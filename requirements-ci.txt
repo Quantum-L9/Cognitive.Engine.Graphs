@@ -6,7 +6,7 @@
 # Dev:     pip install -r requirements-ci.txt -r requirements-dev.txt
 
 # ── Lint & type checking ──────────────────────────────────────────────────────
-ruff==0.15.5
+ruff==0.15.12
 mypy==1.14.0
 
 # ── Type stubs ────────────────────────────────────────────────────────────────
