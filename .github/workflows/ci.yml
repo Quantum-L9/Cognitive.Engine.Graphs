@@ -275,7 +275,7 @@ jobs:
           pip install pip-audit==2.9.0 safety bandit==1.9.1
 
       - name: Run Gitleaks (Secret Detection)
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: .gitleaks.toml
