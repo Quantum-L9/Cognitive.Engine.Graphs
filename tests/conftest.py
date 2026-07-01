@@ -13,8 +13,8 @@ tests/conftest.py — Shared pytest fixtures.
 
 RULE 9 (L9 Contract): paths MUST be absolute, repo-rooted, never relative to __file__ dir.
 RULE 7 (L9 Contract): DomainPackLoader is instantiated with
-    DomainPackLoader(domains_dir=DOMAINS_DIR)
-    matching the EXACT signature in L9_CONTRACT_SPECIFICATIONS.md §2.
+    DomainPackLoader(config_path=str(DOMAINS_DIR))
+    matching DomainPackLoader.__init__(self, config_path: str | None = None).
 
 DOMAINS_DIR uses Path(__file__).parent.parent to resolve
 from tests/ → repo root → domains/.
@@ -129,7 +129,7 @@ def domain_loader():
     """Session-scoped domain loader — RULE 7: exact signature."""
     from engine.config.loader import DomainPackLoader
 
-    return DomainPackLoader(domains_dir=DOMAINS_DIR)
+    return DomainPackLoader(config_path=str(DOMAINS_DIR))
 
 
 # ── Domain Spec ────────────────────────────────────────────────────────────────

@@ -11,7 +11,7 @@ def test_assembler_produces_list():
     from engine.config.loader import DomainPackLoader
     from engine.traversal.assembler import TraversalAssembler
 
-    loader = DomainPackLoader(domains_dir=DOMAINS_DIR)
+    loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
     spec = loader.load_domain("plasticos")
     assembler = TraversalAssembler(spec)
     clauses = assembler.assemble_traversal(direction="*")
@@ -23,7 +23,7 @@ def test_wildcard_direction_always_included():
     from engine.config.loader import DomainPackLoader
     from engine.traversal.assembler import TraversalAssembler
 
-    loader = DomainPackLoader(domains_dir=DOMAINS_DIR)
+    loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
     spec = loader.load_domain("plasticos")
     # Check that traversal has at least the spec's own steps
     assembler = TraversalAssembler(spec)
@@ -38,7 +38,7 @@ def test_traversal_steps_are_strings():
     from engine.config.loader import DomainPackLoader
     from engine.traversal.assembler import TraversalAssembler
 
-    loader = DomainPackLoader(domains_dir=DOMAINS_DIR)
+    loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
     spec = loader.load_domain("plasticos")
     assembler = TraversalAssembler(spec)
     clauses = assembler.assemble_traversal(direction="*")

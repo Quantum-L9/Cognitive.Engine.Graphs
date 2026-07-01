@@ -63,7 +63,7 @@ def test_compile_all_gates_empty_returns_empty():
     from engine.config.loader import DomainPackLoader
     from engine.gates.compiler import GateCompiler
 
-    loader = DomainPackLoader(domains_dir=Path(__file__).parent.parent.parent / "domains")
+    loader = DomainPackLoader(config_path=str(Path(__file__).parent.parent.parent / "domains"))
     spec = loader.load_domain("plasticos")
     compiler = GateCompiler(spec)
     # compile with no params should return some WHERE fragment or empty string

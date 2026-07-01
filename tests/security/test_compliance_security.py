@@ -27,7 +27,7 @@ def test_compliance_engine_loads_for_plasticos():
     from engine.compliance.engine import ComplianceEngine
     from engine.config.loader import DomainPackLoader
 
-    loader = DomainPackLoader(domains_dir=DOMAINS_DIR)
+    loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
     spec = loader.load_domain("plasticos")
     engine = ComplianceEngine(spec)
     assert engine is not None
@@ -38,7 +38,7 @@ def test_prohibited_factor_validator_exists():
     from engine.compliance.prohibited_factors import ProhibitedFactorValidator
     from engine.config.loader import DomainPackLoader
 
-    loader = DomainPackLoader(domains_dir=DOMAINS_DIR)
+    loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
     spec = loader.load_domain("plasticos")
     validator = ProhibitedFactorValidator(spec)
     assert validator is not None
@@ -49,7 +49,7 @@ def test_clean_payload_passes_compliance():
     from engine.compliance.engine import ComplianceEngine
     from engine.config.loader import DomainPackLoader
 
-    loader = DomainPackLoader(domains_dir=DOMAINS_DIR)
+    loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
     spec = loader.load_domain("plasticos")
     engine = ComplianceEngine(spec)
     result = engine.evaluate(
@@ -68,7 +68,7 @@ def test_compliance_evaluate_returns_result():
     from engine.compliance.engine import ComplianceEngine
     from engine.config.loader import DomainPackLoader
 
-    loader = DomainPackLoader(domains_dir=DOMAINS_DIR)
+    loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
     spec = loader.load_domain("plasticos")
     engine = ComplianceEngine(spec)
     result = engine.evaluate({"entity_id": "test"})

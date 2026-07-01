@@ -13,7 +13,7 @@ def test_sync_generator_produces_merge_cypher():
     from engine.config.loader import DomainPackLoader
     from engine.sync.generator import SyncGenerator
 
-    loader = DomainPackLoader(domains_dir=DOMAINS_DIR)
+    loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
     spec = loader.load_domain("plasticos")
     gen = SyncGenerator(spec)
     # Get first sync endpoint
@@ -29,7 +29,7 @@ def test_sync_generator_includes_batch_param():
     from engine.config.loader import DomainPackLoader
     from engine.sync.generator import SyncGenerator
 
-    loader = DomainPackLoader(domains_dir=DOMAINS_DIR)
+    loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
     spec = loader.load_domain("plasticos")
     gen = SyncGenerator(spec)
     if not spec.sync.endpoints:
@@ -43,7 +43,7 @@ def test_unknown_entity_raises():
     from engine.config.loader import DomainPackLoader
     from engine.sync.generator import SyncGenerator
 
-    loader = DomainPackLoader(domains_dir=DOMAINS_DIR)
+    loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
     spec = loader.load_domain("plasticos")
     gen = SyncGenerator(spec)
     with pytest.raises(Exception):

@@ -13,7 +13,7 @@ def test_assembler_loads_from_plasticos_spec():
     from engine.config.loader import DomainPackLoader
     from engine.scoring.assembler import ScoringAssembler
 
-    loader = DomainPackLoader(domains_dir=DOMAINS_DIR)
+    loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
     spec = loader.load_domain("plasticos")
     assembler = ScoringAssembler(spec)
     clause = assembler.assemble_scoring_clause(direction="*")
@@ -48,7 +48,7 @@ def test_scoring_clause_contains_composite_score():
     from engine.config.loader import DomainPackLoader
     from engine.scoring.assembler import ScoringAssembler
 
-    loader = DomainPackLoader(domains_dir=DOMAINS_DIR)
+    loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
     spec = loader.load_domain("plasticos")
     assembler = ScoringAssembler(spec)
     clause = assembler.assemble_scoring_clause(direction="*")
@@ -60,7 +60,7 @@ def test_weight_override_changes_output():
     from engine.config.loader import DomainPackLoader
     from engine.scoring.assembler import ScoringAssembler
 
-    loader = DomainPackLoader(domains_dir=DOMAINS_DIR)
+    loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
     spec = loader.load_domain("plasticos")
     assembler = ScoringAssembler(spec)
     if not spec.scoring.dimensions:

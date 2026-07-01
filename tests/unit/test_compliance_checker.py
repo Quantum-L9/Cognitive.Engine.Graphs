@@ -24,7 +24,7 @@ def test_prohibited_factor_in_payload_raises():
     from engine.compliance.prohibited_factors import ProhibitedFactorValidator
     from engine.config.loader import DomainPackLoader
 
-    loader = DomainPackLoader(domains_dir=Path(__file__).parent.parent.parent / "domains")
+    loader = DomainPackLoader(config_path=str(Path(__file__).parent.parent.parent / "domains"))
     spec = loader.load_domain("plasticos")
     validator = ProhibitedFactorValidator(spec)
     # Validate that validate_gate doesn't silently allow prohibited fields
@@ -48,7 +48,7 @@ def test_compliance_pass_with_clean_payload():
     from engine.compliance.engine import ComplianceEngine
     from engine.config.loader import DomainPackLoader
 
-    loader = DomainPackLoader(domains_dir=Path(__file__).parent.parent.parent / "domains")
+    loader = DomainPackLoader(config_path=str(Path(__file__).parent.parent.parent / "domains"))
     spec = loader.load_domain("plasticos")
     engine = ComplianceEngine(spec)
     result = engine.evaluate({"entity_id": "test-1", "contamination_tolerance": 0.05})
