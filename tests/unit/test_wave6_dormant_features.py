@@ -617,14 +617,20 @@ class TestFeatureNotEnabledError:
         assert d["action"] == "admin"
         assert d["tenant"] == "t1"
 
-    def test_llm_client_raises_feature_not_enabled(self):
-        """ValidatedLLMClient._call() should raise FeatureNotEnabled."""
+    def test_llm_client_raises_backend_not_configured(self, monkeypatch):
+        """ValidatedLLMClient._call() raises LLMBackendNotConfiguredError when no API key."""
         pytest.importorskip("structlog")
-        from chassis.errors import FeatureNotEnabled
-        from engine.security.P2_9_llm_schemas import ValidatedLLMClient
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        from engine.security.P2_9_llm_schemas import (
+            LLMBackendNotConfiguredError,
+            ValidatedLLMClient,
+            _llm_backend,
+        )
 
+        # Reset the lazy-init client so it re-reads env
+        _llm_backend._client = None
         client = ValidatedLLMClient()
-        with pytest.raises(FeatureNotEnabled, match="LLM"):
+        with pytest.raises(LLMBackendNotConfiguredError):
             client._call("system", "user")
 
 
