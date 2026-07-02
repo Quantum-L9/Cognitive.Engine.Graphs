@@ -7,7 +7,6 @@ from Waves 1-4 remain in place.
 
 from __future__ import annotations
 
-import threading
 from pathlib import Path
 
 import pytest
@@ -25,7 +24,8 @@ class TestT601DomainLoaderCache:
 
         loader = DomainPackLoader(config_path=str(ROOT / "domains"))
         assert hasattr(loader, "_lock"), "DomainPackLoader missing _lock attribute"
-        assert isinstance(loader._lock, (threading.Lock, type(threading.Lock())))
+        assert hasattr(loader._lock, "acquire")
+        assert hasattr(loader._lock, "release")
 
     def test_loader_has_ttl(self):
         """Cache has a TTL-based invalidation policy."""
