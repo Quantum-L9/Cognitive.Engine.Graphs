@@ -59,43 +59,50 @@ class TestT602Neo4jResilience:
 
 @pytest.mark.finding("T6-03")
 class TestT603ModuleGlobalState:
-    """T6-03: Module globals in handlers must be settable via init_dependencies."""
+    """T6-03: EngineState must be settable via init_dependencies (W4-01 refactor)."""
 
-    def test_init_dependencies_sets_globals(self):
-        """init_dependencies() must set _graph_driver and _domain_loader."""
+    def test_init_dependencies_sets_state(self):
+        """init_dependencies() must set _graph_driver and _domain_loader on EngineState."""
         import engine.handlers as h
+        from engine.state import get_state
 
+        state = get_state()
         mock_driver = object()
         mock_loader = object()
 
-        original_driver = h._graph_driver
-        original_loader = h._domain_loader
-        original_allowlist = h._tenant_allowlist
+        original_driver = state._graph_driver
+        original_loader = state._domain_loader
+        original_allowlist = state._tenant_allowlist
 
         try:
             h.init_dependencies(mock_driver, mock_loader)
-            assert h._graph_driver is mock_driver
-            assert h._domain_loader is mock_loader
+            assert state._graph_driver is mock_driver
+            assert state._domain_loader is mock_loader
         finally:
-            h._graph_driver = original_driver
-            h._domain_loader = original_loader
-            h._tenant_allowlist = original_allowlist
+            state._graph_driver = original_driver
+            state._domain_loader = original_loader
+            state._tenant_allowlist = original_allowlist
 
     def test_require_deps_raises_if_not_initialized(self):
         """_require_deps raises RuntimeError before init_dependencies."""
         import engine.handlers as h
+        from engine.state import get_state
 
-        original_driver = h._graph_driver
-        original_loader = h._domain_loader
+        state = get_state()
+        original_driver = state._graph_driver
+        original_loader = state._domain_loader
+        original_initialized = state._initialized
 
         try:
-            h._graph_driver = None
-            h._domain_loader = None
+            state._graph_driver = None
+            state._domain_loader = None
+            state._initialized = False
             with pytest.raises(RuntimeError, match="Dependencies not initialized"):
                 h._require_deps()
         finally:
-            h._graph_driver = original_driver
-            h._domain_loader = original_loader
+            state._graph_driver = original_driver
+            state._domain_loader = original_loader
+            state._initialized = original_initialized
 
 
 @pytest.mark.finding("T6-05")
@@ -105,19 +112,21 @@ class TestT605ChassisInitRace:
     def test_handlers_init_dependencies_is_idempotent(self):
         """Calling init_dependencies twice should not corrupt state."""
         import engine.handlers as h
+        from engine.state import get_state
 
-        original_driver = h._graph_driver
-        original_loader = h._domain_loader
-        original_allowlist = h._tenant_allowlist
+        state = get_state()
+        original_driver = state._graph_driver
+        original_loader = state._domain_loader
+        original_allowlist = state._tenant_allowlist
 
         try:
             mock1 = object()
             mock2 = object()
             h.init_dependencies(mock1, mock1)
             h.init_dependencies(mock2, mock2)
-            assert h._graph_driver is mock2
-            assert h._domain_loader is mock2
+            assert state._graph_driver is mock2
+            assert state._domain_loader is mock2
         finally:
-            h._graph_driver = original_driver
-            h._domain_loader = original_loader
-            h._tenant_allowlist = original_allowlist
+            state._graph_driver = original_driver
+            state._domain_loader = original_loader
+            state._tenant_allowlist = original_allowlist
