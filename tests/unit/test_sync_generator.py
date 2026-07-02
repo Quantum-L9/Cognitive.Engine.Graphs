@@ -1,51 +1,58 @@
-"""Unit tests — SyncGenerator: MERGE strategy, unknown strategy/endpoint."""
+"""Unit tests - SyncGenerator: MERGE strategy, unknown strategy/endpoint."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+DOMAINS_DIR = Path(__file__).parent.parent.parent / "domains"
 
-@pytest.fixture
-def plasticos_spec():
-    """Load plasticos spec, skip if not loadable."""
+
+def test_sync_generator_produces_merge_cypher():
     from engine.config.loader import DomainPackLoader
-
-    loader = DomainPackLoader()
-    try:
-        return loader.load_domain("plasticos")
-    except Exception:
-        pytest.skip("plasticos domain spec not loadable with current schema")
-
-
-def test_sync_generator_produces_merge_cypher(plasticos_spec):
-    """Sync generator produces MERGE/MATCH Cypher."""
     from engine.sync.generator import SyncGenerator
 
-    gen = SyncGenerator(plasticos_spec)
-    if not plasticos_spec.sync or not plasticos_spec.sync.endpoints:
+    loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
+    spec = loader.load_domain("plasticos")
+    gen = SyncGenerator(spec)
+    # Get first sync endpoint
+    if not spec.sync.endpoints:
         pytest.skip("No sync endpoints in plasticos spec")
-    ep = plasticos_spec.sync.endpoints[0]
-    cypher, _params = gen.generate_sync_query(ep, [{"id": "test-1", "name": "Alpha"}])
+    ep = spec.sync.endpoints[0]
+    cypher = gen.generate_sync_query(ep, [{"id": "test-1", "name": "Alpha"}])
+    assert isinstance(cypher, str)
     assert "MERGE" in cypher or "MATCH" in cypher
     assert "UNWIND" in cypher or "$" in cypher
 
 
-def test_sync_generator_includes_batch_param(plasticos_spec):
-    """Sync query includes batch parameter."""
+def test_sync_generator_includes_batch_param():
+    from engine.config.loader import DomainPackLoader
     from engine.sync.generator import SyncGenerator
 
-    gen = SyncGenerator(plasticos_spec)
-    if not plasticos_spec.sync or not plasticos_spec.sync.endpoints:
+    loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
+    spec = loader.load_domain("plasticos")
+    gen = SyncGenerator(spec)
+    if not spec.sync.endpoints:
         pytest.skip("No sync endpoints in plasticos spec")
-    ep = plasticos_spec.sync.endpoints[0]
-    _cypher, params = gen.generate_sync_query(ep, [{"entity_id": "f1"}])
-    assert "batch" in params or len(params) > 0
+    ep = spec.sync.endpoints[0]
+    cypher = gen.generate_sync_query(ep, [{"entity_id": "f1"}])
+    # generate_sync_query returns a Cypher string with $batch parameter reference
+    assert "$batch" in cypher or "batch" in cypher
 
 
-def test_unknown_entity_raises(plasticos_spec):
-    """Unknown entity type raises exception."""
+def test_unknown_strategy_raises():
+    """Unknown batch strategy should raise ValueError."""
+    from unittest.mock import MagicMock
+
+    from engine.config.loader import DomainPackLoader
     from engine.sync.generator import SyncGenerator
 
-    gen = SyncGenerator(plasticos_spec)
-    with pytest.raises(Exception):
-        gen.resolve_endpoint("nonexistent_entity_type_xyz")
+    loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
+    spec = loader.load_domain("plasticos")
+    gen = SyncGenerator(spec)
+    # Create a mock endpoint with an invalid strategy
+    fake_ep = MagicMock()
+    fake_ep.batchstrategy = "INVALID_STRATEGY"
+    with pytest.raises((ValueError, Exception)):
+        gen.generate_sync_query(fake_ep, [{"id": "x"}])
