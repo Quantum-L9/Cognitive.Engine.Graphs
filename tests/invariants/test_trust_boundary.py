@@ -64,42 +64,44 @@ class TestT103TenantIsolation:
 
     def test_tenant_allowlist_rejects_unauthorized(self):
         """_validate_tenant_access raises for tenants not in allowlist."""
-        # Simulate an allowlist
-        import engine.handlers as h
         from engine.handlers import ValidationError, _validate_tenant_access
+        from engine.state import get_state
 
-        original = h._tenant_allowlist
+        state = get_state()
+        original = state._tenant_allowlist
         try:
-            h._tenant_allowlist = {"tenant_a", "tenant_b"}
+            state._tenant_allowlist = {"tenant_a", "tenant_b"}
             with pytest.raises(ValidationError):
                 _validate_tenant_access("evil_tenant", "match")
         finally:
-            h._tenant_allowlist = original
+            state._tenant_allowlist = original
 
     def test_tenant_allowlist_allows_authorized(self):
         """Authorized tenants pass the check."""
-        import engine.handlers as h
         from engine.handlers import _validate_tenant_access
+        from engine.state import get_state
 
-        original = h._tenant_allowlist
+        state = get_state()
+        original = state._tenant_allowlist
         try:
-            h._tenant_allowlist = {"tenant_a"}
+            state._tenant_allowlist = {"tenant_a"}
             # Should not raise
             _validate_tenant_access("tenant_a", "match")
         finally:
-            h._tenant_allowlist = original
+            state._tenant_allowlist = original
 
     def test_no_allowlist_permits_all(self):
         """When allowlist is None (dev mode), all tenants allowed."""
-        import engine.handlers as h
         from engine.handlers import _validate_tenant_access
+        from engine.state import get_state
 
-        original = h._tenant_allowlist
+        state = get_state()
+        original = state._tenant_allowlist
         try:
-            h._tenant_allowlist = None
+            state._tenant_allowlist = None
             _validate_tenant_access("any_tenant", "match")
         finally:
-            h._tenant_allowlist = original
+            state._tenant_allowlist = original
 
 
 @pytest.mark.finding("T1-05")
