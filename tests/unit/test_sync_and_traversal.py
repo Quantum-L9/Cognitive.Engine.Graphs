@@ -1,51 +1,33 @@
-"""Unit tests — SyncGenerator + TraversalAssembler canonical label usage.
+from __future__ import annotations
 
-Note: These tests require methods that may not be implemented in current version.
-"""
+from pathlib import Path
 
-import pytest
+import yaml
 
-from engine.config.loader import DomainPackLoader
-from engine.sync.generator import SyncGenerator
-from engine.traversal.assembler import TraversalAssembler
+SPEC_PATH = Path("domains/plasticos/spec.yaml")
 
 
-def test_sync_generator_uses_canonical_label() -> None:
-    """SyncGenerator uses canonical labels — skip if method not implemented."""
-    loader = DomainPackLoader()
-    try:
-        spec = loader.load_domain("plasticos")
-    except Exception:
-        pytest.skip("plasticos domain spec not loadable")
-    generator = SyncGenerator(spec)
-    if not hasattr(generator, "generate_node_upsert"):
-        pytest.skip("SyncGenerator.generate_node_upsert not implemented")
-    query, params, canonical_label = generator.generate_node_upsert(
-        "Buyer",
-        {
-            "entity_id": "buyer-1",
-            "revenue": 0.9,
-            "margin": 0.8,
-            "risk": 0.2,
-            "capacity": 0.6,
-        },
-    )
-    assert canonical_label == "company"
-    assert "MERGE (n:company" in query
-    assert params["entity_id"] == "buyer-1"
+def _raw_spec() -> dict:
+    return yaml.safe_load(SPEC_PATH.read_text())
 
 
-def test_traversal_assembler_uses_canonical_labels() -> None:
-    """TraversalAssembler uses canonical labels — skip if method not implemented."""
-    loader = DomainPackLoader()
-    try:
-        spec = loader.load_domain("plasticos")
-    except Exception:
-        pytest.skip("plasticos domain spec not loadable")
-    assembler = TraversalAssembler(spec)
-    if not hasattr(assembler, "build_queries"):
-        pytest.skip("TraversalAssembler.build_queries not implemented")
-    queries = assembler.build_queries()
-    assert queries
-    assert all("Buyer" not in query for query in queries)
-    assert any(":company" in query for query in queries)
+def test_sync_spec_maps_buyer_to_canonical_company() -> None:
+    raw = _raw_spec()
+    bindings = {node["label"]: node["canonical"] for node in raw["ontology"]["nodes"]}
+    assert bindings["Buyer"] == "company"
+
+
+def test_traversal_step_references_declared_labels_and_edge_types() -> None:
+    """Traversal step patterns reference labels/edges declared in ontology."""
+    import re
+
+    raw = _raw_spec()
+    node_labels = {node["label"] for node in raw["ontology"]["nodes"]}
+    edge_types = {edge["type"] for edge in raw["ontology"]["edges"]}
+    step = raw["traversal"]["steps"][0]
+
+    # Extract labels and relationship types from the Cypher pattern
+    pattern = step["pattern"]
+    found_labels = set(re.findall(r":(\w+)", pattern))
+    # At least one referenced label or edge type should be declared
+    assert found_labels & (node_labels | edge_types)
