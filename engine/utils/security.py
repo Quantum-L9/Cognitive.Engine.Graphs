@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import re
 
-_MAX_LABEL_LEN = 64
+# Maximum allowed label length (defense-in-depth against buffer/DoS attacks).
+_MAX_LABEL_LENGTH = 128
 
 
 def sanitize_label(label: str) -> str:
@@ -27,14 +28,13 @@ def sanitize_label(label: str) -> str:
     SECURITY: Labels are interpolated into Cypher queries. User-uploaded
     domain specs could contain malicious labels with injection payloads.
 
-    Valid labels: [A-Za-z_][A-Za-z0-9_]*, max 64 characters.
+    Valid labels: [A-Za-z_][A-Za-z0-9_]*, max 128 characters.
 
     Raises ValueError if invalid.
     """
-    if len(label) > _MAX_LABEL_LEN:
-        msg = f"Label exceeds maximum length of {_MAX_LABEL_LEN}: {label!r}"
+    if len(label) > _MAX_LABEL_LENGTH:
+        msg = f"Label exceeds max length ({_MAX_LABEL_LENGTH}): {len(label)} chars"
         raise ValueError(msg)
     if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", label):
-        msg = f"Invalid label or type: {label!r}"
-        raise ValueError(msg)
+        raise ValueError(f"Invalid label or type: {label!r}")
     return label
