@@ -7,10 +7,9 @@ and asserts the fix prevents it.
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -66,44 +65,43 @@ class TestT103TenantIsolation:
     def test_tenant_allowlist_rejects_unauthorized(self):
         """_validate_tenant_access raises for tenants not in allowlist."""
         from engine.handlers import ValidationError, _validate_tenant_access
+        from engine.state import get_state
 
-        # Simulate an allowlist
-        import engine.handlers as h
-
-        original = h._tenant_allowlist
+        state = get_state()
+        original = state._tenant_allowlist
         try:
-            h._tenant_allowlist = {"tenant_a", "tenant_b"}
+            state._tenant_allowlist = {"tenant_a", "tenant_b"}
             with pytest.raises(ValidationError):
                 _validate_tenant_access("evil_tenant", "match")
         finally:
-            h._tenant_allowlist = original
+            state._tenant_allowlist = original
 
     def test_tenant_allowlist_allows_authorized(self):
         """Authorized tenants pass the check."""
         from engine.handlers import _validate_tenant_access
+        from engine.state import get_state
 
-        import engine.handlers as h
-
-        original = h._tenant_allowlist
+        state = get_state()
+        original = state._tenant_allowlist
         try:
-            h._tenant_allowlist = {"tenant_a"}
+            state._tenant_allowlist = {"tenant_a"}
             # Should not raise
             _validate_tenant_access("tenant_a", "match")
         finally:
-            h._tenant_allowlist = original
+            state._tenant_allowlist = original
 
     def test_no_allowlist_permits_all(self):
         """When allowlist is None (dev mode), all tenants allowed."""
         from engine.handlers import _validate_tenant_access
+        from engine.state import get_state
 
-        import engine.handlers as h
-
-        original = h._tenant_allowlist
+        state = get_state()
+        original = state._tenant_allowlist
         try:
-            h._tenant_allowlist = None
+            state._tenant_allowlist = None
             _validate_tenant_access("any_tenant", "match")
         finally:
-            h._tenant_allowlist = original
+            state._tenant_allowlist = original
 
 
 @pytest.mark.finding("T1-05")
@@ -161,7 +159,9 @@ def _build_minimal_spec_for_resolver(derived=None):
             ],
             edges=[
                 EdgeSpec(
-                    type="R", **{"from": "N"}, to="Q",
+                    type="R",
+                    **{"from": "N"},
+                    to="Q",
                     direction=EdgeDirection.DIRECTED,
                     category=EdgeCategory.CAPABILITY,
                     managedby=ManagedByType.SYNC,
