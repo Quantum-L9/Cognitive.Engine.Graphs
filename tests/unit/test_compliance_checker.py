@@ -19,22 +19,19 @@ def test_no_prohibited_factors_passes_all():
 
 def test_prohibited_factor_in_payload_raises():
     """Prohibited factors must be blocked at compile time, not runtime."""
+    from pathlib import Path
+
     from engine.compliance.prohibited_factors import ProhibitedFactorValidator
     from engine.config.loader import DomainPackLoader
 
-    loader = DomainPackLoader()
-    try:
-        spec = loader.load_domain("plasticos")
-    except Exception:
-        pytest.skip("plasticos domain spec not loadable with current schema")
+    loader = DomainPackLoader(config_path=str(Path(__file__).parent.parent.parent / "domains"))
+    spec = loader.load_domain("plasticos")
     validator = ProhibitedFactorValidator(spec)
     # Validate that validate_gate doesn't silently allow prohibited fields
-    if not spec.compliance or not spec.compliance.prohibited_factors:
+    if not spec.compliance or not spec.compliance.prohibitedfactors:
         pytest.skip("No prohibited factors configured in plasticos spec")
     prohibited = (
-        spec.compliance.prohibited_factors.factors[0]
-        if hasattr(spec.compliance.prohibited_factors, "factors")
-        else None
+        spec.compliance.prohibitedfactors.factors[0] if hasattr(spec.compliance.prohibitedfactors, "factors") else None
     )
     if prohibited is None:
         pytest.skip("Cannot determine prohibited factor structure")
@@ -43,15 +40,19 @@ def test_prohibited_factor_in_payload_raises():
 
 
 def test_compliance_pass_with_clean_payload():
-    """Clean payload passes compliance check."""
+    """Clean payload passes compliance check via check_match_request."""
+    from pathlib import Path
+
     from engine.compliance.engine import ComplianceEngine
     from engine.config.loader import DomainPackLoader
 
-    loader = DomainPackLoader()
-    try:
-        spec = loader.load_domain("plasticos")
-    except Exception:
-        pytest.skip("plasticos domain spec not loadable with current schema")
+    loader = DomainPackLoader(config_path=str(Path(__file__).parent.parent.parent / "domains"))
+    spec = loader.load_domain("plasticos")
     engine = ComplianceEngine(spec)
-    result = engine.evaluate({"entity_id": "test-1", "contamination_tolerance": 0.05})
-    assert hasattr(result, "compliance_pass") or isinstance(result, dict)
+    result = engine.check_match_request(
+        tenant="test_tenant",
+        query={"entity_id": "test-1", "contamination_tolerance": 0.05},
+        match_direction="fwd",
+        trace_id="unit-test-001",
+    )
+    assert isinstance(result, dict)
