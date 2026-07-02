@@ -45,32 +45,41 @@ def test_prohibited_factor_validator_exists():
 
 
 def test_clean_payload_passes_compliance():
-    """A payload with no prohibited fields must pass."""
+    """A payload with no prohibited fields must pass check_match_request."""
     from engine.compliance.engine import ComplianceEngine
     from engine.config.loader import DomainPackLoader
 
     loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
     spec = loader.load_domain("plasticos")
     engine = ComplianceEngine(spec)
-    result = engine.evaluate(
-        {
+    result = engine.check_match_request(
+        tenant="test_tenant",
+        query={
             "entity_id": "f1",
             "contamination_tolerance": 0.05,
             "facility_tier": "mid",
-        }
+        },
+        match_direction="fwd",
+        trace_id="test-trace-001",
     )
-    # Should pass without error
+    # check_match_request returns the sanitized query dict
     assert result is not None
+    assert isinstance(result, dict)
 
 
 def test_compliance_evaluate_returns_result():
-    """evaluate() must return a structured result."""
+    """check_match_request must return a structured result (sanitized query)."""
     from engine.compliance.engine import ComplianceEngine
     from engine.config.loader import DomainPackLoader
 
     loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
     spec = loader.load_domain("plasticos")
     engine = ComplianceEngine(spec)
-    result = engine.evaluate({"entity_id": "test"})
-    # Result should be a dataclass or dict with compliance_pass
-    assert hasattr(result, "compliance_pass") or isinstance(result, (dict, bool))
+    result = engine.check_match_request(
+        tenant="test_tenant",
+        query={"entity_id": "test"},
+        match_direction="fwd",
+        trace_id="test-trace-002",
+    )
+    # Result should be a dict (sanitized query passed through)
+    assert isinstance(result, dict)
