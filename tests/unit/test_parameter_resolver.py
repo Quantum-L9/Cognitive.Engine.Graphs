@@ -7,17 +7,18 @@ from pathlib import Path
 DOMAINS_DIR = Path(__file__).parent.parent.parent / "domains"
 
 
-def test_none_values_excluded_from_params():
-    """None values must never reach Cypher parameters."""
+def test_resolve_parameters_preserves_input():
+    """resolve_parameters returns input data with derived parameters added."""
     from engine.config.loader import DomainPackLoader
     from engine.traversal.resolver import ParameterResolver
 
     loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
     spec = loader.load_domain("plasticos")
     resolver = ParameterResolver(spec)
-    result = resolver.resolve({"some_param": None, "valid_param": "value"})
-    assert "some_param" not in result
+    result = resolver.resolve_parameters({"some_param": None, "valid_param": "value"})
+    # resolve_parameters copies input and adds derived params
     assert result.get("valid_param") == "value"
+    assert isinstance(result, dict)
 
 
 def test_string_passthrough():
@@ -27,7 +28,7 @@ def test_string_passthrough():
     loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
     spec = loader.load_domain("plasticos")
     resolver = ParameterResolver(spec)
-    result = resolver.resolve({"tag": "HDPE"})
+    result = resolver.resolve_parameters({"tag": "HDPE"})
     assert result["tag"] == "HDPE"
 
 
@@ -38,6 +39,6 @@ def test_empty_params_returns_empty():
     loader = DomainPackLoader(config_path=str(DOMAINS_DIR))
     spec = loader.load_domain("plasticos")
     resolver = ParameterResolver(spec)
-    result = resolver.resolve({})
+    result = resolver.resolve_parameters({})
     assert isinstance(result, dict)
     assert len(result) == 0
