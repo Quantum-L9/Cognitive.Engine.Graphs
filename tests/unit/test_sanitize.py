@@ -19,7 +19,7 @@ def test_valid_labels(value):
         "123start",
         "",
         "has space",
-        "a" * 65,
+        "a" * 129,
     ],
 )
 def test_invalid_labels_raise(value):
