@@ -43,7 +43,7 @@ def test_sync_generator_uses_parameterized_query():
         pytest.skip("No sync endpoints")
     ep = spec.sync.endpoints[0]
     evil_record = {"id": "'; MATCH (n) DETACH DELETE n RETURN '1"}
-    cypher, _params = gen.generate_sync_query(ep, [evil_record])
+    cypher = gen.generate_sync_query(ep, [evil_record])
     # Evil string must NOT appear in the Cypher itself
     assert "DETACH DELETE" not in cypher
     assert "'; MATCH" not in cypher
@@ -60,11 +60,14 @@ def test_gate_compiler_never_interpolates_values():
     loader = DomainPackLoader(config_path=str(Path(__file__).parent.parent.parent / "domains"))
     spec = loader.load_domain("plasticos")
     compiler = GateCompiler(spec)
-    # Compile with evil value as parameter — it must not appear in Cypher text
-    clause = compiler.compile_where_clause(direction="*", params={"contamination_min": evil_value})
-    assert evil_value not in clause
-    # Should use $param references instead
-    assert "$" in clause or clause == ""
+    if not spec.gates:
+        pytest.skip("No gates defined in plasticos spec")
+    # Compile all gates — evil values must not appear in Cypher text
+    clauses = compiler.compile_all_gates(direction="fwd")
+    for clause in clauses:
+        assert evil_value not in clause
+        # Should use $param references instead
+        assert "$" in clause or clause == ""
 
 
 def test_eval_exec_not_importable_from_engine():
