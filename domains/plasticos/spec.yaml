@@ -6,70 +6,113 @@ ontology:
   nodes:
     - label: Buyer
       canonical: company
+      managedby: sync
+      candidate: true
+      matchdirection: intake_to_buyer
       properties:
-        entity_id: string
-        revenue: float
-        margin: float
-        risk: float
-        capacity: float
+        - name: entity_id
+          type: string
+          required: true
+        - name: revenue
+          type: float
+        - name: margin
+          type: float
+        - name: risk
+          type: float
+        - name: capacity
+          type: float
     - label: Supplier
       canonical: company
+      managedby: sync
+      candidate: false
+      matchdirection: intake_to_buyer
       properties:
-        entity_id: string
-        revenue: float
-        margin: float
-        risk: float
-        capacity: float
+        - name: entity_id
+          type: string
+          required: true
+        - name: revenue
+          type: float
+        - name: margin
+          type: float
+        - name: risk
+          type: float
+        - name: capacity
+          type: float
     - label: Contact
       canonical: person
+      managedby: sync
+      candidate: false
+      matchdirection: intake_to_buyer
       properties:
-        entity_id: string
-        email: string
+        - name: entity_id
+          type: string
+          required: true
+        - name: email
+          type: string
   edges:
     - type: KNOWS
-      source_node: Contact
-      target_node: Buyer
-      attributes: {}
+      from: Contact
+      to: Buyer
+      direction: DIRECTED
+      category: capability
+      managedby: sync
+matchentities:
+  candidate:
+    - label: Buyer
+      matchdirection: intake_to_buyer
+  queryentity:
+    - label: Supplier
+      matchdirection: intake_to_buyer
+queryschema:
+  matchdirections:
+    - intake_to_buyer
+  fields: []
 traversal:
   steps:
-    - alias: buyer
-      node_label: Buyer
-      relationship_type: KNOWS
-      direction: both
+    - name: buyer_traversal
+      pattern: "(b:Buyer)-[:KNOWS]-(c:Contact)"
+      required: true
+      matchdirections:
+        - intake_to_buyer
+gates: []
 scoring:
   dimensions:
     - name: revenue
-      source: revenue
-      weight: 0.40
-      positive: true
+      source: candidateproperty
+      candidateprop: revenue
+      computation: lognormalized
+      weightkey: w_revenue
+      defaultweight: 0.40
     - name: margin
-      source: margin
-      weight: 0.30
-      positive: true
+      source: candidateproperty
+      candidateprop: margin
+      computation: lognormalized
+      weightkey: w_margin
+      defaultweight: 0.30
     - name: risk
-      source: risk
-      weight: 0.20
-      positive: true
+      source: candidateproperty
+      candidateprop: risk
+      computation: inverselinear
+      weightkey: w_risk
+      defaultweight: 0.20
     - name: capacity
-      source: capacity
-      weight: 0.10
-      positive: true
+      source: candidateproperty
+      candidateprop: capacity
+      computation: lognormalized
+      weightkey: w_capacity
+      defaultweight: 0.10
 sync:
-  nodes:
-    - label: Buyer
-      required_fields:
-        - entity_id
-        - revenue
-        - margin
-        - risk
-        - capacity
-    - label: Supplier
-      required_fields:
-        - entity_id
-        - revenue
-        - margin
-        - risk
-        - capacity
+  endpoints:
+    - path: /sync/buyers
+      method: POST
+      targetnode: Buyer
+      idproperty: entity_id
+      batchstrategy: UNWINDMERGE
+    - path: /sync/suppliers
+      method: POST
+      targetnode: Supplier
+      idproperty: entity_id
+      batchstrategy: UNWINDMERGE
 compliance:
   required_fields:
     - entity_id
