@@ -29,6 +29,17 @@ from engine.handlers import (
 )
 
 
+def _make_disabled_feature_mocks() -> tuple[MagicMock, MagicMock, MagicMock]:
+    """Create disabled feature mocks for causal, feedbackloop, counterfactual."""
+    causal_mock = MagicMock()
+    causal_mock.enabled = False
+    feedback_mock = MagicMock()
+    feedback_mock.enabled = False
+    counterfactual_mock = MagicMock()
+    counterfactual_mock.enabled = False
+    return causal_mock, feedback_mock, counterfactual_mock
+
+
 def _make_domain_spec() -> MagicMock:
     spec = MagicMock()
     spec.domain.id = "test_domain"
@@ -63,6 +74,7 @@ def _make_domain_spec() -> MagicMock:
 
     spec.derivedparameters = []
     spec.compliance = None
+    spec.causal, spec.feedbackloop, spec.counterfactual = _make_disabled_feature_mocks()
 
     endpoint = MagicMock()
     endpoint.path = "/v1/sync/facility"
