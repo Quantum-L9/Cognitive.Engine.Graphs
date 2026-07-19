@@ -18,6 +18,17 @@
 
 name: CI Pipeline
 
+# NOTE: on.push.branches / on.pull_request.branches must be literal branch
+# names -- GitHub evaluates these filters before a workflow run starts, so
+# `${{ vars.X }}` expressions are NOT supported here (they are supported in
+# `env:`, steps, etc., just not in `on:` trigger filters). This previously
+# read `${{ vars.PRIMARY_BRANCH || 'main' }}` / `${{ vars.DEVELOP_BRANCH ||
+# 'develop' }}`, which GitHub rejects outright as an invalid workflow file
+# ("This run likely failed because of a workflow file issue", 0 jobs
+# created) -- meaning this entire pipeline (all 7-8 phases, including
+# ci-gate) has never actually triggered on push or pull_request in this
+# repo. Hardcoded to the values the `|| 'default'` fallback already
+# implied.
 on:
   push:
     branches:

@@ -18,6 +18,11 @@
 
 name: Docker Build & Push
 
+# NOTE: on.push.branches / on.pull_request.branches must be literal branch
+# names -- `${{ vars.X }}` expressions are not evaluated in `on:` trigger
+# filters (GitHub validates/rejects the whole workflow file before a run
+# can start), so this always failed with 0 jobs created. See ci.yml for
+# the same fix + longer explanation.
 on:
   push:
     branches:

@@ -18,6 +18,11 @@
 
 name: Release Drafter
 
+# NOTE: on.push.branches must be a literal branch name -- `${{ vars.X }}`
+# expressions are not evaluated in `on:` trigger filters (GitHub
+# validates/rejects the whole workflow file before a run can start), so
+# this always failed with 0 jobs created. See ci.yml for the same fix +
+# longer explanation.
 on:
   push:
     branches:
