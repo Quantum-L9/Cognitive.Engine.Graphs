@@ -242,6 +242,16 @@ jobs:
           echo ""
 
           # Fail on critical gates
+          # NOTE: job-id.result with a hyphenated job id (e.g. lint-format,
+          # secrets-scan, yaml-validate) is NOT valid GitHub Actions dot
+          # notation -- `-` is parsed as subtraction, so `needs.lint-format`
+          # silently evaluates to an empty string instead of the job's
+          # result. Hyphenated job ids must use bracket syntax:
+          # needs['lint-format'].result. Previously every condition below
+          # compared an empty string to "failure", which is always false,
+          # so this gate could never actually fail on lint-format/
+          # secrets-scan -- it only "worked" for the two non-hyphenated
+          # job ids (semgrep wasn't even checked at all).
           FAILED=false
 
           if [[ "${{ needs['lint-format'].result }}" == "failure" ]]; then
