@@ -97,6 +97,28 @@ These exclusions must be removed when mock updates are completed.
 
 ---
 
+## Autofix
+
+Two ways to autofix lint violations that `ruff check`/`ruff format` can
+mechanically resolve (unsorted imports, unused imports, formatting,
+`zip(strict=True)`, `Optional[T]` -> `T | None`, etc.):
+
+1. **Locally**: run `make lint-fix` (`ruff check . --fix && ruff format .`),
+   then re-run `make lint` to confirm the fix and see anything left that
+   needs a manual change (e.g. `mypy` errors, or ruff rules with no safe
+   fixer such as `PLR0915`).
+2. **In CI**: `.github/workflows/lint-autofix.yml` runs the same two
+   commands against `develop` (on push or via `workflow_dispatch`) and
+   opens a PR with the results — it never pushes directly to a protected
+   branch. This replaced the former `auto-fix-adr.yml`, which depended on
+   `ci/auto_fix_adr.py` and `ci/check_imports.py`; neither script existed
+   in this repo, so that workflow could never succeed.
+
+Non-autofixable violations (most `mypy` errors, `PLR0915`, etc.) require
+a manual fix — `make lint` fails with the specific rule/line to address.
+
+---
+
 ## Agent Decision Matrix for CI Failures
 
 | CI Step Fails | Action |
