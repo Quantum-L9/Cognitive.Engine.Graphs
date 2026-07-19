@@ -201,7 +201,7 @@ class _LLMBackend:
                 total_tokens=response.usage.total_tokens,
             )
 
-        return content
+        return str(content)
 
 
 # Module-level singleton — shared across all ValidatedLLMClient instances
