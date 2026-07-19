@@ -104,17 +104,22 @@ clean:	## Remove volumes + containers
 
 # ── Quality Gates (local, no Docker) ───────────────────────
 
-.PHONY: lint typecheck check
+.PHONY: lint lint-fix typecheck check
 
-lint:	## Ruff lint + format (autofix)
+lint:	## Ruff lint + format check (no mutation) + MyPy — matches CI's blocking gate
+	ruff check .
+	ruff format --check .
+	mypy engine/
+
+lint-fix:	## Autofix: ruff check --fix + ruff format . (run this when `make lint` fails)
 	ruff check . --fix
 	ruff format .
 
 typecheck:	## MyPy type checking on engine/
 	mypy engine/
 
-check:	## Full local quality gate (lint + types + unit tests)
-	@echo "── Lint ──"
+check:	## Full local quality gate (autofix lint + types + unit tests)
+	@echo "── Lint (autofix) ──"
 	@ruff check . --fix
 	@ruff format .
 	@echo "── Type Check ──"
