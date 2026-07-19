@@ -33,8 +33,9 @@ status: active
 - `pre-commit run --all-files` — runs every hook in `.pre-commit-config.yaml`
   in CI, so hooks are enforced even if a contributor (human or agent) never
   ran `pre-commit install` locally, or bypassed hooks with `git commit -n`
-- `SKIP=gitleaks,packet-envelope-prohibited` (see "Pre-Commit Hooks" below
-  for why those two are skipped here specifically)
+- `SKIP=gitleaks` (see "Pre-Commit Hooks" below for why gitleaks is skipped
+  here specifically; `packet-envelope-prohibited` is deliberately NOT
+  skipped — see below)
 - `pre-commit run --all-files` does not stop at the first failing hook —
   every hook's result is reported in one run
 
@@ -118,23 +119,26 @@ ruff/ruff-format, gitleaks, mypy, `pytest-unit`, `block-fastapi-in-engine`,
 **In CI**: the `precommit` job in `ci.yml` (Phase 2.5) runs
 `pre-commit run --all-files` on every PR/push via `pre-commit/action`, so
 these hooks are enforced regardless of whether a contributor has
-`pre-commit install`ed locally. Two hooks are skipped there with
-`SKIP=gitleaks,packet-envelope-prohibited`:
+`pre-commit install`ed locally. One hook is skipped there with
+`SKIP=gitleaks`:
 
 - `gitleaks` — the hook runs `gitleaks protect --staged`, which inspects
   the git *index*. That has no equivalent in a plain CI checkout (nothing
   is "staged"). Secret scanning is already covered correctly by the
   `security` job in `ci.yml`, which uses `gitleaks/gitleaks-action` to scan
   the actual commit range.
-- `packet-envelope-prohibited` — as of this writing there are 23 pre-existing
-  references to the deprecated `PacketEnvelope` model across `engine/` and
-  `chassis/` (superseded by `TransportPacket` from `constellation_node_sdk`,
-  see `docs/contracts/SHARED_MODELS.md`). That's a real, separately-tracked
-  architecture migration, not a CI-configuration problem — skipped here so
-  this job reflects the currently-addressable baseline rather than being
-  permanently red on a known, unrelated migration debt. Run
-  `python tools/check_packet_envelope_prohibited.py --check .` locally to
-  see the current list; remove the skip once that migration lands.
+
+`packet-envelope-prohibited` is deliberately **not** skipped. As of this
+writing there are 23 pre-existing references to the deprecated
+`PacketEnvelope` model across `engine/` and `chassis/` (superseded by
+`TransportPacket` from `constellation_node_sdk`, see
+`docs/contracts/SHARED_MODELS.md`). Blanket-skipping the hook would hide
+*new* violations along with the known ones. Until the planned CI
+baseline-ratchet system lands (a per-finding fingerprint ledger that
+blocks increases while tolerating recorded, owned, expiring debt), the
+`precommit` job stays honestly red on this migration debt rather than
+lying green. Run `python tools/check_packet_envelope_prohibited.py
+--check .` locally to see the current list.
 
 **Pre-existing pytest-unit exclusions** (`--ignore=...` in the hook's
 `entry:`) — `test_gates_all_types.py`, `test_scoring.py`, `test_config.py`,

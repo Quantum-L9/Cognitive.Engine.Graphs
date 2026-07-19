@@ -139,7 +139,9 @@ jobs:
       - name: Install Linting Tools
         run: |
           python -m pip install --upgrade pip
-          # requirements-ci.txt is the canonical lint/type dependency set.
+          # requirements-ci.txt is the single source of truth for lint tool
+          # versions (ruff/mypy) plus the runtime deps mypy needs to resolve
+          # Pydantic models (pydantic, neo4j, structlog, ...).
           pip install -r requirements-ci.txt
 
       - name: Run Ruff Linter
@@ -157,8 +159,73 @@ jobs:
       - name: Run Mypy Type Checker
         run: |
           echo "Running type checks..."
+          # Scoped to engine/ (same invocation as `make lint` and
+          # ci-quality.yml) -- mypy against the whole repo ('.') fails
+          # immediately with "Source file found twice under different
+          # module names" (tools/auditors/base.py vs auditors/base.py),
+          # which is why this used to be silenced with `|| echo`. Fixed
+          # scope + no more silencing: real type errors now fail the job.
           mypy engine/ --config-file=pyproject.toml --ignore-missing-imports --exclude chassis
           echo "✅ Mypy type checks passed"
+
+# ────────────────────────────────────────────────────────────────────────
+# PHASE 2.5: PRE-COMMIT HOOKS
+# ────────────────────────────────────────────────────────────────────────
+# Runs the exact hooks in .pre-commit-config.yaml so that every commit is
+# checked here regardless of whether a contributor (human or agent) ran
+# `pre-commit install` locally, or bypassed hooks with `git commit -n`.
+# `pre-commit run --all-files` runs every hook and reports every failure
+# in one pass (it does not stop at the first failing hook) -- so a single
+# CI run surfaces the full list of violations to fix, not just one.
+  precommit:
+    name: Pre-commit Hooks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: validate
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install Runtime + Dev Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Needed for the "language: system" local hooks (pytest-unit,
+          # deprecated-import checks, etc.) which shell out to the ambient
+          # `python3` rather than an isolated pre-commit-managed env.
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run Pre-commit Hooks
+        uses: pre-commit/action@v3.0.1
+        env:
+          # gitleaks: the pre-commit hook runs `gitleaks protect --staged`,
+          # which inspects the git *index*, not the diff of a plain
+          # checkout -- it does not translate to a CI context. Secret
+          # scanning is already covered properly in the `security` job
+          # below via gitleaks/gitleaks-action, which scans the actual
+          # commit range.
+          #
+          # packet-envelope-prohibited is deliberately NOT skipped here.
+          # The 23 pre-existing PacketEnvelope references are real
+          # architectural debt (deprecated model, superseded by
+          # TransportPacket -- see docs/contracts/SHARED_MODELS.md).
+          # Blanket-skipping the hook would hide NEW violations, not just
+          # the known ones. Until the CI baseline-ratchet system lands
+          # (per-finding fingerprint ledger that blocks increases while
+          # tolerating recorded debt), this job stays honestly red on the
+          # migration debt rather than lying green.
+          SKIP: gitleaks
 
 # ────────────────────────────────────────────────────────────────────────
 # PHASE 3: TEST SUITE
@@ -368,6 +435,7 @@ jobs:
     needs:
       - validate
       - lint
+      - precommit
       - test
       - security
       - sbom
@@ -383,23 +451,26 @@ jobs:
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo ""
           echo "Job Results:"
-          echo "  validate:  ${{ needs.validate.result }}"
-          echo "  lint:      ${{ needs.lint.result }}"
-          echo "  test:      ${{ needs.test.result }}"
-          echo "  security:  ${{ needs.security.result }}"
-          echo "  sbom:      ${{ needs.sbom.result }}"
-          echo "  scorecard: ${{ needs.scorecard.result }}"
+          echo "  validate:   ${{ needs.validate.result }}"
+          echo "  lint:       ${{ needs.lint.result }}"
+          echo "  precommit:  ${{ needs.precommit.result }}"
+          echo "  test:       ${{ needs.test.result }}"
+          echo "  security:   ${{ needs.security.result }}"
+          echo "  sbom:       ${{ needs.sbom.result }}"
+          echo "  scorecard:  ${{ needs.scorecard.result }}"
           echo ""
 
           # Check for failures in required jobs
           if [[ "${{ needs.validate.result }}" == "failure" ]] || \
              [[ "${{ needs.lint.result }}" == "failure" ]] || \
+             [[ "${{ needs.precommit.result }}" == "failure" ]] || \
              [[ "${{ needs.test.result }}" == "failure" ]]; then
             echo "❌ CI GATE FAILED — Critical job(s) failed"
             echo ""
             echo "Required jobs must pass:"
             echo "  • validate: syntax and structure checks"
             echo "  • lint: code quality and formatting"
+            echo "  • precommit: same hooks contributors run locally"
             echo "  • test: test suite with coverage"
             exit 1
           fi
