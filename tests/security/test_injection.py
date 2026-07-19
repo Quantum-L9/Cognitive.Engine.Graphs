@@ -36,7 +36,7 @@ def test_sync_generator_uses_parameterized_query():
     from engine.config.loader import DomainPackLoader
     from engine.sync.generator import SyncGenerator
 
-    loader = DomainPackLoader(domains_dir=Path(__file__).parent.parent.parent / "domains")
+    loader = DomainPackLoader(config_path=str(Path(__file__).parent.parent.parent / "domains"))
     spec = loader.load_domain("plasticos")
     gen = SyncGenerator(spec)
     if not spec.sync.endpoints:
@@ -57,7 +57,7 @@ def test_gate_compiler_never_interpolates_values():
     from engine.gates.compiler import GateCompiler
 
     evil_value = "'; DROP DATABASE neo4j; //"
-    loader = DomainPackLoader(domains_dir=Path(__file__).parent.parent.parent / "domains")
+    loader = DomainPackLoader(config_path=str(Path(__file__).parent.parent.parent / "domains"))
     spec = loader.load_domain("plasticos")
     compiler = GateCompiler(spec)
     # Compile with evil value as parameter — it must not appear in Cypher text
