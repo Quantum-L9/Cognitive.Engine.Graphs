@@ -445,7 +445,9 @@ class ScoringAssembler:
         Ref: Liu et al., Scientific Reports (2023) 13:6987, §3.2 preference attention.
         """
         default = float(dim.defaultwhennull)  # nosemgrep: float-requires-try-except
-        sample_k = self.scoring_spec.preference_sample_size if hasattr(self.scoring_spec, "preference_sample_size") else 28
+        sample_k = (
+            self.scoring_spec.preference_sample_size if hasattr(self.scoring_spec, "preference_sample_size") else 28
+        )
 
         # Configurable properties with safe defaults
         metadata = dim.metadata if hasattr(dim, "metadata") and dim.metadata else {}
@@ -579,10 +581,7 @@ class ScoringAssembler:
         Standard ReLU zeros out negative signals permanently; LeakyReLU
         allows weak negative contribution.
         """
-        return (
-            f"CASE WHEN ({expr}) >= 0 THEN ({expr}) "
-            f"ELSE {negative_slope} * ({expr}) END"
-        )
+        return f"CASE WHEN ({expr}) >= 0 THEN ({expr}) ELSE {negative_slope} * ({expr}) END"
 
     def _build_score_expression(self, weight_exprs: list[str]) -> str:
         if not weight_exprs:
