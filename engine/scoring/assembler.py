@@ -494,10 +494,7 @@ class ScoringAssembler:
         community_props = metadata.get("community_properties", [])
         if not community_props:
             # Fall back to candidateprop if set, else default single community_id
-            if dim.candidateprop:
-                community_props = [dim.candidateprop]
-            else:
-                community_props = ["community_id"]
+            community_props = [dim.candidateprop] if dim.candidateprop else ["community_id"]
 
         # Build CASE expressions for each community property
         match_cases = []
@@ -577,7 +574,7 @@ class ScoringAssembler:
     def _leaky_relu(expr: str, negative_slope: float = 0.02) -> str:
         """S2-02: LeakyReLU activation between propagation passes.
 
-        HGKR Eq. 5: LeakyReLU with α=0.02 prevents signal collapse.
+        HGKR Eq. 5: LeakyReLU with alpha=0.02 prevents signal collapse.
         Standard ReLU zeros out negative signals permanently; LeakyReLU
         allows weak negative contribution.
         """

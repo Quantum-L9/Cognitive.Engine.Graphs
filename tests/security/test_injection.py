@@ -43,7 +43,7 @@ def test_sync_generator_uses_parameterized_query():
         pytest.skip("No sync endpoints")
     ep = spec.sync.endpoints[0]
     evil_record = {"id": "'; MATCH (n) DETACH DELETE n RETURN '1"}
-    cypher, params = gen.generate_sync_query(ep, [evil_record])
+    cypher, _params = gen.generate_sync_query(ep, [evil_record])
     # Evil string must NOT appear in the Cypher itself
     assert "DETACH DELETE" not in cypher
     assert "'; MATCH" not in cypher

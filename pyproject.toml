@@ -120,6 +120,11 @@ ignore = [
 "engine/packet/test_*.py" = ["B017"]
 "engine/packet/packet_store.py" = ["TRY300"]
 "scripts/**" = ["S603", "S607", "E402"]
+# FeatureNotEnabled is a stable, serialized error-type name consumed by API
+# clients (chassis error envelope `error` field) and asserted in tests.
+# Renaming to satisfy N818's Error-suffix convention would be a breaking
+# wire-format change, so it is intentionally kept as-is.
+"chassis/errors.py" = ["N818"]
 "tools/**" = ["S603", "S607", "TRY300", "PTH123", "PLR0915", "PLW1510", "E402", "B904", "TID251"]
 "auth/**" = ["S101", "S105", "S106", "TC002", "TRY301", "TRY401"]
 "chassis/**" = ["TRY300", "TRY301", "TRY401", "S105", "B027", "B904"]

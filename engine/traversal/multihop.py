@@ -262,54 +262,15 @@ class MultiHopTraverser:
                 )
                 break
 
-            next_queue: deque[str] = deque()
-            hop_audit: dict[str, Any] = {
-                "hop": hop,
-                "queue_size": len(queue),
-                "expansions": [],
-            }
-
-            # Process each vertex in current queue
-            current_level = list(queue)
-            for vertex_id in current_level:
-                # Fetch outgoing edges
-                edges = await self._fetcher.get_outgoing_edges(vertex_id)
-                if not edges:
-                    continue
-
-                # Select best edge
-                selected_edge: TraversalEdge | None = None
-
-                if self._mode == ReasoningMode.SIMILARITY:
-                    selected_edge = self._select_by_similarity(
-                        query_embedding,
-                        edges,  # type: ignore[arg-type]
-                    )
-                elif self._mode == ReasoningMode.LLM:
-                    if llm_calls >= self._max_llm_calls:
-                        # Fall back to similarity when LLM budget exhausted
-                        if query_embedding is not None:
-                            selected_edge = self._select_by_similarity(query_embedding, edges)
-                        else:
-                            selected_edge = edges[0] if edges else None
-                    else:
-                        selected_edge = self._select_by_llm(query_text, vertex_id, edges)
-                        llm_calls += 1
-
-                if selected_edge is not None:
-                    target = selected_edge.target_id
-                    visit_counts[target] += 1
-                    if target not in visited_order:
-                        visited_order.append(target)
-                    next_queue.append(target)
-
-                    hop_audit["expansions"].append(
-                        {
-                            "from": vertex_id,
-                            "to": target,
-                            "edge_question": selected_edge.question[:100],
-                        }
-                    )
+            next_queue, hop_audit, llm_calls = await self._execute_hop(
+                hop=hop,
+                queue=queue,
+                llm_calls=llm_calls,
+                query_embedding=query_embedding,
+                query_text=query_text,
+                visit_counts=visit_counts,
+                visited_order=visited_order,
+            )
 
             queue = next_queue
             queue_sizes.append(len(queue))
@@ -335,6 +296,83 @@ class MultiHopTraverser:
             llm_calls=llm_calls,
             audit_trail=audit_trail,
         )
+
+    async def _execute_hop(
+        self,
+        hop: int,
+        queue: deque[str],
+        llm_calls: int,
+        query_embedding: np.ndarray | None,
+        query_text: str,
+        visit_counts: dict[str, int],
+        visited_order: list[str],
+    ) -> tuple[deque[str], dict[str, Any], int]:
+        """Expand every vertex in the current BFS level by one hop.
+
+        Args:
+            hop: Current hop number (1-indexed).
+            queue: Vertices to expand at this hop.
+            llm_calls: LLM calls made so far (for budget tracking).
+            query_embedding: Query embedding for similarity-based selection.
+            query_text: Query text for LLM-based selection.
+            visit_counts: Mutated in place with newly visited targets.
+            visited_order: Mutated in place with newly visited targets.
+
+        Returns:
+            Tuple of (next hop's queue, this hop's audit entry, updated llm_calls).
+        """
+        next_queue: deque[str] = deque()
+        hop_audit: dict[str, Any] = {
+            "hop": hop,
+            "queue_size": len(queue),
+            "expansions": [],
+        }
+
+        # Process each vertex in current queue
+        current_level = list(queue)
+        for vertex_id in current_level:
+            # Fetch outgoing edges
+            edges = await self._fetcher.get_outgoing_edges(vertex_id)
+            if not edges:
+                continue
+
+            # Select best edge
+            selected_edge: TraversalEdge | None = None
+
+            if self._mode == ReasoningMode.SIMILARITY:
+                # query_embedding is guaranteed non-None here: traverse() raises
+                # ValueError at entry if mode is SIMILARITY and query_embedding is None.
+                selected_edge = self._select_by_similarity(
+                    query_embedding,  # type: ignore[arg-type]
+                    edges,
+                )
+            elif self._mode == ReasoningMode.LLM:
+                if llm_calls >= self._max_llm_calls:
+                    # Fall back to similarity when LLM budget exhausted
+                    if query_embedding is not None:
+                        selected_edge = self._select_by_similarity(query_embedding, edges)
+                    else:
+                        selected_edge = edges[0] if edges else None
+                else:
+                    selected_edge = self._select_by_llm(query_text, vertex_id, edges)
+                    llm_calls += 1
+
+            if selected_edge is not None:
+                target = selected_edge.target_id
+                visit_counts[target] += 1
+                if target not in visited_order:
+                    visited_order.append(target)
+                next_queue.append(target)
+
+                hop_audit["expansions"].append(
+                    {
+                        "from": vertex_id,
+                        "to": target,
+                        "edge_question": selected_edge.question[:100],
+                    }
+                )
+
+        return next_queue, hop_audit, llm_calls
 
     def _select_by_similarity(
         self,

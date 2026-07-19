@@ -37,7 +37,7 @@ async def test_submit_and_drain() -> None:
     channel = GraphToEnrichReturnChannel.get_instance()
     count = await channel.submit(envelope)
     assert count == 1
-    targets = await channel.drain("acme", timeout=0.1)
+    targets = await channel.drain("acme", timeout_seconds=0.1)
     assert len(targets) == 1
     assert targets[0].field_name == "facility_tier"
     assert targets[0].source_confidence == 0.88

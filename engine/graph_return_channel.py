@@ -142,7 +142,7 @@ class GraphToEnrichReturnChannel:
         await channel.submit(envelope)
 
     Usage (ENRICH convergence_controller side):
-        targets = await channel.drain(tenant_id="acme", timeout=0.5)
+        targets = await channel.drain(tenant_id="acme", timeout_seconds=0.5)
     """
 
     _instance: GraphToEnrichReturnChannel | None = None
@@ -206,17 +206,17 @@ class GraphToEnrichReturnChannel:
         self,
         tenant_id: str,
         *,
-        timeout: float = 0.1,
+        timeout_seconds: float = 0.1,
         max_targets: int = 500,
     ) -> list[EnrichmentTarget]:
         """
         Non-blocking drain: collect up to max_targets from the tenant queue.
-        Returns immediately if the queue is empty after `timeout` seconds.
+        Returns immediately if the queue is empty after `timeout_seconds` seconds.
         Called by convergence_controller at the start of each new pass.
         """
         q = self._queue_for(tenant_id)
         targets: list[EnrichmentTarget] = []
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + timeout_seconds
         while len(targets) < max_targets:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -236,7 +236,7 @@ class GraphToEnrichReturnChannel:
             )
         return targets
 
-    def stats(self) -> dict[str, int]:
+    def stats(self) -> dict[str, int | dict[str, int]]:
         return {
             "submitted": self._submitted,
             "drained": self._drained,
