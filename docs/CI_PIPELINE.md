@@ -162,6 +162,25 @@ updates and must be removed once those are completed.
 
 ---
 
+## Fixed: `ci.yml` (and 4 other workflows) never actually triggered
+
+`ci.yml`'s `on.push.branches` / `on.pull_request.branches` were set to
+`${{ vars.PRIMARY_BRANCH || 'main' }}` / `${{ vars.DEVELOP_BRANCH ||
+'develop' }}`. GitHub Actions does not support context expressions in
+`on:` trigger filters — they're evaluated before a workflow run is even
+created, so a workflow file using one there is rejected outright ("This
+run likely failed because of a workflow file issue", 0 jobs created),
+regardless of what the rest of the file contains. `docker-build.yml`,
+`supply-chain.yml`, `codeql.yml`, and `release-drafter.yml` had the exact
+same bug. Confirmed via `gh run list`: every push-triggered run of these
+5 files failed at 0s, and none of them ever appear as a successful
+pull_request-triggered run either — meaning `ci.yml` (the main "CI
+Pipeline" workflow) has never actually executed in this repository, on
+any event. Fixed by hardcoding the branch names the `|| 'default'`
+fallback already implied.
+
+---
+
 ## Fixed: `ci-quality.yml` quality-gate fan-in bug
 
 `quality-gate`'s summary/fail logic referenced `needs.lint-format.result`,
