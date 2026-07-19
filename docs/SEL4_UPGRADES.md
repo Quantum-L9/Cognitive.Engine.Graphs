@@ -1,9 +1,9 @@
 # seL4-Inspired Upgrade Suite — Technical Documentation
 
-**Repository**: `cryptoxdog/Cognitive.Engine.Graphs`  
-**Baseline Commit**: `e7bc2b1`  
-**Research Source**: Klein et al., *"seL4: Formal Verification of an OS Kernel"* (SOSP 2009)  
-**Upgrade Date**: March 2026  
+**Repository**: `cryptoxdog/Cognitive.Engine.Graphs`
+**Baseline Commit**: `e7bc2b1`
+**Research Source**: Klein et al., *"seL4: Formal Verification of an OS Kernel"* (SOSP 2009)
+**Upgrade Date**: March 2026
 
 ---
 
@@ -24,9 +24,9 @@
 
 ### Source Paper
 
-**Title**: *seL4: Formal Verification of an OS Kernel*  
-**Authors**: Gerwin Klein, Kevin Elphinstone, Gernot Heiser, June Andronick, David Cock, Philip Derrin, Dhammika Elkaduwe, Kai Engelhardt, Rafal Kolanski, Michael Norrish, Thomas Sewell, Harvey Tuch, Simon Winwood  
-**Published**: 22nd ACM Symposium on Operating Systems Principles (SOSP), 2009  
+**Title**: *seL4: Formal Verification of an OS Kernel*
+**Authors**: Gerwin Klein, Kevin Elphinstone, Gernot Heiser, June Andronick, David Cock, Philip Derrin, Dhammika Elkaduwe, Kai Engelhardt, Rafal Kolanski, Michael Norrish, Thomas Sewell, Harvey Tuch, Simon Winwood
+**Published**: 22nd ACM Symposium on Operating Systems Principles (SOSP), 2009
 **DOI**: [10.1145/1629575.1629596](https://doi.org/10.1145/1629575.1629596)
 
 The seL4 paper documents the first formal proof of functional correctness for a production-quality operating system microkernel (8,700 lines C, 600 lines assembler). Using the Isabelle/HOL theorem prover, the team established a three-layer refinement chain — Abstract Specification → Executable Specification → C Implementation — proving that every possible execution of the C code conforms to the abstract specification. The verification effort discovered 400+ bugs through proof attempts alone.
@@ -96,7 +96,7 @@ Of these 39 concepts, the reality filter classified:
 ## Wave-by-Wave Enhancement Reference
 
 ### Wave 1: Invariant & Validation Hardening
-**PR**: [#57](https://github.com/cryptoxdog/Cognitive.Engine.Graphs/pull/57) — `+1,010 lines, 32 tests`  
+**PR**: [#57](https://github.com/cryptoxdog/Cognitive.Engine.Graphs/pull/57) — `+1,010 lines, 32 tests`
 **seL4 Concepts**: Invariant preservation, no unchecked user arguments, termination proofs
 
 | ID | Enhancement | Technical Mechanism |
@@ -112,7 +112,7 @@ Of these 39 concepts, the reality filter classified:
 ---
 
 ### Wave 2: Refinement-Inspired Scoring
-**PR**: [#58](https://github.com/cryptoxdog/Cognitive.Engine.Graphs/pull/58) — `+1,734 lines, 71 tests`  
+**PR**: [#58](https://github.com/cryptoxdog/Cognitive.Engine.Graphs/pull/58) — `+1,734 lines, 71 tests`
 **seL4 Concepts**: Three-layer refinement, forward simulation, state relation R
 
 | ID | Enhancement | Technical Mechanism |
@@ -127,7 +127,7 @@ Of these 39 concepts, the reality filter classified:
 ---
 
 ### Wave 3: Capability & Access Control
-**PR**: [#59](https://github.com/cryptoxdog/Cognitive.Engine.Graphs/pull/59) — `54 tests, 851 total passing`  
+**PR**: [#59](https://github.com/cryptoxdog/Cognitive.Engine.Graphs/pull/59) — `54 tests, 851 total passing`
 **seL4 Concepts**: Capability-based access control, capability derivation trees, revocation proofs
 
 | ID | Enhancement | Technical Mechanism |
@@ -142,7 +142,7 @@ Of these 39 concepts, the reality filter classified:
 ---
 
 ### Wave 4: State Management & Resilience
-**PR**: [#60](https://github.com/cryptoxdog/Cognitive.Engine.Graphs/pull/60) — `+1,573 lines, 37 tests`  
+**PR**: [#60](https://github.com/cryptoxdog/Cognitive.Engine.Graphs/pull/60) — `+1,573 lines, 37 tests`
 **seL4 Concepts**: State relation preservation, concurrency minimization, explicit lifecycle
 
 | ID | Enhancement | Technical Mechanism |
@@ -157,7 +157,7 @@ Of these 39 concepts, the reality filter classified:
 ---
 
 ### Wave 5: Correctness Tooling & Verification
-**PR**: [#64](https://github.com/cryptoxdog/Cognitive.Engine.Graphs/pull/64) — `+2,372 lines, 92 tests`  
+**PR**: [#64](https://github.com/cryptoxdog/Cognitive.Engine.Graphs/pull/64) — `+2,372 lines, 92 tests`
 **seL4 Concepts**: Formal proof as verification, testing as proof-companion, cost-of-change visibility
 
 | ID | Enhancement | Technical Mechanism |
@@ -173,7 +173,7 @@ Of these 39 concepts, the reality filter classified:
 ---
 
 ### Wave 6: Dormant Feature Activation
-**PR**: [#63](https://github.com/cryptoxdog/Cognitive.Engine.Graphs/pull/63) — `+1,236 lines, 30 tests`  
+**PR**: [#63](https://github.com/cryptoxdog/Cognitive.Engine.Graphs/pull/63) — `+1,236 lines, 30 tests`
 **seL4 Concepts**: Mechanism/policy separation, explicit memory management, operator-controlled activation
 
 | ID | Enhancement | Technical Mechanism |
