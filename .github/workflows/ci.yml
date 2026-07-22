@@ -21,12 +21,12 @@ name: CI Pipeline
 on:
   push:
     branches:
-      - ${{ vars.PRIMARY_BRANCH || 'main' }}
-      - ${{ vars.DEVELOP_BRANCH || 'develop' }}
+      - main
+      - develop
   pull_request:
     branches:
-      - ${{ vars.PRIMARY_BRANCH || 'main' }}
-      - ${{ vars.DEVELOP_BRANCH || 'develop' }}
+      - main
+      - develop
   workflow_dispatch:
 
 concurrency:
@@ -139,7 +139,8 @@ jobs:
       - name: Install Linting Tools
         run: |
           python -m pip install --upgrade pip
-          pip install ruff==0.15.5 mypy==1.14.0
+          # requirements-ci.txt is the canonical lint/type dependency set.
+          pip install -r requirements-ci.txt
 
       - name: Run Ruff Linter
         run: |
@@ -156,12 +157,8 @@ jobs:
       - name: Run Mypy Type Checker
         run: |
           echo "Running type checks..."
-          mypy ${{ env.SOURCE_DIR }} \
-            --show-error-codes \
-            --pretty \
-            --install-types \
-            --non-interactive \
-            || echo "⚠️  Type check warnings (non-blocking)"
+          mypy engine/ --config-file=pyproject.toml --ignore-missing-imports --exclude chassis
+          echo "✅ Mypy type checks passed"
 
 # ────────────────────────────────────────────────────────────────────────
 # PHASE 3: TEST SUITE
