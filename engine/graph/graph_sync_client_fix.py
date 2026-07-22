@@ -51,8 +51,8 @@ class GraphSyncClient:
             tenant_id=self._tenant_id,
             entity_type=entity_type,
             batch=batch,
-            tenant_tier=self._tenant_tier,
-            correlation_id=correlation_id,
+            tenant_context={"tenant_id": self._tenant_id, "tenant_tier": self._tenant_tier},
+            lineage={"correlation_id": correlation_id} if correlation_id else None,
         )
         # Enforce immediately — hard fail on violation
         return enforce_packet_envelope(packet, expected_type="graph_sync")
@@ -73,7 +73,7 @@ class GraphSyncClient:
         envelope = self._build_envelope(entity_type, batch, correlation_id)
 
         try:
-            result = await self._driver.execute_write(
+            await self._driver.execute_write(
                 _write_batch_tx,
                 entity_type=entity_type,
                 batch=envelope["content"]["batch"],

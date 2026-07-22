@@ -98,8 +98,10 @@ class Capability:
     revoked: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
-        if isinstance(self.allowed_actions, set):
-            object.__setattr__(self, "allowed_actions", frozenset(self.allowed_actions))
+        # Defensive: callers may pass a mutable `set` at runtime despite the
+        # `frozenset[str]` type hint (Python does not enforce annotations).
+        if isinstance(self.allowed_actions, set):  # type: ignore[unreachable]
+            object.__setattr__(self, "allowed_actions", frozenset(self.allowed_actions))  # type: ignore[unreachable]
         self.proof_hash = self._compute_proof_hash()
 
     def _compute_proof_hash(self) -> str:
@@ -178,20 +180,20 @@ class CapabilityValidator:
 
         Checks: registered, integrity, active, tenant match, action allowed.
         """
+        # Defensive: fail closed if a caller passes the wrong runtime type
+        # despite the `Capability` type hint (Python does not enforce it).
         if not isinstance(capability, Capability):
-            return False
+            return False  # type: ignore[unreachable]
         if not capability.is_valid_hash():
             return False
         if not capability.is_active():
             return False
-        if capability.tenant_id != tenant and capability.tenant_id != "*":
+        if capability.tenant_id not in (tenant, "*"):
             return False
         if action not in capability.allowed_actions:
             return False
         registered = self._registry.get(capability.capability_id)
-        if registered is None or registered.revoked:
-            return False
-        return True
+        return not (registered is None or registered.revoked)
 
     def derive_capability(
         self,
@@ -209,7 +211,7 @@ class CapabilityValidator:
 
         # Monotonicity: domain
         child_domain = scope_restriction.get("domain_id", parent.domain_id)
-        if parent.domain_id != "*" and child_domain != parent.domain_id:
+        if parent.domain_id not in ("*", child_domain):
             msg = (
                 f"Monotonicity violation: parent domain '{parent.domain_id}' "
                 f"cannot derive child domain '{child_domain}'"

@@ -81,7 +81,7 @@ def _euclidean_distance(vec_a: list[float], vec_b: list[float]) -> float:
         vec_a = vec_a + [0.0] * (max_len - len(vec_a))
         vec_b = vec_b + [0.0] * (max_len - len(vec_b))
 
-    return sum((a - b) ** 2 for a, b in zip(vec_a, vec_b)) ** 0.5
+    return float(sum((a - b) ** 2 for a, b in zip(vec_a, vec_b, strict=True)) ** 0.5)
 
 
 # ── Drift Detection ─────────────────────────────────────────

@@ -36,14 +36,14 @@ def test_sync_generator_uses_parameterized_query():
     from engine.config.loader import DomainPackLoader
     from engine.sync.generator import SyncGenerator
 
-    loader = DomainPackLoader(domains_dir=Path(__file__).parent.parent.parent / "domains")
+    loader = DomainPackLoader(config_path=str(Path(__file__).parent.parent.parent / "domains"))
     spec = loader.load_domain("plasticos")
     gen = SyncGenerator(spec)
     if not spec.sync.endpoints:
         pytest.skip("No sync endpoints")
     ep = spec.sync.endpoints[0]
     evil_record = {"id": "'; MATCH (n) DETACH DELETE n RETURN '1"}
-    cypher, params = gen.generate_sync_query(ep, [evil_record])
+    cypher, _params = gen.generate_sync_query(ep, [evil_record])
     # Evil string must NOT appear in the Cypher itself
     assert "DETACH DELETE" not in cypher
     assert "'; MATCH" not in cypher
@@ -57,7 +57,7 @@ def test_gate_compiler_never_interpolates_values():
     from engine.gates.compiler import GateCompiler
 
     evil_value = "'; DROP DATABASE neo4j; //"
-    loader = DomainPackLoader(domains_dir=Path(__file__).parent.parent.parent / "domains")
+    loader = DomainPackLoader(config_path=str(Path(__file__).parent.parent.parent / "domains"))
     spec = loader.load_domain("plasticos")
     compiler = GateCompiler(spec)
     # Compile with evil value as parameter — it must not appear in Cypher text

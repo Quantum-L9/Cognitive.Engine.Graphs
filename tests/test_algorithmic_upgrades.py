@@ -16,11 +16,29 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from chassis.audit import (
+    AuditAction,
+    AuditEntry,
+    AuditLogger,
+    LogSink,
+    PostgresSink,
+)
+from engine.diagnostics.dissimilarity import (
+    chi_squared_dissimilarity,
+    detect_drift,
+)
+
 # ── Diagnostics: Fingerprint ─────────────────────────────────
 from engine.diagnostics.fingerprint import (
     DEFAULT_BUCKET_LABELS,
     AlgorithmicFingerprint,
     compute_fingerprint,
+)
+from engine.packet.packet_store import PacketStore
+from engine.security.P2_9_llm_schemas import (
+    CypherQueryOutput,
+    ValidatedLLMClient,
+    validate_llm_json,
 )
 
 
@@ -107,11 +125,6 @@ class TestComputeFingerprint:
 
 # ── Diagnostics: Dissimilarity ───────────────────────────────
 
-from engine.diagnostics.dissimilarity import (
-    chi_squared_dissimilarity,
-    detect_drift,
-)
-
 
 class TestChiSquaredDissimilarity:
     def test_identical_distributions(self):
@@ -194,8 +207,6 @@ class TestDetectDrift:
 
 # ── PacketStore (unit-level, no DB) ──────────────────────────
 
-from engine.packet.packet_store import PacketStore
-
 
 class TestPacketStoreDisabled:
     """Test PacketStore behavior when PACKET_STORE_ENABLED=false (default)."""
@@ -207,12 +218,6 @@ class TestPacketStoreDisabled:
 
 
 # ── LLM Client (unit-level, no LLM) ─────────────────────────
-
-from engine.security.P2_9_llm_schemas import (
-    CypherQueryOutput,
-    ValidatedLLMClient,
-    validate_llm_json,
-)
 
 
 class TestValidateLlmJson:
@@ -270,14 +275,6 @@ class TestValidatedLLMClientNoProvider:
 
 
 # ── Audit Sinks ──────────────────────────────────────────────
-
-from chassis.audit import (
-    AuditAction,
-    AuditEntry,
-    AuditLogger,
-    LogSink,
-    PostgresSink,
-)
 
 
 class TestLogSink:
