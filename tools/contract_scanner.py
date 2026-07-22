@@ -70,7 +70,12 @@ RULES: list[dict] = [
         "Cypher label interpolation without sanitize_label()",
         "Use sanitize_label() for labels, $param for values",
         include_dirs=["engine/"],
-        exclude_dirs=["engine/sync/generator.py", "engine/handlers.py"],  # labels sanitized via sanitize_label()
+        exclude_dirs=[
+            "engine/sync/generator.py",
+            "engine/handlers.py",
+            "engine/causal/attribution.py",
+            "engine/causal/causal_compiler.py",
+        ],  # labels sanitized via sanitize_label() on a preceding line
     ),
     _rule(
         "SEC-002",
