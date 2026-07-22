@@ -31,7 +31,7 @@ import logging
 import secrets
 import time
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -218,13 +218,12 @@ class CapabilityValidator:
 
         # Monotonicity: actions
         child_actions_raw = scope_restriction.get("allowed_actions", parent.allowed_actions)
-        child_actions = frozenset(child_actions_raw) if not isinstance(child_actions_raw, frozenset) else child_actions_raw
+        child_actions = (
+            frozenset(child_actions_raw) if not isinstance(child_actions_raw, frozenset) else child_actions_raw
+        )
         excess = child_actions - parent.allowed_actions
         if excess:
-            msg = (
-                f"Monotonicity violation: child requests actions {excess} "
-                f"not in parent {parent.capability_id!r}"
-            )
+            msg = f"Monotonicity violation: child requests actions {excess} not in parent {parent.capability_id!r}"
             raise PermissionError(msg)
 
         # Expiry: child cannot outlive parent
@@ -259,9 +258,7 @@ class CapabilityValidator:
         cap.revoked = True
 
         children = [
-            d.child_capability
-            for d in self._derivations.values()
-            if d.parent_capability.capability_id == capability_id
+            d.child_capability for d in self._derivations.values() if d.parent_capability.capability_id == capability_id
         ]
         for child in children:
             self.revoke_capability(child.capability_id)
@@ -336,10 +333,7 @@ class CapabilitySet:
         return tenant in subjects or "*" in subjects
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            action: sorted(subjects)
-            for action, subjects in self._action_subjects.items()
-        }
+        return {action: sorted(subjects) for action, subjects in self._action_subjects.items()}
 
 
 # ── W3-03: Action Permission Check ─────────────────────────────

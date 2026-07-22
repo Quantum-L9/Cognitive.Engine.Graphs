@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 # Gap-7: Robust per_field_confidence extractor
 # ---------------------------------------------------------------------------
 
+
 def extract_per_field_confidence(feature_vector: dict[str, Any]) -> dict[str, float]:
     """
     Extract per-field confidence scores from a feature vector.
@@ -51,13 +52,16 @@ def extract_per_field_confidence(feature_vector: dict[str, Any]) -> dict[str, fl
             flat_val = float(flat)
         except (TypeError, ValueError):
             flat_val = 0.0
-        _META_KEYS = {"confidence", "overall_confidence", "pass_number",
-                      "entity_id", "tenant_id", "per_field_confidence", "field_scores"}
-        return {
-            k: flat_val
-            for k in feature_vector
-            if k not in _META_KEYS
+        _META_KEYS = {
+            "confidence",
+            "overall_confidence",
+            "pass_number",
+            "entity_id",
+            "tenant_id",
+            "per_field_confidence",
+            "field_scores",
         }
+        return {k: flat_val for k in feature_vector if k not in _META_KEYS}
 
     # Strategy 4: no confidence info — return empty (caller treats all fields as uncertain)
     logger.debug(
@@ -70,6 +74,7 @@ def extract_per_field_confidence(feature_vector: dict[str, Any]) -> dict[str, fl
 # ---------------------------------------------------------------------------
 # Gap-2 integration: inject return-channel targets into entity known_fields
 # ---------------------------------------------------------------------------
+
 
 async def apply_return_channel_targets(
     entity: dict[str, Any],
@@ -118,6 +123,7 @@ async def apply_return_channel_targets(
 # Gap-4: SchemaProposal emission
 # ---------------------------------------------------------------------------
 
+
 async def emit_schema_proposal(
     proposed_fields: list[dict[str, Any]],
     tenant_id: str,
@@ -144,6 +150,7 @@ async def emit_schema_proposal(
     # In the current architecture this goes to the chassis event router
     try:
         from chassis.events import emit_event
+
         await emit_event(packet_type="schema_proposal", payload=packet)
         logger.info(
             "Emitted schema_proposal packet for tenant=%s with %d new fields (packet_id=%s)",
@@ -164,6 +171,7 @@ async def emit_schema_proposal(
 # ---------------------------------------------------------------------------
 # Gap-8: domain_spec enforcement wrapper
 # ---------------------------------------------------------------------------
+
 
 class DomainSpecRequiredError(TypeError):
     """Raised when run_convergence_loop is called without domain_spec."""

@@ -282,21 +282,18 @@ class MultiHopTraverser:
 
                 if self._mode == ReasoningMode.SIMILARITY:
                     selected_edge = self._select_by_similarity(
-                        query_embedding, edges  # type: ignore[arg-type]
+                        query_embedding,
+                        edges,  # type: ignore[arg-type]
                     )
                 elif self._mode == ReasoningMode.LLM:
                     if llm_calls >= self._max_llm_calls:
                         # Fall back to similarity when LLM budget exhausted
                         if query_embedding is not None:
-                            selected_edge = self._select_by_similarity(
-                                query_embedding, edges
-                            )
+                            selected_edge = self._select_by_similarity(query_embedding, edges)
                         else:
                             selected_edge = edges[0] if edges else None
                     else:
-                        selected_edge = self._select_by_llm(
-                            query_text, vertex_id, edges
-                        )
+                        selected_edge = self._select_by_llm(query_text, vertex_id, edges)
                         llm_calls += 1
 
                 if selected_edge is not None:
@@ -389,10 +386,7 @@ class MultiHopTraverser:
         if not edges or self._llm_client is None:
             return None
 
-        edge_dicts = [
-            {"question": e.question, "target_id": e.target_id}
-            for e in edges
-        ]
+        edge_dicts = [{"question": e.question, "target_id": e.target_id} for e in edges]
 
         try:
             selected_idx = self._llm_client.evaluate_edges(

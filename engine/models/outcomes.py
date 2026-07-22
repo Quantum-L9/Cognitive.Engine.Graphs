@@ -23,12 +23,13 @@ The in-memory store is suitable for single-instance deployments.  For
 multi-instance production, replace with a PostgreSQL-backed implementation
 that reads from the ``transaction_outcomes`` table.
 """
+
 from __future__ import annotations
 
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -43,13 +44,9 @@ class OutcomeRecord(BaseModel):
 
     match_id: str = Field(description="ID of the match request that produced this outcome")
     candidate_id: str = Field(description="ID of the candidate entity")
-    dimension_scores: dict[str, float] = Field(
-        description="Per-dimension scores at the time of the match"
-    )
-    was_selected: bool = Field(
-        description="Whether the customer/user selected this candidate"
-    )
-    feedback_score: Optional[float] = Field(
+    dimension_scores: dict[str, float] = Field(description="Per-dimension scores at the time of the match")
+    was_selected: bool = Field(description="Whether the customer/user selected this candidate")
+    feedback_score: float | None = Field(
         default=None,
         ge=0.0,
         le=1.0,
