@@ -57,7 +57,8 @@ jobs:
           python-version: "3.12"
       - run: pip install -r requirements-ci.txt
       - run: ruff check . && ruff format --check .
-      - run: mypy engine/ --strict --ignore-missing-imports --exclude chassis
+      # Keep type enforcement aligned with ci.yml, ci-quality.yml, and pyproject.toml.
+      - run: mypy engine/ --config-file=pyproject.toml --ignore-missing-imports --exclude chassis
 
   test:
     name: Test Suite
