@@ -118,10 +118,7 @@ class ImportanceScorer:
 
         total = sum(visit_counts.values())
         if total == 0:
-            return {
-                vid: ImportanceResult(score=0.0, visit_count=0, total_visits=0)
-                for vid in visit_counts
-            }
+            return {vid: ImportanceResult(score=0.0, visit_count=0, total_visits=0) for vid in visit_counts}
 
         results: dict[str, ImportanceResult] = {}
         for vid, count in visit_counts.items():

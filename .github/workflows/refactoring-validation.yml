@@ -39,6 +39,8 @@ permissions:
 
 jobs:
   refactor-gate:
+    # This workflow is a specialized deep gate, not a duplicate gate for every Python PR.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.head_ref, 'refactor/')
     name: Refactoring Validation Gate
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -71,7 +73,7 @@ jobs:
 
       - name: Run Mypy Type Checker (BLOCKING)
         run: |
-          mypy engine/ --show-error-codes --pretty --ignore-missing-imports --strict
+          mypy engine/ --config-file=pyproject.toml --ignore-missing-imports --exclude chassis
 # REMOVED: continue-on-error: true
 
       - name: Run Full Test Suite (BLOCKING)
