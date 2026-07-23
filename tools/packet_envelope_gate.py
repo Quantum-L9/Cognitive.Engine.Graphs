@@ -39,7 +39,7 @@ import tempfile
 from pathlib import Path
 
 SDK_REPOSITORY = "https://github.com/Quantum-L9/l9-ci-sdk.git"
-SDK_REVISION = "d8ec01f141b9eec24d22ffac84a83ec7280eef72"
+SDK_REVISION = "b390dc78e3464cca539b998dfb723481927ed91b"
 SDK_RUNTIME_DIR = Path(".l9/runtime/sdk")
 LEDGER_PATH = Path(".l9/baselines/packet-envelope.yml")
 DECLARATION_PATHS = (
