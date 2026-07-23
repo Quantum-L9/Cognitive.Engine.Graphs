@@ -17,6 +17,16 @@ on:
   pull_request:
 
 jobs:
+  action-refs:
+    name: Validate Action References
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # Guard against malformed `@<sha>v<version>` "Frankenrefs" that make
+      # every job in an affected workflow unrunnable. Also warns (non-fatal)
+      # on third-party actions that are not SHA-pinned.
+      - run: python3 tools/check_action_refs.py
+
   contract-files:
     name: Verify Contract Files Exist
     runs-on: ubuntu-latest
