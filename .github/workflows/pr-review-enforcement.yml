@@ -80,7 +80,7 @@ jobs:
           echo "max_files=$MAX_FILES" >> "$GITHUB_OUTPUT"
 
       - name: Check PR Size and Policies
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const marker = '<!-- pr-review-enforcement -->';
