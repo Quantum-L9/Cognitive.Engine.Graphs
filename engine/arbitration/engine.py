@@ -1,3 +1,15 @@
+"""
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [scoring]
+tags: [arbitration]
+owner: engine-team
+status: active
+--- /L9_META ---
+"""
+
 from __future__ import annotations
 
 from typing import Any, Literal

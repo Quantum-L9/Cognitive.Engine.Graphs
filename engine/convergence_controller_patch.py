@@ -1,4 +1,14 @@
 """
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [scoring]
+tags: [convergence, patch]
+owner: engine-team
+status: active
+--- /L9_META ---
+
 GAP-2 + GAP-4 + GAP-7 + GAP-8 PATCH for convergence_controller.py
 
 This file is a DROP-IN PATCH: import and call `patch_convergence_controller()`
@@ -16,6 +26,7 @@ Changes:
 
 from __future__ import annotations
 
+import importlib
 import logging
 from typing import Any
 
@@ -146,10 +157,14 @@ async def emit_schema_proposal(
         proposed_fields=proposed_fields,
         provenance="convergence_loop_schema_discovery",
     )
-    # Emit to the schema evolution queue / event bus
-    # In the current architecture this goes to the chassis event router
+    # Emit to the schema evolution queue / event bus.
+    # In the current architecture this goes to the chassis event router.
+    # Contract 02 / T5-03: engine code must never import chassis statically
+    # (engine/handlers.py and engine/boot.py are the only bridges), so the
+    # optional event router is resolved dynamically at call time.
     try:
-        from chassis.events import emit_event
+        events_module = importlib.import_module("chassis.events")
+        emit_event = events_module.emit_event
 
         await emit_event(packet_type="schema_proposal", payload=packet)
         logger.info(
@@ -158,7 +173,7 @@ async def emit_schema_proposal(
             len(proposed_fields),
             packet["packet_id"],
         )
-    except ImportError:
+    except (ImportError, AttributeError):
         # chassis.events not yet wired — log and continue rather than blocking
         logger.warning(
             "chassis.events not available — schema_proposal packet queued in-memory only: tenant=%s fields=%s",

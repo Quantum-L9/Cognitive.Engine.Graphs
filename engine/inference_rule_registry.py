@@ -1,4 +1,14 @@
 """
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [config]
+tags: [inference, registry]
+owner: engine-team
+status: active
+--- /L9_META ---
+
 GAP-3 FIX: Active inference function registry with real computation functions.
 
 Previously _RULE_REGISTRY was empty at startup, causing every `derived_from`

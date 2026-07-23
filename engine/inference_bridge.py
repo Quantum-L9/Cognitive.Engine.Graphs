@@ -1,4 +1,14 @@
 """
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [config]
+tags: [inference, bridge]
+owner: engine-team
+status: active
+--- /L9_META ---
+
 GAP-9 FIX: Replace engine/inference_bridge.py with this file.
 
 Any direct import of the v1 bridge now raises ImportError immediately,

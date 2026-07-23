@@ -21,6 +21,14 @@ import time
 import uuid
 from typing import Any
 
+# T5-03: handlers.py is the sanctioned chassis bridge. Re-export chassis
+# error types here so other engine modules can use them without importing
+# chassis directly.
+from chassis.errors import FeatureNotEnabled  # noqa: F401
+
+# T5-03: handlers.py is the sanctioned chassis bridge. Re-export chassis
+# error types here so other engine modules can use them without importing
+# chassis directly.
 from engine.auth.capabilities import (
     ACTION_PERMISSION_MAP,
     Capability,
@@ -40,6 +48,8 @@ from engine.sync.generator import SyncGenerator
 from engine.traversal.assembler import TraversalAssembler
 from engine.traversal.resolver import ParameterResolutionError, ParameterResolver
 from engine.utils.security import sanitize_label
+
+__all_chassis_reexports__ = ["FeatureNotEnabled"]
 
 logger = logging.getLogger(__name__)
 
