@@ -31,10 +31,10 @@ import re
 from typing import Any, TypeVar
 
 import structlog
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 # These come from P1-5 (engine/security/llm.py)
 from engine.security.llm import sanitize_llm_input, track_llm_usage
-from pydantic import BaseModel, Field, ValidationError, field_validator
 
 logger = logging.getLogger(__name__)
 _slog = structlog.get_logger(__name__)
@@ -135,10 +135,7 @@ class _LLMBackend:
         try:
             from openai import OpenAI
         except ImportError as exc:
-            raise RuntimeError(
-                "openai package is required for LLM features. "
-                "Install with: pip install openai"
-            ) from exc
+            raise RuntimeError("openai package is required for LLM features. Install with: pip install openai") from exc
 
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
@@ -204,7 +201,7 @@ class _LLMBackend:
                 total_tokens=response.usage.total_tokens,
             )
 
-        return content
+        return str(content)
 
 
 # Module-level singleton — shared across all ValidatedLLMClient instances
@@ -238,12 +235,16 @@ class ValidatedLLMClient:
         try:
             return _llm_backend.call(self.model, system, user)
         except RuntimeError as exc:
-            # Convert to FeatureNotEnabled for graceful degradation
-            from chassis.errors import FeatureNotEnabled
+            # Convert to FeatureNotEnabled for graceful degradation.
+            # T5-03: engine modules must not import chassis directly —
+            # engine/handlers.py is the sanctioned chassis bridge, so the
+            # exception class is resolved through it at call time.
+            from engine.handlers import FeatureNotEnabled
+
             raise FeatureNotEnabled(
                 "LLM SDK",
                 flag="OPENAI_API_KEY",
-                message=str(exc),
+                message=f"LLM SDK feature is not enabled: {exc}",
             ) from exc
 
     # ---- public API ------------------------------------------------

@@ -28,7 +28,7 @@ description: Add a new gate type to the CEG engine
 ```python
 class NewGate(BaseGate):
     """Description of what this gate filters."""
-    
+
     def compile_where(self, spec: GateSpec, domain_spec: DomainSpec) -> str:
         field = sanitize_label(spec.candidateprop)
         param_name = f"${spec.parametername}"
