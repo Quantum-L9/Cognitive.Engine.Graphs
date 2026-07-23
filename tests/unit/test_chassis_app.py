@@ -115,7 +115,7 @@ class TestLifecycleHook:
         import asyncio
 
         hook = _NoOpLifecycle()
-        result = asyncio.get_event_loop().run_until_complete(hook.execute("test", {}, "tenant", "trace"))
+        result = asyncio.run(hook.execute("test", {}, "tenant", "trace"))
         assert result["status"] == "failed"
         assert "No engine lifecycle hook" in result["data"]["error"]
 

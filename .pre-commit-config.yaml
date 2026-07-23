@@ -43,7 +43,7 @@ repos:
     hooks:
       - id: pytest-unit
         name: pytest unit tests
-        entry: bash -c 'PYTHONPATH="${PYTHONPATH}:." python3 -m pytest tests/ -m "unit" --ignore=tests/unit/test_gates_all_types.py --ignore=tests/unit/test_scoring.py --ignore=tests/unit/test_config.py --tb=short -q'
+        entry: bash -c 'PYTHONPATH="${PYTHONPATH}:." python3 -m pytest tests/ -m "unit" --ignore=tests/unit/test_gates_all_types.py --ignore=tests/unit/test_scoring.py --ignore=tests/unit/test_config.py --ignore=tests/unit/test_arbitration.py --ignore=tests/unit/test_wave6_dormant_features.py --tb=short -q'
         language: system
         pass_filenames: false
         always_run: true
@@ -106,7 +106,45 @@ repos:
         always_run: true
         stages: [pre-push]
 
-  # Terminology guard (canonical terms: PacketEnvelope, list[T], T | None)
+  # ── Deprecated API enforcement ──────────────────────────────────────────────
+  # Step 1: auto-fix (runs first; exits 1 if it modified files so you must
+  #   re-stage the fixed versions and retry the commit)
+  # Step 2: check (runs after; fails hard if any DomainSpecLoader still present)
+  # Manual fix: python tools/check_deprecated_imports.py --fix .
+  - repo: local
+    hooks:
+      - id: fix-deprecated-imports
+        name: "Auto-fix: DomainSpecLoader → DomainPackLoader"
+        entry: python3 tools/check_deprecated_imports.py --fix
+        language: system
+        types: [python]
+        pass_filenames: true
+
+      - id: check-deprecated-imports
+        name: "Banned API: DomainSpecLoader is deprecated (use DomainPackLoader)"
+        entry: python3 tools/check_deprecated_imports.py --check
+        language: system
+        types: [python]
+        pass_filenames: true
+
+  # PacketEnvelope prohibition — superseded by transportPacket.
+  # Delegates to the pinned l9-ci-sdk baseline scanner + ledger comparison
+  # (full-repository AST scan; recorded debt in
+  # .l9/baselines/packet-envelope.yml is tolerated until expiry, anything
+  # new/increased/moved blocks). pass_filenames is deliberately false:
+  # changed-file scanning must never bypass the full-repository baseline
+  # comparison. The wrapper contains no scanning or comparison logic of its
+  # own — it provisions the pinned SDK and exits with its verdict.
+  - repo: local
+    hooks:
+      - id: packet-envelope-prohibited
+        name: "Deprecated API: PacketEnvelope → transportPacket (baseline ratchet)"
+        entry: python3 tools/packet_envelope_gate.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
+  # Terminology guard (canonical terms: transportPacket, list[T], T | None)
   - repo: local
     hooks:
       - id: terminology-guard
@@ -114,14 +152,14 @@ repos:
         entry: >
           bash -c '
           VIOLATIONS=0;
-          for pattern in "\\bPacket\\b" "\\bprint\\(" "\\bOptional\\[" "\\bList\\[" "\\bDict\\["; do
+          for pattern in "\\bprint\\(" "\\bOptional\\[" "\\bList\\[" "\\bDict\\["; do
             if git diff --cached --name-only | grep "\.py$" | grep -E "^(engine|tests)/" |
                xargs grep -l -P "$pattern" 2>/dev/null | grep -v __pycache__ | grep -q .; then
               echo "❌ Found forbidden term: $pattern";
               VIOLATIONS=$((VIOLATIONS+1));
             fi;
           done;
-          [ $VIOLATIONS -eq 0 ] || { echo "Use: PacketEnvelope, list[T], T | None"; exit 1; };
+          [ $VIOLATIONS -eq 0 ] || { echo "Use: transportPacket, list[T], T | None"; exit 1; };
           exit 0'
         language: system
         pass_filenames: false

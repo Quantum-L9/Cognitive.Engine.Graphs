@@ -5,13 +5,11 @@ Tests for Milestone 2.1 / 2.2 Pareto wiring:
 - OutcomeRecord + OutcomeHistoryStore
 - adaptive_weight_discovery
 """
+
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
-
-import pytest
-
+from datetime import UTC, datetime, timedelta
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  Milestone 2.1: Schema Extension
@@ -244,7 +242,7 @@ class TestOutcomeHistoryStore:
             candidate_id="c_old",
             dimension_scores={"a": 0.5},
             was_selected=True,
-            timestamp=datetime.utcnow() - timedelta(days=100),
+            timestamp=datetime.now(UTC) - timedelta(days=100),
         )
         store.add_outcome("t1", old)
         # Add a recent outcome
@@ -321,7 +319,7 @@ class TestAdaptiveWeightDiscovery:
             {"dimension_scores": {"structural": 0.8, "geo": 0.8}, "was_selected": True},
         ] * 5  # 15 outcomes
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             adaptive_weight_discovery(
                 dimension_names=["structural", "geo"],
                 outcome_history=outcome_history,
@@ -339,15 +337,13 @@ class TestAdaptiveWeightDiscovery:
     def test_empty_dimensions(self):
         from engine.scoring.weight_discovery import adaptive_weight_discovery
 
-        result = asyncio.get_event_loop().run_until_complete(
-            adaptive_weight_discovery(dimension_names=[], outcome_history=[])
-        )
+        result = asyncio.run(adaptive_weight_discovery(dimension_names=[], outcome_history=[]))
         assert result == []
 
     def test_no_outcome_history(self):
         from engine.scoring.weight_discovery import adaptive_weight_discovery
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             adaptive_weight_discovery(
                 dimension_names=["a", "b"],
                 outcome_history=[],
@@ -360,16 +356,10 @@ class TestAdaptiveWeightDiscovery:
     def test_deterministic_with_seed(self):
         from engine.scoring.weight_discovery import adaptive_weight_discovery
 
-        history = [
-            {"dimension_scores": {"x": 0.8, "y": 0.6}, "was_selected": True}
-        ] * 10
+        history = [{"dimension_scores": {"x": 0.8, "y": 0.6}, "was_selected": True}] * 10
 
-        r1 = asyncio.get_event_loop().run_until_complete(
-            adaptive_weight_discovery(["x", "y"], history, n_samples=15)
-        )
-        r2 = asyncio.get_event_loop().run_until_complete(
-            adaptive_weight_discovery(["x", "y"], history, n_samples=15)
-        )
+        r1 = asyncio.run(adaptive_weight_discovery(["x", "y"], history, n_samples=15))
+        r2 = asyncio.run(adaptive_weight_discovery(["x", "y"], history, n_samples=15))
         assert len(r1) == len(r2)
-        for a, b in zip(r1, r2):
+        for a, b in zip(r1, r2, strict=True):
             assert a.weights == b.weights

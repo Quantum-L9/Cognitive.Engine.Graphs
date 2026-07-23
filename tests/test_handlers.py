@@ -83,6 +83,13 @@ def _make_domain_spec() -> MagicMock:
     node.properties = [prop]
     spec.ontology.nodes = [node]
 
+    # Feedback loop: unset MagicMock attribute chains would leak into
+    # sanitize_label() (which requires str), so pin real values and keep
+    # the loop disabled — handlers then skip score propagation entirely.
+    spec.feedbackloop.enabled = False
+    spec.feedbackloop.signal_weights.enabled = False
+    spec.feedbackloop.outcome_node_label = "Outcome"
+
     return spec
 
 

@@ -60,3 +60,6 @@ secrets.json
 .env.vps
 *.bak.*
 .hypothesis/
+
+# l9-ci-sdk runtime checkout (provisioned by tools/packet_envelope_gate.py)
+.l9/runtime/

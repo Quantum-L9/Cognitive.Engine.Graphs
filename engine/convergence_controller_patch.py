@@ -1,4 +1,14 @@
 """
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [scoring]
+tags: [convergence, patch]
+owner: engine-team
+status: active
+--- /L9_META ---
+
 GAP-2 + GAP-4 + GAP-7 + GAP-8 PATCH for convergence_controller.py
 
 This file is a DROP-IN PATCH: import and call `patch_convergence_controller()`
@@ -16,6 +26,7 @@ Changes:
 
 from __future__ import annotations
 
+import importlib
 import logging
 from typing import Any
 
@@ -25,6 +36,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Gap-7: Robust per_field_confidence extractor
 # ---------------------------------------------------------------------------
+
 
 def extract_per_field_confidence(feature_vector: dict[str, Any]) -> dict[str, float]:
     """
@@ -51,13 +63,16 @@ def extract_per_field_confidence(feature_vector: dict[str, Any]) -> dict[str, fl
             flat_val = float(flat)
         except (TypeError, ValueError):
             flat_val = 0.0
-        _META_KEYS = {"confidence", "overall_confidence", "pass_number",
-                      "entity_id", "tenant_id", "per_field_confidence", "field_scores"}
-        return {
-            k: flat_val
-            for k in feature_vector
-            if k not in _META_KEYS
+        meta_keys = {
+            "confidence",
+            "overall_confidence",
+            "pass_number",
+            "entity_id",
+            "tenant_id",
+            "per_field_confidence",
+            "field_scores",
         }
+        return {k: flat_val for k in feature_vector if k not in meta_keys}
 
     # Strategy 4: no confidence info — return empty (caller treats all fields as uncertain)
     logger.debug(
@@ -71,11 +86,12 @@ def extract_per_field_confidence(feature_vector: dict[str, Any]) -> dict[str, fl
 # Gap-2 integration: inject return-channel targets into entity known_fields
 # ---------------------------------------------------------------------------
 
+
 async def apply_return_channel_targets(
     entity: dict[str, Any],
     tenant_id: str,
     *,
-    timeout: float = 0.05,
+    timeout_seconds: float = 0.05,
 ) -> dict[str, Any]:
     """
     Drain the GraphToEnrichReturnChannel for this tenant and inject any
@@ -88,7 +104,7 @@ async def apply_return_channel_targets(
 
     channel = GraphToEnrichReturnChannel.get_instance()
     entity_id = entity.get("entity_id") or entity.get("id")
-    targets = await channel.drain(tenant_id=tenant_id, timeout=timeout, max_targets=200)
+    targets = await channel.drain(tenant_id=tenant_id, timeout_seconds=timeout_seconds, max_targets=200)
 
     matched = 0
     for target in targets:
@@ -118,6 +134,7 @@ async def apply_return_channel_targets(
 # Gap-4: SchemaProposal emission
 # ---------------------------------------------------------------------------
 
+
 async def emit_schema_proposal(
     proposed_fields: list[dict[str, Any]],
     tenant_id: str,
@@ -140,10 +157,15 @@ async def emit_schema_proposal(
         proposed_fields=proposed_fields,
         provenance="convergence_loop_schema_discovery",
     )
-    # Emit to the schema evolution queue / event bus
-    # In the current architecture this goes to the chassis event router
+    # Emit to the schema evolution queue / event bus.
+    # In the current architecture this goes to the chassis event router.
+    # Contract 02 / T5-03: engine code must never import chassis statically
+    # (engine/handlers.py and engine/boot.py are the only bridges), so the
+    # optional event router is resolved dynamically at call time.
     try:
-        from chassis.events import emit_event
+        events_module = importlib.import_module("chassis.events")
+        emit_event = events_module.emit_event
+
         await emit_event(packet_type="schema_proposal", payload=packet)
         logger.info(
             "Emitted schema_proposal packet for tenant=%s with %d new fields (packet_id=%s)",
@@ -151,7 +173,7 @@ async def emit_schema_proposal(
             len(proposed_fields),
             packet["packet_id"],
         )
-    except ImportError:
+    except (ImportError, AttributeError):
         # chassis.events not yet wired — log and continue rather than blocking
         logger.warning(
             "chassis.events not available — schema_proposal packet queued in-memory only: tenant=%s fields=%s",
@@ -164,6 +186,7 @@ async def emit_schema_proposal(
 # ---------------------------------------------------------------------------
 # Gap-8: domain_spec enforcement wrapper
 # ---------------------------------------------------------------------------
+
 
 class DomainSpecRequiredError(TypeError):
     """Raised when run_convergence_loop is called without domain_spec."""

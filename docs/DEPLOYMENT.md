@@ -154,6 +154,5 @@ Managed via Hetzner Cloud Firewall. Required ports:
 
 ## Related Documentation
 
-- [Infrastructure as Code](../iac/README.md)
 - [Docker Compose (prod)](../docker-compose.prod.yml)
 - [Dockerfile (prod)](../Dockerfile.prod)
