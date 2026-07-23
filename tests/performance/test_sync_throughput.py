@@ -21,9 +21,12 @@ import time
 import uuid
 
 import pytest
+import structlog
 
 from engine.config.schema import SyncEndpointSpec, SyncStrategy
 from engine.sync.generator import SyncGenerator
+
+logger = structlog.get_logger(__name__)
 
 
 @pytest.mark.performance
@@ -99,11 +102,14 @@ class TestSyncThroughput:
         avg_sec = statistics.mean(latencies)
         throughput = batch_size / avg_sec
 
-        print(f"\n{'─' * 50}")
-        print(f"Sync Throughput: {batch_size} facilities")
-        print(f"  avg: {avg_sec:.2f}s  throughput: {throughput:.0f} entities/sec")
-        print(f"  min: {min(latencies):.2f}s  max: {max(latencies):.2f}s")
-        print(f"{'─' * 50}")
+        logger.info(
+            "sync_throughput",
+            facilities=batch_size,
+            avg_sec=round(avg_sec, 2),
+            entities_per_sec=round(throughput),
+            min_sec=round(min(latencies), 2),
+            max_sec=round(max(latencies), 2),
+        )
 
         # Verify data landed
         count_result = await graph_driver.execute_query(
@@ -160,8 +166,12 @@ class TestSyncThroughput:
         avg_sec = statistics.mean(latencies)
         throughput = batch_size / avg_sec
 
-        print(f"\nIncremental Update: {batch_size} facilities")
-        print(f"  avg: {avg_sec:.2f}s  throughput: {throughput:.0f} updates/sec")
+        logger.info(
+            "incremental_update_throughput",
+            facilities=batch_size,
+            avg_sec=round(avg_sec, 2),
+            updates_per_sec=round(throughput),
+        )
 
         # Verify update applied
         result = await graph_driver.execute_query(

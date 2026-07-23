@@ -28,10 +28,13 @@ import statistics
 import time
 
 import pytest
+import structlog
 
 from engine.gates.compiler import GateCompiler
 from engine.scoring.assembler import ScoringAssembler
 from engine.traversal.assembler import TraversalAssembler
+
+logger = structlog.get_logger(__name__)
 
 
 def _full_match_params(domain_spec, tenant: str) -> dict:
@@ -156,10 +159,15 @@ class TestMatchQueryLatency:
         p99 = sorted(latencies)[int(len(latencies) * 0.99)]
         avg = statistics.mean(latencies)
 
-        print(f"\n{'─' * 50}")
-        print(f"Match Query Latency (n=50, {len(seeded_graph['facility_ids'])} facilities)")
-        print(f"  avg: {avg:.1f}ms  p50: {p50:.1f}ms  p95: {p95:.1f}ms  p99: {p99:.1f}ms")
-        print(f"{'─' * 50}")
+        logger.info(
+            "match_query_latency",
+            n=50,
+            facilities=len(seeded_graph["facility_ids"]),
+            avg_ms=round(avg, 1),
+            p50_ms=round(p50, 1),
+            p95_ms=round(p95, 1),
+            p99_ms=round(p99, 1),
+        )
 
         assert p95 < 100, f"p95 latency {p95:.1f}ms exceeds 100ms target"
 
@@ -199,6 +207,6 @@ class TestMatchQueryLatency:
         p95 = sorted(latencies)[int(len(latencies) * 0.95)]
         avg = statistics.mean(latencies)
 
-        print(f"\nRelaxed Match: avg={avg:.1f}ms  p95={p95:.1f}ms")
+        logger.info("relaxed_match_latency", avg_ms=round(avg, 1), p95_ms=round(p95, 1))
 
         assert p95 < 200, f"p95 latency {p95:.1f}ms exceeds 200ms target"
