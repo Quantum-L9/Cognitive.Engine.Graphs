@@ -17,9 +17,9 @@ async def apply_all_gap_fixes(pg_dsn: str, neo4j_driver, domain_pack_loader) -> 
     """
     Call once during application startup, before serving requests.
     Parameters:
-        pg_dsn            – asyncpg-compatible DSN string
-        neo4j_driver      – AsyncDriver from neo4j-driver
-        domain_pack_loader – DomainPackLoader instance
+        pg_dsn            - asyncpg-compatible DSN string
+        neo4j_driver      - AsyncDriver from neo4j-driver
+        domain_pack_loader - DomainPackLoader instance
     """
 
     # ── Gap 5: Wire PostgreSQL audit pool ────────────────────────────────────

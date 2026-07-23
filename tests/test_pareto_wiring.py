@@ -9,7 +9,7 @@ Tests for Milestone 2.1 / 2.2 Pareto wiring:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  Milestone 2.1: Schema Extension
@@ -242,7 +242,7 @@ class TestOutcomeHistoryStore:
             candidate_id="c_old",
             dimension_scores={"a": 0.5},
             was_selected=True,
-            timestamp=datetime.utcnow() - timedelta(days=100),
+            timestamp=datetime.now(UTC) - timedelta(days=100),
         )
         store.add_outcome("t1", old)
         # Add a recent outcome
@@ -363,5 +363,5 @@ class TestAdaptiveWeightDiscovery:
         r1 = asyncio.get_event_loop().run_until_complete(adaptive_weight_discovery(["x", "y"], history, n_samples=15))
         r2 = asyncio.get_event_loop().run_until_complete(adaptive_weight_discovery(["x", "y"], history, n_samples=15))
         assert len(r1) == len(r2)
-        for a, b in zip(r1, r2):
+        for a, b in zip(r1, r2, strict=True):
             assert a.weights == b.weights

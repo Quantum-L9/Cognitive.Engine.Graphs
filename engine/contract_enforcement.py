@@ -159,7 +159,7 @@ def _verify_content_hash(
 ) -> None:
     """Recompute SHA-256 over the canonical content payload and compare."""
     # Content payload = everything except hash fields and metadata
-    _HASH_EXCLUDED = {
+    hash_excluded = {
         "content_hash",
         "envelope_hash",
         "packet_id",
@@ -169,7 +169,7 @@ def _verify_content_hash(
         "lineage",
         "tenant_context",
     }
-    content_payload = {k: v for k, v in packet.items() if k not in _HASH_EXCLUDED}
+    content_payload = {k: v for k, v in packet.items() if k not in hash_excluded}
     try:
         payload_bytes = json.dumps(content_payload, sort_keys=True, default=str).encode()
     except (TypeError, ValueError) as exc:

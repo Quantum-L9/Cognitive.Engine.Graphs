@@ -52,7 +52,7 @@ def extract_per_field_confidence(feature_vector: dict[str, Any]) -> dict[str, fl
             flat_val = float(flat)
         except (TypeError, ValueError):
             flat_val = 0.0
-        _META_KEYS = {
+        meta_keys = {
             "confidence",
             "overall_confidence",
             "pass_number",
@@ -61,7 +61,7 @@ def extract_per_field_confidence(feature_vector: dict[str, Any]) -> dict[str, fl
             "per_field_confidence",
             "field_scores",
         }
-        return {k: flat_val for k in feature_vector if k not in _META_KEYS}
+        return {k: flat_val for k in feature_vector if k not in meta_keys}
 
     # Strategy 4: no confidence info — return empty (caller treats all fields as uncertain)
     logger.debug(
@@ -80,7 +80,7 @@ async def apply_return_channel_targets(
     entity: dict[str, Any],
     tenant_id: str,
     *,
-    timeout: float = 0.05,
+    timeout_seconds: float = 0.05,
 ) -> dict[str, Any]:
     """
     Drain the GraphToEnrichReturnChannel for this tenant and inject any
@@ -93,7 +93,7 @@ async def apply_return_channel_targets(
 
     channel = GraphToEnrichReturnChannel.get_instance()
     entity_id = entity.get("entity_id") or entity.get("id")
-    targets = await channel.drain(tenant_id=tenant_id, timeout=timeout, max_targets=200)
+    targets = await channel.drain(tenant_id=tenant_id, timeout_seconds=timeout_seconds, max_targets=200)
 
     matched = 0
     for target in targets:

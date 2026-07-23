@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -52,7 +52,7 @@ class OutcomeRecord(BaseModel):
         le=1.0,
         description="Optional explicit feedback score (0.0-1.0)",
     )
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 # ── Store ────────────────────────────────────────────────────────────────────
@@ -100,7 +100,7 @@ class OutcomeHistoryStore:
             Each dict has ``dimension_scores`` (dict[str, float]) and
             ``was_selected`` (bool).
         """
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(UTC) - timedelta(days=days)
         bucket = self._history.get(tenant, [])
 
         recent = [
