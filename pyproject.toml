@@ -39,11 +39,17 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
+# NOTE: pytest.ini exists at the repo root, so pytest uses that file as the
+# authoritative config and ignores this [tool.pytest.ini_options] section
+# entirely (pytest.ini takes precedence over pyproject.toml). Keep the two
+# marker lists in sync — see pytest.ini for the config that is actually
+# active in CI and pre-commit.
 testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "unit: Unit tests (no external deps)",
     "integration: Integration tests (requires Neo4j)",
+    "security: Security/injection/compliance tests",
     "compliance: Regulatory compliance tests",
     "performance: Performance benchmarks",
     "slow: Slow tests (>5s)",
