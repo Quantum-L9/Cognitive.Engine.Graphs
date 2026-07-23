@@ -111,8 +111,12 @@ def main() -> int:
             "scan-packet-envelope",
             "--repository-root",
             str(repo_root),
+            # The scanner matches --exclude-dir against single path
+            # components; ".l9" excludes the entire governance/runtime
+            # tree (ledgers plus the provisioned SDK checkout), exactly
+            # matching the Baseline Ratchet workflow invocation.
             "--exclude-dir",
-            ".l9/runtime",
+            ".l9",
             "--output",
             str(findings_path),
         ]
