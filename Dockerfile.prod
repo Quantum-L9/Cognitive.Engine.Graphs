@@ -14,13 +14,22 @@ FROM python:3.12-slim AS builder
 
 WORKDIR /build
 
+# git is required to resolve the git+https constellation-node-sdk dependency
+# (both by `poetry install` below and by the pip fallback)
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install build deps
 RUN pip install --no-cache-dir poetry && \
     poetry config virtualenvs.create false
 
 COPY pyproject.toml poetry.lock* ./
-RUN poetry install --no-dev --no-interaction --no-ansi 2>/dev/null || \
-    pip install --no-cache-dir fastapi uvicorn neo4j pydantic pydantic-settings pyyaml apscheduler redis structlog numpy scipy RestrictedPython
+# --only main: install runtime deps, skip the [dev] group.
+# --no-root: install dependencies only, not the l9-engine project itself
+# (the "current project" install needs README.md, which isn't in the
+# build context yet, and isn't needed — engine/domains/chassis are
+# copied as raw source into the runtime stage below, not pip-installed).
+RUN poetry install --only main --no-root --no-interaction --no-ansi
 
 COPY . .
 

@@ -16,6 +16,10 @@
 # ── Stage 1: Dependencies ──────────────────────────────────
 FROM python:3.12-slim AS deps
 
+# git is required to resolve the git+https constellation-node-sdk dependency
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /build
 COPY requirements.txt requirements.txt
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
