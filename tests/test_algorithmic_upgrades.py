@@ -6,24 +6,21 @@ Tests for the algorithmic upgrade PR:
   - engine/security/P2_9_llm_schemas.py (unit-level, no LLM)
   - chassis/audit.py (PostgresSink, LogSink)
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import os
-from datetime import UTC, datetime
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 # ── Diagnostics: Fingerprint ─────────────────────────────────
-
 from engine.diagnostics.fingerprint import (
+    DEFAULT_BUCKET_LABELS,
     AlgorithmicFingerprint,
     compute_fingerprint,
-    DEFAULT_BUCKET_LABELS,
 )
 
 
@@ -74,7 +71,8 @@ class TestComputeFingerprint:
 
     def test_to_vector(self):
         fp = compute_fingerprint(
-            "p1", "w1",
+            "p1",
+            "w1",
             [{"total_score": 0.5, "dimension_scores": {"a": 0.5, "b": 0.3}}],
         )
         vec = fp.to_vector()
@@ -99,7 +97,9 @@ class TestComputeFingerprint:
     def test_bucket_boundary_validation(self):
         with pytest.raises(ValueError, match="bucket_boundaries"):
             compute_fingerprint(
-                "p1", "w1", [{"total_score": 0.5}],
+                "p1",
+                "w1",
+                [{"total_score": 0.5}],
                 bucket_boundaries=(0.0, 1.0),
                 bucket_labels=("low", "mid", "high"),
             )
@@ -110,7 +110,6 @@ class TestComputeFingerprint:
 from engine.diagnostics.dissimilarity import (
     chi_squared_dissimilarity,
     detect_drift,
-    DriftReport,
 )
 
 
@@ -141,7 +140,9 @@ class TestChiSquaredDissimilarity:
 
 
 class TestDetectDrift:
-    def _make_fp(self, persona_id: str, window_id: str, score_dist: dict, dim_dom: dict, entropy: float, concentration: float):
+    def _make_fp(
+        self, persona_id: str, window_id: str, score_dist: dict, dim_dom: dict, entropy: float, concentration: float
+    ):
         return AlgorithmicFingerprint(
             persona_id=persona_id,
             window_id=window_id,
@@ -193,7 +194,7 @@ class TestDetectDrift:
 
 # ── PacketStore (unit-level, no DB) ──────────────────────────
 
-from engine.packet.packet_store import PacketStore, _extract_packet_row
+from engine.packet.packet_store import PacketStore
 
 
 class TestPacketStoreDisabled:
@@ -202,28 +203,28 @@ class TestPacketStoreDisabled:
     def test_persist_is_noop_when_disabled(self):
         store = PacketStore()
         # Should not raise, just log debug
-        asyncio.get_event_loop().run_until_complete(
-            store.persist(MagicMock(), MagicMock())
-        )
+        asyncio.get_event_loop().run_until_complete(store.persist(MagicMock(), MagicMock()))
 
 
 # ── LLM Client (unit-level, no LLM) ─────────────────────────
 
 from engine.security.P2_9_llm_schemas import (
-    ValidatedLLMClient,
     CypherQueryOutput,
+    ValidatedLLMClient,
     validate_llm_json,
 )
 
 
 class TestValidateLlmJson:
     def test_valid_json(self):
-        raw = json.dumps({
-            "cypher_query": "MATCH (n) RETURN n LIMIT 10",
-            "parameters": {},
-            "explanation": "Returns first 10 nodes",
-            "confidence": 0.9,
-        })
+        raw = json.dumps(
+            {
+                "cypher_query": "MATCH (n) RETURN n LIMIT 10",
+                "parameters": {},
+                "explanation": "Returns first 10 nodes",
+                "confidence": 0.9,
+            }
+        )
         result = validate_llm_json(raw, CypherQueryOutput)
         assert isinstance(result, CypherQueryOutput)
         assert result.confidence == 0.9
@@ -233,12 +234,14 @@ class TestValidateLlmJson:
             validate_llm_json("not json", CypherQueryOutput)
 
     def test_destructive_cypher_rejected(self):
-        raw = json.dumps({
-            "cypher_query": "MATCH (n) DELETE n",
-            "parameters": {},
-            "explanation": "Delete all",
-            "confidence": 0.5,
-        })
+        raw = json.dumps(
+            {
+                "cypher_query": "MATCH (n) DELETE n",
+                "parameters": {},
+                "explanation": "Delete all",
+                "confidence": 0.5,
+            }
+        )
         with pytest.raises(Exception):
             validate_llm_json(raw, CypherQueryOutput)
 
@@ -251,6 +254,7 @@ class TestValidatedLLMClientNoProvider:
         env_backup = os.environ.pop("OPENAI_API_KEY", None)
         try:
             from engine.security.P2_9_llm_schemas import _LLMBackend
+
             backend = _LLMBackend()
             backend._client = None  # Force re-init
             with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
@@ -271,7 +275,6 @@ from chassis.audit import (
     AuditAction,
     AuditEntry,
     AuditLogger,
-    AuditSeverity,
     LogSink,
     PostgresSink,
 )

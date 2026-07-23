@@ -578,7 +578,6 @@ class TestHandlersUseEngineState:
 
     def test_require_deps_uses_engine_state(self) -> None:
         from engine.handlers import _require_deps, init_dependencies
-        from engine.state import get_state
 
         mock_driver = MagicMock()
         mock_loader = MagicMock()
