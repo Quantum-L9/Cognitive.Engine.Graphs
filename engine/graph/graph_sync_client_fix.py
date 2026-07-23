@@ -1,4 +1,14 @@
 """
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [graph]
+tags: [sync, client]
+owner: engine-team
+status: active
+--- /L9_META ---
+
 GAP-1 FIX: Replace the hand-built dict in GraphSyncClient with a canonical
 PacketEnvelope.  Eliminates the silent bypass of content_hash, envelope_hash,
 PacketLineage, and TenantContext.

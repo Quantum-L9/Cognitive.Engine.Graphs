@@ -235,13 +235,16 @@ class ValidatedLLMClient:
         try:
             return _llm_backend.call(self.model, system, user)
         except RuntimeError as exc:
-            # Convert to FeatureNotEnabled for graceful degradation
-            from chassis.errors import FeatureNotEnabled
+            # Convert to FeatureNotEnabled for graceful degradation.
+            # T5-03: engine modules must not import chassis directly —
+            # engine/handlers.py is the sanctioned chassis bridge, so the
+            # exception class is resolved through it at call time.
+            from engine.handlers import FeatureNotEnabled
 
             raise FeatureNotEnabled(
                 "LLM SDK",
                 flag="OPENAI_API_KEY",
-                message=str(exc),
+                message=f"LLM SDK feature is not enabled: {exc}",
             ) from exc
 
     # ---- public API ------------------------------------------------

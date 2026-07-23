@@ -1,4 +1,14 @@
 """
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [config]
+tags: [startup, wiring]
+owner: engine-team
+status: active
+--- /L9_META ---
+
 GAP-FIX STARTUP WIRING
 Add these calls to your application lifespan / startup handler in order.
 This file is a recipe — adapt paths to match your actual app entrypoint.

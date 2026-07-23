@@ -1,4 +1,14 @@
 """
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [graph]
+tags: [gds, community]
+owner: engine-team
+status: active
+--- /L9_META ---
+
 GAP-6 FIX: Export Louvain community labels from Neo4j back to ENRICH
 as known_fields context so convergence_controller uses them in Pass N+1.
 
