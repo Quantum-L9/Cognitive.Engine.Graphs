@@ -6,24 +6,39 @@ Tests for the algorithmic upgrade PR:
   - engine/security/P2_9_llm_schemas.py (unit-level, no LLM)
   - chassis/audit.py (PostgresSink, LogSink)
 """
+
 from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import os
-from datetime import UTC, datetime
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-# ── Diagnostics: Fingerprint ─────────────────────────────────
+from chassis.audit import (
+    AuditAction,
+    AuditEntry,
+    AuditLogger,
+    LogSink,
+    PostgresSink,
+)
+from engine.diagnostics.dissimilarity import (
+    chi_squared_dissimilarity,
+    detect_drift,
+)
 
+# ── Diagnostics: Fingerprint ─────────────────────────────────
 from engine.diagnostics.fingerprint import (
+    DEFAULT_BUCKET_LABELS,
     AlgorithmicFingerprint,
     compute_fingerprint,
-    DEFAULT_BUCKET_LABELS,
+)
+from engine.packet.packet_store import PacketStore
+from engine.security.P2_9_llm_schemas import (
+    CypherQueryOutput,
+    ValidatedLLMClient,
+    validate_llm_json,
 )
 
 
@@ -74,7 +89,8 @@ class TestComputeFingerprint:
 
     def test_to_vector(self):
         fp = compute_fingerprint(
-            "p1", "w1",
+            "p1",
+            "w1",
             [{"total_score": 0.5, "dimension_scores": {"a": 0.5, "b": 0.3}}],
         )
         vec = fp.to_vector()
@@ -99,19 +115,15 @@ class TestComputeFingerprint:
     def test_bucket_boundary_validation(self):
         with pytest.raises(ValueError, match="bucket_boundaries"):
             compute_fingerprint(
-                "p1", "w1", [{"total_score": 0.5}],
+                "p1",
+                "w1",
+                [{"total_score": 0.5}],
                 bucket_boundaries=(0.0, 1.0),
                 bucket_labels=("low", "mid", "high"),
             )
 
 
 # ── Diagnostics: Dissimilarity ───────────────────────────────
-
-from engine.diagnostics.dissimilarity import (
-    chi_squared_dissimilarity,
-    detect_drift,
-    DriftReport,
-)
 
 
 class TestChiSquaredDissimilarity:
@@ -141,7 +153,9 @@ class TestChiSquaredDissimilarity:
 
 
 class TestDetectDrift:
-    def _make_fp(self, persona_id: str, window_id: str, score_dist: dict, dim_dom: dict, entropy: float, concentration: float):
+    def _make_fp(
+        self, persona_id: str, window_id: str, score_dist: dict, dim_dom: dict, entropy: float, concentration: float
+    ):
         return AlgorithmicFingerprint(
             persona_id=persona_id,
             window_id=window_id,
@@ -193,8 +207,6 @@ class TestDetectDrift:
 
 # ── PacketStore (unit-level, no DB) ──────────────────────────
 
-from engine.packet.packet_store import PacketStore, _extract_packet_row
-
 
 class TestPacketStoreDisabled:
     """Test PacketStore behavior when PACKET_STORE_ENABLED=false (default)."""
@@ -202,28 +214,22 @@ class TestPacketStoreDisabled:
     def test_persist_is_noop_when_disabled(self):
         store = PacketStore()
         # Should not raise, just log debug
-        asyncio.get_event_loop().run_until_complete(
-            store.persist(MagicMock(), MagicMock())
-        )
+        asyncio.run(store.persist(MagicMock(), MagicMock()))
 
 
 # ── LLM Client (unit-level, no LLM) ─────────────────────────
 
-from engine.security.P2_9_llm_schemas import (
-    ValidatedLLMClient,
-    CypherQueryOutput,
-    validate_llm_json,
-)
-
 
 class TestValidateLlmJson:
     def test_valid_json(self):
-        raw = json.dumps({
-            "cypher_query": "MATCH (n) RETURN n LIMIT 10",
-            "parameters": {},
-            "explanation": "Returns first 10 nodes",
-            "confidence": 0.9,
-        })
+        raw = json.dumps(
+            {
+                "cypher_query": "MATCH (n) RETURN n LIMIT 10",
+                "parameters": {},
+                "explanation": "Returns first 10 nodes",
+                "confidence": 0.9,
+            }
+        )
         result = validate_llm_json(raw, CypherQueryOutput)
         assert isinstance(result, CypherQueryOutput)
         assert result.confidence == 0.9
@@ -233,12 +239,14 @@ class TestValidateLlmJson:
             validate_llm_json("not json", CypherQueryOutput)
 
     def test_destructive_cypher_rejected(self):
-        raw = json.dumps({
-            "cypher_query": "MATCH (n) DELETE n",
-            "parameters": {},
-            "explanation": "Delete all",
-            "confidence": 0.5,
-        })
+        raw = json.dumps(
+            {
+                "cypher_query": "MATCH (n) DELETE n",
+                "parameters": {},
+                "explanation": "Delete all",
+                "confidence": 0.5,
+            }
+        )
         with pytest.raises(Exception):
             validate_llm_json(raw, CypherQueryOutput)
 
@@ -251,6 +259,7 @@ class TestValidatedLLMClientNoProvider:
         env_backup = os.environ.pop("OPENAI_API_KEY", None)
         try:
             from engine.security.P2_9_llm_schemas import _LLMBackend
+
             backend = _LLMBackend()
             backend._client = None  # Force re-init
             with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
@@ -266,15 +275,6 @@ class TestValidatedLLMClientNoProvider:
 
 
 # ── Audit Sinks ──────────────────────────────────────────────
-
-from chassis.audit import (
-    AuditAction,
-    AuditEntry,
-    AuditLogger,
-    AuditSeverity,
-    LogSink,
-    PostgresSink,
-)
 
 
 class TestLogSink:
@@ -292,12 +292,12 @@ class TestLogSink:
                 tenant="test_tenant",
             ),
         ]
-        count = asyncio.get_event_loop().run_until_complete(sink.write_batch(entries))
+        count = asyncio.run(sink.write_batch(entries))
         assert count == 2
 
     def test_write_empty_batch(self):
         sink = LogSink()
-        count = asyncio.get_event_loop().run_until_complete(sink.write_batch([]))
+        count = asyncio.run(sink.write_batch([]))
         assert count == 0
 
 
@@ -316,14 +316,14 @@ class TestPostgresSink:
                 tenant="test_tenant",
             ),
         ]
-        count = asyncio.get_event_loop().run_until_complete(sink.write_batch(entries))
+        count = asyncio.run(sink.write_batch(entries))
         assert count == 1
         mock_conn.executemany.assert_called_once()
 
     def test_write_empty_batch_skips_db(self):
         mock_pool = MagicMock()
         sink = PostgresSink(mock_pool)
-        count = asyncio.get_event_loop().run_until_complete(sink.write_batch([]))
+        count = asyncio.run(sink.write_batch([]))
         assert count == 0
         mock_pool.acquire.assert_not_called()
 
@@ -335,6 +335,6 @@ class TestAuditLoggerWithSink:
         audit_logger.log(AuditAction.ACCESS, actor="user1", tenant="t1")
         audit_logger.log(AuditAction.MUTATION, actor="user2", tenant="t2")
         assert audit_logger.buffer_count == 2
-        count = asyncio.get_event_loop().run_until_complete(audit_logger.flush())
+        count = asyncio.run(audit_logger.flush())
         assert count == 2
         assert audit_logger.buffer_count == 0
