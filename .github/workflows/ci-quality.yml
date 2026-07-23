@@ -234,21 +234,25 @@ jobs:
           echo "║              QUALITY GATE SUMMARY                           ║"
           echo "╚══════════════════════════════════════════════════════════════╝"
           echo ""
-          echo "  ├─ Lint & Format:  ${{ needs.lint-format.result }}"
+          echo "  ├─ Lint & Format:  ${{ needs['lint-format'].result }}"
           echo "  ├─ Semgrep:        ${{ needs.semgrep.result }}"
-          echo "  ├─ Secrets Scan:   ${{ needs.secrets-scan.result }}"
+          echo "  ├─ Secrets Scan:   ${{ needs['secrets-scan'].result }}"
           echo "  ├─ Coverage:       ${{ needs.coverage.result }}"
-          echo "  └─ YAML Validate:  ${{ needs.yaml-validate.result }}"
+          echo "  └─ YAML Validate:  ${{ needs['yaml-validate'].result }}"
           echo ""
 
           # Fail on critical gates
           FAILED=false
 
-          if [[ "${{ needs.lint-format.result }}" == "failure" ]]; then
+          if [[ "${{ needs['lint-format'].result }}" == "failure" ]]; then
             echo "❌ Lint & Format failed"; FAILED=true
           fi
 
-          if [[ "${{ needs.secrets-scan.result }}" == "failure" ]]; then
+          if [[ "${{ needs.semgrep.result }}" == "failure" ]]; then
+            echo "❌ Semgrep policy check failed"; FAILED=true
+          fi
+
+          if [[ "${{ needs['secrets-scan'].result }}" == "failure" ]]; then
             echo "❌ Secrets Scan failed (hardcoded secrets detected)"; FAILED=true
           fi
 
