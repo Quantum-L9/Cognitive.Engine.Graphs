@@ -12,13 +12,13 @@ status: active
 
 **Purpose**: Documents CI pipeline phases, pre-commit hooks, and blocking/advisory decision model.
 
-**Source**: .github/workflows/ci.yml, .pre-commit-config.yaml
+**Source**: .github/workflows/ci.yml, .github/workflows/ci-quality.yml, .github/workflows/lint-autofix.yml, .pre-commit-config.yaml, pytest.ini
 
-**Provenance**: Extracted from external audit documentation pack (2026-04-02). Verified against live repo 2026-04-26.
+**Provenance**: Extracted from external audit documentation pack (2026-04-02). Verified against live repo 2026-04-26. Updated 2026-07-19 (pre-commit CI enforcement, mypy scope/blocking fix, quality-gate hyphen-notation bug, pytest fail-fast removal).
 
 ---
 
-## CI Pipeline (7 Phases)
+## CI Pipeline (8 Phases)
 
 ### Phase 1: Validation
 - Check Python syntax (all .py files)
@@ -27,11 +27,24 @@ status: active
 ### Phase 2: Lint & Type Check
 - Ruff linter (`ruff check`)
 - Ruff formatter (`ruff format --check`)
-- Mypy type checker (non-blocking warnings)
+- Mypy type checker, scoped to `engine/` (BLOCKING — see note below)
+
+### Phase 2.5: Pre-commit Hooks
+- `pre-commit run --all-files` — runs every hook in `.pre-commit-config.yaml`
+  in CI, so hooks are enforced even if a contributor (human or agent) never
+  ran `pre-commit install` locally, or bypassed hooks with `git commit -n`
+- `SKIP=gitleaks` (see "Pre-Commit Hooks" below for why gitleaks is skipped
+  here specifically; `packet-envelope-prohibited` is deliberately NOT
+  skipped — see below)
+- `pre-commit run --all-files` does not stop at the first failing hook —
+  every hook's result is reported in one run
 
 ### Phase 3: Test Suite
 - Pytest with coverage (`pytest --cov`)
 - Minimum coverage: 60% (CI), 70% (pyproject.toml), 95% (engine/gates/, engine/scoring/)
+- `pytest.ini` has no `-x` (fail-fast): a single run reports every failing
+  test instead of stopping at the first one, while still exiting non-zero
+  (failing the job) if any test fails
 - PostgreSQL service (postgres:16)
 - Redis service (redis:7-alpine)
 
@@ -48,8 +61,16 @@ status: active
 - Security posture scoring
 
 ### Phase 7: CI Gate (Fan-In)
-- **Blocking**: validate, lint, test (must pass)
+- **Blocking**: validate, lint, precommit, test (must pass)
 - **Advisory**: security, sbom, scorecard (failures logged, not blocking)
+
+> `ci-quality.yml` (a separate workflow, not part of `ci.yml`'s fan-in) has
+> its own `quality-gate` job that similarly aggregates `lint-format`,
+> `semgrep`, `secrets-scan`, and `coverage`. Both `ci-gate` and
+> `quality-gate` should be configured as **required status checks** in
+> branch protection for either to actually block a merge — a workflow job
+> failing does not, by itself, prevent merging unless GitHub is configured
+> to require it.
 
 ---
 
@@ -57,43 +78,81 @@ status: active
 
 ```
 Phase 1: Validation      → BLOCKING
-Phase 2: Lint & Type     → BLOCKING
+Phase 2: Lint & Type     → BLOCKING (mypy included — see note below)
+Phase 2.5: Pre-commit    → BLOCKING
 Phase 3: Test Suite      → BLOCKING
 Phase 4: Security        → ADVISORY (non-blocking)
 Phase 5: SBOM            → ADVISORY
 Phase 6: Scorecard       → ADVISORY
-Phase 7: CI Gate (Fan-In)→ BLOCKING (checks Phases 1-3)
+Phase 7: CI Gate (Fan-In)→ BLOCKING (checks Phases 1-3 + 2.5)
 ```
 
-**Merge-Blocking Gates**: validate, lint, test (3 jobs)
+**Merge-Blocking Gates**: validate, lint, precommit, test (4 jobs)
 **Non-Blocking Jobs**: security, sbom, scorecard (3 jobs)
+
+**Mypy is now blocking in `ci.yml`.** It previously ran `mypy .`
+(whole-repo) piped through `|| echo "non-blocking"`, which silenced every
+result — and `mypy .` itself failed immediately with `Source file found
+twice under different module names` (`tools/auditors/base.py` vs
+`auditors.base`) before checking a single file, so this step was
+effectively a no-op. It now runs the same scoped, working invocation as
+`make lint` / `ci-quality.yml` (`mypy engine/ --config-file=pyproject.toml
+--ignore-missing-imports --exclude chassis`) with no output-silencing, so
+real type errors fail the job.
 
 ---
 
-## Pre-Commit Hooks (15 hooks)
+## Pre-Commit Hooks
 
-1. `trailing-whitespace` — remove trailing whitespace
-2. `end-of-file-fixer` — ensure newline at EOF
-3. `check-yaml` — validate YAML syntax
-4. `check-added-large-files` — reject files >500KB
-5. `check-merge-conflict` — detect merge conflict markers
-6. `mixed-line-ending` — enforce LF line endings
-7. `ruff` — Python linting
-8. `ruff-format` — Python formatting
-9. `mypy` — type checking (strict mode)
-10. `block-fastapi-in-engine` — enforce C-001 (custom hook)
-11. `check-cypher-interpolation` — enforce C-009 (custom hook)
-12. `contract-scanner` — run tools/contract_scanner.py
-13. `verify-contracts` — run tools/verify_contracts.py
-14. `l9-meta-check` — verify L9_META headers (C-018)
-15. `gitleaks` — secret scanning
+See `.pre-commit-config.yaml` for the authoritative, current hook list —
+ruff/ruff-format, gitleaks, mypy, `pytest-unit`, `block-fastapi-in-engine`,
+`check-cypher-interpolation`, `l9-contract-scan`, `l9-contract-files-exist`,
+`l9-audit-harness` (pre-push stage), `fix-deprecated-imports` /
+`check-deprecated-imports`, `packet-envelope-prohibited`,
+`terminology-guard`, and the standard `pre-commit-hooks` set
+(`check-yaml`, `end-of-file-fixer`, `trailing-whitespace`,
+`check-added-large-files`).
 
-**Current Exclusions**:
-- `test_gates_all_types.py` — requires mock updates
-- `test_scoring.py` — requires mock updates
-- `test_config.py` — requires mock updates
+**Locally**: install once with `pre-commit install`; hooks then run on every
+`git commit`.
 
-These exclusions must be removed when mock updates are completed.
+**In CI**: the `precommit` job in `ci.yml` (Phase 2.5) runs
+`pre-commit run --all-files` on every PR/push via `pre-commit/action`, so
+these hooks are enforced regardless of whether a contributor has
+`pre-commit install`ed locally. One hook is skipped there with
+`SKIP=gitleaks`:
+
+- `gitleaks` — the hook runs `gitleaks protect --staged`, which inspects
+  the git *index*. That has no equivalent in a plain CI checkout (nothing
+  is "staged"). Secret scanning is already covered correctly by the
+  `security` job in `ci.yml`, which uses `gitleaks/gitleaks-action` to scan
+  the actual commit range.
+
+`packet-envelope-prohibited` is deliberately **not** skipped — and it is
+now **baseline-ratchet governed**. The hook (`tools/packet_envelope_gate.py`)
+provisions the pinned `l9-ci-sdk` revision and runs its deterministic
+full-repository AST scanner, then compares every finding fingerprint
+against the human-reviewed debt ledger at
+`.l9/baselines/packet-envelope.yml`. Pre-existing references to the
+deprecated `PacketEnvelope` model (superseded by `TransportPacket`, see
+`docs/contracts/SHARED_MODELS.md`) are recorded there — each with an
+owner, a tracking issue, an expiry date, and the machine-evaluable removal
+condition "migrated to TransportPacket". Known recorded debt is tolerated
+until expiry; any **new, increased, moved, expired, or unowned** reference
+blocks the commit. The same scanner + ledger comparison runs in CI as the
+blocking check `Baseline Ratchet / Quarantined Debt`
+(`.github/workflows/baseline-ratchet-caller.yml` → the reusable
+`l9-ci-core` baseline-ratchet workflow), so local hooks and CI can never
+disagree. The ledger is CODEOWNERS-protected and is **never** written by
+CI — only humans change it, in reviewed PRs. The legacy grep-based
+`tools/check_packet_envelope_prohibited.py` was deleted (superseded by the
+SDK scanner). Run `pre-commit run packet-envelope-prohibited --all-files`
+locally to see the current verdict.
+
+**Pre-existing pytest-unit exclusions** (`--ignore=...` in the hook's
+`entry:`) — `test_gates_all_types.py`, `test_scoring.py`, `test_config.py`,
+`test_arbitration.py`, `test_wave6_dormant_features.py` — require mock
+updates and must be removed once those are completed.
 
 ---
 
@@ -126,14 +185,29 @@ a manual fix — `make lint` fails with the specific rule/line to address.
 | validate (syntax/YAML) | STOP — fix syntax errors |
 | lint (ruff check) | STOP — run `make lint-fix` |
 | lint (ruff format) | STOP — run `ruff format .` |
-| lint (mypy) | WARN — address type errors if blocking, ignore warnings |
-| test (pytest) | STOP — fix failing tests or add coverage |
+| lint (mypy) | STOP — fix the reported type error(s); mypy is blocking |
+| precommit (any hook) | STOP — run `pre-commit run --all-files` locally, fix, re-commit |
+| test (pytest) | STOP — fix failing tests or add coverage (full failure list is reported, not just the first) |
 | security (gitleaks) | STOP — remove secret, add to vault |
 | security (pip-audit) | WARN — triage vulnerability, create security issue |
 | security (safety) | WARN — review warning, create issue if legitimate |
 | security (bandit) | WARN — review warning, suppress if false positive |
 | sbom | WARN — investigate Anchore failure, retry |
 | scorecard | WARN — investigate scorecard failure, retry |
+
+---
+
+## Fixed: `ci-quality.yml` quality-gate fan-in bug
+
+`quality-gate`'s summary/fail logic referenced `needs.lint-format.result`,
+`needs.secrets-scan.result`, and `needs.yaml-validate.result` using GitHub
+Actions dot notation. Dot notation does not work for job IDs containing a
+hyphen (`-` is parsed as subtraction), so those three always evaluated to
+an empty string — the corresponding `if` conditions could never actually
+be true, meaning `quality-gate` could report ✅ even when `lint-format` or
+`secrets-scan` failed. `semgrep`'s result also wasn't checked at all.
+Fixed by switching to bracket syntax (`needs['lint-format'].result`, etc.)
+and adding the missing `semgrep` failure check.
 
 ---
 

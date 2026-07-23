@@ -208,10 +208,12 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Validate YAML files
+        # Fail-closed: no `|| true`, no continue-on-error. Severity policy
+        # and per-file exclusions live in .yamllint.yml (errors block,
+        # style-only issues are warnings).
         run: |
           pip install yamllint
-          yamllint -c .yamllint.yml . 2>/dev/null || yamllint . || true
-        continue-on-error: true
+          yamllint -c .yamllint.yml .
 
   # ===========================================================================
   # QUALITY-GATE — Aggregation job (add to your ci-complete "needs:")
@@ -242,6 +244,16 @@ jobs:
           echo ""
 
           # Fail on critical gates
+          # NOTE: job-id.result with a hyphenated job id (e.g. lint-format,
+          # secrets-scan, yaml-validate) is NOT valid GitHub Actions dot
+          # notation -- `-` is parsed as subtraction, so `needs.lint-format`
+          # silently evaluates to an empty string instead of the job's
+          # result. Hyphenated job ids must use bracket syntax:
+          # needs['lint-format'].result. Previously every condition below
+          # compared an empty string to "failure", which is always false,
+          # so this gate could never actually fail on lint-format/
+          # secrets-scan -- it only "worked" for the two non-hyphenated
+          # job ids (semgrep wasn't even checked at all).
           FAILED=false
 
           if [[ "${{ needs['lint-format'].result }}" == "failure" ]]; then
