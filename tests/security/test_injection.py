@@ -42,11 +42,13 @@ def test_sync_generator_uses_parameterized_query():
     if not spec.sync.endpoints:
         pytest.skip("No sync endpoints")
     ep = spec.sync.endpoints[0]
-    evil_record = {"id": "'; MATCH (n) DETACH DELETE n RETURN '1"}
-    cypher, _params = gen.generate_sync_query(ep, [evil_record])
+    evil_record = {ep.idproperty: "'; MATCH (n) DETACH DELETE n RETURN '1"}
+    cypher = gen.generate_sync_query(ep, [evil_record])
     # Evil string must NOT appear in the Cypher itself
     assert "DETACH DELETE" not in cypher
     assert "'; MATCH" not in cypher
+    # Batch values must flow through the $batch parameter
+    assert "$batch" in cypher
 
 
 def test_gate_compiler_never_interpolates_values():
@@ -60,11 +62,18 @@ def test_gate_compiler_never_interpolates_values():
     loader = DomainPackLoader(config_path=str(Path(__file__).parent.parent.parent / "domains"))
     spec = loader.load_domain("plasticos")
     compiler = GateCompiler(spec)
-    # Compile with evil value as parameter — it must not appear in Cypher text
-    clause = compiler.compile_where_clause(direction="*", params={"contamination_min": evil_value})
-    assert evil_value not in clause
-    # Should use $param references instead
-    assert "$" in clause or clause == ""
+    # Compile every declared direction — values must never appear in Cypher text;
+    # the compiler only ever emits $param references.
+    directions = {e.matchdirection for e in spec.matchentities.candidate}
+    for direction in sorted(directions):
+        for clause in (
+            compiler.compile_all_gates(direction),
+            compiler.compile_relaxed(direction),
+        ):
+            assert evil_value not in clause
+            assert "DROP DATABASE" not in clause
+            # Should use $param references instead
+            assert "$" in clause or clause == ""
 
 
 def test_eval_exec_not_importable_from_engine():

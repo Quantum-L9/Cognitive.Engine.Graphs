@@ -1,4 +1,14 @@
 """
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [compliance]
+tags: [audit, persistence]
+owner: engine-team
+status: active
+--- /L9_META ---
+
 GAP-5 FIX: Wire db_pool into ComplianceEngine so flush_audit() persists
 to PostgreSQL instead of warning db_pool=None.
 

@@ -214,7 +214,7 @@ class TestPacketStoreDisabled:
     def test_persist_is_noop_when_disabled(self):
         store = PacketStore()
         # Should not raise, just log debug
-        asyncio.get_event_loop().run_until_complete(store.persist(MagicMock(), MagicMock()))
+        asyncio.run(store.persist(MagicMock(), MagicMock()))
 
 
 # ── LLM Client (unit-level, no LLM) ─────────────────────────
@@ -292,12 +292,12 @@ class TestLogSink:
                 tenant="test_tenant",
             ),
         ]
-        count = asyncio.get_event_loop().run_until_complete(sink.write_batch(entries))
+        count = asyncio.run(sink.write_batch(entries))
         assert count == 2
 
     def test_write_empty_batch(self):
         sink = LogSink()
-        count = asyncio.get_event_loop().run_until_complete(sink.write_batch([]))
+        count = asyncio.run(sink.write_batch([]))
         assert count == 0
 
 
@@ -316,14 +316,14 @@ class TestPostgresSink:
                 tenant="test_tenant",
             ),
         ]
-        count = asyncio.get_event_loop().run_until_complete(sink.write_batch(entries))
+        count = asyncio.run(sink.write_batch(entries))
         assert count == 1
         mock_conn.executemany.assert_called_once()
 
     def test_write_empty_batch_skips_db(self):
         mock_pool = MagicMock()
         sink = PostgresSink(mock_pool)
-        count = asyncio.get_event_loop().run_until_complete(sink.write_batch([]))
+        count = asyncio.run(sink.write_batch([]))
         assert count == 0
         mock_pool.acquire.assert_not_called()
 
@@ -335,6 +335,6 @@ class TestAuditLoggerWithSink:
         audit_logger.log(AuditAction.ACCESS, actor="user1", tenant="t1")
         audit_logger.log(AuditAction.MUTATION, actor="user2", tenant="t2")
         assert audit_logger.buffer_count == 2
-        count = asyncio.get_event_loop().run_until_complete(audit_logger.flush())
+        count = asyncio.run(audit_logger.flush())
         assert count == 2
         assert audit_logger.buffer_count == 0

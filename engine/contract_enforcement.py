@@ -1,4 +1,14 @@
 """
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [config]
+tags: [contracts, packets]
+owner: engine-team
+status: active
+--- /L9_META ---
+
 GAP-1 FIX: Strict PacketEnvelope contract enforcement.
 
 Replaces all silent bypass paths with hard ContractViolationError failures.
@@ -152,14 +162,11 @@ def enforce_packet_envelope(
     return packet
 
 
-def _verify_content_hash(
-    packet: dict[str, Any],
-    packet_type: str,
-    packet_id: str,
-) -> None:
-    """Recompute SHA-256 over the canonical content payload and compare."""
-    # Content payload = everything except hash fields and metadata
-    hash_excluded = {
+# Fields excluded from the canonical content payload when computing
+# content_hash. This single definition is shared by the builders and the
+# verifier so canonicalization can never drift between the two.
+_HASH_EXCLUDED_FIELDS: frozenset[str] = frozenset(
+    [
         "content_hash",
         "envelope_hash",
         "packet_id",
@@ -168,17 +175,35 @@ def _verify_content_hash(
         "created_at",
         "lineage",
         "tenant_context",
-    }
-    content_payload = {k: v for k, v in packet.items() if k not in hash_excluded}
+    ]
+)
+
+
+def _compute_content_hash(packet_fields: dict[str, Any]) -> str:
+    """Compute SHA-256 over the canonical content payload of a packet.
+
+    The canonical payload is every field except those in
+    _HASH_EXCLUDED_FIELDS, serialized as sorted-key JSON.
+    """
+    content_payload = {k: v for k, v in packet_fields.items() if k not in _HASH_EXCLUDED_FIELDS}
+    payload_bytes = json.dumps(content_payload, sort_keys=True, default=str).encode()
+    return hashlib.sha256(payload_bytes).hexdigest()
+
+
+def _verify_content_hash(
+    packet: dict[str, Any],
+    packet_type: str,
+    packet_id: str,
+) -> None:
+    """Recompute SHA-256 over the canonical content payload and compare."""
     try:
-        payload_bytes = json.dumps(content_payload, sort_keys=True, default=str).encode()
+        expected_hash = _compute_content_hash(packet)
     except (TypeError, ValueError) as exc:
         raise ContractViolationError(
             f"Cannot serialize content payload for hash verification: {exc}",
             packet_id=packet_id,
         ) from exc
 
-    expected_hash = hashlib.sha256(payload_bytes).hexdigest()
     actual_hash = packet.get("content_hash", "")
     if expected_hash != actual_hash:
         raise ContractViolationError(
@@ -208,15 +233,15 @@ def build_graph_sync_packet(
     import time
     import uuid
 
-    content_payload: dict[str, Any] = {
-        "entity_type": entity_type,
-        "batch": batch,
-    }
-    if tenant_context:
-        content_payload["tenant_context"] = tenant_context
-
-    payload_bytes = json.dumps(content_payload, sort_keys=True, default=str).encode()
-    content_hash = hashlib.sha256(payload_bytes).hexdigest()
+    # Hash over the same canonical field set the verifier uses
+    # (_HASH_EXCLUDED_FIELDS), so self-validation can never drift.
+    content_hash = _compute_content_hash(
+        {
+            "tenant_id": tenant_id,
+            "entity_type": entity_type,
+            "batch": batch,
+        }
+    )
 
     packet_id = f"gs_{uuid.uuid4().hex}"
     envelope_meta = {"packet_id": packet_id, "tenant_id": tenant_id, "content_hash": content_hash}
@@ -255,12 +280,15 @@ def build_schema_proposal_packet(
     import time
     import uuid
 
-    content_payload: dict[str, Any] = {
-        "proposed_fields": proposed_fields,
-        "provenance": provenance,
-    }
-    payload_bytes = json.dumps(content_payload, sort_keys=True, default=str).encode()
-    content_hash = hashlib.sha256(payload_bytes).hexdigest()
+    # Hash over the same canonical field set the verifier uses
+    # (_HASH_EXCLUDED_FIELDS), so self-validation can never drift.
+    content_hash = _compute_content_hash(
+        {
+            "tenant_id": tenant_id,
+            "proposed_fields": proposed_fields,
+            "provenance": provenance,
+        }
+    )
     packet_id = f"sp_{uuid.uuid4().hex}"
     envelope_meta = {"packet_id": packet_id, "tenant_id": tenant_id, "content_hash": content_hash}
     envelope_hash = hashlib.sha256(json.dumps(envelope_meta, sort_keys=True).encode()).hexdigest()

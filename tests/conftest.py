@@ -22,7 +22,6 @@ from tests/ → repo root → domains/.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import uuid
 from collections.abc import AsyncGenerator
@@ -37,14 +36,9 @@ DOMAINS_DIR: Path = Path(__file__).parent.parent / "domains"
 
 
 # ── Event Loop ─────────────────────────────────────────────────────────────────
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    """Session-scoped event loop for all async tests."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+# pytest-asyncio >=1.0 removed support for overriding the `event_loop` fixture.
+# Loop sharing is configured in pytest.ini via
+# asyncio_default_fixture_loop_scope / asyncio_default_test_loop_scope = session.
 
 
 # ── Neo4j Testcontainer ────────────────────────────────────────────────────────
@@ -175,6 +169,46 @@ def minimal_domain_spec():
     return DomainSpec(**raw)
 
 
+# ── Per-Domain Database (enterprise multi-db) ────────────────────────────────
+
+
+@pytest_asyncio.fixture(scope="session")
+async def plasticos_database(graph_driver) -> AsyncGenerator[None, None]:
+    """Ensure the per-domain 'plasticos' database exists.
+
+    Handlers route queries to database=domain_spec.domain.id (RULE 7: explicit
+    database), so integration tests exercising the plasticos tenant need that
+    database to exist. Requires the neo4j enterprise image used by the
+    testcontainer fixture (community edition rejects CREATE DATABASE).
+    """
+    await graph_driver.execute_query(
+        cypher="CREATE DATABASE plasticos IF NOT EXISTS WAIT",
+        parameters={},
+        database="system",
+    )
+    yield
+
+
+# ── Engine Dependency Injection ────────────────────────────────────────────────
+
+
+@pytest_asyncio.fixture
+async def engine_deps(graph_driver, domain_loader, plasticos_database) -> AsyncGenerator[None, None]:
+    """Wire the real handler DI (W4-01 EngineState singleton) for handler tests.
+
+    Handlers take (tenant, payload) and resolve driver/loader via
+    engine.handlers.init_dependencies() — never as positional arguments.
+    Resets EngineState after each test so no state leaks across tests.
+    """
+    from engine.handlers import init_dependencies
+    from engine.state import get_state
+
+    get_state().reset()  # ensure a clean slate even if a prior test initialized state
+    init_dependencies(graph_driver, domain_loader)
+    yield
+    get_state().reset()
+
+
 # ── Test Isolation ─────────────────────────────────────────────────────────────
 
 
@@ -187,6 +221,15 @@ async def clean_db(graph_driver) -> AsyncGenerator[None, None]:
         parameters={},
         database="neo4j",  # RULE 7: explicit database — no implicit default fallback
     )
+    # Handlers write to the per-domain database — wipe it too when present.
+    try:
+        await graph_driver.execute_write(
+            cypher="MATCH (n) DETACH DELETE n",
+            parameters={},
+            database="plasticos",
+        )
+    except Exception:
+        pass  # per-domain db not created in this session — nothing to clean
 
 
 # ── Tenant Fixtures ────────────────────────────────────────────────────────────
