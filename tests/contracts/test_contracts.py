@@ -564,6 +564,12 @@ class TestContract16FileStructure:
             "causal",
             "feedback",
             "resolution",
+            "arbitration",
+            "outcomes",
+            "auth",
+            "diagnostics",
+            "hoprag",
+            "models",
         }
         for item in ENGINE_DIR.iterdir():
             if item.is_dir() and not item.name.startswith("."):

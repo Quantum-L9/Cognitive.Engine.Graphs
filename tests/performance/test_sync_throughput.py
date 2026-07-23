@@ -21,9 +21,12 @@ import time
 import uuid
 
 import pytest
+import structlog
 
 from engine.config.schema import SyncEndpointSpec, SyncStrategy
 from engine.sync.generator import SyncGenerator
+
+logger = structlog.get_logger(__name__)
 
 
 @pytest.mark.performance
@@ -70,9 +73,9 @@ class TestSyncThroughput:
         sync_spec = SyncEndpointSpec(
             path="/v1/sync/facilities",
             method="POST",
-            target_node="Facility",
-            id_property="facility_id",
-            batch_strategy=SyncStrategy.UNWIND_MERGE,
+            targetnode="Facility",
+            idproperty="facility_id",
+            batchstrategy=SyncStrategy.UNWINDMERGE,
         )
         generator = SyncGenerator(domain_spec)
         cypher = generator.generate_sync_query(sync_spec, batch)
@@ -90,7 +93,7 @@ class TestSyncThroughput:
             t0 = time.perf_counter()
             await graph_driver.execute_query(
                 cypher,
-                parameters={"batch": batch},
+                parameters={"batch": batch, "tenant": tenant},
                 database=db,
             )
             elapsed = time.perf_counter() - t0
@@ -99,11 +102,14 @@ class TestSyncThroughput:
         avg_sec = statistics.mean(latencies)
         throughput = batch_size / avg_sec
 
-        print(f"\n{'─' * 50}")
-        print(f"Sync Throughput: {batch_size} facilities")
-        print(f"  avg: {avg_sec:.2f}s  throughput: {throughput:.0f} entities/sec")
-        print(f"  min: {min(latencies):.2f}s  max: {max(latencies):.2f}s")
-        print(f"{'─' * 50}")
+        logger.info(
+            "sync_throughput",
+            facilities=batch_size,
+            avg_sec=round(avg_sec, 2),
+            entities_per_sec=round(throughput),
+            min_sec=round(min(latencies), 2),
+            max_sec=round(max(latencies), 2),
+        )
 
         # Verify data landed
         count_result = await graph_driver.execute_query(
@@ -160,8 +166,12 @@ class TestSyncThroughput:
         avg_sec = statistics.mean(latencies)
         throughput = batch_size / avg_sec
 
-        print(f"\nIncremental Update: {batch_size} facilities")
-        print(f"  avg: {avg_sec:.2f}s  throughput: {throughput:.0f} updates/sec")
+        logger.info(
+            "incremental_update_throughput",
+            facilities=batch_size,
+            avg_sec=round(avg_sec, 2),
+            updates_per_sec=round(throughput),
+        )
 
         # Verify update applied
         result = await graph_driver.execute_query(

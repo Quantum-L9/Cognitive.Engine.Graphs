@@ -130,7 +130,7 @@ All 24 contracts are verified via:
 python tools/verify_contracts.py
 ```
 
-Contracts are documented in `docs/contracts/` and `.claude/rules/contracts.md`.  
+Contracts are documented in `docs/contracts/` and `.claude/rules/contracts.md`.
 Contract C-001 through C-024 must all pass before any merge.
 
 ---
