@@ -114,7 +114,7 @@ causal:
 
 ## Contracts (24 Enforced)
 
-Behavioral contracts are checked by `tools/contract_scanner.py` on every CI run.  
+Behavioral contracts are checked by `tools/contract_scanner.py` on every CI run.
 Full contract definitions: `docs/contracts/` and `.claude/rules/contracts.md`
 
 Critical contracts include:

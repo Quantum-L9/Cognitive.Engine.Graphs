@@ -261,15 +261,37 @@ class GateCompiler:
 
     def _compile_exclusion(self, gate: GateSpec) -> str:
         """
-        Exclusion gate: NOT exists((candidate)-[:EXCLUDED_FROM]->(query_entity))
-        Uses the EXCLUDED_FROM edge type from the graph schema.
+        Exclusion gate: candidate must not have an outgoing exclusion edge to
+        the query entity.
+
+        The match Cypher binds only the `candidate` node — the query entity is
+        supplied as parameters, never as a matched node. Referencing a bare
+        `query` variable inside a pattern expression is invalid Cypher
+        ("PatternExpressions are not allowed to introduce new variables"),
+        so the excluded target is matched by its entity id from the query
+        parameter instead:
+
+            NOT EXISTS { MATCH (candidate)-[:EDGE]->(excluded)
+                         WHERE excluded.entity_id = $<queryparam> }
+
+        When no queryparam identifies the query entity, the gate degrades to
+        "candidate has no exclusion edge at all" — conservative but valid.
         """
         edge_type = sanitize_label(gate.edgetype) if gate.edgetype else "EXCLUDED_FROM"
-        from_node = sanitize_label(gate.fromnode) if gate.fromnode else None
-        to_node = sanitize_label(gate.tonode) if gate.tonode else "candidate"
-        if from_node:
-            return f"NOT exists(({from_node})-[:{edge_type}]->({to_node}))"
-        return f"NOT exists((candidate)-[:{edge_type}]->(query))"
+        target_prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "entity_id"
+        # edge_type and target_prop are sanitized via sanitize_label() above;
+        # values only ever flow through $ parameters.
+        exclusion_edge = "(candidate)-[:" + edge_type + "]->"
+        if gate.queryparam:
+            return (
+                "NOT EXISTS { MATCH "
+                + exclusion_edge
+                + "(excluded) WHERE excluded."
+                + target_prop
+                + f" = ${gate.queryparam} "
+                + "}"
+            )
+        return "NOT EXISTS { MATCH " + exclusion_edge + "() }"
 
     def _compile_composite(self, gate: GateSpec) -> str:
         """

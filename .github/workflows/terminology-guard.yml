@@ -13,8 +13,8 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # CREATED: 2026-02-15T21:34:00-04:00
 # AUTHOR: L9 Engineering (cryptoxdog)
-# PURPOSE: Enforce consistent terminology across codebase (PacketEnvelope, not Packet)
-# DEPENDENCIES: grep, terminology dictionary
+# PURPOSE: Enforce consistent terminology across codebase (transportPacket, not PacketEnvelope)
+# DEPENDENCIES: grep, Python check script
 # DEPLOYMENT: Runs on all PRs
 # DORA METRICS: Zero terminology drift | Review time saved >2hr/week
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -41,62 +41,73 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The PacketEnvelope prohibition check moved to the baseline ratchet
+      # (.github/workflows/baseline-ratchet-caller.yml → l9-ci-core
+      # "Baseline Ratchet / Quarantined Debt"). The ratchet performs a
+      # FULL-repository AST scan on every PR — strictly stronger than the
+      # changed-file grep this workflow used to run — and compares every
+      # finding fingerprint against the reviewed ledger at
+      # .l9/baselines/packet-envelope.yml, failing closed on any new,
+      # increased, moved, expired, or unowned reference. The legacy
+      # tools/check_packet_envelope_prohibited.py was deleted.
 
       - name: Check Forbidden Terms
+        shell: bash
         run: |
-          # Define forbidden terms (must use canonical versions)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            mapfile -t changed_python < <(
+              git diff --name-only --diff-filter=ACMR \
+                "${{ github.event.pull_request.base.sha }}" \
+                "${{ github.event.pull_request.head.sha }}" \
+                -- '*.py' | grep -E '^(engine|tests)/' || true
+            )
+          else
+            mapfile -t changed_python < <(find engine tests -name '*.py' -type f)
+          fi
+
+          if [ "${#changed_python[@]}" -eq 0 ]; then
+            echo "No in-scope Python files; terminology check is not applicable"
+            exit 0
+          fi
+
           FORBIDDEN_TERMS=(
-            "\\bPacket\\b(?!Envelope)"
-            "\\bSubstrate\\b(?!Service)"
-            "\\blog\\.(?!bind)"
-            "\\bprint\\("
-            "\\bOptional\\["
-            "\\bList\\["
-            "\\bDict\\["
-            "\\bTuple\\["
-            "\\bSet\\["
+            "\bSubstrate\b(?!Service)"
+            "\blog\.(?!bind)"
+            "\bprint\("
+            "\bOptional\["
+            "\bList\["
+            "\bDict\["
+            "\bTuple\["
+            "\bSet\["
           )
 
-          VIOLATIONS=0
-
+          violations=0
           for term in "${FORBIDDEN_TERMS[@]}"; do
-            echo "Checking for: $term"
-
-            if grep -rn -P "$term" \
-              --include="*.py" \
-              --exclude-dir=venv \
-              --exclude-dir=.venv \
-              --exclude-dir=__pycache__ \
-              --exclude-dir=chassis \
-              --exclude-dir=tools \
-              --exclude-dir=performance \
-              engine/ tests/; then
-
+            echo "Checking changed files for: $term"
+            if grep -nH -P "$term" "${changed_python[@]}"; then
               echo "❌ Found forbidden term: $term"
-              VIOLATIONS=$((VIOLATIONS+1))
+              violations=$((violations + 1))
             fi
           done
 
-          if [ $VIOLATIONS -gt 0 ]; then
-            echo ""
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "❌ Terminology violations found: $VIOLATIONS"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo ""
-            echo "Use canonical terms:"
-            echo "  • PacketEnvelope (not Packet)"
-            echo "  • SubstrateService (not Substrate)"
-            echo "  • structlog (not stdlib logging)"
-            echo "  • T | None (not Optional[T])"
-            echo "  • list[T] (not List[T])"
-            echo ""
+          if [ "$violations" -gt 0 ]; then
+            echo "❌ Terminology violation classes found: $violations"
+            echo "Use transportPacket, SubstrateService, structlog, T | None, and built-in generics"
             exit 1
           fi
 
-          echo "✅ No terminology violations found"
+          echo "✅ No terminology violations introduced by this PR"
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # DORA META END
-# LAST_MODIFIED: 2026-02-15T21:34:00-04:00
-# CHANGE_SUMMARY: Fixed bash array escaping, action version updates
+# LAST_MODIFIED: 2026-07-23T00:00:00-04:00
+# CHANGE_SUMMARY: PacketEnvelope check moved to the baseline ratchet (full-repo, ledger-governed)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
