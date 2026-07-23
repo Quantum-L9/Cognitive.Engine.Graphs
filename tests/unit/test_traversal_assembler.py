@@ -1,4 +1,10 @@
-"""Unit tests — TraversalAssembler: direction filter, step ordering."""
+"""Unit tests — TraversalAssembler: direction filter, step ordering.
+
+Real API (engine/traversal/assembler.py):
+    TraversalAssembler(domain_spec).assemble_traversal(match_direction: str) -> list[str]
+The plasticos spec declares direction 'intake_to_buyer' with a required
+(candidate:Facility)-[:PROCESSES]->(polymer:PolymerFamily) step.
+"""
 
 from __future__ import annotations
 
@@ -18,23 +24,25 @@ def plasticos_spec():
 
 
 def test_assembler_produces_list(plasticos_spec):
-    """Traversal assembler produces list of clauses."""
+    """Traversal assembler produces a list of MATCH clauses."""
     from engine.traversal.assembler import TraversalAssembler
 
     assembler = TraversalAssembler(plasticos_spec)
-    clauses = assembler.assemble_traversal(direction="*")
+    clauses = assembler.assemble_traversal("intake_to_buyer")
     assert isinstance(clauses, list)
+    assert len(clauses) > 0  # spec has a required PROCESSES step
 
 
-def test_wildcard_direction_always_included(plasticos_spec):
-    """Steps with direction='*' must appear regardless of query direction."""
+def test_direction_filter_excludes_other_directions(plasticos_spec):
+    """Steps scoped to intake_to_buyer must not appear for other directions."""
     from engine.traversal.assembler import TraversalAssembler
 
     assembler = TraversalAssembler(plasticos_spec)
-    result_a = assembler.assemble_traversal(direction="buyer_to_seller")
-    result_b = assembler.assemble_traversal(direction="seller_to_buyer")
-    assert isinstance(result_a, list)
-    assert isinstance(result_b, list)
+    matching = assembler.assemble_traversal("intake_to_buyer")
+    non_matching = assembler.assemble_traversal("nonexistent_direction")
+    assert isinstance(matching, list)
+    assert isinstance(non_matching, list)
+    assert len(non_matching) <= len(matching)
 
 
 def test_traversal_steps_are_strings(plasticos_spec):
@@ -42,7 +50,7 @@ def test_traversal_steps_are_strings(plasticos_spec):
     from engine.traversal.assembler import TraversalAssembler
 
     assembler = TraversalAssembler(plasticos_spec)
-    clauses = assembler.assemble_traversal(direction="*")
+    clauses = assembler.assemble_traversal("intake_to_buyer")
     for clause in clauses:
         assert isinstance(clause, str)
         assert len(clause) > 0

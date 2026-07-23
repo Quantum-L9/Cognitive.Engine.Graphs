@@ -1,40 +1,57 @@
-"""Integration tests — match handler: full pipeline, top_n, invalid payload."""
+"""Integration tests — match handler: full pipeline, top_n, invalid payload.
+
+Real payload contract (engine/handlers.py::handle_match):
+    query: dict (required — resolved against domain queryschema)
+    match_direction: str (required — must exist in matchentities)
+    top_n: int (optional, clamped to [1, 1000])
+    weights: dict (optional, validated to [0, 1], sum <= 1.0)
+
+The plasticos spec declares candidate=Facility for direction
+'intake_to_buyer' and a required traversal step
+(candidate:Facility)-[:PROCESSES]->(polymer:PolymerFamily), so seed data
+must live in the 'plasticos' database and include that edge.
+"""
 
 from __future__ import annotations
 
 import pytest
 
+SEED_CYPHER = """
+UNWIND $batch AS row
+MERGE (n:Facility {entity_id: row.entity_id})
+SET n += row
+SET n.synced_at = datetime()
+WITH n
+MERGE (p:PolymerFamily {code: 'PET'})
+MERGE (n)-[:PROCESSES]->(p)
+"""
+
+
+def _facility(entity_id: str, **overrides) -> dict:
+    row = {
+        "entity_id": entity_id,
+        "name": f"Facility {entity_id}",
+        "contamination_tolerance": 0.10,
+        "latitude": 34.05,
+        "longitude": -118.24,
+        "food_grade_certified": False,
+        "reinforcement_score": 0.5,
+    }
+    row.update(overrides)
+    return row
+
 
 @pytest.mark.asyncio
-async def test_match_returns_candidates(graph_driver, domain_loader, clean_db):
+async def test_match_returns_candidates(engine_deps, graph_driver, clean_db):
     await graph_driver.execute_write(
-        cypher="""
-        UNWIND $batch AS row
-        MERGE (n:Facility {id: row.id})
-        SET n += row
-        SET n.synced_at = datetime()
-        """,
+        cypher=SEED_CYPHER,
         parameters={
             "batch": [
-                {
-                    "id": "f1",
-                    "name": "Alpha Recycle",
-                    "contamination_tolerance": 0.05,
-                    "latitude": 34.05,
-                    "longitude": -118.24,
-                    "reinforcement_score": 0.7,
-                },
-                {
-                    "id": "f2",
-                    "name": "Beta Process",
-                    "contamination_tolerance": 0.10,
-                    "latitude": 34.10,
-                    "longitude": -118.30,
-                    "reinforcement_score": 0.5,
-                },
+                _facility("f1", name="Alpha Recycle", contamination_tolerance=0.05),
+                _facility("f2", name="Beta Process", contamination_tolerance=0.10, latitude=34.10, longitude=-118.30),
             ]
         },
-        database="neo4j",
+        database="plasticos",
     )
     from engine.handlers import handle_match
 
@@ -42,52 +59,47 @@ async def test_match_returns_candidates(graph_driver, domain_loader, clean_db):
         "plasticos",
         {
             "query": {
-                "contamination_min": 0.0,
-                "contamination_max": 0.12,
-                "origin_lat": 34.05,
-                "origin_lon": -118.24,
+                "polymer_type": "PET",
+                "contamination_pct": 0.04,
+                "lat": 34.05,
+                "lon": -118.24,
             },
-            "match_direction": "*",
+            "match_direction": "intake_to_buyer",
             "top_n": 10,
         },
-        graph_driver,
-        domain_loader,
     )
-    assert "candidates" in result or "status" in result
+    assert "candidates" in result
     assert result.get("status") in ("ok", "success", None) or "candidates" in result
 
 
 @pytest.mark.asyncio
-async def test_match_respects_top_n(graph_driver, domain_loader, clean_db):
+async def test_match_respects_top_n(engine_deps, graph_driver, clean_db):
     await graph_driver.execute_write(
-        cypher="""
-        UNWIND $batch AS row
-        MERGE (n:Facility {id: row.id})
-        SET n += row
-        """,
-        parameters={
-            "batch": [{"id": f"f{i}", "name": f"Facility {i}", "contamination_tolerance": 0.05} for i in range(5)]
-        },
-        database="neo4j",
+        cypher=SEED_CYPHER,
+        parameters={"batch": [_facility(f"f{i}", contamination_tolerance=0.20) for i in range(5)]},
+        database="plasticos",
     )
     from engine.handlers import handle_match
 
     result = await handle_match(
         "plasticos",
-        {"query": {}, "match_direction": "*", "top_n": 2},
-        graph_driver,
-        domain_loader,
+        {
+            "query": {"polymer_type": "PET", "contamination_pct": 0.01},
+            "match_direction": "intake_to_buyer",
+            "top_n": 2,
+        },
     )
     candidates = result.get("candidates", [])
     assert len(candidates) <= 2
 
 
-def test_match_invalid_top_n_raises():
-    try:
-        from engine.models.payloads import MatchPayload
-        from pydantic import ValidationError
+@pytest.mark.asyncio
+async def test_match_unknown_direction_raises(engine_deps):
+    """A match_direction with no candidate entity must raise ValidationError."""
+    from engine.handlers import ValidationError, handle_match
 
-        with pytest.raises(ValidationError):
-            MatchPayload.model_validate({"match_direction": "*", "top_n": -5})
-    except ImportError:
-        pytest.skip("MatchPayload not available in this version")
+    with pytest.raises(ValidationError, match="No candidate entity"):
+        await handle_match(
+            "plasticos",
+            {"query": {"polymer_type": "PET"}, "match_direction": "nonexistent_direction", "top_n": 5},
+        )
