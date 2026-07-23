@@ -127,15 +127,22 @@ repos:
         types: [python]
         pass_filenames: true
 
-  # PacketEnvelope prohibition — superseded by transportPacket
+  # PacketEnvelope prohibition — superseded by transportPacket.
+  # Delegates to the pinned l9-ci-sdk baseline scanner + ledger comparison
+  # (full-repository AST scan; recorded debt in
+  # .l9/baselines/packet-envelope.yml is tolerated until expiry, anything
+  # new/increased/moved blocks). pass_filenames is deliberately false:
+  # changed-file scanning must never bypass the full-repository baseline
+  # comparison. The wrapper contains no scanning or comparison logic of its
+  # own — it provisions the pinned SDK and exits with its verdict.
   - repo: local
     hooks:
       - id: packet-envelope-prohibited
-        name: "Deprecated API: PacketEnvelope → transportPacket"
-        entry: python3 tools/check_packet_envelope_prohibited.py
+        name: "Deprecated API: PacketEnvelope → transportPacket (baseline ratchet)"
+        entry: python3 tools/packet_envelope_gate.py
         language: system
-        types: [python]
-        pass_filenames: true
+        pass_filenames: false
+        always_run: true
 
   # Terminology guard (canonical terms: transportPacket, list[T], T | None)
   - repo: local

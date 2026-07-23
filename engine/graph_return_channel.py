@@ -1,4 +1,14 @@
 """
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [graph]
+tags: [return-channel]
+owner: engine-team
+status: active
+--- /L9_META ---
+
 GAP-2 FIX: GRAPH → ENRICH bidirectional return channel.
 
 Receives GRAPH inference outputs and converts them into deterministic
@@ -30,6 +40,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Domain model
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class EnrichmentTarget:
@@ -131,6 +142,7 @@ class GraphInferenceResultEnvelope:
 # Return channel — singleton per process
 # ---------------------------------------------------------------------------
 
+
 class GraphToEnrichReturnChannel:
     """
     Async queue that bridges GRAPH inference outputs back to ENRICH.
@@ -140,10 +152,10 @@ class GraphToEnrichReturnChannel:
         await channel.submit(envelope)
 
     Usage (ENRICH convergence_controller side):
-        targets = await channel.drain(tenant_id="acme", timeout=0.5)
+        targets = await channel.drain(tenant_id="acme", timeout_seconds=0.5)
     """
 
-    _instance: "GraphToEnrichReturnChannel | None" = None
+    _instance: GraphToEnrichReturnChannel | None = None
 
     def __init__(self, maxsize: int = 10_000) -> None:
         # Per-tenant queues: tenant_id → asyncio.Queue[EnrichmentTarget]
@@ -154,7 +166,7 @@ class GraphToEnrichReturnChannel:
         self._rejected: int = 0
 
     @classmethod
-    def get_instance(cls) -> "GraphToEnrichReturnChannel":
+    def get_instance(cls) -> GraphToEnrichReturnChannel:
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
@@ -204,17 +216,17 @@ class GraphToEnrichReturnChannel:
         self,
         tenant_id: str,
         *,
-        timeout: float = 0.1,
+        timeout_seconds: float = 0.1,
         max_targets: int = 500,
     ) -> list[EnrichmentTarget]:
         """
         Non-blocking drain: collect up to max_targets from the tenant queue.
-        Returns immediately if the queue is empty after `timeout` seconds.
+        Returns immediately if the queue is empty after `timeout_seconds` seconds.
         Called by convergence_controller at the start of each new pass.
         """
         q = self._queue_for(tenant_id)
         targets: list[EnrichmentTarget] = []
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + timeout_seconds
         while len(targets) < max_targets:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -223,7 +235,7 @@ class GraphToEnrichReturnChannel:
                 target = await asyncio.wait_for(q.get(), timeout=remaining)
                 targets.append(target)
                 q.task_done()
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 break
         self._drained += len(targets)
         if targets:
@@ -234,7 +246,7 @@ class GraphToEnrichReturnChannel:
             )
         return targets
 
-    def stats(self) -> dict[str, int]:
+    def stats(self) -> dict[str, int | dict[str, int]]:
         return {
             "submitted": self._submitted,
             "drained": self._drained,
@@ -246,6 +258,7 @@ class GraphToEnrichReturnChannel:
 # ---------------------------------------------------------------------------
 # Integration helper: build a valid envelope from raw GRAPH output
 # ---------------------------------------------------------------------------
+
 
 def build_graph_inference_result_envelope(
     *,
@@ -264,9 +277,7 @@ def build_graph_inference_result_envelope(
         "tenant_id": tenant_id,
         "content_hash": content_hash,
     }
-    envelope_hash = hashlib.sha256(
-        json.dumps(envelope_payload, sort_keys=True).encode()
-    ).hexdigest()
+    envelope_hash = hashlib.sha256(json.dumps(envelope_payload, sort_keys=True).encode()).hexdigest()
     return GraphInferenceResultEnvelope(
         packet_id=packet_id,
         tenant_id=tenant_id,
