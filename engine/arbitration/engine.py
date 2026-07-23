@@ -1,4 +1,18 @@
+"""
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [scoring]
+tags: [arbitration]
+owner: engine-team
+status: active
+--- /L9_META ---
+"""
+
 from __future__ import annotations
+
+from typing import Any, Literal
 
 from engine.arbitration.schema import ArbitrationInput, ArbitrationResult
 from engine.config.schema import DecisionPolicy
@@ -24,8 +38,11 @@ class ArbitrationEngine:
             - (data.risk * weights.risk)
             + (data.capacity * weights.capacity)
         )
-        spread = max(data.revenue, data.margin, data.risk, data.capacity) - min(data.revenue, data.margin, data.risk, data.capacity)
+        spread = max(data.revenue, data.margin, data.risk, data.capacity) - min(
+            data.revenue, data.margin, data.risk, data.capacity
+        )
 
+        state: Literal["approve", "reject", "defer", "escalate"]
         if composite >= policy.thresholds.approve_threshold:
             state = "approve"
             reason = "composite score met approve threshold"
@@ -47,15 +64,15 @@ class ArbitrationEngine:
         )
 
     @staticmethod
-    def _evaluate(actual: object, operator: str, expected: object) -> bool:
+    def _evaluate(actual: Any, operator: str, expected: Any) -> bool:
         if operator == "eq":
-            return actual == expected
+            return bool(actual == expected)
         if operator == "lt":
-            return actual < expected
+            return bool(actual < expected)
         if operator == "lte":
-            return actual <= expected
+            return bool(actual <= expected)
         if operator == "gt":
-            return actual > expected
+            return bool(actual > expected)
         if operator == "gte":
-            return actual >= expected
+            return bool(actual >= expected)
         raise ValueError(f"unsupported operator: {operator}")

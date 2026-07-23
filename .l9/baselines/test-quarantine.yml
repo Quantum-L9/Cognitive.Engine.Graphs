@@ -1,0 +1,7 @@
+# Test quarantine ledger for Quantum-L9/Cognitive.Engine.Graphs.
+# Governed by the Baseline Ratchet (l9-ci-core baseline-ratchet.yml).
+# Every entry is pre-existing test debt with a real owner, issue, and expiry.
+# Entries may only shrink; new failures are never auto-added.
+schema_version: 1.0.0
+gate: required-tests
+entries: []
