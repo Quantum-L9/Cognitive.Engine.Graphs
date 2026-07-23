@@ -423,6 +423,15 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         if field.name not in resolved_query:
             resolved_query[field.name] = field.default
 
+    # Scoring dimensions may reference query parameters (queryprop) that are
+    # not declared in queryschema (e.g. $community_id for communitymatch).
+    # Backfill them with null so the generated Cypher never fails with
+    # Neo.ClientError.Statement.ParameterMissing — the scoring expressions
+    # already define null-handling defaults.
+    for dim in domain_spec.scoring.dimensions:
+        if dim.queryprop and dim.queryprop not in resolved_query:
+            resolved_query[dim.queryprop] = None
+
     gate_compiler = GateCompiler(domain_spec)
     where_clause = gate_compiler.compile_all_gates(match_direction)
 

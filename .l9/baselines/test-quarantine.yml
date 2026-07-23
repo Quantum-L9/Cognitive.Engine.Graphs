@@ -86,8 +86,8 @@ entries:
   test_node_id: tests/invariants/test_configuration.py::TestT503ChassisImportContract::test_engine_does_not_import_chassis_except_allowed
   fingerprint: ffa75de661d6d5db7a8972312f2ba1d17725ff0022a1f6ce673bcc6a5bc5ad9c
   exception_type: Failed
-  failure_signature: "Failed: T5-03: engine/convergence_controller_patch.py imports chassis \u2014 only\
-    \ {'boot.py', 'handlers.py'} may do this"
+  failure_signature: 'Failed: T5-03: engine/convergence_controller_patch.py imports chassis — only {''boot.py'',
+    ''handlers.py''} may do this'
   owner: '@cryptoxdog'
   issue: Quantum-L9/Cognitive.Engine.Graphs#139
   introduced_before: af986d0
@@ -98,12 +98,11 @@ entries:
   test_node_id: tests/contracts/test_contracts.py::TestContract18L9Meta::test_engine_files_have_l9_meta
   fingerprint: 0abcd43d48021e190db84aae4461b27a74a1918a5e023542bacd0dc14449b9d9
   exception_type: AssertionError
-  failure_signature: 'AssertionError: Engine files missing L9_META header: [''engine/arbitration/engine.py'',
-    ''engine/arbitration/schema.py'', ''engine/compliance/audit_persistence.py'', ''engine/config/semantic_registry.py'',
-    ''engine/contract_enforcement.py'', ''engine/convergence_controller_patch.py'', ''engine/graph/community_export.py'',
-    ''engine/graph/graph_sync_client_fix.py'', ''engine/graph_return_channel.py'', ''engine/inference_bridge.py'',
-    ''engine/inference_rule_registry.py'', ''engine/outcomes/engine.py'', ''engine/outcomes/schema.py'',
-    ''engine/packet/bridge.py'', ''engine/startup_wiring.py''] assert not [''engine/arbitration/engine.py'',
+  failure_signature: 'AssertionError: Engine files missing L9_META header: [''engine/arbitration/engine.py'', ''engine/arbitration/schema.py'',
+    ''engine/compliance/audit_persistence.py'', ''engine/config/semantic_registry.py'', ''engine/contract_enforcement.py'',
+    ''engine/convergence_controller_patch.py'', ''engine/graph/community_export.py'', ''engine/graph/graph_sync_client_fix.py'',
+    ''engine/graph_return_channel.py'', ''engine/inference_bridge.py'', ''engine/inference_rule_registry.py'', ''engine/outcomes/engine.py'',
+    ''engine/outcomes/schema.py'', ''engine/packet/bridge.py'', ''engine/startup_wiring.py''] assert not [''engine/arbitration/engine.py'',
     ''engine/arbitration/schema.py'', ''engine/compliance/audit_persistence.py'', ''engine/config/semantic_registry.py'',
     ''engine/contract_enforcement.py'', ''engine/convergence_controller_patch.py'', ...]'
   owner: '@cryptoxdog'
@@ -127,70 +126,66 @@ entries:
   test_node_id: tests/security/test_injection.py::test_gate_compiler_never_interpolates_values
   fingerprint: e6bf46fba1d73051f3dded097cd9bbe2d06ed47d30156cd65bda5f760b2c753f
   exception_type: engine.config.loader.DomainSpecError
-  failure_signature: 'engine.config.loader.DomainSpecError: Domain ''plasticos'' validation failed: 30
-    validation errors for DomainSpec ontology.nodes.0.properties Input should be a valid list [type=list_type,
-    input_value={''entity_id'': ''string'', ''...t'', ''capacity'': ''float''}, input_type=dict] For further
-    information visit https://errors.pydantic.dev/2.13/v/list_type ontology.nodes.1.properties Input should
-    be a valid list [type=list_type, input_value={''entity_id'': ''string'', ''...t'', ''capacity'': ''float''},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/list_type ontology.nodes.2.properties
-    Input should be a valid list [type=list_type, input_value={''entity_id'': ''string'', ''email'': ''string''},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/list_type ontology.edges.0.from
-    Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'':
+  failure_signature: 'engine.config.loader.DomainSpecError: Domain ''plasticos'' validation failed: 30 validation
+    errors for DomainSpec ontology.nodes.0.properties Input should be a valid list [type=list_type, input_value={''entity_id'':
+    ''string'', ''...t'', ''capacity'': ''float''}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/list_type
+    ontology.nodes.1.properties Input should be a valid list [type=list_type, input_value={''entity_id'': ''string'',
+    ''...t'', ''capacity'': ''float''}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/list_type
+    ontology.nodes.2.properties Input should be a valid list [type=list_type, input_value={''entity_id'': ''string'',
+    ''email'': ''string''}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/list_type
+    ontology.edges.0.from Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'':
     {}}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing ontology.edges.0.to
-    Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'':
-    {}}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing ontology.edges.0.direction
-    Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'':
-    {}}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing ontology.edges.0.category
-    Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'':
-    {}}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing ontology.edges.0.managedby
-    Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'':
-    {}}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing matchentities
-    Field required [type=missing, input_value={''domain'': {''id'': ''plasti...lict_tolerance'': 0.35}}},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing queryschema
-    Field required [type=missing, input_value={''domain'': {''id'': ''plasti...lict_tolerance'': 0.35}}},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing traversal.steps.0.name
-    Field required [type=missing, input_value={''alias'': ''buyer'', ''node_...S'', ''direction'': ''both''},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing traversal.steps.0.pattern
-    Field required [type=missing, input_value={''alias'': ''buyer'', ''node_...S'', ''direction'': ''both''},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing gates Field
-    required [type=missing, input_value={''domain'': {''id'': ''plasti...lict_tolerance'': 0.35}}}, input_type=dict]
-    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.0.source
-    Input should be ''candidateproperty'', ''queryproperty'', ''computed'', ''traversalalias'' or ''external''
-    [type=enum, input_value=''revenue'', input_type=str] For further information visit https://errors.pydantic.dev/2.13/v/enum
-    scoring.dimensions.0.computation Field required [type=missing, input_value={''name'': ''revenue'',
-    ''sour...: 0.4, ''positive'': True}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
-    scoring.dimensions.0.weightkey Field required [type=missing, input_value={''name'': ''revenue'', ''sour...:
-    0.4, ''positive'': True}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
-    scoring.dimensions.0.defaultweight Field required [type=missing, input_value={''name'': ''revenue'',
-    ''sour...: 0.4, ''positive'': True}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
-    scoring.dimensions.1.source Input should be ''candidateproperty'', ''queryproperty'', ''computed'',
-    ''traversalalias'' or ''external'' [type=enum, input_value=''margin'', input_type=str] For further
-    information visit https://errors.pydantic.dev/2.13/v/enum scoring.dimensions.1.computation Field required
-    [type=missing, input_value={''name'': ''margin'', ''sourc...: 0.3, ''positive'': True}, input_type=dict]
-    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.1.weightkey
-    Field required [type=missing, input_value={''name'': ''margin'', ''sourc...: 0.3, ''positive'': True},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.1.defaultweight
-    Field required [type=missing, input_value={''name'': ''margin'', ''sourc...: 0.3, ''positive'': True},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.2.source
-    Input should be ''candidateproperty'', ''queryproperty'', ''computed'', ''traversalalias'' or ''external''
-    [type=enum, input_value=''risk'', input_type=str] For further information visit https://errors.pydantic.dev/2.13/v/enum
-    scoring.dimensions.2.computation Field required [type=missing, input_value={''name'': ''risk'', ''source''...:
-    0.2, ''positive'': True}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
-    scoring.dimensions.2.weightkey Field required [type=missing, input_value={''name'': ''risk'', ''source''...:
-    0.2, ''positive'': True}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
-    scoring.dimensions.2.defaultweight Field required [type=missing, input_value={''name'': ''risk'',
-    ''source''...: 0.2, ''positive'': True}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
-    scoring.dimensions.3.source Input should be ''candidateproperty'', ''queryproperty'', ''computed'',
-    ''traversalalias'' or ''external'' [type=enum, input_value=''capacity'', input_type=str] For further
-    information visit https://errors.pydantic.dev/2.13/v/enum scoring.dimensions.3.computation Field required
-    [type=missing, input_value={''name'': ''capacity'', ''sou...: 0.1, ''positive'': True}, input_type=dict]
-    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.3.weightkey
-    Field required [type=missing, input_value={''name'': ''capacity'', ''sou...: 0.1, ''positive'': True},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.3.defaultweight
-    Field required [type=missing, input_value={''name'': ''capacity'', ''sou...: 0.1, ''positive'': True},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing sync.endpoints
-    Field required [type=missing, input_value={''nodes'': [{''label'': ''Buy..., ''risk'', ''capacity'']}]},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing'
+    Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'': {}}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing ontology.edges.0.direction Field required
+    [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'': {}}, input_type=dict] For
+    further information visit https://errors.pydantic.dev/2.13/v/missing ontology.edges.0.category Field required
+    [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'': {}}, input_type=dict] For
+    further information visit https://errors.pydantic.dev/2.13/v/missing ontology.edges.0.managedby Field required
+    [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'': {}}, input_type=dict] For
+    further information visit https://errors.pydantic.dev/2.13/v/missing matchentities Field required [type=missing,
+    input_value={''domain'': {''id'': ''plasti...lict_tolerance'': 0.35}}}, input_type=dict] For further information
+    visit https://errors.pydantic.dev/2.13/v/missing queryschema Field required [type=missing, input_value={''domain'':
+    {''id'': ''plasti...lict_tolerance'': 0.35}}}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
+    traversal.steps.0.name Field required [type=missing, input_value={''alias'': ''buyer'', ''node_...S'', ''direction'':
+    ''both''}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing traversal.steps.0.pattern
+    Field required [type=missing, input_value={''alias'': ''buyer'', ''node_...S'', ''direction'': ''both''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing gates Field required [type=missing,
+    input_value={''domain'': {''id'': ''plasti...lict_tolerance'': 0.35}}}, input_type=dict] For further information
+    visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.0.source Input should be ''candidateproperty'',
+    ''queryproperty'', ''computed'', ''traversalalias'' or ''external'' [type=enum, input_value=''revenue'', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/enum scoring.dimensions.0.computation Field
+    required [type=missing, input_value={''name'': ''revenue'', ''sour...: 0.4, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.0.weightkey Field
+    required [type=missing, input_value={''name'': ''revenue'', ''sour...: 0.4, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.0.defaultweight
+    Field required [type=missing, input_value={''name'': ''revenue'', ''sour...: 0.4, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.1.source Input should
+    be ''candidateproperty'', ''queryproperty'', ''computed'', ''traversalalias'' or ''external'' [type=enum, input_value=''margin'',
+    input_type=str] For further information visit https://errors.pydantic.dev/2.13/v/enum scoring.dimensions.1.computation
+    Field required [type=missing, input_value={''name'': ''margin'', ''sourc...: 0.3, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.1.weightkey Field
+    required [type=missing, input_value={''name'': ''margin'', ''sourc...: 0.3, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.1.defaultweight
+    Field required [type=missing, input_value={''name'': ''margin'', ''sourc...: 0.3, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.2.source Input should
+    be ''candidateproperty'', ''queryproperty'', ''computed'', ''traversalalias'' or ''external'' [type=enum, input_value=''risk'',
+    input_type=str] For further information visit https://errors.pydantic.dev/2.13/v/enum scoring.dimensions.2.computation
+    Field required [type=missing, input_value={''name'': ''risk'', ''source''...: 0.2, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.2.weightkey Field
+    required [type=missing, input_value={''name'': ''risk'', ''source''...: 0.2, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.2.defaultweight
+    Field required [type=missing, input_value={''name'': ''risk'', ''source''...: 0.2, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.3.source Input should
+    be ''candidateproperty'', ''queryproperty'', ''computed'', ''traversalalias'' or ''external'' [type=enum, input_value=''capacity'',
+    input_type=str] For further information visit https://errors.pydantic.dev/2.13/v/enum scoring.dimensions.3.computation
+    Field required [type=missing, input_value={''name'': ''capacity'', ''sou...: 0.1, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.3.weightkey Field
+    required [type=missing, input_value={''name'': ''capacity'', ''sou...: 0.1, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.3.defaultweight
+    Field required [type=missing, input_value={''name'': ''capacity'', ''sou...: 0.1, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing sync.endpoints Field required [type=missing,
+    input_value={''nodes'': [{''label'': ''Buy..., ''risk'', ''capacity'']}]}, input_type=dict] For further information
+    visit https://errors.pydantic.dev/2.13/v/missing'
   owner: '@cryptoxdog'
   issue: Quantum-L9/Cognitive.Engine.Graphs#139
   introduced_before: af986d0
@@ -201,8 +196,8 @@ entries:
   test_node_id: tests/invariants/test_resilience.py::TestT605ChassisInitRace::test_handlers_init_dependencies_is_idempotent
   fingerprint: 1fa249dff4f00f653372f8d63588f8842d7f9e45794be1aadb86d72a7aca4aed
   exception_type: AttributeError
-  failure_signature: 'AttributeError: module ''engine.handlers'' has no attribute ''_graph_driver''. Did
-    you mean: ''GraphDriver''?'
+  failure_signature: 'AttributeError: module ''engine.handlers'' has no attribute ''_graph_driver''. Did you mean:
+    ''GraphDriver''?'
   owner: '@cryptoxdog'
   issue: Quantum-L9/Cognitive.Engine.Graphs#139
   introduced_before: af986d0
@@ -214,9 +209,9 @@ entries:
   fingerprint: 5e6d27d2186342dd3364dd61c158025f31b9ede85ad78e38140a313a98ea2ca2
   exception_type: AssertionError
   failure_signature: "AssertionError: engine/convergence_controller_patch.py imports chassis module 'chassis.events'\
-    \ \u2014 only {'boot.py', 'handlers.py'} may do this\nassert not True\n +  where True = <built-in\
-    \ method startswith of str object at 0x7f8313145070>('chassis')\n +    where <built-in method startswith\
-    \ of str object at 0x7f8313145070> = 'chassis.events'.startswith"
+    \ — only {'boot.py', 'handlers.py'} may do this\nassert not True\n +  where True = <built-in method startswith\
+    \ of str object at 0x7f8313145070>('chassis')\n +    where <built-in method startswith of str object at 0x7f8313145070>\
+    \ = 'chassis.events'.startswith"
   owner: '@cryptoxdog'
   issue: Quantum-L9/Cognitive.Engine.Graphs#139
   introduced_before: af986d0
@@ -227,8 +222,8 @@ entries:
   test_node_id: tests/invariants/test_resilience.py::TestT603ModuleGlobalState::test_init_dependencies_sets_globals
   fingerprint: 44210c5708109329ab6085d584f70194dcb3257fce35cdcc0551474aded7ab51
   exception_type: AttributeError
-  failure_signature: 'AttributeError: module ''engine.handlers'' has no attribute ''_graph_driver''. Did
-    you mean: ''GraphDriver''?'
+  failure_signature: 'AttributeError: module ''engine.handlers'' has no attribute ''_graph_driver''. Did you mean:
+    ''GraphDriver''?'
   owner: '@cryptoxdog'
   issue: Quantum-L9/Cognitive.Engine.Graphs#139
   introduced_before: af986d0
@@ -250,8 +245,8 @@ entries:
   test_node_id: tests/unit/test_wave6_dormant_features.py::TestFeatureNotEnabledError::test_llm_client_raises_feature_not_enabled
   fingerprint: 89c0dcdb85736b752328f951f230523c7b79e760ab37eba0dbc93674a8672d66
   exception_type: AssertionError
-  failure_signature: "AssertionError: Regex pattern did not match.\n Regex: 'LLM'\n Input: 'OPENAI_API_KEY\
-    \ environment variable is required. Set it to your OpenAI (or compatible provider) API key.'"
+  failure_signature: "AssertionError: Regex pattern did not match.\n Regex: 'LLM'\n Input: 'OPENAI_API_KEY environment\
+    \ variable is required. Set it to your OpenAI (or compatible provider) API key.'"
   owner: '@cryptoxdog'
   issue: Quantum-L9/Cognitive.Engine.Graphs#139
   introduced_before: af986d0
@@ -351,8 +346,8 @@ entries:
   test_node_id: tests/invariants/test_resilience.py::TestT603ModuleGlobalState::test_require_deps_raises_if_not_initialized
   fingerprint: ad45756141f654d2fb74ec2998952a380278823a2486c060b0047bfb2ca2356f
   exception_type: AttributeError
-  failure_signature: 'AttributeError: module ''engine.handlers'' has no attribute ''_graph_driver''. Did
-    you mean: ''GraphDriver''?'
+  failure_signature: 'AttributeError: module ''engine.handlers'' has no attribute ''_graph_driver''. Did you mean:
+    ''GraphDriver''?'
   owner: '@cryptoxdog'
   issue: Quantum-L9/Cognitive.Engine.Graphs#139
   introduced_before: af986d0
@@ -364,8 +359,7 @@ entries:
   fingerprint: 1ea2ebf7f1339e448d979b1cd98a6a6bcb2e1b90a63e72d5f0275f06d99f19a2
   exception_type: engine.contract_enforcement.ContractViolationError
   failure_signature: 'engine.contract_enforcement.ContractViolationError: ContractViolation[sp_8a1d37f6a143440eb2844cab0f824394]:
-    content_hash mismatch: expected=''ba582c36c79d949f8d56a8599b0a11faa671efcab3933c8b1eb8675379f9cc89''
-    got=''afcfe5aca59e4a544fc3152748ba9482f2241dbdfec607d690b1163a032150fd'''
+    content_hash mismatch: expected=''ba582c36c79d949f8d56a8599b0a11faa671efcab3933c8b1eb8675379f9cc89'' got=''afcfe5aca59e4a544fc3152748ba9482f2241dbdfec607d690b1163a032150fd'''
   owner: '@cryptoxdog'
   issue: Quantum-L9/Cognitive.Engine.Graphs#139
   introduced_before: af986d0
@@ -376,144 +370,66 @@ entries:
   test_node_id: tests/security/test_injection.py::test_sync_generator_uses_parameterized_query
   fingerprint: a822c1def4b85c3b74759a279be795b936196edc12dd6730388a53564b6430a6
   exception_type: engine.config.loader.DomainSpecError
-  failure_signature: 'engine.config.loader.DomainSpecError: Domain ''plasticos'' validation failed: 30
-    validation errors for DomainSpec ontology.nodes.0.properties Input should be a valid list [type=list_type,
-    input_value={''entity_id'': ''string'', ''...t'', ''capacity'': ''float''}, input_type=dict] For further
-    information visit https://errors.pydantic.dev/2.13/v/list_type ontology.nodes.1.properties Input should
-    be a valid list [type=list_type, input_value={''entity_id'': ''string'', ''...t'', ''capacity'': ''float''},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/list_type ontology.nodes.2.properties
-    Input should be a valid list [type=list_type, input_value={''entity_id'': ''string'', ''email'': ''string''},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/list_type ontology.edges.0.from
-    Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'':
+  failure_signature: 'engine.config.loader.DomainSpecError: Domain ''plasticos'' validation failed: 30 validation
+    errors for DomainSpec ontology.nodes.0.properties Input should be a valid list [type=list_type, input_value={''entity_id'':
+    ''string'', ''...t'', ''capacity'': ''float''}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/list_type
+    ontology.nodes.1.properties Input should be a valid list [type=list_type, input_value={''entity_id'': ''string'',
+    ''...t'', ''capacity'': ''float''}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/list_type
+    ontology.nodes.2.properties Input should be a valid list [type=list_type, input_value={''entity_id'': ''string'',
+    ''email'': ''string''}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/list_type
+    ontology.edges.0.from Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'':
     {}}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing ontology.edges.0.to
-    Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'':
-    {}}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing ontology.edges.0.direction
-    Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'':
-    {}}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing ontology.edges.0.category
-    Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'':
-    {}}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing ontology.edges.0.managedby
-    Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'':
-    {}}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing matchentities
-    Field required [type=missing, input_value={''domain'': {''id'': ''plasti...lict_tolerance'': 0.35}}},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing queryschema
-    Field required [type=missing, input_value={''domain'': {''id'': ''plasti...lict_tolerance'': 0.35}}},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing traversal.steps.0.name
-    Field required [type=missing, input_value={''alias'': ''buyer'', ''node_...S'', ''direction'': ''both''},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing traversal.steps.0.pattern
-    Field required [type=missing, input_value={''alias'': ''buyer'', ''node_...S'', ''direction'': ''both''},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing gates Field
-    required [type=missing, input_value={''domain'': {''id'': ''plasti...lict_tolerance'': 0.35}}}, input_type=dict]
-    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.0.source
-    Input should be ''candidateproperty'', ''queryproperty'', ''computed'', ''traversalalias'' or ''external''
-    [type=enum, input_value=''revenue'', input_type=str] For further information visit https://errors.pydantic.dev/2.13/v/enum
-    scoring.dimensions.0.computation Field required [type=missing, input_value={''name'': ''revenue'',
-    ''sour...: 0.4, ''positive'': True}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
-    scoring.dimensions.0.weightkey Field required [type=missing, input_value={''name'': ''revenue'', ''sour...:
-    0.4, ''positive'': True}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
-    scoring.dimensions.0.defaultweight Field required [type=missing, input_value={''name'': ''revenue'',
-    ''sour...: 0.4, ''positive'': True}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
-    scoring.dimensions.1.source Input should be ''candidateproperty'', ''queryproperty'', ''computed'',
-    ''traversalalias'' or ''external'' [type=enum, input_value=''margin'', input_type=str] For further
-    information visit https://errors.pydantic.dev/2.13/v/enum scoring.dimensions.1.computation Field required
-    [type=missing, input_value={''name'': ''margin'', ''sourc...: 0.3, ''positive'': True}, input_type=dict]
-    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.1.weightkey
-    Field required [type=missing, input_value={''name'': ''margin'', ''sourc...: 0.3, ''positive'': True},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.1.defaultweight
-    Field required [type=missing, input_value={''name'': ''margin'', ''sourc...: 0.3, ''positive'': True},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.2.source
-    Input should be ''candidateproperty'', ''queryproperty'', ''computed'', ''traversalalias'' or ''external''
-    [type=enum, input_value=''risk'', input_type=str] For further information visit https://errors.pydantic.dev/2.13/v/enum
-    scoring.dimensions.2.computation Field required [type=missing, input_value={''name'': ''risk'', ''source''...:
-    0.2, ''positive'': True}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
-    scoring.dimensions.2.weightkey Field required [type=missing, input_value={''name'': ''risk'', ''source''...:
-    0.2, ''positive'': True}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
-    scoring.dimensions.2.defaultweight Field required [type=missing, input_value={''name'': ''risk'',
-    ''source''...: 0.2, ''positive'': True}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
-    scoring.dimensions.3.source Input should be ''candidateproperty'', ''queryproperty'', ''computed'',
-    ''traversalalias'' or ''external'' [type=enum, input_value=''capacity'', input_type=str] For further
-    information visit https://errors.pydantic.dev/2.13/v/enum scoring.dimensions.3.computation Field required
-    [type=missing, input_value={''name'': ''capacity'', ''sou...: 0.1, ''positive'': True}, input_type=dict]
-    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.3.weightkey
-    Field required [type=missing, input_value={''name'': ''capacity'', ''sou...: 0.1, ''positive'': True},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.3.defaultweight
-    Field required [type=missing, input_value={''name'': ''capacity'', ''sou...: 0.1, ''positive'': True},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing sync.endpoints
-    Field required [type=missing, input_value={''nodes'': [{''label'': ''Buy..., ''risk'', ''capacity'']}]},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing'
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: af986d0
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: domain-spec-loading
-- id: test-quarantine/test-sync-unknown-entity-type-raises
-  test_node_id: tests/integration/test_sync_handler.py::test_sync_unknown_entity_type_raises
-  fingerprint: 5b2f091b0362854750809763ff94fb89df710f5dd6ed016adfafac3abdf146a9
-  exception_type: engine.config.loader.DomainSpecError
-  failure_signature: 'engine.config.loader.DomainSpecError: Domain ''plasticos'' validation failed: 30
-    validation errors for DomainSpec ontology.nodes.0.properties Input should be a valid list [type=list_type,
-    input_value={''entity_id'': ''string'', ''...t'', ''capacity'': ''float''}, input_type=dict] For further
-    information visit https://errors.pydantic.dev/2.13/v/list_type ontology.nodes.1.properties Input should
-    be a valid list [type=list_type, input_value={''entity_id'': ''string'', ''...t'', ''capacity'': ''float''},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/list_type ontology.nodes.2.properties
-    Input should be a valid list [type=list_type, input_value={''entity_id'': ''string'', ''email'': ''string''},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/list_type ontology.edges.0.from
-    Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'':
-    {}}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing ontology.edges.0.to
-    Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'':
-    {}}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing ontology.edges.0.direction
-    Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'':
-    {}}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing ontology.edges.0.category
-    Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'':
-    {}}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing ontology.edges.0.managedby
-    Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'':
-    {}}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing matchentities
-    Field required [type=missing, input_value={''domain'': {''id'': ''plasti...lict_tolerance'': 0.35}}},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing queryschema
-    Field required [type=missing, input_value={''domain'': {''id'': ''plasti...lict_tolerance'': 0.35}}},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing traversal.steps.0.name
-    Field required [type=missing, input_value={''alias'': ''buyer'', ''node_...S'', ''direction'': ''both''},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing traversal.steps.0.pattern
-    Field required [type=missing, input_value={''alias'': ''buyer'', ''node_...S'', ''direction'': ''both''},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing gates Field
-    required [type=missing, input_value={''domain'': {''id'': ''plasti...lict_tolerance'': 0.35}}}, input_type=dict]
-    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.0.source
-    Input should be ''candidateproperty'', ''queryproperty'', ''computed'', ''traversalalias'' or ''external''
-    [type=enum, input_value=''revenue'', input_type=str] For further information visit https://errors.pydantic.dev/2.13/v/enum
-    scoring.dimensions.0.computation Field required [type=missing, input_value={''name'': ''revenue'',
-    ''sour...: 0.4, ''positive'': True}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
-    scoring.dimensions.0.weightkey Field required [type=missing, input_value={''name'': ''revenue'', ''sour...:
-    0.4, ''positive'': True}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
-    scoring.dimensions.0.defaultweight Field required [type=missing, input_value={''name'': ''revenue'',
-    ''sour...: 0.4, ''positive'': True}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
-    scoring.dimensions.1.source Input should be ''candidateproperty'', ''queryproperty'', ''computed'',
-    ''traversalalias'' or ''external'' [type=enum, input_value=''margin'', input_type=str] For further
-    information visit https://errors.pydantic.dev/2.13/v/enum scoring.dimensions.1.computation Field required
-    [type=missing, input_value={''name'': ''margin'', ''sourc...: 0.3, ''positive'': True}, input_type=dict]
-    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.1.weightkey
-    Field required [type=missing, input_value={''name'': ''margin'', ''sourc...: 0.3, ''positive'': True},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.1.defaultweight
-    Field required [type=missing, input_value={''name'': ''margin'', ''sourc...: 0.3, ''positive'': True},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.2.source
-    Input should be ''candidateproperty'', ''queryproperty'', ''computed'', ''traversalalias'' or ''external''
-    [type=enum, input_value=''risk'', input_type=str] For further information visit https://errors.pydantic.dev/2.13/v/enum
-    scoring.dimensions.2.computation Field required [type=missing, input_value={''name'': ''risk'', ''source''...:
-    0.2, ''positive'': True}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
-    scoring.dimensions.2.weightkey Field required [type=missing, input_value={''name'': ''risk'', ''source''...:
-    0.2, ''positive'': True}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
-    scoring.dimensions.2.defaultweight Field required [type=missing, input_value={''name'': ''risk'',
-    ''source''...: 0.2, ''positive'': True}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
-    scoring.dimensions.3.source Input should be ''candidateproperty'', ''queryproperty'', ''computed'',
-    ''traversalalias'' or ''external'' [type=enum, input_value=''capacity'', input_type=str] For further
-    information visit https://errors.pydantic.dev/2.13/v/enum scoring.dimensions.3.computation Field required
-    [type=missing, input_value={''name'': ''capacity'', ''sou...: 0.1, ''positive'': True}, input_type=dict]
-    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.3.weightkey
-    Field required [type=missing, input_value={''name'': ''capacity'', ''sou...: 0.1, ''positive'': True},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.3.defaultweight
-    Field required [type=missing, input_value={''name'': ''capacity'', ''sou...: 0.1, ''positive'': True},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing sync.endpoints
-    Field required [type=missing, input_value={''nodes'': [{''label'': ''Buy..., ''risk'', ''capacity'']}]},
-    input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing'
+    Field required [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'': {}}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing ontology.edges.0.direction Field required
+    [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'': {}}, input_type=dict] For
+    further information visit https://errors.pydantic.dev/2.13/v/missing ontology.edges.0.category Field required
+    [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'': {}}, input_type=dict] For
+    further information visit https://errors.pydantic.dev/2.13/v/missing ontology.edges.0.managedby Field required
+    [type=missing, input_value={''type'': ''KNOWS'', ''source...uyer'', ''attributes'': {}}, input_type=dict] For
+    further information visit https://errors.pydantic.dev/2.13/v/missing matchentities Field required [type=missing,
+    input_value={''domain'': {''id'': ''plasti...lict_tolerance'': 0.35}}}, input_type=dict] For further information
+    visit https://errors.pydantic.dev/2.13/v/missing queryschema Field required [type=missing, input_value={''domain'':
+    {''id'': ''plasti...lict_tolerance'': 0.35}}}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing
+    traversal.steps.0.name Field required [type=missing, input_value={''alias'': ''buyer'', ''node_...S'', ''direction'':
+    ''both''}, input_type=dict] For further information visit https://errors.pydantic.dev/2.13/v/missing traversal.steps.0.pattern
+    Field required [type=missing, input_value={''alias'': ''buyer'', ''node_...S'', ''direction'': ''both''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing gates Field required [type=missing,
+    input_value={''domain'': {''id'': ''plasti...lict_tolerance'': 0.35}}}, input_type=dict] For further information
+    visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.0.source Input should be ''candidateproperty'',
+    ''queryproperty'', ''computed'', ''traversalalias'' or ''external'' [type=enum, input_value=''revenue'', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.13/v/enum scoring.dimensions.0.computation Field
+    required [type=missing, input_value={''name'': ''revenue'', ''sour...: 0.4, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.0.weightkey Field
+    required [type=missing, input_value={''name'': ''revenue'', ''sour...: 0.4, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.0.defaultweight
+    Field required [type=missing, input_value={''name'': ''revenue'', ''sour...: 0.4, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.1.source Input should
+    be ''candidateproperty'', ''queryproperty'', ''computed'', ''traversalalias'' or ''external'' [type=enum, input_value=''margin'',
+    input_type=str] For further information visit https://errors.pydantic.dev/2.13/v/enum scoring.dimensions.1.computation
+    Field required [type=missing, input_value={''name'': ''margin'', ''sourc...: 0.3, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.1.weightkey Field
+    required [type=missing, input_value={''name'': ''margin'', ''sourc...: 0.3, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.1.defaultweight
+    Field required [type=missing, input_value={''name'': ''margin'', ''sourc...: 0.3, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.2.source Input should
+    be ''candidateproperty'', ''queryproperty'', ''computed'', ''traversalalias'' or ''external'' [type=enum, input_value=''risk'',
+    input_type=str] For further information visit https://errors.pydantic.dev/2.13/v/enum scoring.dimensions.2.computation
+    Field required [type=missing, input_value={''name'': ''risk'', ''source''...: 0.2, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.2.weightkey Field
+    required [type=missing, input_value={''name'': ''risk'', ''source''...: 0.2, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.2.defaultweight
+    Field required [type=missing, input_value={''name'': ''risk'', ''source''...: 0.2, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.3.source Input should
+    be ''candidateproperty'', ''queryproperty'', ''computed'', ''traversalalias'' or ''external'' [type=enum, input_value=''capacity'',
+    input_type=str] For further information visit https://errors.pydantic.dev/2.13/v/enum scoring.dimensions.3.computation
+    Field required [type=missing, input_value={''name'': ''capacity'', ''sou...: 0.1, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.3.weightkey Field
+    required [type=missing, input_value={''name'': ''capacity'', ''sou...: 0.1, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing scoring.dimensions.3.defaultweight
+    Field required [type=missing, input_value={''name'': ''capacity'', ''sou...: 0.1, ''positive'': True}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.13/v/missing sync.endpoints Field required [type=missing,
+    input_value={''nodes'': [{''label'': ''Buy..., ''risk'', ''capacity'']}]}, input_type=dict] For further information
+    visit https://errors.pydantic.dev/2.13/v/missing'
   owner: '@cryptoxdog'
   issue: Quantum-L9/Cognitive.Engine.Graphs#139
   introduced_before: af986d0
@@ -525,8 +441,7 @@ entries:
   fingerprint: 7584d3d57243f9c65e682c7eeb6dcd49377366cde884f689b3d2a497824d383a
   exception_type: engine.contract_enforcement.ContractViolationError
   failure_signature: 'engine.contract_enforcement.ContractViolationError: ContractViolation[gs_111d2e48133946039eede10917374c39]:
-    content_hash mismatch: expected=''42a9e4fbc26ceaa69e9676a1941c11af19fd9a4dd2a7df17bd994da156a4029f''
-    got=''049e16832f433963dfbc27c5e3bed0d1bca57062293c232165449e6bb5822f94'''
+    content_hash mismatch: expected=''42a9e4fbc26ceaa69e9676a1941c11af19fd9a4dd2a7df17bd994da156a4029f'' got=''049e16832f433963dfbc27c5e3bed0d1bca57062293c232165449e6bb5822f94'''
   owner: '@cryptoxdog'
   issue: Quantum-L9/Cognitive.Engine.Graphs#139
   introduced_before: af986d0
@@ -582,8 +497,7 @@ entries:
   fingerprint: d212bb892ae03bd6b86934d8661a033e7a91183d5257d05e9893f51b28261a9b
   exception_type: engine.contract_enforcement.ContractViolationError
   failure_signature: 'engine.contract_enforcement.ContractViolationError: ContractViolation[gs_ec03cecaa6e74596aea08a5d6f550fa1]:
-    content_hash mismatch: expected=''42a9e4fbc26ceaa69e9676a1941c11af19fd9a4dd2a7df17bd994da156a4029f''
-    got=''049e16832f433963dfbc27c5e3bed0d1bca57062293c232165449e6bb5822f94'''
+    content_hash mismatch: expected=''42a9e4fbc26ceaa69e9676a1941c11af19fd9a4dd2a7df17bd994da156a4029f'' got=''049e16832f433963dfbc27c5e3bed0d1bca57062293c232165449e6bb5822f94'''
   owner: '@cryptoxdog'
   issue: Quantum-L9/Cognitive.Engine.Graphs#139
   introduced_before: af986d0
@@ -595,8 +509,7 @@ entries:
   fingerprint: 77cf92f9434272251ca5483646d5496d9e1ba2fa2db412d2397af73068845854
   exception_type: engine.contract_enforcement.ContractViolationError
   failure_signature: 'engine.contract_enforcement.ContractViolationError: ContractViolation[gs_762c0e0c83a24a6d8e0b9a21e70065df]:
-    content_hash mismatch: expected=''42a9e4fbc26ceaa69e9676a1941c11af19fd9a4dd2a7df17bd994da156a4029f''
-    got=''049e16832f433963dfbc27c5e3bed0d1bca57062293c232165449e6bb5822f94'''
+    content_hash mismatch: expected=''42a9e4fbc26ceaa69e9676a1941c11af19fd9a4dd2a7df17bd994da156a4029f'' got=''049e16832f433963dfbc27c5e3bed0d1bca57062293c232165449e6bb5822f94'''
   owner: '@cryptoxdog'
   issue: Quantum-L9/Cognitive.Engine.Graphs#139
   introduced_before: af986d0
@@ -647,245 +560,3 @@ entries:
   expires: '2026-10-21'
   removal_condition: test-passes
   root_cause_group: feature-flag-runtime
-- id: test-quarantine/test-admin-missing-domain-id-handled
-  test_node_id: tests/integration/test_admin_handler.py::test_admin_missing_domain_id_handled
-  fingerprint: 2c860dfdb426fec909a9a53735bc8040a22f19ee83ee675c001a52e1a54e8857
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-get-domain-returns-spec
-  test_node_id: tests/integration/test_admin_handler.py::test_get_domain_returns_spec
-  fingerprint: b5d5dd82b26d1eb6ab2a547d86267b587851f79df3b9a354b0bd16e8a1a7d1c7
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-list-domains-returns-plasticos
-  test_node_id: tests/integration/test_admin_handler.py::test_list_domains_returns_plasticos
-  fingerprint: 36e0eae57dde3f5c41aec63c3de17fbd8499c3b638f679f2d0036ed6aa486e63
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-execute-query-reads-node
-  test_node_id: tests/integration/test_graph_driver.py::test_execute_query_reads_node
-  fingerprint: 8c1874dae92085e9fef2d9eed4a62c89bdb3d3b51c329c49ed5078e78d621b51
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-execute-query-returns-empty-for-miss
-  test_node_id: tests/integration/test_graph_driver.py::test_execute_query_returns_empty_for_miss
-  fingerprint: 51f27d673a466c386afb7ad776da89d3a6d1d0a35331f1efedc14ae5c1074112
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-execute-write-creates-node
-  test_node_id: tests/integration/test_graph_driver.py::test_execute_write_creates_node
-  fingerprint: 311ee55a14fbd942049f3d629f38a0bd81c55c7df1e332cd94b9775b43ac4067
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-match-respects-top-n
-  test_node_id: tests/integration/test_match_handler.py::test_match_respects_top_n
-  fingerprint: 365c5d75ee7731a773f262d08bfc6ccb747fd6c4bae59ada15e6a8075f66adce
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-match-returns-candidates
-  test_node_id: tests/integration/test_match_handler.py::test_match_returns_candidates
-  fingerprint: b072ba488ad22e3472fae87cb2de5207522df2faa4e06aad58c849a16e9f97af
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-exclusion-edges-respect-tenant-scope
-  test_node_id: tests/integration/test_multi_tenant.py::TestGraphLevelTenantIsolation::test_exclusion_edges_respect_tenant_scope
-  fingerprint: e173b4daecb31b77a400f1d4f0f12c1dcd0aa61c94cddaea9e5569e31bd44fe8
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-sync-batch-scoped-to-tenant
-  test_node_id: tests/integration/test_multi_tenant.py::TestGraphLevelTenantIsolation::test_sync_batch_scoped_to_tenant
-  fingerprint: 386ce148392021afd024ad75905765122aa26e83b80cf6dfa553d39e8759a0b9
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-tenant-a-cannot-see-tenant-b-facilities
-  test_node_id: tests/integration/test_multi_tenant.py::TestGraphLevelTenantIsolation::test_tenant_a_cannot_see_tenant_b_facilities
-  fingerprint: 3a7146a67b635adf1fa99f8dae9df46870097546adde8821f51cc150b1a15985
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-null-boolean-property-fails-boolean-gate
-  test_node_id: tests/integration/test_null_semantics.py::TestNullSemanticsPassBehavior::test_null_boolean_property_fails_boolean_gate
-  fingerprint: 82e8104c306ce9555fa08c41164a5ab13ea1d7783cbcbe85df49a06bf8615b1d
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-null-candidate-property-passes-range-gate
-  test_node_id: tests/integration/test_null_semantics.py::TestNullSemanticsPassBehavior::test_null_candidate_property_passes_range_gate
-  fingerprint: b2b94023e66dd4b62bf0119829b9b066c159940b2fa530e84b03c53f87757e9b
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-null-query-param-passes-threshold-gate
-  test_node_id: tests/integration/test_null_semantics.py::TestNullSemanticsPassBehavior::test_null_query_param_passes_threshold_gate
-  fingerprint: 135f2d0b7eabe15d76ad09805a3d741662c05db5d63a2e33264093e1287c365f
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-outcome-rejected-recorded
-  test_node_id: tests/integration/test_outcomes_handler.py::test_outcome_rejected_recorded
-  fingerprint: 04bc396866af0dbf183691689a80665f3f3369da78f695db5f1650c488b8ff13
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-outcome-success-recorded
-  test_node_id: tests/integration/test_outcomes_handler.py::test_outcome_success_recorded
-  fingerprint: 9c340c4f4e84f27afabda46113b74f09627c6e146ec4a97aaa726f5a410d4b6e
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-sync-idempotent-on-second-call
-  test_node_id: tests/integration/test_sync_handler.py::test_sync_idempotent_on_second_call
-  fingerprint: 99e1e6b1e47f6c737ff5686c781143adc332f484cc4b4068467d1839ff0b2c24
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-sync-merges-facilities
-  test_node_id: tests/integration/test_sync_handler.py::test_sync_merges_facilities
-  fingerprint: d976430e5d8c79d4f4bad2ac27c7dcfce3000e2c1a1e1a98df4de9989b4de331
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-relaxed-match-latency-under-200ms
-  test_node_id: tests/performance/test_query_latency.py::TestMatchQueryLatency::test_relaxed_match_latency_under_200ms
-  fingerprint: 7bcd3d200a1f751bea97105e2cbf44619c1c82d8ed55139663b42241b935b24c
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-strict-match-latency-under-100ms
-  test_node_id: tests/performance/test_query_latency.py::TestMatchQueryLatency::test_strict_match_latency_under_100ms
-  fingerprint: 06e08550e464476933c8bdf098839956c30c41583065953274210b96a28de122
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-facility-sync-1000-entities-throughput
-  test_node_id: tests/performance/test_sync_throughput.py::TestSyncThroughput::test_facility_sync_1000_entities_throughput
-  fingerprint: 649a9fd77236754fa611e524fd882950fa01e4c92219552c58ff06183dc10080
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift
-- id: test-quarantine/test-incremental-update-throughput
-  test_node_id: tests/performance/test_sync_throughput.py::TestSyncThroughput::test_incremental_update_throughput
-  fingerprint: 6febdf1fec6bcda4a89c0236224c8a0cdec6d92cb831a1e0805b07c038cf7ea4
-  exception_type: AttributeError
-  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#139
-  introduced_before: 73b1bdf
-  expires: '2026-10-21'
-  removal_condition: test-passes
-  root_cause_group: graphdriver-execute-write-api-drift

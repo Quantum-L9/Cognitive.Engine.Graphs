@@ -13,6 +13,13 @@ tests/performance/test_query_latency.py
 Performance benchmarks for match query latency.
 Tests p50/p95/p99 latency against Neo4j with seeded graph data.
 Requires: pytest-benchmark or manual timing.
+
+Uses the real engine APIs:
+  GateCompiler.compile_all_gates(match_direction) / compile_relaxed(match_direction)
+  TraversalAssembler.assemble_traversal(match_direction)
+  ScoringAssembler.assemble_scoring_clause(match_direction, weights) -> (clause, meta)
+The compiled query binds every gate queryparam and scoring queryprop, mirroring
+the parameter backfill performed by handle_match.
 """
 
 from __future__ import annotations
@@ -27,19 +34,78 @@ from engine.scoring.assembler import ScoringAssembler
 from engine.traversal.assembler import TraversalAssembler
 
 
+def _full_match_params(domain_spec, tenant: str) -> dict:
+    """Bind all queryschema fields + scoring queryprops, like handle_match does."""
+    params: dict = {
+        "tenant": tenant,
+        "polymer_type": "HDPE",
+        "density": 0.95,
+        "mfi": 12.0,
+        "contamination_pct": 0.02,
+        "requires_food_grade": False,
+        "volume_tons": 10.0,
+        "lat": 34.05,
+        "lon": -118.24,
+        "target_price": 800.0,
+    }
+    # Backfill any remaining queryschema fields and scoring queryprops with null,
+    # mirroring the engine's parameter backfill in handle_match.
+    for field in domain_spec.queryschema.fields:
+        params.setdefault(field.name, None)
+    for dim in domain_spec.scoring.dimensions:
+        queryprop = getattr(dim, "queryprop", None)
+        if queryprop:
+            params.setdefault(queryprop, None)
+    return params
+
+
 @pytest.mark.performance
 class TestMatchQueryLatency:
     """Benchmark end-to-end match query execution latency."""
+
+    async def _seed_matchable_facilities(self, graph_driver, db: str, tenant: str) -> None:
+        """Seed facilities that satisfy the strict gate chain + PROCESSES traversal."""
+        await graph_driver.execute_query(
+            """
+            UNWIND $batch AS row
+            MERGE (f:Facility {facility_id: row.facility_id})
+            SET f += row, f.tenant = $tenant, f.updated_at = datetime()
+            MERGE (p:PolymerFamily {code: 'HDPE'})
+            MERGE (f)-[:PROCESSES]->(p)
+            """,
+            parameters={
+                "batch": [
+                    {
+                        "facility_id": 9001 + i,
+                        "name": f"Bench Facility {i}",
+                        "min_density": 0.90,
+                        "max_density": 1.00,
+                        "min_mfi": 5.0,
+                        "max_mfi": 20.0,
+                        "contamination_tolerance": 0.05,
+                        "food_grade_certified": False,
+                        "capacity_tons_month": 100.0,
+                        "lat": 34.05,
+                        "lon": -118.24,
+                        "credit_score": 70.0,
+                        "reinforcement_score": 0.5,
+                    }
+                    for i in range(3)
+                ],
+                "tenant": tenant,
+            },
+            database=db,
+        )
 
     @pytest.mark.asyncio
     async def test_strict_match_latency_under_100ms(self, graph_driver, seeded_graph, domain_spec):
         """
         Strict match query should complete within 100ms p95 on a
-        small seeded graph (3 facilities, 4 polymers, 5 forms).
-        Realistic cold-cache benchmark.
+        small seeded graph. Realistic cold-cache benchmark.
         """
         db = seeded_graph["database"]
         tenant = seeded_graph["tenant"]
+        await self._seed_matchable_facilities(graph_driver, db, tenant)
 
         gate_compiler = GateCompiler(domain_spec)
         scoring_assembler = ScoringAssembler(domain_spec)
@@ -48,37 +114,40 @@ class TestMatchQueryLatency:
         direction = "intake_to_buyer"
         where_clause = gate_compiler.compile_all_gates(direction)
         traversal_clauses = traversal_assembler.assemble_traversal(direction)
-        scoring_clause = scoring_assembler.assemble_scoring_clause(direction, {})
+        weights = {d.weightkey: d.defaultweight for d in domain_spec.scoring.dimensions}
+        scoring_clause, _pareto_meta = scoring_assembler.assemble_scoring_clause(
+            direction, weights
+        )
 
-        # Build the full Cypher query
-        traversal_block = "\n".join(traversal_clauses) if traversal_clauses else ""
+        # Build the full Cypher query. The traversal step already introduces
+        # `candidate`, so anchor the tenant filter in the WHERE clause.
+        traversal_block = (
+            "\n".join(traversal_clauses)
+            if traversal_clauses
+            else "MATCH (candidate:Facility)"
+        )
         cypher = f"""
-        MATCH (candidate:Facility {{tenant: $tenant}})
         {traversal_block}
-        WHERE {where_clause}
+        WHERE candidate.tenant = $tenant AND {where_clause}
         {scoring_clause}
         RETURN candidate.facility_id AS fid, candidate.name AS name, score
         ORDER BY score DESC
         LIMIT 10
         """
 
-        query_params = {
-            "tenant": tenant,
-            "density": 0.95,
-            "mfi": 12.0,
-            "max_contamination": 0.05,
-            "polymer": "HDPE",
-            "form": "regrind",
-        }
+        query_params = _full_match_params(domain_spec, tenant)
 
         # Warmup
-        await graph_driver.execute_query(cypher, parameters=query_params, database=db)
+        results = await graph_driver.execute_query(
+            cypher, parameters=query_params, database=db
+        )
+        assert results, "Seeded facilities should pass the strict gate chain"
 
         # Benchmark: 50 iterations
         latencies: list[float] = []
         for _ in range(50):
             t0 = time.perf_counter()
-            results = await graph_driver.execute_query(cypher, parameters=query_params, database=db)
+            await graph_driver.execute_query(cypher, parameters=query_params, database=db)
             elapsed_ms = (time.perf_counter() - t0) * 1000
             latencies.append(elapsed_ms)
 
@@ -115,7 +184,7 @@ class TestMatchQueryLatency:
         LIMIT 25
         """
 
-        query_params = {"tenant": tenant, "density": 0.95}
+        query_params = _full_match_params(domain_spec, tenant)
 
         # Warmup
         await graph_driver.execute_query(cypher, parameters=query_params, database=db)

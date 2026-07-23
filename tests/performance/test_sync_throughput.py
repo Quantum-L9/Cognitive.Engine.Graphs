@@ -70,9 +70,9 @@ class TestSyncThroughput:
         sync_spec = SyncEndpointSpec(
             path="/v1/sync/facilities",
             method="POST",
-            target_node="Facility",
-            id_property="facility_id",
-            batch_strategy=SyncStrategy.UNWIND_MERGE,
+            targetnode="Facility",
+            idproperty="facility_id",
+            batchstrategy=SyncStrategy.UNWINDMERGE,
         )
         generator = SyncGenerator(domain_spec)
         cypher = generator.generate_sync_query(sync_spec, batch)
@@ -90,7 +90,7 @@ class TestSyncThroughput:
             t0 = time.perf_counter()
             await graph_driver.execute_query(
                 cypher,
-                parameters={"batch": batch},
+                parameters={"batch": batch, "tenant": tenant},
                 database=db,
             )
             elapsed = time.perf_counter() - t0
