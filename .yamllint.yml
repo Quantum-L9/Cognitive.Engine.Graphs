@@ -1,0 +1,58 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: l9-template
+# engine: graph
+# layer: [ci]
+# tags: [ci, quality, yamllint]
+# owner: platform
+# status: active
+# --- /L9_META ---
+#
+# yamllint configuration for the Quality Gates "YAML Validation" job.
+#
+# Policy: this config is FAIL-CLOSED — the CI step runs plain
+# `yamllint -c .yamllint.yml .` with no `|| true` and no
+# continue-on-error. Anything reported at error level blocks the gate.
+#
+# Severity philosophy:
+#   - Structural problems (syntax errors, duplicate keys, broken
+#     indentation, malformed commas/brackets) are errors: they change
+#     or break how YAML parses.
+#   - Pure style preferences (line length, document-start markers,
+#     truthy key spelling used pervasively by GitHub Actions `on:`)
+#     are warnings or disabled: they carry no parse risk and existing
+#     files predate this gate.
+#
+# Exclusions (each must have a reason):
+#   - docs/PlasticOS Graph Cognitive Engine.yaml: a spec-patch
+#     document kept verbatim for reference; parses as valid YAML but
+#     uses prose-style comma formatting throughout (230+ style hits).
+#     Reference documents are not consumed by runtime code.
+#   - domains/MASTER-SPEC-ALL-DOMAINS.yaml: intentionally NOT a
+#     single valid YAML document — it is a consolidated container of
+#     ten domain specs with prose headers, consumed only by
+#     tools/domain_extractor.py which splits it before parsing.
+
+extends: default
+
+ignore: |
+  docs/PlasticOS Graph Cognitive Engine.yaml
+  domains/MASTER-SPEC-ALL-DOMAINS.yaml
+  .hypothesis/
+
+rules:
+  line-length:
+    max: 120
+    level: warning
+  truthy:
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1
+  document-start: disable
+  indentation:
+    spaces: consistent
+    indent-sequences: consistent
+  brackets:
+    max-spaces-inside: 1
+  braces:
+    max-spaces-inside: 1
