@@ -84,10 +84,10 @@ entries:
   root_cause_group: feature-flag-runtime
 - id: test-quarantine/test-engine-does-not-import-chassis-except-allowed
   test_node_id: tests/invariants/test_configuration.py::TestT503ChassisImportContract::test_engine_does_not_import_chassis_except_allowed
-  fingerprint: 1fc3936256d4e1a408b74cfd483249dd8bdcdf1ac7f2a4684e66903ced64978d
+  fingerprint: ffa75de661d6d5db7a8972312f2ba1d17725ff0022a1f6ce673bcc6a5bc5ad9c
   exception_type: Failed
   failure_signature: "Failed: T5-03: engine/convergence_controller_patch.py imports chassis \u2014 only\
-    \ {'handlers.py', 'boot.py'} may do this"
+    \ {'boot.py', 'handlers.py'} may do this"
   owner: '@cryptoxdog'
   issue: Quantum-L9/Cognitive.Engine.Graphs#139
   introduced_before: af986d0
@@ -211,12 +211,12 @@ entries:
   root_cause_group: loader-state-api-drift
 - id: test-quarantine/test-handlers-is-only-chassis-bridge
   test_node_id: tests/contracts/test_contracts.py::TestContract02HandlerInterface::test_handlers_is_only_chassis_bridge
-  fingerprint: a35b540bc4d1b1f341624435a015a3af3449fe0b7e73ce805d22142e28b8534f
+  fingerprint: 5e6d27d2186342dd3364dd61c158025f31b9ede85ad78e38140a313a98ea2ca2
   exception_type: AssertionError
   failure_signature: "AssertionError: engine/convergence_controller_patch.py imports chassis module 'chassis.events'\
-    \ \u2014 only {'handlers.py', 'boot.py'} may do this assert not True + where True = <built-in method\
-    \ startswith of str object at 0xADDR>('chassis') + where <built-in method startswith of str object\
-    \ at 0xADDR> = 'chassis.events'.startswith"
+    \ \u2014 only {'boot.py', 'handlers.py'} may do this\nassert not True\n +  where True = <built-in\
+    \ method startswith of str object at 0x7f8313145070>('chassis')\n +    where <built-in method startswith\
+    \ of str object at 0x7f8313145070> = 'chassis.events'.startswith"
   owner: '@cryptoxdog'
   issue: Quantum-L9/Cognitive.Engine.Graphs#139
   introduced_before: af986d0
@@ -870,6 +870,17 @@ entries:
 - id: test-quarantine/test-facility-sync-1000-entities-throughput
   test_node_id: tests/performance/test_sync_throughput.py::TestSyncThroughput::test_facility_sync_1000_entities_throughput
   fingerprint: 649a9fd77236754fa611e524fd882950fa01e4c92219552c58ff06183dc10080
+  exception_type: AttributeError
+  failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
+  owner: '@cryptoxdog'
+  issue: Quantum-L9/Cognitive.Engine.Graphs#139
+  introduced_before: 73b1bdf
+  expires: '2026-10-21'
+  removal_condition: test-passes
+  root_cause_group: graphdriver-execute-write-api-drift
+- id: test-quarantine/test-incremental-update-throughput
+  test_node_id: tests/performance/test_sync_throughput.py::TestSyncThroughput::test_incremental_update_throughput
+  fingerprint: 6febdf1fec6bcda4a89c0236224c8a0cdec6d92cb831a1e0805b07c038cf7ea4
   exception_type: AttributeError
   failure_signature: 'AttributeError: ''GraphDriver'' object has no attribute ''execute_write'''
   owner: '@cryptoxdog'
