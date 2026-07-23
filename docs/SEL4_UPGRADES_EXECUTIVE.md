@@ -1,7 +1,7 @@
 # Cognitive Engine Graphs — Verified Intelligence Upgrade
 
-**Product**: Cognitive Engine Graphs (CEG)  
-**Upgrade Program**: Formally-Verified OS Kernel Design Principles Applied to Graph Matching  
+**Product**: Cognitive Engine Graphs (CEG)
+**Upgrade Program**: Formally-Verified OS Kernel Design Principles Applied to Graph Matching
 **Date**: March 2026
 
 ---

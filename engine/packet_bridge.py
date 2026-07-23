@@ -111,7 +111,9 @@ def extract_payload(packet: TransportPacket) -> dict[str, Any]:
 
     Returns empty dict if payload is absent. Never raises.
     """
-    raw = packet.payload
+    # Typed Any on purpose: the SDK annotates payload as dict[str, Any], but
+    # these guards defend against contract drift across SDK versions.
+    raw: Any = packet.payload
     if raw is None:
         return {}
     if not isinstance(raw, dict):
