@@ -49,29 +49,15 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Check PacketEnvelope Prohibition
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "Manual run: scanning the full repository"
-            python tools/check_packet_envelope_prohibited.py --check .
-            exit 0
-          fi
-
-          mapfile -t changed_python < <(
-            git diff --name-only --diff-filter=ACMR \
-              "${{ github.event.pull_request.base.sha }}" \
-              "${{ github.event.pull_request.head.sha }}" \
-              -- '*.py'
-          )
-
-          if [ "${#changed_python[@]}" -eq 0 ]; then
-            echo "No changed Python files; PacketEnvelope check is not applicable"
-            exit 0
-          fi
-
-          echo "Checking ${#changed_python[@]} changed Python file(s)"
-          python tools/check_packet_envelope_prohibited.py "${changed_python[@]}"
+      # The PacketEnvelope prohibition check moved to the baseline ratchet
+      # (.github/workflows/baseline-ratchet-caller.yml → l9-ci-core
+      # "Baseline Ratchet / Quarantined Debt"). The ratchet performs a
+      # FULL-repository AST scan on every PR — strictly stronger than the
+      # changed-file grep this workflow used to run — and compares every
+      # finding fingerprint against the reviewed ledger at
+      # .l9/baselines/packet-envelope.yml, failing closed on any new,
+      # increased, moved, expired, or unowned reference. The legacy
+      # tools/check_packet_envelope_prohibited.py was deleted.
 
       - name: Check Forbidden Terms
         shell: bash
@@ -122,6 +108,6 @@ jobs:
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # DORA META END
-# LAST_MODIFIED: 2026-07-20T00:00:00-04:00
-# CHANGE_SUMMARY: Enforce terminology on changed Python files without blocking on legacy debt
+# LAST_MODIFIED: 2026-07-23T00:00:00-04:00
+# CHANGE_SUMMARY: PacketEnvelope check moved to the baseline ratchet (full-repo, ledger-governed)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

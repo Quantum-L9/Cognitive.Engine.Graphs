@@ -89,12 +89,16 @@ jobs:
           python tools/check_deprecated_imports.py --check .
           echo "✅ No deprecated DomainSpecLoader usage found"
 
-      - name: Check PacketEnvelope Prohibition
-        run: |
-          echo "Scanning for prohibited PacketEnvelope usage..."
-          echo "PacketEnvelope has been superseded by transportPacket"
-          python tools/check_packet_envelope_prohibited.py --check .
-          echo "✅ No PacketEnvelope violations found"
+      # PacketEnvelope prohibition is governed by the baseline ratchet
+      # (.github/workflows/baseline-ratchet-caller.yml → l9-ci-core
+      # "Baseline Ratchet / Quarantined Debt", fail-closed). The l9-ci-sdk
+      # scanner performs a full-repository AST scan on every PR and compares
+      # each finding fingerprint against the human-reviewed ledger at
+      # .l9/baselines/packet-envelope.yml: new, increased, moved, expired,
+      # or unowned PacketEnvelope debt blocks the PR. The legacy grep-based
+      # tools/check_packet_envelope_prohibited.py was deleted — it was
+      # superseded by the deterministic SDK scanner and was itself the
+      # single largest source of PacketEnvelope string references (11).
 
       - name: Validate YAML Files
         run: |
@@ -216,15 +220,15 @@ jobs:
           # below via gitleaks/gitleaks-action, which scans the actual
           # commit range.
           #
-          # packet-envelope-prohibited is deliberately NOT skipped here.
-          # The 23 pre-existing PacketEnvelope references are real
-          # architectural debt (deprecated model, superseded by
-          # TransportPacket -- see docs/contracts/SHARED_MODELS.md).
-          # Blanket-skipping the hook would hide NEW violations, not just
-          # the known ones. Until the CI baseline-ratchet system lands
-          # (per-finding fingerprint ledger that blocks increases while
-          # tolerating recorded debt), this job stays honestly red on the
-          # migration debt rather than lying green.
+          # packet-envelope-prohibited (the local hook) now delegates to the
+          # l9-ci-sdk baseline scanner + ledger comparison via
+          # tools/packet_envelope_gate.py: the full repository is scanned
+          # and every finding fingerprint must match an unexpired entry in
+          # .l9/baselines/packet-envelope.yml. Known recorded debt is
+          # tolerated; NEW violations block. No blanket skip is needed or
+          # permitted (see docs/contracts/SHARED_MODELS.md and
+          # TRANSPORT_PACKET_SPEC — PacketEnvelope is superseded by
+          # TransportPacket).
           SKIP: gitleaks
 
 # ────────────────────────────────────────────────────────────────────────

@@ -128,17 +128,26 @@ these hooks are enforced regardless of whether a contributor has
   `security` job in `ci.yml`, which uses `gitleaks/gitleaks-action` to scan
   the actual commit range.
 
-`packet-envelope-prohibited` is deliberately **not** skipped. As of this
-writing there are 23 pre-existing references to the deprecated
-`PacketEnvelope` model across `engine/` and `chassis/` (superseded by
-`TransportPacket` from `constellation_node_sdk`, see
-`docs/contracts/SHARED_MODELS.md`). Blanket-skipping the hook would hide
-*new* violations along with the known ones. Until the planned CI
-baseline-ratchet system lands (a per-finding fingerprint ledger that
-blocks increases while tolerating recorded, owned, expiring debt), the
-`precommit` job stays honestly red on this migration debt rather than
-lying green. Run `python tools/check_packet_envelope_prohibited.py
---check .` locally to see the current list.
+`packet-envelope-prohibited` is deliberately **not** skipped — and it is
+now **baseline-ratchet governed**. The hook (`tools/packet_envelope_gate.py`)
+provisions the pinned `l9-ci-sdk` revision and runs its deterministic
+full-repository AST scanner, then compares every finding fingerprint
+against the human-reviewed debt ledger at
+`.l9/baselines/packet-envelope.yml`. Pre-existing references to the
+deprecated `PacketEnvelope` model (superseded by `TransportPacket`, see
+`docs/contracts/SHARED_MODELS.md`) are recorded there — each with an
+owner, a tracking issue, an expiry date, and the machine-evaluable removal
+condition "migrated to TransportPacket". Known recorded debt is tolerated
+until expiry; any **new, increased, moved, expired, or unowned** reference
+blocks the commit. The same scanner + ledger comparison runs in CI as the
+blocking check `Baseline Ratchet / Quarantined Debt`
+(`.github/workflows/baseline-ratchet-caller.yml` → the reusable
+`l9-ci-core` baseline-ratchet workflow), so local hooks and CI can never
+disagree. The ledger is CODEOWNERS-protected and is **never** written by
+CI — only humans change it, in reviewed PRs. The legacy grep-based
+`tools/check_packet_envelope_prohibited.py` was deleted (superseded by the
+SDK scanner). Run `pre-commit run packet-envelope-prohibited --all-files`
+locally to see the current verdict.
 
 **Pre-existing pytest-unit exclusions** (`--ignore=...` in the hook's
 `entry:`) — `test_gates_all_types.py`, `test_scoring.py`, `test_config.py`,
