@@ -1,4 +1,11 @@
-"""Unit tests — ScoringAssembler: scoring types, weight override, aggregation."""
+"""Unit tests — ScoringAssembler: clause assembly, weight overrides.
+
+Real API (engine/scoring/assembler.py):
+    ScoringAssembler(domain_spec, graph_driver=None)
+        .assemble_scoring_clause(match_direction: str, weights: dict[str, float],
+                                 pareto_candidates=None)
+        -> tuple[str, dict | None]   # (Cypher WITH clause, pareto metadata)
+"""
 
 from __future__ import annotations
 
@@ -17,56 +24,46 @@ def plasticos_spec():
         pytest.skip("plasticos domain spec not loadable with current schema")
 
 
+def _default_weights(spec) -> dict[str, float]:
+    """Build the default weight map from the spec's scoring dimensions."""
+    return {dim.weightkey: dim.defaultweight for dim in spec.scoring.dimensions}
+
+
 def test_assembler_loads_from_plasticos_spec(plasticos_spec):
-    """Scoring assembler produces non-empty clause."""
+    """Assembler constructs from the plasticos spec and produces a clause."""
     from engine.scoring.assembler import ScoringAssembler
 
     assembler = ScoringAssembler(plasticos_spec)
-    clause = assembler.assemble_scoring_clause(direction="*")
+    clause, _meta = assembler.assemble_scoring_clause("intake_to_buyer", _default_weights(plasticos_spec))
     assert isinstance(clause, str)
     assert len(clause) > 0
 
 
-def test_empty_dims_returns_default_score():
-    """With no scoring dimensions, assembler should return a safe default."""
-    from engine.config.schema import DomainSpec
-    from engine.scoring.assembler import ScoringAssembler
-
-    raw = {
-        "domain": {"id": "test", "name": "Test", "version": "0.0.1"},
-        "ontology": {"nodes": [], "edges": []},
-        "matchentities": {"candidate": [], "queryentity": []},
-        "queryschema": {"matchdirections": ["*"], "fields": []},
-        "traversal": {"steps": []},
-        "gates": [],
-        "scoring": {"dimensions": []},
-    }
-    try:
-        spec = DomainSpec(**raw)
-        assembler = ScoringAssembler(spec)
-        result = assembler.assemble_scoring_clause(direction="*")
-        assert isinstance(result, str)
-    except Exception:
-        pytest.skip("Minimal spec construction differs in this version")
-
-
 def test_scoring_clause_contains_composite_score(plasticos_spec):
-    """Scoring clause contains score expression."""
+    """Scoring clause contains the composite score expression."""
     from engine.scoring.assembler import ScoringAssembler
 
     assembler = ScoringAssembler(plasticos_spec)
-    clause = assembler.assemble_scoring_clause(direction="*")
-    assert "score" in clause.lower() or "AS" in clause
+    clause, _meta = assembler.assemble_scoring_clause("intake_to_buyer", _default_weights(plasticos_spec))
+    assert "score" in clause.lower()
+    assert "AS" in clause
 
 
 def test_weight_override_changes_output(plasticos_spec):
-    """Weight override changes scoring output."""
+    """Overriding a dimension weight changes the generated clause."""
     from engine.scoring.assembler import ScoringAssembler
 
     assembler = ScoringAssembler(plasticos_spec)
     if not plasticos_spec.scoring.dimensions:
         pytest.skip("No scoring dimensions in plasticos spec")
-    dim_name = plasticos_spec.scoring.dimensions[0].name
-    base = assembler.assemble_scoring_clause(direction="*")
-    override = assembler.assemble_scoring_clause(direction="*", weights={dim_name: 0.9999})
-    assert isinstance(override, str)
+
+    base_weights = _default_weights(plasticos_spec)
+    base_clause, _ = assembler.assemble_scoring_clause("intake_to_buyer", base_weights)
+
+    override_weights = dict(base_weights)
+    first_key = plasticos_spec.scoring.dimensions[0].weightkey
+    override_weights[first_key] = 0.9999
+    override_clause, _ = assembler.assemble_scoring_clause("intake_to_buyer", override_weights)
+
+    assert isinstance(override_clause, str)
+    assert override_clause != base_clause

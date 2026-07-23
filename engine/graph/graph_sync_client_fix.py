@@ -1,4 +1,14 @@
 """
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [graph]
+tags: [sync, client]
+owner: engine-team
+status: active
+--- /L9_META ---
+
 GAP-1 FIX: Replace the hand-built dict in GraphSyncClient with a canonical
 PacketEnvelope.  Eliminates the silent bypass of content_hash, envelope_hash,
 PacketLineage, and TenantContext.
@@ -6,14 +16,16 @@ PacketLineage, and TenantContext.
 Usage: Drop this over GraphSyncClient in graph/sync/client.py and update
 the import at the call site.
 """
+
 from __future__ import annotations
+
 import logging
 from typing import Any
 
 from engine.contract_enforcement import (
+    ContractViolationError,
     build_graph_sync_packet,
     enforce_packet_envelope,
-    ContractViolationError,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,8 +61,8 @@ class GraphSyncClient:
             tenant_id=self._tenant_id,
             entity_type=entity_type,
             batch=batch,
-            tenant_tier=self._tenant_tier,
-            correlation_id=correlation_id,
+            tenant_context={"tenant_id": self._tenant_id, "tenant_tier": self._tenant_tier},
+            lineage={"correlation_id": correlation_id} if correlation_id else None,
         )
         # Enforce immediately — hard fail on violation
         return enforce_packet_envelope(packet, expected_type="graph_sync")
@@ -71,7 +83,7 @@ class GraphSyncClient:
         envelope = self._build_envelope(entity_type, batch, correlation_id)
 
         try:
-            result = await self._driver.execute_write(
+            await self._driver.execute_write(
                 _write_batch_tx,
                 entity_type=entity_type,
                 batch=envelope["content"]["batch"],
@@ -80,16 +92,17 @@ class GraphSyncClient:
             )
             logger.info(
                 "GraphSyncClient: synced %d %s entities tenant=%s packet_id=%s",
-                len(batch), entity_type, self._tenant_id, envelope["packet_id"],
+                len(batch),
+                entity_type,
+                self._tenant_id,
+                envelope["packet_id"],
             )
             return {"status": "ok", "synced": len(batch), "packet_id": envelope["packet_id"]}
 
         except ContractViolationError:
             raise
-        except Exception as exc:
-            logger.exception(
-                "GraphSyncClient: write failed for packet_id=%s", envelope.get("packet_id")
-            )
+        except Exception:
+            logger.exception("GraphSyncClient: write failed for packet_id=%s", envelope.get("packet_id"))
             raise
 
 

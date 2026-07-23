@@ -76,23 +76,48 @@ jobs:
           fi
 
       - name: Check Markdown Links
+        shell: bash
         run: |
-          find readme/ docs/ -name "*.md" -type f | while read file; do
-            echo "Checking links in: $file"
-            # Basic link validation (no broken internal links)
-            grep -oP '\[.*?\]\(\K[^)]+' "$file" | while read link; do
-              if [[ "$link" =~ ^\./ ]] || [[ "$link" =~ ^/ ]]; then
-                target="${link./}"
-                if [ ! -f "$target" ] && [ ! -d "$target" ]; then
-                  echo "❌ Broken link in $file: $link"
-                  exit 1
-                fi
-              fi
-            done
+          roots=()
+          for root in readme docs; do
+            [ -d "$root" ] && roots+=("$root")
           done
+
+          if [ "${#roots[@]}" -eq 0 ]; then
+            echo "No documentation directories found; skipping link validation"
+            exit 0
+          fi
+
+          failures=0
+          while IFS= read -r -d '' file; do
+            echo "Checking links in: $file"
+            while IFS= read -r link; do
+              clean_link="${link%%#*}"
+              clean_link="${clean_link%%\?*}"
+              clean_link="${clean_link#<}"
+              clean_link="${clean_link%>}"
+
+              case "$clean_link" in
+                ""|http://*|https://*|mailto:*|tel:*) continue ;;
+                /*) target=".${clean_link}" ;;
+                *) target="$(dirname "$file")/${clean_link#./}" ;;
+              esac
+
+              if [ ! -f "$target" ] && [ ! -d "$target" ]; then
+                echo "❌ Broken link in $file: $link (resolved: $target)"
+                failures=$((failures + 1))
+              fi
+            done < <(grep -oP '\[[^]]+\]\(\K[^) ]+' "$file" || true)
+          done < <(find "${roots[@]}" -name "*.md" -type f -print0)
+
+          if [ "$failures" -gt 0 ]; then
+            echo "❌ Broken internal links found: $failures"
+            exit 1
+          fi
+          echo "✅ Markdown links are valid"
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # DORA META END
-# LAST_MODIFIED: 2026-02-15T21:34:00-04:00
-# CHANGE_SUMMARY: Script existence check, action version fixes
+# LAST_MODIFIED: 2026-07-20T00:00:00-04:00
+# CHANGE_SUMMARY: Correct relative-link resolution and aggregate all broken links
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

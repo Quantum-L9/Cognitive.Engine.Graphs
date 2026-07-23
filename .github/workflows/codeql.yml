@@ -22,10 +22,10 @@ name: "CodeQL Analysis"
 on:
   push:
     branches:
-      - ${{ vars.PRIMARY_BRANCH || 'main' }}
+      - main
   pull_request:
     branches:
-      - ${{ vars.PRIMARY_BRANCH || 'main' }}
+      - main
   schedule:
     - cron: '0 6 * * 1' # Weekly on Monday at 6 AM UTC
 

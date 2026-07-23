@@ -122,6 +122,79 @@ class GraphDriver:
 
         Raises CircuitOpenError (maps to 503) if breaker is OPEN.
         """
+        return await self._circuit_breaker.call(self._raw_execute_query, cypher, parameters, database)
+
+    async def _raw_execute_write(
+        self,
+        transaction_function: Any = None,
+        *args: Any,
+        cypher: str | None = None,
+        parameters: dict[str, Any] | None = None,
+        database: str = "neo4j",
+        **kwargs: Any,
+    ) -> dict[str, Any] | Any:
+        """Execute a write without circuit breaker (internal).
+
+        Supports two calling conventions:
+        - ``cypher=...`` keyword form: runs the statement in a managed write
+          transaction and returns a summary dict with Neo4j counters
+          (``nodes_created``, ``relationships_created``, ...) plus
+          ``records`` and ``status``.
+        - callable form: delegates to the session's managed
+          ``execute_write(transaction_function, *args, **kwargs)`` and
+          returns whatever the transaction function returns.
+        """
+        driver = self.get_driver()
+
+        if transaction_function is not None and cypher is not None:
+            raise ValueError("Pass either a transaction function or cypher=, not both")
+        if transaction_function is None and cypher is None:
+            raise ValueError("execute_write requires a transaction function or cypher=")
+
+        async with driver.session(database=database) as session:
+            if transaction_function is not None:
+                return await session.execute_write(transaction_function, *args, **kwargs)
+
+            async def _run_statement(tx: Any) -> dict[str, Any]:
+                result = await tx.run(cypher, parameters or {})
+                records: list[Any] = await result.data()
+                summary = await result.consume()
+                counters = summary.counters
+                return {
+                    "status": "ok",
+                    "records": records,
+                    "nodes_created": counters.nodes_created,
+                    "nodes_deleted": counters.nodes_deleted,
+                    "relationships_created": counters.relationships_created,
+                    "relationships_deleted": counters.relationships_deleted,
+                    "properties_set": counters.properties_set,
+                    "labels_added": counters.labels_added,
+                }
+
+            return await session.execute_write(_run_statement)
+
+    async def execute_write(
+        self,
+        transaction_function: Any = None,
+        *args: Any,
+        cypher: str | None = None,
+        parameters: dict[str, Any] | None = None,
+        database: str = "neo4j",
+        **kwargs: Any,
+    ) -> dict[str, Any] | Any:
+        """Execute a write with W4-02 circuit breaker protection.
+
+        Mirrors :meth:`execute_query` semantics for writes. Accepts either a
+        managed transaction function (neo4j-driver style) or a
+        ``cypher=``/``parameters=`` keyword form returning a counters summary
+        dict. Raises CircuitOpenError (maps to 503) if breaker is OPEN.
+        """
         return await self._circuit_breaker.call(
-            self._raw_execute_query, cypher, parameters, database
+            self._raw_execute_write,
+            transaction_function,
+            *args,
+            cypher=cypher,
+            parameters=parameters,
+            database=database,
+            **kwargs,
         )

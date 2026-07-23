@@ -1,6 +1,7 @@
 """
 Tests for GAP-2: graph_return_channel.py
 """
+
 from __future__ import annotations
 
 import pytest
@@ -36,7 +37,7 @@ async def test_submit_and_drain() -> None:
     channel = GraphToEnrichReturnChannel.get_instance()
     count = await channel.submit(envelope)
     assert count == 1
-    targets = await channel.drain("acme", timeout=0.1)
+    targets = await channel.drain("acme", timeout_seconds=0.1)
     assert len(targets) == 1
     assert targets[0].field_name == "facility_tier"
     assert targets[0].source_confidence == 0.88
@@ -46,9 +47,7 @@ async def test_submit_and_drain() -> None:
 async def test_low_confidence_filtered() -> None:
     envelope = build_graph_inference_result_envelope(
         tenant_id="acme",
-        inference_outputs=[
-            {"entity_id": "e1", "field": "x", "value": "v", "confidence": 0.30, "rule": "r1"}
-        ],
+        inference_outputs=[{"entity_id": "e1", "field": "x", "value": "v", "confidence": 0.30, "rule": "r1"}],
     )
     channel = GraphToEnrichReturnChannel.get_instance()
     count = await channel.submit(envelope)
@@ -59,12 +58,11 @@ async def test_low_confidence_filtered() -> None:
 async def test_tampered_envelope_rejected() -> None:
     envelope = build_graph_inference_result_envelope(
         tenant_id="acme",
-        inference_outputs=[
-            {"entity_id": "e1", "field": "x", "value": "v", "confidence": 0.9, "rule": "r"}
-        ],
+        inference_outputs=[{"entity_id": "e1", "field": "x", "value": "v", "confidence": 0.9, "rule": "r"}],
     )
     # Tamper with content after hashes are set
     import dataclasses
+
     tampered = dataclasses.replace(
         envelope,
         inference_outputs=[{"entity_id": "e_TAMPERED"}],

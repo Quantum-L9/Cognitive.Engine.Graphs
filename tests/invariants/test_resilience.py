@@ -3,6 +3,10 @@ Invariant regression tests — Resilience defects (T6-xx findings).
 
 Verifies that fixes for globals, caching, and operational resilience
 from Waves 1-4 remain in place.
+
+W4-01 note: module-level globals in engine/handlers.py were replaced by
+the EngineState singleton (engine/state.py). These tests assert against
+EngineState rather than the removed module globals.
 """
 
 from __future__ import annotations
@@ -14,18 +18,43 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
+# threading.Lock is a factory function, not a type — use the concrete
+# lock type for isinstance checks (Python 3.12: isinstance() requires a type).
+_LOCK_TYPE = type(threading.Lock())
+
+
+@pytest.fixture
+def clean_state():
+    """Provide a snapshot/restore of the EngineState singleton around a test."""
+    from engine.state import get_state
+
+    state = get_state()
+    snapshot = (
+        state._graph_driver,
+        state._domain_loader,
+        state._tenant_allowlist,
+        state._initialized,
+    )
+    yield state
+    (
+        state._graph_driver,
+        state._domain_loader,
+        state._tenant_allowlist,
+        state._initialized,
+    ) = snapshot
+
 
 @pytest.mark.finding("T6-01")
 class TestT601DomainLoaderCache:
     """T6-01: DomainPackLoader cache must have thread-safety and TTL."""
 
     def test_loader_has_lock(self):
-        """Cache operations are protected by a threading.Lock."""
+        """Cache operations are protected by a threading lock."""
         from engine.config.loader import DomainPackLoader
 
         loader = DomainPackLoader(config_path=str(ROOT / "domains"))
         assert hasattr(loader, "_lock"), "DomainPackLoader missing _lock attribute"
-        assert isinstance(loader._lock, (threading.Lock, type(threading.Lock())))
+        assert isinstance(loader._lock, _LOCK_TYPE)
 
     def test_loader_has_ttl(self):
         """Cache has a TTL-based invalidation policy."""
@@ -59,65 +88,44 @@ class TestT602Neo4jResilience:
 
 @pytest.mark.finding("T6-03")
 class TestT603ModuleGlobalState:
-    """T6-03: Module globals in handlers must be settable via init_dependencies."""
+    """T6-03: Shared state must be settable via init_dependencies (EngineState)."""
 
-    def test_init_dependencies_sets_globals(self):
-        """init_dependencies() must set _graph_driver and _domain_loader."""
+    def test_init_dependencies_sets_state(self, clean_state):
+        """init_dependencies() must populate EngineState driver and loader."""
         import engine.handlers as h
 
+        state = clean_state
         mock_driver = object()
         mock_loader = object()
 
-        original_driver = h._graph_driver
-        original_loader = h._domain_loader
-        original_allowlist = h._tenant_allowlist
+        h.init_dependencies(mock_driver, mock_loader)
+        assert state._graph_driver is mock_driver
+        assert state._domain_loader is mock_loader
 
-        try:
-            h.init_dependencies(mock_driver, mock_loader)
-            assert h._graph_driver is mock_driver
-            assert h._domain_loader is mock_loader
-        finally:
-            h._graph_driver = original_driver
-            h._domain_loader = original_loader
-            h._tenant_allowlist = original_allowlist
-
-    def test_require_deps_raises_if_not_initialized(self):
+    def test_require_deps_raises_if_not_initialized(self, clean_state):
         """_require_deps raises RuntimeError before init_dependencies."""
         import engine.handlers as h
 
-        original_driver = h._graph_driver
-        original_loader = h._domain_loader
-
-        try:
-            h._graph_driver = None
-            h._domain_loader = None
-            with pytest.raises(RuntimeError, match="Dependencies not initialized"):
-                h._require_deps()
-        finally:
-            h._graph_driver = original_driver
-            h._domain_loader = original_loader
+        state = clean_state
+        state._graph_driver = None
+        state._domain_loader = None
+        state._initialized = False
+        with pytest.raises(RuntimeError, match="Dependencies not initialized"):
+            h._require_deps()
 
 
 @pytest.mark.finding("T6-05")
 class TestT605ChassisInitRace:
     """T6-05: Chassis init should not have unprotected race conditions."""
 
-    def test_handlers_init_dependencies_is_idempotent(self):
+    def test_handlers_init_dependencies_is_idempotent(self, clean_state):
         """Calling init_dependencies twice should not corrupt state."""
         import engine.handlers as h
 
-        original_driver = h._graph_driver
-        original_loader = h._domain_loader
-        original_allowlist = h._tenant_allowlist
-
-        try:
-            mock1 = object()
-            mock2 = object()
-            h.init_dependencies(mock1, mock1)
-            h.init_dependencies(mock2, mock2)
-            assert h._graph_driver is mock2
-            assert h._domain_loader is mock2
-        finally:
-            h._graph_driver = original_driver
-            h._domain_loader = original_loader
-            h._tenant_allowlist = original_allowlist
+        state = clean_state
+        mock1 = object()
+        mock2 = object()
+        h.init_dependencies(mock1, mock1)
+        h.init_dependencies(mock2, mock2)
+        assert state._graph_driver is mock2
+        assert state._domain_loader is mock2
