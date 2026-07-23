@@ -34,9 +34,7 @@ def test_assembler_loads_from_plasticos_spec(plasticos_spec):
     from engine.scoring.assembler import ScoringAssembler
 
     assembler = ScoringAssembler(plasticos_spec)
-    clause, _meta = assembler.assemble_scoring_clause(
-        "intake_to_buyer", _default_weights(plasticos_spec)
-    )
+    clause, _meta = assembler.assemble_scoring_clause("intake_to_buyer", _default_weights(plasticos_spec))
     assert isinstance(clause, str)
     assert len(clause) > 0
 
@@ -46,9 +44,7 @@ def test_scoring_clause_contains_composite_score(plasticos_spec):
     from engine.scoring.assembler import ScoringAssembler
 
     assembler = ScoringAssembler(plasticos_spec)
-    clause, _meta = assembler.assemble_scoring_clause(
-        "intake_to_buyer", _default_weights(plasticos_spec)
-    )
+    clause, _meta = assembler.assemble_scoring_clause("intake_to_buyer", _default_weights(plasticos_spec))
     assert "score" in clause.lower()
     assert "AS" in clause
 
@@ -67,9 +63,7 @@ def test_weight_override_changes_output(plasticos_spec):
     override_weights = dict(base_weights)
     first_key = plasticos_spec.scoring.dimensions[0].weightkey
     override_weights[first_key] = 0.9999
-    override_clause, _ = assembler.assemble_scoring_clause(
-        "intake_to_buyer", override_weights
-    )
+    override_clause, _ = assembler.assemble_scoring_clause("intake_to_buyer", override_weights)
 
     assert isinstance(override_clause, str)
     assert override_clause != base_clause

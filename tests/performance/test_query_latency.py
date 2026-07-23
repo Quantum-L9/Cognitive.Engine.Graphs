@@ -118,17 +118,11 @@ class TestMatchQueryLatency:
         where_clause = gate_compiler.compile_all_gates(direction)
         traversal_clauses = traversal_assembler.assemble_traversal(direction)
         weights = {d.weightkey: d.defaultweight for d in domain_spec.scoring.dimensions}
-        scoring_clause, _pareto_meta = scoring_assembler.assemble_scoring_clause(
-            direction, weights
-        )
+        scoring_clause, _pareto_meta = scoring_assembler.assemble_scoring_clause(direction, weights)
 
         # Build the full Cypher query. The traversal step already introduces
         # `candidate`, so anchor the tenant filter in the WHERE clause.
-        traversal_block = (
-            "\n".join(traversal_clauses)
-            if traversal_clauses
-            else "MATCH (candidate:Facility)"
-        )
+        traversal_block = "\n".join(traversal_clauses) if traversal_clauses else "MATCH (candidate:Facility)"
         cypher = f"""
         {traversal_block}
         WHERE candidate.tenant = $tenant AND {where_clause}
@@ -141,9 +135,7 @@ class TestMatchQueryLatency:
         query_params = _full_match_params(domain_spec, tenant)
 
         # Warmup
-        results = await graph_driver.execute_query(
-            cypher, parameters=query_params, database=db
-        )
+        results = await graph_driver.execute_query(cypher, parameters=query_params, database=db)
         assert results, "Seeded facilities should pass the strict gate chain"
 
         # Benchmark: 50 iterations
