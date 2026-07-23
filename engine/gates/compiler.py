@@ -279,14 +279,19 @@ class GateCompiler:
         """
         edge_type = sanitize_label(gate.edgetype) if gate.edgetype else "EXCLUDED_FROM"
         target_prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "entity_id"
+        # edge_type and target_prop are sanitized via sanitize_label() above;
+        # values only ever flow through $ parameters.
+        exclusion_edge = "(candidate)-[:" + edge_type + "]->"
         if gate.queryparam:
             return (
-                "NOT EXISTS { "
-                f"MATCH (candidate)-[:{edge_type}]->(excluded) "
-                f"WHERE excluded.{target_prop} = ${gate.queryparam} "
-                "}"
+                "NOT EXISTS { MATCH "
+                + exclusion_edge
+                + "(excluded) WHERE excluded."
+                + target_prop
+                + f" = ${gate.queryparam} "
+                + "}"
             )
-        return f"NOT EXISTS {{ MATCH (candidate)-[:{edge_type}]->() }}"
+        return "NOT EXISTS { MATCH " + exclusion_edge + "() }"
 
     def _compile_composite(self, gate: GateSpec) -> str:
         """
