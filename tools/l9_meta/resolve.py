@@ -1,4 +1,14 @@
-"""Resolve a repo-relative path to the `MetaRecord` it should carry.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [meta]
+tags: [governance, portability]
+status: active
+--- /L9_META ---
+
+Resolve a repo-relative path to the `MetaRecord` it should carry.
 
 Precedence, most specific last: `defaults` -> `rules` (last match wins) ->
 `overrides[exact path]`. Rules express intent for a directory; overrides handle

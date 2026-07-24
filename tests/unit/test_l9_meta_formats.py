@@ -1,4 +1,14 @@
-"""Golden fixtures for the L9_META format layer (Phase 0 gate).
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [platform]
+status: active
+--- /L9_META ---
+
+Golden fixtures for the L9_META format layer (Phase 0 gate).
 
 Every format must satisfy two properties:
 
@@ -179,6 +189,69 @@ def test_legacy_header_is_parseable() -> None:
     assert parsed is not None
     assert parsed.schema == 1
     assert parsed.layer == ("security",)
+
+
+# --- Self-documentation must not be read as a header --------------------------
+
+INDENTED_EXAMPLE_PY = '''"""Explains the format.
+
+Canonical form:
+
+    --- L9_META ---
+    l9_schema: 2
+    --- /L9_META ---
+"""
+
+import re
+'''
+
+INDENTED_EXAMPLE_YAML = """# Explains the format:
+#
+#     # --- L9_META ---
+#     # l9_schema: 2
+#     # --- /L9_META ---
+key: value
+"""
+
+FIXTURE_DEEP_IN_FILE = '''"""Real docstring, no header."""
+
+SAMPLE = """
+# --- L9_META ---
+# l9_schema: 2
+# --- /L9_META ---
+"""
+'''
+
+
+@pytest.mark.parametrize(
+    ("fmt", "source"),
+    [(docstring, INDENTED_EXAMPLE_PY), (comment, INDENTED_EXAMPLE_YAML)],
+)
+def test_indented_example_is_not_a_header(fmt, source: str) -> None:
+    """An indented delimiter documents the format; it is not a header.
+
+    The block is always emitted flush-left, so indentation is the signal. Both
+    formatter modules carry such an example in their own docstring and were
+    reporting themselves as malformed.
+    """
+    assert fmt.parse(source) is None
+    assert fmt.strip(source) == source, "documentation must survive untouched"
+
+
+def test_delimiter_inside_a_string_literal_is_not_a_header() -> None:
+    """A header lives in the file's leading comment region, not anywhere in it.
+
+    An unbounded scan reads a fixture string 100 lines down as the header, then
+    reports it malformed because the surrounding code has no field lines.
+    """
+    assert docstring.parse(FIXTURE_DEEP_IN_FILE) is None
+
+
+def test_this_test_module_is_not_self_detected() -> None:
+    """The fixtures above are real L9_META text at column 0 in this very file."""
+    source = Path(__file__).read_text(encoding="utf-8")
+    parsed = docstring.parse(source)
+    assert parsed is None or parsed.schema == SCHEMA_VERSION
 
 
 # --- Python statement-order and formatting regressions ------------------------

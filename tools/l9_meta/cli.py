@@ -1,4 +1,14 @@
-"""`l9-meta` command line: check | apply | sync | report | init.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [meta]
+tags: [governance, portability]
+status: active
+--- /L9_META ---
+
+`l9-meta` command line: check | apply | sync | report | init.
 
 `check` is the point of the whole pipeline. Before it existed, L9_META was
 write-only metadata that nothing ever read, so nothing stopped it from drifting.

@@ -1,4 +1,14 @@
-"""Docstring-style L9_META blocks for Python modules.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [meta]
+tags: [governance, portability]
+status: active
+--- /L9_META ---
+
+Docstring-style L9_META blocks for Python modules.
 
 Canonical form — first lines of the module docstring:
 
@@ -30,8 +40,11 @@ from tools.l9_meta.model import (
 OPEN = "--- L9_META ---"
 CLOSE = "--- /L9_META ---"
 
-RE_OPEN = re.compile(r"^[ \t]*---[ \t]*L9_META[ \t]*---[ \t]*$")
-RE_CLOSE = re.compile(r"^[ \t]*---[ \t]*/L9_META[ \t]*---[ \t]*$")
+# Anchored at column 0 — the block is emitted flush-left inside the docstring, so
+# an indented delimiter is an example showing the format. This module's own
+# docstring contains such an example and was parsing as a malformed header.
+RE_OPEN = re.compile(r"^---[ \t]*L9_META[ \t]*---[ \t]*$")
+RE_CLOSE = re.compile(r"^---[ \t]*/L9_META[ \t]*---[ \t]*$")
 
 RE_SHEBANG = re.compile(r"^#![^\n]*\n")
 RE_DOCSTRING = re.compile(r'^(?P<quote>"""|\'\'\')(?P<body>.*?)(?P=quote)', re.DOTALL)

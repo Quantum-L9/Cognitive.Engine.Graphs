@@ -1,3 +1,11 @@
+# --- L9_META ---
+# l9_schema: 2
+# origin: l9-template
+# engine: graph
+# layer: [meta]
+# tags: [governance, portability]
+# status: active
+# --- /L9_META ---
 # L9_META source of truth for this repository.
 #
 # Resolution, most specific last:
@@ -308,6 +316,11 @@ rules:
     origin: l9-template
     layer: [scripts, infra]
     tags: [delivery, portability]
+  # The meta pipeline stamps itself. Portable across repos, hence l9-template.
+  - path: "tools/l9_meta/"
+    origin: l9-template
+    layer: [meta]
+    tags: [governance, portability]
 
   # Filename globs, evaluated after every directory rule so they win. A test's
   # family is the surface it exercises, which its directory cannot express:
@@ -664,6 +677,11 @@ overrides:
   graph-cognitive-engine-spec-v1.1.0.yaml:
     layer: [config]
     tags: [ingestion, domain-spec]
+  # This file is the source of truth for every other header, including its own.
+  l9-meta.yaml:
+    layer: [meta]
+    origin: l9-template
+    tags: [governance, portability]
   pyproject.toml:
     layer: [ci, config]
     tags: [delivery]

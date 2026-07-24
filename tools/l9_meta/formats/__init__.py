@@ -1,4 +1,15 @@
-"""Format dispatch: path -> the module that knows how to read and write its header."""
+"""
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [meta]
+tags: [governance, portability]
+status: active
+--- /L9_META ---
+
+Format dispatch: path -> the module that knows how to read and write its header.
+"""
 
 from __future__ import annotations
 

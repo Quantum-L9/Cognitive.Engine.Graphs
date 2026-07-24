@@ -1,4 +1,14 @@
-"""Derive `l9-meta.yaml` from evidence already in the repo.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [meta]
+tags: [governance, portability]
+status: active
+--- /L9_META ---
+
+Derive `l9-meta.yaml` from evidence already in the repo.
 
 Two evidence sources, in priority order:
 

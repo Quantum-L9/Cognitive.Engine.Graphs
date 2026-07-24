@@ -1,4 +1,14 @@
-"""Config-driven L9_META header pipeline (Contract C-018).
+"""
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [meta]
+tags: [governance, portability]
+status: active
+--- /L9_META ---
+
+Config-driven L9_META header pipeline (Contract C-018).
 
 Public surface:
 

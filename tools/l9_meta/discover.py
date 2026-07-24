@@ -1,4 +1,14 @@
-"""Enumerate the files the pipeline is allowed to touch.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [meta]
+tags: [governance, portability]
+status: active
+--- /L9_META ---
+
+Enumerate the files the pipeline is allowed to touch.
 
 Enumeration goes through `git ls-files -z`. Null termination is required, not
 cosmetic: 14 tracked paths contain spaces (`docs/ACTION ITEMS.MD`,

@@ -1,4 +1,14 @@
-"""JSON L9_META via a leading `_l9_meta` object key.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [meta]
+tags: [governance, portability]
+status: active
+--- /L9_META ---
+
+JSON L9_META via a leading `_l9_meta` object key.
 
 Arrays cannot carry the key without changing their shape, so array documents are
 left untouched and report as unsupported.

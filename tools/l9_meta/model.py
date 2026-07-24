@@ -1,4 +1,15 @@
-"""L9_META record model — schema v2 (owner dropped, see contracts/contract_18.yaml)."""
+"""
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [meta]
+tags: [governance, portability]
+status: active
+--- /L9_META ---
+
+L9_META record model — schema v2 (owner dropped, see contracts/contract_18.yaml).
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,14 @@
-"""TOML L9_META via a trailing `[tool.l9_meta]` table.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [meta]
+tags: [governance, portability]
+status: active
+--- /L9_META ---
+
+TOML L9_META via a trailing `[tool.l9_meta]` table.
 
 TOML tables cannot precede the document body without reparenting every
 subsequent key, so the table is appended at the end of the file.

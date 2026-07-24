@@ -1,4 +1,14 @@
-"""Render `l9-meta.yaml`.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [meta]
+tags: [governance, portability]
+status: active
+--- /L9_META ---
+
+Render `l9-meta.yaml`.
 
 Hand-rendered rather than `yaml.safe_dump`ed: this file is meant to be read and
 edited by humans, so section comments and flow-style lists matter more than

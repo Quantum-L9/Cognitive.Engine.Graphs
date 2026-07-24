@@ -1,4 +1,14 @@
-"""Comment-style L9_META blocks: YAML, shell, Makefile, Dockerfile, CODEOWNERS.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [meta]
+tags: [governance, portability]
+status: active
+--- /L9_META ---
+
+Comment-style L9_META blocks: YAML, shell, Makefile, Dockerfile, CODEOWNERS.
 
 Canonical form:
 
@@ -26,8 +36,11 @@ PREFIX = "#"
 OPEN = "# --- L9_META ---"
 CLOSE = "# --- /L9_META ---"
 
-RE_OPEN = re.compile(r"^[ \t]*#[ \t]*---[ \t]*L9_META[ \t]*---[ \t]*$")
-RE_CLOSE = re.compile(r"^[ \t]*#[ \t]*---[ \t]*/L9_META[ \t]*---[ \t]*$")
+# Anchored at column 0: the canonical block is always emitted flush-left, so an
+# indented delimiter is documentation showing the format, not a header. Allowing
+# leading whitespace made this module's own docstring parse as a malformed header.
+RE_OPEN = re.compile(r"^#[ \t]*---[ \t]*L9_META[ \t]*---[ \t]*$")
+RE_CLOSE = re.compile(r"^#[ \t]*---[ \t]*/L9_META[ \t]*---[ \t]*$")
 
 # Legacy bare form: `# L9_META` with no `---` delimiters, optionally wrapped in
 # `# =====` banner lines and sometimes lacking a `# /L9_META` close sentinel.
@@ -56,9 +69,25 @@ def _uncomment(line: str) -> str:
     return stripped
 
 
+def _head_limit(lines: list[str]) -> int:
+    """Index of the first line that is neither a comment, a shebang, nor blank.
+
+    A header lives in the file's leading comment region. Without this bound the
+    finders scan the whole file, so a `# --- L9_META ---` inside a test fixture
+    string or a fenced doc example is read as that file's header — which then
+    reports as malformed because the surrounding prose has no field lines.
+    """
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            return i
+    return len(lines)
+
+
 def _find_canonical(lines: list[str]) -> tuple[int, int] | None:
     """Return (start, end_exclusive) of the first canonical block."""
-    for i, line in enumerate(lines):
+    limit = _head_limit(lines)
+    for i, line in enumerate(lines[:limit]):
         if RE_OPEN.match(line):
             for j in range(i + 1, len(lines)):
                 if RE_CLOSE.match(lines[j]):
@@ -75,7 +104,8 @@ def _find_legacy(lines: list[str]) -> tuple[int, int] | None:
     sentinel line. Scanning stops at the first line that is none of those, so a
     block without a close sentinel still terminates correctly.
     """
-    for i, line in enumerate(lines):
+    limit = _head_limit(lines)
+    for i, line in enumerate(lines[:limit]):
         if not RE_LEGACY_OPEN.match(line):
             continue
         start = i - 1 if i > 0 and RE_BANNER.match(lines[i - 1]) else i

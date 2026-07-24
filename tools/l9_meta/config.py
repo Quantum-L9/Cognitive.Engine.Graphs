@@ -1,4 +1,14 @@
-"""Load `l9-meta.yaml`, the per-repo source of truth for header values.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [meta]
+tags: [governance, portability]
+status: active
+--- /L9_META ---
+
+Load `l9-meta.yaml`, the per-repo source of truth for header values.
 
 The config replaces the hardcoded `FILE_REGISTRY` that used to live in
 `tools/l9_meta_injector.py`. That registry drifted: it named 10 paths that no
