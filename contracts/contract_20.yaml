@@ -10,6 +10,8 @@ preconditions:
 postconditions:
 - CompoundE3D 256-dim
 - Domain-specific, never cross-tenant
+docs:
+- docs/contracts/KGE_EMBEDDINGS.md
 verification:
   scanner_rules: []
-  test: tests/unit/
+  test: tests/contracts/test_contracts.py::TestContract20KGEEmbeddings

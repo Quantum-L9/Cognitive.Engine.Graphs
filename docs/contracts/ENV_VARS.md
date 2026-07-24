@@ -76,3 +76,13 @@ API_KEY=...                # WRONG → L9_API_KEY_HASH (hash, not plaintext)
 ```
 
 ```
+
+## Scope (CONTRACT-05)
+
+`.env.template` is the single infrastructure file the engine may extend. Adding an
+engine-specific variable here is in scope; changing Docker, CI, or IaC to consume it is
+not — those live in `l9-template` (see [BANNED_PATTERNS.md](BANNED_PATTERNS.md)).
+
+Feature flags follow their own naming rule: the setting is `snake_case` ending in
+`_enabled`, the env var is the same name uppercased. See
+[FEATURE_FLAG_DISCIPLINE.md](FEATURE_FLAG_DISCIPLINE.md).

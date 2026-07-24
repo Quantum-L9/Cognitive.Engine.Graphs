@@ -181,3 +181,22 @@ onBehalfOf        # WRONG → on_behalf_of (inside TenantContext)
 ```
 
 ```
+
+## The Only Data Container (CONTRACT-06)
+
+Every inter-service payload is a `PacketEnvelope`. The boundary functions are the only
+sanctioned way in and out:
+
+```python
+from engine.packet.chassis_contract import deflate_egress, inflate_ingress
+```
+
+- `inflate_ingress()` at boundary **entry**
+- `deflate_egress()` at boundary **exit**
+- Engine code **between** boundaries works with typed dicts and Pydantic models, never
+  raw envelopes
+
+`packet_type` values are lowercase (`PKT-001`). Persistence goes through the memory
+substrate — direct `INSERT INTO packetstore` or `INSERT INTO memory_embeddings` from
+engine code is banned (`MEM-001`, `MEM-002`); see
+[MEMORY_SUBSTRATE_ACCESS.md](MEMORY_SUBSTRATE_ACCESS.md).

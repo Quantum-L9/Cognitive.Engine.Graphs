@@ -5,12 +5,21 @@ level: MUST
 scope:
   paths:
   - tests/**/*.py
+  - engine/**/*.py
 preconditions:
 - Code change submitted
 postconditions:
 - Unit tests for pure functions
 - Integration with testcontainers-neo4j
 - Performance <200ms p95
+- No stubs in engine/ - a NotImplementedError, TODO, or PLACEHOLDER is an untestable path;
+  ship the code or record it in DEFERRED.md
+docs:
+- docs/contracts/TEST_PATTERNS.md
+- docs/contracts/BANNED_PATTERNS.md
 verification:
-  scanner_rules: []
-  test: tests/
+  scanner_rules:
+  - STUB-001
+  - STUB-002
+  - STUB-003
+  test: tests/contracts/test_contracts.py::TestContract17TestRequirements

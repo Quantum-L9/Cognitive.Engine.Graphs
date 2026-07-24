@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: l9-template
 engine: graph
 layer: [audit]
-tags: [L9_TEMPLATE, audit, contracts]
-owner: platform
+tags: [delivery, harness]
 status: active
 --- /L9_META ---
 
 L9 Contract Violation Scanner
-Encodes all 20 contracts as grep-able rules.
+Encodes the grep-able subset of the 24 contracts as regex rules. Contracts without a
+mechanical signature are verified by tests/contracts/, not here — see contracts/*.yaml
+`verification.scanner_rules` for the authoritative rule-to-contract mapping.
 Exit code 1 = violations found = commit/merge blocked.
 """
 
@@ -190,7 +191,7 @@ RULES: list[dict] = [
         "CRITICAL",
         r"httpx\.(post|get|put|delete|patch)\s*\(",
         "Raw HTTP to another node - use delegate_to_node()",
-        "from l9.core.delegation import delegate_to_node",
+        "from engine.packet.chassis_contract import delegate_to_node",
         include_dirs=["engine/"],
     ),
     _rule(
@@ -199,7 +200,7 @@ RULES: list[dict] = [
         "CRITICAL",
         r"requests\.(post|get|put|delete|patch)\s*\(",
         "Raw HTTP via requests - use delegate_to_node()",
-        "from l9.core.delegation import delegate_to_node",
+        "from engine.packet.chassis_contract import delegate_to_node",
         include_dirs=["engine/"],
     ),
     # -- CONTRACT 19: MEMORY_SUBSTRATE_ACCESS.md --
@@ -209,7 +210,7 @@ RULES: list[dict] = [
         "CRITICAL",
         r"INSERT\s+INTO\s+packetstore",
         "Direct write to packetstore - use ingest_packet()",
-        "from l9.memory.ingestion import ingest_packet",
+        "Persist via engine.packet.packet_store, or delegate to the memory substrate node",
         include_dirs=["engine/"],
     ),
     _rule(
@@ -227,8 +228,8 @@ RULES: list[dict] = [
         "SHARED_MODELS.md",
         "HIGH",
         r"class\s+PacketEnvelope\s*\(",
-        "Redefining PacketEnvelope - import from l9.core",
-        "from l9.core.envelope import PacketEnvelope",
+        "Redefining PacketEnvelope - import the shared model",
+        "from engine.packet.packet_envelope import PacketEnvelope",
         include_dirs=["engine/"],
         exclude_dirs=["engine/packet/packet_envelope.py"],  # canonical envelope in this repo
     ),
@@ -237,8 +238,8 @@ RULES: list[dict] = [
         "SHARED_MODELS.md",
         "HIGH",
         r"class\s+TenantContext\s*\(",
-        "Redefining TenantContext - import from l9.core",
-        "from l9.core.envelope import TenantContext",
+        "Redefining TenantContext - import the shared model",
+        "from engine.packet.packet_envelope import TenantContext",
         include_dirs=["engine/"],
         exclude_dirs=["engine/packet/packet_envelope.py"],  # canonical envelope in this repo
     ),
@@ -247,8 +248,8 @@ RULES: list[dict] = [
         "SHARED_MODELS.md",
         "HIGH",
         r"class\s+ExecuteRequest\s*\(",
-        "Redefining ExecuteRequest - import from l9.core",
-        "from l9.core.contract import ExecuteRequest",
+        "Redefining ExecuteRequest - the chassis owns this model",
+        "from chassis.chassis_app import ExecuteRequest",
         include_dirs=["engine/"],
     ),
     # -- CONTRACT 18: OBSERVABILITY.md --
@@ -290,7 +291,37 @@ RULES: list[dict] = [
         "Check PACKET_TYPE_REGISTRY.md",
         exclude_dirs=["agents/cursor/"],
     ),
-    # -- CONTRACT 17: ENV_VARS.md --
+    # -- CONTRACT 17: zero-stub protocol (TEST_PATTERNS.md / BANNED_PATTERNS.md) --
+    # Scoped to engine/: abstract-base-class methods in chassis/ legitimately raise
+    # NotImplementedError as their contract.
+    _rule(
+        "STUB-001",
+        "BANNED_PATTERNS.md",
+        "CRITICAL",
+        r"raise\s+NotImplementedError",
+        "Stub in engine/ - unimplemented code path",
+        "Ship the implementation or record the gap in DEFERRED.md",
+        include_dirs=["engine/"],
+    ),
+    _rule(
+        "STUB-002",
+        "BANNED_PATTERNS.md",
+        "HIGH",
+        r"#\s*TODO\b",
+        "TODO comment in engine/ - deferred work must be tracked, not inlined",
+        "Implement it now or add an entry to DEFERRED.md and drop the comment",
+        include_dirs=["engine/"],
+    ),
+    _rule(
+        "STUB-003",
+        "BANNED_PATTERNS.md",
+        "HIGH",
+        r"#\s*(?:PLACEHOLDER|FIXME|XXX)\b",
+        "PLACEHOLDER/FIXME comment in engine/ - deferred work must be tracked, not inlined",
+        "Implement it now or add an entry to DEFERRED.md and drop the comment",
+        include_dirs=["engine/"],
+    ),
+    # -- CONTRACT 05: ENV_VARS.md --
     _rule(
         "ENV-001",
         "ENV_VARS.md",

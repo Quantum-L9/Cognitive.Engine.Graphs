@@ -9,9 +9,12 @@ preconditions:
 - Any import statement in engine/ code
 postconditions:
 - No FastAPI, Starlette, or uvicorn imports present
+docs:
+- docs/contracts/BANNED_PATTERNS.md
 verification:
   scanner_rules:
   - ARCH-001
   - ARCH-002
   - ARCH-003
-  test: tests/contracts/test_contract_01.py
+  - SHARED-003
+  test: tests/contracts/test_contracts.py::TestContract01SingleIngress

@@ -1,15 +1,37 @@
+# --- L9_META ---
+# l9_schema: 2
+# origin: l9-template
+# engine: graph
+# layer: [contracts]
+# tags: [governance, compliance]
+# status: active
+# --- /L9_META ---
 id: CONTRACT-18
 name: L9_META Headers
 layer: testing
 level: SHOULD
 scope:
+  # Every tracked file with a known format, not just engine/ and chassis/.
+  # The eligible set is computed by tools/l9_meta/discover.py from the git index
+  # minus config `exclude`; enumerating it here would go stale immediately.
   paths:
-  - engine/**/*.py
-  - chassis/**/*.py
+  - '**/*.py'
+  - '**/*.yaml'
+  - '**/*.yml'
+  - '**/*.md'
+  - '**/*.json'
+  - '**/*.toml'
+  - '**/*.sh'
+  - Dockerfile*
+  - Makefile
 preconditions:
 - New file created
 postconditions:
-- L9_META header present (schema v1)
+- L9_META header present (schema v2; `owner` dropped, zero consumers verified)
+- Values match l9-meta.yaml resolution (`l9-meta check` exits 0)
+docs:
+- docs/contracts/L9_META_HEADERS.md
 verification:
   scanner_rules: []
-  test: tools/l9_meta_injector.py
+  test: tests/contracts/test_contracts.py::TestContract18L9Meta
+  command: python tools/l9_meta_injector.py check

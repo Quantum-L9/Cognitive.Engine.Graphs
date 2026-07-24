@@ -10,6 +10,12 @@ preconditions:
 postconditions:
 - 'Signature is async def handle_*(tenant: str, payload: dict) -> dict'
 - Registered via chassis.router.register_handler()
+docs:
+- docs/contracts/HANDLER_PAYLOADS.md
+- docs/contracts/RETURN_VALUES.md
+- docs/contracts/METHOD_SIGNATURES.md
+- docs/contracts/DEPENDENCY_INJECTION.md
 verification:
-  scanner_rules: []
-  test: tests/contracts/test_contract_02.py
+  scanner_rules:
+  - DI-001
+  test: tests/contracts/test_contracts.py::TestContract02HandlerInterface

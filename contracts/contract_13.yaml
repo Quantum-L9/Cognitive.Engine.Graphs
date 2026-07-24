@@ -12,6 +12,9 @@ postconditions:
 - Gates compile to Cypher WHERE
 - Scoring compiles to WITH/ORDER BY
 - 10 gate types, 13 scoring computations
+docs:
+- docs/contracts/METHOD_SIGNATURES.md
+- docs/contracts/FIELD_NAMES.md
 verification:
   scanner_rules: []
-  test: tests/contracts/test_contract_13.py
+  test: tests/contracts/test_contracts.py::TestContract13GateThenScore

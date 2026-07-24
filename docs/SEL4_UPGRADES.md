@@ -162,7 +162,7 @@ Of these 39 concepts, the reality filter classified:
 
 | ID | Enhancement | Technical Mechanism |
 |----|------------|---------------------|
-| W5-01 | Contract Verification Test Suite | `tests/contracts/test_contracts.py`: One test per CEG contract (20 contracts from `.cursorrules`). Tests exercise contract boundaries — e.g., Contract 1 asserts no FastAPI import in engine namespace, Contract 9 asserts startup weight-sum assertion fires on violation. |
+| W5-01 | Contract Verification Test Suite | `tests/contracts/test_contracts.py`: One test class per CEG contract (24 invariants from `contracts/*.yaml`). Tests exercise contract boundaries — e.g., Contract 1 asserts no FastAPI import in engine namespace, Contract 9 asserts startup weight-sum assertion fires on violation. |
 | W5-02 | Invariant Regression Tests | `tests/invariants/`: 31 regression tests, one per audit defect. Each reproduces the exact defect trigger condition, asserts the fix holds. Tagged with `@pytest.mark.finding("T1-03")`. CI gate: all invariant tests must pass on every PR. |
 | W5-03 | Score Quality Benchmark Suite | `tests/scoring/benchmark.py`: Runs labeled test graphs through full match pipeline. Records: good-pair average, bad-pair average, separation (good_avg − bad_avg), distribution moments (mean, std, skew). CI fails if separation < 0.20 or std < 0.05. |
 | W5-04 | Domain-Spec Validation Tool | `tools/validate_domain.py`: Standalone CLI: `python -m ceg.tools.validate_domain path/to/spec.yaml [--strict]`. Runs all W1-01 through W1-04 validators, outputs structured pass/fail report with YAML path references. Pre-commit hook integration. |
@@ -200,7 +200,7 @@ Of these 39 concepts, the reality filter classified:
 | `engine/auth/capabilities.py` | W3 | Capability model, derivation trees, delegation |
 | `engine/state.py` | W4 | EngineState dataclass — centralized mutable state |
 | `engine/errors.py` | W6 | FeatureNotEnabled error class |
-| `tests/contracts/test_contracts.py` | W5 | 20 contract verification tests |
+| `tests/contracts/test_contracts.py` | W5 | 24 contract verification test classes |
 | `tests/invariants/` | W5 | 31 invariant regression tests |
 | `tests/scoring/benchmark.py` | W5 | Score quality benchmark suite |
 | `tests/property/test_gates.py` | W5 | Property-based gate tests (Hypothesis) |
@@ -267,7 +267,7 @@ All flags are added to `engine/config/settings.py` and controllable via environm
 | W2 | 71 | Unit/Integration | Calibration detects out-of-range scores, feedback gradient ±0.02, normalization preserves ranking, monoculture flagged |
 | W3 | 54 | Unit/Integration | Unauthorized tenant → 403, missing capability → 403, delegation creates Neo4j edge, revocation removes edge |
 | W4 | 37 | Unit/Integration | EngineState singleton, circuit opens after 3 failures, TTL cache evicts after 30s, flush triggers at buffer limit |
-| W5 | 92 | Contract/Invariant/Property/Benchmark | 20 contracts verified, 31 regressions covered, score separation > 0.20, property tests for all weight vectors |
+| W5 | 92 | Contract/Invariant/Property/Benchmark | 24 contracts verified, 31 regressions covered, score separation > 0.20, property tests for all weight vectors |
 | W6 | 30 | Unit/Integration | KGE activation smoke-test, erasure idempotency, GDS history returns entries, feature_status reports all gates |
 | **Total** | **316** | | |
 

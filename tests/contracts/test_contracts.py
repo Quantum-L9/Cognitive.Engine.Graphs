@@ -1,7 +1,16 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [test]
+tags: [governance, compliance]
+status: active
+--- /L9_META ---
+
 Contract verification test suite.
 
-One test per CEG contract (20 contracts defined in .cursorrules).
+One test class per CEG contract (24 invariants defined in contracts/*.yaml).
 Verifies that architectural invariants hold across the codebase
 without requiring a running Neo4j instance.
 """
@@ -662,6 +671,127 @@ class TestContract20KGEEmbeddings:
         from engine.config.schema import ComputationType
 
         assert ComputationType.KGE.value == "kge"
+
+
+# ============================================================================
+# LAYER 7 - HARDENING (contracts 21-24)
+# ============================================================================
+
+
+class TestContract21FeatureFlagDiscipline:
+    """CONTRACT 21: behavioral changes are gated by bool flags in settings.py."""
+
+    @pytest.mark.contract
+    def test_feature_flags_are_declared_bool(self):
+        from engine.config.settings import Settings
+
+        flags = [name for name in Settings.model_fields if name.endswith("_enabled")]
+        assert flags, "No *_enabled feature flags found in Settings"
+        non_bool = [n for n in flags if Settings.model_fields[n].annotation is not bool]
+        assert not non_bool, f"Feature flags must be bool: {non_bool}"
+
+    @pytest.mark.contract
+    def test_feature_gates_doc_exists(self):
+        doc = ROOT / "docs" / "FEATURE_GATES.md"
+        assert doc.exists(), "docs/FEATURE_GATES.md is required by CONTRACT 21"
+
+    @pytest.mark.contract
+    def test_every_flag_is_documented(self):
+        from engine.config.settings import Settings
+
+        doc_text = (ROOT / "docs" / "FEATURE_GATES.md").read_text(encoding="utf-8")
+        flags = [name for name in Settings.model_fields if name.endswith("_enabled")]
+        undocumented = [f for f in flags if f not in doc_text and f.upper() not in doc_text]
+        assert not undocumented, f"Feature flags missing from FEATURE_GATES.md: {undocumented}"
+
+
+class TestContract22ScoringWeightCeiling:
+    """CONTRACT 22: default scoring weights sum to <= 1.0, asserted at startup."""
+
+    @pytest.mark.contract
+    def test_weight_sum_assertion_exists(self):
+        from engine import boot
+
+        assert callable(boot._assert_default_weight_sum)
+        assert boot._WEIGHT_CEILING == 1.0
+
+    @pytest.mark.contract
+    def test_default_weights_within_ceiling(self):
+        from engine.boot import _WEIGHT_CEILING
+        from engine.config.settings import settings
+
+        total = settings.w_structural + settings.w_geo + settings.w_reinforcement + settings.w_freshness
+        assert total <= _WEIGHT_CEILING + 1e-9, f"Default weight sum {total} exceeds {_WEIGHT_CEILING}"
+
+    @pytest.mark.contract
+    def test_assertion_raises_when_exceeded(self, monkeypatch):
+        from engine import boot
+
+        monkeypatch.setattr(boot.settings, "w_structural", 0.9)
+        monkeypatch.setattr(boot.settings, "w_geo", 0.9)
+        with pytest.raises(ValueError, match="exceeding"):
+            boot._assert_default_weight_sum()
+
+
+class TestContract23AdminSubactionRegistration:
+    """CONTRACT 23: admin subactions are snake_case and validate inputs."""
+
+    @pytest.mark.contract
+    def test_subaction_names_are_snake_case(self):
+        source = (ROOT / "engine" / "handlers.py").read_text(encoding="utf-8")
+        names = set(re.findall(r'subaction\s*==\s*"([^"]+)"', source))
+        assert names, "No admin subactions found in engine/handlers.py"
+        bad = [n for n in names if not re.fullmatch(r"[a-z][a-z0-9_]*", n)]
+        assert not bad, f"Admin subactions must be snake_case: {bad}"
+
+    @pytest.mark.contract
+    def test_admin_handler_validates_subaction_key(self):
+        source = (ROOT / "engine" / "handlers.py").read_text(encoding="utf-8")
+        assert '_require_key(payload, "subaction", "admin"' in source, (
+            "handle_admin must resolve 'subaction' via _require_key()"
+        )
+
+    @pytest.mark.contract
+    def test_require_key_raises_on_missing(self):
+        from engine.handlers import _require_key
+
+        with pytest.raises(Exception, match="(?i)subaction|missing|required"):
+            _require_key({}, "subaction", "admin", "t1")
+
+
+class TestContract24ResiliencePatterns:
+    """CONTRACT 24: queries go through GraphDriver; caches are bounded."""
+
+    @pytest.mark.contract
+    def test_driver_exposes_circuit_protected_execute(self):
+        from engine.graph.driver import GraphDriver
+
+        assert hasattr(GraphDriver, "execute_query")
+        assert hasattr(GraphDriver, "circuit_breaker")
+
+    @pytest.mark.contract
+    def test_circuit_breaker_settings_are_configurable(self):
+        from engine.config.settings import settings
+
+        assert settings.neo4j_circuit_threshold > 0
+        assert settings.neo4j_circuit_cooldown > 0
+        assert settings.neo4j_circuit_half_open_max > 0
+
+    @pytest.mark.contract
+    def test_domain_cache_is_bounded(self):
+        from engine.config.settings import settings
+
+        assert settings.domain_cache_maxsize > 0, "Domain pack cache must be bounded"
+
+    @pytest.mark.contract
+    def test_engine_has_no_raw_neo4j_sessions(self):
+        violations = []
+        for f in _engine_py_files():
+            if f.name in {"driver.py", "circuit_breaker.py"}:
+                continue
+            if ".session(" in f.read_text(encoding="utf-8"):
+                violations.append(str(f.relative_to(ROOT)))
+        assert not violations, f"Raw Neo4j sessions outside GraphDriver: {violations}"
 
 
 # ============================================================================

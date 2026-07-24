@@ -41,6 +41,9 @@ and rollback procedure.
 | Strict Null Gates | `STRICT_NULL_GATES` | `True` | active |
 | Param Strict Mode | `PARAM_STRICT_MODE` | `True` | active |
 | LLM Security (ValidatedLLMClient) | `LLM_PROVIDER` | — | stub |
+| Outcome Persistence | `OUTCOME_PERSISTENCE_ENABLED` | `False` | dormant |
+| Tenant Auth (JWT `allowed_tenants`) | `TENANT_AUTH_ENABLED` | `True` | active |
+| Capability Auth (domain-spec model) | `CAPABILITY_AUTH_ENABLED` | `True` | active |
 | Constellation Orchestration | — | — | dormant |
 | PostgreSQL Persistence | — | — | dormant |
 
@@ -186,6 +189,39 @@ See `DEFERRED.md: DEFERRED-002`.
 PacketEnvelope protocol, delegation chains, and hop traces are implemented
 but require multi-node deployment to exercise. Single-node deployment uses
 the chassis bridge directly.
+
+---
+
+## 10. Outcome Persistence (W2-02b)
+
+**State**: Dormant
+**Flag**: `OUTCOME_PERSISTENCE_ENABLED=True`
+**Prerequisites**: PacketStore reachable (`PACKET_STORE_ENABLED`, `PACKET_STORE_DSN`).
+
+Writes match outcomes through to the PacketStore. This is a second gate on top of
+`FEEDBACK_ENABLED`: the feedback loop can run in-memory without it, and enabling it
+without a reachable PacketStore degrades to logged warnings rather than hard failure.
+
+---
+
+## 11. Tenant Auth (W3-01)
+
+**State**: Active
+**Flag**: `TENANT_AUTH_ENABLED=True` (default on)
+
+Enforces the JWT `allowed_tenants` claim against the resolved tenant. Setting this to
+`False` disables that check — acceptable only for single-tenant local development.
+
+---
+
+## 12. Capability Auth (W3-02 / W3-03)
+
+**State**: Active
+**Flag**: `CAPABILITY_AUTH_ENABLED=True` (default on)
+
+Enforces the domain-spec capability model, mapping each action to the permissions it
+requires. Disabling it removes per-action authorization while leaving tenant resolution
+intact.
 
 ---
 
