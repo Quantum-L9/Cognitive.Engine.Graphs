@@ -45,6 +45,9 @@ htmlcov/
 # Current work (scratch / WIP)
 current work/
 
+# memory-bank/ is T0 resume SSOT — MUST stay tracked.
+# Do not add memory-bank to this file or ~/.gitignore_global.
+
 # Temporary
 *.tmp
 *.temp
