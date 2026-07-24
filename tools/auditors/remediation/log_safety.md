@@ -2,20 +2,23 @@
 l9_schema: 1
 origin: engine-specific
 engine: graph
-layer: [docs]
-tags: [agent-tasks, logging]
+layer: [audit]
+tags: [auditors, remediation, logging]
 owner: engine-team
 status: active
 /L9_META -->
 
-# Task: Fix Log Safety Finding
+# Remediation: `log_safety` auditor
+
+Fix procedure for findings emitted by `tools/auditors/log_safety.py`.
+Reproduce with: `python tools/audit_dispatch.py --auditor log_safety`
 
 ```
 task: Fix log safety finding "<finding_code>"
 tier: 1
 contracts_to_read:
-  - docs/contracts/LOG_SAFETY.md
-  - docs/contracts/ERRORHANDLING.md
+  - docs/contracts/ERROR_HANDLING.md
+  - docs/contracts/OBSERVABILITY.md
 ```
 
 ## Steps

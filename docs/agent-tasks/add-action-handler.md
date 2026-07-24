@@ -3,10 +3,14 @@ l9_schema: 1
 origin: engine-specific
 engine: graph
 layer: [docs]
-tags: [agent-tasks, handlers]
+tags: [agent-tasks, handlers, deprecated]
 owner: engine-team
-status: active
+status: deprecated
 /L9_META -->
+
+> **DEPRECATED — marked for deletion (DEFERRED-004). Do not follow this file.**
+> Superseded by `.claude/skills/action-handler-development/SKILL.md`.
+> The return-shape guidance below is stale and no longer matches `engine/handlers.py`.
 
 # Task: Add a New Engine Action Handler
 

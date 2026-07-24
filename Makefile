@@ -128,6 +128,34 @@ check:	## Full local quality gate (autofix lint + types + unit tests)
 	@PYTHONPATH="$${PYTHONPATH}:." python3 -m pytest tests/ -m "unit" --tb=short -q
 	@echo "── All checks passed ──"
 
+# ── Agent Verification Gate ────────────────────────────────
+# The single command an agent runs to prove a change is complete.
+# Mirrors CI's blocking jobs (.github/workflows/contracts.yml) exactly, so a
+# green `agent-check` means a green CI. Non-mutating by design — it verifies,
+# it does not autofix. Run `make lint-fix` first if formatting fails.
+
+.PHONY: agent-check
+
+agent-check:	## Agent completion gate: CI's blocking set + audit harness, run locally
+	@echo "── [1/6] Action references ──"
+	@python3 tools/check_action_refs.py
+	@echo "── [2/6] Contract files present + wired ──"
+	@python3 tools/verify_contracts.py
+	@echo "── [3/6] Contract violation scan ──"
+	@python3 tools/contract_scanner.py
+	@echo "── [4/6] Lint + format ──"
+	@ruff check .
+	@ruff format --check .
+	@echo "── [5/6] Type check ──"
+	@mypy engine/ --config-file=pyproject.toml --ignore-missing-imports --exclude chassis
+	@echo "── [6/6] Tests ──"
+	@PYTHONPATH="$${PYTHONPATH}:." python3 -m pytest tests/ --tb=short -q
+	@echo ""
+	@echo "── Audit harness ──"
+	@python3 tools/audit_harness.py
+	@echo ""
+	@echo "✅ agent-check passed — CI's blocking gates should be green"
+
 # ── L9_TEMPLATE Audit Harness ─────────────────────────────
 
 .PHONY: harness harness-strict audit audit-strict coverage

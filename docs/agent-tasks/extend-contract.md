@@ -3,10 +3,13 @@ l9_schema: 1
 origin: engine-specific
 engine: graph
 layer: [docs]
-tags: [agent-tasks, contracts]
+tags: [agent-tasks, contracts, deprecated]
 owner: engine-team
-status: active
+status: deprecated
 /L9_META -->
+
+> **DEPRECATED — marked for deletion (DEFERRED-004). Do not follow this file.**
+> Superseded by `.claude/skills/contract-check/SKILL.md`.
 
 # Task: Extend a Contract File
 

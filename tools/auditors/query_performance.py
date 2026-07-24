@@ -49,7 +49,7 @@ class QueryPerformanceAuditor(BaseAuditor):
 
     @property
     def contract_file(self):
-        return "docs/contracts/CYPHERSAFETY.md"
+        return "docs/contracts/CYPHER_SAFETY.md"
 
     def _scan_n_plus_one(self, tree, rel: str, result: AuditResult, counter: list[int]) -> None:
         """Detect DB/ORM calls inside loops (N+1 pattern)."""
