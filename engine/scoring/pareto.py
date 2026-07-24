@@ -1,11 +1,10 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [scoring]
-tags: [pareto, multi-objective, scoring]
-owner: engine-team
+tags: [matching, calibration, scoring]
 status: active
 --- /L9_META ---
 

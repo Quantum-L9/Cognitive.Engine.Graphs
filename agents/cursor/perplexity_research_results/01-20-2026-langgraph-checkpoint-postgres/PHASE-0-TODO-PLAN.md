@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [docs]
+tags: [governance]
+status: active
+/L9_META -->
+
 # GMP-105: LangGraph Checkpoint Resilience — Phase 0 TODO Plan
 
 **Date:** 2026-01-20

@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [docs]
+tags: [intelligence]
+status: active
+/L9_META -->
+
 # CEG Intelligence Architecture — Value Brief
 
 **L9 Labs** | March 2026

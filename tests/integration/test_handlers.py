@@ -1,4 +1,14 @@
-"""Integration tests — action handlers: sync, match, admin.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [platform, handlers]
+status: active
+--- /L9_META ---
+
+Integration tests — action handlers: sync, match, admin.
 
 These tests use mocked Neo4j (AsyncMock) and a mocked DomainPackLoader
 so they run without a live database while still exercising the real handler

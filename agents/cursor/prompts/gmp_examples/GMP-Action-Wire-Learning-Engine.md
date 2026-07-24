@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance, gmp]
+status: active
+/L9_META -->
+
 # GMP Action: Wire GMP Learning Engine to API Server
 
 **GMP ID:** GMP-92

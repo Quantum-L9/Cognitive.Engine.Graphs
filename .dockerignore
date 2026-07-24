@@ -1,3 +1,11 @@
+# --- L9_META ---
+# l9_schema: 2
+# origin: engine-specific
+# engine: graph
+# layer: [docker]
+# tags: [delivery]
+# status: active
+# --- /L9_META ---
 # .dockerignore
 # Exclude development/build artifacts from Docker context
 

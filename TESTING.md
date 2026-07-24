@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [docs]
+tags: [delivery, harness]
+status: active
+/L9_META -->
+
 # Testing — Cognitive Engine Graphs (CEG)
 
 > Agent reference: read before writing any test code. All test decisions flow from this document.

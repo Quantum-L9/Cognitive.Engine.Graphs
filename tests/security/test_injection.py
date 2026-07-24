@@ -1,4 +1,13 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [governance, security]
+status: active
+--- /L9_META ---
+
 Security tests — Cypher injection attempts across parameterized surfaces.
 
 RULE 4 (L9 Contract): ZERO string interpolation of values in Cypher.

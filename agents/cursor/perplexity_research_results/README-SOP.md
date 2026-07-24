@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [docs]
+tags: [governance]
+status: active
+/L9_META -->
+
 # Perplexity Research Results — SOP
 
 **Location:** `agents/cursor/perplexity_research_results/`

@@ -1,4 +1,14 @@
-"""Unit tests — SyncGenerator: MERGE strategy, batch param, unknown strategy.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [ingestion, sync]
+status: active
+--- /L9_META ---
+
+Unit tests — SyncGenerator: MERGE strategy, batch param, unknown strategy.
 
 Real API (engine/sync/generator.py):
     SyncGenerator(domain_spec)

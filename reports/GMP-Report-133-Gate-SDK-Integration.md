@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [reports]
+tags: [governance]
+status: active
+/L9_META -->
+
 # GMP Report
 
 **ID:** GMP-133 | **Task:** Gate SDK Integration for Cognitive.Engine.Graphs | **Tier:** RUNTIME_TIER | **Date:** 2026-04-26 | **Status:** ✅ COMPLETE

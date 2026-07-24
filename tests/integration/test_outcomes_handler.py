@@ -1,4 +1,14 @@
-"""Integration tests — outcomes handler: success, failure, validation.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [intelligence, feedback]
+status: active
+--- /L9_META ---
+
+Integration tests — outcomes handler: success, failure, validation.
 
 Real payload contract (engine/handlers.py::handle_outcomes):
     match_id: str (required)

@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [docs, contracts]
+tags: [governance, compliance]
+status: active
+/L9_META -->
+
 # Contract Versioning Policy
 
 > Semantic versioning for all CEG contract files. All contracts start at `1.0.0`.

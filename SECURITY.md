@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [security]
+tags: [governance, security]
+status: active
+/L9_META -->
+
 # Security Policy — Cognitive Engine Graphs (CEG)
 
 ## Scope

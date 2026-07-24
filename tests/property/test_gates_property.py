@@ -1,4 +1,13 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [matching, gates, determinism]
+status: active
+--- /L9_META ---
+
 Property-based tests for gate compilation (W5-05).
 
 Uses Hypothesis to generate random valid GateSpec dicts and verify

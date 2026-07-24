@@ -1,11 +1,10 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [graph]
-tags: [circuit-breaker, resilience, sel4]
-owner: engine-team
+tags: [platform, driver]
 status: active
 --- /L9_META ---
 

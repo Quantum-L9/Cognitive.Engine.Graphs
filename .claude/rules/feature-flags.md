@@ -4,6 +4,15 @@ paths:
   - "engine/handlers.py"
   - "engine/boot.py"
 ---
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance]
+status: active
+/L9_META -->
+
 # Feature Flags (engine/config/settings.py)
 
 All in Settings class, controllable via env vars. Contract 21: every behavioral change must be flag-gated.

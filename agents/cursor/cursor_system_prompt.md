@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance]
+status: active
+/L9_META -->
+
 # L9 CURSOR SYSTEM PROMPT — CEG (Cognitive Engine Graph)
 # Version: 1.0.0
 # Node: ceg (Layer 3 — Analysis)

@@ -1,13 +1,11 @@
 # --- L9_META ---
-# l9_schema: 1
-# origin: l9-perplexity-audit
+# l9_schema: 2
+# origin: engine-specific
 # engine: graph
 # layer: [config, ci, audit]
-# tags: [L9_CONFIG, audit, tech-debt, perplexity, pipeline]
-# owner: platform
+# tags: [governance]
 # status: active
 # --- /L9_META ---
-
 # L9 Perplexity Audit Pipeline Configuration
 # Deploy to: config/perplexity_audit.yaml
 # Repo: https://github.com/cryptoxdog/Cognitive.Engine.Graphs

@@ -1,14 +1,14 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [config]
-tags: [packet, envelope, pydantic]
-owner: engine-team
+tags: [platform, packet]
 status: active
 --- /L9_META ---
 """
+
 # # L9 PacketEnvelope v3.0.0 — Constellation Wire Format
 # Zero legacy. No memory substrate dependency. Standalone.
 # The atom of the AI-Constellation.

@@ -4,6 +4,15 @@ paths:
   - "engine/scoring/**/*.py"
   - "engine/traversal/**/*.py"
 ---
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance]
+status: active
+/L9_META -->
+
 # Gates, Scoring & Traversal Rules
 
 ## Gate Compilation (Contract 13, 14, 15)

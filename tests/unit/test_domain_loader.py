@@ -1,4 +1,15 @@
-"""Unit tests — DomainPackLoader. No Neo4j required."""
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [ingestion, domain-spec]
+status: active
+--- /L9_META ---
+
+Unit tests — DomainPackLoader. No Neo4j required.
+"""
 
 from __future__ import annotations
 

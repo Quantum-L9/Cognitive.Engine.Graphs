@@ -1,4 +1,13 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [platform, boot]
+status: active
+--- /L9_META ---
+
 Tests for engine/boot.py and engine/gates/registry.py.
 Ensures module imports succeed and core classes/methods exist.
 """

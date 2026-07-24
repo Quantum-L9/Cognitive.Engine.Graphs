@@ -1,5 +1,14 @@
 # agents/cursor/cursor_retrieval_kernel.py
 """
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance]
+status: active
+--- /L9_META ---
+
 Enforces: Check working memory → long-term memory → repo (no skipping)
 This is the core of eliminating grepping.
 

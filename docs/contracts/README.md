@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [docs, contracts]
+tags: [governance, compliance]
+status: active
+/L9_META -->
+
 # docs/contracts/
 
 > Production-grade contract documentation for the L9 Cognitive Engine Graph (CEG). Every contract traces back to a specific source file in this repository.

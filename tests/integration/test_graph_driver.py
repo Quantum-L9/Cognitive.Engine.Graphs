@@ -1,4 +1,15 @@
-"""Integration tests — GraphDriver: write, read, empty result."""
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [platform, handlers]
+status: active
+--- /L9_META ---
+
+Integration tests — GraphDriver: write, read, empty result.
+"""
 
 from __future__ import annotations
 

@@ -1,11 +1,10 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [hoprag, config]
-tags: [hoprag, configuration, settings]
-owner: engine-team
+tags: [intelligence, hoprag]
 status: active
 --- /L9_META ---
 

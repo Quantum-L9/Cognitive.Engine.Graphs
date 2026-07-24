@@ -3,6 +3,14 @@ name: pr-workflow
 description: Create a branch, commit, and open a PR following CEG conventions
 disable-model-invocation: true
 ---
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance, gmp]
+status: active
+/L9_META -->
 
 # PR Workflow
 

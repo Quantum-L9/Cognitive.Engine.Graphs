@@ -1,15 +1,26 @@
+# --- L9_META ---
+# l9_schema: 2
+# origin: l9-template
+# engine: graph
+# layer: [contracts]
+# tags: [governance, compliance]
+# status: active
+# --- /L9_META ---
 id: CONTRACT-18
 name: L9_META Headers
 layer: testing
 level: SHOULD
 scope:
+  # Every tracked file, not just Python: enumeration is `git ls-files -z` minus
+  # the exclusions in l9-meta.yaml. Narrowing this to engine/ and chassis/ left
+  # ~500 tracked files silently out of contract.
   paths:
-  - engine/**/*.py
-  - chassis/**/*.py
+  - '**'
 preconditions:
 - New file created
 postconditions:
-- L9_META header present (schema v1)
+- L9_META header present (schema v2)
+- Header values match those resolved from l9-meta.yaml for that path
 verification:
   scanner_rules: []
-  test: tools/l9_meta_injector.py
+  test: python tools/l9_meta_injector.py check

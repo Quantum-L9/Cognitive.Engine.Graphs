@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [docs]
+tags: [governance]
+status: active
+/L9_META -->
+
 # Stage 6: Multi-Agent Belief-Calibrated Consensus System
 
 **Perplexity Deep Research Output**

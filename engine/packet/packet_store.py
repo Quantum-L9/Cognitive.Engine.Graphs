@@ -1,11 +1,10 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [packet]
-tags: [packet, audit, persistence]
-owner: engine-team
+tags: [platform, packet]
 status: active
 --- /L9_META ---
 

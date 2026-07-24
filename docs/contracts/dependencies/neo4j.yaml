@@ -1,3 +1,11 @@
+# --- L9_META ---
+# l9_schema: 2
+# origin: l9-template
+# engine: graph
+# layer: [docs, contracts]
+# tags: [governance, compliance]
+# status: active
+# --- /L9_META ---
 # ═══════════════════════════════════════════════════════════════
 # Contract: Neo4j 5 Enterprise Dependency
 # Source:   engine/graph/driver.py:GraphDriver

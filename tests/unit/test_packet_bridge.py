@@ -1,4 +1,14 @@
-"""Unit tests — PacketEnvelope bridge: hash determinism, payload sensitivity.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [platform]
+status: active
+--- /L9_META ---
+
+Unit tests — PacketEnvelope bridge: hash determinism, payload sensitivity.
 
 Note: These tests require chassis integration modules that may not be implemented.
 Tests skip gracefully if required modules are not available.

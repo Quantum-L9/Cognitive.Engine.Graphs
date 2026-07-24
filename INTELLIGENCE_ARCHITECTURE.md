@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [docs]
+tags: [intelligence]
+status: active
+/L9_META -->
+
 # CEG Intelligence Architecture — Technical Reference
 
 **Version:** 2.0.0 | **Date:** March 2026 | **L9 Labs**

@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [docs]
+tags: [governance]
+status: active
+/L9_META -->
+
 # DEFERRED.md — Tracked Deferments
 
 All inline TODO comments must be migrated here with a unique ID, owner, rationale, and acceptance criteria.
@@ -46,5 +55,26 @@ All inline TODO comments must be migrated here with a unique ID, owner, rational
 **Blocked by:** Provider SDK selection (not yet finalized for production)
 
 **Priority:** HIGH — required for any LLM-powered feature to function
+
+---
+## DEFERRED-003
+
+**Title:** Surgical JSON header injection (JSON files excluded from L9_META stamp)
+
+**File:** `tools/l9_meta/formats/jsonmeta.py` — `inject` / `strip`
+
+**Owner:** platform
+
+**Rationale:** Injection round-trips through `json.loads` / `json.dumps`, so stamping a file also reserializes it: blank lines disappear and compact arrays are exploded one element per line. `docs/contracts/data/models/packet-envelope.schema.json` came back +159/−29 for a 9-line header, and `.devcontainer/devcontainer.json` lost its section spacing. The output is semantically identical JSON, but the diff noise is unrelated to metadata, so `**/*.json` is excluded in `l9-meta.yaml` until injection is textual.
+
+**Acceptance Criteria:**
+- `inject` inserts `_l9_meta` as the first key by text edit, matching the file's existing indentation; every other byte is unchanged
+- `strip` removes the key by brace matching, restoring the original bytes
+- Round-trip and idempotency fixtures in `tests/unit/test_l9_meta_formats.py` extended to assert byte equality on a file with compact arrays and blank lines
+- `**/*.json` removed from `exclude` in `l9-meta.yaml` and the 16 JSON files stamped
+
+**Blocked by:** Nothing — deferred to keep the pipeline PR scoped to the header mechanism.
+
+**Priority:** LOW — 16 files, no runtime impact; C-018 coverage is otherwise complete.
 
 ---

@@ -1,15 +1,15 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [config]
-tags: [gates, types]
-owner: engine-team
+tags: [matching, gates]
 status: active
 --- /L9_META ---
 
-Gate type implementations."""
+Gate type implementations.
+"""
 
 from engine.gates.types.all_gates import (
     BaseGate,

@@ -1,15 +1,15 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [test]
-tags: [test, scoring]
-owner: engine-team
+tags: [matching, scoring]
 status: active
 --- /L9_META ---
 
-Tests for traversalalias, kge, and candidateproperty C-06 fix."""
+Tests for traversalalias, kge, and candidateproperty C-06 fix.
+"""
 
 from __future__ import annotations
 

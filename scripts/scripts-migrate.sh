@@ -1,23 +1,13 @@
 # --- L9_META ---
-# l9_schema: 1
+# l9_schema: 2
 # origin: l9-template
 # engine: graph
 # layer: [scripts]
-# tags: [L9_TEMPLATE, scripts, migration]
-# owner: platform
+# tags: [delivery]
 # status: active
 # --- /L9_META ---
 #
 !/usr/bin/env bash
---- L9_META ---
-l9_schema: 1
-origin: l9-template
-engine: graph
-layer: [scripts]
-tags: [L9_TEMPLATE, scripts, migration]
-owner: platform
-status: active
---- /L9_META ---
 ============================================================================
 migrate.sh — Create Neo4j constraints and indexes from domain spec
 ============================================================================

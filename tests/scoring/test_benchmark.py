@@ -1,4 +1,13 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [matching, scoring, performance]
+status: active
+--- /L9_META ---
+
 Score quality benchmark suite (W5-03).
 
 Validates that the scoring assembler produces meaningfully different scores

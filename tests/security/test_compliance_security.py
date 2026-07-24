@@ -1,4 +1,13 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [governance, compliance]
+status: active
+--- /L9_META ---
+
 Security tests — ECOA prohibited factor enforcement at compliance layer.
 """
 

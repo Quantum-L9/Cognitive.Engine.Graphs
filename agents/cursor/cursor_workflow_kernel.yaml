@@ -1,15 +1,11 @@
-# ============================================================================
-# L9_META
-# ============================================================================
-# l9_schema: 1
+# --- L9_META ---
+# l9_schema: 2
 # origin: l9-template
 # engine: graph
-# layer: [agent-rules, kernel]
-# tags: [cursor, kernel, ceg, governance, workflow]
-# owner: Founder
+# layer: [agent-rules]
+# tags: [governance]
 # status: active
-# ============================================================================
-
+# --- /L9_META ---
 # ============================================================================
 # CEG CURSOR WORKFLOW KERNEL — BINDING CONTRACT
 # ============================================================================
@@ -290,9 +286,11 @@ contracts:
     - id: C18
       name: L9_META ON EVERY FILE
       rule: >
-        Every tracked file carries an L9_META header (schema version 1).
-        Fields: l9_schema, origin, engine, layer, tags, owner, status.
-        Injected by tools/l9_meta_injector.py — not manually.
+        Every tracked file carries an L9_META header (schema version 2).
+        Fields: l9_schema, origin, engine, layer, tags, status (owner dropped in v2).
+        Values resolve from l9-meta.yaml by path, not per file: write with
+        `tools/l9_meta_injector.py apply`, verify with `check`. To change a value,
+        edit the l9-meta.yaml rule — never the header.
       scanner_ids: []
 
   layer_6_graph_intelligence:
@@ -485,7 +483,7 @@ pr_evidence_block:
     - [ ] GateType enum count                            → 14
     - [ ] ScoringAssembler dimension count               → 4
     - [ ] All new engine/*.py have tests/unit/test_*.py  → confirmed
-    - [ ] L9_META header on all new files                → confirmed
+    - [ ] python tools/l9_meta_injector.py check          → exit 0
 
   missing_evidence_block: "PR is INCOMPLETE — send back, do not review"
 

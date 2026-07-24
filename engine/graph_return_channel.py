@@ -1,11 +1,10 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [graph]
-tags: [return-channel]
-owner: engine-team
+tags: [platform]
 status: active
 --- /L9_META ---
 

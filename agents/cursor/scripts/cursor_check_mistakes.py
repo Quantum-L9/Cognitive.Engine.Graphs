@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
 """
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [scripts]
+tags: [delivery]
+status: active
+--- /L9_META ---
+
 Cursor Mistake Checker — Leverages L9's MistakePrevention Engine
 ================================================================
 

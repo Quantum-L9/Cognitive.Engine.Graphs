@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [docs]
+tags: [governance]
+status: active
+/L9_META -->
+
 # Phase 0 TODO Plan: Stage 4 - Belief Revision System
 
 **GMP ID:** GMP-STAGE4-BELIEF-REVISION

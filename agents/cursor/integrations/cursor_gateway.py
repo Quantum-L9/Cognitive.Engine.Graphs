@@ -1,4 +1,13 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance]
+status: active
+--- /L9_META ---
+
 L9 Cursor Memory Gateway
 Version: 2.0.0
 

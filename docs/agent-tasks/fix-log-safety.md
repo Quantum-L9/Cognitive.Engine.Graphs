@@ -1,11 +1,10 @@
 <!-- L9_META
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [docs]
-tags: [agent-tasks, logging]
-owner: engine-team
-status: active
+tags: [platform, handlers, deprecated]
+status: deprecated
 /L9_META -->
 
 # Task: Fix Log Safety Finding

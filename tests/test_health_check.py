@@ -1,4 +1,15 @@
-"""Tests for health check response path verification (GMP-07)."""
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [ingestion, readiness]
+status: active
+--- /L9_META ---
+
+Tests for health check response path verification (GMP-07).
+"""
 
 
 def test_health_response_structure():

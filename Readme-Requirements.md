@@ -1,13 +1,11 @@
 <!-- L9_META
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [docs]
-tags: [requirements]
-owner: engine-team
+tags: [delivery]
 status: active
 /L9_META -->
-
 
 **4 files, 226 lines — P0 blockers cleared.**
 

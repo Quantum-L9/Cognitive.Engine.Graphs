@@ -1,10 +1,9 @@
 # --- L9_META ---
-# l9_schema: 1
+# l9_schema: 2
 # origin: chassis
-# engine: "*"
+# engine: graph
 # layer: [docker]
-# tags: [L9_TEMPLATE, docker, engine-agnostic]
-# owner: platform-team
+# tags: [platform, chassis]
 # status: active
 # --- /L9_META ---
 # ─────────────────────────────────────────────────────────────

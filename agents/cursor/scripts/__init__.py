@@ -1,3 +1,14 @@
+"""
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [scripts]
+tags: [delivery]
+status: active
+--- /L9_META ---
+"""
+
 # ============================================================================
 __dora_meta__ = {
     "component_name": "  Init  ",

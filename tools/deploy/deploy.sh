@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # --- L9_META ---
-# l9_schema: 1
+# l9_schema: 2
 # origin: l9-template
 # engine: graph
-# layer: [scripts, deploy]
-# tags: [L9_TEMPLATE, deploy]
-# owner: platform
+# layer: [audit]
+# tags: [delivery, harness]
 # status: active
 # --- /L9_META ---
 # =============================================================================

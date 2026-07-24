@@ -1,12 +1,11 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: chassis
 engine: graph
 layer: [api]
-tags: [chassis, fastapi, legacy]
-owner: platform-team
-status: deprecated
+tags: [platform, chassis]
+status: active
 --- /L9_META ---
 
 chassis/app.py — DEPRECATED — use chassis.chassis_app instead.

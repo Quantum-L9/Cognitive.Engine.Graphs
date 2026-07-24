@@ -1,4 +1,13 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [governance]
+status: active
+--- /L9_META ---
+
 Invariant regression tests — Configuration inconsistencies (T5-xx findings).
 
 Verifies that configuration drift fixes from Waves 1-4 remain in place.

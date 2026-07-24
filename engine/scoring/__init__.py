@@ -1,15 +1,15 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [config]
-tags: [scoring]
-owner: engine-team
+tags: [matching, calibration, scoring]
 status: active
 --- /L9_META ---
 
-Scoring system."""
+Scoring system.
+"""
 
 from engine.scoring.assembler import ScoringAssembler
 from engine.scoring.pareto import (

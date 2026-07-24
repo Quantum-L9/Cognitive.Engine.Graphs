@@ -1,11 +1,10 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [config]
-tags: [compliance, prohibited-factors]
-owner: engine-team
+tags: [governance, compliance, pii]
 status: active
 --- /L9_META ---
 

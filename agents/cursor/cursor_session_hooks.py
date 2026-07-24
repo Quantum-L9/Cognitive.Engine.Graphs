@@ -1,5 +1,14 @@
 # agents/cursor/cursor_session_hooks.py
 """
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance]
+status: active
+--- /L9_META ---
+
 Hooks into Cursor session start/action/end.
 Maintains working memory without modifying AgentExecutor.
 

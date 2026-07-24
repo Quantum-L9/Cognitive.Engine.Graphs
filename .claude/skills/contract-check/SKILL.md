@@ -3,6 +3,14 @@ name: contract-check
 description: Run full contract verification against the CEG codebase
 disable-model-invocation: true
 ---
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance, gmp]
+status: active
+/L9_META -->
 
 # Contract Verification
 

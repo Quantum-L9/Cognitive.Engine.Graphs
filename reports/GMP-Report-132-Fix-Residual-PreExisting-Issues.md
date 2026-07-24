@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [reports]
+tags: [governance]
+status: active
+/L9_META -->
+
 **ID:** GMP-132 | **Task:** Fix Residual Pre-existing Issues (T3: Engine + Tests) | **Tier:** RUNTIME_TIER | **Date:** 2026-04-26 | **Status:** ✅ COMPLETE
 
 ---

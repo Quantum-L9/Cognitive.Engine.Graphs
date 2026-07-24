@@ -1,10 +1,9 @@
 <!-- L9_META
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [docs]
-tags: [changelog]
-owner: engine-team
+tags: [delivery]
 status: active
 /L9_META -->
 

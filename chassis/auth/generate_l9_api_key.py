@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: chassis
 engine: graph
 layer: [api, auth]
-tags: [chassis, auth, keygen]
-owner: platform-team
+tags: [platform, chassis, security]
 status: active
 --- /L9_META ---
 

@@ -1,4 +1,14 @@
-"""Unit tests — Compliance: prohibited factor enforcement.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [governance, compliance]
+status: active
+--- /L9_META ---
+
+Unit tests — Compliance: prohibited factor enforcement.
 
 Real APIs:
     engine/compliance/prohibited_factors.py

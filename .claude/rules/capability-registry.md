@@ -2,6 +2,15 @@
 paths:
   - "engine/**/*.py"
 ---
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance]
+status: active
+/L9_META -->
+
 # Capability Registry — Do NOT Duplicate
 
 Before building any of these, check if it already exists. Use the existing implementation.

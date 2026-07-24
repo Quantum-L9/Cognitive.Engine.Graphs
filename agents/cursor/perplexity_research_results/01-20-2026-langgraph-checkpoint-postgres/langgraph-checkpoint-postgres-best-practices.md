@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [docs]
+tags: [governance]
+status: active
+/L9_META -->
+
 # LangGraph 0.3+ Checkpoint Persistence with PostgreSQL: Frontier Best Practices for Production AI Agent Systems in 2026
 
 > **Research Date:** 2026-01-20

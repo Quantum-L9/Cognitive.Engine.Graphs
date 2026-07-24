@@ -1,11 +1,10 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
-layer: [health, jobs]
-tags: [health, nightly-scan, batch, incremental]
-owner: engine-team
+layer: [health, scripts]
+tags: [ingestion, enrichment, readiness]
 status: active
 --- /L9_META ---
 

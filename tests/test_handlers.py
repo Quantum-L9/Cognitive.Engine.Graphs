@@ -1,15 +1,15 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [test]
-tags: [test, handlers]
-owner: engine-team
+tags: [platform]
 status: active
 --- /L9_META ---
 
-Tests for engine/handlers.py - all 6 action handlers."""
+Tests for engine/handlers.py - all 6 action handlers.
+"""
 
 from __future__ import annotations
 

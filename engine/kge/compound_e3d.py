@@ -1,11 +1,10 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [kge]
-tags: [kge, compound-e3d, model]
-owner: engine-team
+tags: [intelligence, embeddings, dormant]
 status: active
 --- /L9_META ---
 

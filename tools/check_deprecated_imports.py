@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-# --- L9_META ---
-# l9_schema: 1
-# origin: engine-specific
-# engine: graph
-# layer: [tools, governance]
-# tags: [deprecated, api, checker, fixer, DomainPackLoader]
-# owner: platform
-# status: active
-# --- /L9_META ---
-"""Check and auto-fix deprecated DomainSpecLoader → DomainPackLoader usage.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [tools, governance]
+tags: [delivery, harness]
+status: active
+--- /L9_META ---
+
+Check and auto-fix deprecated DomainSpecLoader → DomainPackLoader usage.
 
 DomainSpecLoader was renamed to DomainPackLoader in commit 4c0fb5868b.
 All callers must migrate to:

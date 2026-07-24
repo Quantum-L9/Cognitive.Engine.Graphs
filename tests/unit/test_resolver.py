@@ -1,11 +1,10 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [test]
-tags: [test, unit, resolver, entity-resolution]
-owner: engine-team
+tags: [intelligence, resolution]
 status: active
 --- /L9_META ---
 

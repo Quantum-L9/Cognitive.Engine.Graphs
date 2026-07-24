@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance, gmp]
+status: active
+/L9_META -->
+
 # Cursor-Native GMP Action Files
 
 These files are designed for use with Cursor's `/gmp` command to integrate the GMP v2.0 learning system.

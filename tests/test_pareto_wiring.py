@@ -1,4 +1,13 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [matching, scoring]
+status: active
+--- /L9_META ---
+
 Tests for Milestone 2.1 / 2.2 Pareto wiring:
 - DecisionArbitrationSpec schema extension
 - pareto_integrator (build_pareto_candidates, apply_constraint_penalties, apply_pareto_filter)

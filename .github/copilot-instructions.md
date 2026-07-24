@@ -1,10 +1,9 @@
 <!-- L9_META
-l9_schema: 1
+l9_schema: 2
 origin: l9-template
 engine: graph
 layer: [agent-rules]
-tags: [L9_TEMPLATE, agent-rules, copilot]
-owner: platform
+tags: [governance]
 status: active
 /L9_META -->
 
