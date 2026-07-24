@@ -1,54 +1,53 @@
 # Where we left off (max ~1 screen)
 
-**Last session:** 2026-07-24T21:11Z
+**Last session:** 2026-07-24T22:50Z
 **Repo:** /Users/ib-mac/Dropbox/Repo_Dropbox_IB/Cognitive.Engine.Graphs
-**Branch (main worktree):** fix/docker-git-deps-and-proprietary-license — unchanged, still dirty
-**PR branch:** docs/wire-agent-docs-into-tooling → PR #144 (open)
+**Branch (main worktree):** `fix/docker-git-deps-and-proprietary-license` — dirty, ~620 modified files
 
-## Session Summary
+## Session summary
 
-Wired three previously-decorative doc directories into the tools that should own
-them, then shipped it as PR #144:
-https://github.com/Quantum-L9/Cognitive.Engine.Graphs/pull/144
+Rebuilt the L9_META injection pipeline and shipped it as **PR #147**, then untangled the
+local git state so every stream has a home.
 
-- `docs/agent-tasks/fix-*.md` → `tools/auditors/remediation/` — four auditors had
-  `remediation_doc` / `contract_file` paths that did not resolve, so audit findings
-  linked nowhere. Paths fixed; `audit_dispatch` now prints a remediation index.
-- `docs/Dev-Docs/` → `tools/research/` — the five leverage patterns gained
-  `engine_mapping` blocks and now emit a `research_pattern` category into the
-  coverage matrix via `spec_extract.py`. All five resolve to real subsystems
-  (kge, hoprag, traversal/multihop, resolution, gds).
-- Four `docs/agent-tasks/` dev playbooks consolidated into `.claude/skills/` and
-  marked `status: deprecated`. **Not deleted** — DEFERRED-004 tracks removal
-  pending Founder approval.
-- Added `make agent-check` (13 pre-existing references pointed at nothing).
-- Fixed `docs/contracts/README.md` validation commands + known-gaps table.
+The old injector kept a hardcoded `FILE_REGISTRY` as its source of truth and two of its five
+formatters were stubs that emitted a delimiter pair with no field lines — so `--apply` on any
+YAML, shell, Makefile, or Python path wrote an empty block. The registry had drifted to 10
+ghost entries while ~500 tracked files were invisible to it. Replaced with `l9-meta.yaml`
+(`defaults -> rules (last match wins) -> overrides[exact path]`), formatters restored and split
+into `tools/l9_meta/formats/`, discovery via `git ls-files -z`, tags folded 343 -> 188 across
+three facets, schema v2 drops `owner`. Enforced by an `l9-meta-check` pre-commit hook and a
+`meta-headers` CI job.
 
-New tests: `tests/contracts/test_auditor_wiring.py`,
-`tests/contracts/test_research_wiring.py` (37 tests).
+## PR map — five open streams from this repo
 
-## Critical context for the next window
+| PR | Branch | Contains |
+|---|---|---|
+| #148 | `feat/make-start-governance` | `make start` target + `docs/CI_CONSTELLATION_BOUNDARY.md` |
+| #147 | `feat/l9-meta-pipeline` | L9_META pipeline + the full-repo header stamp (607 files) |
+| #146 | `docs/contract-alignment` | 24 YAML invariants ↔ 27 prose docs reconciled |
+| #145 | `chore/track-memory-bank` | this directory, tracked as T0 resume SSOT |
+| #144 | `docs/wire-agent-docs-into-tooling` | auditor remediation paths + research pattern coverage |
 
-**The main working tree holds ≥3 unrelated uncommitted workstreams** (~130 files):
-chassis/engine/docker work, a concurrent contract-registry expansion (24 YAMLs +
-7 new contract docs that appeared mid-session from another process), and this
-session's doc wiring. PR #144 was therefore built in an **isolated worktree off
-`origin/main`** at `/tmp/ceg-pr-wiring` and contains only the doc-wiring subset —
-no `contracts/*.yaml`, `chassis/`, `engine/`, or workflow changes.
-
-That worktree is **still registered**. `git worktree list` will show it. The
-branch is pushed, so `git worktree remove /tmp/ceg-pr-wiring` is safe when wanted.
+**PR #147 supersedes the local header edits.** 419 of the 439 header-only modified files in the
+main working tree are byte-identical to #147; the other 20 differ only because #147 adds the
+blank line after an injected docstring that `ruff format` requires. Do not open a second
+"meta-only" PR — it would duplicate #147 and conflict with it.
 
 ## Next action
 
-1. Review / merge PR #144.
-2. Decide DEFERRED-004: approve deleting the four deprecated `docs/agent-tasks/` playbooks.
-3. Remove the `/tmp/ceg-pr-wiring` worktree.
-4. Resume the Gate_SDK chassis plan (8 locked steps in `tasks.md`) — no implementation started.
+1. Review / merge in dependency order — #147 touches every file, so land it **last** or expect
+   to rebase the others. #144, #145, #146, #148 are independent of each other.
+2. Sync the `**/*.json` exclusion into the main tree's `l9-meta.yaml` before running
+   `l9-meta apply` there. Without it, 16 JSON files get reserialized (DEFERRED-003).
+3. Decide DEFERRED-004: approve deleting the four deprecated `docs/agent-tasks/` playbooks.
+4. `docs/Commands.md` is a 0-byte stray in the main tree — write it or delete it.
+5. Resume the Gate_SDK chassis plan (8 locked steps in `tasks.md`) — no implementation started.
+6. Remove the temp worktrees once their branches merge: `/tmp/ceg-meta-pr`, `/tmp/ceg-pr`,
+   `/tmp/ceg-mb`, `/tmp/ceg-pristine`.
 
 ## Blockers
 
-- **Graphiti unreachable** — no episodic memory written this session or last.
-- **`make agent-check` mypy step unverified locally** — `mypy` on PATH runs under
-  Python 3.9 (Xcode) while the project targets 3.12. Pre-existing; CI runs it correctly.
+- **Graphiti unreachable** — four consecutive sessions absent from the episodic graph.
+- **`mypy` on PATH is Python 3.9 (Xcode)**, project targets 3.12 — `make lint` fails locally at
+  type-check with a bogus syntax error on `engine/inference_rule_registry.py`. CI is unaffected.
 - **Governance GitHub backup not run** — requires explicit push approval.
