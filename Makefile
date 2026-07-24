@@ -14,6 +14,13 @@
 .PHONY: dev dev-build dev-down dev-logs dev-restart health
 .PHONY: test test-unit test-integration seed shell neo4j-shell
 
+# ── Governance ─────────────────────────────────────────────
+
+.PHONY: start
+
+start:	## Run the full governance session-start pipeline against this repo
+	@$(MAKE) -C "$(HOME)/.cursor-governance" start WS="$(CURDIR)"
+
 # ── Docker Compose ─────────────────────────────────────────
 
 dev:Start all services (detached)
