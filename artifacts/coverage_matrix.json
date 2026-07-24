@@ -1,18 +1,4 @@
 {
-  "_l9_meta": {
-    "l9_schema": 1,
-    "origin": "engine-specific",
-    "engine": "graph",
-    "layer": [
-      "artifacts"
-    ],
-    "tags": [
-      "coverage",
-      "matrix"
-    ],
-    "owner": "engine-team",
-    "status": "active"
-  },
   "categories": {
     "gates": {
       "IMPLEMENTED": 10,
@@ -61,13 +47,19 @@
       "PARTIAL": 0,
       "MISSING": 0,
       "total": 5
+    },
+    "research_pattern": {
+      "IMPLEMENTED": 5,
+      "PARTIAL": 0,
+      "MISSING": 0,
+      "total": 5
     }
   },
   "totals": {
-    "IMPLEMENTED": 27,
+    "IMPLEMENTED": 32,
     "PARTIAL": 9,
     "MISSING": 0,
-    "total": 36
+    "total": 41
   },
-  "generated_at": "2026-03-02T04:01:38.659971+00:00"
+  "generated_at": "2026-07-24T21:09:12.515556+00:00"
 }
