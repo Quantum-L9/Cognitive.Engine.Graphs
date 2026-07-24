@@ -536,61 +536,70 @@ FILE_REGISTRY: list[FileMeta] = [
     ),
     # L9_Platform_Architecture.md and L9_AI_Constellation_Infrastructure_Reference.md
     # are referenced in CLAUDE.md but live in the L9 platform repo, not here
-    # --- docs/Dev-Docs ---
+    # --- tools/research (spec-coverage input, consumed by tools/spec_extract.py) ---
     FileMeta(
-        "docs/Dev-Docs/cognitive-engine-revenue-patterns.md",
+        "tools/research/cognitive-engine-revenue-patterns.md",
         "engine-specific",
-        ["docs"],
-        ["dev-docs", "revenue"],
+        ["audit"],
+        ["research", "revenue", "spec-coverage"],
         "engine-team",
     ),
     FileMeta(
-        "docs/Dev-Docs/top3_graph_pattern_analysis.json",
+        "tools/research/top3_graph_pattern_analysis.json",
         "engine-specific",
-        ["docs"],
-        ["dev-docs", "analysis"],
+        ["audit"],
+        ["research", "analysis"],
         "engine-team",
     ),
     FileMeta(
-        "docs/Dev-Docs/top5_leverage_patterns_detailed.json",
+        "tools/research/top5_leverage_patterns_detailed.json",
         "engine-specific",
-        ["docs"],
-        ["dev-docs", "analysis"],
+        ["audit"],
+        ["research", "analysis", "spec-coverage"],
         "engine-team",
     ),
     FileMeta(
-        "docs/Dev-Docs/universal_graph_schema.json", "engine-specific", ["docs"], ["dev-docs", "schema"], "engine-team"
-    ),
-    # --- docs/agent-tasks ---
-    FileMeta(
-        "docs/agent-tasks/add-domain-spec.md",
+        "tools/research/universal_graph_schema.json",
         "engine-specific",
-        ["docs"],
-        ["agent-tasks", "domain-spec"],
+        ["audit"],
+        ["research", "schema"],
         "engine-team",
     ),
-    FileMeta("docs/agent-tasks/add-gate-type.md", "engine-specific", ["docs"], ["agent-tasks", "gates"], "engine-team"),
+    # --- tools/auditors/remediation (audit fix runbooks, wired via Auditor.remediation_doc) ---
     FileMeta(
-        "docs/agent-tasks/add-action-handler.md",
+        "tools/auditors/remediation/api_regression.md",
         "engine-specific",
-        ["docs"],
-        ["agent-tasks", "handlers"],
+        ["tools"],
+        ["remediation", "api"],
         "engine-team",
     ),
     FileMeta(
-        "docs/agent-tasks/extend-contract.md", "engine-specific", ["docs"], ["agent-tasks", "contracts"], "engine-team"
+        "tools/auditors/remediation/audit_finding.md",
+        "engine-specific",
+        ["tools"],
+        ["remediation", "audit"],
+        "engine-team",
     ),
     FileMeta(
-        "docs/agent-tasks/fix-api-regression.md", "engine-specific", ["docs"], ["agent-tasks", "api"], "engine-team"
+        "tools/auditors/remediation/log_safety.md",
+        "engine-specific",
+        ["tools"],
+        ["remediation", "logging"],
+        "engine-team",
     ),
     FileMeta(
-        "docs/agent-tasks/fix-audit-finding.md", "engine-specific", ["docs"], ["agent-tasks", "audit"], "engine-team"
+        "tools/auditors/remediation/query_performance.md",
+        "engine-specific",
+        ["tools"],
+        ["remediation", "performance"],
+        "engine-team",
     ),
     FileMeta(
-        "docs/agent-tasks/fix-log-safety.md", "engine-specific", ["docs"], ["agent-tasks", "logging"], "engine-team"
-    ),
-    FileMeta(
-        "docs/agent-tasks/fix-test-quality.md", "engine-specific", ["docs"], ["agent-tasks", "testing"], "engine-team"
+        "tools/auditors/remediation/test_quality.md",
+        "engine-specific",
+        ["tools"],
+        ["remediation", "testing"],
+        "engine-team",
     ),
     # --- docs/misc ---
     FileMeta(

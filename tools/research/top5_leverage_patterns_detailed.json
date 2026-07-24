@@ -4,11 +4,12 @@
     "origin": "engine-specific",
     "engine": "graph",
     "layer": [
-      "docs"
+      "audit"
     ],
     "tags": [
-      "dev-docs",
-      "analysis"
+      "research",
+      "analysis",
+      "spec-coverage"
     ],
     "owner": "engine-team",
     "status": "active"
@@ -46,7 +47,18 @@
       "implementation": "APPLICATION edges with outcome='closed' \u2192 build borrower-lender-product affinity graph \u2192 rank loan products by historical success with similar borrower profiles",
       "revenue_impact": "20-30% improvement in loan approval rate + 10-15% increase in broker commission (higher close rate = more volume)"
     },
-    "leverage_score": "10/10 - Proven across 3 different verticals with $510B total revenue influence"
+    "leverage_score": "10/10 - Proven across 3 different verticals with $510B total revenue influence",
+    "engine_mapping": {
+      "subsystem": "engine/gds + engine/scoring",
+      "search_tokens": [
+        "cooccurrence",
+        "communitymatch"
+      ],
+      "search_files": [
+        "engine/gds/",
+        "engine/scoring/"
+      ]
+    }
   },
   "2_ENTITY_DISAMBIGUATION_VIA_CONTEXT": {
     "pattern_name": "Context-Aware Entity Resolution",
@@ -81,7 +93,18 @@
       "implementation": "LoanPurpose hierarchy + PropertyContext (LTV, equity) + BorrowerIntent (urgency, cash need) \u2192 precise loan product category \u2192 only match products in correct refinance type",
       "revenue_impact": "30-40% improvement in loan officer efficiency (fewer irrelevant product presentations) + 15-20% higher borrower satisfaction (right product first time)"
     },
-    "leverage_score": "9/10 - Critical for reducing noise in high-volume matching scenarios"
+    "leverage_score": "9/10 - Critical for reducing noise in high-volume matching scenarios",
+    "engine_mapping": {
+      "subsystem": "engine/resolution",
+      "search_tokens": [
+        "EntityResolver",
+        "handle_resolve"
+      ],
+      "search_files": [
+        "engine/resolution/",
+        "engine/handlers.py"
+      ]
+    }
   },
   "3_GRAPH_EMBEDDINGS_FOR_SIMILARITY": {
     "pattern_name": "Low-Dimensional Similarity via Graph Embeddings",
@@ -114,7 +137,18 @@
       "implementation": "GNN on loanproduct-lender-borrower-outcome graph \u2192 product embeddings \u2192 when novel borrower profile arrives (e.g., gig worker, crypto income), find nearest products in embedding space",
       "revenue_impact": "20-30% increase in addressable borrower segments (non-traditional income, non-QM) + 15-20% higher broker revenue (access to underserved niches)"
     },
-    "leverage_score": "9/10 - Unlocks long-tail/novel scenarios where explicit historical data is sparse"
+    "leverage_score": "9/10 - Unlocks long-tail/novel scenarios where explicit historical data is sparse",
+    "engine_mapping": {
+      "subsystem": "engine/kge",
+      "search_tokens": [
+        "CompoundE3D",
+        "kge_enabled"
+      ],
+      "search_files": [
+        "engine/kge/",
+        "engine/config/"
+      ]
+    }
   },
   "4_REAL_TIME_CONTEXT_AWARE_RANKING": {
     "pattern_name": "Session-Context Dynamic Re-Ranking",
@@ -149,7 +183,17 @@
       "implementation": "Base product match score (credit/DTI/LTV gates) + real-time signals (borrower marked 'closing in 30 days', lender rate sheet updated this morning, LO has pipeline capacity) \u2192 re-rank products \u2192 prioritize available + competitive + fast",
       "revenue_impact": "25-35% improvement in close rate (urgency-matched products close faster) + 10-15% increase in broker revenue (capacity-aware routing maximizes LO utilization)"
     },
-    "leverage_score": "8/10 - Critical for time-sensitive/high-urgency scenarios (not all use cases need real-time)"
+    "leverage_score": "8/10 - Critical for time-sensitive/high-urgency scenarios (not all use cases need real-time)",
+    "engine_mapping": {
+      "subsystem": "engine/scoring",
+      "search_tokens": [
+        "temporalproximity",
+        "calibration"
+      ],
+      "search_files": [
+        "engine/scoring/"
+      ]
+    }
   },
   "5_MULTI_HOP_TRAVERSAL_FOR_ENRICHMENT": {
     "pattern_name": "Transitive Relationship Discovery via Multi-Hop Traversal",
@@ -184,6 +228,17 @@
       "implementation": "3-hop traversal: BorrowerProfile \u2192 SIMILAR_TO \u2192 Borrower A \u2192 APPLICATION {outcome='closed'} \u2192 Lender B \u2192 LENDER_PERFORMANCE \u2192 Loan Category C \u2192 prioritize Lender B products in Category C",
       "revenue_impact": "15-25% improvement in lender-borrower match quality (historical success signals from similar borrowers) + 10-15% higher approval rate (lenders see better-fit borrowers)"
     },
-    "leverage_score": "8/10 - Unlocks network effects and transitive trust/compatibility signals"
+    "leverage_score": "8/10 - Unlocks network effects and transitive trust/compatibility signals",
+    "engine_mapping": {
+      "subsystem": "engine/traversal + engine/hoprag",
+      "search_tokens": [
+        "MultiHopTraverser",
+        "multihop"
+      ],
+      "search_files": [
+        "engine/traversal/",
+        "engine/hoprag/"
+      ]
+    }
   }
 }

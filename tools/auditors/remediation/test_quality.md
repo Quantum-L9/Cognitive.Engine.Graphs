@@ -2,20 +2,22 @@
 l9_schema: 1
 origin: engine-specific
 engine: graph
-layer: [docs]
-tags: [agent-tasks, testing]
+layer: [audit]
+tags: [auditors, remediation, testing]
 owner: engine-team
 status: active
 /L9_META -->
 
-# Task: Fix Test Quality Finding
+# Remediation: `test_quality` auditor
+
+Fix procedure for findings emitted by `tools/auditors/test_quality.py`.
+Reproduce with: `python tools/audit_dispatch.py --auditor test_quality`
 
 ```
 task: Fix test quality finding "<finding_code>"
 tier: 1
 contracts_to_read:
-  - docs/contracts/TEST_QUALITY.md
-  - docs/contracts/TESTPATTERNS.md
+  - docs/contracts/TEST_PATTERNS.md
 ```
 
 ## Steps by Category

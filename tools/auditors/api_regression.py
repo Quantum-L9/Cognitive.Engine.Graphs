@@ -80,7 +80,7 @@ class APIRegressionAuditor(BaseAuditor):
 
     @property
     def contract_file(self):
-        return "docs/contracts/METHODSIGNATURES.md"
+        return "docs/contracts/METHOD_SIGNATURES.md"
 
     @property
     def requires(self):

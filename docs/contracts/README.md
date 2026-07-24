@@ -10,9 +10,9 @@ CEG is a **domain-agnostic graph-native matching engine** built on a FastAPI cha
 
 | Contract | Type | Source File | Description |
 |----------|------|-------------|-------------|
-| `openapi.yaml` | API | `chassis/app.py`, `chassis/actions.py` | OpenAPI 3.1 spec for all HTTP endpoints |
-| `execute-action` | API | `chassis/app.py` | Universal POST /v1/execute endpoint |
-| `health-probe` | API | `chassis/app.py` | GET /v1/health endpoint |
+| `openapi.yaml` | API | `chassis/chassis_app.py`, `chassis/actions.py` | OpenAPI 3.1 spec for all HTTP endpoints |
+| `execute-action` | API | `chassis/chassis_app.py` | Universal POST /v1/execute endpoint |
+| `health-probe` | API | `chassis/chassis_app.py` | GET /v1/health endpoint |
 | `PacketEnvelope` | Data | `engine/packet/packet_envelope.py` | Core immutable message envelope |
 | `DomainSpec` | Data | `engine/config/schema.py` | Full domain pack configuration model |
 | `OutcomeRecord` | Data | `engine/models/outcomes.py` | Match outcome feedback record |
@@ -32,7 +32,7 @@ CEG is a **domain-agnostic graph-native matching engine** built on a FastAPI cha
 ```mermaid
 graph LR
     Client["External Client"]
-    Chassis["chassis/app.py\nPOST /v1/execute\nGET /v1/health"]
+    Chassis["chassis/chassis_app.py\nPOST /v1/execute\nGET /v1/health"]
     Actions["chassis/actions.py\nexecute_action()"]
     Handlers["engine/handlers.py\nhandle_match()\nhandle_sync()\nhandle_admin()\nhandle_outcomes()\nhandle_resolve()\nhandle_enrich()"]
     Auth["engine/auth/capabilities.py\nCapabilitySet\nACTION_PERMISSION_MAP"]
@@ -60,10 +60,46 @@ graph LR
 ## Validation Commands
 
 ```bash
+make agent-check                      # everything CI blocks on (contracts included)
+pytest tests/contracts/               # contract suite only
+```
+
+`make agent-check` is the completion gate: it runs `tools/verify_contracts.py`
+(the 20 contract markdown files present and referenced from the agent rule
+files), `tools/contract_scanner.py` (banned pattern scan), lint, types, and the
+full test suite. A green `agent-check` means green CI.
+
+Run `pytest tests/contracts/` **without** `-m contract`. The `contract` marker
+covers under a fifth of the tests in this directory and deselects the rest,
+including every OpenAPI, AsyncAPI, JSON Schema, env-contract, dependency, and
+auditor-wiring test. Marker-filtered runs pass while most of the contract
+surface goes unexercised. To see the split:
+
+```bash
+pytest tests/contracts/ -m contract --collect-only    # prints "N/M tests collected (K deselected)"
+```
+
+### Known validation gaps
+
+| Surface | Status |
+|---------|--------|
+| OpenAPI structural lint | `tests/contracts/test_openapi_lint.py` skips — `openapi-spec-validator` is not declared in `pyproject.toml` |
+| AsyncAPI schema validation | Only structural key assertions (`test_asyncapi_contract.py`); no full AsyncAPI 3.0 schema check |
+| Tool JSON Schemas | `docs/contracts/agents/tool-schemas/` holds only `_index.yaml` — all six action schemas (`match`, `sync`, `admin`, `outcomes`, `resolve`, `enrich`) are `xfail` |
+| Shared API schemas | `docs/contracts/api/schemas/shared-models.yaml` and `error-responses.yaml` are not generated — tests `xfail` |
+
+The two schemas under `docs/contracts/data/models/` (`packet-envelope`,
+`outcome-record`) **are** validated in-repo by `test_data_models.py`, so no
+external `ajv` step is needed — but that test skips when `jsonschema` is absent,
+and `jsonschema` is not declared in `pyproject.toml` either. It passes locally
+only because the package happens to be installed.
+
+External linters below cover the remaining gaps. They are **not** run by CI and
+require Node.js:
+
+```bash
 npx @redocly/cli lint docs/contracts/api/openapi.yaml
 npx @asyncapi/cli validate docs/contracts/events/asyncapi.yaml
-find docs/contracts -name "*.schema.json" | xargs -I{} npx ajv compile -s {}
-pytest tests/contracts/ -m contract -v
 ```
 
 ## Directory Structure

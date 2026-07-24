@@ -165,7 +165,22 @@ def _pr_comment(results, all_f):
         print(f"\n**{len(high)} HIGH issues:**\n")
         for f in high[:5]:
             print(f"- **[{f.code}]** {f.message}  `{f.file}:{f.line}`")
+
+    _print_remediation_index(results)
     print(f"\n---\n*{len(all_f)} total from {len([r for r in results if r.findings])} auditors*")
+
+
+def _print_remediation_index(results) -> None:
+    """List the fix runbook for each auditor that produced findings."""
+    docs = {}
+    for auditor in get_all_auditors():
+        docs[auditor.name] = auditor.remediation_doc
+    offenders = sorted({r.auditor_name for r in results if r.findings and r.auditor_name in docs})
+    if not offenders:
+        return
+    print("\n**How to fix:**\n")
+    for name in offenders:
+        print(f"- `{name}` → [`{docs[name]}`]({docs[name]})")
 
 
 def _resolve_auditors(args):
@@ -221,6 +236,7 @@ def main():
         for a in sorted(auditors, key=lambda x: (x.tier.value, x.domain, x.name)):
             rq = f" [requires: {', '.join(a.requires)}]" if a.requires else ""
             print(f"  {a.name:<25s} {a.domain:<12s} {a.tier.value:<12s} {a.contract_file}{rq}")
+            print(f"  {'':<25s} {'':<12s} {'':<12s} fix: {a.remediation_doc}")
         sys.exit(0)
 
     auditors = _resolve_auditors(args)
