@@ -14,7 +14,7 @@ Enforced by `tools/contract_scanner.py` and `tools/verify_contracts.py`.
 | 1 | Single Ingress | Only POST /v1/execute and GET /v1/health. Engine NEVER imports FastAPI/Starlette. |
 | 2 | Handler Interface | `async def handle_*(tenant: str, payload: dict) -> dict`. handlers.py is the ONLY engine file importing chassis (plus boot.py). |
 | 3 | Tenant Isolation | Tenant resolved BY chassis. Every Neo4j query scopes to tenant database. No cross-tenant reads. |
-| 4 | Observability Inherited | Engine NEVER configures structlog/Prometheus. Uses `structlog.get_logger(__name__)` only. |
+| 4 | Observability Inherited | Engine NEVER configures structlog/Prometheus. Logger getter is `logging.getLogger(__name__)` or `structlog.get_logger(__name__)`. |
 | 5 | Infrastructure is Template | Engine NEVER creates Dockerfile, docker-compose, CI pipeline. All in l9-template. |
 
 ## Layer 2 — Packet Protocol (6–8)

@@ -46,7 +46,7 @@ engine/
   handlers.py         ← ONLY bridge between chassis and engine. Registers all actions.
   config/             ← Domain spec YAML loader, settings, units
   domains/            ← Per-vertical domain spec YAMLs (plastics-recycling, etc.)
-  gates/              ← 14 gate types: GateCompiler, GateType enum, null semantics, registry
+  gates/              ← 10 gate types: GateCompiler, GateType enum, null semantics, registry
   scoring/            ← ScoringAssembler, 4 dimensions, temporal decay, scoring explainer
   traversal/          ← TraversalAssembler, traversal steps, match directions
   resolver/           ← ParameterResolver, derived parameter computation
@@ -61,32 +61,29 @@ tests/
   unit/               ← One test file per engine module
   integration/        ← End-to-end handler flow tests
   compliance/         ← Security scan, prohibited factor tests
-docs/contracts/       ← All 20 contract files (FIELDNAMES, METHODSIGNATURES, etc.)
+docs/contracts/       ← All 27 contract docs (FIELD_NAMES, METHOD_SIGNATURES, etc.)
 
 ---
 
-## 14 GATE TYPES — IMPLEMENT ALL 14, NEVER SILENTLY SKIP
+## 10 GATE TYPES — IMPLEMENT ALL 10, NEVER SILENTLY SKIP
 
-The CEG spec defines exactly 14 WHERE gate types. Your GateType enum MUST have 14 values.
-Your gate registry MUST map 14 handlers. Unknown gate types MUST raise, never pass-through.
+`GateType` in `engine/config/schema.py` has exactly 10 values. Your gate registry MUST map
+10 handlers. Unknown gate types MUST raise, never pass-through.
 
-Gate types (canonical):
-  1.  exact_match
-  2.  range_check
-  3.  enum_membership
-  4.  geo_radius
-  5.  taxonomy_overlap
-  6.  list_intersection
-  7.  threshold_min
-  8.  threshold_max
-  9.  null_check
-  10. regex_match
-  11. computed_expression    ← use safeeval dispatch table, NEVER eval()
-  12. graph_affinity
-  13. temporal_window
-  14. compliance_exclusion
+Gate types (canonical — these are the literal enum values):
+  1.  range
+  2.  threshold
+  3.  boolean
+  4.  composite
+  5.  enummap
+  6.  exclusion
+  7.  selfrange
+  8.  freshness
+  9.  temporalrange
+  10. traversal
 
-Self-check: Count your GateType enum values. Count your registry entries. Both must equal 14.
+Self-check: Count your GateType enum values. Count your registry entries. Both must equal 10.
+Asserted by `tests/contracts/test_contracts.py::TestContract13GateThenScore`.
 
 ---
 
@@ -393,7 +390,7 @@ docker-compose.prod.yml must NOT expose debug ports or hardcode credentials.
   [ ] No pickle.loads, no yaml.load without SafeLoader
 
 ### COMPLETENESS
-  [ ] 14 gate types in enum, 14 entries in registry
+  [ ] 10 gate types in enum, 10 entries in registry
   [ ] 4 scoring dimensions in ScoringAssembler
   [ ] All action handlers registered in handlers.py
   [ ] Zero NotImplementedError / TODO / PLACEHOLDER / FIXME

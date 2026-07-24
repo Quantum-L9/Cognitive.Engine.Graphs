@@ -10,6 +10,10 @@ preconditions:
 - Infrastructure file created or modified
 postconditions:
 - No Dockerfile, docker-compose, CI pipeline, or Terraform in engine/
+docs:
+- docs/contracts/BANNED_PATTERNS.md
+- docs/contracts/ENV_VARS.md
 verification:
-  scanner_rules: []
-  test: tests/contracts/test_contract_05.py
+  scanner_rules:
+  - ENV-001
+  test: tests/contracts/test_contracts.py::TestContract05InfrastructureIsTemplate

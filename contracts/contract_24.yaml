@@ -12,6 +12,9 @@ postconditions:
 - Circuit breaker 3/30s
 - Caches bounded + TTL
 - No module-level globals
+docs:
+- docs/contracts/DEPENDENCY_INJECTION.md
+- docs/contracts/METHOD_SIGNATURES.md
 verification:
   scanner_rules: []
-  test: tests/contracts/test_contract_24.py
+  test: tests/contracts/test_contracts.py::TestContract24ResiliencePatterns

@@ -9,6 +9,8 @@ preconditions:
 - 'Gate with invertible: true'
 postconditions:
 - candidate_prop and query_param swapped when direction reverses
+docs:
+- docs/contracts/BIDIRECTIONAL_MATCHING.md
 verification:
   scanner_rules: []
-  test: tests/unit/
+  test: tests/contracts/test_contracts.py::TestContract15BidirectionalMatching

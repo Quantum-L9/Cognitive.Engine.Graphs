@@ -10,6 +10,9 @@ preconditions:
 postconditions:
 - Labels/types pass sanitize_label() regex ^[A-Za-z_][A-Za-z0-9_]*$
 - Values always parameterized ($batch, $query)
+docs:
+- docs/contracts/CYPHER_SAFETY.md
+- docs/contracts/BANNED_PATTERNS.md
 verification:
   scanner_rules:
   - SEC-001
@@ -19,4 +22,4 @@ verification:
   - SEC-005
   - SEC-006
   - SEC-007
-  test: tests/contracts/test_contract_09.py
+  test: tests/contracts/test_contracts.py::TestContract09CypherInjectionPrevention

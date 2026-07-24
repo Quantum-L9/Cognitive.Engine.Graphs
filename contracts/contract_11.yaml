@@ -10,6 +10,8 @@ preconditions:
 postconditions:
 - 'Handling per spec: hash|encrypt|redact|tokenize'
 - Engine never logs PII values
+docs:
+- docs/contracts/PII_HANDLING.md
 verification:
   scanner_rules: []
-  test: tests/compliance/
+  test: tests/contracts/test_contracts.py::TestContract11PIIHandling

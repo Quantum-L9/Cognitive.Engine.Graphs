@@ -65,3 +65,17 @@ from engine.api.routers.match import match_endpoint  # BANNED
 ```
 
 ```
+
+## Required Coverage (CONTRACT-17)
+
+| Test type | Location | Must cover |
+|---|---|---|
+| Unit | `tests/unit/` | Gate compilation, scoring math, parameter resolution, null semantics **per gate type** |
+| Integration | `tests/integration/` | Full pipeline against `testcontainers-neo4j` — the driver is never mocked |
+| Compliance | `tests/compliance/` | Prohibited factors blocked at **compile** time |
+| Performance | `tests/performance/` | p95 match latency < 200 ms |
+| Validation | `tests/` | Compiled Cypher for the reference spec matches the hand-verified baseline |
+
+Every new function needs at least one test. The hand-verified Cypher baseline is the
+regression anchor for the compiler — if it changes, the change is intentional and
+reviewed, not incidental.

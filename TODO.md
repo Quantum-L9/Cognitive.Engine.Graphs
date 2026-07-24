@@ -19,7 +19,7 @@ status: active
 
 ### 2. Preflight Check
 - [ ] Run `make lint` — ruff check + mypy
-- [ ] Run `python tools/verify_contracts.py` — 20 contracts present
+- [ ] Run `python tools/verify_contracts.py` — 27 contract docs present and wired
 - [ ] Run `python tools/contract_scanner.py` — no violations
 - [ ] Verify `.env` / secrets configured (KUBECONFIG, SLACK_WEBHOOK_URL)
 - [ ] Review uncommitted changes in git status

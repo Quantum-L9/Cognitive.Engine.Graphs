@@ -26,7 +26,7 @@ make harness
 | **Cypher injection pattern detection** | Regex-scans f-strings for label interpolation without `sanitize_label()` | Flags `f"MERGE (n:{spec.target_node} ...)"` with evidence snippet |
 | **Lifecycle anchor verification** | Checks that match/sync/GDS flows reference expected components | Warns if `GateCompiler`, `TraversalAssembler`, `ScoringAssembler` aren't referenced in handler chain |
 | **Spec coverage scanning** | Extracts features from spec YAML, scans codebase for implementation evidence | Reports which gates, scoring types, ontology nodes are IMPLEMENTED / PARTIAL / MISSING |
-| **Contract wiring verification** | Checks all 20 contract docs exist and are referenced in `.cursorrules` / `CLAUDE.md` | Fails if `FIELD_NAMES.md` exists but isn't wired into agent rules |
+| **Contract wiring verification** | Checks all 27 contract docs exist and are referenced in `.cursorrules` / `CLAUDE.md` / `AGENTS.md` | Fails if `FIELD_NAMES.md` exists but isn't wired into agent rules |
 | **Evidence-based output** | Every finding includes file path + line range + 7-line code snippet | You see the exact code, not a vague description |
 | **Severity-gated CI exit codes** | Returns exit code 1 if CRITICAL or HIGH findings exist | CI blocks merge; `make harness` fails locally |
 | **Consolidated report** | Writes `artifacts/harness_report.md` combining all step results | Single doc for PR review |

@@ -11,7 +11,7 @@ tests/
   unit/           Pure function tests. No Neo4j. No I/O. Fast (<100ms total).
   integration/    Full pipeline via testcontainers-neo4j. Requires Docker.
   compliance/     Prohibited factor enforcement. Gate compile-time blocking.
-  contracts/      All 24 behavioral contracts (via verify_contracts.py).
+  contracts/      All 24 behavioral contracts, one TestContractNN class each.
   invariants/     Engine invariants: score bounds, weight sums, determinism.
   property/       Hypothesis-based property tests for scoring math.
 ```
@@ -125,10 +125,16 @@ def test_gender_scoring_dimension_blocked():
 
 ## Contract Tests
 
-All 24 contracts are verified via:
+All 24 contracts are verified by three complementary gates:
+
 ```bash
-python tools/verify_contracts.py
+python -m pytest tests/contracts/    # behavioral assertions, one class per contract
+python tools/verify_contracts.py     # the 27 contract docs exist and are wired
+python tools/contract_scanner.py     # banned-pattern regex rules
 ```
+
+`tests/contracts/test_contract_registry.py` is the drift gate: it fails if a YAML contract,
+its `docs:` pointers, its `scanner_rules`, and its `verification.test` node ID ever disagree.
 
 Contracts are documented in `docs/contracts/` and `.claude/rules/contracts.md`.
 Contract C-001 through C-024 must all pass before any merge.

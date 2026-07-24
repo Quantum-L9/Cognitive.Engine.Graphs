@@ -1,22 +1,21 @@
 <!-- L9_META
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [docs]
-tags: [contracts, enforcement]
-owner: engine-team
+tags: [platform]
 status: active
 /L9_META -->
 
 # L9 Contract Enforcement System
-## Making 20 Contracts Enforced Law — Not Aspirational Guidelines
+## Making 24 Contracts Enforced Law — Not Aspirational Guidelines
 ### Version 1.0.0 | 2026-03-01
 
 ---
 
 ## The Problem
 
-You have 20 contracts. Agents read them *if they feel like it*. Nothing stops a PR
+You have 24 contracts. Agents read them *if they feel like it*. Nothing stops a PR
 with `eval()`, a redefined `PacketEnvelope`, or a hand-rolled `httpx.post()` to
 another node from merging. The contracts are documentation, not law.
 
@@ -50,7 +49,7 @@ Developer / Agent writes code
             | passes
             v
 +-------------------------+
-|   CI - contract audit   |  <- Verifies all 20 files exist & unmodified
+|   CI - contract audit   |  <- Verifies all 27 docs exist & are wired  
 |                         |  <- Verifies no contract violations in code
 |                         |  <- Blocks merge on ANY finding
 +-----------+-------------+
@@ -58,7 +57,7 @@ Developer / Agent writes code
             v
 +-------------------------+
 |   3-LLM PR Review       |  <- CodeRabbit + Qodo + Claude
-|   (configured with      |  <- Each reviewer knows the 20 contracts
+|   (configured with      |  <- Each reviewer knows the 24 contracts
 |    contract awareness)   |  <- Blocks merge on CRITICAL findings
 +-----------+-------------+
             | all pass
@@ -111,13 +110,13 @@ repos:
 
 ## Layer 2: `tools/contract_scanner.py` (The Enforcer)
 
-This single script encodes ALL 20 contracts as scannable regex rules.
+This script encodes the mechanically detectable subset of the 24 contracts as regex rules.
 Runs on pre-commit (per-file) and in CI (full repo). Exit 1 = blocked.
 
 ```python
 """
 L9 Contract Violation Scanner
-Encodes all 20 contracts as grep-able rules.
+Encodes the grep-able subset of the 24 contracts as regex rules.
 Exit code 1 = violations found = commit/merge blocked.
 """
 
@@ -300,7 +299,7 @@ the architecture section above. Each rule maps to one contract.
 
 ## Layer 3: `tools/verify_contracts.py` (File Existence + Wiring)
 
-Verifies all 20 contract files exist AND are referenced in `.cursorrules`
+Verifies all 27 contract docs exist AND are referenced in `.cursorrules`
 and `CLAUDE.md`. Blocks CI if any are missing or unwired.
 
 ```python
@@ -449,11 +448,12 @@ reviews:
 | 18 | OBSERVABILITY.md | OBS-001, OBS-002 | Yes | Yes | Yes |
 | 19 | MEMORY_SUBSTRATE_ACCESS.md | MEM-001, MEM-002 | Yes | Yes | Yes |
 | 20 | SHARED_MODELS.md | SHARED-001 to 003 | Yes | Yes | Yes |
-| - | All 20 files exist | verify_contracts.py | Yes | Yes | - |
-| - | All 20 wired in CLAUDE.md | verify_contracts.py | Yes | Yes | - |
+| - | All 27 docs exist | verify_contracts.py | Yes | Yes | - |
+| - | All 27 wired in agent files | verify_contracts.py | Yes | Yes | - |
+| - | YAML ↔ docs ↔ rules ↔ tests agree | test_contract_registry.py | Yes | Yes | - |
 | - | Zero-Stub Protocol | STUB-001 to 003 | Yes | Yes | Yes |
 
-**16 of 20 contracts have automated scanner rules. The other 4 are semantic
+**10 of 24 contracts have automated scanner rules. The other 14 are semantic
 (field names, method signatures, test patterns, domain versioning) and are
 enforced by mypy, pytest, and LLM review.**
 

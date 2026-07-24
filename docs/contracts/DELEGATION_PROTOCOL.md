@@ -67,7 +67,7 @@ response = build_response_packet(
 > **Note:** This pattern predates the Gate SDK. New code MUST use `GateClient`.
 
 ```python
-from l9.chassis.contract import delegate_to_node
+from engine.packet.chassis_contract import delegate_to_node
 
 response_packet = await delegate_to_node(
     envelope=current_packet,         # The packet you're currently processing
