@@ -1,15 +1,17 @@
 {
   "_l9_meta": {
-    "l9_schema": 2,
+    "l9_schema": 1,
     "origin": "l9-template",
     "engine": "graph",
     "layer": [
       "telemetry"
     ],
     "tags": [
-      "platform",
-      "observability"
+      "L9_TEMPLATE",
+      "telemetry",
+      "grafana"
     ],
+    "owner": "platform",
     "status": "active"
   },
   "dashboard": {

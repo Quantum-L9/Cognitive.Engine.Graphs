@@ -1,14 +1,17 @@
 {
   "_l9_meta": {
-    "l9_schema": 2,
+    "l9_schema": 1,
     "origin": "l9-template",
     "engine": "graph",
     "layer": [
       "config"
     ],
     "tags": [
-      "governance"
+      "L9_TEMPLATE",
+      "config",
+      "suite6"
     ],
+    "owner": "platform",
     "status": "active"
   },
   "suite_version": "6.0.0",

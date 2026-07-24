@@ -24,6 +24,11 @@ defaults:
 
 exclude:
   - artifacts/
+  # JSON injection round-trips through the parser, so stamping a file also
+  # reserializes it: blank lines vanish and compact arrays explode one element
+  # per line. Excluded until injection is surgical (insert the key as text and
+  # leave the rest byte-identical). See DEFERRED.md.
+  - "**/*.json"
 
 vocabulary:
   origin: [engine-specific, l9-template, chassis, domain-specific]

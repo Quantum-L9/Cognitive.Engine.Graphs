@@ -1,19 +1,6 @@
 {
-  "_l9_meta": {
-    "l9_schema": 2,
-    "origin": "engine-specific",
-    "engine": "graph",
-    "layer": [
-      "test"
-    ],
-    "tags": [
-      "platform",
-      "fixtures"
-    ],
-    "status": "active"
-  },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$comment": "Test fixture for handle_sync() \u2014 source: engine/handlers.py:621",
+  "$comment": "Test fixture for handle_sync() — source: engine/handlers.py:621",
   "action": "sync",
   "tenant": "plasticos",
   "payload": {
@@ -26,11 +13,7 @@
           "lat": 29.7604,
           "lon": -95.3698
         },
-        "materials_handled": [
-          "HDPE",
-          "LDPE",
-          "PP"
-        ],
+        "materials_handled": ["HDPE", "LDPE", "PP"],
         "capacity_kg_monthly": 50000,
         "active": true
       },
@@ -39,12 +22,9 @@
         "name": "Beta Recyclers",
         "location": {
           "lat": 32.7767,
-          "lon": -96.797
+          "lon": -96.7970
         },
-        "materials_handled": [
-          "PET",
-          "HDPE"
-        ],
+        "materials_handled": ["PET", "HDPE"],
         "capacity_kg_monthly": 75000,
         "active": true
       }

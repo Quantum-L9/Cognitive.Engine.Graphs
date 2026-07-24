@@ -1,18 +1,4 @@
 {
-  "_l9_meta": {
-    "l9_schema": 2,
-    "origin": "l9-template",
-    "engine": "graph",
-    "layer": [
-      "docs",
-      "contracts"
-    ],
-    "tags": [
-      "governance",
-      "compliance"
-    ],
-    "status": "active"
-  },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/cryptoxdog/Cognitive.Engine.Graphs/docs/contracts/data/models/outcome-record.schema.json",
   "title": "OutcomeRecord",
@@ -29,11 +15,7 @@
     },
     "outcome": {
       "type": "string",
-      "enum": [
-        "success",
-        "failure",
-        "partial"
-      ],
+      "enum": ["success", "failure", "partial"],
       "description": "Match outcome value."
     },
     "dimension_scores": {
@@ -50,32 +32,20 @@
       "description": "Whether the candidate was selected by the requester."
     },
     "feedback_score": {
-      "type": [
-        "number",
-        "null"
-      ],
+      "type": ["number", "null"],
       "minimum": 0.0,
       "maximum": 1.0,
       "default": null,
       "description": "Optional explicit feedback score [0.0, 1.0]."
     },
     "created_at": {
-      "type": [
-        "string",
-        "null"
-      ],
+      "type": ["string", "null"],
       "format": "date-time",
       "description": "UTC creation timestamp.",
       "default": null
     }
   },
-  "required": [
-    "match_id",
-    "candidate_id",
-    "outcome",
-    "dimension_scores",
-    "was_selected"
-  ],
+  "required": ["match_id", "candidate_id", "outcome", "dimension_scores", "was_selected"],
   "additionalProperties": false,
   "examples": [
     {

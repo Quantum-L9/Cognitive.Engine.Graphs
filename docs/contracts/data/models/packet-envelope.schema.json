@@ -1,18 +1,4 @@
 {
-  "_l9_meta": {
-    "l9_schema": 2,
-    "origin": "l9-template",
-    "engine": "graph",
-    "layer": [
-      "docs",
-      "contracts"
-    ],
-    "tags": [
-      "governance",
-      "compliance"
-    ],
-    "status": "active"
-  },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/cryptoxdog/Cognitive.Engine.Graphs/docs/contracts/data/models/packet-envelope.schema.json",
   "title": "TransportPacket",
@@ -30,48 +16,20 @@
         },
         "packet_type": {
           "type": "string",
-          "enum": [
-            "request",
-            "response",
-            "event",
-            "error",
-            "command",
-            "query",
-            "tool_call",
-            "tool_result",
-            "reasoning",
-            "delegation",
-            "governance",
-            "heartbeat"
-          ],
+          "enum": ["request", "response", "event", "error", "command", "query", "tool_call", "tool_result", "reasoning", "delegation", "governance", "heartbeat"],
           "description": "Packet type. Source: constellation_node_sdk.TransportHeader"
         },
         "action": {
           "type": "string",
-          "enum": [
-            "match",
-            "sync",
-            "admin",
-            "outcomes",
-            "resolve",
-            "health",
-            "healthcheck",
-            "enrich"
-          ],
+          "enum": ["match", "sync", "admin", "outcomes", "resolve", "health", "healthcheck", "enrich"],
           "description": "Engine action routed by chassis."
         },
         "trace_id": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "description": "W3C traceparent trace-id for distributed tracing."
         },
         "correlation_id": {
-          "type": [
-            "string",
-            "null"
-          ],
+          "type": ["string", "null"],
           "description": "Business-level correlation identifier."
         },
         "created_at": {
@@ -80,68 +38,29 @@
           "description": "ISO 8601 creation timestamp."
         }
       },
-      "required": [
-        "packet_id",
-        "packet_type",
-        "action"
-      ]
+      "required": ["packet_id", "packet_type", "action"]
     },
     "address": {
       "type": "object",
       "description": "Routing: source, destination, and reply-to nodes.",
       "properties": {
-        "source_node": {
-          "type": "string"
-        },
-        "destination_node": {
-          "type": "string"
-        },
-        "reply_to": {
-          "type": "string"
-        }
+        "source_node": { "type": "string" },
+        "destination_node": { "type": "string" },
+        "reply_to": { "type": "string" }
       },
-      "required": [
-        "source_node",
-        "destination_node",
-        "reply_to"
-      ]
+      "required": ["source_node", "destination_node", "reply_to"]
     },
     "tenant": {
       "type": "object",
       "description": "Multi-tenant identity stack. Enforces tenant isolation (Contract 3).",
       "properties": {
-        "actor": {
-          "type": "string",
-          "description": "Tenant performing the action."
-        },
-        "on_behalf_of": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "originator": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "org_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "user_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
+        "actor": { "type": "string", "description": "Tenant performing the action." },
+        "on_behalf_of": { "type": ["string", "null"] },
+        "originator": { "type": ["string", "null"] },
+        "org_id": { "type": ["string", "null"] },
+        "user_id": { "type": ["string", "null"] }
       },
-      "required": [
-        "actor"
-      ]
+      "required": ["actor"]
     },
     "payload": {
       "type": "object",
@@ -164,88 +83,42 @@
           "maxLength": 64,
           "description": "SHA-256 hex digest of full transport fields."
         },
-        "classification": {
-          "type": "string"
-        },
-        "encryption_status": {
-          "type": "string"
-        }
+        "classification": { "type": "string" },
+        "encryption_status": { "type": "string" }
       },
-      "required": [
-        "payload_hash",
-        "transport_hash"
-      ]
+      "required": ["payload_hash", "transport_hash"]
     },
     "governance": {
       "type": "object",
       "description": "Audit and compliance metadata.",
       "properties": {
-        "intent": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "compliance_tags": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "retention_days": {
-          "type": "integer",
-          "minimum": 1
-        }
+        "intent": { "type": ["string", "null"] },
+        "compliance_tags": { "type": "array", "items": { "type": "string" } },
+        "retention_days": { "type": "integer", "minimum": 1 }
       }
     },
     "lineage": {
       "type": "object",
       "description": "Derivation chain. Immutable ancestry.",
       "properties": {
-        "parent_id": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "format": "uuid"
-        },
-        "root_id": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "generation": {
-          "type": "integer",
-          "minimum": 0
-        }
+        "parent_id": { "type": ["string", "null"], "format": "uuid" },
+        "root_id": { "type": "string", "format": "uuid" },
+        "generation": { "type": "integer", "minimum": 0 }
       },
-      "required": [
-        "root_id",
-        "generation"
-      ]
+      "required": ["root_id", "generation"]
     },
     "hop_trace": {
       "type": "array",
       "description": "Append-only journey trace through constellation nodes.",
-      "items": {
-        "type": "object"
-      }
+      "items": { "type": "object" }
     },
     "delegation_chain": {
       "type": "array",
       "description": "Scoped authorization chain through multi-hop flows.",
-      "items": {
-        "type": "object"
-      }
+      "items": { "type": "object" }
     }
   },
-  "required": [
-    "header",
-    "address",
-    "tenant",
-    "payload",
-    "security",
-    "lineage"
-  ],
+  "required": ["header", "address", "tenant", "payload", "security", "lineage"],
   "additionalProperties": true,
   "examples": [
     {
@@ -266,10 +139,7 @@
         "originator": "plasticos"
       },
       "payload": {
-        "query": {
-          "material_type": "HDPE",
-          "quantity_kg": 500
-        },
+        "query": {"material_type": "HDPE", "quantity_kg": 500},
         "match_direction": "supplier_to_buyer",
         "top_n": 10
       },
