@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance, gmp]
+status: active
+/L9_META -->
+
 Now I have the live PR data from the actual [cryptoxdog/Cognitive.Engine.Graphs](https://github.com/cryptoxdog/Cognitive.Engine.Graphs) repo. Here is the action prompt — a structured review protocol that operates on your actual open PRs:
 
 ***

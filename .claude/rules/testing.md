@@ -2,6 +2,15 @@
 paths:
   - "tests/**/*.py"
 ---
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance]
+status: active
+/L9_META -->
+
 # Testing Rules (Contract 17)
 
 ## Test Types

@@ -1,10 +1,9 @@
 # --- L9_META ---
-# l9_schema: 1
+# l9_schema: 2
 # origin: l9-template
 # engine: graph
-# layer: [build]
-# tags: [L9_TEMPLATE, build, commands]
-# owner: platform
+# layer: [ci]
+# tags: [delivery, harness]
 # status: active
 # --- /L9_META ---
 # ─────────────────────────────────────────────────────────────

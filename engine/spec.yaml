@@ -1,13 +1,11 @@
 # --- L9_META ---
-# l9_schema: 1
+# l9_schema: 2
 # origin: engine-specific
 # engine: graph
 # layer: [config]
-# tags: [spec, registration, gate-sdk]
-# owner: engine-team
+# tags: [platform]
 # status: active
 # --- /L9_META ---
-
 # engine/spec.yaml — Node registration contract for Cognitive.Engine.Graphs
 # Read by: constellation_node_sdk.registration.build_registration_payload
 # Consumed by: Gate /v1/admin/register at node startup

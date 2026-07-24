@@ -1,15 +1,15 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [config]
-tags: [config]
-owner: engine-team
+tags: [platform, domain-spec, settings]
 status: active
 --- /L9_META ---
 
-Configuration loading and validation for domain packs."""
+Configuration loading and validation for domain packs.
+"""
 
 from engine.config.loader import DomainPackLoader
 from engine.config.schema import (

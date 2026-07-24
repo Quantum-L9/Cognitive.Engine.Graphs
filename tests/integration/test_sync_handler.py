@@ -1,4 +1,15 @@
-"""Integration tests — sync handler: merge, idempotency, unknown entity."""
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [ingestion, sync]
+status: active
+--- /L9_META ---
+
+Integration tests — sync handler: merge, idempotency, unknown entity.
+"""
 
 from __future__ import annotations
 

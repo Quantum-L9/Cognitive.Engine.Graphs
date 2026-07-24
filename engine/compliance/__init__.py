@@ -1,15 +1,15 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [config]
-tags: [compliance]
-owner: engine-team
+tags: [governance, compliance, pii]
 status: active
 --- /L9_META ---
 
-Compliance and governance."""
+Compliance and governance.
+"""
 
 from engine.compliance.audit import AuditLogger
 from engine.compliance.engine import ComplianceEngine

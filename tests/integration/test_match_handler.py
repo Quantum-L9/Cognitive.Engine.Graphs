@@ -1,4 +1,14 @@
-"""Integration tests — match handler: full pipeline, top_n, invalid payload.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [matching, handlers]
+status: active
+--- /L9_META ---
+
+Integration tests — match handler: full pipeline, top_n, invalid payload.
 
 Real payload contract (engine/handlers.py::handle_match):
     query: dict (required — resolved against domain queryschema)

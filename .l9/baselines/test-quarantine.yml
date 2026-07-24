@@ -1,3 +1,11 @@
+# --- L9_META ---
+# l9_schema: 2
+# origin: engine-specific
+# engine: graph
+# layer: [governance]
+# tags: [governance]
+# status: active
+# --- /L9_META ---
 # Test quarantine ledger for Quantum-L9/Cognitive.Engine.Graphs.
 # Governed by the Baseline Ratchet (l9-ci-core baseline-ratchet.yml).
 # Every entry is pre-existing test debt with a real owner, issue, and expiry.

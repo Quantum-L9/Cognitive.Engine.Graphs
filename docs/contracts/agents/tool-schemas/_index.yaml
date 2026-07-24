@@ -1,3 +1,11 @@
+# --- L9_META ---
+# l9_schema: 2
+# origin: l9-template
+# engine: graph
+# layer: [docs, contracts]
+# tags: [governance, compliance]
+# status: active
+# --- /L9_META ---
 # ═══════════════════════════════════════════════════════════════
 # Contract: Agent Tool Schema Registry
 # Source:   chassis/actions.py:_engine_handlers

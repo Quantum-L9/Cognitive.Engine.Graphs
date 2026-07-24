@@ -1,10 +1,9 @@
 <!-- L9_META
-l9_schema: 1
-origin: audit-corrected
+l9_schema: 2
+origin: engine-specific
 engine: graph
-layer: [operations]
-tags: [troubleshooting, debugging, common-errors]
-owner: platform
+layer: [scripts]
+tags: [platform]
 status: active
 /L9_META -->
 
@@ -338,36 +337,56 @@ gates:
 
 ### Symptom
 ```
-❌ L9_META header missing or malformed
-File: engine/gates/new_gate.py
+MISSING  engine/gates/new_gate.py
+
+606/607 files consistent (1 missing, 0 drift, 0 misplaced, 0 invalid)
 ```
 
 ### Diagnosis
-This violates **Contract C-018** (L9_META Headers). Every file needs metadata.
+This violates **Contract C-018** (L9_META Headers). Every tracked file needs
+metadata. Field values are not authored per file — they are resolved from
+`l9-meta.yaml` by path, so a missing header usually just means the file is new.
+
+Other statuses the check can report:
+
+| Status | Meaning |
+|---|---|
+| `MISSING` | No header at all |
+| `DRIFT` | Header present, values disagree with `l9-meta.yaml` |
+| `MISPLACED` | Values correct, but the block is in the wrong position |
+| `INVALID` | Value outside the vocabulary, or tag facet cardinality violated |
 
 ### Resolution
 ```bash
-# Run L9_META injector
-python tools/l9_meta_injector.py engine/gates/new_gate.py
+# Write or repair headers for every tracked file
+python tools/l9_meta_injector.py apply
 
-# Or manually add header
+# Confirm
+python tools/l9_meta_injector.py check
 ```
+
+`apply` writes this into a Python file, merging into the existing module
+docstring rather than adding a second one:
 
 ```python
-# --- L9_META ---
-# l9_schema: 1
-# origin: engine-specific
-# engine: graph
-# layer: [gate-compilation]
-# tags: [gates, compilation]
-# owner: engine-team
-# status: active
-# --- /L9_META ---
+"""New gate implementation.
 
-"""New gate implementation."""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [gates]
+tags: [matching, gates]
+status: active
+--- /L9_META ---
+"""
 ```
 
-**Agent Action**: Run `tools/l9_meta_injector.py` on new files before committing.
+If `check` reports `INVALID`, the fix is in `l9-meta.yaml`, not the file — add
+the value to `vocabulary` or correct the rule that resolves that path.
+
+**Agent Action**: Run `tools/l9_meta_injector.py apply` on new files before
+committing. The `l9-meta-check` pre-commit hook blocks the commit otherwise.
 
 ---
 

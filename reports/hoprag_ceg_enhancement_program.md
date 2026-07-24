@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [reports]
+tags: [governance]
+status: active
+/L9_META -->
+
 # HopRAG → CEG Enhancement Program
 
 **Version:** 1.0.0

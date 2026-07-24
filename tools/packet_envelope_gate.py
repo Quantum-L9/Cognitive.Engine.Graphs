@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-# --- L9_META ---
-# l9_schema: 1
-# origin: ceg
-# engine: graph
-# layer: [ci, tools]
-# tags: [ci, baseline-ratchet, packet-envelope]
-# owner: platform
-# status: active
-# --- /L9_META ---
-"""Thin PacketEnvelope debt gate: delegates to the pinned l9-ci-sdk.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [ci, tools]
+tags: [delivery, harness]
+status: active
+--- /L9_META ---
+
+Thin PacketEnvelope debt gate: delegates to the pinned l9-ci-sdk.
 
 This wrapper contains NO scanning, normalization, fingerprinting, or
 comparison logic. It only:

@@ -1,4 +1,13 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [governance, compliance]
+status: active
+--- /L9_META ---
+
 Invariant regression tests — Compliance defects (T3-xx findings).
 
 Verifies that audit logging, PII handling, and compliance wiring

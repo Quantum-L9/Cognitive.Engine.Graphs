@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules, governance]
+tags: [governance, gmp]
+status: active
+/L9_META -->
+
 # GMP v3.2.0 — ONE-PAGE QUICK REFERENCE
 
 ## THE 7 PHASES (0-6, ALWAYS IN THIS ORDER)

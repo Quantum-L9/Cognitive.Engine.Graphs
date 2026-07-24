@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [governance]
+tags: [governance]
+status: active
+/L9_META -->
+
 # GUARDRAILS.md — CEG AI Safety Constraints
 
 > Mandatory read for ALL agents operating in this repository.

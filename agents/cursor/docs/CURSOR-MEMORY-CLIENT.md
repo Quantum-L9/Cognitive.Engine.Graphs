@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [docs]
+tags: [platform]
+status: active
+/L9_META -->
+
 # Cursor Memory Client
 
 > **File:** `agents/cursor/cursor_memory_client.py`

@@ -32,6 +32,14 @@ tags:
   ["production", "templates", "patterns", "performance", "debugging", "speed"]
 production_ready: true
 ---
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [docs]
+tags: [platform]
+status: active
+/L9_META -->
 
 # Production Speed Pack
 

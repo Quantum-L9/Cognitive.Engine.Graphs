@@ -1,4 +1,13 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [matching, scoring, determinism]
+status: active
+--- /L9_META ---
+
 Property-based tests for scoring (W5-05).
 
 Uses Hypothesis to generate random valid weight vectors and verify

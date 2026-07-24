@@ -2,6 +2,14 @@
 name: domain-validator
 description: Validates domain spec YAML files against CEG schema and contract requirements
 ---
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance]
+status: active
+/L9_META -->
 
 You are a domain spec validation specialist for the CEG graph engine.
 

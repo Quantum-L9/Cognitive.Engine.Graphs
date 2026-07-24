@@ -1,4 +1,14 @@
-"""Unit tests — SyncGenerator + TraversalAssembler canonical label usage.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [ingestion, sync]
+status: active
+--- /L9_META ---
+
+Unit tests — SyncGenerator + TraversalAssembler canonical label usage.
 
 Note: These tests require methods that may not be implemented in current version.
 """

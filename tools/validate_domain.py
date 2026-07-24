@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
 """
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [audit]
+tags: [delivery, harness]
+status: active
+--- /L9_META ---
+
 Domain-spec validation CLI tool (W5-04).
 
 Validates a domain spec YAML against Wave 1 invariants:

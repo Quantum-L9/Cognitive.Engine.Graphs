@@ -1,16 +1,14 @@
 {
   "_l9_meta": {
-    "l9_schema": 1,
+    "l9_schema": 2,
     "origin": "engine-specific",
     "engine": "graph",
     "layer": [
       "docs"
     ],
     "tags": [
-      "dev-docs",
-      "analysis"
+      "platform"
     ],
-    "owner": "engine-team",
     "status": "active"
   },
   "top_3_systems": {

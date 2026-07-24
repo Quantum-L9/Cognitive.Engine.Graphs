@@ -1,11 +1,10 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [causal]
-tags: [causal, edges, attribution, validation, counterfactual]
-owner: engine-team
+tags: [intelligence, causal]
 status: active
 --- /L9_META ---
 

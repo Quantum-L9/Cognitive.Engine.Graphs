@@ -1,11 +1,10 @@
 """
 --- L9_META ---
-l9_schema: 1
-origin: tests
+l9_schema: 2
+origin: engine-specific
 engine: graph
-layer: [tests]
-tags: [hoprag, integration, pipeline, test]
-owner: engine-team
+layer: [test]
+tags: [intelligence, hoprag]
 status: active
 --- /L9_META ---
 

@@ -1,4 +1,15 @@
-"""Unit tests — GateCompiler: gate types, null semantics, direction filter."""
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [matching, gates]
+status: active
+--- /L9_META ---
+
+Unit tests — GateCompiler: gate types, null semantics, direction filter.
+"""
 
 from __future__ import annotations
 

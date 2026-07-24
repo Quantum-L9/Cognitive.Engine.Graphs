@@ -1,15 +1,15 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [test]
-tags: [test, config]
-owner: engine-team
+tags: [ingestion, domain-spec]
 status: active
 --- /L9_META ---
 
-Tests for DomainPackLoader cache invalidation and path security."""
+Tests for DomainPackLoader cache invalidation and path security.
+"""
 
 from __future__ import annotations
 

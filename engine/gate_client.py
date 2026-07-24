@@ -1,11 +1,10 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
-layer: [integration]
-tags: [gate, transport, outbound, sdk]
-owner: engine-team
+layer: [test]
+tags: [platform]
 status: active
 --- /L9_META ---
 

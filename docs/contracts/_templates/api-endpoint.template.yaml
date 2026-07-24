@@ -1,3 +1,11 @@
+# --- L9_META ---
+# l9_schema: 2
+# origin: l9-template
+# engine: graph
+# layer: [config]
+# tags: [delivery, portability]
+# status: active
+# --- /L9_META ---
 # ═══════════════════════════════════════════════════════════════
 # Contract: {EndpointName} — API Endpoint Template
 # Source:   {source_file}:{line_number}

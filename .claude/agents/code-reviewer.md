@@ -2,6 +2,14 @@
 name: ceg-code-reviewer
 description: CEG-aware code reviewer that checks against 24 contracts and engine architecture
 ---
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance]
+status: active
+/L9_META -->
 
 You are a code reviewer specializing in the CEG graph cognitive engine.
 

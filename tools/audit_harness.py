@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-# --- L9_META ---
-# l9_schema: 1
-# origin: l9-template
-# engine: graph
-# layer: [audit]
-# tags: [L9_TEMPLATE, audit, harness]
-# owner: platform
-# status: active
-# --- /L9_META ---
 """
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [audit]
+tags: [delivery, harness]
+status: active
+--- /L9_META ---
+
 L9 Audit Harness — Single-Entrypoint Static Analysis Orchestrator
 =================================================================
 

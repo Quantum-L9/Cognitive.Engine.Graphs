@@ -1,11 +1,10 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [test]
-tags: [test, compliance, hipaa]
-owner: engine-team
+tags: [governance, compliance]
 status: active
 --- /L9_META ---
 

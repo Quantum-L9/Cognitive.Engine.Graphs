@@ -1,4 +1,13 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [matching, gates]
+status: active
+--- /L9_META ---
+
 Tests for engine/gate_client.py.
 
 Verifies:

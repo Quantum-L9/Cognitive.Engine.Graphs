@@ -1,4 +1,13 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [test]
+tags: [governance, compliance]
+status: active
+--- /L9_META ---
+
 Known gap tracker — tests that are expected to fail until the gap is filled.
 
 Each test corresponds to a known architectural gap identified in the

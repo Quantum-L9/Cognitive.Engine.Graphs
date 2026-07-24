@@ -1,10 +1,9 @@
 # --- L9_META ---
-# l9_schema: 1
+# l9_schema: 2
 # origin: l9-template
 # engine: graph
 # layer: [governance]
-# tags: [L9_TEMPLATE, precommit]
-# owner: platform
+# tags: [delivery, harness]
 # status: active
 # --- /L9_META ---
 #
@@ -141,6 +140,21 @@ repos:
         name: "Deprecated API: PacketEnvelope → transportPacket (baseline ratchet)"
         entry: python3 tools/packet_envelope_gate.py
         language: system
+        pass_filenames: false
+        always_run: true
+
+  # L9_META headers (Contract C-018) — resolves every tracked file against
+  # l9-meta.yaml. always_run because a rule edit changes the expected values
+  # for files that are not themselves staged.
+  - repo: local
+    hooks:
+      - id: l9-meta-check
+        name: L9_META Header Check
+        entry: python tools/l9_meta_injector.py check
+        language: python
+        # pre-commit builds an isolated venv, so l9-meta.yaml parsing needs
+        # pyyaml declared here — it is not inherited from the repo environment.
+        additional_dependencies: [pyyaml]
         pass_filenames: false
         always_run: true
 

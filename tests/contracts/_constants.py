@@ -1,4 +1,13 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [test]
+tags: [governance, compliance]
+status: active
+--- /L9_META ---
+
 Shared constants for contract validation tests.
 
 Imported by test modules directly; conftest.py imports these for fixture setup.

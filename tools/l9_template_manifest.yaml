@@ -1,10 +1,9 @@
 # --- L9_META ---
-# l9_schema: 1
+# l9_schema: 2
 # origin: l9-template
 # engine: graph
 # layer: [meta]
-# tags: [L9_TEMPLATE, meta, manifest]
-# owner: platform
+# tags: [delivery, harness]
 # status: active
 # --- /L9_META ---
 #
@@ -45,9 +44,20 @@ files:
   - path: "tools/l9_template_manifest.yaml"
     required: true
     tags: ["L9_TEMPLATE", "meta", "manifest"]
+  # CLI entry point — a shim over tools/l9_meta/cli.py, kept so existing docs
+  # and hooks that invoke it by path keep working.
   - path: "tools/l9_meta_injector.py"
     required: false
     tags: ["L9_TEMPLATE", "meta", "injector"]
+  - path: "tools/l9_meta"
+    required: false
+    tags: ["L9_TEMPLATE", "meta", "injector"]
+  # Per-repo source of truth: vocabulary, path rules, overrides, exclusions.
+  # Portable design, repo-specific content — scaffold a new repo's copy with
+  # `python tools/l9_meta_injector.py init`.
+  - path: "l9-meta.yaml"
+    required: false
+    tags: ["meta", "config"]
 
   # --- CI/CD workflows ---
   - path: ".github/workflows/audit.yml"

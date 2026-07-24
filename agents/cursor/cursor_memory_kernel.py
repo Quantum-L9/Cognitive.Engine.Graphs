@@ -1,4 +1,13 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance]
+status: active
+--- /L9_META ---
+
 Cursor Memory Kernel - Session Memory & TODO Tracking
 
 Wraps l9.workflow_todo_kernel.v2.yaml into executable Python.

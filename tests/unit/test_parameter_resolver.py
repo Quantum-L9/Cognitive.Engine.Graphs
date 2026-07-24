@@ -1,4 +1,14 @@
-"""Unit tests — ParameterResolver: passthrough, derived parameters, empty input.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [matching, traversal]
+status: active
+--- /L9_META ---
+
+Unit tests — ParameterResolver: passthrough, derived parameters, empty input.
 
 Real API (engine/traversal/resolver.py):
     ParameterResolver(domain_spec).resolve_parameters(query_data: dict) -> dict

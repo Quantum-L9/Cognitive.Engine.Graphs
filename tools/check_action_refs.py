@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-# --- L9_META ---
-# l9_schema: 1
-# origin: engine-specific
-# engine: graph
-# layer: [ci]
-# tags: [ci, security, supply-chain, actions]
-# owner: platform
-# status: active
-# --- /L9_META ---
-"""Guard: reject malformed GitHub Actions references in workflow files.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [ci]
+tags: [delivery, harness]
+status: active
+--- /L9_META ---
+
+Guard: reject malformed GitHub Actions references in workflow files.
 
 Detects the "Frankenref" corruption pattern where a 40-hex commit SHA and a
 version tag are concatenated into a single unusable ref:

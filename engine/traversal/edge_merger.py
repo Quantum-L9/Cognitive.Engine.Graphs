@@ -1,11 +1,10 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [traversal]
-tags: [hoprag, edge-merger, hybrid-similarity, indexing]
-owner: engine-team
+tags: [matching, traversal]
 status: active
 --- /L9_META ---
 

@@ -1,4 +1,14 @@
-"""Unit tests — ScoringAssembler: clause assembly, weight overrides.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [matching, scoring]
+status: active
+--- /L9_META ---
+
+Unit tests — ScoringAssembler: clause assembly, weight overrides.
 
 Real API (engine/scoring/assembler.py):
     ScoringAssembler(domain_spec, graph_driver=None)

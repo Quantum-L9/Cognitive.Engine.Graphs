@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules, governance]
+tags: [governance, gmp]
+status: active
+/L9_META -->
+
 # 🧠 GMP CURSOR TEMPLATE v3.2.0 — L9 CANONICAL
 
 **Purpose:** Deterministic, locked-in execution for Cursor IDE fixes across multiple task types (single-file, multi-file, refactoring, deployment).

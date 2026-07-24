@@ -1,23 +1,13 @@
 # --- L9_META ---
-# l9_schema: 1
+# l9_schema: 2
 # origin: l9-template
 # engine: graph
-# layer: [bootstrap]
-# tags: [L9_TEMPLATE, bootstrap, setup]
-# owner: platform
+# layer: [boot]
+# tags: [delivery]
 # status: active
 # --- /L9_META ---
 #
 !/usr/bin/env bash
---- L9_META ---
-l9_schema: 1
-origin: l9-template
-engine: graph
-layer: [bootstrap]
-tags: [L9_TEMPLATE, bootstrap, setup]
-owner: platform
-status: active
---- /L9_META ---
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Universal CI/CD Pack — Automated Variable Setup
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -4,6 +4,15 @@ paths:
   - "chassis/**/*.py"
   - "tools/**/*.py"
 ---
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance]
+status: active
+/L9_META -->
+
 # CEG Contracts (1–24)
 
 Enforced by `tools/contract_scanner.py` and `tools/verify_contracts.py`.
@@ -44,7 +53,7 @@ Enforced by `tools/contract_scanner.py` and `tools/verify_contracts.py`.
 | # | Name | Rule |
 |---|------|------|
 | 17 | Test Requirements | Unit for pure functions, integration with testcontainers-neo4j, compliance for prohibited factors, <200ms p95. |
-| 18 | L9_META Headers | Every file carries L9_META header. Injected by tools/l9_meta_injector.py. |
+| 18 | L9_META Headers | Every tracked file carries an L9_META header (schema v2). Values resolve from `l9-meta.yaml` by path — write with `tools/l9_meta_injector.py apply`, verify with `check`, never hand-edit a header. |
 
 ## Layer 6 — Graph Intelligence (19–20)
 | # | Name | Rule |

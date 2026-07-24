@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules, governance]
+tags: [governance, gmp]
+status: active
+/L9_META -->
+
 # CURSOR RUNBOOK — L9 GMP + CURSOR INTEGRATION
 
 **Version:** 3.1.0

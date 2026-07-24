@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [docs]
+tags: [platform]
+status: active
+/L9_META -->
+
 # Architecture — Cognitive Engine Graphs (CEG)
 
 > Agent reference: read this before creating files, modifying handlers, or touching the engine/chassis boundary.

@@ -1,4 +1,15 @@
-"""Unit tests — Cypher utility functions."""
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [matching, traversal]
+status: active
+--- /L9_META ---
+
+Unit tests — Cypher utility functions.
+"""
 
 from __future__ import annotations
 

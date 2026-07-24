@@ -1,3 +1,14 @@
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [ingestion, domain-spec]
+status: active
+--- /L9_META ---
+"""
+
 import pytest
 
 from engine.config.loader import DomainPackLoader

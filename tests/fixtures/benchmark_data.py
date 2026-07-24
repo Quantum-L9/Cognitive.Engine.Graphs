@@ -1,4 +1,13 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [platform, fixtures]
+status: active
+--- /L9_META ---
+
 Benchmark test data — labeled synthetic pairs for score quality validation.
 
 Each scenario defines a "good pair" (high expected score) and a "bad pair"

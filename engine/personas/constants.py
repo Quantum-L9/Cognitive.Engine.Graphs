@@ -1,11 +1,10 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [personas, config]
-tags: [constants, tier-3, composition]
-owner: engine-team
+tags: [intelligence, personas]
 status: active
 --- /L9_META ---
 

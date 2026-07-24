@@ -127,10 +127,9 @@ regexes = [
 ]
 
 [tool.l9_meta]
-l9_schema = 1
+l9_schema = 2
 origin = "l9-template"
 engine = "graph"
 layer = ["security"]
-tags = ["L9_TEMPLATE", "gitleaks", "secrets"]
-owner = "platform"
+tags = ["governance", "security"]
 status = "active"

@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [docs]
+tags: [governance]
+status: active
+/L9_META -->
+
 # Stage 4: Explanation-Based Belief Revision System
 
 **Perplexity Deep Research Output**

@@ -1,11 +1,10 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [intake]
-tags: [intake, scanner, crm]
-owner: engine-team
+tags: [ingestion, intake]
 status: active
 --- /L9_META ---
 

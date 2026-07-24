@@ -1,3 +1,11 @@
+# --- L9_META ---
+# l9_schema: 2
+# origin: engine-specific
+# engine: graph
+# layer: [governance]
+# tags: [governance]
+# status: active
+# --- /L9_META ---
 # Baseline ledger: deprecated PacketEnvelope references (fail-closed debt).
 # Enforced by l9-ci-sdk baseline ratchet — see .github/workflows/baseline-ratchet-caller.yml.
 # Every entry is owned, expiring, and tied to issue Quantum-L9/Cognitive.Engine.Graphs#138.

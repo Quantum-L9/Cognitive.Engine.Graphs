@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules, governance]
+tags: [governance, gmp]
+status: active
+/L9_META -->
+
 # GMP Audit v1.0 — Example Implementation & Usage Guide
 
 **Document:** GMP Audit v1.0 Implementation Guide

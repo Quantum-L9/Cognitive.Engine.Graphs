@@ -1,4 +1,16 @@
 {
+  "_l9_meta": {
+    "l9_schema": 2,
+    "origin": "engine-specific",
+    "engine": "graph",
+    "layer": [
+      "agent-rules"
+    ],
+    "tags": [
+      "governance"
+    ],
+    "status": "active"
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -27,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'if command -v python3 &>/dev/null && [ -f tools/contract_scanner.py ]; then python3 tools/contract_scanner.py --quick 2>/dev/null || echo \"Contract scanner found issues — review before committing\"; fi'"
+            "command": "bash -c 'if command -v python3 &>/dev/null && [ -f tools/contract_scanner.py ]; then python3 tools/contract_scanner.py --quick 2>/dev/null || echo \"Contract scanner found issues \u2014 review before committing\"; fi'"
           }
         ]
       }

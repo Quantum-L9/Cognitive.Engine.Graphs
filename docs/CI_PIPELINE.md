@@ -1,10 +1,9 @@
 <!-- L9_META
-l9_schema: 1
-origin: audit-corrected
+l9_schema: 2
+origin: engine-specific
 engine: graph
 layer: [ci]
-tags: [ci, pipeline, pre-commit, enforcement]
-owner: platform
+tags: [platform]
 status: active
 /L9_META -->
 

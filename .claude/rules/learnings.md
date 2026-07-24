@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance]
+status: active
+/L9_META -->
+
 # Agent Learnings
 
 This file captures non-obvious patterns and gotchas discovered by agents working in this repo.

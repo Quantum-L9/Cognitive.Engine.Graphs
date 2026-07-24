@@ -1,11 +1,10 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
-layer: [health, tests]
-tags: [health, tests, readiness, enrichment]
-owner: engine-team
+layer: [health, test]
+tags: [ingestion, readiness]
 status: active
 --- /L9_META ---
 

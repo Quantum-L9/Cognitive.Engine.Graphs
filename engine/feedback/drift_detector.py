@@ -1,11 +1,10 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [feedback]
-tags: [feedback, drift-detection, chi-squared]
-owner: engine-team
+tags: [intelligence, feedback]
 status: active
 --- /L9_META ---
 

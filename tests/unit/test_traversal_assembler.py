@@ -1,4 +1,14 @@
-"""Unit tests — TraversalAssembler: direction filter, step ordering.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [matching, traversal]
+status: active
+--- /L9_META ---
+
+Unit tests — TraversalAssembler: direction filter, step ordering.
 
 Real API (engine/traversal/assembler.py):
     TraversalAssembler(domain_spec).assemble_traversal(match_direction: str) -> list[str]

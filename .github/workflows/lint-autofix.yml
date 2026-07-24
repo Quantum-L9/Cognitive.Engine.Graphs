@@ -1,10 +1,9 @@
 # --- L9_META ---
-# l9_schema: 1
+# l9_schema: 2
 # origin: engine-specific
 # engine: graph
 # layer: [ci]
-# tags: [ci, lint, autofix, ruff]
-# owner: platform
+# tags: [delivery, harness]
 # status: active
 # --- /L9_META ---
 #

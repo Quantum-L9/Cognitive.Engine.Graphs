@@ -1,4 +1,13 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance]
+status: active
+--- /L9_META ---
+
 L9 Cursor Client
 HTTP client wrapper for Cursor remote API.
 Simple POST wrapper with timeout and error handling.

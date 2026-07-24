@@ -1,4 +1,13 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [matching, scoring]
+status: active
+--- /L9_META ---
+
 Tests for the algorithmic upgrade PR:
   - engine/diagnostics/fingerprint.py
   - engine/diagnostics/dissimilarity.py

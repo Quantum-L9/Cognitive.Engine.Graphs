@@ -1,4 +1,14 @@
-"""Integration tests — admin handler: list_domains, get_domain, init_schema.
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [platform, handlers]
+status: active
+--- /L9_META ---
+
+Integration tests — admin handler: list_domains, get_domain, init_schema.
 
 Handlers use the W4-01 EngineState DI: dependencies are injected via
 engine.handlers.init_dependencies() (the ``engine_deps`` fixture), and the

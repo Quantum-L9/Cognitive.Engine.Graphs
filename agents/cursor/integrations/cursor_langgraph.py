@@ -1,4 +1,13 @@
 """
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance]
+status: active
+--- /L9_META ---
+
 L9 Cursor LangGraph Integration
 Version: 1.0.0
 

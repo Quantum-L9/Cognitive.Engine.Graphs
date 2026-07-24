@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: l9-template
+engine: graph
+layer: [contracts]
+tags: [governance, compliance]
+status: active
+/L9_META -->
+
 # Machine-Readable Contract Specifications
 
 Each YAML file defines one CEG contract with:

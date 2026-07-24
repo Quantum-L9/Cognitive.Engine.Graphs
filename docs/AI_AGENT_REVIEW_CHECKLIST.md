@@ -1,10 +1,9 @@
 <!-- L9_META
-l9_schema: 1
-origin: audit-corrected
+l9_schema: 2
+origin: engine-specific
 engine: graph
-layer: [code-review]
-tags: [pr-review, checklist, ai-agents]
-owner: platform
+layer: [governance]
+tags: [platform]
 status: active
 /L9_META -->
 
@@ -100,10 +99,12 @@ status: active
 - **Severity**: MEDIUM
 
 **CON-003: L9_META Headers (C-018)**
-- [ ] All new .py files have L9_META header
-- [ ] Use `tools/l9_meta_injector.py` (not manual)
+- [ ] All new tracked files have an L9_META header (schema v2 — no `owner`)
+- [ ] Header written by `tools/l9_meta_injector.py apply` (not hand-authored)
+- [ ] New path pattern → `l9-meta.yaml` rule added, not a per-file override
+- [ ] New tag → declared in `vocabulary` under the correct facet
 - **Severity**: LOW
-- **Template**: "Missing L9_META header. Run tools/l9_meta_injector.py. Contract C-018"
+- **Template**: "L9_META header missing or drifted. Run `python tools/l9_meta_injector.py apply`, then `check`. Values come from l9-meta.yaml — do not edit the header by hand. Contract C-018"
 
 ### 4. Code Quality (MEDIUM)
 

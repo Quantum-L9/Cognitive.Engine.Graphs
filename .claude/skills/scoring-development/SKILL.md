@@ -2,6 +2,14 @@
 name: new-scoring
 description: Add a new scoring computation to the CEG engine
 ---
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance, gmp]
+status: active
+/L9_META -->
 
 # New Scoring Computation Development
 

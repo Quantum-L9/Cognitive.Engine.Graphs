@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [docs]
+tags: [platform]
+status: active
+/L9_META -->
+
 <!-- L9_TEMPLATE: true -->
 # L9 Audit Harness — What It Does (and Doesn't)
 

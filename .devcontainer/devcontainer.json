@@ -1,9 +1,20 @@
 {
+  "_l9_meta": {
+    "l9_schema": 2,
+    "origin": "engine-specific",
+    "engine": "graph",
+    "layer": [
+      "dev"
+    ],
+    "tags": [
+      "delivery"
+    ],
+    "status": "active"
+  },
   "name": "Graph Engine Dev",
   "dockerComposeFile": "../docker-compose.dev.yml",
   "service": "api",
   "workspaceFolder": "/workspace",
-
   "customizations": {
     "vscode": {
       "extensions": [
@@ -27,7 +38,9 @@
             "source.fixAll": "explicit"
           }
         },
-        "editor.rulers": [88],
+        "editor.rulers": [
+          88
+        ],
         "files.exclude": {
           "**/__pycache__": true,
           "**/*.pyc": true,
@@ -37,23 +50,40 @@
       }
     }
   },
-
   "features": {
     "ghcr.io/devcontainers/features/git:1": {},
     "ghcr.io/devcontainers/features/github-cli:1": {},
     "ghcr.io/devcontainers/features/docker-in-docker:2": {}
   },
-
-  "forwardPorts": [8000, 7474, 7687, 6379, 3000, 9090, 16686],
+  "forwardPorts": [
+    8000,
+    7474,
+    7687,
+    6379,
+    3000,
+    9090,
+    16686
+  ],
   "portsAttributes": {
-    "8000": {"label": "FastAPI"},
-    "7474": {"label": "Neo4j Browser"},
-    "6379": {"label": "Redis"},
-    "3000": {"label": "Grafana"},
-    "9090": {"label": "Prometheus"},
-    "16686": {"label": "Jaeger UI"}
+    "8000": {
+      "label": "FastAPI"
+    },
+    "7474": {
+      "label": "Neo4j Browser"
+    },
+    "6379": {
+      "label": "Redis"
+    },
+    "3000": {
+      "label": "Grafana"
+    },
+    "9090": {
+      "label": "Prometheus"
+    },
+    "16686": {
+      "label": "Jaeger UI"
+    }
   },
-
   "postCreateCommand": "pip install -e '.[dev]' && pre-commit install",
   "remoteUser": "vscode"
 }

@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [docs]
+tags: [governance]
+status: active
+/L9_META -->
+
 # DEFERRED.md — Tracked Deferments
 
 All inline TODO comments must be migrated here with a unique ID, owner, rationale, and acceptance criteria.

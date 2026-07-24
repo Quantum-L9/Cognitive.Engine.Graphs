@@ -1,3 +1,11 @@
+# --- L9_META ---
+# l9_schema: 2
+# origin: l9-template
+# engine: graph
+# layer: [contracts]
+# tags: [governance, compliance]
+# status: active
+# --- /L9_META ---
 id: CONTRACT-07
 name: Immutability + Content Hash
 layer: packet

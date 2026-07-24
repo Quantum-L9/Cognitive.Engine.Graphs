@@ -1,5 +1,16 @@
 # tests/unit/test_pareto_ensemble.py
-"""Unit tests for Pareto ensemble module."""
+"""
+--- L9_META ---
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [matching, scoring]
+status: active
+--- /L9_META ---
+
+Unit tests for Pareto ensemble module.
+"""
 
 from __future__ import annotations
 

@@ -1,3 +1,11 @@
+# --- L9_META ---
+# l9_schema: 2
+# origin: l9-template
+# engine: graph
+# layer: [config]
+# tags: [delivery, portability]
+# status: active
+# --- /L9_META ---
 # dev.conf — Local development configuration
 # Copy to your repo root as dev.conf and edit.
 # This file should be .gitignored (contains local paths).

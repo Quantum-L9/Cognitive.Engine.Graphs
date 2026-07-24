@@ -1,4 +1,17 @@
 {
+  "_l9_meta": {
+    "l9_schema": 2,
+    "origin": "l9-template",
+    "engine": "graph",
+    "layer": [
+      "config"
+    ],
+    "tags": [
+      "delivery",
+      "portability"
+    ],
+    "status": "active"
+  },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/cryptoxdog/Cognitive.Engine.Graphs/docs/contracts/agents/tool-schemas/{tool-name}.schema.json",
   "title": "{PascalCaseName}Payload",
@@ -16,7 +29,9 @@
       "default": "{default_value}"
     }
   },
-  "required": ["{required_field}"],
+  "required": [
+    "{required_field}"
+  ],
   "additionalProperties": false,
   "examples": [
     {

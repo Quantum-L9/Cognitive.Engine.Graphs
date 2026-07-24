@@ -1,10 +1,9 @@
 <!-- L9_META
-l9_schema: 1
+l9_schema: 2
 origin: l9-template
 engine: graph
-layer: [templates]
-tags: [L9_TEMPLATE, styleguide]
-owner: platform
+layer: [config]
+tags: [delivery, portability]
 status: active
 /L9_META -->
 

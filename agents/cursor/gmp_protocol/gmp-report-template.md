@@ -1,3 +1,12 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules, governance]
+tags: [governance, gmp]
+status: active
+/L9_META -->
+
 <!-- CONTRACT: agents/cursor/gmp_protocol/gmp-report-contract.yaml v3.3.0 -->
 <!-- VALIDATE: python3 scripts/validate_gmp_report.py {this_file} -->
 <!-- ID: Next sequential after checking reports/ and reports/GMP Reports/ -->
