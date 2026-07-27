@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
@@ -39,7 +39,7 @@ jobs:
             echo "ERROR: engine/middleware.py exists (tenant resolution is chassis-only)"
             exit 1
           fi
-          # Fail if engine/api/ directory exists (app factory is in chassis/app.py)
+          # Fail if engine/api/ directory exists (app factory is in chassis/chassis_app.py)
           if [ -d "engine/api" ]; then
             echo "ERROR: engine/api/ directory exists (app factory belongs in chassis/)"
             exit 1
