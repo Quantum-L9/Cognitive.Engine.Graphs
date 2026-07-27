@@ -32,7 +32,7 @@ def init_dependencies(graph_driver: GraphDriver, domain_loader: DomainPackLoader
 ## Chassis Startup Sequence
 
 ```python
-# chassis/app.py (or equivalent startup hook)
+# chassis/chassis_app.py (or equivalent startup hook)
 from engine.handlers import init_dependencies, register_all
 
 async def lifespan(app):
