@@ -79,7 +79,25 @@ local-api:Run API locally against Dockerized DBs
 	PLASTICOS_REDIS_URL=redis://localhost:6379/0 \
 	PLASTICOS_LOG_LEVEL=debug \
 	L9_LIFECYCLE_HOOK=engine.boot:GraphLifecycle \
-	uvicorn chassis.app:create_app --factory --reload --port 8000
+	L9_CHASSIS=legacy \
+	uvicorn chassis.entrypoint:create_app --factory --reload --port 8000
+
+local-api-sdk:Run API locally on the SDK chassis (L9_CHASSIS=sdk)
+	PLASTICOS_NEO4J_URI=bolt://localhost:7687 \
+	PLASTICOS_NEO4J_PASSWORD=l9-dev-password \
+	PLASTICOS_REDIS_URL=redis://localhost:6379/0 \
+	PLASTICOS_LOG_LEVEL=debug \
+	L9_LIFECYCLE_HOOK=engine.boot:GraphLifecycle \
+	L9_CHASSIS=sdk \
+	L9_ENVIRONMENT=local \
+	L9_SERVICE_NAME=graph-engine \
+	HOST=0.0.0.0 \
+	L9_ENFORCE_GATE_ONLY_INGRESS=false \
+	L9_REQUIRE_SIGNATURE=false \
+	L9_MAX_ATTACHMENTS=0 \
+	L9_MAX_ATTACHMENT_SIZE_BYTES=0 \
+	L9_ALLOWED_ACTIONS="$$(python3 -c 'from engine.handlers import ACTION_HANDLERS; print(",".join(ACTION_HANDLERS))')" \
+	uvicorn chassis.entrypoint:create_app --factory --reload --port 8000
 
 # ── Production ─────────────────────────────────────────────
 
