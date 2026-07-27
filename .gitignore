@@ -45,6 +45,9 @@ htmlcov/
 # Current work (scratch / WIP)
 current work/
 
+# memory-bank/ is T0 resume SSOT — MUST stay tracked.
+# Do not add memory-bank to this file or ~/.gitignore_global.
+
 # Temporary
 *.tmp
 *.temp
@@ -63,3 +66,4 @@ secrets.json
 
 # l9-ci-sdk runtime checkout (provisioned by tools/packet_envelope_gate.py)
 .l9/runtime/
+.venv-py312-mypy/
