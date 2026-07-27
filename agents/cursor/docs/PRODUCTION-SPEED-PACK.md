@@ -1,43 +1,9 @@
----
-# === SUITE 6 CANONICAL HEADER ===
-suite: "Cursor Governance Suite 6 (L9 + Suite 6)"
-version: "6.0.0"
-component_id: "DOC-PSP-001"
-component_name: "Production Speed Pack"
-layer: "documentation"
-domain: "development_productivity"
-type: "guide"
-status: "active"
-created: "2025-11-07T00:00:00Z"
-updated: "2026-01-04T00:00:00Z"
-author: "Igor Beylin"
-maintainer: "Igor Beylin"
-
-# === GOVERNANCE METADATA ===
-governance_level: "informational"
-compliance_required: false
-audit_trail: false
-security_classification: "internal"
-
-# === BUSINESS METADATA ===
-title: "Production Speed Pack v1.0.0"
-purpose: "Code templates and patterns for rapid production-ready development"
-summary: >
-  Comprehensive collection of production-ready code templates, refactoring patterns,
-  performance optimization strategies, and debugging approaches. Extracted from
-  CursorPreferencePack to accelerate development velocity while maintaining quality.
-business_value: "Accelerates development with production-ready templates"
-# === LEGACY METADATA (preserved) ===
-tags:
-  ["production", "templates", "patterns", "performance", "debugging", "speed"]
-production_ready: true
----
 <!-- L9_META
 l9_schema: 2
 origin: engine-specific
 engine: graph
 layer: [docs]
-tags: [platform]
+tags: [platform, templates, performance, debugging]
 status: active
 /L9_META -->
 

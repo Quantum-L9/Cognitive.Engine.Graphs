@@ -124,9 +124,6 @@ files:
     tags: ["L9_TEMPLATE", "pr-review"]
 
   # --- Config / bootstrap ---
-  - path: ".suite6-config.json"
-    required: false
-    tags: ["L9_TEMPLATE", "config", "suite6"]
   - path: "setup-new-workspace.yaml"
     required: false
     tags: ["L9_TEMPLATE", "bootstrap", "workspace"]
@@ -187,9 +184,6 @@ files:
   - path: "scripts/scripts-build.sh"
     required: false
     tags: ["L9_TEMPLATE", "scripts", "build"]
-  - path: "scripts/scripts-deploy.sh"
-    required: false
-    tags: ["L9_TEMPLATE", "scripts", "deploy"]
   - path: "scripts/scripts-dev.sh"
     required: false
     tags: ["L9_TEMPLATE", "scripts", "dev"]

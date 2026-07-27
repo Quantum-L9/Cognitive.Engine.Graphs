@@ -57,24 +57,113 @@ All inline TODO comments must be migrated here with a unique ID, owner, rational
 **Priority:** HIGH — required for any LLM-powered feature to function
 
 ---
-## DEFERRED-003
 
-**Title:** Surgical JSON header injection (JSON files excluded from L9_META stamp)
+## DEFERRED-002-UPDATE (2026-07-24)
 
-**File:** `tools/l9_meta/formats/jsonmeta.py` — `inject` / `strip`
+**Title:** DEFERRED-002 partially resolved — OpenAI backend is wired
 
-**Owner:** platform
+**Rationale:** Re-inspection of `engine/security/P2_9_llm_schemas.py` (`_LLMBackend` class, lines 112-212) found that the "empty JSON object + warning" stub described in DEFERRED-002 no longer matches the code. `_LLMBackend._ensure_client()` and `_LLMBackend.call()` lazily construct a real OpenAI SDK client from `OPENAI_API_KEY`/`OPENAI_BASE_URL`/`LLM_PROVIDER` and issue actual chat completions; `ValidatedLLMClient._call()` dispatches to it and raises `FeatureNotEnabled` only when no API key is configured. `docs/FEATURE_GATES.md` §8 has been corrected to state "active" instead of "stub" for the OpenAI provider.
 
-**Rationale:** Injection round-trips through `json.loads` / `json.dumps`, so stamping a file also reserializes it: blank lines disappear and compact arrays are exploded one element per line. `docs/contracts/data/models/packet-envelope.schema.json` came back +159/−29 for a 9-line header, and `.devcontainer/devcontainer.json` lost its section spacing. The output is semantically identical JSON, but the diff noise is unrelated to metadata, so `**/*.json` is excluded in `l9-meta.yaml` until injection is textual.
+**Still outstanding (original DEFERRED-002 scope not fully closed):**
+- Anthropic (or other non-OpenAI-compatible) provider support is NOT implemented — `LLM_PROVIDER` only supports `openai` / `openai-compatible`.
+- DEFERRED-001 (token/cost extraction) remains open and unaffected by this update.
 
-**Acceptance Criteria:**
-- `inject` inserts `_l9_meta` as the first key by text edit, matching the file's existing indentation; every other byte is unchanged
-- `strip` removes the key by brace matching, restoring the original bytes
-- Round-trip and idempotency fixtures in `tests/unit/test_l9_meta_formats.py` extended to assert byte equality on a file with compact arrays and blank lines
-- `**/*.json` removed from `exclude` in `l9-meta.yaml` and the 16 JSON files stamped
+**Owner:** engine-team
 
-**Blocked by:** Nothing — deferred to keep the pipeline PR scoped to the header mechanism.
-
-**Priority:** LOW — 16 files, no runtime impact; C-018 coverage is otherwise complete.
+**Priority:** LOW — OpenAI path is production-ready; Anthropic support remains a future enhancement, not a blocker.
 
 ---
+
+## DEFERRED-003
+
+**Title:** Quarantined — broken alternate chassis auth FastAPI factory
+
+**File:** `chassis/auth/app.py` (removed 2026-07-24)
+
+**Owner:** platform-team
+
+**Rationale:** Alternate `create_app()` imported nonexistent `engine.api.auth.BearerAuthMiddleware` and duplicated the single-ingress factory already owned by `chassis/chassis_app.py`. Not on the Docker/`make local-api` path. Removed rather than repaired to avoid a second HTTP entrypoint.
+
+**Acceptance Criteria (if resurrected):**
+- Auth middleware lives in `chassis/auth/auth.py` and is applied from `chassis.chassis_app.create_app` only
+- No second FastAPI factory under `chassis/auth/`
+- No imports of `engine.api.*` (directory must not exist — Contract 1)
+
+**Priority:** LOW — auth helpers in `chassis/auth/auth.py` remain; only the broken factory was removed
+
+---
+
+## DEFERRED-004
+
+**Title:** Delete four superseded `docs/agent-tasks/` development playbooks
+
+**File:** `docs/agent-tasks/add-action-handler.md`, `add-domain-spec.md`, `add-gate-type.md`, `extend-contract.md`
+
+**Owner:** engine-team
+
+**Rationale:** Content was consolidated into `.claude/skills/` (`action-handler-development`, `domain-spec-authoring`, `gate-development`, `contract-check`), which is the path agents actually load. Two of the four carry guidance that is now wrong: `add-action-handler.md` documents a stale handler return shape, and `add-gate-type.md` describes a one-file-per-gate layout that does not match `engine/gates/types/all_gates.py`. Following either produces a broken change. The files are marked `status: deprecated` with a banner and are referenced by nothing in the repo, so they are inert — but leaving them keeps two competing sources of guidance. Deletion is pending Founder approval per the destructive-operation rule.
+
+**Acceptance Criteria:**
+- The four files are removed from `docs/agent-tasks/`
+- `grep -rn "agent-tasks"` returns no references outside `DEFERRED.md`
+- `make agent-check` exits 0
+
+**Blocked by:** Explicit Founder approval to delete (files marked, not removed)
+
+**Priority:** LOW — files are deprecated and unreferenced; deletion is cleanup, not a fix
+
+---
+## DEFERRED-005
+
+**Title:** SDK chassis divergences from the locked build plan (`L9_CHASSIS=sdk`)
+
+**File:** `chassis/node_app.py`, `chassis/handler_registration.py`, `.env.template`, `docker-compose.yml`
+
+**Owner:** platform-team
+
+**Rationale:** The Gate SDK chassis instantiation plan assumed SDK capabilities that
+the installed `constellation-node-sdk` does not provide. Each was implemented against
+the actual SDK surface rather than skipped, but the following gaps remain open:
+
+1. **`/v1/relay` does not exist.** The plan expected a relay route to assert absent
+   for CONTRACT-01. `create_node_app()` exposes only `/v1/execute`, `/v1/health`,
+   `/metrics`. The absence test in `tests/unit/test_node_app.py` therefore passes
+   trivially and would not catch a future SDK version that adds relay.
+
+2. **Gate-only ingress is not an SDK feature.** `NodeRuntimeConfig` has no
+   gate-only field, so `L9_ENFORCE_GATE_ONLY_INGRESS` / `L9_GATE_NODE_NAME` are
+   consumed by a local `BaseHTTPMiddleware` in `chassis/node_app.py`, not by the
+   SDK. That middleware reads and replays the request body (`request._receive`),
+   which is a documented Starlette workaround, not a supported API. If the SDK
+   grows native gate-only enforcement, delete the middleware in favour of it.
+
+3. **`PacketStore.persist` type mismatch is unverified at runtime.** The store
+   annotates `TransportPacket`; the audit wrapper passes `PacketEnvelope` from
+   `engine/packet/chassis_contract.py`. Persist failures are caught and logged as
+   warnings, so a shape mismatch would degrade the audit trail silently rather
+   than fail the request.
+
+4. **`trace_id` is synthesised, not propagated.** SDK handlers receive only
+   `(tenant, payload)`, so `_with_packet_audit` generates a fresh `uuid4()` per
+   call. The Gate's own trace ID is therefore not carried into the packet pair,
+   breaking cross-node trace correlation on the SDK path.
+
+5. **`L9_MAX_ATTACHMENT_SIZE_BYTES` must be pinned.** The SDK defaults the
+   attachment cap to 10MB and the packet cap to 256KB, then rejects that pair —
+   so `get_runtime_config()` cannot validate from SDK defaults alone.
+   `.env.template`, `docker-compose.yml`, and `make local-api-sdk` all set it to
+   `0`. Guarded by
+   `tests/unit/test_node_app.py::test_sdk_default_attachment_caps_are_mutually_invalid`.
+
+**Acceptance Criteria:**
+- SDK pinned to a tag or commit (see tech debt: it is currently an unpinned git dep)
+- Gate-only ingress moved to native SDK enforcement, or the body-replay workaround
+  replaced with a pure-ASGI middleware
+- `PacketStore.persist` accepts `PacketEnvelope` explicitly, or the wrapper converts
+- Gate trace ID reaches the audit packets (requires an SDK context accessor)
+
+**Priority:** MEDIUM — `L9_CHASSIS` defaults to `legacy`, so none of these affect the
+production path today. All become blocking before the SDK chassis becomes default.
+
+---
+

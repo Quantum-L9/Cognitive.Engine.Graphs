@@ -339,7 +339,7 @@ gates:
 ```
 MISSING  engine/gates/new_gate.py
 
-606/607 files consistent (1 missing, 0 drift, 0 misplaced, 0 invalid)
+595/596 files consistent (1 missing, 0 drift, 0 misplaced, 0 invalid)
 ```
 
 ### Diagnosis
