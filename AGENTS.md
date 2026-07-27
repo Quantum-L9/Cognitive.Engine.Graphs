@@ -1,3 +1,4 @@
+
 # AGENTS.md — L9 Graph Cognitive Engine
 
 Cross-tool agent instructions for the CEG repository. Read by Claude Code, Codex, Cursor, Copilot, Jules, Aider, CodeRabbit, and all AGENTS.md-compatible tools.
@@ -65,7 +66,8 @@ tools/                   # contract_scanner.py, verify_contracts.py, validate_do
 - Type hints on every function signature
 - Pydantic v2 BaseModel for all structured data
 - `ruff format .` before commit (Black-compatible, 88-char)
-- `structlog.get_logger(__name__)` for logging — never configure structlog in engine
+- `logging.getLogger(__name__)` or `structlog.get_logger(__name__)` for logging — match the
+  surrounding module, and never configure logging in engine (see `docs/contracts/OBSERVABILITY.md`)
 - Exception messages: `msg = f"..."; raise ValueError(msg)` (avoids EM101)
 - Nullable: `x: str | None = None` — never `Optional`
 - Datetime: always `datetime.now(tz=UTC)`
@@ -118,4 +120,5 @@ tools/                   # contract_scanner.py, verify_contracts.py, validate_do
 | `docs/TROUBLESHOOTING.md` | 10 common failure scenarios with diagnosis + resolution | Debugging errors, CI failures |
 | `docs/AI_AGENT_REVIEW_CHECKLIST.md` | PR review rubric, severity scoring, comment templates | Reviewing PRs (CodeRabbit, Qodo, Claude) |
 | `docs/CI_PIPELINE.md` | 7 CI phases, 15 pre-commit hooks, blocking vs advisory | CI failure diagnosis |
+| `docs/CI_CONSTELLATION_BOUNDARY.md` | What's wired (`l9-ci-core`/`l9-ci-sdk`) vs. not (`l9-harness`/`l9-assurance`); extend-don't-replace rule for `audit.yml` | Before wiring any Quantum-L9 constellation repo, or touching `tools/audit_harness.py` / `.github/workflows/audit.yml` |
 | `.claude/rules/contracts.md` | 24 contracts + enforcement matrix (automated vs manual) | Contract uncertainty |
