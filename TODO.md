@@ -57,6 +57,9 @@ status: active
 ### Automation
 - [ ] Inject L9_META headers into all files that have it missing using a script
 
+### Tech Debt
+- [ ] DEFERRED-003: `contracts/contract_NN.yaml` registry (24 files) doesn't conform to `test_contract_registry.py` schema — missing `docs` field, stale `verification.test` pointers. See `DEFERRED.md`.
+
 ---
 
 ## 📝 Notes

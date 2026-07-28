@@ -44,6 +44,8 @@ except ImportError:
 
 
 L9_TEMPLATE_TAG = "L9_TEMPLATE"
+RESEARCH_DIR = "tools/research"
+RESEARCH_PATTERNS_FILE = "top5_leverage_patterns_detailed.json"
 
 
 class Status(StrEnum):
@@ -361,6 +363,37 @@ def extract_gds_features(spec: dict) -> list[SpecFeature]:
     return features
 
 
+def extract_research_features(root: Path) -> list[SpecFeature]:
+    """Turn tools/research/*.json leverage patterns into coverage-matrix rows.
+
+    Each pattern's engine_mapping.search_tokens/search_files feeds straight into
+    scan_codebase() like any other feature category. See test_research_wiring.py
+    for the contract that keeps this mapping honest against engine renames.
+    """
+    research_file = root / RESEARCH_DIR / RESEARCH_PATTERNS_FILE
+    if not research_file.is_file():
+        return []
+
+    data = json.loads(research_file.read_text(encoding="utf-8"))
+    features = []
+    for key, pattern in data.items():
+        if key.startswith("_") or not isinstance(pattern, dict):
+            continue
+        mapping = pattern.get("engine_mapping")
+        if not isinstance(mapping, dict) or not mapping.get("search_tokens"):
+            continue
+        features.append(
+            SpecFeature(
+                category="research_pattern",
+                name=pattern.get("pattern_name", key),
+                spec_reference=f"{RESEARCH_DIR}/{RESEARCH_PATTERNS_FILE}#{key}",
+                search_tokens=list(mapping["search_tokens"]),
+                search_files=list(mapping.get("search_files", [])),
+            )
+        )
+    return features
+
+
 def scan_codebase(root: Path, features: list[SpecFeature]) -> None:
     py_cache: dict[str, str] = {}
     yaml_cache: dict[str, str] = {}
@@ -524,6 +557,7 @@ def main() -> int:
     features += extract_v11_additions(spec)
     features += extract_action_features(spec)
     features += extract_gds_features(spec)
+    features += extract_research_features(root)
 
     print(f"Extracted {len(features)} features from spec")
     print(f"Scanning codebase at {root} ...")

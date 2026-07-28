@@ -48,3 +48,32 @@ All inline TODO comments must be migrated here with a unique ID, owner, rational
 **Priority:** HIGH — required for any LLM-powered feature to function
 
 ---
+
+## DEFERRED-003
+
+**Title:** `contracts/contract_NN.yaml` registry does not conform to `test_contract_registry.py` schema
+
+**File:** `contracts/contract_01.yaml` through `contract_24.yaml` (all 24, committed via PR #70)
+
+**Owner:** engine-team
+
+**Rationale:** `tests/contracts/test_contract_registry.py` (added alongside the dual-chassis/SDK migration work) enforces a newer contract-YAML schema than the one the existing 24 `contracts/*.yaml` files were authored against:
+- Every contract YAML is missing the required `docs: [...]` key entirely.
+- Every contract's `verification.test` points at a retired per-contract test file (e.g. `tests/contracts/test_contract_01.py`) instead of a pytest node ID into the current monolithic `tests/contracts/test_contracts.py` (20 classes, not a 1:1 match against 24 contracts).
+- Two aggregate checks also fail: every doc in `verify_contracts.py::REQUIRED_CONTRACTS` must be claimed by some contract's `docs` list, and every scanner rule ID in `tools/contract_scanner.py` must be claimed by some contract's `verification.scanner_rules` list.
+
+Fixing this requires a deliberate, per-contract mapping decision (which of the 29 `docs/contracts/*.md` files and which `test_contracts.py` class each of the 24 contracts corresponds to) — not a mechanical fix, and getting the mapping wrong would create false confidence in a compliance-tracking system. Deferred rather than guessed.
+
+**Acceptance Criteria:**
+- Every `contracts/contract_NN.yaml` has a non-empty `docs` list of files that exist under `docs/contracts/`
+- Every `contracts/contract_NN.yaml`'s `verification.test` is a resolvable `tests/contracts/test_contracts.py::ClassName` node ID
+- Every `verification.scanner_rules` entry exists in `tools/contract_scanner.py`
+- Every doc in `tools/verify_contracts.py::REQUIRED_CONTRACTS` is claimed by at least one contract's `docs` list
+- Every scanner rule ID in `tools/contract_scanner.py` is claimed by at least one contract's `verification.scanner_rules` list
+- `pytest tests/contracts/test_contract_registry.py` passes in full
+
+**Blocked by:** Requires the contract author (or someone with full context on the 24-contract ↔ 29-doc ↔ 20-test-class intended mapping) to make the mapping decisions
+
+**Priority:** MEDIUM — compliance/audit tooling gap, not a functional regression; existing `tools/verify_contracts.py` and `tools/contract_scanner.py` still run and enforce their own (older) contract set independently
+
+---

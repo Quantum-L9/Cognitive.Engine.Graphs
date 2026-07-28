@@ -1,10 +1,9 @@
 # --- L9_META ---
-# l9_schema: 1
+# l9_schema: 2
 # origin: l9-template
 # engine: graph
 # layer: [ci]
-# tags: [L9_TEMPLATE, ci, audit, harness]
-# owner: platform
+# tags: [delivery, harness]
 # status: active
 # --- /L9_META ---
 name: L9 Audit Harness
@@ -13,6 +12,10 @@ on:
   pull_request:
   push:
     branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
 
 jobs:
   audit:
@@ -35,3 +38,55 @@ jobs:
         with:
           name: l9-audit-reports
           path: artifacts/
+
+      - name: Post harness report to PR
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- l9-audit-harness -->';
+            const reportPath = 'artifacts/harness_report.md';
+            const pr = context.payload.pull_request;
+
+            let report;
+            try {
+              report = fs.readFileSync(reportPath, 'utf8');
+            } catch (err) {
+              report = '⚠️ Audit harness did not produce a report at `' + reportPath +
+                '`. Check the [workflow run](' +
+                `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}` +
+                ') for details.';
+            }
+
+            const maxLen = 60000;
+            if (report.length > maxLen) {
+              report = report.slice(0, maxLen) + '\n\n...(truncated — see workflow run artifacts for the full report)';
+            }
+            const body = `${marker}\n${report}`;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              per_page: 100
+            });
+            const botComment = [...comments].reverse().find(c =>
+              c.user.type === 'Bot' && c.body.includes(marker)
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body
+              });
+            }

@@ -71,7 +71,7 @@ class LogSafetyAuditor(BaseAuditor):
 
     @property
     def contract_file(self) -> str:
-        return "docs/contracts/ERRORHANDLING.md"
+        return "docs/contracts/ERROR_HANDLING.md"
 
     # ------------------------------------------------------------------ #
     # Helpers extracted to reduce _scan_sensitive_logs complexity          #

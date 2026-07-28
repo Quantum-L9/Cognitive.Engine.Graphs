@@ -1,15 +1,15 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: l9-template
 engine: graph
 layer: [audit]
-tags: [L9_TEMPLATE, auditors, base]
-owner: platform
+tags: [delivery, harness]
 status: active
 --- /L9_META ---
 
-L9 BaseAuditor Protocol v2 — tiered execution, allowlists, two-phase scanning."""
+L9 BaseAuditor Protocol v2 — tiered execution, allowlists, two-phase scanning.
+"""
 
 from __future__ import annotations
 
@@ -132,6 +132,15 @@ class BaseAuditor(ABC):
     @property
     @abstractmethod
     def contract_file(self) -> str: ...
+
+    @property
+    def remediation_doc(self) -> str:
+        """Runbook describing how to fix this auditor's findings.
+
+        Convention-based so a new auditor gets a doc slot for free; the
+        auditor-wiring test fails if the file is absent.
+        """
+        return f"tools/auditors/remediation/{self.name}.md"
 
     @property
     def allowlist(self) -> Allowlist:
