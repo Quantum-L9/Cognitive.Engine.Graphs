@@ -39,6 +39,7 @@ import argparse
 import json
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -111,6 +112,30 @@ def run_step(
         result.passed = False
 
     return result
+
+
+def run_steps_concurrently(
+    step_specs: list[tuple[str, list[str], bool]],
+    root: Path,
+) -> dict[str, StepResult]:
+    """Run independent audit steps in a bounded thread pool, keyed by name.
+
+    Each ``(name, cmd, fail_on_nonzero)`` triple is executed via ``run_step``.
+    The steps write disjoint artifacts and share no data, so overlapping their
+    wall-clock is safe — ``subprocess.run`` releases the GIL while it waits on
+    the child process. Results are returned by name so the caller can reassemble
+    them in a deterministic order; the concurrency is capped at the number of
+    steps, so there is no unbounded process fan-out.
+    """
+    results: dict[str, StepResult] = {}
+    if not step_specs:
+        return results
+    with ThreadPoolExecutor(max_workers=len(step_specs)) as pool:
+        futures = [pool.submit(run_step, name, cmd, root, fail_on_nonzero) for name, cmd, fail_on_nonzero in step_specs]
+        for fut in as_completed(futures):
+            res = fut.result()
+            results[res.name] = res
+    return results
 
 
 def collect_artifacts(root: Path) -> dict[str, str]:
@@ -291,50 +316,55 @@ def main() -> int:
         repo_root=str(root),
     )
 
-    # ── Step 1: Architecture Audit ──────────────────────────
     print("\n╔══════════════════════════════════════╗")
     print("║  L9 Audit Harness                    ║")
     print("╚══════════════════════════════════════╝\n")
 
-    print("[1/3] Architecture audit...")
-    step1 = run_step(
-        name="Architecture Audit",
-        cmd=[python, "tools/audit_engine.py"],
-        root=root,
-        fail_on_nonzero=True,
-    )
-    harness.steps.append(step1)
+    # ── Run the independent audit steps concurrently ────────
+    # Each step scans the tree and writes its own disjoint artifacts
+    # (audit_engine.py → audit_report.md; spec_extract.py →
+    # coverage_matrix.json / coverage_report.md / spec_checklist.json;
+    # verify_contracts.py → stdout only), so they have no ordering or data
+    # dependency. Running them in a bounded thread pool overlaps their
+    # wall-clock — subprocess.run releases the GIL while waiting on the child —
+    # without changing findings, the report, or the exit code. Results are
+    # reassembled in the fixed 1/2/3 order below so output stays deterministic.
+    spec_fail_on = "MISSING" if args.strict else "NONE"
+    step_specs: list[tuple[str, list[str], bool]] = [
+        ("Architecture Audit", [python, "tools/audit_engine.py"], True),
+        ("Spec Coverage", [python, "tools/spec_extract.py", "--fail-on", spec_fail_on], args.strict),
+    ]
+    if not args.skip_contracts:
+        step_specs.append(("Contract Wiring", [python, "tools/verify_contracts.py"], True))
 
+    print(f"Running {len(step_specs)} audit step(s) concurrently...\n")
+    results = run_steps_concurrently(step_specs, root)
+
+    # ── Step 1: Architecture Audit ──────────────────────────
+    step1 = results["Architecture Audit"]
+    harness.steps.append(step1)
+    print("[1/3] Architecture audit...")
     if step1.passed:
         print("  ✅ No CRITICAL/HIGH findings")
     elif step1.exit_code == 2:
         print(f"  ⚠️  Infrastructure error: {step1.stderr.strip()[:100]}")
     else:
         print("  ❌ CRITICAL or HIGH findings detected")
-
     if step1.stdout:
         for line in step1.stdout.strip().splitlines():
             print(f"     {line}")
 
     # ── Step 2: Spec Coverage ───────────────────────────────
-    print("\n[2/3] Spec coverage scan...")
-    spec_fail_on = "MISSING" if args.strict else "NONE"
-    step2 = run_step(
-        name="Spec Coverage",
-        cmd=[python, "tools/spec_extract.py", "--fail-on", spec_fail_on],
-        root=root,
-        fail_on_nonzero=args.strict,
-    )
+    step2 = results["Spec Coverage"]
     # In non-strict mode, spec failures are informational only
     if not args.strict:
         step2.passed = True
     harness.steps.append(step2)
-
+    print("\n[2/3] Spec coverage scan...")
     if step2.passed:
         print("  ✅ Spec coverage scan complete")
     else:
         print("  ❌ Missing spec features (--strict mode)")
-
     if step2.stdout:
         for line in step2.stdout.strip().splitlines()[-5:]:
             print(f"     {line}")
@@ -344,13 +374,8 @@ def main() -> int:
         step3 = StepResult(name="Contract Wiring", exit_code=0, skipped=True)
         print("\n[3/3] Contract wiring... ⏭️  skipped")
     else:
+        step3 = results["Contract Wiring"]
         print("\n[3/3] Contract wiring check...")
-        step3 = run_step(
-            name="Contract Wiring",
-            cmd=[python, "tools/verify_contracts.py"],
-            root=root,
-            fail_on_nonzero=True,
-        )
         if step3.passed:
             print("  ✅ All contracts present and wired")
         elif step3.exit_code == 2:
