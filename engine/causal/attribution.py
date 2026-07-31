@@ -16,9 +16,11 @@ Traces backward through causal edges to identify and weight contributing factors
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 from engine.config.schema import DomainSpec
+from engine.config.settings import settings
 from engine.graph.driver import GraphDriver
 from engine.utils.security import sanitize_label
 
@@ -26,6 +28,19 @@ logger = logging.getLogger(__name__)
 
 # Valid attribution model names
 VALID_MODELS = frozenset({"first_touch", "last_touch", "linear", "position_based"})
+
+
+def _temporal_decay_factor(age_days: float, halflife_days: float) -> float:
+    """Exponential recency decay in [0, 1]: exp(-age / halflife).
+
+    Matches the repo's temporal-decay convention (engine/scoring/assembler.py
+    ``_compile_temporalproximity``). age 0 (or missing timestamp) -> 1.0 (no
+    decay); older links decay toward 0. ``halflife_days`` is assumed positive
+    (sourced from settings.decay_transaction_halflife, default 180.0).
+    """
+    if halflife_days <= 0:
+        return 1.0
+    return math.exp(-max(age_days, 0.0) / halflife_days)
 
 
 class AttributionCalculator:
@@ -67,13 +82,16 @@ class AttributionCalculator:
         else:
             rel_pattern = f"[*1..{depth}]"
 
-        # Trace backward from outcome to find contributing touchpoints
+        # Trace backward from outcome to find contributing touchpoints. Per-edge
+        # ages (in days) are computed in Cypher for the temporal-decay refinement;
+        # a missing created_at coalesces to now -> age 0 -> no decay (NULL-safe).
         cypher = (
             f"MATCH (outcome:{outcome_label} {{outcome_id: $outcome_id}})\n"
             f"MATCH path = (touchpoint)-{rel_pattern}->(outcome)\n"
             f"RETURN touchpoint.entity_id AS touchpoint_id,\n"
             f"       length(path) AS distance,\n"
-            f"       [r IN relationships(path) | r.confidence] AS confidences\n"
+            f"       [r IN relationships(path) | r.confidence] AS confidences,\n"
+            f"       [r IN relationships(path) | duration.inDays(coalesce(r.created_at, datetime()), datetime()).days] AS ages_days\n"
             f"ORDER BY distance ASC"
         )
 
@@ -88,12 +106,30 @@ class AttributionCalculator:
 
         touchpoints = self._assign_weights(results, model)
 
-        return {
+        response: dict[str, Any] = {
             "touchpoints": touchpoints,
             "model": model,
             "chain_depth": max((r["distance"] for r in results), default=0),
             "total_touchpoints": len(touchpoints),
         }
+
+        # Temporal-decay refinement (feature-flagged, per-domain). Down-weights
+        # touchpoints reached through older causal links and renormalizes so the
+        # attribution weights still sum to 1.0. Flag off -> weights unchanged.
+        if self._spec.causal.temporal_decay_enabled:
+            halflife = settings.decay_transaction_halflife
+            ages_by_touchpoint: dict[str, float] = {}
+            for r in results:
+                tp_id = r["touchpoint_id"]
+                if not tp_id:
+                    continue
+                ages = [a for a in (r.get("ages_days") or []) if a is not None]
+                # A touchpoint's chain is only as fresh as its oldest link.
+                ages_by_touchpoint[tp_id] = float(max(ages)) if ages else 0.0
+            response["touchpoints"] = self._apply_temporal_decay(touchpoints, ages_by_touchpoint, halflife)
+            response["temporal_decay"] = {"enabled": True, "halflife_days": halflife}
+
+        return response
 
     @staticmethod
     def _assign_weights(
@@ -142,3 +178,26 @@ class AttributionCalculator:
                     weights[tp_id] = round(middle_weight, 6)
 
         return weights
+
+    @staticmethod
+    def _apply_temporal_decay(
+        weights: dict[str, float],
+        ages_days: dict[str, float],
+        halflife_days: float,
+    ) -> dict[str, float]:
+        """Down-weight touchpoints by causal-link age, then renormalize to sum 1.0.
+
+        Each base weight is multiplied by ``exp(-age / halflife)``; the result is
+        renormalized so the attribution invariant (weights sum to 1.0, bounded in
+        [0, 1]) is preserved. A touchpoint with no recorded age (0.0) is not
+        decayed. If every decayed weight is zero (degenerate), the base weights
+        are returned unchanged.
+        """
+        decayed = {
+            tp_id: base * _temporal_decay_factor(ages_days.get(tp_id, 0.0), halflife_days)
+            for tp_id, base in weights.items()
+        }
+        total = sum(decayed.values())
+        if total <= 0:
+            return weights
+        return {tp_id: round(value / total, 6) for tp_id, value in decayed.items()}

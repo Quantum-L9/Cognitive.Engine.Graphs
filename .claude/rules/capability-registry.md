@@ -21,6 +21,7 @@ Before building any of these, check if it already exists. Use the existing imple
 | Score normalization | engine/handlers.py | post-query min-max pass |
 | Entity resolution | engine/resolution/resolver.py | `EntityResolver` |
 | Causal edges | engine/causal/causal_compiler.py | `CausalCompiler` |
+| Causal attribution temporal decay | engine/causal/attribution.py | `_apply_temporal_decay()` / `_temporal_decay_factor()` |
 | Persona composition | engine/personas/composer.py | trait vector arithmetic |
 | Health scoring | engine/health/ | readiness, gaps, enrichment |
 | CRM intake | engine/intake/ | scan, compile, impact |
