@@ -24,7 +24,7 @@ prometheus-client = "^0.24.1"
 numpy = "^2.4.3"
 openai = "^1.0.0"
 asyncpg = "^0.31.0"
-constellation-node-sdk = {git = "https://github.com/cryptoxdog/Gate_SDK.git"}
+constellation-node-sdk = {git = "https://github.com/Quantum-L9/Gate_SDK.git", rev = "a770e8531dc1c59ce01e1dbb0f4162785d9dda89"}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "9.0.3"
