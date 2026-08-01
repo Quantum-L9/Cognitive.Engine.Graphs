@@ -132,17 +132,19 @@ class _LLMBackend:
         if self._client is not None:
             return self._client
 
-        try:
-            from openai import OpenAI
-        except ImportError as exc:
-            raise RuntimeError("openai package is required for LLM features. Install with: pip install openai") from exc
-
+        # Prefer a clear missing-key error over a missing-package error when
+        # both are absent (CI installs requirements-ci.txt without openai).
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise RuntimeError(
                 "OPENAI_API_KEY environment variable is required. "
                 "Set it to your OpenAI (or compatible provider) API key."
             )
+
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise RuntimeError("openai package is required for LLM features. Install with: pip install openai") from exc
 
         kwargs: dict[str, Any] = {"api_key": api_key}
         base_url = os.environ.get("OPENAI_BASE_URL")
