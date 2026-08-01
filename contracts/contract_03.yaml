@@ -10,7 +10,9 @@ preconditions:
 postconditions:
 - Query scoped to tenant database
 - No cross-tenant reads
+docs:
+- docs/contracts/SHARED_MODELS.md
 verification:
   scanner_rules:
   - SHARED-002
-  test: tests/contracts/test_contract_03.py
+  test: tests/contracts/test_contracts.py::TestContract03TenantIsolation
