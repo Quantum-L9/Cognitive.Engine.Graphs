@@ -49,7 +49,7 @@ Every intelligence capability in CEG is controlled by a boolean flag in the **do
 | `causal.enabled` | `bool` | `false` | CausalSubgraphSpec | Master switch for causal edge subsystem |
 | `causal.attribution_enabled` | `bool` | `false` | CausalSubgraphSpec | Enable multi-touch attribution calculation on outcomes |
 | `causal.counterfactual_enabled` | `bool` | `false` | CausalSubgraphSpec | Enable CounterfactualScenario generation for negative outcomes |
-| `causal.temporal_decay_enabled` | `bool` | `false` | CausalSubgraphSpec | Enable temporal decay subgraph (Phase 2) |
+| `causal.temporal_decay_enabled` | `bool` | `false` | CausalSubgraphSpec | Down-weight attribution for older causal links (`exp(-age_days / halflife)`, renormalized). Consumer: `AttributionCalculator.compute_attribution` / `_apply_temporal_decay`; halflife = `settings.decay_transaction_halflife` (180.0) |
 | `causal.chain_depth_limit` | `int` | `5` | CausalSubgraphSpec | Maximum causal chain traversal depth |
 | `causal.causal_edges` | `list[CausalEdgeSpec]` | `[]` | CausalSubgraphSpec | Declared causal edge types with `edge_type`, `source_label`, `target_label`, `required_properties`, `temporal_validation`, and `confidence_threshold` |
 
