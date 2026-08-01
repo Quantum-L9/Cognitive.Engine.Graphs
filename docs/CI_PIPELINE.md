@@ -228,5 +228,9 @@ and adding the missing `semgrep` failure check.
 - **TESTING.md** — Test structure and coverage thresholds
 - **GUARDRAILS.md** — Banned patterns registry
 - **docs/TROUBLESHOOTING.md** — Common CI failure resolutions
+- **docs/CI_CONSTELLATION_BOUNDARY.md** — What's wired from the Quantum-L9
+  constellation (`l9-ci-core` baseline-ratchet, `l9-ci-sdk` packet-envelope
+  scanner) vs. not (`l9-harness`, `l9-assurance`); read before extending
+  that integration or touching `audit.yml`
 - **.github/workflows/ci.yml** — Pipeline definition (source of truth)
 - **.pre-commit-config.yaml** — Hook configuration (source of truth)
