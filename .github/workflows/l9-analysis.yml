@@ -81,14 +81,14 @@ jobs:
           set -euo pipefail
           pip install --upgrade pip semgrep
           mkdir -p "artifacts/raw/semgrep/${L9_MATRIX_ID}"
-          # Fail closed: no `|| true`. Baseline Ratchet / Workflow Integrity
-          # rejects fail-open shell suffixes; normalize/publish steps decide
-          # whether findings are blocking via governance outputs.
+          # No `|| true` (Baseline Ratchet rejects fail-open). Also no
+          # `--error`: findings must reach normalize/publish so governance
+          # can decide blocking vs advisory; `--error` exits 1 before that.
           semgrep scan \
             --config p/python \
             --json \
             --output "artifacts/raw/semgrep/${L9_MATRIX_ID}/report.json" \
-            --error --quiet
+            --quiet
         env:
           L9_MATRIX_ID: ${{ env.L9_MATRIX_ID }}
 
