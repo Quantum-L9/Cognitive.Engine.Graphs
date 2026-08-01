@@ -125,7 +125,13 @@ class AttributionCalculator:
                     continue
                 ages = [a for a in (r.get("ages_days") or []) if a is not None]
                 # A touchpoint's chain is only as fresh as its oldest link.
-                ages_by_touchpoint[tp_id] = float(max(ages)) if ages else 0.0
+                if not ages:
+                    ages_by_touchpoint[tp_id] = 0.0
+                else:
+                    try:
+                        ages_by_touchpoint[tp_id] = float(max(ages))
+                    except (TypeError, ValueError):
+                        ages_by_touchpoint[tp_id] = 0.0
             response["touchpoints"] = self._apply_temporal_decay(touchpoints, ages_by_touchpoint, halflife)
             response["temporal_decay"] = {"enabled": True, "halflife_days": halflife}
 
