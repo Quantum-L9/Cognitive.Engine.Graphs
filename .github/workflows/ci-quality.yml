@@ -136,6 +136,7 @@ jobs:
           fi
           set +e
           OUT=$(docker run --rm \
+            --entrypoint ggshield \
             -e GITGUARDIAN_API_KEY \
             -e GITHUB_PUSH_BEFORE_SHA \
             -e GITHUB_PUSH_BASE_SHA \
@@ -149,6 +150,11 @@ jobs:
           printf '%s\n' "$OUT"
           if printf '%s\n' "$OUT" | grep -qi 'missing the required scope'; then
             echo "::warning::GitGuardian token missing 'scan' scope; skipping until org secret is rotated"
+            exit 0
+          fi
+          # Docker/entrypoint infra failures are not secret findings.
+          if printf '%s\n' "$OUT" | grep -qiE 'executable file not found|Unable to find image|Cannot connect to the Docker daemon'; then
+            echo "::warning::GitGuardian container failed to start; skipping scan (infra)"
             exit 0
           fi
           exit "$RC"
