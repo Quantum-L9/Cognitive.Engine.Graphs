@@ -2,13 +2,18 @@
 l9_schema: 1
 origin: engine-specific
 engine: graph
-layer: [docs]
-tags: [agent-tasks, audit]
+layer: [audit]
+tags: [auditors, remediation, audit]
 owner: engine-team
 status: active
 /L9_META -->
 
-# Task: Fix Audit Finding
+# Remediation: architecture audit findings
+
+Generic fix procedure for rule findings emitted by `tools/audit_engine.py`
+(the Architecture Audit step of `make harness`). For auditor-specific
+findings from `tools/audit_dispatch.py`, use the matching runbook in this
+directory instead.
 
 ```
 task: Fix audit finding "<finding_id>"

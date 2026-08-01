@@ -3,10 +3,15 @@ l9_schema: 1
 origin: engine-specific
 engine: graph
 layer: [docs]
-tags: [agent-tasks, gates]
+tags: [agent-tasks, gates, deprecated]
 owner: engine-team
-status: active
+status: deprecated
 /L9_META -->
+
+> **DEPRECATED — marked for deletion (DEFERRED-004). Do not follow this file.**
+> Superseded by `.claude/skills/gate-development/SKILL.md`.
+> The file layout below is stale — gate types live in `engine/gates/types/all_gates.py`,
+> not one file per gate.
 
 # Task: Add a New Gate Type
 

@@ -91,7 +91,7 @@ class TestQualityAuditor(BaseAuditor):
 
     @property
     def contract_file(self):
-        return "docs/contracts/TESTPATTERNS.md"
+        return "docs/contracts/TEST_PATTERNS.md"
 
     def _check_weak_tests(self, tf: Path, tree: ast.AST, rel: str, result: AuditResult, c: int) -> tuple[int, int]:
         """Return (updated_counter, test_count). Flags tests with zero assertions."""

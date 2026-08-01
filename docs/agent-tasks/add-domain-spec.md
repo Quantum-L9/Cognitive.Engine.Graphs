@@ -3,10 +3,13 @@ l9_schema: 1
 origin: engine-specific
 engine: graph
 layer: [docs]
-tags: [agent-tasks, domain-spec]
+tags: [agent-tasks, domain-spec, deprecated]
 owner: engine-team
-status: active
+status: deprecated
 /L9_META -->
+
+> **DEPRECATED — marked for deletion (DEFERRED-004). Do not follow this file.**
+> Superseded by `.claude/skills/domain-spec-authoring/SKILL.md`.
 
 # Task: Add a New Domain Spec
 
