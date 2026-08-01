@@ -291,6 +291,39 @@ never a cross-node hop.
 
 ---
 
+## 10. Outcome Persistence (W2-02b)
+
+**State**: Dormant
+**Flag**: `OUTCOME_PERSISTENCE_ENABLED=True`
+**Prerequisites**: PacketStore reachable (`PACKET_STORE_ENABLED`, `PACKET_STORE_DSN`).
+
+Writes match outcomes through to the PacketStore. This is a second gate on top of
+`FEEDBACK_ENABLED`: the feedback loop can run in-memory without it, and enabling it
+without a reachable PacketStore degrades to logged warnings rather than hard failure.
+
+---
+
+## 11. Tenant Auth (W3-01)
+
+**State**: Active
+**Flag**: `TENANT_AUTH_ENABLED=True` (default on)
+
+Enforces the JWT `allowed_tenants` claim against the resolved tenant. Setting this to
+`False` disables that check — acceptable only for single-tenant local development.
+
+---
+
+## 12. Capability Auth (W3-02 / W3-03)
+
+**State**: Active
+**Flag**: `CAPABILITY_AUTH_ENABLED=True` (default on)
+
+Enforces the domain-spec capability model, mapping each action to the permissions it
+requires. Disabling it removes per-action authorization while leaving tenant resolution
+intact.
+
+---
+
 ## Querying Feature Status
 
 Use the `feature_status` admin subaction to get current state of all gates:

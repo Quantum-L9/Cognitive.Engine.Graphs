@@ -4,6 +4,7 @@ paths:
   - "chassis/**/*.py"
   - "tools/**/*.py"
 ---
+
 # CEG Contracts (1–24)
 
 Enforced by `tools/contract_scanner.py` and `tools/verify_contracts.py`.
@@ -14,7 +15,7 @@ Enforced by `tools/contract_scanner.py` and `tools/verify_contracts.py`.
 | 1 | Single Ingress | Only POST /v1/execute and GET /v1/health. Engine NEVER imports FastAPI/Starlette. |
 | 2 | Handler Interface | `async def handle_*(tenant: str, payload: dict) -> dict`. handlers.py is the ONLY engine file importing chassis (plus boot.py). |
 | 3 | Tenant Isolation | Tenant resolved BY chassis. Every Neo4j query scopes to tenant database. No cross-tenant reads. |
-| 4 | Observability Inherited | Engine NEVER configures structlog/Prometheus. Uses `structlog.get_logger(__name__)` only. |
+| 4 | Observability Inherited | Engine NEVER configures structlog/Prometheus. Logger getter is `logging.getLogger(__name__)` or `structlog.get_logger(__name__)`. |
 | 5 | Infrastructure is Template | Engine NEVER creates Dockerfile, docker-compose, CI pipeline. All in l9-template. |
 
 ## Layer 2 — Packet Protocol (6–8)
@@ -44,7 +45,7 @@ Enforced by `tools/contract_scanner.py` and `tools/verify_contracts.py`.
 | # | Name | Rule |
 |---|------|------|
 | 17 | Test Requirements | Unit for pure functions, integration with testcontainers-neo4j, compliance for prohibited factors, <200ms p95. |
-| 18 | L9_META Headers | Every file carries L9_META header. Injected by tools/l9_meta_injector.py. |
+| 18 | L9_META Headers | Every tracked file carries an L9_META header (schema v2). Values resolve from `l9-meta.yaml` by path — write with `tools/l9_meta_injector.py apply`, verify with `check`, never hand-edit a header. |
 
 ## Layer 6 — Graph Intelligence (19–20)
 | # | Name | Rule |

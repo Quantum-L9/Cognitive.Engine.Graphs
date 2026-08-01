@@ -2008,6 +2008,10 @@ async def handle_enrich(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {"enriched_count": count, "entity_type": entity_type, "tenant": tenant}
 
 
+# CONTRACT-02: single source of truth for the engine's action surface.
+# Both chassis implementations (legacy chassis/actions.py and the SDK-native
+# chassis/handler_registration.py) route off this dict rather than each
+# maintaining their own action list, so the two chassis can't drift apart.
 ActionHandler = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
 
 ACTION_HANDLERS: dict[str, ActionHandler] = {

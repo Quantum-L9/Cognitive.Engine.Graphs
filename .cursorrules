@@ -1,13 +1,12 @@
-# Made By: Igor Beylin
 # --- L9_META ---
-# l9_schema: 1
+# l9_schema: 2
 # origin: l9-template
 # engine: graph
 # layer: [agent-rules]
-# tags: [L9_TEMPLATE, agent-rules, cursor]
-# owner: platform
+# tags: [governance]
 # status: active
 # --- /L9_META ---
+# Made By: Igor Beylin
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # SESSION BOOTSTRAP — EXECUTE THIS BLOCK ON EVERY NEW CHAT WINDOW
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -68,7 +67,7 @@
 #     dimensions, GDS jobs, KGE embeddings, community detection.
 #
 #   @docs/L9_Contract_Enforcement_System.md
-#     How contract_scanner.py + verify_contracts.py enforce the 20 contracts.
+#     How contract_scanner.py + verify_contracts.py enforce the 24 contracts.
 #     Read before touching tools/ or .github/workflows/.
 #
 # ── TIER 4: ACTIVE DOMAIN SPEC (always in context) ──────────────────────────
@@ -84,7 +83,7 @@
 #
 # ── TIER 5: CONTRACT DOCS (load only the relevant one before touching a subsystem)
 #
-#   docs/contracts/ directory contains the 20 contract files.
+#   docs/contracts/ directory contains the 27 contract docs.
 #   Do NOT bulk-load all of them. Load the specific file for the subsystem
 #   you are about to modify:
 #
@@ -93,6 +92,7 @@
 #     @docs/contracts/CYPHER_SAFETY.md
 #     @docs/contracts/BANNED_PATTERNS.md
 #     @docs/contracts/PYDANTIC_YAML_MAPPING.md
+#     @docs/contracts/BIDIRECTIONAL_MATCHING.md
 #
 #   Before touching engine/handlers.py or chassis/:
 #     @docs/contracts/HANDLER_PAYLOADS.md
@@ -113,6 +113,8 @@
 #   Before touching engine/compliance/:
 #     @docs/contracts/OBSERVABILITY.md
 #     @docs/contracts/MEMORY_SUBSTRATE_ACCESS.md
+#     @docs/contracts/PROHIBITED_FACTORS.md
+#     @docs/contracts/PII_HANDLING.md
 #
 #   Before touching domains/ or domain spec versioning:
 #     @docs/contracts/DOMAIN_SPEC_VERSIONING.md
@@ -122,9 +124,21 @@
 #   Before touching .env.template or env var naming:
 #     @docs/contracts/ENV_VARS.md
 #
+#   Before touching engine/config/settings.py or gating a behavior change:
+#     @docs/contracts/FEATURE_FLAG_DISCIPLINE.md
+#
+#   Before touching engine/scoring/ or engine/boot.py:
+#     @docs/contracts/SCORING_WEIGHT_CEILING.md
+#
+#   Before touching engine/kge/:
+#     @docs/contracts/KGE_EMBEDDINGS.md
+#
+#   Before adding any new tracked file:
+#     @docs/contracts/L9_META_HEADERS.md
+#
 # ── INVARIANT CHECKS (verify silently on load) ───────────────────────────────
 #
-#   1. GateType enum = exactly 14 values (contract 13)
+#   1. GateType enum = exactly 10 values (contract 13)
 #   2. ScoringAssembler = exactly 4 active dimensions (contract 13)
 #   3. No PR marked BLOCKED in workflow_state.md for the branch being worked on
 #   4. Task about to be started does NOT appear in DEFERRED.md
@@ -136,7 +150,7 @@
 #   Do not guess its contents. Do not proceed without it.
 #
 # ============================================================================
-# 20 contracts. Violate any → revert and ask.
+# 24 contracts. Violate any → revert and ask.
 # ============================================================================
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -429,7 +443,7 @@
 # DEL-002  requests.post/get/etc (in engine/)             → contract 8
 # MEM-001  INSERT INTO packetstore (in engine/)           → contract 7
 # MEM-002  INSERT INTO memory_embeddings (in engine/)     → contract 7
-# STUB-001 raise NotImplementedError (outside tests/)     → zero-stub protocol
+# STUB-001 raise NotImplementedError (in engine/)         → zero-stub protocol
 #
 # HIGH — merge blocked:
 # ERR-001  bare except:                                   → error handling
@@ -441,8 +455,8 @@
 # SHARED-001 class PacketEnvelope (redefining)            → contract 7
 # SHARED-002 class TenantContext (redefining)             → contract 3
 # SHARED-003 class ExecuteRequest (redefining)            → contract 1
-# STUB-002 # TODO comment                                → zero-stub protocol
-# STUB-003 # PLACEHOLDER comment                         → zero-stub protocol
+# STUB-002 # TODO comment (in engine/)                   → zero-stub protocol
+# STUB-003 # PLACEHOLDER/FIXME/XXX comment (in engine/)  → zero-stub protocol
 # PKT-001  uppercase packet_type value                    → contract 7
 # ENV-001  non-L9_ env var name for infra vars            → convention
 
@@ -454,7 +468,7 @@
 # 1. PRE-COMMIT  → ruff, mypy --strict, contract_scanner.py, verify_contracts.py
 # 2. CI LINT     → same as pre-commit, repo-wide
 # 3. CI TESTS    → pytest (unit + integration + compliance + performance)
-# 4. CI AUDIT    → verify_contracts.py (all 20 contract files exist + wired)
+# 4. CI AUDIT    → verify_contracts.py (all 27 contract docs exist + wired)
 # 5. LLM REVIEW  → CodeRabbit + Qodo + Claude (contract-aware instructions)
 #
 # Branch protection: all 5 required status checks. No bypass.
