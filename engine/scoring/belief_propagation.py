@@ -81,13 +81,13 @@ def bayesian_update(prior: float, evidence: float) -> float:
         msg = f"evidence must be in [0.0, 1.0], got {evidence}"
         raise ValueError(msg)
 
-    # P(E) = P(E|H)*P(H) + P(E|¬H)*P(¬H)
+    # Marginal probability of evidence under the binary hypothesis model.
     p_e = evidence * prior + (1 - evidence) * (1 - prior)
 
-    if p_e == 0.0:
+    if p_e <= 0.0:
         return 0.0
 
-    # P(H|E) = P(E|H) * P(H) / P(E)
+    # Bayes update: posterior proportional to likelihood times prior.
     posterior = (evidence * prior) / p_e
     return max(0.0, min(1.0, posterior))
 
