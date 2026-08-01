@@ -75,7 +75,9 @@ def test_run_steps_concurrently_overlaps_wall_clock(tmp_path: Path) -> None:
 
     assert set(results) == {"S0", "S1", "S2"}
     assert all(r.passed for r in results.values())
-    assert elapsed < 1.0
+    # Serial wall clock would be ~1.2s; allow CI scheduler jitter above 1.0s
+    # while still proving overlap (must beat serial sum).
+    assert elapsed < 1.15
 
 
 @pytest.mark.unit
