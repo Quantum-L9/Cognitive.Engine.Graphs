@@ -21,9 +21,22 @@ substrate table. The LangGraph DAG handles validation, embedding, graph sync,
 insight extraction, and checkpointing.
 
 ## The Only Write Path
-```python
-from l9.memory.ingestion import ingest_packet
 
+Inside this engine, persistence goes through `PacketStore` — never raw SQL:
+
+```python
+from engine.packet.packet_store import get_packet_store
+
+await get_packet_store().write(packet)
+```
+
+`PacketStore` is gated by `packet_store_enabled` and requires `PACKET_STORE_DSN`
+(see [../FEATURE_GATES.md](../FEATURE_GATES.md)).
+
+When delegating to the constellation memory substrate node, the ingestion contract is
+`ingest_packet()` on that node — reached via the delegation protocol, not by importing it:
+
+```python
 await ingest_packet(PacketEnvelopeIn(
     packet_type="enrichment_result",
     payload={"entity_id": "abc-123", "enriched_fields": {...}},
@@ -47,9 +60,11 @@ await ingest_packet(PacketEnvelopeIn(
 
 ## The Only Read Path
 
-```python
-from l9.memory.retrieval import PipelineRouter
+Retrieval is a memory-substrate-node capability reached through delegation
+(see [DELEGATION_PROTOCOL.md](DELEGATION_PROTOCOL.md)). The engine does not query the
+substrate's tables or embeddings directly.
 
+```python
 results = await PipelineRouter.retrieve(
     query="HDPE contamination tolerance for Houston facilities",
     tenant_id="acme",

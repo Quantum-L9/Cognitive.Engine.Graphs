@@ -74,18 +74,16 @@ jobs:
       - name: mypy
         run: |
           set -euo pipefail
-          # mkdir required before --install-types on a cold cache, else mypy
-          # fails with the misleading "no mypy cache directory" error and
-          # masks any real type errors underneath it (python/mypy#10768).
+          # Align with make lint / ci.yml / ci-quality.yml: type-check engine/
+          # only. mypy on SOURCE_DIR=. dual-maps tools/auditors and fails closed
+          # before any engine diagnostics are useful.
           mkdir -p .mypy_cache
-          MYPY_EXCLUDE_ARGS=()
-          if [ -n "${MYPY_EXCLUDE}" ]; then
-            MYPY_EXCLUDE_ARGS=(--exclude "${MYPY_EXCLUDE}")
-          fi
-          mypy "${SOURCE_DIR}" \
-            "${MYPY_EXCLUDE_ARGS[@]}" \
+          mypy engine/ \
+            --config-file=pyproject.toml \
+            --ignore-missing-imports \
+            --exclude chassis \
             --show-error-codes --pretty \
-            --install-types --non-interactive --ignore-missing-imports
+            --install-types --non-interactive
 
   test:
     name: Test Suite

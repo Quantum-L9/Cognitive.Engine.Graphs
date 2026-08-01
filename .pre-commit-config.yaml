@@ -79,7 +79,7 @@ repos:
         language: system
         pass_filenames: false
 
-  # L9 contract enforcement (20 contracts)
+  # L9 contract enforcement (24 invariants, 27 docs)
   - repo: local
     hooks:
       - id: l9-contract-scan
@@ -92,6 +92,21 @@ repos:
         name: L9 Contract Files Existence Check
         entry: python tools/verify_contracts.py
         language: python
+        pass_filenames: false
+        always_run: true
+
+  # L9_META headers (Contract C-018) — resolves every tracked file against
+  # l9-meta.yaml. always_run because a rule edit changes the expected values
+  # for files that are not themselves staged.
+  - repo: local
+    hooks:
+      - id: l9-meta-check
+        name: L9_META Header Check
+        entry: python tools/l9_meta_injector.py check
+        language: python
+        # pre-commit builds an isolated venv, so l9-meta.yaml parsing needs
+        # pyyaml declared here — it is not inherited from the repo environment.
+        additional_dependencies: [pyyaml]
         pass_filenames: false
         always_run: true
 

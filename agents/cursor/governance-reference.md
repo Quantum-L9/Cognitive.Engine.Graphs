@@ -112,7 +112,7 @@ chassis/middleware/                     ← auth, tenant resolution, rate-limit
 docker-compose.prod.yml                 ← production infrastructure
 Dockerfile.prod                         ← production container
 graph-cognitive-engine-spec-v1.1.0.yaml ← canonical domain spec (read-only reference)
-docs/contracts/                         ← all 20 contract files (FIELDNAMES, etc.)
+docs/contracts/                         ← all 27 contract docs (FIELD_NAMES, etc.)
 .github/workflows/                      ← CI pipeline definitions
 .pre-commit-config.yaml                 ← pre-commit hooks
 .gitleaks.toml                          ← secret scanning rules
@@ -145,7 +145,7 @@ These invariants hold at all times. Any PR that breaks them is BLOCKED:
 
 | Invariant                     | Rule                                                                |
 |-------------------------------|---------------------------------------------------------------------|
-| **14 gate types**             | `GateType` enum has exactly 14 values. Registry has exactly 14 handlers. |
+| **10 gate types**             | `GateType` enum has exactly 10 values. Registry has exactly 10 handlers. |
 | **4 scoring dimensions**      | `ScoringAssembler` computes exactly 4 dimensions per domain spec.   |
 | **Parameterized Cypher only** | Zero f-string values in any Cypher string. All use `$param`.        |
 | **sanitize_label() on labels**| All node/relationship labels f-stringed into Cypher use `sanitize_label()` first. |
@@ -231,7 +231,7 @@ Every PR must include in its description:
 - [ ] grep -rn "NotImplementedError" engine/ → empty
 - [ ] grep -rn "eval(" engine/               → empty (or only safeeval.py dispatch)
 - [ ] grep -rn "f\".*{" engine/**/*.py       → reviewed, all label-only f-strings
-- [ ] Gate count: GateType enum = 14 values, registry = 14 entries
+- [ ] Gate count: GateType enum = 10 values, registry = 10 entries
 - [ ] All new engine/*.py have corresponding tests/unit/test_*.py
 ```
 

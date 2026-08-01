@@ -150,7 +150,7 @@ class APIRegressionAuditor(BaseAuditor):
                             message=f"Signature changed: {cn}.{mn}({', '.join(bm['args'])}) -> ({', '.join(cm['args'])})",
                             file=rp,
                             line=0,
-                            fix_hint="Update METHODSIGNATURES.md + all callers",
+                            fix_hint="Update METHOD_SIGNATURES.md + all callers",
                             suggestions=[f"Old: {bm['args']}"],
                         )
                     if bm["returns"] and cm["returns"] and bm["returns"] != cm["returns"]:
