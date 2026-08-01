@@ -1,15 +1,11 @@
-# ============================================================================
-# L9_META
-# ============================================================================
-# l9_schema: 1
+# --- L9_META ---
+# l9_schema: 2
 # origin: l9-template
 # engine: graph
-# layer: [agent-rules, kernel]
-# tags: [cursor, kernel, ceg, governance, workflow]
-# owner: Founder
+# layer: [agent-rules]
+# tags: [governance]
 # status: active
-# ============================================================================
-
+# --- /L9_META ---
 # ============================================================================
 # CEG CURSOR WORKFLOW KERNEL — BINDING CONTRACT
 # ============================================================================
@@ -30,7 +26,7 @@ author: Cursor
 
 description: >
   Governs Cursor agent behavior within the Cognitive.Engine.Graphs repository.
-  Binds Cursor to the 20 contracts in .cursorrules, the CEG file structure,
+  Binds Cursor to the 24 contracts in contracts/*.yaml, the CEG file structure,
   the enforcement pipeline, and confidence-based decision logic.
   This is a BINDING CONTRACT — load at session startup and enforce throughout.
 
@@ -79,7 +75,7 @@ init:
         This file is NEVER modified by Cursor.
 
   session_checks:
-    - verify: ".cursorrules is loaded and all 20 contracts are in context"
+    - verify: ".cursorrules is loaded and all 24 contracts are in context"
     - verify: "GateType enum count = 14 (contract 13)"
     - verify: "ScoringAssembler has exactly 4 dimensions in scope"
     - verify: "No open PRs marked BLOCKED in workflow_state.md"
@@ -132,7 +128,7 @@ authority:
       note: Review comments only. No merge authority.
 
 # ============================================================================
-# CONTRACT REGISTRY (from .cursorrules — 20 contracts)
+# CONTRACT REGISTRY (SSOT: contracts/*.yaml — 24 contracts)
 # ============================================================================
 contracts:
   layer_1_chassis_boundary:
@@ -235,13 +231,13 @@ contracts:
       rule: >
         Gates (hard filter) compile to Cypher WHERE clauses — zero Python post-filtering.
         Scoring dimensions compile to a single WITH/ORDER BY clause.
-        GateType enum = exactly 14 values. Registry = exactly 14 handlers.
+        GateType enum = exactly 10 values. Registry = exactly 10 handlers.
         10 gate types: range, threshold, boolean, composite, enum_map, exclusion,
           self_range, freshness, temporal_range, traversal.
         9 scoring computations: geo_decay, log_normalized, community_match, inverse_linear,
           candidate_property, weighted_rate, price_alignment, temporal_proximity, custom_cypher.
       scanner_ids: []
-      invariant: "GateType enum count MUST equal 14 at all times"
+      invariant: "GateType enum count MUST equal 10 at all times"
 
     - id: C14
       name: NULL SEMANTICS ARE DETERMINISTIC
@@ -290,9 +286,11 @@ contracts:
     - id: C18
       name: L9_META ON EVERY FILE
       rule: >
-        Every tracked file carries an L9_META header (schema version 1).
-        Fields: l9_schema, origin, engine, layer, tags, owner, status.
-        Injected by tools/l9_meta_injector.py — not manually.
+        Every tracked file carries an L9_META header (schema version 2).
+        Fields: l9_schema, origin, engine, layer, tags, status (owner dropped in v2).
+        Values resolve from l9-meta.yaml by path, not per file: write with
+        `tools/l9_meta_injector.py apply`, verify with `check`. To change a value,
+        edit the l9-meta.yaml rule — never the header.
       scanner_ids: []
 
   layer_6_graph_intelligence:
@@ -435,7 +433,7 @@ enforcement_pipeline:
 
   layer_4_ci_audit:
     tool: verify_contracts.py
-    checks: "all 20 contract docs exist in docs/contracts/ and are wired"
+    checks: "all 27 contract docs exist in docs/contracts/ and are wired"
 
   layer_5_llm_review:
     tools: [CodeRabbit, Qodo, Claude]
@@ -485,7 +483,7 @@ pr_evidence_block:
     - [ ] GateType enum count                            → 14
     - [ ] ScoringAssembler dimension count               → 4
     - [ ] All new engine/*.py have tests/unit/test_*.py  → confirmed
-    - [ ] L9_META header on all new files                → confirmed
+    - [ ] python tools/l9_meta_injector.py check          → exit 0
 
   missing_evidence_block: "PR is INCOMPLETE — send back, do not review"
 

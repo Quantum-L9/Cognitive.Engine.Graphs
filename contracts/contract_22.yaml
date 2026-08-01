@@ -11,6 +11,8 @@ preconditions:
 postconditions:
 - Sum of defaults <= 1.0
 - Enforced by _assert_default_weight_sum()
+docs:
+- docs/contracts/SCORING_WEIGHT_CEILING.md
 verification:
   scanner_rules: []
-  test: tests/contracts/test_contract_22.py
+  test: tests/contracts/test_contracts.py::TestContract22ScoringWeightCeiling
