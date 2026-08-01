@@ -10,9 +10,10 @@ preconditions:
 postconditions:
 - Mutations via .derive() only
 - content_hash SHA-256 UNIQUE constraint
+docs:
+- docs/contracts/PACKET_ENVELOPE_FIELDS.md
+- docs/contracts/SHARED_MODELS.md
 verification:
   scanner_rules:
-  - MEM-001
-  - MEM-002
   - SHARED-001
-  test: tests/contracts/test_contract_07.py
+  test: tests/contracts/test_contracts.py::TestContract07ImmutabilityPayloadHash

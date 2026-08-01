@@ -11,8 +11,12 @@ postconditions:
 - parent_id, root_id set
 - generation incremented
 - hop_trace append-only
+docs:
+- docs/contracts/DELEGATION_PROTOCOL.md
+- docs/contracts/PACKET_ENVELOPE_FIELDS.md
+- docs/contracts/NODE_REGISTRATION.md
 verification:
   scanner_rules:
   - DEL-001
   - DEL-002
-  test: tests/contracts/test_contract_08.py
+  test: tests/contracts/test_contracts.py::TestContract08LineageAudit
