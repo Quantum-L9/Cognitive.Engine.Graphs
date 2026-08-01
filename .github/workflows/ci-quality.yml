@@ -120,6 +120,8 @@ jobs:
       # Prefer the Action when the token has scan scope. If the org token is
       # mis-scoped (common infra gap), skip rather than hard-fail every PR —
       # real secret findings still fail when the token is valid.
+      # Use the pinned Docker image (same as ggshield-action) to avoid Sonar
+      # flags on unpinned/unlocked pip installs in workflows.
       - name: GitGuardian scan
         env:
           GITHUB_PUSH_BEFORE_SHA: ${{ github.event.before }}
@@ -132,10 +134,16 @@ jobs:
             echo "::warning::GITGUARDIAN_API_KEY not configured; skipping GitGuardian scan"
             exit 0
           fi
-          python -m pip install --upgrade pip
-          pip install ggshield
           set +e
-          OUT=$(ggshield secret scan ci 2>&1)
+          OUT=$(docker run --rm \
+            -e GITGUARDIAN_API_KEY \
+            -e GITHUB_PUSH_BEFORE_SHA \
+            -e GITHUB_PUSH_BASE_SHA \
+            -e GITHUB_PULL_BASE_SHA \
+            -e GITHUB_DEFAULT_BRANCH \
+            -v "$PWD:/src" -w /src \
+            gitguardian/ggshield:v1.53.0 \
+            secret scan ci 2>&1)
           RC=$?
           set -e
           printf '%s\n' "$OUT"

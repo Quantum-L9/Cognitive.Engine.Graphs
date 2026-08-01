@@ -345,10 +345,15 @@ jobs:
       # gitleaks-action@v2 requires a paid org license (GITLEAKS_LICENSE).
       # The OSS CLI does not — keep secret detection fail-closed without the Action.
       - name: Install Gitleaks CLI
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           GITLEAKS_VERSION=8.24.3
-          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-            | sudo tar xz -C /usr/local/bin gitleaks
+          gh release download "v${GITLEAKS_VERSION}" \
+            --repo gitleaks/gitleaks \
+            --pattern "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            --dir /tmp
+          sudo tar xz -C /usr/local/bin -f "/tmp/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" gitleaks
           gitleaks version
 
       - name: Run Gitleaks (Secret Detection)
