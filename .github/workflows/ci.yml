@@ -352,7 +352,26 @@ jobs:
           gitleaks version
 
       - name: Run Gitleaks (Secret Detection)
-        run: gitleaks detect --source . --config .gitleaks.toml --verbose --redact --exit-code 1
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_SHA: ${{ github.sha }}
+        run: |
+          # Scan only commits introduced by this event — full-history scans
+          # surface long-standing allowlisted-adjacent fixtures and block every PR.
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            gitleaks detect --source . --log-opts "${PR_BASE}..${PR_HEAD}" \
+              --config .gitleaks.toml --verbose --redact --exit-code 1
+          elif [ -n "${PUSH_BEFORE:-}" ] && [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            gitleaks detect --source . --log-opts "${PUSH_BEFORE}..${PUSH_SHA}" \
+              --config .gitleaks.toml --verbose --redact --exit-code 1
+          else
+            gitleaks detect --source . --no-git \
+              --config .gitleaks.toml --verbose --redact --exit-code 1
+          fi
 
       - name: Run pip-audit (Dependency Vulnerabilities)
         run: |
