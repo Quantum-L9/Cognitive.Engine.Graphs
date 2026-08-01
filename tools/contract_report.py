@@ -61,8 +61,10 @@ def check_test_exists(contract: dict, repo_root: Path) -> dict[str, bool]:
     if not test_path:
         return result
 
-    # Check if the specific test file/dir exists
-    full_path = repo_root / test_path
+    # verification.test may be a pytest node ID ("file.py::TestClass"); the
+    # filesystem check only applies to the path portion.
+    file_part = test_path.split("::", 1)[0]
+    full_path = repo_root / file_part
     if full_path.exists():
         if "contracts" in test_path:
             result["contract"] = True

@@ -19,7 +19,7 @@ status: active
 
 ### 2. Preflight Check
 - [ ] Run `make lint` — ruff check + mypy
-- [ ] Run `python tools/verify_contracts.py` — 20 contracts present
+- [ ] Run `python tools/verify_contracts.py` — 27 contract docs present and wired
 - [ ] Run `python tools/contract_scanner.py` — no violations
 - [ ] Verify `.env` / secrets configured (KUBECONFIG, SLACK_WEBHOOK_URL)
 - [ ] Review uncommitted changes in git status
@@ -56,6 +56,9 @@ status: active
 
 ### Automation
 - [ ] Inject L9_META headers into all files that have it missing using a script
+
+### Tech Debt
+- [ ] DEFERRED-003: `contracts/contract_NN.yaml` registry (24 files) doesn't conform to `test_contract_registry.py` schema — missing `docs` field, stale `verification.test` pointers. See `DEFERRED.md`.
 
 ---
 

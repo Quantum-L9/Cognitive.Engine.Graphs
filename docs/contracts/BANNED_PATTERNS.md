@@ -59,3 +59,70 @@ Quick-reference for ALL agents. If you see yourself writing any of these, STOP.
 | `Field(alias="...")` | Use snake_case directly | PYDANTIC_YAML_MAPPING.md |
 | `candidateprop` | `field` (per GateSpec) | FIELD_NAMES.md contract |
 ```
+
+## Infrastructure (CONTRACT-05)
+
+The engine never authors infrastructure. Dockerfiles, `docker-compose.yml`, CI pipelines,
+Terraform modules, and k8s manifests all live in `l9-template`. The only infrastructure
+surface the engine owns is adding engine-specific variables to `.env.template`
+(see [ENV_VARS.md](ENV_VARS.md)).
+
+| ❌ Banned in this repo | ✅ Instead |
+|---|---|
+| Creating a new `Dockerfile` / `docker-compose.yml` | Use the template's |
+| Adding a `.github/workflows/*.yml` build pipeline | Use the template's |
+| Terraform / Helm / k8s manifests | `l9-iac` template |
+
+## File Structure (CONTRACT-16)
+
+The `engine/` layout is fixed. Each concern has exactly one home:
+
+| Path | Owns |
+|---|---|
+| `engine/handlers.py` | The **only** chassis bridge (`register_all`) |
+| `engine/config/` | Domain spec schema, loader, settings, units |
+| `engine/gates/` | Gate compiler, null semantics, registry, `types/` |
+| `engine/scoring/` | Scoring assembler |
+| `engine/traversal/` | Traversal assembler and resolver |
+| `engine/sync/` | Sync generator |
+| `engine/gds/` | GDS scheduler |
+| `engine/graph/` | Neo4j async driver wrapper |
+| `engine/compliance/` | Prohibited factors, PII, audit |
+| `engine/packet/` | PacketEnvelope bridge |
+| `engine/utils/` | `safe_eval`, `sanitize_label` |
+
+Do not create new top-level directories under `engine/` without architectural approval.
+`engine/api/` must not exist — it is a post-refactor ghost.
+
+## Zero-Stub Protocol (CONTRACT-17)
+
+`engine/` ships working code. An unimplemented path is an untestable path, so the stub
+markers below are banned there and enforced by `tools/contract_scanner.py`.
+
+| Rule | Pattern | Severity |
+|---|---|---|
+| `STUB-001` | `raise NotImplementedError` | CRITICAL |
+| `STUB-002` | `# TODO` | HIGH |
+| `STUB-003` | `# PLACEHOLDER`, `# FIXME`, `# XXX` | HIGH |
+
+When you cannot finish the work now, record it in `DEFERRED.md` and remove the marker.
+A tracked deferral is reviewable; an inline comment is not.
+
+```python
+# 🚫 BANNED — the gap is invisible outside this file
+def compile_traversal_gate(spec: GateSpec) -> str:
+    raise NotImplementedError  # TODO: needs multi-hop support
+```
+
+```python
+# ✅ CORRECT — fail loudly at compile time, and log the gap in DEFERRED.md
+def compile_traversal_gate(spec: GateSpec) -> str:
+    if spec.hops > 1:
+        msg = f"Multi-hop traversal gates are not supported (hops={spec.hops})"
+        raise ValueError(msg)
+    ...
+```
+
+**Scope note:** these rules apply to `engine/` only. Abstract base classes in `chassis/`
+(for example `AuditSink.write_batch`) raise `NotImplementedError` as their defining
+contract — that is the intended use, not a stub.

@@ -10,6 +10,9 @@ preconditions:
 postconditions:
 - 'null_behavior: pass wraps in IS NULL OR predicate'
 - 'null_behavior: fail rejects NULL'
+docs:
+- docs/contracts/FIELD_NAMES.md
+- docs/contracts/PYDANTIC_YAML_MAPPING.md
 verification:
   scanner_rules: []
-  test: tests/unit/
+  test: tests/contracts/test_contracts.py::TestContract14NullSemantics

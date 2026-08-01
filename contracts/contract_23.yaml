@@ -12,6 +12,8 @@ postconditions:
 - Returns {status, subaction}
 - Logs with tenant/trace_id
 - Validates with _require_key()
+docs:
+- docs/contracts/HANDLER_PAYLOADS.md
 verification:
   scanner_rules: []
-  test: tests/contracts/test_contract_23.py
+  test: tests/contracts/test_contracts.py::TestContract23AdminSubactionRegistration

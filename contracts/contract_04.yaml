@@ -8,10 +8,15 @@ scope:
 preconditions:
 - Logging or metrics code in engine/
 postconditions:
-- Only structlog.get_logger(__name__) used
+- Logger obtained via logging.getLogger(__name__) or structlog.get_logger(__name__)
 - No structlog.configure() or logging.basicConfig()
+docs:
+- docs/contracts/OBSERVABILITY.md
+- docs/contracts/ERROR_HANDLING.md
 verification:
   scanner_rules:
   - OBS-001
   - OBS-002
-  test: tests/contracts/test_contract_04.py
+  - ERR-001
+  - ERR-002
+  test: tests/contracts/test_contracts.py::TestContract04ObservabilityInherited
