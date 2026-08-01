@@ -96,3 +96,29 @@ Fixing this requires a deliberate, per-contract mapping decision (which of the 2
 **Priority:** LOW — files are deprecated and unreferenced; deletion is cleanup, not a fix
 
 ---
+## DEFERRED-005
+
+**Title:** Multi-signal composite scoring semantics for `engine/scoring/belief_propagation.py`
+
+**File:** `engine/scoring/belief_propagation.py`
+
+**Owner:** engine-team
+
+**Rationale:** The module ships chain propagation (`propagate_chain`) but deliberately omits a multi-signal `composite_score` that fuses independent match dimensions into one ranked score. The original draft implemented `belief - entropy`, subtracting bits from a probability — dimensionally incoherent, and it produced values contradicting its own docstring examples. Rewriting it requires first choosing between two mutually exclusive semantics, which is a product decision, not an implementation detail:
+
+- **Bayesian accumulation** — each confirming signal raises belief, so `[0.9, 0.85, 0.8]` scores near 1.0 and a lone `0.9` scores near 0.9.
+- **Weakest link** — the worst dimension caps the result, so `[0.95, 0.6, 0.95]` scores near 0.6 regardless of the two strong signals.
+
+These order candidates differently on mixed inputs. No formula satisfies both; the discarded test suite asserted both simultaneously, which is why it could not pass.
+
+**Acceptance Criteria:**
+- One semantics is chosen and recorded (ADR or `docs/contracts/`)
+- `composite_score` implemented against that spec, output bounded `[0, 1]`
+- Tests assert the chosen semantics only, with worked examples matching docstrings
+- Any real citation is verified to exist before being referenced
+
+**Blocked by:** Founder decision on fusion semantics
+
+**Priority:** MEDIUM — chain propagation is usable without it; composite is needed before belief scoring feeds candidate ranking
+
+---

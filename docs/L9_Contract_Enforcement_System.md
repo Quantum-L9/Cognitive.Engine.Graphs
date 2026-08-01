@@ -49,7 +49,7 @@ Developer / Agent writes code
             | passes
             v
 +-------------------------+
-|   CI - contract audit   |  <- Verifies all 27 docs exist & are wired  
+|   CI - contract audit   |  <- Verifies all 27 docs exist & are wired
 |                         |  <- Verifies no contract violations in code
 |                         |  <- Blocks merge on ANY finding
 +-----------+-------------+
