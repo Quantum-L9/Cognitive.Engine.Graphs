@@ -10,8 +10,8 @@ status: active
 
 # Inference Engine Enhancement — KG Research Roadmap
 
-**Stack context:** CompoundE3D Phase 4 (integrated) · Neo4j 5.x Enterprise · PyTorch Geometric 2.4 · FastAPI 0.104 · ~15K entities, 50K edges, 31 relation types, ~150 triples/day growth · Multi-tenant Kubernetes  
-**Research papers:** NBFNet (2106.06935) · CompGCN (1911.03082) · CompoundE3D (2309.12501) · R-GCN (1703.06103) · AGEA (2601.14662)  
+**Stack context:** CompoundE3D Phase 4 (integrated) · Neo4j 5.x Enterprise · PyTorch Geometric 2.4 · FastAPI 0.104 · ~15K entities, 50K edges, 31 relation types, ~150 triples/day growth · Multi-tenant Kubernetes
+**Research papers:** NBFNet (2106.06935) · CompGCN (1911.03082) · CompoundE3D (2309.12501) · R-GCN (1703.06103) · AGEA (2601.14662)
 **Recommended architecture:** B — Path-Aware Engine
 
 ---
@@ -65,9 +65,9 @@ h^(t)(v) = AGGREGATE({MESSAGE(h^(t-1)(u), w_q(u,r,v)) : (u,r,v) ∈ E(v)} ∪ {h
 w_q(u,r,v) = W_r · q + b_r   # Edge repr depends ONLY on relation type + query — enables induction
 ```
 
-**Key results:** FB15k-237 HITS@10 = 0.599; inductive splits HITS@10 = 0.523 (vs 0.311 for RotatE, +68%)  
-**Critical hyperparameter:** T=6 layers optimal (T=12 → +2× memory for -0.8% MRR)  
-**Single most important trick:** 10% edge dropout during training — forces multi-hop path learning  
+**Key results:** FB15k-237 HITS@10 = 0.599; inductive splits HITS@10 = 0.523 (vs 0.311 for RotatE, +68%)
+**Critical hyperparameter:** T=6 layers optimal (T=12 → +2× memory for -0.8% MRR)
+**Single most important trick:** 10% edge dropout during training — forces multi-hop path learning
 Without dropout: HITS@10 = 0.521. With dropout: HITS@10 = 0.599 (+15% absolute)
 
 ### CompGCN — Joint Node+Relation Embedding
@@ -79,8 +79,8 @@ h_v^(l+1) = f(Σ_{(u,r)∈N(v)} W_r^(l) · φ(x_u, z_r))
 W_r = Σ_b a_{rb} · V_b    # Basis decomposition: B=50 → 4.74× fewer params, <1% MRR loss
 ```
 
-Composition operators (best → worst): **Corr** > Mult > Sub  
-**Key results:** FB15k-237 MRR = 0.355 (+7% over RotatE); WN18RR MRR = 0.479  
+Composition operators (best → worst): **Corr** > Mult > Sub
+**Key results:** FB15k-237 MRR = 0.355 (+7% over RotatE); WN18RR MRR = 0.479
 **Critical implementation:** Relation update via **reverse message passing** (§3.2) — omitting this breaks training
 
 ### CompoundE3D — 3D Geometric Relation Operators
@@ -92,7 +92,7 @@ M_r = diag(O_{r,1}, ..., O_{r,n})   where O = T · R · S · F · H (5 transform
 Scoring: f_r(h,t) = ||M_r·h - t||  or  ||h - M_r·t||
 ```
 
-**Integration status:** ✅ Fully integrated (beamsearch.py, ensemble.py, compounde3d.py)  
+**Integration status:** ✅ Fully integrated (beamsearch.py, ensemble.py, compounde3d.py)
 **Upgrade path:** Use as NBFNet MESSAGE function (Milestone 4) for geometric path composition
 
 ### AGEA — Adversarial Graph Extraction
@@ -103,8 +103,8 @@ Scoring: f_r(h,t) = ||M_r·h - t||  or  ||h - M_r·t||
 N^t = (N^t_nodes · |V^t_r| + N^t_edges · |E^t_r|) / (|V^t_r| + |E^t_r|)
 ```
 
-**Results on LightRAG:** 90.7% nodes + 82.3% edges recovered in 1,000 queries ($0.50–$2.50)  
-**Your attack surface:** `dimension_scores`, `gates_passed`, `explanation` paths → direct topology leakage  
+**Results on LightRAG:** 90.7% nodes + 82.3% edges recovered in 1,000 queries ($0.50–$2.50)
+**Your attack surface:** `dimension_scores`, `gates_passed`, `explanation` paths → direct topology leakage
 **Dual use:** Novelty score also useful as active enrichment scheduler (see §Active Learning below)
 
 ---
@@ -112,7 +112,7 @@ N^t = (N^t_nodes · |V^t_r| + N^t_edges · |E^t_r|) / (|V^t_r| + |E^t_r|)
 ## Three Architectures
 
 ### Architecture A — Surgical Upgrade (1 week)
-Drop-in CompGCN encoder. Preserves all downstream logic.  
+Drop-in CompGCN encoder. Preserves all downstream logic.
 **Gain:** +5% MRR, +15-20% HITS@10 on cold-start. Does **not** solve inductive generalization.
 
 ### Architecture B — Path-Aware Engine (3-4 weeks) ⭐ RECOMMENDED
