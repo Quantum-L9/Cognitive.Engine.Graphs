@@ -83,6 +83,13 @@ def _config(**overrides: Any) -> NodeRuntimeConfig:
         "max_attachment_size_bytes": 0,
     }
     base.update(overrides)
+    # Newer constellation-node-sdk builds default enforce_gate_only_ingress=True,
+    # which requires require_signature=True. These unit tests exercise unsigned
+    # packets plus chassis middleware for gate-only policy, so disable the SDK
+    # flag when the installed SDK exposes it.
+    fields = getattr(NodeRuntimeConfig, "model_fields", {})
+    if "enforce_gate_only_ingress" in fields and "enforce_gate_only_ingress" not in base:
+        base["enforce_gate_only_ingress"] = False
     return NodeRuntimeConfig(**base)
 
 
