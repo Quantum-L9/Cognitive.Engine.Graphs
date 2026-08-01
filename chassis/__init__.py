@@ -14,6 +14,6 @@ Bridges HTTP boundary to engine action handlers via PacketEnvelope.
 """
 
 from chassis.actions import execute_action
-from chassis.app import ChassisSettings, LifecycleHook, create_app
+from chassis.chassis_app import ChassisSettings, LifecycleHook, create_app
 
 __all__ = ["ChassisSettings", "LifecycleHook", "create_app", "execute_action"]

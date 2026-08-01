@@ -5,11 +5,20 @@ level: MUST
 scope:
   paths:
   - engine/handlers.py
+  - chassis/actions.py
+  - chassis/handler_registration.py
 preconditions:
 - Action handler function defined
 postconditions:
 - 'Signature is async def handle_*(tenant: str, payload: dict) -> dict'
-- Registered via chassis.router.register_handler()
+- engine.handlers.ACTION_HANDLERS is the single action->handler map; no chassis
+  may hand-maintain a parallel list
+- 'Legacy chassis: registered via chassis.router.register_handler() driven by
+  ACTION_HANDLERS (engine/handlers.py:register_all)'
+- 'SDK chassis: registered via constellation_node_sdk.register_handler() driven
+  by ACTION_HANDLERS (chassis/handler_registration.py:register_engine_handlers)'
+- SDK handler wrappers keep an explicit two-parameter signature — the SDK
+  dispatches on parameter count, so *args reroutes to the one-arg packet form
 docs:
 - docs/contracts/HANDLER_PAYLOADS.md
 - docs/contracts/RETURN_VALUES.md
@@ -19,3 +28,7 @@ verification:
   scanner_rules:
   - DI-001
   test: tests/contracts/test_contracts.py::TestContract02HandlerInterface
+  tests:
+  - tests/contracts/test_contracts.py::TestContract02HandlerInterface
+  - tests/contracts/test_chassis_parity.py
+  - tests/unit/test_node_app.py

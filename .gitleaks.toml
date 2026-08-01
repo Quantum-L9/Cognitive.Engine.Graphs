@@ -124,6 +124,8 @@ regexes = [
     "\\.template$",
     "\\.sample$",
     "_example\\.",
+    # Local-dev only password used in Makefile compose helpers (not a real secret)
+    "l9-dev-password",
 ]
 
 [tool.l9_meta]

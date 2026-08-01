@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 
-from chassis.app import ChassisSettings, LifecycleHook, create_app
+from chassis.chassis_app import ChassisSettings, LifecycleHook, create_app
 
 
 class MockLifecycleHook(LifecycleHook):

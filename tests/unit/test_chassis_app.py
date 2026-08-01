@@ -9,7 +9,7 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
-Unit tests for chassis/app.py — FastAPI factory and endpoints.
+Unit tests for chassis/chassis_app.py — FastAPI factory and endpoints.
 Tests the engine-agnostic chassis with LifecycleHook abstraction.
 Target Coverage: 85%+
 """
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from chassis.app import (
+from chassis.chassis_app import (
     ChassisSettings,
     ExecuteRequest,
     ExecuteResponse,

@@ -163,7 +163,7 @@ def apply_chassis_middleware(
     Apply the full L9 chassis middleware stack to a FastAPI app.
     Order matters: outermost middleware listed first.
 
-    Usage (in chassis/app.py create_app):
+    Usage (in chassis/chassis_app.py create_app):
         from chassis.middleware import apply_chassis_middleware
         apply_chassis_middleware(application)
     """

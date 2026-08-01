@@ -38,8 +38,10 @@ print('Neo4j ready')
     done
 fi
 
-# Launch uvicorn — chassis.chassis_app:create_app resolves engine via L9_LIFECYCLE_HOOK
-exec uvicorn chassis.chassis_app:create_app \
+# Launch uvicorn — chassis.entrypoint:create_app dispatches on L9_CHASSIS
+# (legacy default resolves engine via L9_LIFECYCLE_HOOK; sdk uses create_node_app)
+echo "Chassis: ${L9_CHASSIS:-legacy}"
+exec uvicorn chassis.entrypoint:create_app \
     --factory \
     --host 0.0.0.0 \
     --port ${API_PORT:-8000} \

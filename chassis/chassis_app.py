@@ -9,7 +9,7 @@ owner: platform-team
 status: active
 --- /L9_META ---
 
-chassis/app.py — Reusable, Micro-Service Agnostic L9 Chassis
+chassis/chassis_app.py — Reusable, Micro-Service Agnostic L9 Chassis
 
 Single-ingress HTTP boundary for ANY L9 constellation engine.
 Zero engine imports.  All engine coupling flows through two seams:
@@ -19,14 +19,14 @@ Zero engine imports.  All engine coupling flows through two seams:
 
 Usage (Graph engine):
     # in your engine's __main__.py or entrypoint:
-    from chassis.app import create_app
+    from chassis.chassis_app import create_app
     from myengine.boot import GraphLifecycle
 
     app = create_app(lifecycle_hook=GraphLifecycle())
 
 Usage (uvicorn --factory):
     # set L9_LIFECYCLE_HOOK=myengine.boot:GraphLifecycle  (env var)
-    uvicorn chassis.app:create_app --factory
+    uvicorn chassis.chassis_app:create_app --factory
 """
 
 from __future__ import annotations
@@ -376,7 +376,7 @@ def create_app(
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  NOTE:  uvicorn with --factory flag:
-#    uvicorn chassis.app:create_app --factory
+#    uvicorn chassis.chassis_app:create_app --factory
 #
 #  To wire a specific engine, either:
 #    1. Set env:   L9_LIFECYCLE_HOOK=engine.boot:GraphLifecycle
