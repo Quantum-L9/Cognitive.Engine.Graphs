@@ -108,7 +108,7 @@ jobs:
 
             console.log(`Reviewable PR stats: +${additions} -${deletions} = ${total} lines, ${files} files`);
             console.log(`Ignored generated/cache files: ${ignoredFiles}`);
-            console.log(`Thresholds: warn=${warn}, block=${block}, maxFiles=${maxFiles}`);
+            console.log(`Thresholds: warn=${warn}, block=${block} (additions-only), maxFiles=${maxFiles}`);
 
             const messages = [marker];
             let shouldFail = false;
@@ -128,11 +128,14 @@ jobs:
               messages.push('');
             }
 
-            if (total > block) {
+            // Block on additions only so deletion-heavy migrations (dead-code removal)
+            // are not penalized twice. Warn still uses additions+deletions.
+            if (additions > block) {
               shouldFail = true;
               messages.push('❌ **PR Too Large**');
-              messages.push(`   Reviewable lines changed: ${total}`);
-              messages.push(`   Limit: ${block} lines`);
+              messages.push(`   Reviewable additions: ${additions}`);
+              messages.push(`   Limit: ${block} added lines`);
+              messages.push(`   (deletions: ${deletions}; total churn ${total} is warn-only)`);
               messages.push('   **Action Required:** Break into smaller, atomic PRs');
               messages.push('');
             } else if (total > warn) {

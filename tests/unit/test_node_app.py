@@ -83,6 +83,10 @@ def _config(**overrides: Any) -> NodeRuntimeConfig:
         "max_attachment_size_bytes": 0,
     }
     base.update(overrides)
+    # Newer constellation-node-sdk builds default enforce_gate_only_ingress=True,
+    # which requires require_signature=True. These unit tests exercise unsigned
+    # packets plus chassis middleware for gate-only policy, so disable the SDK
+    # flag when the installed SDK exposes it.
     fields = getattr(NodeRuntimeConfig, "model_fields", {})
     if "enforce_gate_only_ingress" in fields and "enforce_gate_only_ingress" not in base:
         base["enforce_gate_only_ingress"] = False
@@ -313,7 +317,12 @@ def test_max_attachments_without_schemes_is_rejected() -> None:
 
 
 def test_sdk_default_attachment_caps_construct() -> None:
-    """Current constellation-node-sdk accepts default attachment/packet caps."""
+    """Current constellation-node-sdk accepts default attachment/packet caps.
+
+    Older SDK builds rejected 10MB attachments against a 256KB packet cap; the
+    installed SDK no longer does. Keep an explicit smoke construct so CI still
+    proves NodeRuntimeConfig can be built for tests without env pinning.
+    """
     cfg = NodeRuntimeConfig(
         environment="test",
         node_name=NODE_NAME,

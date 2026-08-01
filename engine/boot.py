@@ -67,6 +67,7 @@ class GraphLifecycle(LifecycleHook):
         self._domain_loader: DomainPackLoader | None = None
         self._schedulers: list[Any] = []
         self._compliance_flush_task: asyncio.Task[None] | None = None
+        self._db_pool: Any | None = None
 
     # --- lifecycle ----------------------------------------------------------
 
@@ -97,7 +98,21 @@ class GraphLifecycle(LifecycleHook):
             config_path=str(settings.domains_root),
         )
 
-        init_dependencies(self._graph_driver, self._domain_loader)
+        # W4-04: Optional Postgres pool for ComplianceEngine audit-flush persistence.
+        # Soft dependency — None (disabled flush) if DSN unset or Postgres unreachable.
+        if settings.postgres_dsn:
+            try:
+                import asyncpg
+
+                self._db_pool = await asyncpg.create_pool(dsn=settings.postgres_dsn, min_size=1, max_size=5)
+                logger.info("GraphLifecycle.startup → Postgres audit pool connected")
+            except Exception as exc:
+                logger.warning("GraphLifecycle.startup → Postgres audit pool unavailable: %s", exc)
+                self._db_pool = None
+        else:
+            logger.info("POSTGRES_DSN not set — compliance audit flush disabled")
+
+        init_dependencies(self._graph_driver, self._domain_loader, db_pool=self._db_pool)
 
         # Gate_SDK: self-register this node with Gate routing table
         from engine.gate_registration import register_node_with_gate
@@ -200,7 +215,11 @@ class GraphLifecycle(LifecycleHook):
             except Exception as exc:
                 logger.warning("Final compliance flush failed for %s: %s", domain_id, exc)
 
+        # W4-04: state.shutdown() closes the shared Postgres audit pool (state._db_pool,
+        # same object as self._db_pool below) — do not close it a second time here.
         await state.shutdown()
+        self._db_pool = None
+
         logger.info("GraphLifecycle.shutdown complete")
 
     # --- W4-04: compliance flush loop ----------------------------------------
