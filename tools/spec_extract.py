@@ -15,6 +15,10 @@ L9_TEMPLATE: true
 Extracts required features from the graph-cognitive-engine spec YAML,
 then scans engine/ code to produce a coverage matrix.
 
+Two input sources:
+    graph-cognitive-engine-spec-v1.1.0.yaml  — contracted spec features
+    tools/research/                          — researched leverage patterns
+
 Usage:
     python tools/spec_extract.py                          # default spec path
     python tools/spec_extract.py --spec path/to/spec.yaml # custom spec path
@@ -44,6 +48,9 @@ except ImportError:
 
 
 L9_TEMPLATE_TAG = "L9_TEMPLATE"
+RESEARCH_DIR = "tools/research"
+RESEARCH_PATTERNS_FILE = "top5_leverage_patterns_detailed.json"
+
 RESEARCH_DIR = "tools/research"
 RESEARCH_PATTERNS_FILE = "top5_leverage_patterns_detailed.json"
 
@@ -364,33 +371,43 @@ def extract_gds_features(spec: dict) -> list[SpecFeature]:
 
 
 def extract_research_features(root: Path) -> list[SpecFeature]:
-    """Turn tools/research/*.json leverage patterns into coverage-matrix rows.
+    """Turn researched leverage patterns into tracked coverage items.
 
-    Each pattern's engine_mapping.search_tokens/search_files feeds straight into
-    scan_codebase() like any other feature category. See test_research_wiring.py
-    for the contract that keeps this mapping honest against engine renames.
+    Each pattern in the research file declares an `engine_mapping` naming the
+    real engine symbols that implement it. Patterns without that mapping are
+    skipped and warned about — an unmapped pattern cannot be scanned for, so
+    reporting it as MISSING would be indistinguishable from a genuine gap.
     """
-    research_file = root / RESEARCH_DIR / RESEARCH_PATTERNS_FILE
-    if not research_file.is_file():
+    path = root / RESEARCH_DIR / RESEARCH_PATTERNS_FILE
+    if not path.exists():
         return []
 
-    data = json.loads(research_file.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"WARNING: cannot read {path}: {exc}", file=sys.stderr)
+        return []
+
     features = []
     for key, pattern in data.items():
         if key.startswith("_") or not isinstance(pattern, dict):
             continue
         mapping = pattern.get("engine_mapping")
-        if not isinstance(mapping, dict) or not mapping.get("search_tokens"):
+        tokens = mapping.get("search_tokens") if isinstance(mapping, dict) else None
+        if not tokens:
+            print(f"WARNING: research pattern {key} has no engine_mapping.search_tokens — skipped", file=sys.stderr)
             continue
+
         features.append(
             SpecFeature(
                 category="research_pattern",
-                name=pattern.get("pattern_name", key),
+                name=str(pattern.get("pattern_name", key)),
                 spec_reference=f"{RESEARCH_DIR}/{RESEARCH_PATTERNS_FILE}#{key}",
-                search_tokens=list(mapping["search_tokens"]),
-                search_files=list(mapping.get("search_files", [])),
+                search_tokens=[str(t) for t in tokens],
+                search_files=[str(f) for f in mapping.get("search_files", [])],
             )
         )
+
     return features
 
 
@@ -559,7 +576,10 @@ def main() -> int:
     features += extract_gds_features(spec)
     features += extract_research_features(root)
 
-    print(f"Extracted {len(features)} features from spec")
+    research = extract_research_features(root)
+    features += research
+
+    print(f"Extracted {len(features)} features from spec ({len(research)} from {RESEARCH_DIR})")
     print(f"Scanning codebase at {root} ...")
 
     scan_codebase(root, features)
