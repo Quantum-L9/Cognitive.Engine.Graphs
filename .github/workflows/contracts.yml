@@ -34,6 +34,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      - run: pip install -r requirements-ci.txt
       - run: python tools/verify_contracts.py
 
   contract-scan:
@@ -57,7 +58,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install pyyaml
-      - run: python tools/l9_meta_injector.py check
+      # Default mode is dry-run verification; there is no `check` subcommand.
+      - run: python tools/l9_meta_injector.py
 
   lint:
     name: Lint + Type Check
