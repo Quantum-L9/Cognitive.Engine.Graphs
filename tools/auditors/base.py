@@ -134,6 +134,15 @@ class BaseAuditor(ABC):
     def contract_file(self) -> str: ...
 
     @property
+    def remediation_doc(self) -> str:
+        """Runbook describing how to fix this auditor's findings.
+
+        Convention-based so a new auditor gets a doc slot for free; the
+        auditor-wiring test fails if the file is absent.
+        """
+        return f"tools/auditors/remediation/{self.name}.md"
+
+    @property
     def allowlist(self) -> Allowlist:
         return Allowlist()
 

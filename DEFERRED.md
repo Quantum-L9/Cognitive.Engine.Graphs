@@ -48,3 +48,24 @@ All inline TODO comments must be migrated here with a unique ID, owner, rational
 **Priority:** HIGH — required for any LLM-powered feature to function
 
 ---
+
+## DEFERRED-004
+
+**Title:** Delete four superseded `docs/agent-tasks/` development playbooks
+
+**File:** `docs/agent-tasks/add-action-handler.md`, `add-domain-spec.md`, `add-gate-type.md`, `extend-contract.md`
+
+**Owner:** engine-team
+
+**Rationale:** Content was consolidated into `.claude/skills/` (`action-handler-development`, `domain-spec-authoring`, `gate-development`, `contract-check`), which is the path agents actually load. Two of the four carry guidance that is now wrong: `add-action-handler.md` documents a stale handler return shape, and `add-gate-type.md` describes a one-file-per-gate layout that does not match `engine/gates/types/all_gates.py`. Following either produces a broken change. The files are marked `status: deprecated` with a banner and are referenced by nothing in the repo, so they are inert — but leaving them keeps two competing sources of guidance. Deletion is pending Founder approval per the destructive-operation rule.
+
+**Acceptance Criteria:**
+- The four files are removed from `docs/agent-tasks/`
+- `grep -rn "agent-tasks"` returns no references outside `DEFERRED.md`
+- `make agent-check` exits 0
+
+**Blocked by:** Explicit Founder approval to delete (files marked, not removed)
+
+**Priority:** LOW — files are deprecated and unreferenced; deletion is cleanup, not a fix
+
+---
