@@ -34,7 +34,8 @@ def test_run_step_reports_missing_script(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_run_step_captures_success(tmp_path: Path) -> None:
-    _write_script(tmp_path, "ok.py", "print('hello')")
+    # Avoid bare print( — terminology-guard forbids it in tests/.
+    _write_script(tmp_path, "ok.py", "import sys; sys.stdout.write('hello\\n')")
     res = ah.run_step("ok", [sys.executable, "ok.py"], tmp_path)
     assert res.exit_code == 0
     assert res.passed is True
@@ -43,9 +44,9 @@ def test_run_step_captures_success(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_run_steps_concurrently_returns_all_by_name(tmp_path: Path) -> None:
-    _write_script(tmp_path, "a.py", "print('a')")
+    _write_script(tmp_path, "a.py", "import sys; sys.stdout.write('a\\n')")
     _write_script(tmp_path, "b.py", "import sys; sys.exit(1)")
-    _write_script(tmp_path, "c.py", "print('c')")
+    _write_script(tmp_path, "c.py", "import sys; sys.stdout.write('c\\n')")
     specs = [
         ("A", [sys.executable, "a.py"], True),
         ("B", [sys.executable, "b.py"], True),
