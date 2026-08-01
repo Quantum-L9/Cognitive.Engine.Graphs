@@ -1166,7 +1166,7 @@ causal:
   enabled: true
   attribution_enabled: true
   counterfactual_enabled: true
-  temporal_decay_enabled: false
+  temporal_decay_enabled: true
   chain_depth_limit: 5
   causal_edges:
     - edge_type: RESULTED_IN

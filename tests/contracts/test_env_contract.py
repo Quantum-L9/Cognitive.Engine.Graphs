@@ -3,7 +3,7 @@ Environment variable contract tests.
 
 Sources:
   engine/config/settings.py:Settings — all env var declarations
-  chassis/app.py:ChassisSettings
+  chassis/chassis_app.py:ChassisSettings
   docker-compose.yml
 """
 

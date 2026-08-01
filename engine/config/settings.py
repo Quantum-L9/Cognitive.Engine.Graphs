@@ -16,6 +16,7 @@ Reads from .env file and environment variables.
 Single source of truth for all L9_* configuration.
 """
 
+import sys
 from pathlib import Path
 
 from pydantic import model_validator
@@ -23,12 +24,20 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEFAULT_SECRETS = frozenset({"password", "change-me-in-production"})
 
+# Under pytest, ignore a developer's local .env so test suites stay hermetic
+# and reflect code-level defaults (or explicit monkeypatch/patch overrides)
+# rather than whatever opt-in flags the operator activated for local dev.
+# "pytest" is guaranteed to be in sys.modules by the time this module is
+# first imported during test collection (pytest imports itself before
+# collecting conftest.py / test modules).
+_ENV_FILE: str | None = None if "pytest" in sys.modules else ".env"
+
 
 class Settings(BaseSettings):
     """L9 Engine configuration. All env vars prefixed L9_ unless noted."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -130,6 +139,10 @@ class Settings(BaseSettings):
     domain_cache_maxsize: int = 100  # W4-03: max entries in domain pack cache
     compliance_flush_interval: int = 60  # W4-04: seconds between compliance audit flushes
     compliance_buffer_max: int = 100  # W4-04: max buffered audit entries before forced flush
+    postgres_dsn: str | None = None  # W4-04: asyncpg DSN for ComplianceEngine audit-flush pool.
+    # None = compliance audit flush is disabled (flush_audit() no-ops with a warning).
+    # Distinct from PACKET_STORE_DSN (engine/packet/packet_store.py), which manages
+    # its own lazy pool — both may point at the same Postgres instance.
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
