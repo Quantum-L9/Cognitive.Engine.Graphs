@@ -10,9 +10,10 @@
 #
 # L9 Graph Cognitive Engine — Local Dev Docker Compose
 # Usage: docker compose up -d
-# API:   http://localhost:8000/v1/health
-# Neo4j: http://localhost:7474 (browser), bolt://localhost:7687
-# Redis: localhost:6379
+# API:      http://localhost:8000/v1/health
+# Neo4j:    http://localhost:7474 (browser), bolt://localhost:7687
+# Redis:    localhost:6379
+# Postgres: localhost:5432 (PacketStore + ComplianceEngine audit-flush pool)
 
 services:
 
@@ -27,6 +28,24 @@ services:
     environment:
       # Engine lifecycle hook — wires Graph engine to chassis
       L9_LIFECYCLE_HOOK: engine.boot:GraphLifecycle
+      # Chassis selection (chassis.entrypoint:create_app)
+      L9_CHASSIS: legacy
+      # SDK chassis config — inert while L9_CHASSIS=legacy. NodeRuntimeConfig
+      # is frozen with extra="forbid", so names must match the SDK exactly.
+      L9_ENVIRONMENT: local
+      L9_SERVICE_NAME: graph-engine
+      L9_SERVICE_VERSION: 1.1.0
+      HOST: 0.0.0.0
+      L9_ENFORCE_GATE_ONLY_INGRESS: "true"
+      L9_GATE_NODE_NAME: gate
+      L9_REQUIRE_SIGNATURE: "true"
+      L9_SIGNING_ALGORITHM: hmac-sha256
+      L9_SIGNING_KEY: dev-shared-hmac-secret-not-for-production
+      L9_SIGNING_KEY_ID: graph-engine-v1
+      L9_ALLOWED_ACTIONS: match,sync,admin,outcomes,resolve,health,healthcheck,enrich
+      L9_MAX_ATTACHMENTS: "0"
+      # Required: SDK defaults (10MB attachment vs 256KB packet) are mutually invalid.
+      L9_MAX_ATTACHMENT_SIZE_BYTES: "0"
       # Neo4j — uses Docker service name, not localhost
       NEO4J_URI: bolt://neo4j:7687
       NEO4J_USERNAME: neo4j
@@ -48,6 +67,13 @@ services:
       MAX_RESULTS: "25"
       # Domain
       DOMAINS_ROOT: domains
+      # Postgres — ComplianceEngine audit-flush pool (soft dependency; None
+      # disables flush with a warning, does not block startup — see
+      # engine/boot.py). Same instance also backs PacketStore below.
+      POSTGRES_DSN: postgresql://l9_engine:l9-dev-password@postgres:5432/l9_graph
+      # PacketStore — dual-gated with settings.outcome_persistence_enabled
+      PACKET_STORE_ENABLED: "true"
+      PACKET_STORE_DSN: postgresql://l9_engine:l9-dev-password@postgres:5432/l9_graph
     volumes:
       # Hot-reload: mount source code so changes reflect without rebuild
       - ./engine:/app/engine:ro
@@ -57,8 +83,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; r=httpx.get('http://localhost:8000/v1/health'); exit(0 if r.status_code==200 else 1)"]
+      test: ["CMD", "python", "-c", "import httpx; r=httpx.get('http://localhost:8000/v1/health'); exit(0 if r.status_code==200 and r.json().get('ready', True) else 1)"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -115,11 +143,38 @@ services:
     networks:
       - l9-graph
 
+  # ── PostgreSQL 16 (PacketStore + ComplianceEngine audit) ──
+  postgres:
+    image: postgres:16-alpine
+    container_name: l9-graph-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: l9_engine
+      POSTGRES_PASSWORD: l9-dev-password
+      POSTGRES_DB: l9_graph
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Auto-applied on first container init only (postgres entrypoint
+      # convention) — schema for packet_store, lineage_graph, hop_trace,
+      # delegation_chain, packet_audit_log tables.
+      - ./engine/packet/packet_store.sql:/docker-entrypoint-initdb.d/01_packet_store.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U l9_engine -d l9_graph"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - l9-graph
+
 volumes:
   neo4j_data:
   neo4j_logs:
   neo4j_plugins:
   redis_data:
+  postgres_data:
 
 networks:
   l9-graph:

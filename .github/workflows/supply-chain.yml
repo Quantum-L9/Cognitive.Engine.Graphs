@@ -98,7 +98,25 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v6
 
+      - name: Check Dependency Graph Availability
+        id: depgraph
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          OUT=$(gh api "repos/${{ github.repository }}/dependency-graph/compare/${{ github.event.pull_request.base.sha }}...${{ github.sha }}" 2>&1)
+          RC=$?
+          set -e
+          if [ "$RC" -eq 0 ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Dependency graph unavailable (enable Dependency graph in repo Security settings). Skipping Dependency Review."
+            echo "$OUT"
+          fi
+
       - name: Review Dependencies
+        if: steps.depgraph.outputs.available == 'true'
         uses: actions/dependency-review-action@3b139cfc5fae8b618d3eae3675e383bb1769c019 # v4.5.0
         with:
           fail-on-severity: high
@@ -174,7 +192,10 @@ jobs:
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo ""
 
-          ALLOW="${{ vars.PIP_LICENSES_ALLOW || 'MIT;Apache-2.0;BSD-3-Clause;BSD-2-Clause;ISC;Python Software Foundation License;Mozilla Public License 2.0 (MPL 2.0)' }}"
+          # pip-licenses reports human-readable names (e.g. "MIT License"),
+          # SPDX ids ("MIT"), and compound expressions. Keep both styles.
+          # Proprietary covers first-party constellation-node-sdk.
+          ALLOW="${{ vars.PIP_LICENSES_ALLOW || 'MIT;MIT License;MIT-0;MIT OR Apache-2.0;Apache-2.0;Apache Software License;Apache Software License; MIT License;Apache License 2.0;Apache-2.0 OR BSD-3-Clause;Apache-2.0 AND BSD-2-Clause;BSD;BSD License;BSD-3-Clause;BSD-2-Clause;BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0;ISC;PSF-2.0;Python Software Foundation License;Mozilla Public License 2.0 (MPL 2.0);MPL-2.0;MPL-2.0 AND MIT;Proprietary' }}"
           DENY="${{ vars.PIP_LICENSES_DENY || 'GPL-3.0;AGPL-3.0;LGPL-3.0' }}"
 
           echo "Allowed licenses: $ALLOW"

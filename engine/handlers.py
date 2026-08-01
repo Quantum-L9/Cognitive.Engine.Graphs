@@ -73,14 +73,21 @@ class ExecutionError(EngineError):
     """Neo4j or runtime execution failure."""
 
 
-def init_dependencies(graph_driver: GraphDriver, domain_loader: DomainPackLoader) -> None:
+def init_dependencies(
+    graph_driver: GraphDriver,
+    domain_loader: DomainPackLoader,
+    db_pool: Any | None = None,
+) -> None:
     """Called by chassis/boot at startup to inject dependencies into EngineState.
 
     W4-01: Populates the EngineState singleton rather than module-level globals.
+    W4-04: db_pool is an optional asyncpg pool used by ComplianceEngine for
+    audit-flush persistence. None = compliance audit flush no-ops (soft dependency).
     """
     state = get_state()
     state._graph_driver = graph_driver
     state._domain_loader = domain_loader
+    state._db_pool = db_pool
     import os
 
     allowlist_raw = os.getenv("TENANT_ALLOWLIST", "")
@@ -137,7 +144,7 @@ def _get_compliance_engine(domain_spec: DomainSpec) -> ComplianceEngine:
     state = get_state()
     domain_id = domain_spec.domain.id
     if domain_id not in state.compliance_engines:
-        state.compliance_engines[domain_id] = ComplianceEngine(domain_spec)
+        state.compliance_engines[domain_id] = ComplianceEngine(domain_spec, db_pool=state.db_pool)
     return state.compliance_engines[domain_id]
 
 
@@ -2005,7 +2012,9 @@ async def handle_enrich(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 # Both chassis implementations (legacy chassis/actions.py and the SDK-native
 # chassis/handler_registration.py) route off this dict rather than each
 # maintaining their own action list, so the two chassis can't drift apart.
-ACTION_HANDLERS: dict[str, Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]] = {
+ActionHandler = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+
+ACTION_HANDLERS: dict[str, ActionHandler] = {
     "match": handle_match,
     "sync": handle_sync,
     "admin": handle_admin,
@@ -2018,7 +2027,7 @@ ACTION_HANDLERS: dict[str, Callable[[str, dict[str, Any]], Awaitable[dict[str, A
 
 
 def register_all(chassis_router: Any) -> None:
-    """Register all action handlers with a legacy chassis router interface.
+    """Register every action handler with a legacy chassis router interface.
 
     The primary registration path is via chassis.actions._init_engine()
     which consumes ACTION_HANDLERS directly. This function exists for
@@ -2026,4 +2035,8 @@ def register_all(chassis_router: Any) -> None:
     """
     for action, handler in ACTION_HANDLERS.items():
         chassis_router.register_handler(action, handler)
-    logger.info("Registered %d action handlers: %s", len(ACTION_HANDLERS), ", ".join(ACTION_HANDLERS))
+    logger.info(
+        "Registered %d action handlers: %s",
+        len(ACTION_HANDLERS),
+        ", ".join(ACTION_HANDLERS),
+    )

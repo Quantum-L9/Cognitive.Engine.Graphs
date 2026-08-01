@@ -10,11 +10,11 @@ status: active
 --- /L9_META ---
 """
 
-import json
 import re
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -53,11 +53,22 @@ def load_yaml(path: Path) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+# Bounded per-run caches. The audit is a single-pass, read-only scan, so the
+# same source file and the same include/exclude glob set are resolved once and
+# reused across every rule that references them (many rules share
+# `engine/**/*.py`). This removes redundant disk reads and directory walks
+# without changing findings — read_text is pure for a given path within a run.
+@lru_cache(maxsize=8192)
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def list_files(root: Path, include_globs: list[str], exclude_globs: list[str]) -> list[Path]:
+@lru_cache(maxsize=2048)
+def _list_files_cached(
+    root: Path,
+    include_globs: tuple[str, ...],
+    exclude_globs: tuple[str, ...],
+) -> tuple[Path, ...]:
     included: set[Path] = set()
     for pat in include_globs:
         included |= set(root.glob(pat)) if "**" not in pat else set(root.rglob(pat.replace("**/", "")))
@@ -65,7 +76,11 @@ def list_files(root: Path, include_globs: list[str], exclude_globs: list[str]) -
     for pat in exclude_globs:
         excluded |= set(root.glob(pat)) if "**" not in pat else set(root.rglob(pat.replace("**/", "")))
     files = [p for p in included if p.is_file() and p not in excluded]
-    return sorted(files)
+    return tuple(sorted(files))
+
+
+def list_files(root: Path, include_globs: list[str], exclude_globs: list[str]) -> list[Path]:
+    return list(_list_files_cached(root, tuple(include_globs), tuple(exclude_globs)))
 
 
 def snippet_with_lines(text: str, line_no: int, context: int = 3) -> tuple[int, int, str]:
@@ -270,20 +285,6 @@ def write_report(root: Path, meta: dict[str, Any], grouped: dict[str, list[Findi
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def write_coverage(root: Path, grouped: dict[str, list[Finding]]) -> None:
-    out_dir = root / "artifacts"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    coverage_path = out_dir / "coverage_matrix.json"
-
-    summary = {
-        "CRITICAL": len(grouped.get("CRITICAL", [])),
-        "HIGH": len(grouped.get("HIGH", [])),
-        "MEDIUM": len(grouped.get("MEDIUM", [])),
-        "LOW": len(grouped.get("LOW", [])),
-    }
-    coverage_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-
-
 def main() -> int:
     root = Path().resolve()
     meta = {"generated_at": now_iso(), "repo_root": str(root)}
@@ -301,7 +302,11 @@ def main() -> int:
 
     grouped = group_findings(findings)
     write_report(root, meta, grouped)
-    write_coverage(root, grouped)
+    # Severity counts live in audit_report.md (parsed by the harness). This tool
+    # deliberately does NOT write artifacts/coverage_matrix.json: that file is the
+    # spec-coverage matrix owned by tools/spec_extract.py. Writing an audit
+    # severity summary to the same name collided with spec_extract's output and
+    # only appeared harmless because the harness ran the two steps serially.
 
     critical = len(grouped.get("CRITICAL", []))
     high = len(grouped.get("HIGH", []))

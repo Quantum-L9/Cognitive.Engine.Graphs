@@ -228,7 +228,7 @@ entries:
 - id: packet-envelope/tools-contract-scanner-py-string-annotation
   gate: pre-commit/packet-envelope-prohibited
   rule: packet-envelope-prohibited
-  fingerprint: 77b4a4343e80a70d5eabc7088779a8d6a12cf959e1e547369a09bbdd8b49de90
+  fingerprint: 8cd932a0e047bad7a8266c886f5d587f598942f079598628676ba6f0cee5a893
   path: tools/contract_scanner.py
   owner: '@cryptoxdog'
   issue: Quantum-L9/Cognitive.Engine.Graphs#138
@@ -236,4 +236,4 @@ entries:
   expires: '2026-10-21'
   removal_condition: migrated-to:TransportPacket
   root_cause_group: packet-envelope-migration
-  evidence: tools/contract_scanner.py::string-annotation:from l9.core.envelope import PacketEnvelope
+  evidence: tools/contract_scanner.py::string-annotation:from engine.packet.packet_envelope import PacketEnvelope

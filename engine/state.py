@@ -57,6 +57,7 @@ class EngineState:
         self._gds_schedulers: dict[str, GDSScheduler] = {}
         self._compliance_engines: dict[str, ComplianceEngine] = {}
         self._tenant_allowlist: set[str] | None = None  # None = all tenants allowed
+        self._db_pool: Any | None = None  # optional asyncpg pool for compliance audit flush
 
     # ------------------------------------------------------------------
     # Properties (read-only after initialization)
@@ -92,6 +93,17 @@ class EngineState:
     def tenant_allowlist(self) -> set[str] | None:
         return self._tenant_allowlist
 
+    @property
+    def db_pool(self) -> Any | None:
+        """Optional asyncpg pool for ComplianceEngine audit flush.
+
+        Unlike graph_driver/domain_loader, this is a soft dependency —
+        returns None (never raises) when Postgres is not configured or
+        unreachable. Callers must handle the None case (see
+        ComplianceEngine.flush_audit()).
+        """
+        return self._db_pool
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -101,6 +113,7 @@ class EngineState:
         graph_driver: GraphDriver,
         domain_loader: DomainPackLoader,
         tenant_allowlist: set[str] | None = None,
+        db_pool: Any | None = None,
     ) -> None:
         """Initialize the engine state. Idempotent — second call logs warning and returns."""
         async with self._lock:
@@ -112,6 +125,7 @@ class EngineState:
             self._domain_loader = domain_loader
             self._gds_schedulers = {}
             self._compliance_engines = {}
+            self._db_pool = db_pool
 
             # Resolve tenant allowlist from parameter or environment
             if tenant_allowlist is not None:
@@ -156,9 +170,17 @@ class EngineState:
                 except Exception as exc:
                     logger.warning("Error closing graph driver: %s", exc)
 
+            # Close Postgres pool (compliance audit flush)
+            if self._db_pool is not None:
+                try:
+                    await self._db_pool.close()
+                except Exception as exc:
+                    logger.warning("Error closing db_pool: %s", exc)
+
             self._graph_driver = None
             self._domain_loader = None
             self._tenant_allowlist = None
+            self._db_pool = None
             self._shutdown_time = time.time()
             self._initialized = False
             logger.info("EngineState shut down at %.3f", self._shutdown_time)
@@ -172,6 +194,7 @@ class EngineState:
         self._gds_schedulers = {}
         self._compliance_engines = {}
         self._tenant_allowlist = None
+        self._db_pool = None
         self._lock = asyncio.Lock()
 
     def health_check(self) -> dict[str, Any]:
@@ -182,6 +205,7 @@ class EngineState:
             "shutdown_time": self._shutdown_time,
             "graph_driver_present": self._graph_driver is not None,
             "domain_loader_present": self._domain_loader is not None,
+            "db_pool_present": self._db_pool is not None,
             "tenant_count": len(self._tenant_allowlist) if self._tenant_allowlist else 0,
             "gds_scheduler_count": len(self._gds_schedulers),
             "compliance_engine_count": len(self._compliance_engines),

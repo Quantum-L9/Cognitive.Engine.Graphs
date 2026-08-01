@@ -21,12 +21,13 @@ Covers:
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
 
-from engine.causal.attribution import AttributionCalculator
+from engine.causal.attribution import AttributionCalculator, _temporal_decay_factor
 from engine.causal.causal_compiler import CausalCompiler
 from engine.causal.edge_taxonomy import CausalEdgeType, CausalEdgeValidator
 from engine.config.schema import (
@@ -500,6 +501,50 @@ class TestAttributionModels:
     def test_empty_results(self):
         weights = AttributionCalculator._assign_weights([], "linear")
         assert weights == {}
+
+
+class TestTemporalDecay:
+    """Feature-flagged temporal-decay refinement of attribution weights."""
+
+    def test_decay_factor_bounds(self):
+        # age 0 -> no decay; age == halflife -> exp(-1); negative age -> no decay
+        assert _temporal_decay_factor(0.0, 180.0) == 1.0
+        assert _temporal_decay_factor(180.0, 180.0) == pytest.approx(math.exp(-1))
+        assert _temporal_decay_factor(-5.0, 180.0) == 1.0
+
+    def test_decay_factor_nonpositive_halflife_is_noop(self):
+        assert _temporal_decay_factor(365.0, 0.0) == 1.0
+        assert _temporal_decay_factor(365.0, -10.0) == 1.0
+
+    def test_apply_decay_favors_recent_and_renormalizes(self):
+        # Equal base credit; tp2 is one halflife old -> tp1 keeps more, sum == 1.0
+        weights = {"tp1": 0.5, "tp2": 0.5}
+        ages = {"tp1": 0.0, "tp2": 180.0}
+        out = AttributionCalculator._apply_temporal_decay(weights, ages, 180.0)
+        assert out["tp1"] > out["tp2"]
+        assert sum(out.values()) == pytest.approx(1.0, abs=1e-6)
+        # tp1 : tp2 == 1 : exp(-1)  after renormalization
+        expected_ratio = 1.0 / math.exp(-1)
+        assert out["tp1"] / out["tp2"] == pytest.approx(expected_ratio, abs=0.001)
+
+    def test_apply_decay_single_touchpoint_stays_full_credit(self):
+        # first_touch/last_touch put all credit on one touchpoint; decay+renorm
+        # must leave it at 1.0 regardless of age.
+        out = AttributionCalculator._apply_temporal_decay({"tp1": 1.0, "tp2": 0.0}, {"tp1": 365.0, "tp2": 0.0}, 180.0)
+        assert out["tp1"] == 1.0
+        assert out["tp2"] == 0.0
+
+    def test_apply_decay_missing_age_is_noop(self):
+        # No recorded age for any touchpoint -> factor 1.0 -> weights unchanged.
+        weights = {"tp1": 0.5, "tp2": 0.5}
+        out = AttributionCalculator._apply_temporal_decay(weights, {}, 180.0)
+        assert out == {"tp1": 0.5, "tp2": 0.5}
+
+    def test_apply_decay_all_zero_returns_base(self):
+        # Degenerate: all base weights zero -> return base unchanged (no div-by-zero).
+        weights = {"tp1": 0.0, "tp2": 0.0}
+        out = AttributionCalculator._apply_temporal_decay(weights, {"tp1": 10.0}, 180.0)
+        assert out == weights
 
 
 class TestAttributionCalculator:
