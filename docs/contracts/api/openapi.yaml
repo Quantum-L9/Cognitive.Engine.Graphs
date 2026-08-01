@@ -1,9 +1,9 @@
 # ═══════════════════════════════════════════════════════════════
 # Contract: L9 Cognitive Engine Graph — Unified API
-# Source:   chassis/app.py, chassis/chassis_app.py, chassis/actions.py
+# Source:   chassis/chassis_app.py, chassis/chassis_app.py, chassis/actions.py
 # Version:  1.0.0
 # Updated:  2026-04-26
-# Verified: Against chassis/app.py lines 82-99, 330-361, handlers.py
+# Verified: Against chassis/chassis_app.py lines 82-99, 330-361, handlers.py
 # ═══════════════════════════════════════════════════════════════
 
 openapi: 3.1.0
@@ -15,6 +15,26 @@ info:
     accessed through the single universal ingress: POST /v1/execute.
     The `action` field routes to one of 8 named handlers in engine/handlers.py.
     Behavior is entirely driven by domain spec YAML files loaded at runtime.
+
+    TWO CHASSIS, ONE ACTION SET. `chassis/entrypoint.py` dispatches on
+    `L9_CHASSIS`; both paths route the same `engine.handlers.ACTION_HANDLERS`
+    (CONTRACT-02). The request/response envelope differs:
+
+      L9_CHASSIS=legacy (default) — chassis/chassis_app.py. The ExecuteRequest /
+        ExecuteResponse schemas below. Auth: `x-api-key`. `/v1/health` returns
+        200 healthy / 503 degraded.
+
+      L9_CHASSIS=sdk — chassis/node_app.py, built by constellation-node-sdk
+        `create_node_app()`. The body is a `TransportPacket`, not ExecuteRequest:
+        `action` and `payload` live under the packet, tenant arrives as
+        `tenant.org_id` (== CEG domain_id), and the response is a TransportPacket
+        with `header.packet_type` of `response` or `failure`. Auth is packet
+        signature verification (`L9_REQUIRE_SIGNATURE`), not `x-api-key`.
+        `/v1/health` is always HTTP 200 — readiness is the `ready` boolean, which
+        is why the container probes assert on `ready` rather than status alone.
+        Ingress is Gate-only: `/v1/execute` returns 403 unless the packet is
+        Gate-authored (see x-sdk-gate-only-ingress below).
+        Route surface is `/v1/execute`, `/v1/health`, `/metrics` — no `/v1/relay`.
   version: 1.0.0
   contact:
     email: eng@l9.dev
@@ -42,7 +62,7 @@ components:
       type: object
       description: |
         Universal execute request envelope — chassis contract.
-        Source: chassis/app.py:ExecuteRequest (lines 82-88)
+        Source: chassis/chassis_app.py:ExecuteRequest (lines 82-88)
       properties:
         action:
           type: string
@@ -67,7 +87,7 @@ components:
       type: object
       description: |
         Universal execute response envelope — chassis contract.
-        Source: chassis/app.py:ExecuteResponse (lines 91-98)
+        Source: chassis/chassis_app.py:ExecuteResponse (lines 91-98)
       properties:
         status:
           type: string
@@ -114,7 +134,7 @@ paths:
         Universal single-ingress endpoint for all engine operations.
         Routes to: match, sync, admin, outcomes, resolve, health, healthcheck, enrich.
 
-        HTTP status code mapping (source: chassis/app.py:_raise_for_failed_result):
+        HTTP status code mapping (source: chassis/chassis_app.py:_raise_for_failed_result):
           200 — success, failed, or circuit_open (check body .status)
           400 — unknown action (ValueError from engine)
           422 — payload validation failure (Pydantic or engine ValidationError)
@@ -122,7 +142,7 @@ paths:
 
         Each call is wrapped in a PacketEnvelope (inflate_ingress → handler →
         deflate_egress → PacketStore.persist). CONTRACT-06, CONTRACT-07, CONTRACT-08.
-      x-source-file: chassis/app.py:execute()
+      x-source-file: chassis/chassis_app.py:execute()
       tags: [engine]
       requestBody:
         required: true
@@ -267,8 +287,8 @@ paths:
         2. domain_loader.load_domain(tenant) spec validation
 
         Returns 200 when healthy, 503 when Neo4j unreachable.
-        Source: chassis/app.py:health(), engine/handlers.py:handle_health()
-      x-source-file: chassis/app.py:health()
+        Source: chassis/chassis_app.py:health(), engine/handlers.py:handle_health()
+      x-source-file: chassis/chassis_app.py:health()
       tags: [health]
       security: []
       parameters:
@@ -308,3 +328,15 @@ tags:
     description: Core engine action execution
   - name: health
     description: Liveness and readiness probes
+
+# Gate-only ingress is enforced by chassis/node_app.py middleware, not by the
+# SDK: NodeRuntimeConfig carries no gate-only field. Rejection is HTTP 403 with
+# `detail: "gate-only ingress: <reason>"`.
+x-sdk-gate-only-ingress:
+  applies_to: L9_CHASSIS=sdk, POST /v1/execute
+  toggle: L9_ENFORCE_GATE_ONLY_INGRESS (default true)
+  gate_node: L9_GATE_NODE_NAME (default "gate")
+  required_packet_fields:
+    provenance.origin_kind: must equal "gate"
+    provenance.resolved_by_gate: must be true
+    address.source_node: must equal L9_GATE_NODE_NAME

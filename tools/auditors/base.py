@@ -1,15 +1,15 @@
 """
 --- L9_META ---
-l9_schema: 1
+l9_schema: 2
 origin: l9-template
 engine: graph
 layer: [audit]
-tags: [L9_TEMPLATE, auditors, base]
-owner: platform
+tags: [delivery, harness]
 status: active
 --- /L9_META ---
 
-L9 BaseAuditor Protocol v2 — tiered execution, allowlists, two-phase scanning."""
+L9 BaseAuditor Protocol v2 — tiered execution, allowlists, two-phase scanning.
+"""
 
 from __future__ import annotations
 

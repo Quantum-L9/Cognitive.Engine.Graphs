@@ -36,28 +36,12 @@ def _init_engine() -> None:
         return
 
     try:
-        from engine.handlers import (
-            handle_admin,
-            handle_enrich,
-            handle_health,
-            handle_healthcheck,
-            handle_match,
-            handle_outcomes,
-            handle_resolve,
-            handle_sync,
-        )
+        from engine.handlers import ACTION_HANDLERS
         from engine.packet.chassis_contract import deflate_egress, inflate_ingress
 
-        _engine_handlers = {
-            "match": handle_match,
-            "sync": handle_sync,
-            "admin": handle_admin,
-            "outcomes": handle_outcomes,
-            "resolve": handle_resolve,
-            "health": handle_health,
-            "healthcheck": handle_healthcheck,
-            "enrich": handle_enrich,
-        }
+        # CONTRACT-02: consume the single source of truth rather than
+        # rebuilding the action list here — see engine/handlers.py.
+        _engine_handlers = dict(ACTION_HANDLERS)
         _inflate_ingress = inflate_ingress
         _deflate_egress = deflate_egress
         logger.info("Engine handlers initialized: %d actions registered", len(_engine_handlers))

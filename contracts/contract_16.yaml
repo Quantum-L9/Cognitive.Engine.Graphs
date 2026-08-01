@@ -9,6 +9,8 @@ preconditions:
 - New directory created
 postconditions:
 - No new top-level directories without architectural approval
+docs:
+- docs/contracts/BANNED_PATTERNS.md
 verification:
   scanner_rules: []
-  test: tests/contracts/test_contract_16.py
+  test: tests/contracts/test_contracts.py::TestContract16FileStructure

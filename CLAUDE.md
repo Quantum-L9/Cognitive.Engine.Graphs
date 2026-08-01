@@ -98,6 +98,24 @@ def proximity_gate(spec, domain):
 @docs/SEL4_UPGRADES.md
 ```
 
+## Contract Docs
+
+Load the specific doc for the subsystem you are about to touch — do not bulk-load.
+
+| Subsystem | Docs |
+|---|---|
+| `engine/gates/`, `engine/config/schema.py` | `docs/contracts/FIELD_NAMES.md`, `docs/contracts/CYPHER_SAFETY.md`, `docs/contracts/BANNED_PATTERNS.md`, `docs/contracts/PYDANTIC_YAML_MAPPING.md`, `docs/contracts/BIDIRECTIONAL_MATCHING.md` |
+| `engine/handlers.py`, `chassis/` | `docs/contracts/HANDLER_PAYLOADS.md`, `docs/contracts/METHOD_SIGNATURES.md`, `docs/contracts/DEPENDENCY_INJECTION.md`, `docs/contracts/RETURN_VALUES.md` |
+| `engine/packet/` | `docs/contracts/PACKET_ENVELOPE_FIELDS.md`, `docs/contracts/SHARED_MODELS.md`, `docs/contracts/DELEGATION_PROTOCOL.md`, `docs/contracts/PACKET_TYPE_REGISTRY.md` |
+| `tests/` | `docs/contracts/TEST_PATTERNS.md`, `docs/contracts/ERROR_HANDLING.md` |
+| `engine/compliance/` | `docs/contracts/OBSERVABILITY.md`, `docs/contracts/MEMORY_SUBSTRATE_ACCESS.md`, `docs/contracts/PROHIBITED_FACTORS.md`, `docs/contracts/PII_HANDLING.md` |
+| `domains/`, spec versioning | `docs/contracts/DOMAIN_SPEC_VERSIONING.md`, `docs/contracts/FEEDBACK_LOOPS.md`, `docs/contracts/NODE_REGISTRATION.md` |
+| `.env.template`, env naming | `docs/contracts/ENV_VARS.md` |
+| `engine/config/settings.py`, feature gating | `docs/contracts/FEATURE_FLAG_DISCIPLINE.md` |
+| `engine/scoring/`, `engine/boot.py` | `docs/contracts/SCORING_WEIGHT_CEILING.md` |
+| `engine/kge/` | `docs/contracts/KGE_EMBEDDINGS.md` |
+| Any new tracked file | `docs/contracts/L9_META_HEADERS.md` |
+
 ## References
 
 Detailed reference material loads automatically from `.claude/rules/` when you edit relevant files:

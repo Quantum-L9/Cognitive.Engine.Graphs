@@ -1,3 +1,4 @@
+
 # docs/contracts/
 
 > Production-grade contract documentation for the L9 Cognitive Engine Graph (CEG). Every contract traces back to a specific source file in this repository.
@@ -65,9 +66,10 @@ pytest tests/contracts/               # contract suite only
 ```
 
 `make agent-check` is the completion gate: it runs `tools/verify_contracts.py`
-(the 20 contract markdown files present and referenced from the agent rule
-files), `tools/contract_scanner.py` (banned pattern scan), lint, types, and the
-full test suite. A green `agent-check` means green CI.
+(the 27 contract markdown files present and referenced from the agent rule
+files), `tools/contract_scanner.py` (banned pattern scan),
+`tools/contract_report.py` (contract-to-verification coverage), lint, types, and
+the full test suite. A green `agent-check` means green CI.
 
 Run `pytest tests/contracts/` **without** `-m contract`. The `contract` marker
 covers under a fifth of the tests in this directory and deselects the rest,

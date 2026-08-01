@@ -100,3 +100,35 @@ class GDSScheduler:
 4. Update tests
 5. Run `make test` to verify no signature mismatches
 ```
+
+## Gate-Then-Score (CONTRACT-13)
+
+Matching is two phases, both compiled to Cypher — never post-filtered in Python:
+
+| Phase | Assembler | Produces |
+|---|---|---|
+| Gates (hard filter) | `GateCompiler.compile_all_gates()` | one `WHERE` clause |
+| Scoring (soft rank) | `ScoringAssembler.assemble_scoring_clause()` | one `WITH ... ORDER BY` clause |
+
+Clause order is fixed: `MATCH` → traversal → `WHERE` gates → `WITH` scoring →
+`RETURN candidate, score` → `ORDER BY score DESC`.
+
+There is no iterative scoring loop and no Python-side filtering of returned rows. If a
+predicate cannot be expressed in Cypher, it is not a gate.
+
+## GDS Jobs Are Declarative (CONTRACT-19)
+
+`GDSScheduler` reads `spec.gds_jobs` and creates APScheduler jobs from it. No algorithm
+call is hardcoded.
+
+`GDSJobSpec` fields: `name`, `algorithm`, `schedule` (`cron` | `manual`), `projection`
+(declares `node_labels` + `edge_types`), and spec-driven write targets — `writeproperty`,
+`writeto`, `writeedge`, `writeproperties`, `sourceedge`, `filter`.
+
+```python
+# ❌ hardcoded algorithm dispatch
+await driver.execute_query("CALL gds.louvain.write(...)")   # BANNED
+
+# ✅ scheduler reads the spec
+scheduler.load_jobs(spec.gds_jobs)
+```

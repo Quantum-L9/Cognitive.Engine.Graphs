@@ -11,6 +11,14 @@ preconditions:
 postconditions:
 - Wrapped via inflate_ingress() at entry
 - Wrapped via deflate_egress() at exit
+docs:
+- docs/contracts/PACKET_ENVELOPE_FIELDS.md
+- docs/contracts/PACKET_TYPE_REGISTRY.md
+- docs/contracts/MEMORY_SUBSTRATE_ACCESS.md
+- docs/contracts/FEEDBACK_LOOPS.md
 verification:
-  scanner_rules: []
-  test: tests/contracts/test_contract_06.py
+  scanner_rules:
+  - PKT-001
+  - MEM-001
+  - MEM-002
+  test: tests/contracts/test_contracts.py::TestContract06TransportPacket
