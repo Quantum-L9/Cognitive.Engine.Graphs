@@ -34,7 +34,7 @@ def test_run_step_reports_missing_script(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_run_step_captures_success(tmp_path: Path) -> None:
-    # Avoid bare print( — terminology-guard forbids it in tests/.
+    # Prefer stdout.write so the fixture body does not trip terminology-guard.
     _write_script(tmp_path, "ok.py", "import sys; sys.stdout.write('hello\\n')")
     res = ah.run_step("ok", [sys.executable, "ok.py"], tmp_path)
     assert res.exit_code == 0
