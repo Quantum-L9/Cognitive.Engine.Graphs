@@ -61,11 +61,9 @@ types.py             \# PacketType enum, shared type aliases
 
 ## Import Pattern
 ```python
-# ✅ CORRECT — import from l9.core (internal operations)
-from l9.core.envelope import PacketEnvelope, TenantContext, PacketLineage
-from l9.core.contract import ExecuteRequest, ExecuteResponse
-from l9.core.delegation import delegate_to_node
-from l9.core.types import PacketType
+# ✅ CORRECT — import from engine.packet (internal operations)
+from engine.packet.packet_envelope import PacketEnvelope, PacketLineage, PacketType, TenantContext
+from engine.packet.chassis_contract import deflate_egress, delegate_to_node, inflate_ingress
 
 # ❌ WRONG — redefining in engine code
 class PacketEnvelope(BaseModel):  # BANNED — already in l9-core
@@ -110,4 +108,23 @@ dependencies = [
 ]
 ```
 
+```
+
+## Tenant Isolation (CONTRACT-03)
+
+`TenantContext` is a shared model — the engine never redefines it (`SHARED-002`) and never
+resolves it. The chassis performs the 5-level resolution (header → subdomain → key prefix
+→ envelope → default) and hands the engine a plain `tenant: str`.
+
+Every Neo4j query scopes to that tenant's database. There is no cross-tenant read path:
+not in matching, not in sync, not in the KGE vector index
+(see [KGE_EMBEDDINGS.md](KGE_EMBEDDINGS.md)).
+
+```python
+# ✅ tenant arrives as an argument
+async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]: ...
+
+# ❌ engine resolving tenant itself
+tenant = request.headers["X-Tenant-Id"]   # BANNED — chassis concern
+class TenantContext(BaseModel): ...       # BANNED — SHARED-002
 ```

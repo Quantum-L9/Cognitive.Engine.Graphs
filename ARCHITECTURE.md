@@ -56,7 +56,7 @@ tests/
   property/            Hypothesis-based property tests
 tools/
   contract_scanner.py  Scans generated Cypher for contract violations
-  verify_contracts.py  Asserts all 24 contracts pass
+  verify_contracts.py  Asserts every contract doc exists and is wired into agent files
   validate_domain.py   Validates domain spec YAML against Pydantic schema
 ```
 

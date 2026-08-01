@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════════════
 # Contract: Engine + Chassis Environment Variables
 # Source:   engine/config/settings.py:Settings
-#           chassis/app.py:ChassisSettings
+#           chassis/chassis_app.py:ChassisSettings
 #           docker-compose.yml
 # Version:  1.0.0
 # Updated:  2026-04-05
@@ -164,7 +164,7 @@ variables:
       Dotted module path to the engine's LifecycleHook class.
       Format: "module.path:ClassName"
       Example: "engine.boot:GraphLifecycle"
-      Source: chassis/app.py:ChassisSettings.l9_lifecycle_hook
+      Source: chassis/chassis_app.py:ChassisSettings.l9_lifecycle_hook
     source: env
     sensitive: false
 

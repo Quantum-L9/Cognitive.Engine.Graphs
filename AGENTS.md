@@ -1,3 +1,11 @@
+<!-- L9_META
+l9_schema: 2
+origin: engine-specific
+engine: graph
+layer: [agent-rules]
+tags: [governance]
+status: active
+/L9_META -->
 
 # AGENTS.md — L9 Graph Cognitive Engine
 
@@ -122,3 +130,20 @@ tools/                   # contract_scanner.py, verify_contracts.py, validate_do
 | `docs/CI_PIPELINE.md` | 7 CI phases, 15 pre-commit hooks, blocking vs advisory | CI failure diagnosis |
 | `docs/CI_CONSTELLATION_BOUNDARY.md` | What's wired (`l9-ci-core`/`l9-ci-sdk`) vs. not (`l9-harness`/`l9-assurance`); extend-don't-replace rule for `audit.yml` | Before wiring any Quantum-L9 constellation repo, or touching `tools/audit_harness.py` / `.github/workflows/audit.yml` |
 | `.claude/rules/contracts.md` | 24 contracts + enforcement matrix (automated vs manual) | Contract uncertainty |
+
+<!-- BEGIN L9 FORMATTER OWNERSHIP (generated — do not edit) -->
+
+## Formatter ownership
+
+Workspace class: `biome_default` — Default for every governed workspace: Biome owns JS/TS/JSON, Ruff owns Python.
+
+Exactly one formatter owns each language. Do not reformat a file with a tool other than its owner, and do not add config for a competing formatter: the result is a diff that churns on every save.
+
+| Languages | Owner | Note |
+|---|---|---|
+| `javascript`, `javascriptreact`, `typescript`, `typescriptreact`, `json`, `jsonc` | **biome** | bound by the governed IDE profile |
+| `python` | **ruff** | bound by the governed IDE profile |
+
+Generated from `environment/ide/policy.json` in the governance clone by `ops/scripts/adapters/agentdocs.sh`. Edit the policy, not this block.
+
+<!-- END L9 FORMATTER OWNERSHIP -->

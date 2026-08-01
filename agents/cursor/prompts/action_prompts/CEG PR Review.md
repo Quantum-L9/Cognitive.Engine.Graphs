@@ -138,7 +138,7 @@ Answer these questions specifically for this PR:
    If yes: Are they reachable end-to-end (chassis → handlers.py → engine module)?
 
 3. Does this PR modify ScoringAssembler or gate compilation?
-   If yes: Are the 4 scoring dimensions still intact? Are all 14 gate types still registered?
+   If yes: Are the 4 scoring dimensions still intact? Are all 10 gate types still registered?
 
 4. Does this PR touch domain spec schema (schema.py)?
    If yes: Are all new fields snake_case? Do they have defaults or are they Optional?

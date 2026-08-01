@@ -48,6 +48,8 @@ except ImportError:
 
 
 L9_TEMPLATE_TAG = "L9_TEMPLATE"
+RESEARCH_DIR = "tools/research"
+RESEARCH_PATTERNS_FILE = "top5_leverage_patterns_detailed.json"
 
 RESEARCH_DIR = "tools/research"
 RESEARCH_PATTERNS_FILE = "top5_leverage_patterns_detailed.json"
@@ -390,7 +392,6 @@ def extract_research_features(root: Path) -> list[SpecFeature]:
     for key, pattern in data.items():
         if key.startswith("_") or not isinstance(pattern, dict):
             continue
-
         mapping = pattern.get("engine_mapping")
         tokens = mapping.get("search_tokens") if isinstance(mapping, dict) else None
         if not tokens:
@@ -573,6 +574,7 @@ def main() -> int:
     features += extract_v11_additions(spec)
     features += extract_action_features(spec)
     features += extract_gds_features(spec)
+    features += extract_research_features(root)
 
     research = extract_research_features(root)
     features += research

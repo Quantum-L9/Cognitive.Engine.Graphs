@@ -19,6 +19,7 @@ import logging
 import re
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 # T5-03: handlers.py is the sanctioned chassis bridge. Re-export chassis
@@ -2000,19 +2001,29 @@ async def handle_enrich(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     return {"enriched_count": count, "entity_type": entity_type, "tenant": tenant}
 
 
+# CONTRACT-02: single source of truth for the engine's action surface.
+# Both chassis implementations (legacy chassis/actions.py and the SDK-native
+# chassis/handler_registration.py) route off this dict rather than each
+# maintaining their own action list, so the two chassis can't drift apart.
+ACTION_HANDLERS: dict[str, Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]] = {
+    "match": handle_match,
+    "sync": handle_sync,
+    "admin": handle_admin,
+    "outcomes": handle_outcomes,
+    "resolve": handle_resolve,
+    "health": handle_health,
+    "healthcheck": handle_healthcheck,
+    "enrich": handle_enrich,
+}
+
+
 def register_all(chassis_router: Any) -> None:
-    """Register all 8 action handlers with a legacy chassis router interface.
+    """Register all action handlers with a legacy chassis router interface.
 
     The primary registration path is via chassis.actions._init_engine()
-    which builds the handler dict directly. This function exists for
+    which consumes ACTION_HANDLERS directly. This function exists for
     chassis implementations that use a router.register_handler() pattern.
     """
-    chassis_router.register_handler("match", handle_match)
-    chassis_router.register_handler("sync", handle_sync)
-    chassis_router.register_handler("admin", handle_admin)
-    chassis_router.register_handler("outcomes", handle_outcomes)
-    chassis_router.register_handler("resolve", handle_resolve)
-    chassis_router.register_handler("health", handle_health)
-    chassis_router.register_handler("healthcheck", handle_healthcheck)
-    chassis_router.register_handler("enrich", handle_enrich)
-    logger.info("Registered 8 action handlers: match, sync, admin, outcomes, resolve, health, healthcheck, enrich")
+    for action, handler in ACTION_HANDLERS.items():
+        chassis_router.register_handler(action, handler)
+    logger.info("Registered %d action handlers: %s", len(ACTION_HANDLERS), ", ".join(ACTION_HANDLERS))
