@@ -342,11 +342,41 @@ jobs:
           python -m pip install --upgrade pip
           pip install pip-audit==2.9.0 safety bandit==1.9.1
 
-      - name: Run Gitleaks (Secret Detection)
-        uses: gitleaks/gitleaks-action@v2
+      # gitleaks-action@v2 requires a paid org license (GITLEAKS_LICENSE).
+      # The OSS CLI does not — keep secret detection fail-closed without the Action.
+      - name: Install Gitleaks CLI
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_CONFIG: .gitleaks.toml
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          GITLEAKS_VERSION=8.24.3
+          gh release download "v${GITLEAKS_VERSION}" \
+            --repo gitleaks/gitleaks \
+            --pattern "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            --dir /tmp
+          sudo tar xz -C /usr/local/bin -f "/tmp/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" gitleaks
+          gitleaks version
+
+      - name: Run Gitleaks (Secret Detection)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_SHA: ${{ github.sha }}
+        run: |
+          # Scan only commits introduced by this event — full-history scans
+          # surface long-standing allowlisted-adjacent fixtures and block every PR.
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            gitleaks detect --source . --log-opts "${PR_BASE}..${PR_HEAD}" \
+              --config .gitleaks.toml --verbose --redact --exit-code 1
+          elif [ -n "${PUSH_BEFORE:-}" ] && [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            gitleaks detect --source . --log-opts "${PUSH_BEFORE}..${PUSH_SHA}" \
+              --config .gitleaks.toml --verbose --redact --exit-code 1
+          else
+            gitleaks detect --source . --no-git \
+              --config .gitleaks.toml --verbose --redact --exit-code 1
+          fi
 
       - name: Run pip-audit (Dependency Vulnerabilities)
         run: |
@@ -367,8 +397,26 @@ jobs:
             --exclude ./venv,./.venv,./tests,./build,./dist \
             || echo "⚠️  Security warnings found (non-blocking)"
 
-      - name: Dependency Review (PR only)
+      - name: Check Dependency Graph Availability
         if: github.event_name == 'pull_request'
+        id: depgraph
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          OUT=$(gh api "repos/${{ github.repository }}/dependency-graph/compare/${{ github.event.pull_request.base.sha }}...${{ github.sha }}" 2>&1)
+          RC=$?
+          set -e
+          if [ "$RC" -eq 0 ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Dependency graph unavailable; skipping Dependency Review in security job."
+            echo "$OUT"
+          fi
+
+      - name: Dependency Review (PR only)
+        if: github.event_name == 'pull_request' && steps.depgraph.outputs.available == 'true'
         uses: actions/dependency-review-action@3b139cfc5fae8b618d3eae3675e383bb1769c019 # v4.5.0
         with:
           fail-on-severity: high

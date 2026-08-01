@@ -92,6 +92,7 @@ repos:
         name: L9 Contract Files Existence Check
         entry: python tools/verify_contracts.py
         language: python
+        additional_dependencies: [pyyaml]
         pass_filenames: false
         always_run: true
 
@@ -102,7 +103,8 @@ repos:
     hooks:
       - id: l9-meta-check
         name: L9_META Header Check
-        entry: python tools/l9_meta_injector.py check
+        # Dry-run is the default (no --apply); there is no `check` subcommand.
+        entry: python tools/l9_meta_injector.py
         language: python
         # pre-commit builds an isolated venv, so l9-meta.yaml parsing needs
         # pyyaml declared here — it is not inherited from the repo environment.
