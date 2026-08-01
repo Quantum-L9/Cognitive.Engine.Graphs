@@ -102,8 +102,9 @@ jobs:
         uses: actions/dependency-review-action@3b139cfc5fae8b618d3eae3675e383bb1769c019 # v4.5.0
         with:
           fail-on-severity: high
+          # dependency-review-action rejects specifying both allow-licenses and
+          # deny-licenses. Keep the allow-list (stricter); deny-list is implied.
           allow-licenses: ${{ vars.ALLOWED_LICENSES || 'MIT, Apache-2.0, BSD-3-Clause, BSD-2-Clause, ISC' }}
-          deny-licenses: ${{ vars.DENIED_LICENSES || 'GPL-3.0, AGPL-3.0' }}
           comment-summary-in-pr: on-failure
 
 # ────────────────────────────────────────────────────────────────────────
