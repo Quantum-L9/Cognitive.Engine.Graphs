@@ -115,3 +115,17 @@ endpoint.idproperty                 # WRONG: missing underscore
 - Integration tests must instantiate DomainSpec from real YAML and access all fields
 
 ```
+
+## Null Semantics Are Per-Gate (CONTRACT-14)
+
+Every gate declares `nullbehavior` (`NullBehavior.PASS` by default, or `FAIL`). This is a
+per-gate decision, not a global setting, and the compiler applies it — callers never
+handle NULL themselves.
+
+| `nullbehavior` | Compiled predicate |
+|---|---|
+| `pass` | `(candidate.prop IS NULL OR <predicate>)` |
+| `fail` | `<predicate>` — a NULL candidate is rejected |
+
+The wrapping happens in `engine/gates/null_semantics.py`. Do not hand-write
+`IS NULL OR` into a gate's `compile_where()`; set `nullbehavior` in the spec instead.

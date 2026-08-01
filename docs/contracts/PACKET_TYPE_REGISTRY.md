@@ -64,7 +64,7 @@ NEVER be renamed or removed. Use EXACTLY these strings.
 ## Adding a New Packet Type
 
 1. Add to this file
-2. Add to `PacketType` enum in `l9/packet/envelope.py`
+2. Add to the `PacketType` enum in `engine/packet/packet_envelope.py`
 3. Add validation in `PacketValidator`
 4. Update `tools/audit_rules.yaml` if compliance checks apply
 ```

@@ -10,6 +10,11 @@ preconditions:
 postconditions:
 - All behavior from domain_spec.yaml via DomainConfig Pydantic
 - Never raw YAML or dicts
+docs:
+- docs/contracts/PYDANTIC_YAML_MAPPING.md
+- docs/contracts/FIELD_NAMES.md
+- docs/contracts/DOMAIN_SPEC_VERSIONING.md
 verification:
-  scanner_rules: []
-  test: tests/contracts/test_contract_12.py
+  scanner_rules:
+  - NAME-001
+  test: tests/contracts/test_contracts.py::TestContract12DomainSpecSourceOfTruth

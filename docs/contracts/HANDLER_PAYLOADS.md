@@ -70,3 +70,23 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 ```
 
 ```
+
+## Admin Subaction Registration (CONTRACT-23)
+
+`handle_admin` dispatches on a `subaction` key. Two rules:
+
+1. **Resolve it through `_require_key()`** — never `payload.get("subaction")`. A missing
+   key must raise, not fall through to a default branch.
+2. **Names are `snake_case`** — matching `[a-z][a-z0-9_]*`. No camelCase, no dots, no
+   spaces.
+
+```python
+# ✅
+subaction = _require_key(payload, "subaction", "admin", tenant)
+if subaction == "trigger_gds_job":
+    ...
+
+# ❌
+subaction = payload.get("subaction", "describe")   # silent default
+if subaction == "triggerGDSJob":                   # not snake_case
+```
