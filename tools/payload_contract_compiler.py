@@ -114,27 +114,29 @@ def validate_schemas() -> list[dict[str, Any]]:
             "id": schema.get("$id"),
             "digest": _sha_file(path),
         }
-        try:
-            if Draft202012Validator is not None:
+        if Draft202012Validator is not None:
+            try:
                 Draft202012Validator.check_schema(schema)
-                backend = "jsonschema"
+                entry["check_schema"] = "PASS"
+                entry["check_schema_backend"] = "jsonschema"
+            except Exception as exc:
+                entry["check_schema"] = "FAIL"
+                entry["error"] = str(exc)
+        else:
+            # Lightweight structural gate when jsonschema is unavailable.
+            errors: list[str] = []
+            if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
+                errors.append("missing Draft 2020-12 $schema")
+            if not schema.get("$id"):
+                errors.append("missing $id")
+            if schema.get("type") not in {None, "object"} and "common.schema" not in path.name:
+                errors.append("unexpected root type")
+            if errors:
+                entry["check_schema"] = "FAIL"
+                entry["error"] = "; ".join(errors)
             else:
-                # Lightweight structural gate when jsonschema is unavailable.
-                errors: list[str] = []
-                if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
-                    errors.append("missing Draft 2020-12 $schema")
-                if not schema.get("$id"):
-                    errors.append("missing $id")
-                if schema.get("type") not in {None, "object"} and "common.schema" not in path.name:
-                    errors.append("unexpected root type")
-                if errors:
-                    raise ValueError("; ".join(errors))
-                backend = "structural"
-            entry["check_schema"] = "PASS"
-            entry["check_schema_backend"] = backend
-        except Exception as exc:
-            entry["check_schema"] = "FAIL"
-            entry["error"] = str(exc)
+                entry["check_schema"] = "PASS"
+                entry["check_schema_backend"] = "structural"
         text = path.read_text(encoding="utf-8")
         hits = [token for token in FORBIDDEN_TOKENS if token in text]
         props = set((schema.get("properties") or {}).keys())
