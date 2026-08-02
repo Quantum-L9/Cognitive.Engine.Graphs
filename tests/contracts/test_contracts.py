@@ -579,6 +579,8 @@ class TestContract16FileStructure:
             "diagnostics",
             "hoprag",
             "models",
+            "shadow",
+            "replay",
         }
         for item in ENGINE_DIR.iterdir():
             if item.is_dir() and not item.name.startswith("."):

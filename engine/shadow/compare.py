@@ -1,4 +1,16 @@
-"""Deterministic primary-vs-shadow ranking comparison (observational only)."""
+"""
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [shadow]
+tags: [shadow, comparison, observational, task-055]
+owner: engine-team
+status: active
+--- /L9_META ---
+
+Deterministic primary-vs-shadow ranking comparison (observational only).
+"""
 
 from __future__ import annotations
 
