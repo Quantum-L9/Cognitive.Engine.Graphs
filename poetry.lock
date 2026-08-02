@@ -461,7 +461,7 @@ markers = {main = "platform_system == \"Windows\" or sys_platform == \"win32\"",
 
 [[package]]
 name = "constellation-node-sdk"
-version = "1.0.0"
+version = "1.0.1"
 description = "Canonical TransportPacket SDK for Constellation worker and orchestrator nodes"
 optional = false
 python-versions = ">=3.12"
@@ -484,9 +484,9 @@ dev = ["mypy (>=1.11.0)", "pytest (>=8.3.0)", "pytest-asyncio (>=0.23.8)", "ruff
 
 [package.source]
 type = "git"
-url = "https://github.com/cryptoxdog/Gate_SDK.git"
-reference = "HEAD"
-resolved_reference = "433f6c1f998425fe73a66e6db3ba22317310593a"
+url = "https://github.com/Quantum-L9/Gate_SDK.git"
+reference = "a770e8531dc1c59ce01e1dbb0f4162785d9dda89"
+resolved_reference = "a770e8531dc1c59ce01e1dbb0f4162785d9dda89"
 
 [[package]]
 name = "coverage"
