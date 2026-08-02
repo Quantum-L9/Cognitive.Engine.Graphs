@@ -1,0 +1,72 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: urn:l9:plasticos:contracts:payload:match-request:1.0.0-draft
+title: PlasticOS CEG Match Request
+description: Payload carried by TransportPacket action=match. No transport fields
+  and no ungoverned weight override.
+x-publication-status: draft-unpublished
+type: object
+additionalProperties: false
+required:
+- contract_version
+- domain
+- query_id
+- direction
+- query_entity_ref
+- query
+- top_n
+- projection_version
+- policy_ref
+properties:
+  contract_version:
+    $ref: ./common.schema.yaml#/$defs/contract_version
+  domain:
+    $ref: ./common.schema.yaml#/$defs/domain
+  query_id:
+    type: string
+    minLength: 1
+  direction:
+    type: string
+    enum:
+    - supply_opportunity_to_buyer_facility
+    - buyer_demand_to_supply_opportunity
+  query_entity_ref:
+    $ref: ./common.schema.yaml#/$defs/entity_ref
+  query:
+    type: object
+    additionalProperties: false
+    required:
+    - facts
+    - evidence_summary
+    properties:
+      facts:
+        type: object
+      evidence_summary:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required:
+          - feature_id
+          - value_state
+          - evidence_ref
+          properties:
+            feature_id:
+              type: string
+            value_state:
+              $ref: ./common.schema.yaml#/$defs/field_value_state
+            evidence_ref:
+              $ref: ./common.schema.yaml#/$defs/entity_ref
+      governed_filters:
+        type: object
+  top_n:
+    type: integer
+    minimum: 1
+    maximum: 1000
+  projection_version:
+    type: string
+    minLength: 1
+  policy_ref:
+    $ref: ./common.schema.yaml#/$defs/semver_ref
+  field_dictionary_version:
+    type: string
+    minLength: 1

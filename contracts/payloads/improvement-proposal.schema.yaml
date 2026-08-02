@@ -1,0 +1,91 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: urn:l9:plasticos:contracts:payload:improvement-proposal:1.0.0-draft
+title: PlasticOS Improvement Proposal
+description: Review-only proposal derived from evidence. It cannot mutate production
+  directly.
+x-publication-status: draft-unpublished
+type: object
+additionalProperties: false
+required:
+- contract_version
+- domain
+- proposal_id
+- subject_ref
+- proposal_type
+- proposed_changes
+- evidence_refs
+- status
+- direct_mutation
+- review_required
+- created_at
+properties:
+  contract_version:
+    $ref: ./common.schema.yaml#/$defs/contract_version
+  domain:
+    $ref: ./common.schema.yaml#/$defs/domain
+  proposal_id:
+    type: string
+    minLength: 1
+  subject_ref:
+    $ref: ./common.schema.yaml#/$defs/entity_ref
+  proposal_type:
+    type: string
+    enum:
+    - schema_change
+    - field_mapping
+    - policy_change
+    - quality_rule
+    - capability_update
+  proposed_changes:
+    type: array
+    minItems: 1
+    items:
+      type: object
+      additionalProperties: false
+      required:
+      - path
+      - operation
+      - rationale
+      properties:
+        path:
+          type: string
+        operation:
+          type: string
+          enum:
+          - add
+          - replace
+          - deprecate
+        proposed_value: {}
+        rationale:
+          type: string
+          minLength: 1
+  evidence_refs:
+    type: array
+    minItems: 1
+    items:
+      $ref: ./common.schema.yaml#/$defs/entity_ref
+    uniqueItems: true
+  status:
+    type: string
+    enum:
+    - draft
+    - pending_review
+    - approved
+    - rejected
+    - superseded
+  direct_mutation:
+    const: false
+  review_required:
+    const: true
+  created_at:
+    type: string
+    format: date-time
+  reviewed_by:
+    type:
+    - string
+    - 'null'
+  reviewed_at:
+    type:
+    - string
+    - 'null'
+    format: date-time

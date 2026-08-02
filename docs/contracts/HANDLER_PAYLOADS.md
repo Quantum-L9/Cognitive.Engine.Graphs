@@ -16,6 +16,8 @@ Every action handler has a FIXED payload schema. Agents must validate
 incoming payloads against these schemas before processing.
 
 ## match
+
+> TASK-040 / ADR-106: prefer `engine.models.payloads.MatchRequest` / `MatchResponse` (payload-only; no transport fields; no ungoverned weights).
 ```python
 class MatchPayload(BaseModel):
     query: dict[str, Any]              # Entity attributes to match against
