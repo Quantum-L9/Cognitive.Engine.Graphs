@@ -1,4 +1,16 @@
-"""Offline outcome replay compatible with Odoo TASK-057 input schema."""
+"""
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [replay]
+tags: [replay, outcome, offline, task-033]
+owner: engine-team
+status: active
+--- /L9_META ---
+
+Offline outcome replay compatible with Odoo TASK-057 input schema.
+"""
 
 from __future__ import annotations
 
