@@ -317,17 +317,20 @@ def test_max_attachments_without_schemes_is_rejected() -> None:
 
 
 def test_sdk_default_attachment_caps_construct() -> None:
-    """Current constellation-node-sdk accepts default attachment/packet caps.
+    """Pinned SDK rejects mutually invalid default attachment/packet caps.
 
-    Older SDK builds rejected 10MB attachments against a 256KB packet cap; the
-    installed SDK no longer does. Keep an explicit smoke construct so CI still
-    proves NodeRuntimeConfig can be built for tests without env pinning.
+    constellation-node-sdk@a770e853 still enforces
+    max_attachment_size_bytes <= max_packet_bytes. Bare construct with SDK
+    field defaults fails closed; tests must pin compatible caps via _config().
     """
-    cfg = NodeRuntimeConfig(
-        environment="test",
-        node_name=NODE_NAME,
-        service_name=NODE_NAME,
-        service_version="1.1.0",
-    )
+    with pytest.raises(ValidationError, match="max_attachment_size_bytes"):
+        NodeRuntimeConfig(
+            environment="test",
+            node_name=NODE_NAME,
+            service_name=NODE_NAME,
+            service_version="1.1.0",
+        )
+    cfg = _config()
     assert cfg.max_packet_bytes > 0
     assert cfg.max_attachment_size_bytes >= 0
+    assert cfg.max_attachment_size_bytes <= cfg.max_packet_bytes
