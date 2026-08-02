@@ -1,0 +1,20 @@
+{
+  "contract_version": "1.0.0-draft",
+  "domain": "plasticos",
+  "projection_version": "1.0.0",
+  "records": [
+    {
+      "entity_ref": "res.partner:102",
+      "entity_type": "facility",
+      "revision": 9,
+      "operation": "tombstone",
+      "properties": {},
+      "source_record": {
+        "system": "odoo",
+        "record_ref": "res.partner:102",
+        "revision": 9
+      },
+      "field_dictionary_version": "1.0.0"
+    }
+  ]
+}

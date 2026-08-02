@@ -4,7 +4,7 @@ l9_schema: 1
 origin: engine-specific
 engine: graph
 layer: [models]
-tags: [payload, match, improvement, transport-boundary]
+tags: [payload, match, sync, improvement, transport-boundary]
 owner: engine-team
 status: active
 --- /L9_META ---
@@ -223,3 +223,49 @@ class ImprovementProposal(PayloadBase):
         if len(values) != len(set(values)):
             raise ValueError("evidence_refs must be unique")
         return values
+
+
+class SyncOperation(StrEnum):
+    UPSERT = "upsert"
+    TOMBSTONE = "tombstone"
+
+
+class SourceRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    system: str = Field(min_length=1)
+    record_ref: str = Field(min_length=1)
+    revision: int = Field(ge=0)
+
+
+class SyncProjectionRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    entity_ref: str = Field(pattern=ENTITY_REF_PATTERN)
+    entity_type: str = Field(min_length=1)
+    revision: int = Field(ge=0)
+    operation: SyncOperation
+    properties: dict[str, Any] = Field(default_factory=dict)
+    relationship_refs: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    source_record: SourceRecord
+    field_dictionary_version: str = Field(min_length=1)
+
+    @field_validator("relationship_refs", "evidence_refs")
+    @classmethod
+    def _entity_refs(cls, values: list[str]) -> list[str]:
+        return _require_entity_refs(values)
+
+
+class SyncProjection(PayloadBase):
+    contract_version: Literal["1.0.0-draft"]
+    domain: Literal["plasticos"]
+    projection_version: str = Field(min_length=1)
+    records: list[SyncProjectionRecord] = Field(min_length=1, max_length=10000)
+
+
+class SyncApplyResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    accepted: list[str] = Field(default_factory=list)
+    reused: list[str] = Field(default_factory=list)
+    rejected: list[dict[str, str]] = Field(default_factory=list)
+    projection_version: str
+    store_revision_map: dict[str, int] = Field(default_factory=dict)

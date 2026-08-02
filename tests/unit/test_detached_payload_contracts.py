@@ -14,6 +14,7 @@ from engine.models.payloads import (
     ImprovementProposal,
     MatchRequest,
     MatchResponse,
+    SyncProjection,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -101,3 +102,7 @@ def test_improvement_schema_locks_direct_mutation_const() -> None:
     schema = _load_yaml(PAYLOADS / "improvement-proposal.schema.yaml")
     assert schema["properties"]["direct_mutation"]["const"] is False
     assert schema["properties"]["review_required"]["const"] is True
+
+
+def test_sync_projection_example() -> None:
+    SyncProjection.model_validate(_load_json(EXAMPLES / "sync-projection.json"))

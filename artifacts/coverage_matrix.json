@@ -49,17 +49,17 @@
       "total": 5
     },
     "research_pattern": {
-      "IMPLEMENTED": 5,
+      "IMPLEMENTED": 10,
       "PARTIAL": 0,
       "MISSING": 0,
-      "total": 5
+      "total": 10
     }
   },
   "totals": {
-    "IMPLEMENTED": 32,
+    "IMPLEMENTED": 37,
     "PARTIAL": 9,
     "MISSING": 0,
-    "total": 41
+    "total": 46
   },
-  "generated_at": "2026-07-24T21:09:12.515556+00:00"
+  "generated_at": "2026-08-02T09:48:26.010076+00:00"
 }

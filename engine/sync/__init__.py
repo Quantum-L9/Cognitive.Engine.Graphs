@@ -12,5 +12,6 @@ status: active
 Sync system."""
 
 from engine.sync.generator import SyncGenerator
+from engine.sync.projection import ProjectionEntry, ProjectionStore
 
-__all__ = ["SyncGenerator"]
+__all__ = ["ProjectionEntry", "ProjectionStore", "SyncGenerator"]
