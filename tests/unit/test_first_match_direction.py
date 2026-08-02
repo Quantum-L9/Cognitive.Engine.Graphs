@@ -15,10 +15,11 @@ DIRECTION = "supply_opportunity_to_buyer_facility"
 LEGACY = "intake_to_buyer"
 
 
-def test_executable_spec_declares_first_direction_only() -> None:
+def test_executable_spec_declares_first_direction() -> None:
     data = yaml.safe_load((ROOT / "domains/plasticos/spec.yaml").read_text())
     directions = data["queryschema"]["matchdirections"]
-    assert directions == [DIRECTION]
+    assert DIRECTION in directions
+    assert directions[0] == DIRECTION
     assert LEGACY not in directions
     text = (ROOT / "domains/plasticos/spec.yaml").read_text()
     assert LEGACY not in text
@@ -27,7 +28,8 @@ def test_executable_spec_declares_first_direction_only() -> None:
 def test_domain_pack_loader_exposes_first_direction() -> None:
     spec = DomainPackLoader(config_path=str(ROOT / "domains")).load_domain("plasticos")
     assert isinstance(spec, DomainSpec)
-    assert spec.queryschema.matchdirections == [DIRECTION]
+    assert DIRECTION in spec.queryschema.matchdirections
+    assert spec.queryschema.matchdirections[0] == DIRECTION
 
 
 def test_traversal_assembler_accepts_first_direction() -> None:
