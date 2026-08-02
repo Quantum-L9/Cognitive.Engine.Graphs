@@ -10,16 +10,14 @@ status: active
 --- /L9_META ---
 
 Detached PlasticOS payload contracts (TASK-040).
-
-These models describe business payloads carried inside Gate_SDK
-TransportPacket. They deliberately exclude transport/envelope fields and
-forbid direct production mutation via improvement proposals.
+Payloads ride inside TransportPacket; transport fields and direct mutation are forbidden.
 """
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -50,14 +48,15 @@ FORBIDDEN_TRANSPORT_FIELDS = frozenset(
 )
 
 ENTITY_REF_PATTERN = r"^[a-z0-9_.-]+:[^\s]+$"
+_ENTITY_REF = re.compile(ENTITY_REF_PATTERN)
 
 
-class MatchDirection(str, Enum):
+class MatchDirection(StrEnum):
     SUPPLY_TO_BUYER = "supply_opportunity_to_buyer_facility"
     BUYER_TO_SUPPLY = "buyer_demand_to_supply_opportunity"
 
 
-class FieldValueState(str, Enum):
+class FieldValueState(StrEnum):
     OBSERVED = "observed"
     REPORTED = "reported"
     INFERRED = "inferred"
@@ -68,13 +67,13 @@ class FieldValueState(str, Enum):
     SUPERSEDED = "superseded"
 
 
-class ScoreScale(str, Enum):
+class ScoreScale(StrEnum):
     ZERO_TO_ONE = "0_to_1"
     ZERO_TO_HUNDRED = "0_to_100"
     UNNORMALIZED = "unnormalized_declared"
 
 
-class ProposalType(str, Enum):
+class ProposalType(StrEnum):
     SCHEMA_CHANGE = "schema_change"
     FIELD_MAPPING = "field_mapping"
     POLICY_CHANGE = "policy_change"
@@ -82,7 +81,7 @@ class ProposalType(str, Enum):
     CAPABILITY_UPDATE = "capability_update"
 
 
-class ProposalStatus(str, Enum):
+class ProposalStatus(StrEnum):
     DRAFT = "draft"
     PENDING_REVIEW = "pending_review"
     APPROVED = "approved"
@@ -90,32 +89,34 @@ class ProposalStatus(str, Enum):
     SUPERSEDED = "superseded"
 
 
-class PayloadBase(BaseModel):
-    """Payload root with transport-field rejection."""
+def _require_entity_refs(values: list[str]) -> list[str]:
+    for value in values:
+        if not _ENTITY_REF.match(value):
+            raise ValueError(f"invalid entity_ref: {value}")
+    return values
 
+
+class PayloadBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="before")
     @classmethod
     def reject_transport_fields(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        hit = FORBIDDEN_TRANSPORT_FIELDS.intersection(data)
-        if hit:
-            raise ValueError(f"transport fields forbidden on payload: {sorted(hit)}")
+        if isinstance(data, dict):
+            hit = FORBIDDEN_TRANSPORT_FIELDS.intersection(data)
+            if hit:
+                raise ValueError(f"transport fields forbidden on payload: {sorted(hit)}")
         return data
 
 
 class SemverRef(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     id: str = Field(min_length=1)
     version: str = Field(min_length=1)
 
 
 class EvidenceSummaryItem(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     feature_id: str
     value_state: FieldValueState
     evidence_ref: str = Field(pattern=ENTITY_REF_PATTERN)
@@ -123,7 +124,6 @@ class EvidenceSummaryItem(BaseModel):
 
 class MatchQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     facts: dict[str, Any]
     evidence_summary: list[EvidenceSummaryItem]
     governed_filters: dict[str, Any] = Field(default_factory=dict)
@@ -144,7 +144,6 @@ class MatchRequest(PayloadBase):
 
 class FailedGate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     gate_id: str
     reason: str
     evidence_refs: list[str] = Field(default_factory=list)
@@ -152,18 +151,11 @@ class FailedGate(BaseModel):
     @field_validator("evidence_refs")
     @classmethod
     def _refs(cls, values: list[str]) -> list[str]:
-        import re
-
-        pat = re.compile(ENTITY_REF_PATTERN)
-        for value in values:
-            if not pat.match(value):
-                raise ValueError(f"invalid entity_ref: {value}")
-        return values
+        return _require_entity_refs(values)
 
 
 class FeatureContribution(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     feature_id: str
     contribution: float
     evidence_refs: list[str] = Field(default_factory=list)
@@ -171,7 +163,6 @@ class FeatureContribution(BaseModel):
 
 class MatchCandidate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     entity_ref: str = Field(pattern=ENTITY_REF_PATTERN)
     eligible: bool
     score: float | None
@@ -204,7 +195,6 @@ class MatchResponse(PayloadBase):
 
 class ProposedChange(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     path: str
     operation: Literal["add", "replace", "deprecate"]
     rationale: str = Field(min_length=1)
@@ -229,12 +219,7 @@ class ImprovementProposal(PayloadBase):
     @field_validator("evidence_refs")
     @classmethod
     def unique_refs(cls, values: list[str]) -> list[str]:
-        import re
-
-        pat = re.compile(ENTITY_REF_PATTERN)
-        for value in values:
-            if not pat.match(value):
-                raise ValueError(f"invalid entity_ref: {value}")
+        _require_entity_refs(values)
         if len(values) != len(set(values)):
             raise ValueError("evidence_refs must be unique")
         return values

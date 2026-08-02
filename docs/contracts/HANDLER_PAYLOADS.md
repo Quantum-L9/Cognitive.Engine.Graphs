@@ -17,38 +17,21 @@ incoming payloads against these schemas before processing.
 
 ## match
 
-Payload-only contracts (TASK-040 / ADR-106). Carried inside Gate_SDK
-`TransportPacket`; no transport/envelope fields; no ungoverned weight override.
-Canonical models: `engine.models.payloads.MatchRequest` / `MatchResponse`.
-Schemas: `contracts/payloads/match-*.schema.yaml`.
-
+> TASK-040 / ADR-106: prefer `engine.models.payloads.MatchRequest` / `MatchResponse` (payload-only; no transport fields; no ungoverned weights).
 ```python
-class MatchRequest(BaseModel):
-    contract_version: Literal["1.0.0-draft"]
-    domain: Literal["plasticos"]
-    query_id: str
-    direction: Literal[
-        "supply_opportunity_to_buyer_facility",
-        "buyer_demand_to_supply_opportunity",
-    ]
-    query_entity_ref: str
-    query: MatchQuery                  # facts + evidence_summary + governed_filters
-    top_n: int                         # 1-1000
-    projection_version: str
-    policy_ref: SemverRef
-    field_dictionary_version: str | None = None
+class MatchPayload(BaseModel):
+    query: dict[str, Any]              # Entity attributes to match against
+    match_direction: str               # e.g., "buyer_to_seller"
+    top_n: int = 10                    # Max candidates to return (1-1000)
+    weights: dict[str, float] = {}     # Override scoring dimension weights
+    filters: dict[str, Any] = {}       # Additional Cypher filters
 
 class MatchResponse(BaseModel):
-    contract_version: Literal["1.0.0-draft"]
-    domain: Literal["plasticos"]
+    candidates: list[dict[str, Any]]
     query_id: str
-    direction: str
-    candidates: list[MatchCandidate]   # eligible=false => rank must be null
+    match_direction: str
+    total_candidates: int
     execution_time_ms: float
-    domain_spec_version: str
-    model_version: str
-    total_candidates: int | None = None
-    projection_version: str | None = None
 ```
 
 
