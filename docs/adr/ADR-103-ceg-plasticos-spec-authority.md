@@ -1,7 +1,7 @@
 # ADR-103: Single Executable CEG PlasticOS Spec
 
-**Status:** Accepted  
-**Task:** TASK-015  
+**Status:** Accepted
+**Task:** TASK-015
 **Date:** 2026-08-02
 
 ## Decision

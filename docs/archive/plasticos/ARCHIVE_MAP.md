@@ -1,7 +1,7 @@
 # PlasticOS Spec Archive Map
 
-Authoritative executable source: `domains/plasticos/spec.yaml`  
-Loader: `engine.config.loader.DomainPackLoader`  
+Authoritative executable source: `domains/plasticos/spec.yaml`
+Loader: `engine.config.loader.DomainPackLoader`
 ADR: `docs/adr/ADR-103-ceg-plasticos-spec-authority.md`
 
 | Archived path | Former path | Status |
