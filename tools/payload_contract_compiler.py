@@ -85,6 +85,15 @@ def _load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _resolve_under_root(path: Path) -> Path:
+    """Reject report paths that escape the repository root."""
+    resolved = path.expanduser().resolve()
+    root = ROOT.resolve()
+    if not resolved.is_relative_to(root):
+        raise ValueError(f"--report must stay under repo root ({root})")
+    return resolved
+
+
 def _models() -> dict[str, type]:
     from engine.models.payloads import (
         CanonicalProjection,
@@ -105,105 +114,112 @@ def _models() -> dict[str, type]:
     }
 
 
-def validate_schemas() -> list[dict[str, Any]]:
-    results: list[dict[str, Any]] = []
-    for path in sorted(PAYLOADS.glob("*.schema.yaml")):
-        schema = _load_yaml(path)
-        entry: dict[str, Any] = {
-            "path": str(path.relative_to(ROOT)),
-            "id": schema.get("$id"),
-            "digest": _sha_file(path),
-        }
-        if Draft202012Validator is not None:
-            try:
-                Draft202012Validator.check_schema(schema)
-                entry["check_schema"] = "PASS"
-                entry["check_schema_backend"] = "jsonschema"
-            except Exception as exc:
-                entry["check_schema"] = "FAIL"
-                entry["error"] = str(exc)
-        else:
-            # Lightweight structural gate when jsonschema is unavailable.
-            errors: list[str] = []
-            if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
-                errors.append("missing Draft 2020-12 $schema")
-            if not schema.get("$id"):
-                errors.append("missing $id")
-            if schema.get("type") not in {None, "object"} and "common.schema" not in path.name:
-                errors.append("unexpected root type")
-            if errors:
-                entry["check_schema"] = "FAIL"
-                entry["error"] = "; ".join(errors)
-            else:
-                entry["check_schema"] = "PASS"
-                entry["check_schema_backend"] = "structural"
-        text = path.read_text(encoding="utf-8")
-        hits = [token for token in FORBIDDEN_TOKENS if token in text]
-        props = set((schema.get("properties") or {}).keys())
-        from engine.models.payloads import FORBIDDEN_TRANSPORT_FIELDS
+def _structural_schema_errors(schema: dict[str, Any], path: Path) -> list[str]:
+    errors: list[str] = []
+    if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
+        errors.append("missing Draft 2020-12 $schema")
+    if not schema.get("$id"):
+        errors.append("missing $id")
+    if schema.get("type") not in {None, "object"} and "common.schema" not in path.name:
+        errors.append("unexpected root type")
+    return errors
 
-        transport_hits = sorted(props & set(FORBIDDEN_TRANSPORT_FIELDS))
-        entry["forbidden_token_hits"] = hits
-        entry["transport_property_hits"] = transport_hits
-        entry["status"] = "PASS" if entry["check_schema"] == "PASS" and not hits and not transport_hits else "FAIL"
-        results.append(entry)
-    return results
+
+def _apply_schema_check(entry: dict[str, Any], schema: dict[str, Any], path: Path) -> None:
+    if Draft202012Validator is not None:
+        try:
+            Draft202012Validator.check_schema(schema)
+            entry["check_schema"] = "PASS"
+            entry["check_schema_backend"] = "jsonschema"
+        except Exception as exc:
+            entry["check_schema"] = "FAIL"
+            entry["error"] = str(exc)
+        return
+    errors = _structural_schema_errors(schema, path)
+    if errors:
+        entry["check_schema"] = "FAIL"
+        entry["error"] = "; ".join(errors)
+        return
+    entry["check_schema"] = "PASS"
+    entry["check_schema_backend"] = "structural"
+
+
+def _schema_entry(path: Path) -> dict[str, Any]:
+    from engine.models.payloads import FORBIDDEN_TRANSPORT_FIELDS
+
+    schema = _load_yaml(path)
+    entry: dict[str, Any] = {
+        "path": str(path.relative_to(ROOT)),
+        "id": schema.get("$id"),
+        "digest": _sha_file(path),
+    }
+    _apply_schema_check(entry, schema, path)
+    text = path.read_text(encoding="utf-8")
+    hits = [token for token in FORBIDDEN_TOKENS if token in text]
+    props = set((schema.get("properties") or {}).keys())
+    transport_hits = sorted(props & set(FORBIDDEN_TRANSPORT_FIELDS))
+    entry["forbidden_token_hits"] = hits
+    entry["transport_property_hits"] = transport_hits
+    entry["status"] = "PASS" if entry["check_schema"] == "PASS" and not hits and not transport_hits else "FAIL"
+    return entry
+
+
+def validate_schemas() -> list[dict[str, Any]]:
+    return [_schema_entry(path) for path in sorted(PAYLOADS.glob("*.schema.yaml"))]
+
+
+def _positive_entry(path: Path, models: dict[str, type], aliases: dict[str, str]) -> dict[str, Any]:
+    stem = path.name.replace(".json", "")
+    schema_name = aliases.get(stem, f"{stem}.schema.yaml")
+    model_name = SCHEMA_TO_MODEL.get(schema_name)
+    entry: dict[str, Any] = {"file": str(path.relative_to(ROOT)), "schema": schema_name}
+    if model_name is None:
+        entry["status"] = "FAIL"
+        entry["error"] = "no model mapping"
+        return entry
+    try:
+        models[model_name].model_validate(_load_json(path))
+        entry["status"] = "PASS"
+        entry["model"] = model_name
+    except ValidationError as exc:
+        entry["status"] = "FAIL"
+        entry["error"] = str(exc)[:400]
+    return entry
+
+
+def _model_for_negative(path: Path, models: dict[str, type]) -> tuple[type | None, str | None]:
+    for schema_name, model_name in SCHEMA_TO_MODEL.items():
+        prefix = schema_name.replace(".schema.yaml", "")
+        if path.name.startswith(prefix):
+            return models[model_name], model_name
+    return None, None
+
+
+def _negative_entry(path: Path, models: dict[str, type]) -> dict[str, Any]:
+    entry: dict[str, Any] = {"file": str(path.relative_to(ROOT))}
+    model, model_name = _model_for_negative(path, models)
+    if model is None:
+        entry["status"] = "FAIL"
+        entry["error"] = "no model mapping"
+        return entry
+    entry["model"] = model_name
+    try:
+        model.model_validate(_load_json(path))
+        entry["status"] = "FAIL"
+        entry["detail"] = "incorrectly_accepted"
+    except ValidationError:
+        entry["status"] = "PASS"
+        entry["detail"] = "rejected_as_expected"
+        if path.name in SEMANTIC_NEGATIVES:
+            entry["enforcement"] = "owner_semantic"
+    return entry
 
 
 def validate_fixtures() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     models = _models()
-    positives: list[dict[str, Any]] = []
-    negatives: list[dict[str, Any]] = []
-
-    example_aliases = {
-        "sync-projection-tombstone": "sync-projection.schema.yaml",
-    }
-
-    for path in sorted(EXAMPLES.glob("*.json")):
-        stem = path.name.replace(".json", "")
-        schema_name = example_aliases.get(stem, f"{stem}.schema.yaml")
-        model_name = SCHEMA_TO_MODEL.get(schema_name)
-        entry: dict[str, Any] = {"file": str(path.relative_to(ROOT)), "schema": schema_name}
-        if model_name is None:
-            entry["status"] = "FAIL"
-            entry["error"] = "no model mapping"
-            positives.append(entry)
-            continue
-        try:
-            models[model_name].model_validate(_load_json(path))
-            entry["status"] = "PASS"
-            entry["model"] = model_name
-        except ValidationError as exc:
-            entry["status"] = "FAIL"
-            entry["error"] = str(exc)[:400]
-        positives.append(entry)
-
-    for path in sorted(NEGATIVES.glob("*.json")):
-        entry = {"file": str(path.relative_to(ROOT))}
-        payload = _load_json(path)
-        model = None
-        for schema_name, model_name in SCHEMA_TO_MODEL.items():
-            prefix = schema_name.replace(".schema.yaml", "")
-            if path.name.startswith(prefix):
-                model = models[model_name]
-                entry["model"] = model_name
-                break
-        if model is None:
-            entry["status"] = "FAIL"
-            entry["error"] = "no model mapping"
-            negatives.append(entry)
-            continue
-        try:
-            model.model_validate(payload)
-            entry["status"] = "FAIL"
-            entry["detail"] = "incorrectly_accepted"
-        except ValidationError:
-            entry["status"] = "PASS"
-            entry["detail"] = "rejected_as_expected"
-            if path.name in SEMANTIC_NEGATIVES:
-                entry["enforcement"] = "owner_semantic"
-        negatives.append(entry)
-
+    aliases = {"sync-projection-tombstone": "sync-projection.schema.yaml"}
+    positives = [_positive_entry(path, models, aliases) for path in sorted(EXAMPLES.glob("*.json"))]
+    negatives = [_negative_entry(path, models) for path in sorted(NEGATIVES.glob("*.json"))]
     return positives, negatives
 
 
@@ -233,6 +249,11 @@ def validate_domain_authority() -> dict[str, Any]:
     }
 
 
+def _write_report(write_path: Path, report: dict[str, Any]) -> None:
+    write_path.parent.mkdir(parents=True, exist_ok=True)
+    write_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
+
 def compile_report(*, write_path: Path | None) -> dict[str, Any]:
     schema_results = validate_schemas()
     positives, negatives = validate_fixtures()
@@ -255,8 +276,7 @@ def compile_report(*, write_path: Path | None) -> dict[str, Any]:
     report["result"] = "PASS" if ok else "FAIL"
     report["digest"] = _sha_obj({k: v for k, v in report.items() if k != "digest"})
     if write_path is not None:
-        write_path.parent.mkdir(parents=True, exist_ok=True)
-        write_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        _write_report(write_path, report)
     return report
 
 
@@ -274,7 +294,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Do not write report file",
     )
     args = parser.parse_args(argv)
-    report = compile_report(write_path=None if args.stdout_only else args.report)
+    write_path = None if args.stdout_only else _resolve_under_root(args.report)
+    report = compile_report(write_path=write_path)
     print(json.dumps({"result": report["result"], "digest": report["digest"]}, indent=2))
     return 0 if report["result"] == "PASS" else 1
 
