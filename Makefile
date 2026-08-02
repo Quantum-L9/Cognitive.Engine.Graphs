@@ -242,20 +242,22 @@ contracts-report:	## Contract-to-verification coverage table (scanner rules, tes
 	@python3 tools/contract_report.py
 
 agent-check:	## Agent completion gate: CI's blocking set + audit harness, run locally
-	@echo "── [1/7] Action references ──"
+	@echo "── [1/8] Action references ──"
 	@python3 tools/check_action_refs.py
-	@echo "── [2/7] Contract files present + wired ──"
+	@echo "── [2/8] Contract files present + wired ──"
 	@python3 tools/verify_contracts.py
-	@echo "── [3/7] Contract violation scan ──"
+	@echo "── [3/8] Contract violation scan ──"
 	@python3 tools/contract_scanner.py
-	@echo "── [4/7] Lint + format ──"
+	@echo "── [4/8] Payload contract compiler validator ──"
+	@PYTHONPATH="$${PYTHONPATH}:." python3 tools/payload_contract_compiler.py --stdout-only
+	@echo "── [5/8] Lint + format ──"
 	@ruff check .
 	@ruff format --check .
-	@echo "── [5/7] Type check ──"
+	@echo "── [6/8] Type check ──"
 	@mypy engine/ --config-file=pyproject.toml --ignore-missing-imports --exclude chassis
-	@echo "── [6/7] Tests ──"
+	@echo "── [7/8] Tests ──"
 	@PYTHONPATH="$${PYTHONPATH}:." python3 -m pytest tests/ --tb=short -q
-	@echo "── [7/7] Contract verification coverage ──"
+	@echo "── [8/8] Contract verification coverage ──"
 	@python3 tools/contract_report.py
 	@echo ""
 	@echo "── Audit harness ──"
@@ -264,20 +266,22 @@ agent-check:	## Agent completion gate: CI's blocking set + audit harness, run lo
 	@echo "✅ agent-check passed — CI's blocking gates should be green"
 
 agent-check-unit:	## Local agent gate (skips Docker integration/perf): CI's blocking set + audit harness, run locally
-	@echo "── [1/7] Action references ──"
+	@echo "── [1/8] Action references ──"
 	@python3 tools/check_action_refs.py
-	@echo "── [2/7] Contract files present + wired ──"
+	@echo "── [2/8] Contract files present + wired ──"
 	@python3 tools/verify_contracts.py
-	@echo "── [3/7] Contract violation scan ──"
+	@echo "── [3/8] Contract violation scan ──"
 	@python3 tools/contract_scanner.py
-	@echo "── [4/7] Lint + format ──"
+	@echo "── [4/8] Payload contract compiler validator ──"
+	@PYTHONPATH="$${PYTHONPATH}:." python3 tools/payload_contract_compiler.py --stdout-only
+	@echo "── [5/8] Lint + format ──"
 	@ruff check .
 	@ruff format --check .
-	@echo "── [5/7] Type check ──"
+	@echo "── [6/8] Type check ──"
 	@mypy engine/ --config-file=pyproject.toml --ignore-missing-imports --exclude chassis
-	@echo "── [6/7] Tests ──"
+	@echo "── [7/8] Tests ──"
 	@PYTHONPATH="$${PYTHONPATH}:." python3 -m pytest tests/ -m "unit" --tb=short -q
-	@echo "── [7/7] Contract verification coverage ──"
+	@echo "── [8/8] Contract verification coverage ──"
 	@python3 tools/contract_report.py
 	@echo ""
 	@echo "── Audit harness ──"
