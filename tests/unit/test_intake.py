@@ -59,7 +59,7 @@ def intake_spec() -> DomainSpec:
                 NodeSpec(
                     label="Facility",
                     candidate=True,
-                    matchdirection="intake_to_buyer",
+                    matchdirection="supply_opportunity_to_buyer_facility",
                     properties=[
                         PropertySpec(name="facility_id", type=PropertyType.INT, required=True),
                         PropertySpec(name="name", type=PropertyType.STRING),
@@ -76,7 +76,7 @@ def intake_spec() -> DomainSpec:
                 NodeSpec(
                     label="MaterialIntake",
                     queryentity=True,
-                    matchdirection="intake_to_buyer",
+                    matchdirection="supply_opportunity_to_buyer_facility",
                     properties=[
                         PropertySpec(name="intake_id", type=PropertyType.INT, required=True),
                         PropertySpec(name="material_type", type=PropertyType.STRING),
@@ -103,10 +103,10 @@ def intake_spec() -> DomainSpec:
             ],
         ),
         matchentities=MatchEntitiesSpec(
-            candidate=[MatchEntitySpec(label="Facility", matchdirection="intake_to_buyer")],
-            queryentity=[MatchEntitySpec(label="MaterialIntake", matchdirection="intake_to_buyer")],
+            candidate=[MatchEntitySpec(label="Facility", matchdirection="supply_opportunity_to_buyer_facility")],
+            queryentity=[MatchEntitySpec(label="MaterialIntake", matchdirection="supply_opportunity_to_buyer_facility")],
         ),
-        queryschema=QuerySchemaSpec(matchdirections=["intake_to_buyer"], fields=[]),
+        queryschema=QuerySchemaSpec(matchdirections=["supply_opportunity_to_buyer_facility"], fields=[]),
         gates=[
             GateSpec(
                 name="density_range",

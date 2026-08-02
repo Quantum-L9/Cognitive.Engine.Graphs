@@ -36,7 +36,7 @@ async def test_outcome_success_recorded(engine_deps, graph_driver, clean_db):
                 "active_dimensions": ["geo_proximity"],
                 "dimension_weights": {"geo_proximity": 0.85},
                 "gates_passed": ["contamination_threshold"],
-                "match_direction": "intake_to_buyer",
+                "match_direction": "supply_opportunity_to_buyer_facility",
                 "candidate_count": 2,
             },
         },

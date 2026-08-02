@@ -46,7 +46,7 @@ def _minimal_spec_raw(**overrides: Any) -> dict[str, Any]:
                     "label": "Facility",
                     "managedby": "sync",
                     "candidate": True,
-                    "matchdirection": "intake_to_buyer",
+                    "matchdirection": "supply_opportunity_to_buyer_facility",
                     "properties": [
                         {"name": "facility_id", "type": "int", "required": True},
                         {"name": "name", "type": "string"},
@@ -62,7 +62,7 @@ def _minimal_spec_raw(**overrides: Any) -> dict[str, Any]:
                     "label": "MaterialIntake",
                     "managedby": "api",
                     "queryentity": True,
-                    "matchdirection": "intake_to_buyer",
+                    "matchdirection": "supply_opportunity_to_buyer_facility",
                     "properties": [
                         {"name": "intake_id", "type": "int", "required": True},
                     ],
@@ -80,11 +80,11 @@ def _minimal_spec_raw(**overrides: Any) -> dict[str, Any]:
             ],
         },
         "matchentities": {
-            "candidate": [{"label": "Facility", "matchdirection": "intake_to_buyer"}],
-            "queryentity": [{"label": "MaterialIntake", "matchdirection": "intake_to_buyer"}],
+            "candidate": [{"label": "Facility", "matchdirection": "supply_opportunity_to_buyer_facility"}],
+            "queryentity": [{"label": "MaterialIntake", "matchdirection": "supply_opportunity_to_buyer_facility"}],
         },
         "queryschema": {
-            "matchdirections": ["intake_to_buyer"],
+            "matchdirections": ["supply_opportunity_to_buyer_facility"],
             "fields": [
                 {"name": "density", "type": "float"},
                 {"name": "target_score", "type": "float"},
@@ -280,7 +280,7 @@ class TestW102ScoreRange:
         assembler = ScoringAssembler(spec)
         s = _make_settings(score_clamp_enabled=True)
         with patch(_SETTINGS_TARGET, s):
-            clause, _ = assembler.assemble_scoring_clause("intake_to_buyer", {})
+            clause, _ = assembler.assemble_scoring_clause("supply_opportunity_to_buyer_facility", {})
         assert "CASE WHEN" in clause
 
     def test_scoring_assembler_no_clamp_when_disabled(self) -> None:
@@ -305,7 +305,7 @@ class TestW102ScoreRange:
         assembler = ScoringAssembler(spec)
         s = _make_settings(score_clamp_enabled=False)
         with patch(_SETTINGS_TARGET, s):
-            clause, _ = assembler.assemble_scoring_clause("intake_to_buyer", {})
+            clause, _ = assembler.assemble_scoring_clause("supply_opportunity_to_buyer_facility", {})
         # The raw expression (before AS test_dim) should NOT be wrapped in CASE clamp
         before_alias = clause.split("AS test_dim")[0]
         assert "CASE WHEN" not in before_alias
@@ -558,7 +558,7 @@ class TestW104TraversalValidators:
         from engine.traversal.assembler import TraversalAssembler
 
         assembler = TraversalAssembler(spec)
-        warnings = assembler.validate_traversal("intake_to_buyer")
+        warnings = assembler.validate_traversal("supply_opportunity_to_buyer_facility")
         assert any("UNKNOWN_EDGE" in w for w in warnings)
 
     def test_empty_traversal_passes(self) -> None:
