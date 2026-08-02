@@ -1,0 +1,123 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: urn:l9:plasticos:contracts:payload:match-response:1.0.0-draft
+title: PlasticOS CEG Match Response
+description: CEG-owned candidate eligibility, ranking, explanation, and missing-evidence
+  result.
+x-publication-status: draft-unpublished
+type: object
+additionalProperties: false
+required:
+- contract_version
+- domain
+- query_id
+- direction
+- candidates
+- execution_time_ms
+- domain_spec_version
+- model_version
+properties:
+  contract_version:
+    $ref: ./common.schema.yaml#/$defs/contract_version
+  domain:
+    $ref: ./common.schema.yaml#/$defs/domain
+  query_id:
+    type: string
+    minLength: 1
+  direction:
+    type: string
+    enum:
+    - supply_opportunity_to_buyer_facility
+    - buyer_demand_to_supply_opportunity
+  candidates:
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required:
+      - entity_ref
+      - eligible
+      - score
+      - score_scale
+      - failed_gates
+      - feature_contributions
+      - missing_evidence
+      properties:
+        entity_ref:
+          $ref: ./common.schema.yaml#/$defs/entity_ref
+        eligible:
+          type: boolean
+        score:
+          type:
+          - number
+          - 'null'
+        score_scale:
+          type: string
+          enum:
+          - 0_to_1
+          - 0_to_100
+          - unnormalized_declared
+        rank:
+          type:
+          - integer
+          - 'null'
+          minimum: 1
+        failed_gates:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - gate_id
+            - reason
+            properties:
+              gate_id:
+                type: string
+              reason:
+                type: string
+              evidence_refs:
+                type: array
+                items:
+                  $ref: ./common.schema.yaml#/$defs/entity_ref
+        feature_contributions:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - feature_id
+            - contribution
+            properties:
+              feature_id:
+                type: string
+              contribution:
+                type: number
+              evidence_refs:
+                type: array
+                items:
+                  $ref: ./common.schema.yaml#/$defs/entity_ref
+        missing_evidence:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+        explanation:
+          type:
+          - string
+          - 'null'
+  total_candidates:
+    type: integer
+    minimum: 0
+  execution_time_ms:
+    type: number
+    minimum: 0
+  domain_spec_version:
+    type: string
+    minLength: 1
+  model_version:
+    type: string
+    minLength: 1
+  projection_version:
+    type: string
+    minLength: 1
+x-plasticos-cross-field-rules:
+- eligible=false candidates must not receive an eligible rank

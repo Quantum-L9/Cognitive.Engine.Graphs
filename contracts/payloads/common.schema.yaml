@@ -1,0 +1,214 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: urn:l9:plasticos:contracts:common:1.0.0-draft
+title: PlasticOS Common Payload Definitions
+description: Reusable definitions for payload contracts. Not a transport envelope.
+x-publication-status: draft-unpublished
+$defs:
+  contract_version:
+    type: string
+    const: 1.0.0-draft
+  domain:
+    type: string
+    const: plasticos
+  entity_ref:
+    type: string
+    pattern: ^[a-z0-9_.-]+:[^\s]+$
+  revision:
+    oneOf:
+    - type: integer
+      minimum: 0
+    - type: string
+      minLength: 1
+  semver_ref:
+    type: object
+    additionalProperties: false
+    required:
+    - id
+    - version
+    properties:
+      id:
+        type: string
+        minLength: 1
+      version:
+        type: string
+        minLength: 1
+  source_ref:
+    type: object
+    additionalProperties: false
+    required:
+    - system
+    - record_ref
+    properties:
+      system:
+        type: string
+        enum:
+        - odoo
+        - eie
+        - ceg
+        - operator
+        - external_source
+      record_ref:
+        $ref: ./common.schema.yaml#/$defs/entity_ref
+      revision:
+        $ref: ./common.schema.yaml#/$defs/revision
+  time_window:
+    type: object
+    additionalProperties: false
+    properties:
+      start_at:
+        type:
+        - string
+        - 'null'
+        format: date-time
+      end_at:
+        type:
+        - string
+        - 'null'
+        format: date-time
+    x-plasticos-cross-field-rules:
+    - when both exist, start_at <= end_at
+  quantity_range:
+    type: object
+    additionalProperties: false
+    required:
+    - unit
+    properties:
+      minimum:
+        type:
+        - number
+        - 'null'
+        minimum: 0
+      target:
+        type:
+        - number
+        - 'null'
+        minimum: 0
+      maximum:
+        type:
+        - number
+        - 'null'
+        minimum: 0
+      unit:
+        type: string
+        enum:
+        - lb
+        - short_ton
+        - metric_ton
+        - kg
+    x-plasticos-cross-field-rules:
+    - minimum <= target <= maximum for non-null values
+  typed_value:
+    oneOf:
+    - type: object
+      additionalProperties: false
+      required:
+      - kind
+      - value
+      properties:
+        kind:
+          const: string
+        value:
+          type: string
+    - type: object
+      additionalProperties: false
+      required:
+      - kind
+      - value
+      properties:
+        kind:
+          const: number
+        value:
+          type: number
+    - type: object
+      additionalProperties: false
+      required:
+      - kind
+      - value
+      properties:
+        kind:
+          const: boolean
+        value:
+          type: boolean
+    - type: object
+      additionalProperties: false
+      required:
+      - kind
+      - value
+      properties:
+        kind:
+          const: string_set
+        value:
+          type: array
+          items:
+            type: string
+          uniqueItems: true
+    - type: object
+      additionalProperties: false
+      required:
+      - kind
+      - value
+      properties:
+        kind:
+          const: structured
+        value:
+          type: object
+    - type: object
+      additionalProperties: false
+      required:
+      - kind
+      - value
+      properties:
+        kind:
+          const: 'null'
+        value:
+          type: 'null'
+  provenance:
+    type: object
+    additionalProperties: false
+    required:
+    - source_type
+    - source_ref
+    - method
+    properties:
+      source_type:
+        type: string
+        enum:
+        - odoo
+        - enrichment
+        - inference
+        - manual
+        - seed
+        - graph
+        - external
+      source_ref:
+        type: string
+        minLength: 1
+      method:
+        type: string
+        minLength: 1
+      actor_ref:
+        type:
+        - string
+        - 'null'
+      rule_or_model_version:
+        type:
+        - string
+        - 'null'
+      content_hash:
+        type:
+        - string
+        - 'null'
+        pattern: ^[a-f0-9]{64}$
+  evidence_ref:
+    $ref: ./common.schema.yaml#/$defs/entity_ref
+  field_value_state:
+    type: string
+    enum:
+    - observed
+    - reported
+    - inferred
+    - unknown
+    - not_applicable
+    - stale
+    - conflicting
+    - superseded
