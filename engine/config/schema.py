@@ -1086,8 +1086,8 @@ class DomainSpec(BaseModel):
             for key, weight_sum in buckets.items():
                 if weight_sum > weight_ceiling + tolerance:
                     msg = (
-                        f"Scoring dimension default weights for direction {key!r} "
-                        f"sum to {weight_sum:.4f}, exceeding {weight_ceiling}"
+                        f"Scoring dimension default weights sum to {weight_sum:.4f} "
+                        f"for direction {key!r}, exceeding {weight_ceiling}"
                     )
                     raise ValueError(msg)
 
