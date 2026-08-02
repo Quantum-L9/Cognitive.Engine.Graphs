@@ -58,8 +58,12 @@ def _relax_strict_validation() -> Generator[None, None, None]:
 
 @pytest.fixture
 def plasticos_spec_data() -> dict:
-    """Load the plasticos domain spec YAML."""
-    spec_path = Path(__file__).parent.parent.parent / "domains" / "plasticos_domain_spec.yaml"
+    """Load archived PlasticOS YAML for schema/feature activation coverage.
+
+    Runtime authority remains domains/plasticos/spec.yaml via DomainPackLoader.
+    This fixture intentionally reads the archived richer reference spec.
+    """
+    spec_path = Path(__file__).parent.parent.parent / "docs" / "archive" / "plasticos" / "plasticos_domain_spec.yaml"
     with spec_path.open() as f:
         return yaml.safe_load(f)
 

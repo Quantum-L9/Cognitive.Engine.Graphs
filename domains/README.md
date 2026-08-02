@@ -1,3 +1,6 @@
+> **PlasticOS authority (ADR-103 / TASK-015):** executable source is `domains/plasticos/spec.yaml` only.
+> Alternate PlasticOS YAML lives under `docs/archive/plasticos/` and is non-authoritative.
+
 <!-- L9_META
 l9_schema: 1
 origin: domain-specific
@@ -17,9 +20,8 @@ Each domain pack is a complete, self-contained specification that the engine loa
 
 ## Domain Pack Structure
 
-Two structures are supported:
+`DomainPackLoader` resolves **only** the subdirectory executable path:
 
-### Subdirectory Structure (Recommended for complex domains)
 ```
 domains/
 ├── {domain-id}/
@@ -28,14 +30,8 @@ domains/
 │       └── {gate-name}.cypher
 ```
 
-### Flat File Structure (Simple domains)
-```
-domains/
-├── {domain_id}_domain_spec.yaml    # Self-contained spec file
-```
-
-The loader checks both patterns. Use subdirectory structure when you need
-custom Cypher overrides or additional domain-specific resources.
+Flat `*_domain_spec.yaml` files under `domains/` are not loaded at runtime.
+PlasticOS historical flat/docs specs are archived under `docs/archive/plasticos/`.
 
 ## Available Domains
 

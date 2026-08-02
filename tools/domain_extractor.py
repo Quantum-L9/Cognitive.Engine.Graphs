@@ -21,7 +21,7 @@ USAGE:
 
 OUTPUT:
     domains/
-    ├── plasticos_domain_spec.yaml
+    ├── plasticos/spec.yaml
     ├── mortgage_brokerage_domain_spec.yaml
     ├── healthcare_referral_domain_spec.yaml
     └── ...

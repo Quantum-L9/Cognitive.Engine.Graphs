@@ -24,7 +24,7 @@
 #     files predate this gate.
 #
 # Exclusions (each must have a reason):
-#   - docs/PlasticOS Graph Cognitive Engine.yaml: a spec-patch
+#   - docs/archive/plasticos/PlasticOS Graph Cognitive Engine.yaml: a spec-patch
 #     document kept verbatim for reference; parses as valid YAML but
 #     uses prose-style comma formatting throughout (230+ style hits).
 #     Reference documents are not consumed by runtime code.
@@ -36,7 +36,7 @@
 extends: default
 
 ignore: |
-  docs/PlasticOS Graph Cognitive Engine.yaml
+  docs/archive/plasticos/PlasticOS Graph Cognitive Engine.yaml
   domains/MASTER-SPEC-ALL-DOMAINS.yaml
   .hypothesis/
 

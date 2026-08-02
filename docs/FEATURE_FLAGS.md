@@ -97,7 +97,7 @@ These are infrastructure-level gates that live outside domain specs:
 ### Step 1: Edit the Domain Spec YAML
 
 ```yaml
-# domains/plasticos_domain_spec.yaml
+# domains/plasticos/spec.yaml
 
 # Enable the feedback loop
 feedbackloop:

@@ -112,4 +112,4 @@ domain_schema_abstraction:
     Constraints and indexes are created via handle_admin(subaction="init_schema").
     Source: engine/handlers.py:_init_schema()
 
-  reference_domain_example: domains/plasticos_domain_spec.yaml
+  reference_domain_example: domains/plasticos/spec.yaml
