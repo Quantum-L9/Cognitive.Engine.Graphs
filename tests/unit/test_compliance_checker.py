@@ -65,7 +65,7 @@ def test_compliance_pass_with_clean_payload(plasticos_spec):
     result = engine.check_match_request(
         tenant="plasticos",
         query=query,
-        match_direction="intake_to_buyer",
+        match_direction="supply_opportunity_to_buyer_facility",
         trace_id="test-trace",
     )
     assert isinstance(result, dict)

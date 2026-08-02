@@ -148,7 +148,7 @@ def minimal_domain_spec():
                     "label": "Facility",
                     "managedby": "sync",
                     "candidate": True,
-                    "matchdirection": "intake_to_buyer",
+                    "matchdirection": "supply_opportunity_to_buyer_facility",
                     "properties": [
                         {"name": "facility_id", "type": "int", "required": True},
                         {"name": "name", "type": "string"},
@@ -158,10 +158,10 @@ def minimal_domain_spec():
             "edges": [],
         },
         "matchentities": {
-            "candidate": [{"label": "Facility", "matchdirection": "intake_to_buyer"}],
-            "queryentity": [{"label": "Facility", "matchdirection": "intake_to_buyer"}],
+            "candidate": [{"label": "Facility", "matchdirection": "supply_opportunity_to_buyer_facility"}],
+            "queryentity": [{"label": "Facility", "matchdirection": "supply_opportunity_to_buyer_facility"}],
         },
-        "queryschema": {"matchdirections": ["intake_to_buyer"], "fields": []},
+        "queryschema": {"matchdirections": ["supply_opportunity_to_buyer_facility"], "fields": []},
         "traversal": {"steps": []},
         "gates": [],
         "scoring": {"dimensions": []},

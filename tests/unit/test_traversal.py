@@ -51,24 +51,24 @@ def _spec_with_steps(steps: list[TraversalStepSpec]) -> DomainSpec:
                     "label": "Facility",
                     "managedby": "sync",
                     "candidate": True,
-                    "matchdirection": "intake_to_buyer",
+                    "matchdirection": "supply_opportunity_to_buyer_facility",
                     "properties": [{"name": "facility_id", "type": "int", "required": True}],
                 },
                 {
                     "label": "MaterialIntake",
                     "managedby": "api",
                     "queryentity": True,
-                    "matchdirection": "intake_to_buyer",
+                    "matchdirection": "supply_opportunity_to_buyer_facility",
                     "properties": [{"name": "intake_id", "type": "int", "required": True}],
                 },
             ],
             "edges": [],
         },
         "matchentities": {
-            "candidate": [{"label": "Facility", "matchdirection": "intake_to_buyer"}],
-            "queryentity": [{"label": "MaterialIntake", "matchdirection": "intake_to_buyer"}],
+            "candidate": [{"label": "Facility", "matchdirection": "supply_opportunity_to_buyer_facility"}],
+            "queryentity": [{"label": "MaterialIntake", "matchdirection": "supply_opportunity_to_buyer_facility"}],
         },
-        "queryschema": {"matchdirections": ["intake_to_buyer"], "fields": []},
+        "queryschema": {"matchdirections": ["supply_opportunity_to_buyer_facility"], "fields": []},
         "traversal": {"steps": [s.model_dump() for s in steps]},
         "gates": [],
         "scoring": {"dimensions": []},
@@ -125,7 +125,7 @@ class TestTraversalAssembler:
             ]
         )
         asm = TraversalAssembler(spec)
-        clauses = asm.assemble_traversal("intake_to_buyer")
+        clauses = asm.assemble_traversal("supply_opportunity_to_buyer_facility")
         assert len(clauses) == 1
         assert clauses[0].startswith("MATCH ")
         assert "ACCEPTS_POLYMER" in clauses[0]
@@ -137,7 +137,7 @@ class TestTraversalAssembler:
             ]
         )
         asm = TraversalAssembler(spec)
-        clauses = asm.assemble_traversal("intake_to_buyer")
+        clauses = asm.assemble_traversal("supply_opportunity_to_buyer_facility")
         assert len(clauses) == 1
         assert clauses[0].startswith("OPTIONAL MATCH ")
 
@@ -150,7 +150,7 @@ class TestTraversalAssembler:
             ]
         )
         asm = TraversalAssembler(spec)
-        clauses = asm.assemble_traversal("intake_to_buyer")
+        clauses = asm.assemble_traversal("supply_opportunity_to_buyer_facility")
         assert len(clauses) == 3
         assert clauses[0].startswith("MATCH ")
         assert clauses[1].startswith("OPTIONAL MATCH ")
@@ -159,11 +159,11 @@ class TestTraversalAssembler:
     def test_direction_filtering_includes_matching(self):
         spec = _spec_with_steps(
             [
-                _step("cap", "(c)-[:R]->(t)", match_directions=["intake_to_buyer"]),
+                _step("cap", "(c)-[:R]->(t)", match_directions=["supply_opportunity_to_buyer_facility"]),
             ]
         )
         asm = TraversalAssembler(spec)
-        clauses = asm.assemble_traversal("intake_to_buyer")
+        clauses = asm.assemble_traversal("supply_opportunity_to_buyer_facility")
         assert len(clauses) == 1
 
     def test_direction_filtering_excludes_nonmatching(self):
@@ -173,7 +173,7 @@ class TestTraversalAssembler:
             ]
         )
         asm = TraversalAssembler(spec)
-        clauses = asm.assemble_traversal("intake_to_buyer")
+        clauses = asm.assemble_traversal("supply_opportunity_to_buyer_facility")
         assert len(clauses) == 0
 
     def test_null_matchdirections_always_included(self):
@@ -189,14 +189,14 @@ class TestTraversalAssembler:
     def test_empty_steps(self):
         spec = _spec_with_steps([])
         asm = TraversalAssembler(spec)
-        clauses = asm.assemble_traversal("intake_to_buyer")
+        clauses = asm.assemble_traversal("supply_opportunity_to_buyer_facility")
         assert clauses == []
 
     def test_pattern_preserved_verbatim(self):
         pattern = "(candidate)-[:ACCEPTED_MATERIAL_FROM]->(seller:Facility)"
         spec = _spec_with_steps([_step("reinf", pattern)])
         asm = TraversalAssembler(spec)
-        clauses = asm.assemble_traversal("intake_to_buyer")
+        clauses = asm.assemble_traversal("supply_opportunity_to_buyer_facility")
         assert pattern in clauses[0]
 
     def test_multiple_directions_partial_match(self):

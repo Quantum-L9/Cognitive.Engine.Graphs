@@ -12,7 +12,7 @@
 # Primary test domain for the L9 Graph Cognitive Engine
 #
 # Entity Model: MaterialIntake (RFQ) → Facility (Supplier)
-# Match Direction: intake_to_buyer (buyer seeking suppliers for material)
+# Match Direction: supply_opportunity_to_buyer_facility (buyer seeking suppliers for material)
 
 domain:
   id: plasticos
@@ -28,7 +28,7 @@ ontology:
     - label: Facility
       managedby: sync
       candidate: true
-      matchdirection: intake_to_buyer
+      matchdirection: supply_opportunity_to_buyer_facility
       description: Recycling facility that processes plastic materials
       properties:
         - name: facility_id
@@ -87,7 +87,7 @@ ontology:
     - label: MaterialIntake
       managedby: api
       queryentity: true
-      matchdirection: intake_to_buyer
+      matchdirection: supply_opportunity_to_buyer_facility
       description: Material intake request (RFQ) from a buyer
       properties:
         - name: intake_id
@@ -186,14 +186,14 @@ ontology:
 matchentities:
   candidate:
     - label: Facility
-      matchdirection: intake_to_buyer
+      matchdirection: supply_opportunity_to_buyer_facility
   queryentity:
     - label: MaterialIntake
-      matchdirection: intake_to_buyer
+      matchdirection: supply_opportunity_to_buyer_facility
 
 queryschema:
   matchdirections:
-    - intake_to_buyer
+    - supply_opportunity_to_buyer_facility
   fields:
     - name: polymer_type
       type: string
@@ -221,7 +221,7 @@ traversal:
       pattern: "(candidate:Facility)-[:PROCESSES]->(polymer:PolymerFamily)"
       required: true
       matchdirections:
-        - intake_to_buyer
+        - supply_opportunity_to_buyer_facility
       description: Ensure facility processes the requested polymer type
 
 gates:
@@ -232,7 +232,7 @@ gates:
     queryparam: density
     nullbehavior: pass
     matchdirections:
-      - intake_to_buyer
+      - supply_opportunity_to_buyer_facility
     description: Material density must fall within facility's acceptable range
 
   - name: mfi_range
@@ -242,7 +242,7 @@ gates:
     queryparam: mfi
     nullbehavior: pass
     matchdirections:
-      - intake_to_buyer
+      - supply_opportunity_to_buyer_facility
 
   - name: contamination_threshold
     type: threshold
@@ -251,7 +251,7 @@ gates:
     operator: ">="
     nullbehavior: fail
     matchdirections:
-      - intake_to_buyer
+      - supply_opportunity_to_buyer_facility
     description: Facility must tolerate the material's contamination level
 
   - name: food_grade_check
@@ -260,7 +260,7 @@ gates:
     queryparam: requires_food_grade
     nullbehavior: pass
     matchdirections:
-      - intake_to_buyer
+      - supply_opportunity_to_buyer_facility
     description: If food-grade required, facility must be certified
 
   - name: capacity_check
@@ -270,14 +270,14 @@ gates:
     operator: ">="
     nullbehavior: pass
     matchdirections:
-      - intake_to_buyer
+      - supply_opportunity_to_buyer_facility
     description: Facility must have capacity for requested volume
 
   - name: exclusion_check
     type: exclusion
     edgetype: EXCLUDED_FROM
     matchdirections:
-      - intake_to_buyer
+      - supply_opportunity_to_buyer_facility
     description: Exclude facilities on buyer's blacklist
 
 scoring:
@@ -291,7 +291,7 @@ scoring:
       weightkey: w_geo
       defaultweight: 0.25
       matchdirections:
-        - intake_to_buyer
+        - supply_opportunity_to_buyer_facility
 
     - name: credit_score
       source: candidateproperty
@@ -301,7 +301,7 @@ scoring:
       weightkey: w_credit
       defaultweight: 0.15
       matchdirections:
-        - intake_to_buyer
+        - supply_opportunity_to_buyer_facility
 
     - name: contamination_tolerance_score
       source: candidateproperty
@@ -312,7 +312,7 @@ scoring:
       weightkey: w_contamination
       defaultweight: 0.10
       matchdirections:
-        - intake_to_buyer
+        - supply_opportunity_to_buyer_facility
       description: Lower contamination tolerance = more selective = higher quality
 
     - name: community_match
@@ -324,7 +324,7 @@ scoring:
       weightkey: w_community
       defaultweight: 0.10
       matchdirections:
-        - intake_to_buyer
+        - supply_opportunity_to_buyer_facility
 
     - name: rate_score
       source: candidateproperty
@@ -334,7 +334,7 @@ scoring:
       weightkey: w_rate
       defaultweight: 0.15
       matchdirections:
-        - intake_to_buyer
+        - supply_opportunity_to_buyer_facility
 
     - name: price_alignment
       source: candidateproperty
@@ -344,7 +344,7 @@ scoring:
       weightkey: w_price
       defaultweight: 0.15
       matchdirections:
-        - intake_to_buyer
+        - supply_opportunity_to_buyer_facility
 
     - name: recency
       source: candidateproperty
@@ -354,7 +354,7 @@ scoring:
       weightkey: w_recency
       defaultweight: 0.10
       matchdirections:
-        - intake_to_buyer
+        - supply_opportunity_to_buyer_facility
 
 sync:
   endpoints:

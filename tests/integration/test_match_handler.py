@@ -7,7 +7,7 @@ Real payload contract (engine/handlers.py::handle_match):
     weights: dict (optional, validated to [0, 1], sum <= 1.0)
 
 The plasticos spec declares candidate=Facility for direction
-'intake_to_buyer' and a required traversal step
+'supply_opportunity_to_buyer_facility' and a required traversal step
 (candidate:Facility)-[:PROCESSES]->(polymer:PolymerFamily), so seed data
 must live in the 'plasticos' database and include that edge.
 """
@@ -64,7 +64,7 @@ async def test_match_returns_candidates(engine_deps, graph_driver, clean_db):
                 "lat": 34.05,
                 "lon": -118.24,
             },
-            "match_direction": "intake_to_buyer",
+            "match_direction": "supply_opportunity_to_buyer_facility",
             "top_n": 10,
         },
     )
@@ -85,7 +85,7 @@ async def test_match_respects_top_n(engine_deps, graph_driver, clean_db):
         "plasticos",
         {
             "query": {"polymer_type": "PET", "contamination_pct": 0.01},
-            "match_direction": "intake_to_buyer",
+            "match_direction": "supply_opportunity_to_buyer_facility",
             "top_n": 2,
         },
     )

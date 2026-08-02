@@ -114,7 +114,7 @@ class TestMatchQueryLatency:
         scoring_assembler = ScoringAssembler(domain_spec)
         traversal_assembler = TraversalAssembler(domain_spec)
 
-        direction = "intake_to_buyer"
+        direction = "supply_opportunity_to_buyer_facility"
         where_clause = gate_compiler.compile_all_gates(direction)
         traversal_clauses = traversal_assembler.assemble_traversal(direction)
         weights = {d.weightkey: d.defaultweight for d in domain_spec.scoring.dimensions}
@@ -173,7 +173,7 @@ class TestMatchQueryLatency:
         tenant = seeded_graph["tenant"]
 
         gate_compiler = GateCompiler(domain_spec)
-        direction = "intake_to_buyer"
+        direction = "supply_opportunity_to_buyer_facility"
         where_clause = gate_compiler.compile_relaxed(direction)
 
         cypher = f"""
