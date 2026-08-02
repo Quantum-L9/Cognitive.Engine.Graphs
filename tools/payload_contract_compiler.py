@@ -117,16 +117,21 @@ def validate_schemas() -> list[dict[str, Any]]:
         try:
             if Draft202012Validator is not None:
                 Draft202012Validator.check_schema(schema)
+                backend = "jsonschema"
             else:
                 # Lightweight structural gate when jsonschema is unavailable.
+                errors: list[str] = []
                 if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
-                    raise ValueError("missing Draft 2020-12 $schema")
+                    errors.append("missing Draft 2020-12 $schema")
                 if not schema.get("$id"):
-                    raise ValueError("missing $id")
+                    errors.append("missing $id")
                 if schema.get("type") not in {None, "object"} and "common.schema" not in path.name:
-                    raise ValueError("unexpected root type")
+                    errors.append("unexpected root type")
+                if errors:
+                    raise ValueError("; ".join(errors))
+                backend = "structural"
             entry["check_schema"] = "PASS"
-            entry["check_schema_backend"] = "jsonschema" if Draft202012Validator is not None else "structural"
+            entry["check_schema_backend"] = backend
         except Exception as exc:
             entry["check_schema"] = "FAIL"
             entry["error"] = str(exc)
