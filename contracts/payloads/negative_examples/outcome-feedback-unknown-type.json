@@ -1,0 +1,18 @@
+{
+  "contract_version": "1.0.0-draft",
+  "domain": "plasticos",
+  "outcomes": [
+    {
+      "match_result_ref": "plasticos.match.result:501",
+      "candidate_ref": "res.partner:102",
+      "outcome_type": "won_deal",
+      "occurred_at": "2026-08-02T14:00:00Z",
+      "source_record": {
+        "system": "odoo",
+        "record_ref": "plasticos.offer:88",
+        "revision": 2
+      },
+      "idempotency_key": "match-501-won-20260802"
+    }
+  ]
+}

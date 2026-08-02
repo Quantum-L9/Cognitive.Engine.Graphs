@@ -11,9 +11,11 @@ from pydantic import ValidationError
 
 from engine.models.payloads import (
     FORBIDDEN_TRANSPORT_FIELDS,
+    CanonicalProjection,
     ImprovementProposal,
     MatchRequest,
     MatchResponse,
+    OutcomeFeedback,
     SyncProjection,
 )
 
@@ -27,6 +29,9 @@ SCHEMA_FILES = (
     "match-response.schema.yaml",
     "improvement-proposal.schema.yaml",
     "common.schema.yaml",
+    "canonical-projection.schema.yaml",
+    "outcome-feedback.schema.yaml",
+    "sync-projection.schema.yaml",
 )
 
 
@@ -106,3 +111,11 @@ def test_improvement_schema_locks_direct_mutation_const() -> None:
 
 def test_sync_projection_example() -> None:
     SyncProjection.model_validate(_load_json(EXAMPLES / "sync-projection.json"))
+
+
+def test_canonical_projection_example() -> None:
+    CanonicalProjection.model_validate(_load_json(EXAMPLES / "canonical-projection.json"))
+
+
+def test_outcome_feedback_example() -> None:
+    OutcomeFeedback.model_validate(_load_json(EXAMPLES / "outcome-feedback.json"))
