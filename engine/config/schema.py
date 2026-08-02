@@ -1074,14 +1074,22 @@ class DomainSpec(BaseModel):
                             gate.queryparam,
                         )
 
-        # (c) W1-01: Scoring dimension default weights sum check
+        # (c) W1-01: Scoring dimension default weights sum check (per match direction)
         if settings.domain_strict_validation and self.scoring and self.scoring.dimensions:
-            weight_sum = sum(d.defaultweight for d in self.scoring.dimensions)
             weight_ceiling = 1.0
             tolerance = 1e-9
-            if weight_sum > weight_ceiling + tolerance:
-                msg = f"Scoring dimension default weights sum to {weight_sum:.4f}, exceeding {weight_ceiling}"
-                raise ValueError(msg)
+            buckets: dict[str, float] = {}
+            for dim in self.scoring.dimensions:
+                keys = dim.matchdirections or ["*"]
+                for key in keys:
+                    buckets[key] = buckets.get(key, 0.0) + dim.defaultweight
+            for key, weight_sum in buckets.items():
+                if weight_sum > weight_ceiling + tolerance:
+                    msg = (
+                        f"Scoring dimension default weights sum to {weight_sum:.4f} "
+                        f"for direction {key!r}, exceeding {weight_ceiling}"
+                    )
+                    raise ValueError(msg)
 
         # Validate GDS job references
         for job in self.gdsjobs:

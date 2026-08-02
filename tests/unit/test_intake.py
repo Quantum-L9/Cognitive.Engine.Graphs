@@ -104,7 +104,9 @@ def intake_spec() -> DomainSpec:
         ),
         matchentities=MatchEntitiesSpec(
             candidate=[MatchEntitySpec(label="Facility", matchdirection="supply_opportunity_to_buyer_facility")],
-            queryentity=[MatchEntitySpec(label="MaterialIntake", matchdirection="supply_opportunity_to_buyer_facility")],
+            queryentity=[
+                MatchEntitySpec(label="MaterialIntake", matchdirection="supply_opportunity_to_buyer_facility")
+            ],
         ),
         queryschema=QuerySchemaSpec(matchdirections=["supply_opportunity_to_buyer_facility"], fields=[]),
         gates=[

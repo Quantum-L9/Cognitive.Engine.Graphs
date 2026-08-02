@@ -34,7 +34,9 @@ def test_assembler_loads_from_plasticos_spec(plasticos_spec):
     from engine.scoring.assembler import ScoringAssembler
 
     assembler = ScoringAssembler(plasticos_spec)
-    clause, _meta = assembler.assemble_scoring_clause("supply_opportunity_to_buyer_facility", _default_weights(plasticos_spec))
+    clause, _meta = assembler.assemble_scoring_clause(
+        "supply_opportunity_to_buyer_facility", _default_weights(plasticos_spec)
+    )
     assert isinstance(clause, str)
     assert len(clause) > 0
 
@@ -44,7 +46,9 @@ def test_scoring_clause_contains_composite_score(plasticos_spec):
     from engine.scoring.assembler import ScoringAssembler
 
     assembler = ScoringAssembler(plasticos_spec)
-    clause, _meta = assembler.assemble_scoring_clause("supply_opportunity_to_buyer_facility", _default_weights(plasticos_spec))
+    clause, _meta = assembler.assemble_scoring_clause(
+        "supply_opportunity_to_buyer_facility", _default_weights(plasticos_spec)
+    )
     assert "score" in clause.lower()
     assert "AS" in clause
 
