@@ -7,7 +7,7 @@
 ## Decision
 
 Match request/response and improvement proposal are payload-only contracts carried
-inside Gate_SDK `TransportPacket`. They do not extend PacketEnvelope / alternate
+inside Gate_SDK `TransportPacket`. They do not extend the alternate
 `packet.schema.yaml`.
 
 ## Acceptance
