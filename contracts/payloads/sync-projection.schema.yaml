@@ -1,0 +1,64 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: urn:l9:plasticos:contracts:payload:sync-projection:1.0.0-draft
+title: PlasticOS CEG Sync Projection
+description: Provider-neutral upsert or tombstone records for CEG. Odoo remains authority.
+x-publication-status: draft-unpublished
+type: object
+additionalProperties: false
+required:
+- contract_version
+- domain
+- projection_version
+- records
+properties:
+  contract_version:
+    $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/contract_version
+  domain:
+    $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/domain
+  projection_version:
+    type: string
+    minLength: 1
+  records:
+    type: array
+    minItems: 1
+    maxItems: 10000
+    items:
+      type: object
+      additionalProperties: false
+      required:
+      - entity_ref
+      - entity_type
+      - revision
+      - operation
+      - properties
+      - source_record
+      - field_dictionary_version
+      properties:
+        entity_ref:
+          $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/entity_ref
+        entity_type:
+          type: string
+          minLength: 1
+        revision:
+          $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/revision
+        operation:
+          type: string
+          enum:
+          - upsert
+          - tombstone
+        properties:
+          type: object
+        relationship_refs:
+          type: array
+          items:
+            $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/entity_ref
+        evidence_refs:
+          type: array
+          items:
+            $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/entity_ref
+        source_record:
+          $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/source_ref
+        field_dictionary_version:
+          type: string
+          minLength: 1
+artifact_status: approved_contract

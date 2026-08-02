@@ -21,10 +21,11 @@
       "agents/cursor/gmp_protocol/gmp-report-contract.yaml",
       "agents/cursor/gmp_protocol/phase0-scope-template.yaml",
       "agents/cursor/integrations/cursor_gateway.py",
-      "docs/PlasticOS Graph Cognitive Engine.yaml",
+      "docs/archive/plasticos/PlasticOS Graph Cognitive Engine.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml",
       "docs/contracts/config/env-contract.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
-      "docs/plasticos_domain_spec_v0.4.yaml",
       "domains/MASTER-SPEC-ALL-DOMAINS.yaml",
       "domains/_template.yaml",
       "domains/freight_matching_domain_spec.yaml",
@@ -32,7 +33,6 @@
       "domains/legal_discovery_domain_spec.yaml",
       "domains/mortgage_brokerage_domain_spec.yaml",
       "domains/plasticos/spec.yaml",
-      "domains/plasticos_domain_spec.yaml",
       "domains/roofing_company_domain_spec.yaml",
       "engine/arbitration/schema.py",
       "engine/config/schema.py",
@@ -57,6 +57,7 @@
       "engine/scoring/pareto.py",
       "engine/traversal/multihop.py",
       "graph-cognitive-engine-spec-v1.1.0.yaml",
+      "tests/contracts/test_contract_registry.py",
       "tests/contracts/test_contracts.py",
       "tests/contracts/test_env_contract.py",
       "tests/integration/test_hoprag_pipeline.py",
@@ -70,6 +71,7 @@
       "tests/test_boot_and_registry.py",
       "tests/test_pareto_wiring.py",
       "tests/unit/test_arbitration.py",
+      "tests/unit/test_audit_harness_parallel.py",
       "tests/unit/test_causal_edges.py",
       "tests/unit/test_config_schema.py",
       "tests/unit/test_counterfactual.py",
@@ -93,11 +95,11 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:136",
-      "tools/spec_extract.py:142",
+      "tools/spec_extract.py:138",
       "tools/spec_extract.py:144",
       "tools/spec_extract.py:146",
-      "tools/audit_engine.py:76",
+      "tools/spec_extract.py:148",
+      "tools/audit_engine.py:91",
       "tests/test_pareto_wiring.py:220",
       "tests/test_pareto_wiring.py:266",
       "tests/test_boot_and_registry.py:92",
@@ -120,6 +122,7 @@
     ],
     "status": "IMPLEMENTED",
     "evidence_files": [
+      ".github/governance/quality-thresholds.yaml",
       ".github/pr_review_config.yaml",
       "agents/cursor/GMP-v2.0-Perplex-Py-Scripts/script_3.py",
       "agents/cursor/GMP-v2.0-Perplex-Py-Scripts/script_4.py",
@@ -131,12 +134,13 @@
       "chassis/auth/settings.py",
       "chassis/middleware.py",
       "config/perplexity_audit.yaml",
-      "docs/PlasticOS Graph Cognitive Engine.yaml",
+      "docs/archive/plasticos/PlasticOS Graph Cognitive Engine.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml",
       "docs/contracts/config/env-contract.yaml",
       "docs/contracts/data/graph-schema.yaml",
       "docs/contracts/dependencies/neo4j.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
-      "docs/plasticos_domain_spec_v0.4.yaml",
       "domains/MASTER-SPEC-ALL-DOMAINS.yaml",
       "domains/_template.yaml",
       "domains/aios_god_agent_domain_spec.yaml",
@@ -145,7 +149,6 @@
       "domains/healthcare_referral_domain_spec.yaml",
       "domains/mortgage_brokerage_domain_spec.yaml",
       "domains/plasticos/spec.yaml",
-      "domains/plasticos_domain_spec.yaml",
       "domains/repo_as_agent_domain_spec.yaml",
       "domains/research_agent_domain_spec.yaml",
       "domains/roofing_company_domain_spec.yaml",
@@ -190,6 +193,7 @@
       "engine/scoring/pareto_integrator.py",
       "engine/traversal/edge_merger.py",
       "graph-cognitive-engine-spec-v1.1.0.yaml",
+      "tests/contracts/test_contracts.py",
       "tests/contracts/test_env_contract.py",
       "tests/fixtures/hgkr_benchmark_domain.yaml",
       "tests/integration/test_null_semantics.py",
@@ -228,7 +232,7 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:137",
+      "tools/spec_extract.py:139",
       "chassis/middleware.py:75",
       "chassis/middleware.py:78",
       "chassis/middleware.py:80",
@@ -258,18 +262,20 @@
       "agents/cursor/GMP-v2.0-Perplex-Py-Scripts/script_2.py",
       "agents/cursor/cursor_workflow_kernel.yaml",
       "agents/cursor/gmp_meta_learning.py",
-      "docs/PlasticOS Graph Cognitive Engine.yaml",
+      "contracts/payloads/match-response.schema.yaml",
+      "docs/archive/plasticos/PlasticOS Graph Cognitive Engine.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml",
+      "docs/contracts/api/openapi.yaml",
       "docs/contracts/config/env-contract.yaml",
       "docs/contracts/data/graph-schema.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
-      "docs/plasticos_domain_spec_v0.4.yaml",
       "domains/MASTER-SPEC-ALL-DOMAINS.yaml",
       "domains/_template.yaml",
       "domains/healthcare_referral_domain_spec.yaml",
       "domains/legal_discovery_domain_spec.yaml",
       "domains/mortgage_brokerage_domain_spec.yaml",
       "domains/plasticos/spec.yaml",
-      "domains/plasticos_domain_spec.yaml",
       "domains/research_agent_domain_spec.yaml",
       "domains/roofing_company_domain_spec.yaml",
       "engine/config/schema.py",
@@ -294,7 +300,7 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:138",
+      "tools/spec_extract.py:140",
       "tests/test_boot_and_registry.py:94",
       "tests/test_boot_and_registry.py:118",
       "tests/unit/test_handlers_enrich_health.py:44",
@@ -322,9 +328,9 @@
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
       "domains/_template.yaml",
-      "domains/plasticos_domain_spec.yaml",
       "engine/arbitration/engine.py",
       "engine/arbitration/schema.py",
       "engine/config/schema.py",
@@ -340,6 +346,7 @@
       "engine/personas/constants.py",
       "engine/personas/selector.py",
       "engine/personas/types.py",
+      "engine/scoring/belief_propagation.py",
       "graph-cognitive-engine-spec-v1.1.0.yaml",
       "tests/property/test_gates_property.py",
       "tests/property/test_scoring_property.py",
@@ -352,7 +359,7 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:139",
+      "tools/spec_extract.py:141",
       "tools/check_action_refs.py:71",
       "tests/test_boot_and_registry.py:95",
       "tests/unit/test_arbitration.py:36",
@@ -380,7 +387,7 @@
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
       "domains/MASTER-SPEC-ALL-DOMAINS.yaml",
       "domains/_template.yaml",
       "domains/freight_matching_domain_spec.yaml",
@@ -402,14 +409,14 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:140",
+      "tools/spec_extract.py:142",
       "tests/test_boot_and_registry.py:96",
-      "tests/unit/test_intake.py:118",
+      "tests/unit/test_intake.py:120",
       "tests/unit/test_gates_all_types.py:131",
       "tests/unit/test_gates_all_types.py:132",
       "tests/unit/test_gates_all_types.py:135",
       "tests/property/test_gates_property.py:26",
-      "tests/contracts/test_contracts.py:498",
+      "tests/contracts/test_contracts.py:507",
       "engine/gates/compiler.py:207",
       "engine/gates/null_semantics.py:32"
     ]
@@ -431,13 +438,13 @@
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
       "config/perplexity_audit.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
-      "docs/plasticos_domain_spec_v0.4.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml",
       "domains/MASTER-SPEC-ALL-DOMAINS.yaml",
       "domains/_template.yaml",
       "domains/mortgage_brokerage_domain_spec.yaml",
       "domains/plasticos/spec.yaml",
-      "domains/plasticos_domain_spec.yaml",
       "engine/config/schema.py",
       "engine/gates/compiler.py",
       "engine/gates/null_semantics.py",
@@ -458,7 +465,7 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:141",
+      "tools/spec_extract.py:143",
       "tests/test_boot_and_registry.py:97",
       "tests/unit/test_config_schema.py:77",
       "tests/unit/test_config_schema.py:147",
@@ -486,7 +493,7 @@
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
       "domains/MASTER-SPEC-ALL-DOMAINS.yaml",
       "domains/_template.yaml",
       "domains/healthcare_referral_domain_spec.yaml",
@@ -504,7 +511,7 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:142",
+      "tools/spec_extract.py:144",
       "tests/test_boot_and_registry.py:98",
       "tests/unit/test_gates_all_types.py:161",
       "tests/unit/test_gates_all_types.py:162",
@@ -533,13 +540,13 @@
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
       "chassis/auth/settings.py",
+      "docs/archive/plasticos/plasticos_domain_spec.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml",
       "docs/contracts/api/openapi.yaml",
       "docs/contracts/config/env-contract.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
-      "docs/plasticos_domain_spec_v0.4.yaml",
       "domains/MASTER-SPEC-ALL-DOMAINS.yaml",
       "domains/_template.yaml",
-      "domains/plasticos_domain_spec.yaml",
       "domains/research_agent_domain_spec.yaml",
       "engine/boot.py",
       "engine/config/schema.py",
@@ -552,6 +559,7 @@
       "engine/health/gap_prioritizer.py",
       "engine/health/readiness_scorer.py",
       "graph-cognitive-engine-spec-v1.1.0.yaml",
+      "tests/contracts/test_contracts.py",
       "tests/contracts/test_data_models.py",
       "tests/contracts/test_env_contract.py",
       "tests/fixtures/hgkr_benchmark_domain.yaml",
@@ -565,7 +573,7 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:143",
+      "tools/spec_extract.py:145",
       "tests/test_boot_and_registry.py:99",
       "engine/boot.py:47",
       "engine/boot.py:52",
@@ -593,7 +601,7 @@
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
       "domains/MASTER-SPEC-ALL-DOMAINS.yaml",
       "domains/_template.yaml",
       "domains/freight_matching_domain_spec.yaml",
@@ -610,7 +618,7 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:144",
+      "tools/spec_extract.py:146",
       "tests/test_boot_and_registry.py:100",
       "tests/unit/test_gates_all_types.py:195",
       "tests/unit/test_gates_all_types.py:196",
@@ -637,13 +645,14 @@
     ],
     "status": "IMPLEMENTED",
     "evidence_files": [
+      ".github/governance/semgrep-identity-map.yaml",
       ".github/pr_review_config.yaml",
       "agents/cursor/cursor_workflow_kernel.yaml",
-      "chassis/auth/app.py",
+      "docs/archive/plasticos/plasticos_domain_spec.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml",
       "docs/contracts/agents/tool-schemas/_index.yaml",
       "docs/contracts/config/env-contract.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
-      "docs/plasticos_domain_spec_v0.4.yaml",
       "domains/MASTER-SPEC-ALL-DOMAINS.yaml",
       "domains/_template.yaml",
       "domains/aios_god_agent_domain_spec.yaml",
@@ -651,7 +660,6 @@
       "domains/healthcare_referral_domain_spec.yaml",
       "domains/mortgage_brokerage_domain_spec.yaml",
       "domains/plasticos/spec.yaml",
-      "domains/plasticos_domain_spec.yaml",
       "domains/repo_as_agent_domain_spec.yaml",
       "domains/roofing_company_domain_spec.yaml",
       "engine/compliance/engine.py",
@@ -694,11 +702,13 @@
       "tests/unit/test_config_schema.py",
       "tests/unit/test_domain_pack_loader.py",
       "tests/unit/test_edge_merger.py",
+      "tests/unit/test_first_match_direction.py",
       "tests/unit/test_gates_all_types.py",
       "tests/unit/test_gds_scheduler.py",
       "tests/unit/test_multihop_traversal.py",
       "tests/unit/test_parameter_resolver.py",
       "tests/unit/test_pseudo_query.py",
+      "tests/unit/test_second_match_direction.py",
       "tests/unit/test_sync_and_traversal.py",
       "tests/unit/test_traversal.py",
       "tests/unit/test_traversal_assembler.py",
@@ -713,7 +723,7 @@
       "tools/hoprag_benchmark.py:12",
       "tools/hoprag_benchmark.py:16",
       "tools/hoprag_benchmark.py:176",
-      "tools/spec_extract.py:145",
+      "tools/spec_extract.py:147",
       "tools/validate_domain.py:8",
       "tools/validate_domain.py:141",
       "tools/validate_domain.py:142",
@@ -738,15 +748,15 @@
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
       "chassis/auth/settings.py",
+      "docs/archive/plasticos/plasticos_domain_spec.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml",
       "docs/contracts/config/env-contract.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
-      "docs/plasticos_domain_spec_v0.4.yaml",
       "domains/MASTER-SPEC-ALL-DOMAINS.yaml",
       "domains/_template.yaml",
       "domains/freight_matching_domain_spec.yaml",
       "domains/healthcare_referral_domain_spec.yaml",
       "domains/plasticos/spec.yaml",
-      "domains/plasticos_domain_spec.yaml",
       "engine/config/schema.py",
       "engine/config/settings.py",
       "engine/kge/cross_dimensional_ensemble.py",
@@ -769,7 +779,7 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:198",
+      "tools/spec_extract.py:200",
       "tests/test_pareto_wiring.py:45",
       "tests/test_pareto_wiring.py:52",
       "tests/test_pareto_wiring.py:55",
@@ -796,12 +806,12 @@
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
       "domains/MASTER-SPEC-ALL-DOMAINS.yaml",
       "domains/_template.yaml",
       "domains/legal_discovery_domain_spec.yaml",
       "domains/plasticos/spec.yaml",
-      "domains/plasticos_domain_spec.yaml",
       "domains/research_agent_domain_spec.yaml",
       "engine/config/schema.py",
       "engine/scoring/assembler.py",
@@ -812,16 +822,16 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:199",
-      "tests/unit/test_intake.py:126",
-      "tests/contracts/test_contracts.py:411",
+      "tools/spec_extract.py:201",
+      "tests/unit/test_intake.py:128",
+      "tests/contracts/test_contracts.py:420",
       "tests/scoring/test_benchmark.py:105",
       "engine/config/schema.py:95",
       "engine/scoring/assembler.py:226",
       "engine/scoring/assembler.py:273",
       "graph-cognitive-engine-spec-v1.1.0.yaml:205",
       "domains/legal_discovery_domain_spec.yaml:104",
-      "domains/plasticos_domain_spec.yaml:911"
+      "domains/MASTER-SPEC-ALL-DOMAINS.yaml:809"
     ]
   },
   {
@@ -839,12 +849,12 @@
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
       "domains/MASTER-SPEC-ALL-DOMAINS.yaml",
       "domains/_template.yaml",
       "domains/mortgage_brokerage_domain_spec.yaml",
       "domains/plasticos/spec.yaml",
-      "domains/plasticos_domain_spec.yaml",
       "engine/config/schema.py",
       "engine/handlers.py",
       "engine/kge/cross_dimensional_ensemble.py",
@@ -861,8 +871,8 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:200",
-      "engine/handlers.py:437",
+      "tools/spec_extract.py:202",
+      "engine/handlers.py:445",
       "tests/unit/test_counterfactual.py:62",
       "tests/unit/test_counterfactual.py:63",
       "tests/unit/test_counterfactual.py:73",
@@ -888,7 +898,7 @@
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
       "domains/MASTER-SPEC-ALL-DOMAINS.yaml",
       "domains/_template.yaml",
       "domains/aios_god_agent_domain_spec.yaml",
@@ -907,11 +917,11 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:201",
+      "tools/spec_extract.py:203",
       "tests/unit/test_scoring.py:74",
       "tests/unit/test_scoring.py:81",
       "tests/unit/test_hgkr_schema.py:203",
-      "tests/contracts/test_contracts.py:413",
+      "tests/contracts/test_contracts.py:422",
       "engine/config/schema.py:97",
       "engine/scoring/assembler.py:228",
       "engine/scoring/assembler.py:312",
@@ -934,7 +944,8 @@
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
       "domains/MASTER-SPEC-ALL-DOMAINS.yaml",
       "domains/_template.yaml",
       "domains/aios_god_agent_domain_spec.yaml",
@@ -944,7 +955,6 @@
       "domains/legal_discovery_domain_spec.yaml",
       "domains/mortgage_brokerage_domain_spec.yaml",
       "domains/plasticos/spec.yaml",
-      "domains/plasticos_domain_spec.yaml",
       "domains/repo_as_agent_domain_spec.yaml",
       "domains/research_agent_domain_spec.yaml",
       "domains/roofing_company_domain_spec.yaml",
@@ -968,7 +978,7 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:202",
+      "tools/spec_extract.py:204",
       "tests/test_scoring_extended.py:12",
       "tests/test_scoring_extended.py:81",
       "tests/test_scoring_extended.py:82",
@@ -995,7 +1005,7 @@
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
       "domains/MASTER-SPEC-ALL-DOMAINS.yaml",
       "domains/_template.yaml",
       "domains/repo_as_agent_domain_spec.yaml",
@@ -1007,11 +1017,11 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:203",
+      "tools/spec_extract.py:205",
       "tests/unit/test_scoring_security.py:12",
       "tests/unit/test_scoring_security.py:14",
       "tests/unit/test_scoring_security.py:25",
-      "tests/contracts/test_contracts.py:418",
+      "tests/contracts/test_contracts.py:427",
       "engine/config/schema.py:102",
       "engine/config/schema.py:436",
       "engine/scoring/assembler.py:34",
@@ -1033,19 +1043,26 @@
     ],
     "status": "IMPLEMENTED",
     "evidence_files": [
-      "domains/plasticos_domain_spec.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec.yaml",
+      "engine/causal/attribution.py",
       "engine/config/schema.py",
       "graph-cognitive-engine-spec-v1.1.0.yaml",
+      "tests/integration/test_causal_temporal_decay.py",
+      "tests/unit/test_causal_edges.py",
       "tests/unit/test_settings.py",
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:204",
-      "tools/spec_extract.py:262",
-      "tests/unit/test_settings.py:57",
-      "engine/config/schema.py:861",
-      "graph-cognitive-engine-spec-v1.1.0.yaml:1968",
-      "domains/plasticos_domain_spec.yaml:1169"
+      "tools/spec_extract.py:206",
+      "tools/spec_extract.py:264",
+      "tests/unit/test_causal_edges.py:30",
+      "tests/unit/test_causal_edges.py:511",
+      "tests/unit/test_causal_edges.py:512",
+      "tests/unit/test_causal_edges.py:513",
+      "tests/unit/test_causal_edges.py:516",
+      "tests/unit/test_causal_edges.py:517",
+      "tests/unit/test_causal_edges.py:523",
+      "tests/unit/test_causal_edges.py:533"
     ]
   },
   {
@@ -1063,10 +1080,11 @@
     ],
     "status": "IMPLEMENTED",
     "evidence_files": [
+      "docs/archive/plasticos/plasticos_domain_spec.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml",
       "docs/contracts/agents/tool-schemas/_index.yaml",
       "docs/contracts/data/graph-schema.yaml",
-      "docs/plasticos_domain_spec_v0.4.yaml",
-      "domains/plasticos_domain_spec.yaml",
+      "domains/plasticos/spec.yaml",
       "engine/causal/attribution.py",
       "engine/causal/counterfactual.py",
       "engine/config/schema.py",
@@ -1079,6 +1097,7 @@
       "engine/scoring/assembler.py",
       "engine/scoring/hgkr_utils.py",
       "tests/contracts/test_data_models.py",
+      "tests/integration/test_causal_temporal_decay.py",
       "tests/unit/test_causal_edges.py",
       "tests/unit/test_causal_serializer.py",
       "tests/unit/test_domain_spec_activation.py",
@@ -1086,16 +1105,16 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:259",
-      "engine/handlers.py:815",
-      "engine/handlers.py:1206",
-      "engine/handlers.py:1347",
-      "engine/handlers.py:1588",
-      "engine/handlers.py:1633",
-      "tests/unit/test_domain_spec_activation.py:122",
-      "tests/unit/test_causal_edges.py:203",
-      "tests/unit/test_causal_edges.py:227",
-      "tests/unit/test_causal_edges.py:252"
+      "tools/spec_extract.py:261",
+      "engine/handlers.py:823",
+      "engine/handlers.py:1214",
+      "engine/handlers.py:1355",
+      "engine/handlers.py:1596",
+      "engine/handlers.py:1641",
+      "tests/unit/test_domain_spec_activation.py:126",
+      "tests/unit/test_causal_edges.py:204",
+      "tests/unit/test_causal_edges.py:228",
+      "tests/unit/test_causal_edges.py:253"
     ]
   },
   {
@@ -1113,14 +1132,14 @@
     ],
     "status": "IMPLEMENTED",
     "evidence_files": [
-      "docs/plasticos_domain_spec_v0.4.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml",
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:259",
-      "docs/plasticos_domain_spec_v0.4.yaml:555",
-      "docs/plasticos_domain_spec_v0.4.yaml:1048",
-      "docs/plasticos_domain_spec_v0.4.yaml:1643"
+      "tools/spec_extract.py:261",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml:562",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml:1055",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml:1650"
     ]
   },
   {
@@ -1138,16 +1157,18 @@
     ],
     "status": "IMPLEMENTED",
     "evidence_files": [
+      "docs/archive/plasticos/plasticos_domain_spec.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml",
       "docs/contracts/agents/tool-schemas/_index.yaml",
       "docs/contracts/data/graph-schema.yaml",
-      "docs/plasticos_domain_spec_v0.4.yaml",
-      "domains/plasticos_domain_spec.yaml",
+      "domains/plasticos/spec.yaml",
       "engine/causal/edge_taxonomy.py",
       "engine/config/schema.py",
       "engine/handlers.py",
       "engine/resolution/similarity.py",
       "engine/scoring/assembler.py",
       "tests/contracts/test_data_models.py",
+      "tests/integration/test_causal_temporal_decay.py",
       "tests/unit/test_causal_edges.py",
       "tests/unit/test_causal_serializer.py",
       "tests/unit/test_causal_validator.py",
@@ -1155,13 +1176,13 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:260",
-      "engine/handlers.py:1588",
-      "engine/handlers.py:1607",
-      "engine/handlers.py:1617",
-      "engine/handlers.py:1620",
-      "engine/handlers.py:1647",
-      "engine/handlers.py:1750",
+      "tools/spec_extract.py:262",
+      "engine/handlers.py:1596",
+      "engine/handlers.py:1615",
+      "engine/handlers.py:1625",
+      "engine/handlers.py:1628",
+      "engine/handlers.py:1655",
+      "engine/handlers.py:1758",
       "tests/unit/test_causal_validator.py:34",
       "tests/unit/test_causal_validator.py:58",
       "tests/unit/test_causal_validator.py:72"
@@ -1182,9 +1203,9 @@
     ],
     "status": "IMPLEMENTED",
     "evidence_files": [
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml",
       "docs/contracts/agents/tool-schemas/_index.yaml",
       "docs/contracts/data/graph-schema.yaml",
-      "docs/plasticos_domain_spec_v0.4.yaml",
       "engine/handlers.py",
       "engine/resolution/resolver.py",
       "tests/contracts/test_data_models.py",
@@ -1193,10 +1214,10 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:260",
-      "engine/handlers.py:1781",
-      "engine/handlers.py:1785",
-      "engine/handlers.py:1850",
+      "tools/spec_extract.py:262",
+      "engine/handlers.py:1789",
+      "engine/handlers.py:1793",
+      "engine/handlers.py:1858",
       "tests/unit/test_handlers_extended.py:307",
       "tests/unit/test_resolver.py:212",
       "tests/contracts/test_data_models.py:134",
@@ -1224,8 +1245,8 @@
       "engine/handlers.py"
     ],
     "evidence_lines": [
-      "engine/handlers.py:1587",
-      "engine/handlers.py:2013"
+      "engine/handlers.py:1595",
+      "engine/handlers.py:2021"
     ]
   },
   {
@@ -1247,8 +1268,8 @@
       "engine/handlers.py"
     ],
     "evidence_lines": [
-      "engine/handlers.py:1780",
-      "engine/handlers.py:2014"
+      "engine/handlers.py:1788",
+      "engine/handlers.py:2022"
     ]
   },
   {
@@ -1265,19 +1286,26 @@
     ],
     "status": "IMPLEMENTED",
     "evidence_files": [
-      "domains/plasticos_domain_spec.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec.yaml",
+      "engine/causal/attribution.py",
       "engine/config/schema.py",
       "graph-cognitive-engine-spec-v1.1.0.yaml",
+      "tests/integration/test_causal_temporal_decay.py",
+      "tests/unit/test_causal_edges.py",
       "tests/unit/test_settings.py",
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:204",
-      "tools/spec_extract.py:262",
-      "tests/unit/test_settings.py:57",
-      "engine/config/schema.py:861",
-      "graph-cognitive-engine-spec-v1.1.0.yaml:1968",
-      "domains/plasticos_domain_spec.yaml:1169"
+      "tools/spec_extract.py:206",
+      "tools/spec_extract.py:264",
+      "tests/unit/test_causal_edges.py:30",
+      "tests/unit/test_causal_edges.py:511",
+      "tests/unit/test_causal_edges.py:512",
+      "tests/unit/test_causal_edges.py:513",
+      "tests/unit/test_causal_edges.py:516",
+      "tests/unit/test_causal_edges.py:517",
+      "tests/unit/test_causal_edges.py:523",
+      "tests/unit/test_causal_edges.py:533"
     ]
   },
   {
@@ -1297,8 +1325,8 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:205",
-      "tools/spec_extract.py:262"
+      "tools/spec_extract.py:207",
+      "tools/spec_extract.py:264"
     ]
   },
   {
@@ -1318,10 +1346,10 @@
       "engine/handlers.py"
     ],
     "evidence_lines": [
-      "engine/handlers.py:385",
-      "engine/handlers.py:1431",
-      "engine/handlers.py:1478",
-      "engine/handlers.py:2010"
+      "engine/handlers.py:393",
+      "engine/handlers.py:1439",
+      "engine/handlers.py:1486",
+      "engine/handlers.py:2018"
     ]
   },
   {
@@ -1341,8 +1369,8 @@
       "engine/handlers.py"
     ],
     "evidence_lines": [
-      "engine/handlers.py:637",
-      "engine/handlers.py:2011"
+      "engine/handlers.py:645",
+      "engine/handlers.py:2019"
     ]
   },
   {
@@ -1362,8 +1390,8 @@
       "engine/handlers.py"
     ],
     "evidence_lines": [
-      "engine/handlers.py:767",
-      "engine/handlers.py:2012"
+      "engine/handlers.py:775",
+      "engine/handlers.py:2020"
     ]
   },
   {
@@ -1383,10 +1411,10 @@
       "engine/handlers.py"
     ],
     "evidence_lines": [
-      "engine/handlers.py:391",
-      "engine/handlers.py:1435",
-      "engine/handlers.py:1461",
-      "engine/handlers.py:1470"
+      "engine/handlers.py:399",
+      "engine/handlers.py:1443",
+      "engine/handlers.py:1469",
+      "engine/handlers.py:1478"
     ]
   },
   {
@@ -1406,8 +1434,8 @@
       "engine/handlers.py"
     ],
     "evidence_lines": [
-      "engine/handlers.py:1934",
-      "engine/handlers.py:2017"
+      "engine/handlers.py:1942",
+      "engine/handlers.py:2025"
     ]
   },
   {
@@ -1427,8 +1455,8 @@
       "engine/handlers.py"
     ],
     "evidence_lines": [
-      "engine/handlers.py:1929",
-      "engine/handlers.py:2016"
+      "engine/handlers.py:1937",
+      "engine/handlers.py:2024"
     ]
   },
   {
@@ -1446,13 +1474,13 @@
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
-      "docs/plasticos_domain_spec_v0.4.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml",
       "domains/MASTER-SPEC-ALL-DOMAINS.yaml",
       "domains/_template.yaml",
       "domains/mortgage_brokerage_domain_spec.yaml",
       "domains/plasticos/spec.yaml",
-      "domains/plasticos_domain_spec.yaml",
       "engine/gds/scheduler.py",
       "engine/graph/community_export.py",
       "engine/scoring/assembler.py",
@@ -1476,7 +1504,7 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:330",
+      "tools/spec_extract.py:332",
       "tools/l9_meta_injector.py:370",
       "engine/startup_wiring.py:64",
       "tests/unit/test_handlers_enrich_health.py:125",
@@ -1502,7 +1530,7 @@
     ],
     "status": "IMPLEMENTED",
     "evidence_files": [
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
       "engine/gds/scheduler.py",
       "graph-cognitive-engine-spec-v1.1.0.yaml",
       "tests/unit/test_gds_scheduler.py",
@@ -1511,7 +1539,7 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:331",
+      "tools/spec_extract.py:333",
       "tests/unit/test_hgkr_gds_dag.py:66",
       "tests/unit/test_hgkr_gds_dag.py:69",
       "tests/unit/test_hgkr_gds_dag.py:70",
@@ -1538,12 +1566,12 @@
     "status": "IMPLEMENTED",
     "evidence_files": [
       "chassis/auth/settings.py",
+      "docs/archive/plasticos/plasticos_domain_spec.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml",
       "docs/contracts/api/openapi.yaml",
       "docs/contracts/config/env-contract.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
-      "docs/plasticos_domain_spec_v0.4.yaml",
       "domains/_template.yaml",
-      "domains/plasticos_domain_spec.yaml",
       "engine/boot.py",
       "engine/config/settings.py",
       "engine/gds/scheduler.py",
@@ -1551,6 +1579,7 @@
       "engine/outcomes/schema.py",
       "graph-cognitive-engine-spec-v1.1.0.yaml",
       "tests/conftest.py",
+      "tests/contracts/test_contracts.py",
       "tests/contracts/test_data_models.py",
       "tests/contracts/test_env_contract.py",
       "tests/integration/test_match_handler.py",
@@ -1565,7 +1594,7 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:332",
+      "tools/spec_extract.py:334",
       "tests/conftest.py:253",
       "tests/conftest.py:261",
       "tests/conftest.py:269",
@@ -1591,8 +1620,8 @@
     ],
     "status": "IMPLEMENTED",
     "evidence_files": [
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
-      "docs/plasticos_domain_spec_v0.4.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml",
       "engine/gds/scheduler.py",
       "graph-cognitive-engine-spec-v1.1.0.yaml",
       "tests/unit/test_gds_scheduler.py",
@@ -1600,7 +1629,7 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:333",
+      "tools/spec_extract.py:335",
       "tests/unit/test_gds_scheduler.py:215",
       "engine/gds/scheduler.py:264",
       "engine/gds/scheduler.py:499",
@@ -1608,8 +1637,8 @@
       "graph-cognitive-engine-spec-v1.1.0.yaml:622",
       "graph-cognitive-engine-spec-v1.1.0.yaml:703",
       "tools/audit_rules.yaml:89",
-      "docs/plasticos_domain_spec_v0.4.yaml:864",
-      "docs/plasticos_domain_spec_v0.4.yaml:1405"
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml:871",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml:1412"
     ]
   },
   {
@@ -1629,14 +1658,14 @@
       "agents/cursor/cursor_memory_client.py",
       "agents/cursor/cursor_workflow_kernel.yaml",
       "agents/cursor/integrations/cursor_gateway.py",
+      "docs/archive/plasticos/plasticos_domain_spec.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
+      "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml",
       "docs/contracts/data/graph-schema.yaml",
-      "docs/plasticos_domain_spec_v0.3.0.yaml",
-      "docs/plasticos_domain_spec_v0.4.yaml",
       "domains/MASTER-SPEC-ALL-DOMAINS.yaml",
       "domains/_template.yaml",
       "domains/mortgage_brokerage_domain_spec.yaml",
       "domains/plasticos/spec.yaml",
-      "domains/plasticos_domain_spec.yaml",
       "engine/config/schema.py",
       "engine/diagnostics/__init__.py",
       "engine/diagnostics/dissimilarity.py",
@@ -1676,7 +1705,7 @@
       "tools/spec_extract.py"
     ],
     "evidence_lines": [
-      "tools/spec_extract.py:334",
+      "tools/spec_extract.py:336",
       "tests/test_algorithmic_upgrades.py:4",
       "tests/test_algorithmic_upgrades.py:26",
       "tests/test_algorithmic_upgrades.py:27",
@@ -1735,8 +1764,150 @@
     ],
     "evidence_lines": [
       "engine/resolution/resolver.py:30",
-      "engine/handlers.py:1796",
-      "engine/handlers.py:1798"
+      "engine/handlers.py:1804",
+      "engine/handlers.py:1806"
+    ]
+  },
+  {
+    "category": "research_pattern",
+    "name": "Low-Dimensional Similarity via Graph Embeddings",
+    "spec_reference": "tools/research/top5_leverage_patterns_detailed.json#3_GRAPH_EMBEDDINGS_FOR_SIMILARITY",
+    "search_tokens": [
+      "CompoundE3D",
+      "kge_enabled"
+    ],
+    "search_files": [
+      "engine/kge/",
+      "engine/config/"
+    ],
+    "status": "IMPLEMENTED",
+    "evidence_files": [
+      "engine/config/schema.py",
+      "engine/config/settings.py",
+      "engine/kge/__init__.py",
+      "engine/kge/beam_search.py",
+      "engine/kge/compound_e3d.py",
+      "engine/kge/ensemble.py",
+      "engine/kge/transformations.py"
+    ],
+    "evidence_lines": [
+      "engine/kge/transformations.py:12",
+      "engine/kge/transformations.py:199",
+      "engine/kge/compound_e3d.py:12",
+      "engine/kge/compound_e3d.py:15",
+      "engine/kge/compound_e3d.py:43",
+      "engine/kge/compound_e3d.py:44",
+      "engine/kge/compound_e3d.py:47",
+      "engine/kge/compound_e3d.py:60",
+      "engine/kge/compound_e3d.py:68",
+      "engine/kge/compound_e3d.py:80"
+    ]
+  },
+  {
+    "category": "research_pattern",
+    "name": "Session-Context Dynamic Re-Ranking",
+    "spec_reference": "tools/research/top5_leverage_patterns_detailed.json#4_REAL_TIME_CONTEXT_AWARE_RANKING",
+    "search_tokens": [
+      "temporalproximity",
+      "calibration"
+    ],
+    "search_files": [
+      "engine/scoring/"
+    ],
+    "status": "IMPLEMENTED",
+    "evidence_files": [
+      "engine/scoring/assembler.py",
+      "engine/scoring/calibration.py",
+      "engine/scoring/feedback.py",
+      "engine/scoring/hgkr_utils.py"
+    ],
+    "evidence_lines": [
+      "engine/scoring/feedback.py:19",
+      "engine/scoring/hgkr_utils.py:7",
+      "engine/scoring/hgkr_utils.py:19",
+      "engine/scoring/hgkr_utils.py:35",
+      "engine/scoring/hgkr_utils.py:45",
+      "engine/scoring/hgkr_utils.py:50",
+      "engine/scoring/hgkr_utils.py:51",
+      "engine/scoring/hgkr_utils.py:61",
+      "engine/scoring/hgkr_utils.py:66",
+      "engine/scoring/hgkr_utils.py:67"
+    ]
+  },
+  {
+    "category": "research_pattern",
+    "name": "Transitive Relationship Discovery via Multi-Hop Traversal",
+    "spec_reference": "tools/research/top5_leverage_patterns_detailed.json#5_MULTI_HOP_TRAVERSAL_FOR_ENRICHMENT",
+    "search_tokens": [
+      "MultiHopTraverser",
+      "multihop"
+    ],
+    "search_files": [
+      "engine/traversal/",
+      "engine/hoprag/"
+    ],
+    "status": "IMPLEMENTED",
+    "evidence_files": [
+      "engine/hoprag/__init__.py",
+      "engine/traversal/multihop.py"
+    ],
+    "evidence_lines": [
+      "engine/traversal/multihop.py:138",
+      "engine/traversal/multihop.py:151",
+      "engine/traversal/multihop.py:174",
+      "engine/traversal/multihop.py:283",
+      "engine/hoprag/__init__.py:30"
+    ]
+  },
+  {
+    "category": "research_pattern",
+    "name": "Behavioral Graph Collaborative Filtering",
+    "spec_reference": "tools/research/top5_leverage_patterns_detailed.json#1_COLLABORATIVE_FILTERING_AT_SCALE",
+    "search_tokens": [
+      "cooccurrence",
+      "communitymatch"
+    ],
+    "search_files": [
+      "engine/gds/",
+      "engine/scoring/"
+    ],
+    "status": "IMPLEMENTED",
+    "evidence_files": [
+      "engine/gds/scheduler.py",
+      "engine/scoring/assembler.py"
+    ],
+    "evidence_lines": [
+      "engine/gds/scheduler.py:42",
+      "engine/gds/scheduler.py:45",
+      "engine/gds/scheduler.py:61",
+      "engine/gds/scheduler.py:259",
+      "engine/gds/scheduler.py:260",
+      "engine/gds/scheduler.py:354",
+      "engine/scoring/assembler.py:227",
+      "engine/scoring/assembler.py:278"
+    ]
+  },
+  {
+    "category": "research_pattern",
+    "name": "Context-Aware Entity Resolution",
+    "spec_reference": "tools/research/top5_leverage_patterns_detailed.json#2_ENTITY_DISAMBIGUATION_VIA_CONTEXT",
+    "search_tokens": [
+      "EntityResolver",
+      "handle_resolve"
+    ],
+    "search_files": [
+      "engine/resolution/",
+      "engine/handlers.py"
+    ],
+    "status": "IMPLEMENTED",
+    "evidence_files": [
+      "engine/handlers.py",
+      "engine/resolution/resolver.py"
+    ],
+    "evidence_lines": [
+      "engine/resolution/resolver.py:30",
+      "engine/handlers.py:1804",
+      "engine/handlers.py:1806"
     ]
   },
   {

@@ -6,6 +6,9 @@ from engine.models.payloads import (
     ImprovementProposal,
     MatchRequest,
     MatchResponse,
+    SyncApplyResult,
+    SyncProjection,
+    SyncProjectionRecord,
 )
 
 __all__ = [
@@ -15,4 +18,7 @@ __all__ = [
     "MatchResponse",
     "OutcomeHistoryStore",
     "OutcomeRecord",
+    "SyncApplyResult",
+    "SyncProjection",
+    "SyncProjectionRecord",
 ]

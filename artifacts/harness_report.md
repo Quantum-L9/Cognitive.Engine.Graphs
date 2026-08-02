@@ -1,7 +1,7 @@
 # L9 Audit Harness Report
 
-- **Generated:** 2026-07-24T21:03:15.354248+00:00
-- **Repo root:** `/Users/ib-mac/Dropbox/Repo_Dropbox_IB/Cognitive.Engine.Graphs`
+- **Generated:** 2026-08-02T09:48:24.178008+00:00
+- **Repo root:** `/Users/ib-mac/l9-constellation-control/worktrees/ceg/TASK-028`
 - **Overall result:** ✅ PASSED
 - **Exit code:** 0
 
@@ -26,10 +26,10 @@ See `artifacts/audit_report.md` for full details.
 
 ## Spec Coverage
 
-- ✅ Implemented: 32
+- ✅ Implemented: 37
 - ⚠️ Partial: 9
 - ❌ Missing: 0
-- **Total features:** 41
+- **Total features:** 46
 
 | Category | Implemented | Partial | Missing | Total |
 |----------|-------------|---------|---------|-------|
@@ -41,7 +41,7 @@ See `artifacts/audit_report.md` for full details.
 | v1.1_scoring | 1 | 1 | 0 | 2 |
 | action_handler | 0 | 6 | 0 | 6 |
 | gds_algorithm | 5 | 0 | 0 | 5 |
-| research_pattern | 5 | 0 | 0 | 5 |
+| research_pattern | 10 | 0 | 0 | 10 |
 
 See `artifacts/coverage_report.md` for full details.
 
