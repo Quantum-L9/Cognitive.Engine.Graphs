@@ -20,7 +20,7 @@
 domain:
   id: plasticos
   name: PlasticOS Recycling Marketplace
-  version: 1.0.0
+  version: 1.1.0
   description: 'Domain specification for matching material intake requests (RFQs)
     from buyers to recycling facilities (suppliers) based on polymer compatibility,
     geographic proximity, capacity, certifications, and historical transaction success.
@@ -52,10 +52,10 @@ ontology:
       description: Financial creditworthiness score (0-100)
     - name: min_density
       type: float
-      description: "Minimum acceptable material density (g/cm\xB3)"
+      description: Minimum acceptable material density (g/cm³)
     - name: max_density
       type: float
-      description: "Maximum acceptable material density (g/cm\xB3)"
+      description: Maximum acceptable material density (g/cm³)
     - name: min_mfi
       type: float
       description: Minimum acceptable melt flow index
@@ -100,7 +100,7 @@ ontology:
       description: Primary polymer type (HDPE, PP, PET, LDPE)
     - name: density
       type: float
-      description: "Material density (g/cm\xB3)"
+      description: Material density (g/cm³)
     - name: mfi
       type: float
       description: Melt flow index
@@ -361,6 +361,15 @@ gates:
   - buyer_demand_to_supply_opportunity
   description: Active available tons must cover demand; Facility capacity_tons_month
     is not used here
+- name: active_supply_polymer
+  type: boolean
+  candidateprop: polymer_type
+  queryparam: polymer_type
+  nullbehavior: fail
+  matchdirections:
+  - buyer_demand_to_supply_opportunity
+  description: Active supply polymer_type must equal demand polymer_type (PACK-026
+    hard-gate harvest)
 scoring:
   dimensions:
   - name: geo_proximity
@@ -523,3 +532,109 @@ decision_policy:
     approve_threshold: 0.5
     reject_threshold: 0.2
     conflict_tolerance: 0.35
+feedbackloop:
+  enabled: true
+  signal_weights:
+    enabled: true
+    recalculation_cadence_days: 30
+    min_outcomes_for_recalculation: 50
+    baseline_weight: 1.0
+    max_weight: 3.0
+    min_weight: 0.1
+    frequency_adjustment: true
+    confidence_dampening: true
+    penalty_threshold: 0.5
+    penalty_factor: 0.3
+  propagation_boost_factor: 1.15
+  propagation_similarity_threshold: 0.4
+  outcome_edge_type: RESULTED_IN
+  outcome_node_label: TransactionOutcome
+  drift_threshold: 0.15
+  drift_window_days: 30
+feature_catalog:
+- feature_id: geo_proximity
+  owner: ceg
+  scoring_dimension: geo_proximity
+  evidence_required: false
+- feature_id: credit_score
+  owner: ceg
+  scoring_dimension: credit_score
+  evidence_required: false
+- feature_id: contamination_tolerance_score
+  owner: ceg
+  scoring_dimension: contamination_tolerance_score
+  evidence_required: true
+- feature_id: community_match
+  owner: ceg
+  scoring_dimension: community_match
+  evidence_required: false
+- feature_id: rate_score
+  owner: ceg
+  scoring_dimension: rate_score
+  evidence_required: false
+- feature_id: price_alignment
+  owner: ceg
+  scoring_dimension: price_alignment
+  evidence_required: false
+- feature_id: recency
+  owner: ceg
+  scoring_dimension: recency
+  evidence_required: false
+- feature_id: active_supply_geo
+  owner: ceg
+  scoring_dimension: active_supply_geo
+  evidence_required: false
+- feature_id: material.contamination_pct
+  owner: eie
+  scoring_dimension: null
+  evidence_required: true
+  description: EIE-produced evidence feature consumed as match query input
+- feature_id: facility.capacity.available_lbs_month
+  owner: odoo
+  scoring_dimension: null
+  evidence_required: true
+  description: Operational capacity evidence; missing => recommended enrichment
+explanations:
+  version: 1.0.0
+  contribution_ordering: deterministic_feature_id
+  missing_evidence_codes:
+  - facility.capacity.available_lbs_month
+  - material.contamination_pct
+  - facility.food_grade_certified
+  - supply.available_tons
+  recommended_actions:
+  - action_id: request_capacity_evidence
+    when: missing_evidence
+    message: Request facility monthly available capacity evidence before ranking.
+  - action_id: request_contamination_evidence
+    when: missing_evidence
+    message: Request observed contamination evidence from EIE before hard-gate evaluation.
+  - action_id: relax_or_reroute
+    when: failed_gate
+    message: Candidate failed a hard gate; do not rank; capture failed_gates reasons.
+  - action_id: review_low_score
+    when: low_score
+    message: Eligible but low score; review feature_contributions before operator
+      commit.
+  - action_id: exclude_ineligible
+    when: ineligible
+    message: Ineligible candidates must not receive rank.
+outcome_signals:
+- signal: reviewed
+  calibration_label: true
+- signal: contacted
+  calibration_label: true
+- signal: quoted
+  calibration_label: true
+- signal: accepted
+  calibration_label: true
+- signal: rejected
+  calibration_label: true
+- signal: completed
+  calibration_label: true
+- signal: claim_raised
+  calibration_label: true
+- signal: paid
+  calibration_label: true
+- signal: repeat_business
+  calibration_label: true

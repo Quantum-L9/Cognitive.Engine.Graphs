@@ -16,7 +16,7 @@ Defines the contract every spec.yaml must satisfy.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -957,6 +957,48 @@ class DecisionArbitrationSpec(BaseModel):
     )
 
 
+class FeatureCatalogEntry(BaseModel):
+    """Harvested feature taxonomy entry (PACK-026 → DomainSpec)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    feature_id: str
+    owner: Literal["ceg", "eie", "odoo"]
+    scoring_dimension: str | None = None
+    evidence_required: bool = True
+    description: str | None = None
+
+
+class RecommendedActionSpec(BaseModel):
+    """Deterministic recommended next action for match explanations."""
+
+    model_config = ConfigDict(frozen=True)
+
+    action_id: str
+    when: Literal["missing_evidence", "failed_gate", "low_score", "ineligible"]
+    message: str
+
+
+class ExplanationCatalogSpec(BaseModel):
+    """Explanation / recommended-action taxonomy (no tensor runtime)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    version: str = "1.0.0"
+    contribution_ordering: Literal["deterministic_feature_id", "score_desc"] = "deterministic_feature_id"
+    recommended_actions: list[RecommendedActionSpec] = Field(default_factory=list)
+    missing_evidence_codes: list[str] = Field(default_factory=list)
+
+
+class OutcomeSignalSpec(BaseModel):
+    """Business outcome signal used for feedback calibration."""
+
+    model_config = ConfigDict(frozen=True)
+
+    signal: str
+    calibration_label: bool = True
+
+
 class DomainMetadata(BaseModel):
     """Domain pack metadata."""
 
@@ -992,6 +1034,9 @@ class DomainSpec(BaseModel):
     semantic_registry: SemanticRegistrySpec = Field(default_factory=SemanticRegistrySpec)
     decision_arbitration: DecisionArbitrationSpec = Field(default_factory=DecisionArbitrationSpec)
     decision_policy: DecisionPolicy | None = None
+    feature_catalog: list[FeatureCatalogEntry] = Field(default_factory=list)
+    explanations: ExplanationCatalogSpec = Field(default_factory=ExplanationCatalogSpec)
+    outcome_signals: list[OutcomeSignalSpec] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_cross_references(self) -> DomainSpec:
