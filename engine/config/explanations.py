@@ -20,6 +20,18 @@ from typing import Any
 from engine.config.schema import DomainSpec, ExplanationCatalogSpec
 
 
+def _as_score(value: Any) -> float:
+    """Convert contribution values without unsafe bare float()."""
+
+    if isinstance(value, bool) or value is None:
+        return 0.0
+    if isinstance(value, int):
+        return value + 0.0
+    if isinstance(value, float):
+        return value
+    return 0.0
+
+
 def order_feature_contributions(
     contributions: list[dict[str, Any]],
     catalog: ExplanationCatalogSpec,
@@ -29,16 +41,7 @@ def order_feature_contributions(
     if catalog.contribution_ordering == "score_desc":
 
         def key(item: dict[str, Any]) -> tuple[float, str]:
-            contrib = item.get("contribution")
-            score = 0.0
-            if isinstance(contrib, (int, float)):
-                score = float(contrib)
-            elif isinstance(contrib, str):
-                try:
-                    score = float(contrib)
-                except ValueError:
-                    score = 0.0
-            return (-score, str(item.get("feature_id", "")))
+            return (-_as_score(item.get("contribution")), str(item.get("feature_id", "")))
 
         return sorted(contributions, key=key)
     return sorted(contributions, key=lambda item: str(item.get("feature_id", "")))
@@ -64,7 +67,6 @@ def recommended_actions_for(
         messages.extend(a.message for a in actions if a.when == "ineligible")
     if low_score and eligible:
         messages.extend(a.message for a in actions if a.when == "low_score")
-    # stable unique
     seen: set[str] = set()
     ordered: list[str] = []
     for msg in messages:
