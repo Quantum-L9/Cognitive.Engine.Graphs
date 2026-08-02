@@ -1,7 +1,7 @@
 # ADR-106: Detach Match and Improvement Payloads from Alternate Packet
 
-**Status:** Accepted  
-**Task:** TASK-040  
+**Status:** Accepted
+**Task:** TASK-040
 **Date:** 2026-08-02
 
 ## Decision
