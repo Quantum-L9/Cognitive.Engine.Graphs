@@ -21,7 +21,7 @@ from engine.config.schema import DomainSpec, ExplanationCatalogSpec
 
 
 def _as_score(value: Any) -> float:
-    """Convert contribution values without calling float()."""
+    """Convert contribution values without numeric coercion helpers."""
 
     if isinstance(value, bool) or value is None:
         return 0.0
