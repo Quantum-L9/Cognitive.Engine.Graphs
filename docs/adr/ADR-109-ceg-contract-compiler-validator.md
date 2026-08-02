@@ -1,7 +1,7 @@
 # ADR-109: CEG payload contract compiler validator
 
-**Status:** Accepted  
-**Task:** TASK-034  
+**Status:** Accepted
+**Task:** TASK-034
 **Date:** 2026-08-02
 
 ## Decision

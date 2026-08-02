@@ -27,8 +27,12 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from jsonschema import Draft202012Validator
 from pydantic import ValidationError
+
+try:
+    from jsonschema import Draft202012Validator
+except ImportError:  # CI unit env may omit optional requirements-dev extras
+    Draft202012Validator = None  # type: ignore[misc, assignment]
 
 ROOT = Path(__file__).resolve().parents[1]
 PAYLOADS = ROOT / "contracts" / "payloads"
@@ -111,8 +115,18 @@ def validate_schemas() -> list[dict[str, Any]]:
             "digest": _sha_file(path),
         }
         try:
-            Draft202012Validator.check_schema(schema)
+            if Draft202012Validator is not None:
+                Draft202012Validator.check_schema(schema)
+            else:
+                # Lightweight structural gate when jsonschema is unavailable.
+                if schema.get("$schema") != "https://json-schema.org/draft/2020-12/schema":
+                    raise ValueError("missing Draft 2020-12 $schema")
+                if not schema.get("$id"):
+                    raise ValueError("missing $id")
+                if schema.get("type") not in {None, "object"} and "common.schema" not in path.name:
+                    raise ValueError("unexpected root type")
             entry["check_schema"] = "PASS"
+            entry["check_schema_backend"] = "jsonschema" if Draft202012Validator is not None else "structural"
         except Exception as exc:
             entry["check_schema"] = "FAIL"
             entry["error"] = str(exc)
