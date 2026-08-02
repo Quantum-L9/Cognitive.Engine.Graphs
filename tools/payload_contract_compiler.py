@@ -211,7 +211,9 @@ def validate_domain_authority() -> dict[str, Any]:
     """DomainPackLoader must load plasticos; no parallel cartridge authority."""
     from engine.config.loader import DomainPackLoader
 
-    loader = DomainPackLoader()
+    # Pin to repo domains/ so DOMAIN_SPECS_PATH cannot redirect authority.
+    domains_path = ROOT / "domains"
+    loader = DomainPackLoader(config_path=str(domains_path))
     domain = loader.load_domain("plasticos")
     dumped = domain.model_dump()
     directions = list(
@@ -222,6 +224,7 @@ def validate_domain_authority() -> dict[str, Any]:
     return {
         "loader": "DomainPackLoader",
         "domain_id": "plasticos",
+        "config_path": str(domains_path.relative_to(ROOT)),
         "spec_path": "domains/plasticos/spec.yaml",
         "loaded": True,
         "match_directions": directions,
