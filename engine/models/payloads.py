@@ -230,11 +230,40 @@ class SyncOperation(StrEnum):
     TOMBSTONE = "tombstone"
 
 
+class SourceSystem(StrEnum):
+    ODOO = "odoo"
+    EIE = "eie"
+    CEG = "ceg"
+    OPERATOR = "operator"
+    EXTERNAL_SOURCE = "external_source"
+
+
+class ProjectionEntityType(StrEnum):
+    MATERIAL_SPECIFICATION = "material_specification"
+    MATERIAL_OBSERVATION = "material_observation"
+    SUPPLY_OPPORTUNITY = "supply_opportunity"
+    BUYER_DEMAND = "buyer_demand"
+    FACILITY_MATERIAL_RULE = "facility_material_rule"
+    CAPACITY_OBSERVATION = "capacity_observation"
+
+
+class OutcomeType(StrEnum):
+    REVIEWED = "reviewed"
+    CONTACTED = "contacted"
+    QUOTED = "quoted"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    COMPLETED = "completed"
+    CLAIM_RAISED = "claim_raised"
+    PAID = "paid"
+    REPEAT_BUSINESS = "repeat_business"
+
+
 class SourceRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    system: str = Field(min_length=1)
-    record_ref: str = Field(min_length=1)
-    revision: int = Field(ge=0)
+    system: SourceSystem
+    record_ref: str = Field(pattern=ENTITY_REF_PATTERN)
+    revision: int | str = 0
 
 
 class SyncProjectionRecord(BaseModel):
@@ -269,3 +298,74 @@ class SyncApplyResult(BaseModel):
     rejected: list[dict[str, str]] = Field(default_factory=list)
     projection_version: str
     store_revision_map: dict[str, int] = Field(default_factory=dict)
+
+
+class CanonicalProjection(PayloadBase):
+    contract_version: Literal["1.0.0-draft"]
+    domain: Literal["plasticos"]
+    entity_ref: str = Field(pattern=ENTITY_REF_PATTERN)
+    entity_type: ProjectionEntityType
+    revision: int | str
+    source_record: SourceRecord
+    projection_version: str = Field(min_length=1)
+    field_dictionary_version: str = Field(min_length=1)
+    properties: dict[str, Any] = Field(default_factory=dict)
+    relationship_refs: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    generated_at: datetime
+    tombstone: bool = False
+
+    @field_validator("relationship_refs", "evidence_refs")
+    @classmethod
+    def _unique_entity_refs(cls, values: list[str]) -> list[str]:
+        _require_entity_refs(values)
+        if len(values) != len(set(values)):
+            raise ValueError("entity refs must be unique")
+        return values
+
+
+class OutcomeFeedbackItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    match_result_ref: str = Field(pattern=ENTITY_REF_PATTERN)
+    candidate_ref: str = Field(pattern=ENTITY_REF_PATTERN)
+    outcome_type: OutcomeType
+    occurred_at: datetime
+    source_record: SourceRecord
+    idempotency_key: str = Field(min_length=1)
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class OutcomeFeedback(PayloadBase):
+    contract_version: Literal["1.0.0-draft"]
+    domain: Literal["plasticos"]
+    outcomes: list[OutcomeFeedbackItem] = Field(min_length=1)
+
+
+class OutcomeApplyResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    accepted: list[str] = Field(default_factory=list)
+    reused: list[str] = Field(default_factory=list)
+
+
+class OutcomeFeedbackStore:
+    """Idempotent outcome feedback applicator keyed by idempotency_key."""
+
+    def __init__(self) -> None:
+        self._by_key: dict[str, OutcomeFeedbackItem] = {}
+
+    def get(self, idempotency_key: str) -> OutcomeFeedbackItem | None:
+        return self._by_key.get(idempotency_key)
+
+    def snapshot(self) -> dict[str, OutcomeFeedbackItem]:
+        return dict(self._by_key)
+
+    def apply(self, feedback: OutcomeFeedback) -> OutcomeApplyResult:
+        accepted: list[str] = []
+        reused: list[str] = []
+        for item in feedback.outcomes:
+            if item.idempotency_key in self._by_key:
+                reused.append(item.idempotency_key)
+                continue
+            self._by_key[item.idempotency_key] = item
+            accepted.append(item.idempotency_key)
+        return OutcomeApplyResult(accepted=accepted, reused=reused)

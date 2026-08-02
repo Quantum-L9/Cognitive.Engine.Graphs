@@ -1,0 +1,27 @@
+{
+  "contract_version": "1.0.0-draft",
+  "domain": "plasticos",
+  "entity_ref": "plasticos.material.specification:9",
+  "entity_type": "material_specification",
+  "revision": 3,
+  "source_record": {
+    "system": "odoo",
+    "record_ref": "plasticos.material.specification:9",
+    "revision": 3
+  },
+  "projection_version": "1.0.0",
+  "field_dictionary_version": "1.0.0",
+  "properties": {
+    "polymer_code": "HDPE",
+    "form_code": "REGRIND",
+    "color_code": "BLACK"
+  },
+  "relationship_refs": [
+    "plasticos.material.observation:90"
+  ],
+  "evidence_refs": [
+    "plasticos.material.observation:90"
+  ],
+  "generated_at": "2026-08-01T13:30:00Z",
+  "tombstone": false
+}

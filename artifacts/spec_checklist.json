@@ -262,6 +262,7 @@
       "agents/cursor/GMP-v2.0-Perplex-Py-Scripts/script_2.py",
       "agents/cursor/cursor_workflow_kernel.yaml",
       "agents/cursor/gmp_meta_learning.py",
+      "contracts/payloads/canonical-projection.schema.yaml",
       "contracts/payloads/match-response.schema.yaml",
       "docs/archive/plasticos/PlasticOS Graph Cognitive Engine.yaml",
       "docs/archive/plasticos/plasticos_domain_spec.yaml",
@@ -1566,6 +1567,7 @@
     "status": "IMPLEMENTED",
     "evidence_files": [
       "chassis/auth/settings.py",
+      "contracts/payloads/outcome-feedback.schema.yaml",
       "docs/archive/plasticos/plasticos_domain_spec.yaml",
       "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
       "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml",

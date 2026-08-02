@@ -13,6 +13,12 @@ $defs:
   entity_ref:
     type: string
     pattern: ^[a-z0-9_.-]+:[^\s]+$
+  revision:
+    oneOf:
+    - type: integer
+      minimum: 0
+    - type: string
+      minLength: 1
   semver_ref:
     type: object
     additionalProperties: false
@@ -24,6 +30,27 @@ $defs:
       version:
         type: string
         minLength: 1
+  source_ref:
+    type: object
+    additionalProperties: false
+    required:
+    - system
+    - record_ref
+    properties:
+      system:
+        type: string
+        enum:
+        - odoo
+        - eie
+        - ceg
+        - operator
+        - external_source
+      record_ref:
+        $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/entity_ref
+      revision:
+        $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/revision
+  evidence_ref:
+    $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/entity_ref
   field_value_state:
     type: string
     enum:

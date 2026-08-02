@@ -1,0 +1,62 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: urn:l9:plasticos:contracts:payload:canonical-projection:1.0.0-draft
+title: PlasticOS Canonical Projection
+description: Rebuildable provider-neutral projection of approved Odoo facts. It is never the business system of record.
+x-publication-status: draft-unpublished
+type: object
+additionalProperties: false
+required:
+- contract_version
+- domain
+- entity_ref
+- entity_type
+- revision
+- source_record
+- projection_version
+- field_dictionary_version
+- properties
+- generated_at
+properties:
+  contract_version:
+    $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/contract_version
+  domain:
+    $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/domain
+  entity_ref:
+    $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/entity_ref
+  entity_type:
+    type: string
+    enum:
+    - material_specification
+    - material_observation
+    - supply_opportunity
+    - buyer_demand
+    - facility_material_rule
+    - capacity_observation
+  revision:
+    $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/revision
+  source_record:
+    $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/source_ref
+  projection_version:
+    type: string
+    minLength: 1
+  field_dictionary_version:
+    type: string
+    minLength: 1
+  properties:
+    type: object
+  relationship_refs:
+    type: array
+    items:
+      $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/entity_ref
+    uniqueItems: true
+  evidence_refs:
+    type: array
+    items:
+      $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/evidence_ref
+    uniqueItems: true
+  generated_at:
+    type: string
+    format: date-time
+  tombstone:
+    type: boolean
+    default: false
