@@ -30,7 +30,14 @@ def order_feature_contributions(
 
         def key(item: dict[str, Any]) -> tuple[float, str]:
             contrib = item.get("contribution")
-            score = float(contrib) if isinstance(contrib, (int, float)) else 0.0
+            score = 0.0
+            if isinstance(contrib, (int, float)):
+                score = float(contrib)
+            elif isinstance(contrib, str):
+                try:
+                    score = float(contrib)
+                except ValueError:
+                    score = 0.0
             return (-score, str(item.get("feature_id", "")))
 
         return sorted(contributions, key=key)

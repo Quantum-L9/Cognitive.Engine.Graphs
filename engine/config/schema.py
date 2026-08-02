@@ -957,7 +957,6 @@ class DecisionArbitrationSpec(BaseModel):
     )
 
 
-
 class FeatureCatalogEntry(BaseModel):
     """Harvested feature taxonomy entry (PACK-026 → DomainSpec)."""
 
