@@ -518,7 +518,11 @@ FILE_REGISTRY: list[FileMeta] = [
         "engine-team",
     ),
     FileMeta(
-        "docs/archive/plasticos/PlasticOS Graph Cognitive Engine.yaml", "engine-specific", ["docs"], ["plasticos", "spec"], "engine-team"
+        "docs/archive/plasticos/PlasticOS Graph Cognitive Engine.yaml",
+        "engine-specific",
+        ["docs"],
+        ["plasticos", "spec"],
+        "engine-team",
     ),
     FileMeta(
         "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
@@ -603,7 +607,11 @@ FILE_REGISTRY: list[FileMeta] = [
     ),
     # --- docs/misc ---
     FileMeta(
-        "docs/archive/plasticos/plasticos_domain_spec_changes.md", "domain-specific", ["docs"], ["plasticos", "changelog"], "domain-team"
+        "docs/archive/plasticos/plasticos_domain_spec_changes.md",
+        "domain-specific",
+        ["docs"],
+        ["plasticos", "changelog"],
+        "domain-team",
     ),
     # --- docs/contracts ---
     FileMeta(
@@ -774,7 +782,11 @@ FILE_REGISTRY: list[FileMeta] = [
     ),
     FileMeta("domains/_template.yaml", "domain-specific", ["config"], ["domains", "template"], "domain-team"),
     FileMeta(
-        "docs/archive/plasticos/plasticos_domain_spec.yaml", "domain-specific", ["config"], ["domains", "plasticos"], "domain-team"
+        "docs/archive/plasticos/plasticos_domain_spec.yaml",
+        "domain-specific",
+        ["config"],
+        ["domains", "plasticos"],
+        "domain-team",
     ),
     FileMeta("domains/plasticos/spec.yaml", "domain-specific", ["config"], ["domains", "plasticos"], "domain-team"),
     FileMeta("chassis/__init__.py", "chassis", ["api"], ["chassis"], "platform-team"),

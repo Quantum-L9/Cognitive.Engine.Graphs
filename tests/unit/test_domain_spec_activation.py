@@ -63,13 +63,7 @@ def plasticos_spec_data() -> dict:
     Runtime authority remains domains/plasticos/spec.yaml via DomainPackLoader.
     This fixture intentionally reads the archived richer reference spec.
     """
-    spec_path = (
-        Path(__file__).parent.parent.parent
-        / "docs"
-        / "archive"
-        / "plasticos"
-        / "plasticos_domain_spec.yaml"
-    )
+    spec_path = Path(__file__).parent.parent.parent / "docs" / "archive" / "plasticos" / "plasticos_domain_spec.yaml"
     with spec_path.open() as f:
         return yaml.safe_load(f)
 
