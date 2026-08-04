@@ -783,12 +783,12 @@ async def main():
     logger.info("pattern analysis: stats", stats=stats)
 
     # Generate heuristics
-    await engine.generate_heuristics()
-    logger.info("generated {len(heuristics)} heuristics")
+    heuristics = await engine.generate_heuristics()
+    logger.info("generated heuristics", count=len(heuristics))
 
     # Get active heuristics for next GMP
-    await engine.get_active_heuristics()
-    logger.info("active heuristics: {len(active)}")
+    active = await engine.get_active_heuristics()
+    logger.info("active heuristics", count=len(active))
 
     # Update autonomy metrics
     metrics = await engine.update_autonomy_metrics(result)

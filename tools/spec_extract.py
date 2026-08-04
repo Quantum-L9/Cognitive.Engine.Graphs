@@ -56,9 +56,6 @@ ENGINE_GLOB = "engine/**/*.py"
 DOMAINS_GLOB = "domains/**/*.yaml"
 COVERAGE_MATRIX_JSON = "coverage_matrix.json"
 
-RESEARCH_DIR = "tools/research"
-RESEARCH_PATTERNS_FILE = "top5_leverage_patterns_detailed.json"
-
 
 class Status(StrEnum):
     IMPLEMENTED = "IMPLEMENTED"

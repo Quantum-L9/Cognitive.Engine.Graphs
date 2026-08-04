@@ -154,7 +154,10 @@ def main() -> int:
                     file=sys.stderr,
                 )
             except ValueError:
-                pass
+                print(
+                    "PacketEnvelope gate: compare output was not JSON; consult the raw SDK output above.",
+                    file=sys.stderr,
+                )
         return compare.returncode
 
 

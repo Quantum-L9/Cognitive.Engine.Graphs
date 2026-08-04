@@ -157,14 +157,15 @@ class CompoundE3D:
                 self._relation_embeddings[rid] = rng.uniform(-bound, bound, size=self.dim)
 
         # Simplified training loop (production: replace with PyTorch optim)
+        entity_list = list(entities)
         losses: list[float] = []
         for _ in range(epochs):
             epoch_loss = 0.0
             rng.shuffle(triples)
             for h, r, t in triples:
                 pos_score = self._distance(h, r, t)
-                # Negative sampling
-                neg_t = rng.choice(list(entities))
+                # Negative sampling — index the list so the type stays str
+                neg_t = entity_list[int(rng.integers(len(entity_list)))]
                 neg_score = self._distance(h, r, neg_t)
                 loss = max(0.0, self.config.margin + pos_score - neg_score)
                 epoch_loss += loss
