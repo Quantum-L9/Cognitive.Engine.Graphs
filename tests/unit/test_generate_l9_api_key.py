@@ -51,7 +51,10 @@ def test_generate_key_is_high_entropy_urlsafe():
     # secrets.token_urlsafe(48) yields ~64 url-safe chars.
     assert isinstance(key, str)
     assert len(key) >= 43
-    assert keygen.generate_key() != keygen.generate_key()
+    # Two independent draws must differ (no fixed/degenerate output).
+    first_key = keygen.generate_key()
+    second_key = keygen.generate_key()
+    assert first_key != second_key
 
 
 def test_resource_identifiers_are_non_sensitive_names():
