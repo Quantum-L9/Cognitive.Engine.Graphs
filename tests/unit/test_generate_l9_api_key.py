@@ -62,7 +62,7 @@ def test_resource_identifiers_are_non_sensitive_names():
     # not be named with tokens ("secret"/"key"/"token") that trip clear-text
     # logging heuristics when printed in status output.
     assert keygen.AWS_SM_ENTRY_NAME == "clawdbot/l9-api"
-    for banned in ("secret", "token", "password", "credential"):
+    for banned in ("secret", "key", "token", "password", "credential"):
         assert banned not in "AWS_SM_ENTRY_NAME".lower()
         assert banned not in "AWS_SM_ENTRY_DESCRIPTION".lower()
 
