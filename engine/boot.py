@@ -203,6 +203,8 @@ class GraphLifecycle(LifecycleHook):
             try:
                 await self._compliance_flush_task
             except asyncio.CancelledError:
+                # Expected: awaiting a task we just cancelled re-raises
+                # CancelledError. Swallow it here so shutdown continues.
                 pass
             self._compliance_flush_task = None
             logger.info("W4-04: Compliance flush task stopped")

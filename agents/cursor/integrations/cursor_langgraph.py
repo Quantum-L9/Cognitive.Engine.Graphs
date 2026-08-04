@@ -207,7 +207,7 @@ class CursorMemoryWriteNode:
 
         # Write errors
         if state.errors:
-            for _error in state.errors:
+            for _ in state.errors:
                 try:
                     packet_id = await self._gateway.write_error(state)
                     packet_ids.append(packet_id)

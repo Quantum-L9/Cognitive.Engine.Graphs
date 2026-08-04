@@ -109,6 +109,13 @@ class LearnedHeuristic(BaseModel):
         """Make hashable for deduplication."""
         return hash(self.pattern_text)
 
+    def __eq__(self, other: object) -> bool:
+        """Equality by pattern_text, kept consistent with __hash__ so that
+        set/dict deduplication collapses heuristics sharing a pattern."""
+        if not isinstance(other, LearnedHeuristic):
+            return NotImplemented
+        return self.pattern_text == other.pattern_text
+
 
 class AutonomyGraduationMetrics(BaseModel):
     """Tracks metrics for autonomy level graduation."""

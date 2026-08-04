@@ -154,6 +154,8 @@ def main() -> int:
                     file=sys.stderr,
                 )
             except (json.JSONDecodeError, ValueError):
+                # Best-effort diagnostic only; a malformed comparison payload
+                # must not mask the underlying gate return code.
                 pass
         return compare.returncode
 
