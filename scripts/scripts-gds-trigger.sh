@@ -34,7 +34,7 @@ JOB="${2:-all}"
 
 echo "⚙️  Triggering GDS jobs for ${DOMAIN}"
 
-if [ "$JOB" = "all" ]; then
+if [[ "$JOB" = "all" ]]; then
   curl -sf -X POST "${API_URL}/v1/admin/gds/trigger-all"     -H "X-Domain-Key: ${DOMAIN}" | python3 -m json.tool
 else
   curl -sf -X POST "${API_URL}/v1/admin/gds/trigger/${JOB}"     -H "X-Domain-Key: ${DOMAIN}" | python3 -m json.tool

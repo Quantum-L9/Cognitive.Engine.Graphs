@@ -145,24 +145,26 @@ class CompoundE3D:
             entities.update([h, t])
             relations.add(r)
 
+        rng = np.random.default_rng()
+
         # Initialize embeddings (Xavier uniform)
         bound = np.sqrt(6.0 / self.dim)
         for eid in entities:
             if eid not in self._entity_embeddings:
-                self._entity_embeddings[eid] = np.random.uniform(-bound, bound, size=self.dim)
+                self._entity_embeddings[eid] = rng.uniform(-bound, bound, size=self.dim)
         for rid in relations:
             if rid not in self._relation_embeddings:
-                self._relation_embeddings[rid] = np.random.uniform(-bound, bound, size=self.dim)
+                self._relation_embeddings[rid] = rng.uniform(-bound, bound, size=self.dim)
 
         # Simplified training loop (production: replace with PyTorch optim)
         losses: list[float] = []
-        for epoch in range(epochs):
+        for _ in range(epochs):
             epoch_loss = 0.0
-            np.random.shuffle(triples)
+            rng.shuffle(triples)
             for h, r, t in triples:
                 pos_score = self._distance(h, r, t)
                 # Negative sampling
-                neg_t = np.random.choice(list(entities))
+                neg_t = rng.choice(list(entities))
                 neg_score = self._distance(h, r, neg_t)
                 loss = max(0.0, self.config.margin + pos_score - neg_score)
                 epoch_loss += loss

@@ -158,7 +158,7 @@ def compute_fingerprint(
         if isinstance(dim_scores, dict) and dim_scores:
             numeric_dims = {k: v for k, v in dim_scores.items() if isinstance(v, (int, float))}
             if numeric_dims:
-                top_dim = max(numeric_dims, key=lambda k: abs(numeric_dims[k]))
+                top_dim = max(numeric_dims.items(), key=lambda item: abs(item[1]))[0]
                 dimension_wins[top_dim] += 1
 
     # Normalize to relative frequencies

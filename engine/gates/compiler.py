@@ -19,6 +19,7 @@ Exports: GateCompiler
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Callable
 
 from engine.config.schema import (
@@ -31,6 +32,9 @@ from engine.gates.null_semantics import NullHandler
 from engine.utils.security import sanitize_label
 
 logger = logging.getLogger(__name__)
+
+# Cypher boolean conjunction used to join WHERE fragments.
+AND_JOINER = " AND "
 
 
 class GateCompiler:
@@ -166,7 +170,7 @@ class GateCompiler:
         if not fragments:
             return "true"
 
-        return " AND ".join(fragments)
+        return AND_JOINER.join(fragments)
 
     def compile_relaxed(
         self,
@@ -186,7 +190,7 @@ class GateCompiler:
             if role and gate.roleexempt and role in gate.roleexempt:
                 continue
 
-            if gate.relaxedpenalty == 0.0:
+            if math.isclose(gate.relaxedpenalty, 0.0, abs_tol=1e-9):
                 fragment = self.compile(gate)
                 if fragment:
                     hard_fragments.append(f"({fragment})")
@@ -194,7 +198,7 @@ class GateCompiler:
         if not hard_fragments:
             return "true"
 
-        return " AND ".join(hard_fragments)
+        return AND_JOINER.join(hard_fragments)
 
     # ── Gate Type Handlers ─────────────────────────────────
 
@@ -247,7 +251,7 @@ class GateCompiler:
         parts = []
         parts.append(f"(candidate.{min_prop} IS NULL OR candidate.{min_prop} <= ${param})")
         parts.append(f"(candidate.{max_prop} IS NULL OR ${param} <= candidate.{max_prop})")
-        return " AND ".join(parts)
+        return AND_JOINER.join(parts)
 
     def _compile_enum(self, gate: GateSpec) -> str:
         """

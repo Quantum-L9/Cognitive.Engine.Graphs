@@ -45,7 +45,7 @@ docker build -t "${PROJECT}:${TAG}"   --build-arg L9_PROJECT="$PROJECT"   --buil
 echo "✅ Built ${PROJECT}:${TAG}"
 
 --- Tag & Push ---
-if [ "$ACCOUNT_ID" != "000000000000" ]; then
+if [[ "$ACCOUNT_ID" != "000000000000" ]]; then
   echo "📤 Pushing to ECR..."
   aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REGISTRY"
 

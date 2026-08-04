@@ -48,7 +48,7 @@ from pathlib import Path
 # Also catches: from engine.config.loader import DomainSpecLoader, OtherThing
 # (the replacement handles the simple single-import case; compound imports are
 #  flagged and require manual fix with a clear error message)
-_IMPORT_PATTERN = re.compile(r"from\s+engine\.config\.loader\s+import\s+([^\n]*\bDomainSpecLoader\b[^\n]*)")
+_IMPORT_PATTERN = re.compile(r"from\s+engine\.config\.loader\s+import\s+(?=[^\n]*\bDomainSpecLoader\b)([^\n]*)")
 
 # Matches: DomainSpecLoader(...)  — any call site
 _CALL_PATTERN = re.compile(r"\bDomainSpecLoader\(([^)]*)\)")

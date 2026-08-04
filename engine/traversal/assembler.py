@@ -139,7 +139,7 @@ class TraversalAssembler:
                         pass
 
             # Check label references in pattern
-            label_refs = re.findall(r":([A-Za-z_][A-Za-z0-9_]*)", step.pattern)
+            label_refs = re.findall(r":([A-Za-z_]\w*)", step.pattern)
             for ref in label_refs:
                 if ref not in node_labels and ref not in edge_types:
                     msg = f"Traversal step '{step.name}': references undeclared label/type '{ref}'"

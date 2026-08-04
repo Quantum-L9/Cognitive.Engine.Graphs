@@ -185,9 +185,11 @@ jobs:
 
       - name: Notify Slack (Success)
         if: success() && vars.SLACK_NOTIFICATIONS_ENABLED == 'true'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
-            curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} \
+          if [ -n "$SLACK_WEBHOOK_URL" ]; then
+            curl -X POST "$SLACK_WEBHOOK_URL" \
               -H 'Content-Type: application/json' \
               -d '{
                 "text": "✅ *${{ env.PROJECT }}* deployed to `${{ inputs.environment }}`",
@@ -203,9 +205,11 @@ jobs:
 
       - name: Notify Slack (Failure)
         if: failure() && vars.SLACK_NOTIFICATIONS_ENABLED == 'true'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          if [ -n "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
-            curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} \
+          if [ -n "$SLACK_WEBHOOK_URL" ]; then
+            curl -X POST "$SLACK_WEBHOOK_URL" \
               -H 'Content-Type: application/json' \
               -d '{
                 "text": "❌ *${{ env.PROJECT }}* deployment to `${{ inputs.environment }}` FAILED",

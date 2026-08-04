@@ -28,7 +28,10 @@ logger: structlog.stdlib.BoundLogger = structlog.get_logger(__name__)
 
 # ── Normalisation helpers ──────────────────────────────────
 
-_STRIP_RE = re.compile(r"[_\-\s]+")
+# Separator pattern: underscores, hyphens, and whitespace runs.
+_SEPARATOR_PATTERN = r"[_\-\s]+"
+
+_STRIP_RE = re.compile(_SEPARATOR_PATTERN)
 
 
 def _normalise(name: str) -> str:
@@ -38,8 +41,8 @@ def _normalise(name: str) -> str:
 
 def _token_overlap(a: str, b: str) -> float:
     """Token-level Jaccard similarity between two field names."""
-    tokens_a = set(re.split(r"[_\-\s]+", a.lower()))
-    tokens_b = set(re.split(r"[_\-\s]+", b.lower()))
+    tokens_a = set(re.split(_SEPARATOR_PATTERN, a.lower()))
+    tokens_b = set(re.split(_SEPARATOR_PATTERN, b.lower()))
     if not tokens_a or not tokens_b:
         return 0.0
     intersection = tokens_a & tokens_b

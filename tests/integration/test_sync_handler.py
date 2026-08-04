@@ -43,5 +43,5 @@ def test_sync_unknown_entity_type_raises(domain_loader):
 
     spec = domain_loader.load_domain("plasticos")
     gen = SyncGenerator(spec)
-    with pytest.raises(Exception):
+    with pytest.raises(AttributeError, match="resolve_endpoint"):
         gen.resolve_endpoint("nonexistent_entity_type_xyz")

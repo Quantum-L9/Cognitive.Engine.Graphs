@@ -34,11 +34,11 @@ concurrency:
   group: supply-chain-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege default at workflow level; each job below grants only the
+# write scopes it needs (scorecard: security-events/id-token; sbom: id-token;
+# dependency-review: pull-requests). Keeps elevated permissions job-scoped.
 permissions:
   contents: read
-  security-events: write
-  id-token: write
-  actions: read
 
 env:
   PYTHON_VERSION: ${{ vars.PYTHON_VERSION || '3.12' }}

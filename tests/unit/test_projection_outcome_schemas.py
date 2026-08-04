@@ -49,14 +49,16 @@ def test_outcome_feedback_fixture_validates() -> None:
 
 @pytest.mark.unit
 def test_canonical_rejects_transport_field() -> None:
+    data = _load(NEGATIVES / "canonical-projection-transport-field.json")
     with pytest.raises(ValidationError):
-        CanonicalProjection.model_validate(_load(NEGATIVES / "canonical-projection-transport-field.json"))
+        CanonicalProjection.model_validate(data)
 
 
 @pytest.mark.unit
 def test_outcome_rejects_unknown_type() -> None:
+    data = _load(NEGATIVES / "outcome-feedback-unknown-type.json")
     with pytest.raises(ValidationError):
-        OutcomeFeedback.model_validate(_load(NEGATIVES / "outcome-feedback-unknown-type.json"))
+        OutcomeFeedback.model_validate(data)
 
 
 @pytest.mark.unit

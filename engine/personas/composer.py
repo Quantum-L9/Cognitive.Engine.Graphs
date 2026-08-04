@@ -25,6 +25,7 @@ in Language Models" (arXiv 2510.15987v1)
 from __future__ import annotations
 
 import logging
+import math
 from typing import Literal, assert_never
 
 from engine.personas.constants import persona_settings
@@ -98,7 +99,7 @@ def blend_personas(personas: list[WeightedPersona]) -> TraitVector:
         raise ValueError(msg)
 
     total_weight = sum(p["weight"] for p in personas)
-    if total_weight == 0.0:
+    if math.isclose(total_weight, 0.0, abs_tol=1e-9):
         msg = "Cannot blend personas with all-zero weights."
         raise ValueError(msg)
 

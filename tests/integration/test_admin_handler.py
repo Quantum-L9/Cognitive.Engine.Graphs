@@ -37,12 +37,16 @@ async def test_admin_missing_domain_id_handled(engine_deps):
     """get_domain without domain_id should raise or return error."""
     from engine.handlers import handle_admin
 
+    raised = False
+    result: dict = {}
     try:
         result = await handle_admin(
             "plasticos",
             {"subaction": "get_domain"},
         )
+    except Exception:
+        raised = True  # Raising is also acceptable
+
+    if not raised:
         # Some implementations return error dict instead of raising
         assert "error" in result or result.get("status") == "error"
-    except Exception:
-        pass  # Raising is also acceptable

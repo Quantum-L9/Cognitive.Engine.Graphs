@@ -281,7 +281,7 @@ class GDSScheduler:
             result["aggregation_strategy"] = resolved_agg
 
         except Exception as e:
-            logger.error(f"Job {job_spec.name} failed: {e}", exc_info=True)
+            logger.exception(f"Job {job_spec.name} failed")
             result = {"status": "failed", "error": str(e)}
 
         async with self._history_lock:
@@ -318,7 +318,7 @@ class GDSScheduler:
             if "not found" in exc_msg or "does not exist" in exc_msg:
                 pass  # Graph didn't exist; expected on first run
             else:
-                logger.error("GDS pre-drop failed unexpectedly for %s: %s", graph_name, exc)
+                logger.exception("GDS pre-drop failed unexpectedly for %s", graph_name)
                 raise
 
         # Use json.dumps for proper Cypher array syntax
@@ -348,8 +348,8 @@ class GDSScheduler:
             drop_cypher = f"CALL gds.graph.drop('{graph_name}') YIELD graphName RETURN graphName"
             try:
                 await self.graph_driver.execute_query(drop_cypher, database=db)
-            except Exception as drop_err:
-                logger.error(f"Failed to drop projected graph '{graph_name}': {drop_err}")
+            except Exception:
+                logger.exception(f"Failed to drop projected graph '{graph_name}'")
 
     async def _run_cooccurrence(self, job_spec: GDSJobSpec) -> dict[str, Any]:
         """Build co-occurrence edges from bipartite projection.

@@ -38,7 +38,7 @@ echo "=================="
 --- API ---
 printf "  API (%s)... " "$API_URL"
 if HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" "${API_URL}/v1/health" 2>/dev/null); then
-  if [ "$HTTP_CODE" = "200" ]; then
+  if [[ "$HTTP_CODE" = "200" ]]; then
     echo "✅ UP (${HTTP_CODE})"
   else
     echo "⚠️  DEGRADED (${HTTP_CODE})"

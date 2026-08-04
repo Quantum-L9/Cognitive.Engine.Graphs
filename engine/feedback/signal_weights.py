@@ -125,7 +125,7 @@ class SignalWeightCalculator:
         dim_total = result[0]["dim_total"] if result else 0
         dim_wins = result[0]["dim_wins"] if result else 0
 
-        if dim_total == 0 or base_win_rate == 0.0:
+        if dim_total == 0 or math.isclose(base_win_rate, 0.0, abs_tol=1e-9):
             return {
                 "weight": self._weight_spec.baseline_weight,
                 "confidence": 0.0,

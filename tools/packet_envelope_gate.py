@@ -153,7 +153,7 @@ def main() -> int:
                     "docs/CI_PIPELINE.md (baseline ratchet).",
                     file=sys.stderr,
                 )
-            except (json.JSONDecodeError, ValueError):
+            except ValueError:
                 pass
         return compare.returncode
 

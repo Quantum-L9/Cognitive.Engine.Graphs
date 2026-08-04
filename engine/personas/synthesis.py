@@ -23,6 +23,7 @@ in Language Models" (arXiv 2510.15987v1)
 from __future__ import annotations
 
 import logging
+import math
 
 from engine.personas.constants import persona_settings
 from engine.personas.types import FeatureVector, PersonaOutput, WeightedOutput
@@ -81,7 +82,7 @@ def compute_synthesis_weights(
     min_w = persona_settings.min_persona_weight
     n = len(persona_outputs)
 
-    if total_raw == 0.0:
+    if math.isclose(total_raw, 0.0, abs_tol=1e-9):
         # Equal weights when no alignment signal
         equal_w = 1.0 / n
         return [{"output": output, "weight": equal_w} for output in persona_outputs]

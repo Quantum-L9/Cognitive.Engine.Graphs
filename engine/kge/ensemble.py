@@ -46,6 +46,9 @@ from engine.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+# Error message raised when an ensemble is asked to fuse an empty score list.
+NO_SCORES_MSG = "No scores provided"
+
 
 class FusionStrategy(StrEnum):
     """Ensemble fusion strategies.
@@ -146,7 +149,7 @@ class WeightedDistributionScore(VariantEnsemble):
 
     def fuse(self, scores: list[VariantScore]) -> EnsembleResult:
         if not scores:
-            raise ValueError("No scores provided")
+            raise ValueError(NO_SCORES_MSG)
 
         normalized = [
             VariantScore(
@@ -210,7 +213,7 @@ class RankAggregationEnsemble(VariantEnsemble):
 
     def fuse(self, scores: list[VariantScore]) -> EnsembleResult:
         if not scores:
-            raise ValueError("No scores provided")
+            raise ValueError(NO_SCORES_MSG)
 
         ranked = sorted(scores, key=lambda s: -s.score)
 
@@ -325,7 +328,7 @@ class MixtureOfExpertsEnsemble(VariantEnsemble):
 
     def fuse(self, scores: list[VariantScore]) -> EnsembleResult:
         if not scores:
-            raise ValueError("No scores provided")
+            raise ValueError(NO_SCORES_MSG)
 
         competencies = np.array([s.score * s.confidence for s in scores])
         gate_logits = competencies / (1.0 + 1e-8)

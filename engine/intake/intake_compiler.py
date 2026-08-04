@@ -23,6 +23,8 @@ Compilation rules (adapted from L9 Spec Compiler):
 
 from __future__ import annotations
 
+import math
+
 import structlog
 import yaml
 
@@ -210,7 +212,7 @@ def compile_intake(
             gate_type = _propose_gate_type(prop)
             if gate_type and not mapping.is_gate_critical:
                 gate_proposals.append({"field": mapping.canonical_name, "gate_type": gate_type.value})
-            if _propose_scoring(prop) and mapping.scoring_weight == 0.0:
+            if _propose_scoring(prop) and math.isclose(mapping.scoring_weight, 0.0, abs_tol=1e-9):
                 scoring_proposals.append(mapping.canonical_name)
 
     # Build YAML output

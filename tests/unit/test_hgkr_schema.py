@@ -84,13 +84,15 @@ class TestGDSJobSpecExtensions:
 
     def test_propagation_depth_lower_bound(self) -> None:
         """Depth < 1 is rejected by Pydantic ge=1 constraint."""
+        raw = _minimal_gds_job(propagation_depth=0)
         with pytest.raises(PydanticValidationError):
-            GDSJobSpec(**_minimal_gds_job(propagation_depth=0))
+            GDSJobSpec(**raw)
 
     def test_propagation_depth_upper_bound(self) -> None:
         """Depth > 5 is rejected by Pydantic le=5 constraint."""
+        raw = _minimal_gds_job(propagation_depth=6)
         with pytest.raises(PydanticValidationError):
-            GDSJobSpec(**_minimal_gds_job(propagation_depth=6))
+            GDSJobSpec(**raw)
 
     def test_propagation_depth_valid_range(self) -> None:
         """Depths 1 through 5 are all accepted."""

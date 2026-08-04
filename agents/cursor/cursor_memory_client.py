@@ -190,6 +190,9 @@ MCP_URL = os.getenv("MCP_URL", "http://46.62.243.82/memory")
 # L9 API URL (FALLBACK for graph/cache) - also use direct IP
 L9_API_URL = os.getenv("L9_API_URL", "http://46.62.243.82")
 
+# Shared request content type
+CONTENT_TYPE_JSON = "application/json"
+
 # MCP_API_KEY_C is the correct key for Cursor (caller_id: "C")
 # Fallback chain: MCP_API_KEY_C -> L9_EXECUTOR_API_KEY (legacy)
 L9_EXECUTOR_API_KEY = os.getenv("MCP_API_KEY_C") or os.getenv("L9_EXECUTOR_API_KEY", "")
@@ -216,7 +219,7 @@ def mcp_call_tool(tool_name: str, arguments: dict) -> dict:
     url = f"{MCP_URL}/mcp/call"
     headers = {
         "Authorization": f"Bearer {L9_EXECUTOR_API_KEY}",
-        "Content-Type": "application/json",
+        "Content-Type": CONTENT_TYPE_JSON,
     }
 
     payload = {
@@ -265,7 +268,7 @@ def api_request(method: str, path: str, data: dict | None = None) -> dict:
     url = f"{L9_API_URL}{path}"
     headers = {
         "Authorization": f"Bearer {L9_EXECUTOR_API_KEY}",
-        "Content-Type": "application/json",
+        "Content-Type": CONTENT_TYPE_JSON,
         "X-User-Id": "cursor",
     }
 
@@ -339,7 +342,7 @@ def cmd_health():
 
     # TEST 2: Direct API Health (FALLBACK)
     url = f"{L9_API_URL}/health"
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": CONTENT_TYPE_JSON}
     req = urllib.request.Request(url, headers=headers, method="GET")
 
     try:

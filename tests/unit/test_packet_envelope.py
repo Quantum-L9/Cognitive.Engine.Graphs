@@ -32,6 +32,7 @@ import json
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import ValidationError
 
 from engine.packet.chassis_contract import deflate_egress, delegate_to_node, inflate_ingress
 from engine.packet.packet_envelope import (
@@ -82,35 +83,35 @@ def minimal_packet():
 
 class TestImmutability:
     def test_frozen_payload(self, base_packet):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError, match="Instance is frozen"):
             base_packet.payload = {"hacked": True}
 
     def test_frozen_tenant(self, base_packet):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError, match="Instance is frozen"):
             base_packet.tenant = TenantContext(actor="evil")
 
     def test_frozen_tags(self, base_packet):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError, match="Instance is frozen"):
             base_packet.tags = ("injected",)
 
     def test_extra_field_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
             PacketAddress(source_node="x", evil_field="y")
 
     def test_sub_object_frozen(self, base_packet):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError, match="Instance is frozen"):
             base_packet.address.source_node = "hijacked"
 
     def test_security_frozen(self, base_packet):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError, match="Instance is frozen"):
             base_packet.security.content_hash = "tampered"
 
     def test_observability_frozen(self, base_packet):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError, match="Instance is frozen"):
             base_packet.observability.trace_id = "replaced"
 
     def test_lineage_frozen(self, base_packet):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError, match="Instance is frozen"):
             base_packet.lineage.generation = 999
 
 
