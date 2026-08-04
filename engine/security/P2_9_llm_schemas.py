@@ -261,7 +261,7 @@ class ValidatedLLMClient:
         # Sanitize schema_hint to prevent prompt injection via untrusted schema content.
         schema_hint_clean: str | None = None
         if schema_hint:
-            schema_hint_clean = re.sub(r"[^\w\s.\-_\[\]{}]", "", str(schema_hint))[:500]
+            schema_hint_clean = re.sub(r"[^\w\s.\-\[\]{}]", "", str(schema_hint))[:500]
 
         system = "You are a Cypher query expert. Return JSON with: cypher_query, parameters, explanation, confidence."
         user = f"Convert to Cypher: {clean}"

@@ -276,7 +276,7 @@ async def _health_route(request: Request, hook: LifecycleHook) -> JSONResponse:
         status_code = 200 if result.get("data", {}).get("status") == "healthy" else 503
         return JSONResponse(content=result, status_code=status_code)
     except Exception as exc:
-        logger.error("Health check failed: %s", exc)
+        logger.exception("Health check failed: %s", exc)
         return JSONResponse(
             content={"status": "unhealthy", "error": "health_check_failed"},
             status_code=503,

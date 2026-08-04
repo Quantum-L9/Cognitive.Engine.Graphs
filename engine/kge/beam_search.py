@@ -33,6 +33,7 @@ AI (constraint satisfaction).
 
 from __future__ import annotations
 
+import functools
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -90,6 +91,7 @@ class PruneStrategy(StrEnum):
     COMBINED = "combined"
 
 
+@functools.total_ordering
 @dataclass
 class BeamCandidate:
     """Represents a candidate variant in beam search."""
@@ -200,7 +202,7 @@ class BeamSearchEngine:
         """
         import warnings
 
-        rng = np.random.default_rng()
+        rng = np.random.default_rng(0)
 
         # Check if model has trained embeddings
         if not self.model._entity_embeddings:

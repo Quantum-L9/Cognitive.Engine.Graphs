@@ -33,8 +33,9 @@ def test_tombstone_fixture_validates() -> None:
 
 @pytest.mark.unit
 def test_unknown_operation_rejected() -> None:
+    data = _load(NEGATIVES / "sync-projection-unknown-operation.json")
     with pytest.raises(ValidationError):
-        SyncProjection.model_validate(_load(NEGATIVES / "sync-projection-unknown-operation.json"))
+        SyncProjection.model_validate(data)
 
 
 @pytest.mark.unit

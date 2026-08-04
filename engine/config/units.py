@@ -169,8 +169,8 @@ class UnitConverter:
         """
         try:
             return float(safe_eval(formula, {"value": value}))
-        except Exception as e:
-            logger.error(f"Formula evaluation failed: {formula}, error: {e}")
+        except Exception:
+            logger.exception(f"Formula evaluation failed: {formula}")
             return value
 
     def get_unit_definition(self, unit: str) -> UnitDefinition | None:

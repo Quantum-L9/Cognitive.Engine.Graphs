@@ -92,23 +92,27 @@ class TestPathTraversalSecurity:
 
     def test_path_traversal_blocked_parent_dir(self, domains_dir: Path) -> None:
         """Reject ../.. traversal attempts."""
+        loader = DomainPackLoader(str(domains_dir))
         with pytest.raises(DomainNotFoundError):
-            DomainPackLoader(str(domains_dir)).load_domain("../../etc/passwd")
+            loader.load_domain("../../etc/passwd")
 
     def test_path_traversal_blocked_single_parent(self, domains_dir: Path) -> None:
         """Reject single ../ traversal."""
+        loader = DomainPackLoader(str(domains_dir))
         with pytest.raises(DomainNotFoundError):
-            DomainPackLoader(str(domains_dir)).load_domain("../etc/passwd")
+            loader.load_domain("../etc/passwd")
 
     def test_path_traversal_blocked_encoded(self, domains_dir: Path) -> None:
         """Reject URL-encoded traversal (..%2F)."""
+        loader = DomainPackLoader(str(domains_dir))
         with pytest.raises(DomainNotFoundError):
-            DomainPackLoader(str(domains_dir)).load_domain("..%2F..%2Fetc%2Fpasswd")
+            loader.load_domain("..%2F..%2Fetc%2Fpasswd")
 
     def test_absolute_path_blocked(self, domains_dir: Path) -> None:
         """Reject absolute paths that escape base directory."""
+        loader = DomainPackLoader(str(domains_dir))
         with pytest.raises(DomainNotFoundError):
-            DomainPackLoader(str(domains_dir)).load_domain("/etc/passwd")
+            loader.load_domain("/etc/passwd")
 
     def test_absolute_path_to_existing_file_blocked(self, domains_dir: Path) -> None:
         """Reject absolute paths even to existing files."""
@@ -117,38 +121,46 @@ class TestPathTraversalSecurity:
         abs_spec.parent.mkdir(exist_ok=True)
         abs_spec.write_text("domain: {id: test}")
         # Try to load using absolute path - should fail
+        loader = DomainPackLoader(str(domains_dir))
+        target = str(abs_spec.parent)
         with pytest.raises(DomainNotFoundError):
-            DomainPackLoader(str(domains_dir)).load_domain(str(abs_spec.parent))
+            loader.load_domain(target)
 
     def test_empty_domain_id_rejected(self, domains_dir: Path) -> None:
         """Reject empty domain_id."""
+        loader = DomainPackLoader(str(domains_dir))
         with pytest.raises(DomainNotFoundError):
-            DomainPackLoader(str(domains_dir)).load_domain("")
+            loader.load_domain("")
 
     def test_whitespace_domain_id_rejected(self, domains_dir: Path) -> None:
         """Reject whitespace-only domain_id."""
+        loader = DomainPackLoader(str(domains_dir))
         with pytest.raises(DomainNotFoundError):
-            DomainPackLoader(str(domains_dir)).load_domain("   ")
+            loader.load_domain("   ")
 
     def test_dot_domain_id_rejected(self, domains_dir: Path) -> None:
         """Reject single dot domain_id."""
+        loader = DomainPackLoader(str(domains_dir))
         with pytest.raises(DomainNotFoundError):
-            DomainPackLoader(str(domains_dir)).load_domain(".")
+            loader.load_domain(".")
 
     def test_double_dot_domain_id_rejected(self, domains_dir: Path) -> None:
         """Reject double dot domain_id."""
+        loader = DomainPackLoader(str(domains_dir))
         with pytest.raises(DomainNotFoundError):
-            DomainPackLoader(str(domains_dir)).load_domain("..")
+            loader.load_domain("..")
 
     def test_hidden_directory_traversal(self, domains_dir: Path) -> None:
         """Reject traversal via hidden directories."""
+        loader = DomainPackLoader(str(domains_dir))
         with pytest.raises(DomainNotFoundError):
-            DomainPackLoader(str(domains_dir)).load_domain(".hidden/../../../etc/passwd")
+            loader.load_domain(".hidden/../../../etc/passwd")
 
     def test_null_byte_injection(self, domains_dir: Path) -> None:
         """Reject null byte injection attempts."""
+        loader = DomainPackLoader(str(domains_dir))
         with pytest.raises(DomainNotFoundError):
-            DomainPackLoader(str(domains_dir)).load_domain("testdomain\x00../../etc/passwd")
+            loader.load_domain("testdomain\x00../../etc/passwd")
 
     def test_valid_domain_loads_successfully(self, domains_dir: Path) -> None:
         """Verify valid domain still loads correctly after security checks."""
@@ -166,8 +178,9 @@ class TestPathTraversalSecurity:
         symlink_spec = symlink_domain / "spec.yaml"
         symlink_spec.symlink_to(real_spec)
 
+        loader = DomainPackLoader(str(domains_dir))
         with pytest.raises(DomainNotFoundError, match="symlink"):
-            DomainPackLoader(str(domains_dir)).load_domain("symlink_domain")
+            loader.load_domain("symlink_domain")
 
 
 class TestFileSizeLimit:
@@ -181,8 +194,9 @@ class TestFileSizeLimit:
         # Create a file larger than the limit
         oversized_spec.write_text("x" * (MAX_SPEC_BYTES + 1))
 
+        loader = DomainPackLoader(str(domains_dir))
         with pytest.raises(DomainSpecError, match="exceeds maximum size"):
-            DomainPackLoader(str(domains_dir)).load_domain("oversized")
+            loader.load_domain("oversized")
 
     def test_normal_size_spec_accepted(self, domains_dir: Path) -> None:
         """Accept spec files within size limit."""
@@ -192,5 +206,6 @@ class TestFileSizeLimit:
 
 
 def test_nonexistent_domain(domains_dir: Path) -> None:
+    loader = DomainPackLoader(str(domains_dir))
     with pytest.raises(DomainNotFoundError):
-        DomainPackLoader(str(domains_dir)).load_domain("nope")
+        loader.load_domain("nope")

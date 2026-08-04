@@ -187,20 +187,19 @@ def audit_rules(root: Path, rules: dict[str, Any]) -> list[Finding]:
                             )
                         )
 
-                if required_any:
-                    if not any(x in text for x in required_any):
-                        findings.append(
-                            Finding(
-                                severity=severity,
-                                rule_id=rule_id,
-                                file=str(f),
-                                line_start=None,
-                                line_end=None,
-                                issue=desc,
-                                evidence=f"None of required-any tokens found: {required_any}",
-                                fix="Ensure lifecycle entrypoints reference expected components.",
-                            )
+                if required_any and not any(x in text for x in required_any):
+                    findings.append(
+                        Finding(
+                            severity=severity,
+                            rule_id=rule_id,
+                            file=str(f),
+                            line_start=None,
+                            line_end=None,
+                            issue=desc,
+                            evidence=f"None of required-any tokens found: {required_any}",
+                            fix="Ensure lifecycle entrypoints reference expected components.",
                         )
+                    )
 
                 for needle in patterns:
                     for ln in find_all_lines(text, needle):

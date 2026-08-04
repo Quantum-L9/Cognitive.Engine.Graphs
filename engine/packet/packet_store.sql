@@ -436,7 +436,7 @@ RETURNS TABLE(packet_id UUID, generation INT, derivation_type TEXT) LANGUAGE SQL
         SELECT lg.parent_id, lg.generation, lg.derivation_type
         FROM lineage_graph lg JOIN ancestors a ON lg.child_id = a.packet_id
     )
-    SELECT * FROM ancestors;
+    SELECT packet_id, generation, derivation_type FROM ancestors;
 $$;
 
 -- Lineage walk: all descendants of a packet
@@ -449,5 +449,5 @@ RETURNS TABLE(packet_id UUID, generation INT, derivation_type TEXT) LANGUAGE SQL
         SELECT lg.child_id, lg.generation, lg.derivation_type
         FROM lineage_graph lg JOIN descendants d ON lg.parent_id = d.packet_id
     )
-    SELECT * FROM descendants;
+    SELECT packet_id, generation, derivation_type FROM descendants;
 $$;

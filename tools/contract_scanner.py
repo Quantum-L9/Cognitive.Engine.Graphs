@@ -23,6 +23,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+CYPHER_SAFETY_MD = "CYPHER_SAFETY.md"
+BANNED_PATTERNS_MD = "BANNED_PATTERNS.md"
+SHARED_MODELS_MD = "SHARED_MODELS.md"
+ENGINE_DIR = "engine/"
+CONTRACT_SCANNER_PATH = "tools/contract_scanner.py"
+
 
 @dataclass
 class Violation:
@@ -65,12 +71,12 @@ RULES: list[dict] = [
     # -- CONTRACT 3: CYPHER_SAFETY.md --
     _rule(
         "SEC-001",
-        "CYPHER_SAFETY.md",
+        CYPHER_SAFETY_MD,
         "CRITICAL",
         r'f["\'].*MATCH\s*\(.*\{[^$]',
         "Cypher label interpolation without sanitize_label()",
         "Use sanitize_label() for labels, $param for values",
-        include_dirs=["engine/"],
+        include_dirs=[ENGINE_DIR],
         exclude_dirs=[
             "engine/sync/generator.py",
             "engine/handlers.py",
@@ -80,25 +86,25 @@ RULES: list[dict] = [
     ),
     _rule(
         "SEC-002",
-        "CYPHER_SAFETY.md",
+        CYPHER_SAFETY_MD,
         "CRITICAL",
         r"\beval\s*\(",
         "eval() is banned - code injection risk",
         "Use operator dispatch table or ast.literal_eval()",
-        exclude_dirs=["tests/", "tools/contract_scanner.py", "engine/utils/safe_eval.py"],  # AST-based; no eval()
+        exclude_dirs=["tests/", CONTRACT_SCANNER_PATH, "engine/utils/safe_eval.py"],  # AST-based; no eval()
     ),
     _rule(
         "SEC-003",
-        "CYPHER_SAFETY.md",
+        CYPHER_SAFETY_MD,
         "CRITICAL",
         r"\bexec\s*\(",
         "exec() is banned - code injection risk",
         "Remove entirely",
-        exclude_dirs=["tests/", "tools/contract_scanner.py", "engine/security/"],
+        exclude_dirs=["tests/", CONTRACT_SCANNER_PATH, "engine/security/"],
     ),
     _rule(
         "SEC-004",
-        "CYPHER_SAFETY.md",
+        CYPHER_SAFETY_MD,
         "CRITICAL",
         r'f["\'].*LIMIT\s*\{',
         "LIMIT value interpolation - use $limit parameter",
@@ -106,7 +112,7 @@ RULES: list[dict] = [
     ),
     _rule(
         "SEC-005",
-        "BANNED_PATTERNS.md",
+        BANNED_PATTERNS_MD,
         "CRITICAL",
         r'f["\'].*(?:SELECT|INSERT|UPDATE|DELETE)\s.*\{',
         "SQL string interpolation - use parameterized queries",
@@ -114,7 +120,7 @@ RULES: list[dict] = [
     ),
     _rule(
         "SEC-006",
-        "BANNED_PATTERNS.md",
+        BANNED_PATTERNS_MD,
         "CRITICAL",
         r"pickle\.loads?\s*\(",
         "pickle banned - deserialization attack vector",
@@ -122,7 +128,7 @@ RULES: list[dict] = [
     ),
     _rule(
         "SEC-007",
-        "BANNED_PATTERNS.md",
+        BANNED_PATTERNS_MD,
         "CRITICAL",
         r"yaml\.load\s*\([^)]*\)\s*$",
         "yaml.load() without SafeLoader",
@@ -136,7 +142,7 @@ RULES: list[dict] = [
         r"except\s*:",
         "Bare except: clause",
         "except SpecificError as e:",
-        exclude_dirs=["tools/contract_scanner.py"],
+        exclude_dirs=[CONTRACT_SCANNER_PATH],
     ),
     _rule(
         "ERR-002",
@@ -149,30 +155,30 @@ RULES: list[dict] = [
     # -- CONTRACT 10: BANNED_PATTERNS.md (Architecture) --
     _rule(
         "ARCH-001",
-        "BANNED_PATTERNS.md",
+        BANNED_PATTERNS_MD,
         "CRITICAL",
         r"from\s+fastapi\s+import",
         "FastAPI import in engine/ - chassis owns HTTP",
         "Register handlers in engine/handlers.py",
-        include_dirs=["engine/"],
+        include_dirs=[ENGINE_DIR],
     ),
     _rule(
         "ARCH-002",
-        "BANNED_PATTERNS.md",
+        BANNED_PATTERNS_MD,
         "CRITICAL",
         r"from\s+starlette\s+import",
         "Starlette import in engine/ - chassis owns middleware",
         "Remove",
-        include_dirs=["engine/"],
+        include_dirs=[ENGINE_DIR],
     ),
     _rule(
         "ARCH-003",
-        "BANNED_PATTERNS.md",
+        BANNED_PATTERNS_MD,
         "CRITICAL",
         r"import\s+uvicorn",
         "uvicorn import in engine/ - chassis owns ASGI",
         "Remove",
-        include_dirs=["engine/"],
+        include_dirs=[ENGINE_DIR],
     ),
     # -- CONTRACT 7: DEPENDENCY_INJECTION.md --
     _rule(
@@ -182,7 +188,7 @@ RULES: list[dict] = [
         r"from\s+fastapi\s+import\s+Depends",
         "FastAPI Depends in engine/ - chassis concern",
         "Use init_dependencies() pattern",
-        include_dirs=["engine/"],
+        include_dirs=[ENGINE_DIR],
     ),
     # -- CONTRACT 12: DELEGATION_PROTOCOL.md --
     _rule(
@@ -192,7 +198,7 @@ RULES: list[dict] = [
         r"httpx\.(post|get|put|delete|patch)\s*\(",
         "Raw HTTP to another node - use delegate_to_node()",
         "from engine.packet.chassis_contract import delegate_to_node",
-        include_dirs=["engine/"],
+        include_dirs=[ENGINE_DIR],
     ),
     _rule(
         "DEL-002",
@@ -201,7 +207,7 @@ RULES: list[dict] = [
         r"requests\.(post|get|put|delete|patch)\s*\(",
         "Raw HTTP via requests - use delegate_to_node()",
         "from engine.packet.chassis_contract import delegate_to_node",
-        include_dirs=["engine/"],
+        include_dirs=[ENGINE_DIR],
     ),
     # -- CONTRACT 19: MEMORY_SUBSTRATE_ACCESS.md --
     _rule(
@@ -211,7 +217,7 @@ RULES: list[dict] = [
         r"INSERT\s+INTO\s+packetstore",
         "Direct write to packetstore - use ingest_packet()",
         "Persist via engine.packet.packet_store, or delegate to the memory substrate node",
-        include_dirs=["engine/"],
+        include_dirs=[ENGINE_DIR],
     ),
     _rule(
         "MEM-002",
@@ -220,37 +226,37 @@ RULES: list[dict] = [
         r"INSERT\s+INTO\s+memory_embeddings",
         "Direct write to memory_embeddings - use ingest_packet()",
         "Embeddings generated by LangGraph DAG",
-        include_dirs=["engine/"],
+        include_dirs=[ENGINE_DIR],
     ),
     # -- CONTRACT 20: SHARED_MODELS.md --
     _rule(
         "SHARED-001",
-        "SHARED_MODELS.md",
+        SHARED_MODELS_MD,
         "HIGH",
         r"class\s+PacketEnvelope\s*\(",
         "Redefining PacketEnvelope - import the shared model",
         "from engine.packet.packet_envelope import PacketEnvelope",
-        include_dirs=["engine/"],
+        include_dirs=[ENGINE_DIR],
         exclude_dirs=["engine/packet/packet_envelope.py"],  # canonical envelope in this repo
     ),
     _rule(
         "SHARED-002",
-        "SHARED_MODELS.md",
+        SHARED_MODELS_MD,
         "HIGH",
         r"class\s+TenantContext\s*\(",
         "Redefining TenantContext - import the shared model",
         "from engine.packet.packet_envelope import TenantContext",
-        include_dirs=["engine/"],
+        include_dirs=[ENGINE_DIR],
         exclude_dirs=["engine/packet/packet_envelope.py"],  # canonical envelope in this repo
     ),
     _rule(
         "SHARED-003",
-        "SHARED_MODELS.md",
+        SHARED_MODELS_MD,
         "HIGH",
         r"class\s+ExecuteRequest\s*\(",
         "Redefining ExecuteRequest - the chassis owns this model",
         "from chassis.chassis_app import ExecuteRequest",
-        include_dirs=["engine/"],
+        include_dirs=[ENGINE_DIR],
     ),
     # -- CONTRACT 18: OBSERVABILITY.md --
     _rule(
@@ -260,7 +266,7 @@ RULES: list[dict] = [
         r"structlog\.configure\s*\(",
         "Configuring structlog in engine - chassis does this",
         "Use logging.getLogger(__name__)",
-        include_dirs=["engine/"],
+        include_dirs=[ENGINE_DIR],
     ),
     _rule(
         "OBS-002",
@@ -269,7 +275,7 @@ RULES: list[dict] = [
         r"logging\.basicConfig\s*\(",
         "Configuring logging in engine - chassis does this",
         "Use logging.getLogger(__name__) only",
-        include_dirs=["engine/"],
+        include_dirs=[ENGINE_DIR],
     ),
     # -- CONTRACT 6: PYDANTIC_YAML_MAPPING.md --
     _rule(
@@ -279,7 +285,7 @@ RULES: list[dict] = [
         r"Field\s*\(\s*alias\s*=",
         "Pydantic Field alias banned - snake_case everywhere",
         "Remove alias, use snake_case matching YAML key",
-        include_dirs=["engine/"],
+        include_dirs=[ENGINE_DIR],
     ),
     # -- CONTRACT 13: PACKET_TYPE_REGISTRY.md --
     _rule(
@@ -296,30 +302,30 @@ RULES: list[dict] = [
     # NotImplementedError as their contract.
     _rule(
         "STUB-001",
-        "BANNED_PATTERNS.md",
+        BANNED_PATTERNS_MD,
         "CRITICAL",
         r"raise\s+NotImplementedError",
         "Stub in engine/ - unimplemented code path",
         "Ship the implementation or record the gap in DEFERRED.md",
-        include_dirs=["engine/"],
+        include_dirs=[ENGINE_DIR],
     ),
     _rule(
         "STUB-002",
-        "BANNED_PATTERNS.md",
+        BANNED_PATTERNS_MD,
         "HIGH",
         r"#\s*TODO\b",
         "TODO comment in engine/ - deferred work must be tracked, not inlined",
         "Implement it now or add an entry to DEFERRED.md and drop the comment",
-        include_dirs=["engine/"],
+        include_dirs=[ENGINE_DIR],
     ),
     _rule(
         "STUB-003",
-        "BANNED_PATTERNS.md",
+        BANNED_PATTERNS_MD,
         "HIGH",
         r"#\s*(?:PLACEHOLDER|FIXME|XXX)\b",
         "PLACEHOLDER/FIXME comment in engine/ - deferred work must be tracked, not inlined",
         "Implement it now or add an entry to DEFERRED.md and drop the comment",
-        include_dirs=["engine/"],
+        include_dirs=[ENGINE_DIR],
     ),
     # -- CONTRACT 05: ENV_VARS.md --
     _rule(

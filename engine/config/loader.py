@@ -32,6 +32,9 @@ logger = logging.getLogger(__name__)
 # Maximum spec file size (5MB) to prevent OOM on malicious/corrupted files
 MAX_SPEC_BYTES = 5 * 1024 * 1024
 
+# Canonical filename for a domain's spec inside its directory.
+SPEC_FILENAME = "spec.yaml"
+
 
 class DomainNotFoundError(Exception):
     """Raised when a requested domain spec does not exist."""
@@ -136,7 +139,7 @@ class DomainPackLoader:
         """Discover all domain directories containing spec.yaml."""
         if not self._base_path.is_dir():
             return []
-        return [d.name for d in sorted(self._base_path.iterdir()) if d.is_dir() and (d / "spec.yaml").exists()]
+        return [d.name for d in sorted(self._base_path.iterdir()) if d.is_dir() and (d / SPEC_FILENAME).exists()]
 
     def _resolve_spec_path(self, domain_id: str) -> Path:
         """Resolve and validate spec file path — prevents path traversal and symlink attacks."""
@@ -152,10 +155,10 @@ class DomainPackLoader:
         if Path(domain_id).is_absolute():
             raise DomainNotFoundError(f"Invalid domain ID: {domain_id!r} must be a relative path")
 
-        candidate = (self._base_path / domain_id / "spec.yaml").resolve()
+        candidate = (self._base_path / domain_id / SPEC_FILENAME).resolve()
 
         # Check for symlinks before resolving - reject symlinked spec files
-        raw_path = self._base_path / domain_id / "spec.yaml"
+        raw_path = self._base_path / domain_id / SPEC_FILENAME
         if raw_path.is_symlink():
             raise DomainNotFoundError(f"Invalid domain path: {domain_id!r} spec.yaml is a symlink")
 

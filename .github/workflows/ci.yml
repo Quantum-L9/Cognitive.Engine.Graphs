@@ -211,7 +211,7 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run Pre-commit Hooks
-        uses: pre-commit/action@v3.0.1
+        uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
         env:
           # gitleaks: the pre-commit hook runs `gitleaks protect --staged`,
           # which inspects the git *index*, not the diff of a plain
@@ -306,7 +306,7 @@ jobs:
           echo "✅ All tests passed with coverage >=${{ env.COVERAGE_THRESHOLD }}%"
 
       - name: Upload Coverage to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
         with:
           files: ./coverage.xml
           flags: unittests

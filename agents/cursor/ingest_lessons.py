@@ -29,12 +29,14 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
+META_TIMESTAMP = "2026-02-14T00:00:00Z"
+
 __dora_meta__ = {
     "component_name": "Ingest Lessons",
     "module_version": "1.0.0",
     "created_by": "L9 Agent",
-    "created_at": "2026-02-14T00:00:00Z",
-    "updated_at": "2026-02-14T00:00:00Z",
+    "created_at": META_TIMESTAMP,
+    "updated_at": META_TIMESTAMP,
     "layer": "operations",
     "domain": "memory_substrate",
     "module_name": "ingest_lessons",
@@ -147,7 +149,7 @@ def parse_lessons(path: Path) -> list[dict]:
 
     # Process auto-generated lessons
     for match in auto_matches:
-        num_str, title, mistake, impact, prevention, rule, date_added = match
+        num_str, title, mistake, impact, prevention, rule, _ = match
         num = int(num_str)
         title_clean = title.strip()
 
@@ -378,7 +380,7 @@ __dora_footer__ = {
     "tags": ["ingestion", "lessons", "memory"],
     "keywords": ["ingest", "lesson", "repeated-mistakes", "mcp"],
     "business_value": "Ingests governance lessons into semantic memory for retrieval",
-    "last_modified": "2026-02-14T00:00:00Z",
+    "last_modified": META_TIMESTAMP,
     "modified_by": "L9_Agent",
     "change_summary": "Initial creation — Cursor Agent Enforcement Upgrade plan item 2",
 }

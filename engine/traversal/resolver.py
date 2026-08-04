@@ -64,7 +64,7 @@ class ParameterResolver:
                 if settings.param_strict_mode:
                     msg = f"Failed to resolve derived parameter '{param_spec.name}': {exc}"
                     raise ParameterResolutionError(msg) from exc
-                logger.error("Failed to resolve parameter '%s': %s", param_spec.name, exc)
+                logger.exception("Failed to resolve parameter '%s'", param_spec.name)
 
         return resolved
 

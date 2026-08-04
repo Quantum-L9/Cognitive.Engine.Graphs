@@ -153,8 +153,11 @@ def main() -> int:
                     "docs/CI_PIPELINE.md (baseline ratchet).",
                     file=sys.stderr,
                 )
-            except (json.JSONDecodeError, ValueError):
-                pass
+            except ValueError:
+                print(
+                    "PacketEnvelope gate: compare output was not JSON; consult the raw SDK output above.",
+                    file=sys.stderr,
+                )
         return compare.returncode
 
 

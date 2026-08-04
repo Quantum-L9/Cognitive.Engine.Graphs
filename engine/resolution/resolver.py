@@ -152,8 +152,7 @@ class EntityResolver:
                 total_merged += merged
                 resolution_groups += 1
                 # Mark merged entities as resolved
-                for rid in result.get("resolution_ids", []):
-                    resolved_set.add(rid)
+                resolved_set.update(result.get("resolution_ids", []))
 
         return {
             "total_entities": len(entity_ids),

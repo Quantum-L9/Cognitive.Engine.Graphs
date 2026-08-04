@@ -56,6 +56,12 @@ ENV L9_PROJECT=$L9_PROJECT \
     LOG_LEVEL=INFO \
     PYTHONUNBUFFERED=1
 
+# Run as a non-root user (parity with Dockerfile / Dockerfile.chassis). The
+# API binds port 8000 (>1024), so no elevated privilege is required at runtime.
+RUN groupadd -r l9 && useradd -r -g l9 -d /app -s /sbin/nologin l9 \
+    && chown -R l9:l9 /app
+USER l9
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

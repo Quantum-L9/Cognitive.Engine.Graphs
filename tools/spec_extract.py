@@ -50,9 +50,11 @@ except ImportError:
 L9_TEMPLATE_TAG = "L9_TEMPLATE"
 RESEARCH_DIR = "tools/research"
 RESEARCH_PATTERNS_FILE = "top5_leverage_patterns_detailed.json"
-
-RESEARCH_DIR = "tools/research"
-RESEARCH_PATTERNS_FILE = "top5_leverage_patterns_detailed.json"
+GATES_GLOB = "engine/gates/**/*.py"
+SCORING_GLOB = "engine/scoring/**/*.py"
+ENGINE_GLOB = "engine/**/*.py"
+DOMAINS_GLOB = "domains/**/*.yaml"
+COVERAGE_MATRIX_JSON = "coverage_matrix.json"
 
 
 class Status(StrEnum):
@@ -110,7 +112,7 @@ def extract_gate_features(spec: dict) -> list[SpecFeature]:
                             f"'{gate_name}'",
                             f"GateType.{gate_name.upper()}",
                         ],
-                        search_files=["engine/gates/**/*.py"],
+                        search_files=[GATES_GLOB],
                     )
                 )
         elif isinstance(gate_types, list):
@@ -128,7 +130,7 @@ def extract_gate_features(spec: dict) -> list[SpecFeature]:
                             f'"{name}"',
                             f"GateType.{str(name).upper()}",
                         ],
-                        search_files=["engine/gates/**/*.py"],
+                        search_files=[GATES_GLOB],
                     )
                 )
 
@@ -158,7 +160,7 @@ def extract_gate_features(spec: dict) -> list[SpecFeature]:
                         name=g,
                         spec_reference="gates (detected in spec text)",
                         search_tokens=[g, g.replace("_", ""), f'"{g}"', f"GateType.{g.upper()}"],
-                        search_files=["engine/gates/**/*.py"],
+                        search_files=[GATES_GLOB],
                     )
                 )
 
@@ -174,11 +176,8 @@ def extract_scoring_features(spec: dict) -> list[SpecFeature]:
         if isinstance(dims, (dict, list)):
             items = dims.items() if isinstance(dims, dict) else enumerate(dims)
             for key, val in items:
-                name = (
-                    val
-                    if isinstance(val, str)
-                    else (val.get("type", val.get("name", str(key))) if isinstance(val, dict) else str(val))
-                )
+                non_str_name = val.get("type", val.get("name", str(key))) if isinstance(val, dict) else str(val)
+                name = val if isinstance(val, str) else non_str_name
                 features.append(
                     SpecFeature(
                         category="scoring",
@@ -190,7 +189,7 @@ def extract_scoring_features(spec: dict) -> list[SpecFeature]:
                             f'"{name}"',
                             f"ScoringType.{str(name).upper()}",
                         ],
-                        search_files=["engine/scoring/**/*.py"],
+                        search_files=[SCORING_GLOB],
                     )
                 )
 
@@ -215,7 +214,7 @@ def extract_scoring_features(spec: dict) -> list[SpecFeature]:
                         name=s,
                         spec_reference="scoring (detected in spec text)",
                         search_tokens=[s, s.replace("_", ""), f'"{s}"'],
-                        search_files=["engine/scoring/**/*.py"],
+                        search_files=[SCORING_GLOB],
                     )
                 )
 
@@ -239,7 +238,7 @@ def extract_ontology_features(spec: dict) -> list[SpecFeature]:
                         name=str(name),
                         spec_reference=f"ontology.{section_key}.{name}",
                         search_tokens=[f'"{name}"', f"'{name}'", str(name)],
-                        search_files=["engine/**/*.py", "domains/**/*.yaml"],
+                        search_files=[ENGINE_GLOB, DOMAINS_GLOB],
                     )
                 )
         elif isinstance(items, dict):
@@ -250,7 +249,7 @@ def extract_ontology_features(spec: dict) -> list[SpecFeature]:
                         name=str(name),
                         spec_reference=f"ontology.{section_key}.{name}",
                         search_tokens=[f'"{name}"', f"'{name}'", str(name)],
-                        search_files=["engine/**/*.py", "domains/**/*.yaml"],
+                        search_files=[ENGINE_GLOB, DOMAINS_GLOB],
                     )
                 )
 
@@ -271,7 +270,7 @@ def extract_v11_additions(spec: dict) -> list[SpecFeature]:
                 name=node,
                 spec_reference=f"v1.1 addition: {node} node",
                 search_tokens=[node, f'"{node}"', f"'{node}'"],
-                search_files=["engine/**/*.py", "domains/**/*.yaml"],
+                search_files=[ENGINE_GLOB, DOMAINS_GLOB],
             )
         )
     for edge in v11_edges:
@@ -281,7 +280,7 @@ def extract_v11_additions(spec: dict) -> list[SpecFeature]:
                 name=edge,
                 spec_reference=f"v1.1 addition: {edge} edge",
                 search_tokens=[edge, f'"{edge}"', f"'{edge}'"],
-                search_files=["engine/**/*.py", "domains/**/*.yaml"],
+                search_files=[ENGINE_GLOB, DOMAINS_GLOB],
             )
         )
     for ep in v11_endpoints:
@@ -291,7 +290,7 @@ def extract_v11_additions(spec: dict) -> list[SpecFeature]:
                 name=ep,
                 spec_reference=f"v1.1 addition: {ep} action/endpoint",
                 search_tokens=[f"handle_{ep}", f'"{ep}"', f"'{ep}'", ep],
-                search_files=["engine/handlers.py", "engine/**/*.py"],
+                search_files=["engine/handlers.py", ENGINE_GLOB],
             )
         )
     for sc in v11_scoring:
@@ -301,7 +300,7 @@ def extract_v11_additions(spec: dict) -> list[SpecFeature]:
                 name=sc,
                 spec_reference=f"v1.1 addition: {sc} scoring type",
                 search_tokens=[sc, sc.replace("_", ""), f'"{sc}"'],
-                search_files=["engine/scoring/**/*.py"],
+                search_files=[SCORING_GLOB],
             )
         )
 
@@ -491,7 +490,7 @@ def write_coverage_matrix(out_dir: Path, features: list[SpecFeature]) -> None:
             totals[k] += cat_data[k]
 
     matrix = {"categories": by_category, "totals": totals, "generated_at": datetime.now(UTC).isoformat()}
-    (out_dir / "coverage_matrix.json").write_text(json.dumps(matrix, indent=2), encoding="utf-8")
+    (out_dir / COVERAGE_MATRIX_JSON).write_text(json.dumps(matrix, indent=2), encoding="utf-8")
 
 
 def write_coverage_report(out_dir: Path, features: list[SpecFeature], matrix: dict) -> None:
@@ -507,11 +506,11 @@ def write_coverage_report(out_dir: Path, features: list[SpecFeature], matrix: di
     lines.append("| Category | Implemented | Partial | Missing | Total |")
     lines.append("|----------|-------------|---------|---------|-------|")
 
-    cats = json.loads((out_dir / "coverage_matrix.json").read_text())["categories"]
+    cats = json.loads((out_dir / COVERAGE_MATRIX_JSON).read_text())["categories"]
     for cat, data in cats.items():
         lines.append(f"| {cat} | {data['IMPLEMENTED']} | {data['PARTIAL']} | {data['MISSING']} | {data['total']} |")
 
-    totals = json.loads((out_dir / "coverage_matrix.json").read_text())["totals"]
+    totals = json.loads((out_dir / COVERAGE_MATRIX_JSON).read_text())["totals"]
     lines.append(
         f"| **TOTAL** | **{totals['IMPLEMENTED']}** | **{totals['PARTIAL']}** | **{totals['MISSING']}** | **{totals['total']}** |"
     )
@@ -587,7 +586,7 @@ def main() -> int:
     write_checklist(out_dir, features)
     write_coverage_matrix(out_dir, features)
 
-    matrix_data = json.loads((out_dir / "coverage_matrix.json").read_text())
+    matrix_data = json.loads((out_dir / COVERAGE_MATRIX_JSON).read_text())
     write_coverage_report(out_dir, features, matrix_data)
 
     totals = matrix_data["totals"]

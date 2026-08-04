@@ -68,10 +68,10 @@ def test_malformed_yaml_raises(tmp_path):
     bad = tmp_path / "broken" / "spec.yaml"
     bad.parent.mkdir()
     bad.write_text("domain:\n  id: [unclosed")
-    from engine.config.loader import DomainPackLoader
+    from engine.config.loader import DomainPackLoader, DomainSpecError
 
     loader = DomainPackLoader(config_path=str(tmp_path))
-    with pytest.raises(Exception):
+    with pytest.raises(DomainSpecError, match="Invalid YAML"):
         loader.load_domain("broken")
 
 

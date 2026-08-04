@@ -50,7 +50,7 @@ def test_template_contains_placeholders(contracts_root, filename):
 def test_api_template_has_operationid_placeholder(contracts_root):
     path = contracts_root / "_templates" / "api-endpoint.template.yaml"
     if not path.exists():
-        pytest.skip()
+        pytest.skip("api-endpoint.template.yaml not yet present")
     content = path.read_text()
     assert "operationId" in content
 
@@ -58,7 +58,7 @@ def test_api_template_has_operationid_placeholder(contracts_root):
 def test_tool_schema_template_has_json_schema_dollar_schema(contracts_root):
     path = contracts_root / "_templates" / "tool-schema.template.json"
     if not path.exists():
-        pytest.skip()
+        pytest.skip("tool-schema.template.json not yet present")
     content = path.read_text()
     assert '"$schema"' in content
 
@@ -66,6 +66,6 @@ def test_tool_schema_template_has_json_schema_dollar_schema(contracts_root):
 def test_data_model_template_has_additional_properties_false(contracts_root):
     path = contracts_root / "_templates" / "data-model.template.json"
     if not path.exists():
-        pytest.skip()
+        pytest.skip("data-model.template.json not yet present")
     content = path.read_text()
     assert "additionalProperties" in content

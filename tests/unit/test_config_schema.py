@@ -231,14 +231,12 @@ class TestOntologySpec:
 
     def test_duplicate_node_labels_raises(self) -> None:
         """OntologySpec rejects duplicate node labels."""
+        nodes = [
+            NodeSpec(label="A", managedby=ManagedByType.SYNC),
+            NodeSpec(label="A", managedby=ManagedByType.API),
+        ]
         with pytest.raises(PydanticValidationError, match="Duplicate node labels"):
-            OntologySpec(
-                nodes=[
-                    NodeSpec(label="A", managedby=ManagedByType.SYNC),
-                    NodeSpec(label="A", managedby=ManagedByType.API),
-                ],
-                edges=[],
-            )
+            OntologySpec(nodes=nodes, edges=[])
 
     def test_duplicate_edge_signatures_raises(self) -> None:
         """OntologySpec rejects duplicate edge type+from+to tuples."""
@@ -250,14 +248,12 @@ class TestOntologySpec:
             category=EdgeCategory.CAPABILITY,
             managedby=ManagedByType.SYNC,
         )
+        nodes = [
+            NodeSpec(label="A", managedby=ManagedByType.SYNC),
+            NodeSpec(label="B", managedby=ManagedByType.SYNC),
+        ]
         with pytest.raises(PydanticValidationError, match="Duplicate edge type signatures"):
-            OntologySpec(
-                nodes=[
-                    NodeSpec(label="A", managedby=ManagedByType.SYNC),
-                    NodeSpec(label="B", managedby=ManagedByType.SYNC),
-                ],
-                edges=[edge, edge],
-            )
+            OntologySpec(nodes=nodes, edges=[edge, edge])
 
     def test_valid_ontology(self) -> None:
         """OntologySpec passes with unique labels and edges."""
