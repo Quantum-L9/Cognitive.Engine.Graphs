@@ -419,7 +419,9 @@ def scan_codebase(root: Path, features: list[SpecFeature]) -> None:
             continue
         try:
             py_cache[str(py_file.relative_to(root))] = py_file.read_text(encoding="utf-8", errors="replace")
-        except Exception:
+        except OSError:
+            # Unreadable file (permissions, transient IO): skip it and keep
+            # scanning the rest of the tree.
             pass
 
     for yaml_file in root.rglob("*.yaml"):
@@ -427,7 +429,9 @@ def scan_codebase(root: Path, features: list[SpecFeature]) -> None:
             continue
         try:
             yaml_cache[str(yaml_file.relative_to(root))] = yaml_file.read_text(encoding="utf-8", errors="replace")
-        except Exception:
+        except OSError:
+            # Unreadable file (permissions, transient IO): skip it and keep
+            # scanning the rest of the tree.
             pass
 
     all_files = {**py_cache, **yaml_cache}

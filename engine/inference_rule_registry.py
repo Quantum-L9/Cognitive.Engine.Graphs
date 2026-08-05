@@ -355,6 +355,8 @@ def infer_icp_fit_score(entity: dict, ctx: InferenceContext) -> InferenceResult 
                 score += 0.25
                 factors += 1
         except (TypeError, ValueError):
+            # Non-numeric / malformed revenue value: skip this factor rather
+            # than fail the whole scoring pass.
             pass
     if entity.get("email_domain"):
         score += 0.10
