@@ -31,7 +31,7 @@ import re
 from typing import Any, TypeVar
 
 import structlog
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 # These come from P1-5 (engine/security/llm.py)
 from engine.security.llm import sanitize_llm_input, track_llm_usage
@@ -102,7 +102,12 @@ def validate_llm_json(raw: str, schema: type[T]) -> T:
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise ValidationError(f"LLM returned invalid JSON: {exc}") from exc
+        # NB: pydantic's ValidationError cannot be constructed from a plain
+        # string in v2 (needs from_exception_data). ValueError is the correct
+        # "not valid input" signal — and pydantic.ValidationError subclasses it,
+        # so callers catching ValueError still catch schema failures too.
+        msg = f"LLM returned invalid JSON: {exc}"
+        raise ValueError(msg) from exc
     return schema.model_validate(data)
 
 

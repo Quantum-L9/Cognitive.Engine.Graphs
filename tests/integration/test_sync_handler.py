@@ -37,11 +37,30 @@ async def test_sync_idempotent_on_second_call(engine_deps, clean_db):
     assert r2.get("status") in ("ok", "success")
 
 
-def test_sync_unknown_entity_type_raises(domain_loader):
-    """RULE 3: unknown entity_type raises, not silent pass-through."""
-    from engine.sync.generator import SyncGenerator
+@pytest.mark.asyncio
+async def test_sync_unknown_entity_type_raises(domain_loader):
+    """RULE 3: an unknown entity_type is rejected, not silently passed through.
 
-    spec = domain_loader.load_domain("plasticos")
-    gen = SyncGenerator(spec)
-    with pytest.raises(AttributeError, match="resolve_endpoint"):
-        gen.resolve_endpoint("nonexistent_entity_type_xyz")
+    handle_sync resolves the entity_type to a declared sync endpoint and raises
+    ValidationError when none matches. This rejection happens during endpoint
+    resolution — before any Neo4j access — so the real domain loader plus a mock
+    driver is sufficient (no testcontainers needed).
+    """
+    from unittest.mock import AsyncMock
+
+    from engine.handlers import ValidationError, handle_sync, init_dependencies
+    from engine.state import get_state
+
+    get_state().reset()
+    init_dependencies(AsyncMock(), domain_loader)
+    try:
+        with pytest.raises(ValidationError, match="No sync endpoint for entity type"):
+            await handle_sync(
+                "plasticos",
+                {
+                    "entity_type": "nonexistent_entity_type_xyz",
+                    "batch": [{"facility_id": 9001}],
+                },
+            )
+    finally:
+        get_state().reset()
