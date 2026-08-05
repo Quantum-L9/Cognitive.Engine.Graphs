@@ -137,7 +137,8 @@ def validate_llm_output(llm_response: str, expected_schema: type[T], strict: boo
         Validated Pydantic model instance
 
     Raises:
-        ValidationError: If output doesn't match schema
+        ValueError: If the response is not valid JSON.
+        ValidationError: If the parsed JSON doesn't match the schema.
 
     Example:
         from pydantic import BaseModel
