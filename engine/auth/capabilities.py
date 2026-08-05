@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -35,23 +36,28 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Capability action strings (constants avoid duplicated literals).
+PERM_MATCH_READ = "match:read"
+PERM_SYNC_WRITE = "sync:write"
+PERM_ADMIN_WRITE = "admin:write"
+
 # ── W3-03: Action-Level Permission Map ──────────────────────────
 # Maps every engine action to a required capability string.
 # Used by check_action_permission() to enforce at handler entry.
 
 ACTION_PERMISSION_MAP: dict[str, str] = {
-    "match": "match:read",
-    "sync": "sync:write",
-    "enrich": "sync:write",
-    "outcomes": "sync:write",
-    "admin": "admin:write",
+    "match": PERM_MATCH_READ,
+    "sync": PERM_SYNC_WRITE,
+    "enrich": PERM_SYNC_WRITE,
+    "outcomes": PERM_SYNC_WRITE,
+    "admin": PERM_ADMIN_WRITE,
     "kge_search": "admin:kge",
-    "calibration_run": "admin:write",
-    "score_feedback": "admin:write",
-    "apply_weight_proposal": "admin:write",
-    "resolve": "match:read",
-    "health": "match:read",
-    "healthcheck": "match:read",
+    "calibration_run": PERM_ADMIN_WRITE,
+    "score_feedback": PERM_ADMIN_WRITE,
+    "apply_weight_proposal": PERM_ADMIN_WRITE,
+    "resolve": PERM_MATCH_READ,
+    "health": PERM_MATCH_READ,
+    "healthcheck": PERM_MATCH_READ,
 }
 
 # All known capability action strings
@@ -116,7 +122,7 @@ class Capability:
         return self.proof_hash == self._compute_proof_hash()
 
     def is_expired(self) -> bool:
-        if self.expires_at == 0.0:
+        if math.isclose(self.expires_at, 0.0, abs_tol=1e-9):
             return False
         return time.time() > self.expires_at
 

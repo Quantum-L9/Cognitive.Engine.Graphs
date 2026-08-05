@@ -350,8 +350,10 @@ class TestGateTypeClasses:
 
     def test_base_gate_is_abstract(self) -> None:
         """BaseGate cannot be instantiated directly."""
+        spec = MagicMock()
+        domain_spec = MagicMock()
         with pytest.raises(TypeError):
-            BaseGate(MagicMock(), MagicMock())
+            BaseGate(spec, domain_spec)
 
     def test_threshold_gate_compile(self) -> None:
         """ThresholdGate.compile() generates comparison."""

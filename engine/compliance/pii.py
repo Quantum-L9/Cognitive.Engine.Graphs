@@ -60,13 +60,13 @@ _PII_PATTERNS: dict[PIICategory, re.Pattern[str]] = {
         r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}",
     ),
     PIICategory.PHONE: re.compile(
-        r"(?:\+?1[\-\s.]?)?\(?[0-9]{3}\)?[\-\s.]?[0-9]{3}[\-\s.]?[0-9]{4}",
+        r"(?:\+?1[\-\s.]?)?\(?\d{3}\)?[\-\s.]?\d{3}[\-\s.]?\d{4}",
     ),
     PIICategory.SSN: re.compile(
-        r"\b[0-9]{3}[\-\s]?[0-9]{2}[\-\s]?[0-9]{4}\b",
+        r"\b\d{3}[\-\s]?\d{2}[\-\s]?\d{4}\b",
     ),
     PIICategory.IP_ADDRESS: re.compile(
-        r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b",
+        r"\b(?:\d{1,3}\.){3}\d{1,3}\b",
     ),
 }
 
@@ -178,16 +178,16 @@ class PIIHandler:
             else:
                 # Check value patterns (strings only)
                 if isinstance(value, str):
-                    for category, pattern in self._patterns.items():
+                    for value_category, pattern in self._patterns.items():
                         if pattern.search(value):
                             sensitivity = _PII_FIELD_HINTS.get(
-                                category.value,
-                                (category, PIISensitivity.MEDIUM),
+                                value_category.value,
+                                (value_category, PIISensitivity.MEDIUM),
                             )[1]
                             detections.append(
                                 PIIDetection(
                                     field_path=field_path,
-                                    category=category,
+                                    category=value_category,
                                     sensitivity=sensitivity,
                                     detected_by="pattern_match",
                                 )
@@ -358,8 +358,8 @@ class PIIHandler:
                 async with db_pool.acquire() as conn:
                     result = await conn.execute("SELECT gdpr_erase_subject($1)", data_subject_id)
                     summary["packets_deleted"] = result
-            except Exception as e:
-                logger.error(f"GDPR erasure DB error for {data_subject_id}: {e}")
+            except Exception:
+                logger.exception(f"GDPR erasure DB error for {data_subject_id}")
                 raise
 
         if graph_driver:
@@ -370,8 +370,8 @@ class PIIHandler:
                 )
                 if result:
                     summary["graph_nodes_deleted"] = result[0].get("deleted", 0)
-            except Exception as e:
-                logger.error(f"GDPR erasure graph error for {data_subject_id}: {e}")
+            except Exception:
+                logger.exception(f"GDPR erasure graph error for {data_subject_id}")
                 raise
 
         logger.info(f"GDPR erasure complete for data_subject_id={data_subject_id}: {summary}")

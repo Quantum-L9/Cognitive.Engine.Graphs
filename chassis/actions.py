@@ -44,7 +44,7 @@ def _init_engine() -> None:
         _deflate_egress = deflate_egress
         logger.info("Engine handlers initialized: %d actions registered", len(_engine_handlers))
     except ImportError as e:
-        logger.error(f"Failed to import engine handlers: {e}")
+        logger.exception(f"Failed to import engine handlers: {e}")
         _engine_handlers = {}
         raise RuntimeError("Engine initialization failed") from e
 

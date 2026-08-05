@@ -59,8 +59,10 @@ def test_traversalalias_default_prop() -> None:
 
 
 def test_traversalalias_no_alias_raises() -> None:
+    asm = _asm()
+    dim = _dim(computation=ComputationType.TRAVERSALALIAS)
     with pytest.raises(ValueError, match="requires 'alias'"):
-        _asm()._compile_traversalalias(_dim(computation=ComputationType.TRAVERSALALIAS))
+        asm._compile_traversalalias(dim)
 
 
 def test_kge_with_alias() -> None:
@@ -74,8 +76,10 @@ def test_kge_candidateprop_only() -> None:
 
 
 def test_kge_no_source_raises() -> None:
+    asm = _asm()
+    dim = _dim(computation=ComputationType.KGE)
     with pytest.raises(ValueError, match="requires 'alias' or 'candidateprop'"):
-        _asm()._compile_kge(_dim(computation=ComputationType.KGE))
+        asm._compile_kge(dim)
 
 
 def test_candidateproperty_default_is_safe_literal() -> None:

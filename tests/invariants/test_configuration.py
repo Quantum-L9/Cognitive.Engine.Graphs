@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -133,5 +134,5 @@ class TestWave1Settings:
         """Production mode rejects default secrets."""
         from engine.config.settings import Settings
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError, match="must be changed from default"):
             Settings(l9_env="prod", neo4j_password="password", api_secret_key="change-me-in-production")

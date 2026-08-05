@@ -58,10 +58,8 @@ def _count_passable_gates(
     passable = 0
     for gate in gates:
         required = _gate_required_fields(gate)
-        if required and required.issubset(available_fields):
-            passable += 1
-        elif not required:
-            # Gates with no candidate property requirements always pass
+        # Gate fires when its required fields are all available, or it has none.
+        if (required and required.issubset(available_fields)) or not required:
             passable += 1
     return passable
 

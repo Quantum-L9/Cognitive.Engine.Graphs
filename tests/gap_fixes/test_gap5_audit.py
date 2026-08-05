@@ -29,15 +29,15 @@ async def test_flush_returns_zero_when_no_pool() -> None:
 
 
 @pytest.mark.asyncio
-async def test_flush_returns_zero_for_empty_entries() -> None:
+async def test_flush_returns_zero_for_empty_entries(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_pool = MagicMock()
-    audit_persistence._POOL = mock_pool
+    monkeypatch.setattr(audit_persistence, "_POOL", mock_pool)
     result = await audit_persistence.flush_audit_entries([])
     assert result == 0
 
 
 @pytest.mark.asyncio
-async def test_flush_inserts_rows() -> None:
+async def test_flush_inserts_rows(monkeypatch: pytest.MonkeyPatch) -> None:
     entries = [
         {"tenant_id": "t1", "actor": "system", "action": "match", "detail": "ok", "created_at": time.time()},
         {"tenant_id": "t1", "actor": "user1", "action": "sync"},
@@ -50,7 +50,7 @@ async def test_flush_inserts_rows() -> None:
     mock_pool.acquire = MagicMock(
         return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_conn), __aexit__=AsyncMock(return_value=False))
     )
-    audit_persistence._POOL = mock_pool
+    monkeypatch.setattr(audit_persistence, "_POOL", mock_pool)
 
     result = await audit_persistence.flush_audit_entries(entries)
     assert result == 2

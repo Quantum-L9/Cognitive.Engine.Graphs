@@ -45,6 +45,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+CONTRACT_WIRING_STEP = "Contract Wiring"
+
 
 @dataclass
 class StepResult:
@@ -238,7 +240,9 @@ def write_harness_report(
         lines.append("|----------|-------|")
         for sev in ["CRITICAL", "HIGH", "MEDIUM", "LOW"]:
             count = audit_counts.get(sev, 0)
-            icon = "🔴" if sev == "CRITICAL" else "🟠" if sev == "HIGH" else "🟡" if sev == "MEDIUM" else "🔵"
+            icon_medium = "🟡" if sev == "MEDIUM" else "🔵"
+            icon_high = "🟠" if sev == "HIGH" else icon_medium
+            icon = "🔴" if sev == "CRITICAL" else icon_high
             lines.append(f"| {icon} {sev} | {count} |")
         lines.append("")
         lines.append("See `artifacts/audit_report.md` for full details.")
@@ -335,7 +339,7 @@ def main() -> int:
         ("Spec Coverage", [python, "tools/spec_extract.py", "--fail-on", spec_fail_on], args.strict),
     ]
     if not args.skip_contracts:
-        step_specs.append(("Contract Wiring", [python, "tools/verify_contracts.py"], True))
+        step_specs.append((CONTRACT_WIRING_STEP, [python, "tools/verify_contracts.py"], True))
 
     print(f"Running {len(step_specs)} audit step(s) concurrently...\n")
     results = run_steps_concurrently(step_specs, root)
@@ -371,10 +375,10 @@ def main() -> int:
 
     # ── Step 3: Contract Wiring ─────────────────────────────
     if args.skip_contracts:
-        step3 = StepResult(name="Contract Wiring", exit_code=0, skipped=True)
+        step3 = StepResult(name=CONTRACT_WIRING_STEP, exit_code=0, skipped=True)
         print("\n[3/3] Contract wiring... ⏭️  skipped")
     else:
-        step3 = results["Contract Wiring"]
+        step3 = results[CONTRACT_WIRING_STEP]
         print("\n[3/3] Contract wiring check...")
         if step3.passed:
             print("  ✅ All contracts present and wired")

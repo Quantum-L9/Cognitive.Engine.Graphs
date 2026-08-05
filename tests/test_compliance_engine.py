@@ -104,8 +104,9 @@ def test_validate_gates_clean() -> None:
 
 def test_validate_gates_blocked() -> None:
     gate = _MockGate(candidateprop="race", queryparam="x", name="bad")
+    engine = ComplianceEngine(_spec())
     with pytest.raises(ValueError, match="prohibited"):
-        ComplianceEngine(_spec()).validate_gates([gate])
+        engine.validate_gates([gate])
 
 
 def test_redact_passthrough_when_disabled() -> None:

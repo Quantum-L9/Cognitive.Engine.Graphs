@@ -153,7 +153,7 @@ def validate_llm_output(llm_response: str, expected_schema: type[T], strict: boo
         # Parse JSON
         data = json.loads(llm_response)
     except json.JSONDecodeError as e:
-        logger.error(f"LLM returned invalid JSON: {e}")
+        logger.exception("LLM returned invalid JSON")
         raise ValidationError(f"LLM output is not valid JSON: {e}")
 
     # Validate against schema
@@ -168,8 +168,8 @@ def validate_llm_output(llm_response: str, expected_schema: type[T], strict: boo
         logger.info(f"LLM output validated against {expected_schema.__name__}")
         return validated
 
-    except ValidationError as e:
-        logger.error(f"LLM output failed schema validation: {e}")
+    except ValidationError:
+        logger.exception("LLM output failed schema validation")
         raise
 
 

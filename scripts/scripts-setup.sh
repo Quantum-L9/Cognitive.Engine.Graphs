@@ -37,7 +37,7 @@ command -v docker compose >/dev/null 2>&1 || command -v docker-compose >/dev/nul
 echo "✅ Prerequisites met"
 
 --- Create .env if missing ---
-if [ ! -f "$ROOT_DIR/.env" ]; then
+if [[ ! -f "$ROOT_DIR/.env" ]]; then
   cat > "$ROOT_DIR/.env" << 'EOF'
 L9 Engine — Environment Variables
 Consistent across all L9 repos
@@ -75,7 +75,7 @@ fi
 if command -v poetry >/dev/null 2>&1; then
   echo "📦 Installing via Poetry..."
   cd "$ROOT_DIR" && poetry install
-elif [ -f "$ROOT_DIR/requirements.txt" ]; then
+elif [[ -f "$ROOT_DIR/requirements.txt" ]]; then
   echo "📦 Installing via pip..."
   python3 -m pip install -r "$ROOT_DIR/requirements.txt"
 else

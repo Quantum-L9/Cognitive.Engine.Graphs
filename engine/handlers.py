@@ -251,12 +251,12 @@ _DANGEROUS_PATTERNS = (
 )
 
 # Valid property name pattern (alphanumeric + underscore, must start with letter/underscore)
-_PROPERTY_NAME_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+_PROPERTY_NAME_RE = re.compile(r"^[a-zA-Z_]\w*$")
 
 # Direct property access: n.<identifier> preceded by start-of-string or an operator/whitespace.
 # Intentionally does NOT match n.<identifier> preceded by '(' to block substring(n.prop,...) bypass.
 # Also matches Cypher parameter references ($param_name).
-_DIRECT_PROPERTY_RE = re.compile(r"(?:^|[\s+\-*/])n\.[a-zA-Z_][a-zA-Z0-9_]*|\$[a-zA-Z_][a-zA-Z0-9_]*")
+_DIRECT_PROPERTY_RE = re.compile(r"(?:^|[\s+\-*/])n\.[a-zA-Z_]\w*|\$[a-zA-Z_]\w*")
 
 
 def _check_dangerous_patterns(expr_stripped: str, expr_lower: str) -> None:
@@ -309,7 +309,7 @@ def _try_safe_literal(expr_stripped: str, expr_lower: str) -> str | None:
 
 def _validate_property_refs_and_chars(expr_stripped: str) -> None:
     """Validate property names and allowed characters in the expression."""
-    property_refs = re.findall(r"n\.([a-zA-Z_][a-zA-Z0-9_]*)", expr_stripped)
+    property_refs = re.findall(r"n\.([a-zA-Z_]\w*)", expr_stripped)
     for prop in property_refs:
         if not _PROPERTY_NAME_RE.match(prop):
             raise ValidationError(
@@ -488,7 +488,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             database=domain_spec.domain.id,
         )
     except Exception as exc:
-        logger.error("Match query failed for tenant=%s", tenant, exc_info=True)
+        logger.exception("Match query failed for tenant=%s", tenant)
         raise ExecutionError(
             "Match query execution failed",
             action="match",
@@ -974,7 +974,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         from engine.kge.compound_e3d import CompoundE3D, CompoundE3DConfig
 
         config = CompoundE3DConfig.from_kge_spec(spec.kge)
-        kge_model = CompoundE3D(config)  # noqa: F841 — instantiation validates config
+        CompoundE3D(config)  # instantiation validates config
         # Smoke test: verify vector index exists by running a simple query
         smoke_ok = True
         smoke_detail = "vector index reachable"

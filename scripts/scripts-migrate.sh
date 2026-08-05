@@ -46,9 +46,9 @@ fi
 Read constraints from domain spec or migration files
 MIGRATION_DIR="$ROOT_DIR/domains/${DOMAIN}/migrations"
 
-if [ -d "$MIGRATION_DIR" ]; then
+if [[ -d "$MIGRATION_DIR" ]]; then
   for CYPHER_FILE in "$MIGRATION_DIR"/*.cypher; do
-    [ -f "$CYPHER_FILE" ] || continue
+    [[ -f "$CYPHER_FILE" ]] || continue
     echo "  📋 Running $(basename "$CYPHER_FILE")..."
     $CYPHER_CMD < "$CYPHER_FILE"
     echo "  ✅ $(basename "$CYPHER_FILE") applied"

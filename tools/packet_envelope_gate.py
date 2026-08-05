@@ -153,10 +153,11 @@ def main() -> int:
                     "docs/CI_PIPELINE.md (baseline ratchet).",
                     file=sys.stderr,
                 )
-            except (json.JSONDecodeError, ValueError):
-                # Best-effort diagnostic only; a malformed comparison payload
-                # must not mask the underlying gate return code.
-                pass
+            except ValueError:
+                print(
+                    "PacketEnvelope gate: compare output was not JSON; consult the raw SDK output above.",
+                    file=sys.stderr,
+                )
         return compare.returncode
 
 

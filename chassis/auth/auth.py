@@ -201,13 +201,16 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         if self._tenant_auth_enabled:
             # Check for service-to-service bypass key first
             bypass_header = request.headers.get(_BYPASS_KEY_HEADER, "")
-            if self._bypass_key_bytes and bypass_header:
-                if hmac.compare_digest(
+            if (
+                self._bypass_key_bytes
+                and bypass_header
+                and hmac.compare_digest(
                     bypass_header.encode("utf-8"),
                     self._bypass_key_bytes,
-                ):
-                    # Bypass key valid — skip tenant check
-                    return await call_next(request)
+                )
+            ):
+                # Bypass key valid — skip tenant check
+                return await call_next(request)
 
             # Extract tenant from request body (for POST /v1/execute)
             # We decode JWT claims to check allowed_tenants

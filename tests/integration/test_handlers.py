@@ -66,8 +66,9 @@ def test_handle_sync_rejects_missing_entity_type() -> None:
     _reset_state()
     init_dependencies(graph_driver=driver, domain_loader=loader)
 
+    coro = handle_sync("tenant-a", {"batch": [{"entity_id": "x"}]})
     with pytest.raises((ValidationError, Exception)):
-        asyncio.run(handle_sync("tenant-a", {"batch": [{"entity_id": "x"}]}))
+        asyncio.run(coro)
 
 
 def test_handle_sync_rejects_empty_batch() -> None:
@@ -80,8 +81,9 @@ def test_handle_sync_rejects_empty_batch() -> None:
     _reset_state()
     init_dependencies(graph_driver=driver, domain_loader=loader)
 
+    coro = handle_sync("tenant-a", {"entity_type": "Buyer", "batch": []})
     with pytest.raises((ValidationError, Exception)):
-        asyncio.run(handle_sync("tenant-a", {"entity_type": "Buyer", "batch": []}))
+        asyncio.run(coro)
 
 
 def test_handle_sync_returns_success_shape() -> None:
@@ -125,8 +127,9 @@ def test_handle_match_rejects_missing_query() -> None:
     _reset_state()
     init_dependencies(graph_driver=driver, domain_loader=loader)
 
+    coro = handle_match("tenant-a", {"match_direction": "a_to_b"})
     with pytest.raises((ValidationError, Exception)):
-        asyncio.run(handle_match("tenant-a", {"match_direction": "a_to_b"}))
+        asyncio.run(coro)
 
 
 def test_handle_match_rejects_missing_direction() -> None:
@@ -139,8 +142,9 @@ def test_handle_match_rejects_missing_direction() -> None:
     _reset_state()
     init_dependencies(graph_driver=driver, domain_loader=loader)
 
+    coro = handle_match("tenant-a", {"query": {"revenue": 0.8}})
     with pytest.raises((ValidationError, Exception)):
-        asyncio.run(handle_match("tenant-a", {"query": {"revenue": 0.8}}))
+        asyncio.run(coro)
 
 
 # ── handle_admin ──────────────────────────────────────────────────────────────
@@ -168,8 +172,9 @@ def test_handle_admin_rejects_unknown_subaction() -> None:
     _reset_state()
     init_dependencies(graph_driver=driver, domain_loader=loader)
 
+    coro = handle_admin("tenant-a", {"subaction": "does_not_exist"})
     with pytest.raises((ValidationError, Exception)):
-        asyncio.run(handle_admin("tenant-a", {"subaction": "does_not_exist"}))
+        asyncio.run(coro)
 
 
 def test_handle_admin_rejects_missing_subaction() -> None:
@@ -181,5 +186,6 @@ def test_handle_admin_rejects_missing_subaction() -> None:
     _reset_state()
     init_dependencies(graph_driver=driver, domain_loader=loader)
 
+    coro = handle_admin("tenant-a", {})
     with pytest.raises((ValidationError, Exception)):
-        asyncio.run(handle_admin("tenant-a", {}))
+        asyncio.run(coro)

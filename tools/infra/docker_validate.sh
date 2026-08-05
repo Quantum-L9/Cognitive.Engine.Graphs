@@ -255,7 +255,7 @@ main() {
         echo -e "║  ${GREEN}✓ ALL CHECKS PASSED${NC}"
         [[ "$mode" == "build" ]] && echo "║  ✓ BUILD SUCCESSFUL"
     else
-        echo -e "║  ${RED}✗ $VALIDATION_ERRORS ERROR(S) FOUND${NC}"
+        echo -e "║  ${RED}✗ $VALIDATION_ERRORS ERROR(S) FOUND${NC}" >&2
     fi
     echo "╚════════════════════════════════════════════════════════════════════╝"
     echo ""

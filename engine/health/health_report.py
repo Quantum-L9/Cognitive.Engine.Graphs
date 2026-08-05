@@ -128,9 +128,8 @@ def _build_upgrade_recommendations(
                 "Your readiness score is below 70% — Enrich tier customers average 2.3x more matches after enrichment"
             )
 
-    elif tier == "enrich":
-        if len(entity_health.enrichment_targets) > 10:
-            recs.append("Upgrade to Discover for batch scanning across all entities — find and fix gaps automatically")
+    elif tier == "enrich" and len(entity_health.enrichment_targets) > 10:
+        recs.append("Upgrade to Discover for batch scanning across all entities — find and fix gaps automatically")
 
     return recs
 

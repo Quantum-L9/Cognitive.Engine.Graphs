@@ -152,12 +152,11 @@ def enforce_packet_envelope(
         _verify_content_hash(packet, expected_type, packet_id)
 
     # Envelope hash must be non-empty
-    if "envelope_hash" in required:
-        if not packet.get("envelope_hash"):
-            raise ContractViolationError(
-                "envelope_hash is empty",
-                packet_id=packet_id,
-            )
+    if "envelope_hash" in required and not packet.get("envelope_hash"):
+        raise ContractViolationError(
+            "envelope_hash is empty",
+            packet_id=packet_id,
+        )
 
     return packet
 

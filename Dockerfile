@@ -39,11 +39,11 @@ COPY chassis/ /app/chassis/
 
 # Copy entrypoint
 COPY scripts/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
 
-# Non-root user
-RUN groupadd -r l9 && useradd -r -g l9 -d /app -s /sbin/nologin l9
-RUN chown -R l9:l9 /app
+# Make the entrypoint executable and create the non-root user in a single layer
+RUN chmod +x /app/entrypoint.sh \
+    && groupadd -r l9 && useradd -r -g l9 -d /app -s /sbin/nologin l9 \
+    && chown -R l9:l9 /app
 USER l9
 
 EXPOSE 8000

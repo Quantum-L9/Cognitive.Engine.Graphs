@@ -66,6 +66,6 @@ def test_no_second_plasticos_executable_directory() -> None:
 )
 def test_archived_materials_marked_non_authoritative(archived: Path) -> None:
     if archived.name == "ARCHIVE_MAP.md" or not archived.is_file():
-        return
+        pytest.skip("ARCHIVE_MAP.md index and non-file entries carry no authority marker")
     head = archived.read_text(encoding="utf-8")[:500]
     assert "NON-AUTHORITATIVE" in head

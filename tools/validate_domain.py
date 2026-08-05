@@ -192,7 +192,7 @@ def _check_compliance(spec: DomainSpec) -> list[dict]:
                 "message": "No prohibited factors in gates",
             }
         )
-    except (ValueError, Exception) as exc:
+    except Exception as exc:
         results.append(
             {
                 "check": "W3-02-prohibited-factors",

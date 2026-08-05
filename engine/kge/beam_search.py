@@ -202,7 +202,7 @@ class BeamSearchEngine:
         """
         import warnings
 
-        rng = np.random.default_rng()
+        rng = np.random.default_rng(0)
 
         # Check if model has trained embeddings
         if not self.model._entity_embeddings:

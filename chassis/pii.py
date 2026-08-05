@@ -53,9 +53,9 @@ class PIISensitivity(StrEnum):
 
 _PII_PATTERNS: dict[PIICategory, re.Pattern] = {
     PIICategory.EMAIL: re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}"),
-    PIICategory.PHONE: re.compile(r"(?:\+?1[\-\s.]?)?\(?[0-9]{3}\)?[\-\s.]?[0-9]{3}[\-\s.]?[0-9]{4}"),
-    PIICategory.SSN: re.compile(r"\b[0-9]{3}[\-\s]?[0-9]{2}[\-\s]?[0-9]{4}\b"),
-    PIICategory.IP_ADDRESS: re.compile(r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b"),
+    PIICategory.PHONE: re.compile(r"(?:\+?1[\-\s.]?)?\(?\d{3}\)?[\-\s.]?\d{3}[\-\s.]?\d{4}"),
+    PIICategory.SSN: re.compile(r"\b\d{3}[\-\s]?\d{2}[\-\s]?\d{4}\b"),
+    PIICategory.IP_ADDRESS: re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"),
 }
 
 _PII_FIELD_HINTS: dict[str, tuple[PIICategory, PIISensitivity]] = {

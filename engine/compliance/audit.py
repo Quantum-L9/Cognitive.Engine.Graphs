@@ -356,8 +356,8 @@ class AuditLogger:
         try:
             async with db_pool.acquire() as conn:
                 await conn.executemany(insert_sql, batch_data)
-        except Exception as e:
-            logger.error(f"Failed to persist audit entries: {e}")
+        except Exception:
+            logger.exception("Failed to persist audit entries")
             async with self._buffer_lock:
                 self._buffer = entries + self._buffer
             raise

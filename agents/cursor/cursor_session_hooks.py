@@ -187,20 +187,17 @@ class CursorSessionHooks:
         """
         files = []
 
-        if tool_id in ["read_file", "get_file_contents"] or tool_id in [
-            "write_file",
-            "create_or_update_file",
-        ]:
+        if (
+            tool_id in ["read_file", "get_file_contents"]
+            or tool_id in ["write_file", "create_or_update_file"]
+            or tool_id in ["list_files", "get_directory_contents"]
+        ):
             if "path" in args:
                 files.append(args["path"])
 
         elif tool_id == "search_code":
             # Search tools don't directly touch files, but note the query scope
             pass
-
-        elif tool_id in ["list_files", "get_directory_contents"]:
-            if "path" in args:
-                files.append(args["path"])
 
         return files
 
