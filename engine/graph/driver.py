@@ -116,12 +116,21 @@ class GraphDriver:
         self,
         cypher: str,
         parameters: dict[str, Any] | None = None,
-        database: str = "neo4j",
+        database: str | None = None,
     ) -> list[Any]:
         """Execute Cypher query with W4-02 circuit breaker protection.
 
         Raises CircuitOpenError (maps to 503) if breaker is OPEN.
         """
+        if database is None:
+            from engine.config.settings import settings
+
+            if settings.strict_tenant_database:
+                msg = (
+                    "GraphDriver.execute_query requires an explicit database (W7-01); implicit 'neo4j' fallback removed"
+                )
+                raise ValueError(msg)
+            database = "neo4j"
         return await self._circuit_breaker.call(self._raw_execute_query, cypher, parameters, database)
 
     async def _raw_execute_write(
@@ -179,7 +188,7 @@ class GraphDriver:
         *args: Any,
         cypher: str | None = None,
         parameters: dict[str, Any] | None = None,
-        database: str = "neo4j",
+        database: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any] | Any:
         """Execute a write with W4-02 circuit breaker protection.
@@ -189,6 +198,15 @@ class GraphDriver:
         ``cypher=``/``parameters=`` keyword form returning a counters summary
         dict. Raises CircuitOpenError (maps to 503) if breaker is OPEN.
         """
+        if database is None:
+            from engine.config.settings import settings
+
+            if settings.strict_tenant_database:
+                msg = (
+                    "GraphDriver.execute_write requires an explicit database (W7-01); implicit 'neo4j' fallback removed"
+                )
+                raise ValueError(msg)
+            database = "neo4j"
         return await self._circuit_breaker.call(
             self._raw_execute_write,
             transaction_function,

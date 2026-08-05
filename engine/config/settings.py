@@ -144,6 +144,12 @@ class Settings(BaseSettings):
     # Distinct from PACKET_STORE_DSN (engine/packet/packet_store.py), which manages
     # its own lazy pool — both may point at the same Postgres instance.
 
+    # --- Wave 7: Explicit Tenant Database Binding ---
+    strict_tenant_database: bool = (
+        False  # W7-01: require explicit database= on GraphDriver calls; no implicit 'neo4j' fallback
+    )
+    require_sdk_chassis_in_prod: bool = False  # W7-02: fail startup if L9_CHASSIS != sdk when l9_env == prod
+
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
         """Raise if default secrets are used in production environment."""

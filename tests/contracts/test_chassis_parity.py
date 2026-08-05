@@ -19,6 +19,7 @@ rather than in production.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import pytest
 from constellation_node_sdk import clear_handlers, registered_actions
@@ -78,3 +79,36 @@ def test_entrypoint_rejects_unknown_chassis(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("L9_CHASSIS", "nope")
     with pytest.raises(ValueError, match="L9_CHASSIS"):
         resolve_chassis()
+
+
+def test_entrypoint_rejects_legacy_chassis_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
+    """W7-02: with the flag enabled, legacy chassis in prod fails startup."""
+    from chassis.entrypoint import resolve_chassis
+    from engine.config.settings import Settings
+
+    monkeypatch.setenv("L9_CHASSIS", "legacy")
+    prod = Settings(
+        l9_env="prod",
+        neo4j_password="test-pw",
+        api_secret_key="test-key",
+        require_sdk_chassis_in_prod=True,
+    )
+    with patch("engine.config.settings.settings", prod):
+        with pytest.raises(ValueError, match="production"):
+            resolve_chassis()
+
+
+def test_entrypoint_allows_sdk_chassis_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
+    """W7-02: sdk chassis in prod is accepted with the flag enabled."""
+    from chassis.entrypoint import resolve_chassis
+    from engine.config.settings import Settings
+
+    monkeypatch.setenv("L9_CHASSIS", "sdk")
+    prod = Settings(
+        l9_env="prod",
+        neo4j_password="test-pw",
+        api_secret_key="test-key",
+        require_sdk_chassis_in_prod=True,
+    )
+    with patch("engine.config.settings.settings", prod):
+        assert resolve_chassis() == "sdk"

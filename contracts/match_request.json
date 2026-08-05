@@ -1,0 +1,31 @@
+{
+  "contract_version": "1.0.0-draft",
+  "domain": "plasticos",
+  "query_id": "odoo-match-71-1",
+  "direction": "supply_opportunity_to_buyer_facility",
+  "query_entity_ref": "res.partner:71",
+  "query": {
+    "facts": {
+      "polymer": "HDPE",
+      "form": "regrind",
+      "quantity_lbs_month": 40000
+    },
+    "evidence_summary": [
+      {
+        "feature_id": "polymer_fit",
+        "value_state": "observed",
+        "evidence_ref": "plasticos.supply.opportunity:71"
+      }
+    ],
+    "governed_filters": {
+      "region": "us-midwest"
+    }
+  },
+  "top_n": 25,
+  "projection_version": "1.0.0",
+  "policy_ref": {
+    "id": "plasticos-matching-policy",
+    "version": "1.1.0"
+  },
+  "field_dictionary_version": "plasticos-fd-1.0.0"
+}

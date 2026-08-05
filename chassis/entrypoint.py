@@ -41,6 +41,12 @@ def resolve_chassis() -> str:
     if selected not in _VALID:
         msg = f"L9_CHASSIS must be one of {_VALID}, got {selected!r}"
         raise ValueError(msg)
+
+    from engine.config.settings import settings
+
+    if settings.require_sdk_chassis_in_prod and settings.is_production and selected != SDK:
+        msg = f"L9_CHASSIS must be {SDK!r} in production (l9_env=prod); got {selected!r}"
+        raise ValueError(msg)
     return selected
 
 

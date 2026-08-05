@@ -34,6 +34,12 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | ensemble_max_divergence | 0.30 | GDS/KGE score divergence cap |
 | score_normalize | False | Post-query min-max normalization |
 
+## Wave 7 — Explicit Tenant Database Binding
+| Flag | Default | Purpose |
+|------|---------|---------|
+| strict_tenant_database | False | Require explicit `database=` on GraphDriver calls; no implicit 'neo4j' fallback (W7-01) |
+| require_sdk_chassis_in_prod | False | Fail startup if `L9_CHASSIS != sdk` when `l9_env == prod` (W7-02) |
+
 ## Entity Resolution
 | Flag | Default | Purpose |
 |------|---------|---------|
