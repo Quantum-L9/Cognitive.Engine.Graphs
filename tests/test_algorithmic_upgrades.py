@@ -235,10 +235,10 @@ class TestValidateLlmJson:
         assert result.confidence == 0.9
 
     def test_invalid_json(self):
-        # Malformed JSON is rejected before schema validation. The current
-        # implementation surfaces this as a TypeError (raised while building
-        # the fallback error), so assert on that concrete type.
-        with pytest.raises(TypeError):
+        # Malformed JSON is rejected before schema validation and surfaces as a
+        # ValueError. (Schema-shape failures raise pydantic ValidationError via
+        # model_validate instead — see test_destructive_cypher_rejected.)
+        with pytest.raises(ValueError, match="invalid JSON"):
             validate_llm_json("not json", CypherQueryOutput)
 
     def test_destructive_cypher_rejected(self):
