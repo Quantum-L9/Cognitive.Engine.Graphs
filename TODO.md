@@ -1,3 +1,10 @@
+## Issue unblock (session reference)
+
+**Cluster:** CEG#32 (mypy chassis) + CEG#33 (YAML) — closed 2026-08-11 as already clean on main
+**Owning fix:** none (evidence close; `mypy chassis/` clean; listed YAML parse OK)
+**Next:** optional CI hygiene — drop `--exclude chassis` from mypy workflow steps (CI_PIPELINE; not done)
+**Pickup:** Graphiti PICKUP written 2026-08-11
+
 <!-- L9_META
 l9_schema: 1
 origin: engine-specific
