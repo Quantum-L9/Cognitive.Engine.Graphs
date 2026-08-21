@@ -37,16 +37,16 @@ repos:
         additional_dependencies: [pydantic, pydantic-settings, types-PyYAML, neo4j, structlog]
         exclude: ^(tests/|tools/|domains/|current work/|harvest_staging/|docs/|engine/security/|engine/auth/|agents/cursor/)
 
-  # Unit tests (fast subset for pre-commit)
-  # Note: Some tests require mock updates; run full suite with `pytest tests/`
+  # Unit tests covering staged Python only. Full catalog: make test / CI pytest.
+  # pre-commit run --all-files (≥40 .py files) keeps the historical unit subset.
   - repo: local
     hooks:
       - id: pytest-unit
-        name: pytest unit tests
-        entry: bash -c 'PYTHONPATH="${PYTHONPATH}:." python3 -m pytest tests/ -m "unit" --ignore=tests/unit/test_gates_all_types.py --ignore=tests/unit/test_scoring.py --ignore=tests/unit/test_config.py --ignore=tests/unit/test_arbitration.py --ignore=tests/unit/test_wave6_dormant_features.py --tb=short -q'
+        name: pytest unit tests (changed files)
+        entry: python3 tools/run_precommit_pytest_unit.py
         language: system
-        pass_filenames: false
-        always_run: true
+        types: [python]
+        pass_filenames: true
         stages: [pre-commit]
 
   # Security: Block banned imports in engine/
