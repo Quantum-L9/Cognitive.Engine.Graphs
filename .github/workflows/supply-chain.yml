@@ -76,7 +76,7 @@ jobs:
           sarif_file: scorecard.sarif
 
       - name: Upload Scorecard Results as Artifact
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: scorecard-results
           path: scorecard.sarif
@@ -122,9 +122,10 @@ jobs:
           fail-on-severity: high
           # dependency-review-action rejects specifying both allow-licenses and
           # deny-licenses. Keep the allow-list (stricter); deny-list is implied.
-          # Repo var ALLOWED_LICENSES is set and would drop SPDX AND compounds
-          # from a || fallback. Always append the two Dual-license strings.
-          allow-licenses: ${{ vars.ALLOWED_LICENSES || 'MIT, Apache-2.0, BSD-3-Clause, BSD-2-Clause, ISC' }}, Apache-2.0 AND MIT, Apache-2.0 AND BSD-2-Clause
+          # SPDX AND compounds in allow-licenses do not match package Dual
+          # licenses and also break MIT matching (upload-artifact 7.0.1).
+          allow-licenses: ${{ vars.ALLOWED_LICENSES || 'MIT, Apache-2.0, BSD-3-Clause, BSD-2-Clause, ISC' }}
+          allow-dependencies-licenses: pkg:pypi/structlog, pkg:pypi/prometheus-client
           comment-summary-in-pr: on-failure
 
 # ────────────────────────────────────────────────────────────────────────
@@ -219,7 +220,7 @@ jobs:
 
       - name: Upload License Report
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: license-report
           path: |
