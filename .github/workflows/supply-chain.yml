@@ -122,7 +122,9 @@ jobs:
           fail-on-severity: high
           # dependency-review-action rejects specifying both allow-licenses and
           # deny-licenses. Keep the allow-list (stricter); deny-list is implied.
-          allow-licenses: ${{ vars.ALLOWED_LICENSES || 'MIT, Apache-2.0, BSD-3-Clause, BSD-2-Clause, ISC, Apache-2.0 AND MIT, Apache-2.0 AND BSD-2-Clause' }}
+          # Repo var ALLOWED_LICENSES is set and would drop SPDX AND compounds
+          # from a || fallback. Always append the two Dual-license strings.
+          allow-licenses: ${{ vars.ALLOWED_LICENSES || 'MIT, Apache-2.0, BSD-3-Clause, BSD-2-Clause, ISC' }}, Apache-2.0 AND MIT, Apache-2.0 AND BSD-2-Clause
           comment-summary-in-pr: on-failure
 
 # ────────────────────────────────────────────────────────────────────────
