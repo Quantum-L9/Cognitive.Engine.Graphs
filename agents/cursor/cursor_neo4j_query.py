@@ -45,10 +45,18 @@ __dora_meta__ = {
 import argparse
 import json
 import os
+import ssl
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import structlog
+
+try:
+    from ._safe_http import http_exchange, require_http_url
+except ImportError:  # standalone `python cursor_neo4j_query.py`
+    from _safe_http import http_exchange, require_http_url
 
 logger = structlog.get_logger(__name__)
 
@@ -75,13 +83,16 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
 if not NEO4J_PASSWORD:
     logger.warning("NEO4J_PASSWORD env var not set — Neo4j queries will fail")
 
+# HTTP Neo4j is the SSH-tunnel / local Docker path only. Remote hosts must be https.
+_NEO4J_HTTP_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+_SSL_CONTEXT = ssl.create_default_context()
+
 
 def query_neo4j(cypher: str) -> dict:
     """Execute a Cypher query against Neo4j."""
     import base64
-    import urllib.request
 
-    url = f"{NEO4J_URL}/db/neo4j/tx/commit"
+    url = f"{NEO4J_URL.rstrip('/')}/db/neo4j/tx/commit"
     data = json.dumps({"statements": [{"statement": cypher}]}).encode()
 
     # Create auth header
@@ -94,11 +105,24 @@ def query_neo4j(cypher: str) -> dict:
             "Content-Type": "application/json",
             "Authorization": f"Basic {credentials}",
         },
+        method="POST",
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=30) as response:
+        require_http_url(url, allowed_http_hosts=_NEO4J_HTTP_HOSTS, label="Neo4j URL")
+        with http_exchange(
+            req,
+            timeout=30,
+            context=_SSL_CONTEXT,
+            allowed_http_hosts=_NEO4J_HTTP_HOSTS,
+            label="Neo4j URL",
+        ) as response:
             return json.loads(response.read().decode())
+    except ValueError as e:
+        return {"error": str(e), "errors": [{"message": str(e)}]}
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode() if e.fp else str(e)
+        return {"error": f"HTTP {e.code}", "errors": [{"message": detail}]}
     except urllib.error.URLError as e:
         return {"error": str(e), "errors": [{"message": str(e)}]}
 
