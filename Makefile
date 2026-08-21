@@ -16,10 +16,17 @@
 
 # ── Governance ─────────────────────────────────────────────
 
-.PHONY: start
+.PHONY: start campaign
 
 start:	## Run the full governance session-start pipeline against this repo
 	@$(MAKE) -C "$(HOME)/.cursor-governance" start WS="$(CURDIR)"
+
+campaign:	## Activate a PE campaign (proxies to governance make campaign)
+	@test -n "$(INTENT)" || (echo "INTENT= path to activate seed is required" >&2; exit 2)
+	@$(MAKE) -C "$(HOME)/.cursor-governance" campaign \
+		INTENT="$$(python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).expanduser().resolve())' "$(INTENT)")" \
+		CAMPAIGN_UNTIL="$(or $(CAMPAIGN_UNTIL),execute)" \
+		CAMPAIGN_ARGS="$(CAMPAIGN_ARGS)"
 
 # ── Docker Compose ─────────────────────────────────────────
 
