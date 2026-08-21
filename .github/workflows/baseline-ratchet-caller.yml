@@ -26,10 +26,10 @@ permissions:
 jobs:
   ratchet:
     name: Baseline Ratchet
-    uses: Quantum-L9/l9-ci-core/.github/workflows/baseline-ratchet.yml@d81a06ed821106a487df2e5ad06d93e347392af6
+    uses: Quantum-L9/l9-ci-core/.github/workflows/baseline-ratchet.yml@0d28395428426853c44825c4645c23ee8ace23b1
     with:
-      core-revision: d81a06ed821106a487df2e5ad06d93e347392af6
-      sdk-revision: 0779fca8238011f8abea551895f96584676e9d17
+      core-revision: 0d28395428426853c44825c4645c23ee8ace23b1
+      sdk-revision: b1a491414ed04bb18d665f8a8755de80947c8200
       python-version: "3.12"
       pytest-paths: tests
       test-quarantine-ledger: .l9/baselines/test-quarantine.yml
