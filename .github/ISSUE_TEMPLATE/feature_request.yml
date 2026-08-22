@@ -1,0 +1,69 @@
+name: Feature Request
+description: Propose a new feature or enhancement for Quantum-L9 infrastructure
+title: "[Feature]: "
+labels: ["enhancement", "triage"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before submitting, check existing issues and discussions to avoid duplicates.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem does this feature solve? What gap does it address?
+      placeholder: "Currently, when I do X, I have to manually Y because..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the feature you'd like to see implemented.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What other approaches did you consider? Why did you reject them?
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: Define what "done" looks like. Use checkboxes.
+      placeholder: |
+        - [ ] CI gate added to pr-pipeline kernel
+        - [ ] CONTRIBUTING.md updated
+        - [ ] TRACEABILITY_MAP.yaml entry added
+    validations:
+      required: true
+
+  - type: dropdown
+    id: affected-repos
+    attributes:
+      label: Primarily Affected Repository
+      multiple: true
+      options:
+        - l9-ci-core
+        - Cursor-Governance
+        - l9-assurance
+        - .github (org backbone)
+        - Multiple repos (org-wide change)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Suggested Priority
+      options:
+        - Critical (blocks current work)
+        - High (significant improvement)
+        - Medium (nice to have)
+        - Low (future consideration)
