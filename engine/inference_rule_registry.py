@@ -13,8 +13,8 @@ GAP-3 FIX: Active inference function registry with real computation functions.
 
 Previously _RULE_REGISTRY was empty at startup, causing every `derived_from`
 inference rule that referenced a named rule to block with NO_RULE.
-This module registers all production inference functions and wires them
-into the DerivationGraph execution engine.
+This module registers the supported in-code inference functions and exposes
+them through the explicit execute_rule() registry boundary.
 
 Registration pattern:
     @register_inference_rule("rule_name")
@@ -47,7 +47,8 @@ class InferenceContext:
     domain_id: str
     pass_number: int
     known_fields: dict[str, Any] = field(default_factory=dict)
-    domain_kb: dict[str, Any] = field(default_factory=dict)  # from domain spec KB injection
+    # Optional caller-supplied tuning context. DomainSpec/DomainPackLoader do not populate it.
+    domain_kb: dict[str, Any] = field(default_factory=dict)
     confidence_floor: float = 0.55
 
 
@@ -132,8 +133,9 @@ def execute_rule(
 
 # ===========================================================================
 # PRODUCTION INFERENCE RULES
-# Register all domain-agnostic rules here. Domain-specific rules are
-# loaded from domain KB via load_domain_rules() below.
+# Register supported in-code inference rules here. Domain configuration remains
+# owned by the typed DomainSpec/DomainPackLoader boundary; raw rule dictionaries
+# are not loaded into this registry.
 # ===========================================================================
 
 
@@ -414,88 +416,6 @@ def infer_buyer_persona(entity: dict, ctx: InferenceContext) -> InferenceResult 
     return InferenceResult(
         "buyer_persona", "unknown", 0.55, "infer_buyer_persona", rationale=f"title={title} — no match"
     )
-
-
-# ---------------------------------------------------------------------------
-# Dynamic domain rule loader (Gap-3: KB injection pathway)
-# ---------------------------------------------------------------------------
-
-
-def load_domain_rules(domain_kb: dict[str, Any]) -> int:
-    """
-    Load domain-specific inference rules from domain KB.
-    Returns count of rules registered.
-
-    The KB may contain a 'inference_rules' list of:
-        {name: str, field: str, conditions: [...], value: Any, confidence: float}
-
-    Simple condition-based rules are auto-registered as closures.
-    Complex rules should be registered via @register_inference_rule in domain pack files.
-    """
-    rules_spec = domain_kb.get("inference_rules", [])
-    registered = 0
-    for spec in rules_spec:
-        rule_name = spec.get("name")
-        if not rule_name:
-            continue
-        if rule_name in _RULE_REGISTRY:
-            continue  # already registered — don't overwrite
-        _register_condition_rule(rule_name, spec)
-        registered += 1
-    logger.info("Loaded %d domain-specific inference rules from KB", registered)
-    return registered
-
-
-def _register_condition_rule(rule_name: str, spec: dict[str, Any]) -> None:
-    """Auto-generate and register a simple condition-based inference rule."""
-    target_field = spec["field"]
-    conditions = spec.get("conditions", [])
-    default_value = spec.get("value")
-    confidence = float(spec.get("confidence", 0.65))
-
-    def _rule(entity: dict, ctx: InferenceContext) -> InferenceResult | None:
-        for cond in conditions:
-            src_field = cond.get("source_field")
-            operator = cond.get("operator", "eq")
-            cond_value = cond.get("value")
-            entity_val = entity.get(src_field)
-            if entity_val is None:
-                return None
-            match operator:
-                case "eq":
-                    if entity_val != cond_value:
-                        return None
-                case "gt":
-                    try:
-                        if float(entity_val) <= float(cond_value):
-                            return None
-                    except (TypeError, ValueError):
-                        return None
-                case "lt":
-                    try:
-                        if float(entity_val) >= float(cond_value):
-                            return None
-                    except (TypeError, ValueError):
-                        return None
-                case "contains":
-                    if str(cond_value).lower() not in str(entity_val).lower():
-                        return None
-                case _:
-                    return None
-        output_value = spec.get("output_value", default_value)
-        if output_value is None:
-            return None
-        return InferenceResult(
-            field_name=target_field,
-            value=output_value,
-            confidence=confidence,
-            rule_name=rule_name,
-            provenance="domain_kb",
-            rationale="condition rule from KB",
-        )
-
-    _RULE_REGISTRY[rule_name] = _rule
-    logger.debug("Auto-registered condition rule: %s → %s", rule_name, target_field)
 
 
 def list_registered_rules() -> list[str]:
