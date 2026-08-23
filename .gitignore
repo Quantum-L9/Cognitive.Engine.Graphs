@@ -67,3 +67,13 @@ secrets.json
 # l9-ci-sdk runtime checkout (provisioned by tools/packet_envelope_gate.py)
 .l9/runtime/
 .venv-py312-mypy/
+
+# Agent session bootstrap — injected into the checkout per session, not
+# repository content. .claude/rules is a symlink into the governance clone
+# (an absolute machine path) and .claude/skills is a projection of the
+# governance skill library, so committing either would duplicate the
+# governance SSOT and hardcode a machine path. .mcp.json is environment
+# specific. A repo that later wants its own tracked Claude config can
+# un-ignore the specific paths it owns.
+/.claude/
+/.mcp.json
