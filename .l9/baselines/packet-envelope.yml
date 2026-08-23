@@ -18,19 +18,6 @@ entries:
   removal_condition: migrated-to:TransportPacket
   root_cause_group: packet-envelope-migration
   evidence: chassis/pii.py::string-annotation:For PacketEnvelope.security.pii_fields.
-- id: packet-envelope/engine-graph-graph-sync-client-fix-py-string-annotation
-  gate: pre-commit/packet-envelope-prohibited
-  rule: packet-envelope-prohibited
-  fingerprint: 3743f9ff50d0e4dbb3567bc40dfe2085a29eaf1b6f3c115cf55f291965c1089a
-  path: engine/graph/graph_sync_client_fix.py
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#138
-  introduced_before: af986d0
-  expires: '2026-10-21'
-  removal_condition: migrated-to:TransportPacket
-  root_cause_group: packet-envelope-migration
-  evidence: engine/graph/graph_sync_client_fix.py::string-annotation:Build and validate a PacketEnvelope
-    before sending.
 - id: packet-envelope/engine-packet-bridge-py-import-from
   gate: pre-commit/packet-envelope-prohibited
   rule: packet-envelope-prohibited
