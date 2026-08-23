@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import engine.inference_rule_registry as registry
-from engine.inference_rule_registry import InferenceContext, InferenceResult, execute_rule
+from engine import inference_rule_registry as registry
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -27,13 +26,13 @@ def test_registry_exposes_only_supported_in_code_rule_surface() -> None:
 
 
 def test_supported_registry_still_returns_canonical_result_type() -> None:
-    context = InferenceContext(tenant_id="test", domain_id="plasticos", pass_number=1)
-    result = execute_rule(
+    context = registry.InferenceContext(tenant_id="test", domain_id="plasticos", pass_number=1)
+    result = registry.execute_rule(
         "infer_material_grade_from_mfi",
         {"melt_flow_index": 5.0, "material_type": "HDPE"},
         context,
     )
-    assert isinstance(result, InferenceResult)
+    assert isinstance(result, registry.InferenceResult)
     assert result.field_name == "material_grade"
     assert result.value == "HD_injection"
 
