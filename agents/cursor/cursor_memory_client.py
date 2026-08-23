@@ -103,6 +103,11 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+try:
+    from ._safe_http import http_exchange, require_http_url, secure_ssl_context
+except ImportError:  # standalone `python cursor_memory_client.py`
+    from _safe_http import http_exchange, require_http_url, secure_ssl_context
+
 import structlog
 
 # =============================================================================
@@ -198,9 +203,28 @@ CONTENT_TYPE_JSON = "application/json"
 L9_EXECUTOR_API_KEY = os.getenv("MCP_API_KEY_C") or os.getenv("L9_EXECUTOR_API_KEY", "")
 
 # Skip SSL verification for self-signed certs
-ssl_context = ssl.create_default_context()
+ssl_context = secure_ssl_context()
 ssl_context.check_hostname = False
 ssl_context.verify_mode = ssl.CERT_NONE
+
+# http is allowed only for the documented C1 IP and the local Docker/tunnel hosts.
+# Anything else must be https. file:// and userinfo are refused (CWE-939).
+_ALLOWED_HTTP_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "46.62.243.82"})
+
+
+def _require_http_url(url: str) -> str:
+    return require_http_url(url, allowed_http_hosts=_ALLOWED_HTTP_HOSTS, label="memory URL")
+
+
+def _http_exchange(req: urllib.request.Request, *, timeout: float, context: ssl.SSLContext):
+    return http_exchange(
+        req,
+        timeout=timeout,
+        context=context,
+        allowed_http_hosts=_ALLOWED_HTTP_HOSTS,
+        label="memory URL",
+    )
+
 
 # =============================================================================
 # MCP Client (Primary - MCP Server ONLY)
@@ -231,12 +255,14 @@ def mcp_call_tool(tool_name: str, arguments: dict) -> dict:
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
 
     try:
-        with urllib.request.urlopen(req, timeout=30, context=ssl_context) as response:
+        with _http_exchange(req, timeout=30, context=ssl_context) as response:
             result = json.loads(response.read().decode())
             # MCP server returns {"status": "success", "result": {...}, "caller": "C"}
             if result.get("status") == "success":
                 return result.get("result", {})
             return {"error": result.get("detail", "MCP call failed")}
+    except ValueError as e:
+        return {"error": str(e)}
     except urllib.error.HTTPError as e:
         error_detail = e.read().decode() if e.fp else ""
         return {"error": f"HTTP {e.code}", "detail": error_detail}
@@ -276,8 +302,10 @@ def api_request(method: str, path: str, data: dict | None = None) -> dict:
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
 
     try:
-        with urllib.request.urlopen(req, timeout=30, context=ssl_context) as response:
+        with _http_exchange(req, timeout=30, context=ssl_context) as response:
             return json.loads(response.read().decode())
+    except ValueError as e:
+        return {"error": str(e)}
     except urllib.error.HTTPError as e:
         return {"error": f"HTTP {e.code}", "detail": e.read().decode()}
     except urllib.error.URLError as e:
@@ -346,7 +374,7 @@ def cmd_health():
     req = urllib.request.Request(url, headers=headers, method="GET")
 
     try:
-        with urllib.request.urlopen(req, timeout=10, context=ssl_context) as response:
+        with _http_exchange(req, timeout=10, context=ssl_context) as response:
             api_result = json.loads(response.read().decode())
             results["api_health"] = {
                 "status": "healthy",
