@@ -147,10 +147,10 @@ def _imports_of(path: Path, known: set[str]) -> set[str]:
             called = getattr(fn, "attr", None) or getattr(fn, "id", None)
             if called in {"import_module", "__import__", "find_spec"}:
                 for arg in node.args:
-                    if isinstance(arg.value if isinstance(arg, ast.Constant) else None, str):
-                        value = arg.value
-                        if value.split(".")[0] == PKG and (hit := _resolve(value, known)):
-                            found.add(hit)
+                    if not isinstance(arg, ast.Constant) or not isinstance(arg.value, str):
+                        continue
+                    if arg.value.split(".")[0] == PKG and (hit := _resolve(arg.value, known)):
+                        found.add(hit)
 
     return found
 
@@ -204,6 +204,14 @@ def test_no_runtime_module_imports_a_removed_surface() -> None:
 
 
 def test_no_runtime_module_reintroduces_a_removed_symbol() -> None:
+    """Some of these names are generic enough to be reinvented by accident —
+    `ContractViolationError` and `enforce_packet_envelope` especially. That is
+    the point: packet-envelope validation belongs to engine/packet/, and audit
+    persistence to engine/compliance/audit.py. If a canonical owner genuinely
+    needs one of these names, add it there and drop it from REMOVED_SYMBOLS in
+    the same change — deliberately, with the owner named in the commit. Do not
+    delete this test to get past it.
+    """
     offenders: list[str] = []
     for path in sorted([*ENGINE.rglob("*.py"), *CHASSIS.rglob("*.py")]):
         source = path.read_text(encoding="utf-8")
