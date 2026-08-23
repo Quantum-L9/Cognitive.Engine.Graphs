@@ -39,6 +39,36 @@ class HttpResponse:
         return None
 
 
+DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def secure_ssl_context() -> ssl.SSLContext:
+    """Default context pinned to TLS 1.2+; TLSv1 and TLSv1.1 stay refused."""
+    context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return context
+
+
+def format_authority(host: str, port: int | None) -> str:
+    """RFC 3986 authority. IPv6 literals keep their brackets."""
+    literal = f"[{host}]" if ":" in host else host
+    return literal if port is None else f"{literal}:{port}"
+
+
+def redact_url(url: str) -> str:
+    """Scheme and authority only — never echo userinfo, path, or query to a log."""
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return "<unparseable URL>"
+    scheme = parsed.scheme or "<no scheme>"
+    if not host:
+        return f"{scheme}://<no host>"
+    return f"{scheme}://{format_authority(host, port)}"
+
+
 def require_http_url(
     url: str,
     *,
@@ -47,18 +77,19 @@ def require_http_url(
 ) -> str:
     """Refuse file://, userinfo, and unsigned remote http."""
     parsed = urlparse(url)
+    safe = redact_url(url)
     if parsed.scheme not in {"http", "https"}:
-        msg = f"refusing non-http(s) {label} scheme {parsed.scheme!r}: {url[:120]}"
+        msg = f"refusing non-http(s) {label} scheme {parsed.scheme!r}: {safe}"
         raise ValueError(msg)
     if parsed.username or parsed.password:
-        msg = f"refusing {label} with userinfo: {url[:120]}"
+        msg = f"refusing {label} with userinfo: {safe}"
         raise ValueError(msg)
     host = (parsed.hostname or "").lower()
     if not host:
-        msg = f"refusing {label} without host: {url[:120]}"
+        msg = f"refusing {label} without host: {safe}"
         raise ValueError(msg)
     if parsed.scheme == "http" and host not in allowed_http_hosts:
-        msg = f"refusing non-allowlisted http {label}: {url[:120]}"
+        msg = f"refusing non-allowlisted http {label}: {safe}"
         raise ValueError(msg)
     return url
 
@@ -86,9 +117,7 @@ def parse_http_response(raw: bytes) -> tuple[int, str, Message, bytes]:
         if b":" not in line:
             continue
         key, value = line.split(b":", 1)
-        headers[key.decode("latin-1", errors="replace")] = value.decode(
-            "latin-1", errors="replace"
-        ).strip()
+        headers[key.decode("latin-1", errors="replace")] = value.decode("latin-1", errors="replace").strip()
     length = headers.get("Content-Length")
     if length is not None:
         try:
@@ -111,7 +140,7 @@ def http_exchange(
     parsed = urlparse(url)
     host = parsed.hostname
     if host is None:
-        msg = f"refusing {label} without host: {url[:120]}"
+        msg = f"refusing {label} without host: {redact_url(url)}"
         raise ValueError(msg)
     path = parsed.path or "/"
     if parsed.query:
@@ -128,7 +157,8 @@ def http_exchange(
             sock = socket.create_connection((host, port), timeout=timeout)
     except OSError as exc:
         raise urllib.error.URLError(exc) from exc
-    header_host = host if parsed.port in (None, 80, 443) else f"{host}:{port}"
+    default_port = DEFAULT_PORTS[parsed.scheme]
+    header_host = format_authority(host, None if parsed.port in (None, default_port) else port)
     header_lines = [
         f"{method} {path} HTTP/1.0",
         f"Host: {header_host}",

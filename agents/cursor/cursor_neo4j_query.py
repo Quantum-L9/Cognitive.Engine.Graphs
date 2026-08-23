@@ -45,7 +45,6 @@ __dora_meta__ = {
 import argparse
 import json
 import os
-import ssl
 import sys
 import urllib.error
 import urllib.request
@@ -54,9 +53,9 @@ from pathlib import Path
 import structlog
 
 try:
-    from ._safe_http import http_exchange, require_http_url
+    from ._safe_http import http_exchange, require_http_url, secure_ssl_context
 except ImportError:  # standalone `python cursor_neo4j_query.py`
-    from _safe_http import http_exchange, require_http_url
+    from _safe_http import http_exchange, require_http_url, secure_ssl_context
 
 logger = structlog.get_logger(__name__)
 
@@ -85,7 +84,7 @@ if not NEO4J_PASSWORD:
 
 # HTTP Neo4j is the SSH-tunnel / local Docker path only. Remote hosts must be https.
 _NEO4J_HTTP_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
-_SSL_CONTEXT = ssl.create_default_context()
+_SSL_CONTEXT = secure_ssl_context()
 
 
 def query_neo4j(cypher: str) -> dict:

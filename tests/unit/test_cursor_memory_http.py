@@ -32,6 +32,7 @@ _NEO4J = _AGENT_DIR / "cursor_neo4j_query.py"
 _SAFE_HTTP = _AGENT_DIR / "_safe_http.py"
 sys.path.insert(0, str(_AGENT_DIR))
 
+import _safe_http  # noqa: E402
 import cursor_memory_client as cmc  # noqa: E402
 import cursor_neo4j_query as cnq  # noqa: E402
 
@@ -102,7 +103,7 @@ def test_http_exchange_posts_over_loopback() -> None:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        ctx = ssl.create_default_context()
+        ctx = _safe_http.secure_ssl_context()
         with cmc._http_exchange(req, timeout=2, context=ctx) as resp:
             body = resp.read()
         assert b'"ok":true' in body
@@ -119,7 +120,7 @@ def test_http_exchange_maps_connect_error() -> None:
     port = sock.getsockname()[1]
     sock.close()
     req = urllib.request.Request(f"http://127.0.0.1:{port}/health", method="GET")
-    ctx = ssl.create_default_context()
+    ctx = _safe_http.secure_ssl_context()
     with pytest.raises(urllib.error.URLError):
         cmc._http_exchange(req, timeout=1, context=ctx)
 
@@ -139,3 +140,75 @@ def test_neo4j_query_refuses_remote_http(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(cnq, "NEO4J_PASSWORD", "x")
     result = cnq.query_neo4j("RETURN 1")
     assert "non-allowlisted" in result["error"]
+
+
+@pytest.mark.unit
+def test_secure_ssl_context_refuses_tls_below_1_2() -> None:
+    for context in (
+        _safe_http.secure_ssl_context(),
+        cmc.ssl_context,
+        cnq._SSL_CONTEXT,
+    ):
+        assert context.minimum_version >= ssl.TLSVersion.TLSv1_2
+
+
+@pytest.mark.unit
+def test_url_errors_never_echo_userinfo() -> None:
+    secret = "http://alice:hunter2@example.com/memory"
+    with pytest.raises(ValueError) as excinfo:
+        cmc._require_http_url(secret)
+    message = str(excinfo.value)
+    assert "hunter2" not in message
+    assert "alice" not in message
+    assert "example.com" in message
+
+
+@pytest.mark.unit
+def test_redact_url_drops_path_query_and_userinfo() -> None:
+    assert _safe_http.redact_url("https://u:p@host.example:8443/x?token=abc") == ("https://host.example:8443")
+    assert _safe_http.redact_url("file:///etc/passwd") == "file://<no host>"
+    assert _safe_http.redact_url("http://[::1]:8000/health") == "http://[::1]:8000"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("host", "port", "expected"),
+    [
+        ("127.0.0.1", None, "127.0.0.1"),
+        ("127.0.0.1", 8000, "127.0.0.1:8000"),
+        ("::1", None, "[::1]"),
+        ("::1", 8000, "[::1]:8000"),
+    ],
+)
+def test_format_authority_brackets_ipv6(host: str, port: int | None, expected: str) -> None:
+    assert _safe_http.format_authority(host, port) == expected
+
+
+@pytest.mark.unit
+def test_host_header_keeps_explicit_non_default_port() -> None:
+    """A loopback server on an ephemeral port must be addressed host:port."""
+    seen: dict[str, str] = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            seen["host"] = self.headers.get("Host", "")
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *_args: object) -> None:
+            return None
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/health", method="GET")
+        with cmc._http_exchange(req, timeout=2, context=_safe_http.secure_ssl_context()):
+            pass
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert seen["host"] == f"127.0.0.1:{port}"

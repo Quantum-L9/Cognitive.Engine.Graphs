@@ -104,9 +104,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 try:
-    from ._safe_http import http_exchange, require_http_url
+    from ._safe_http import http_exchange, require_http_url, secure_ssl_context
 except ImportError:  # standalone `python cursor_memory_client.py`
-    from _safe_http import http_exchange, require_http_url
+    from _safe_http import http_exchange, require_http_url, secure_ssl_context
 
 import structlog
 
@@ -203,7 +203,7 @@ CONTENT_TYPE_JSON = "application/json"
 L9_EXECUTOR_API_KEY = os.getenv("MCP_API_KEY_C") or os.getenv("L9_EXECUTOR_API_KEY", "")
 
 # Skip SSL verification for self-signed certs
-ssl_context = ssl.create_default_context()
+ssl_context = secure_ssl_context()
 ssl_context.check_hostname = False
 ssl_context.verify_mode = ssl.CERT_NONE
 
@@ -224,6 +224,7 @@ def _http_exchange(req: urllib.request.Request, *, timeout: float, context: ssl.
         allowed_http_hosts=_ALLOWED_HTTP_HOSTS,
         label="memory URL",
     )
+
 
 # =============================================================================
 # MCP Client (Primary - MCP Server ONLY)
