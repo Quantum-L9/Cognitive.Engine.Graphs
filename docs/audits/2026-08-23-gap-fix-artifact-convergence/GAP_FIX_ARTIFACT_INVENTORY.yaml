@@ -1,6 +1,7 @@
 # Phase 1 — gap-fix island inventory
 # Contract: CEG-GAP-FIX-ARTIFACT-REACHABILITY-CONVERGENCE-2026-08-23
-# Base SHA: 5868bc49865eba0afd6154a0746ac06111cf1ccf (origin/main, predecessor #232 merged)
+# Base SHA: 5868bc49865eba0afd6154a0746ac06111cf1ccf (origin/main = merge commit of
+# PR #232, "fix(inference): remove ghost bridge and unowned KB rule loading")
 #
 # Discovery commands:
 #   find engine tests -type f | sort | grep -E 'gap|patch|fix|return_channel|community_export|audit_persistence|graph_sync'
@@ -143,7 +144,7 @@ artifacts:
     exists: true
     current_blob_sha: null
     introduction_commit: 0979ff5
-    latest_change_commit: 5815927   # predecessor #232 removed the dead spec.kb recipe block
+    latest_change_commit: 5815927   # PR #232 removed the dead spec.kb recipe block
     declared_owner: engine-team
     declared_status: active
     discovered_via: sole module referencing the island as "wiring"
@@ -172,7 +173,8 @@ associated_tests:
     covers_anything_else: false
   - path: tests/gap_fixes/test_gap3_inference_registry.py
     covers: engine/inference_rule_registry.py
-    in_scope: false                     # predecessor contract owns inference
+    in_scope: false                     # exercises the retained test-only registry;
+                                        # inference ownership is out of this contract's scope
   - path: tests/gap_fixes/test_gap9_inference_authority.py
     covers: [engine/inference_rule_registry.py, engine/startup_wiring.py (source-text assertion)]
     in_scope: partial                   # must be updated if startup_wiring.py is removed

@@ -189,7 +189,7 @@ artifacts:
       init_dependencies(db_pool=...) (E-002). boot.py contains no call to
       apply_all_gap_fixes and never has.
     behavior_preservation_requirement: >
-      None from this file. The predecessor's guard (no undeclared spec.kb /
+      None from this file. PR #232's guard (no undeclared spec.kb /
       load_domain_rules recipe may reappear) is preserved as a stronger tree-wide
       invariant rather than a source-text assertion against one file.
     proposed_action: DELETE
@@ -200,13 +200,25 @@ artifacts:
   # ── Explicitly retained ──
 
   - path: engine/inference_rule_registry.py
-    classification: HISTORICAL_REFERENCE
-    confidence: HIGH
+    classification: TEST_ONLY_IMPLEMENTATION
+    confidence: CONFIRMED
+    evidence:
+      runtime_callers: []
+      production_reachability: NONE_VERIFIED
+      test_consumers:
+        - tests/gap_fixes/test_gap3_inference_registry.py
+        - tests/gap_fixes/test_gap9_inference_authority.py
     proposed_action: KEEP
     reason: >
-      Owned by predecessor CEG-INFERENCE-OWNERSHIP-CLOSURE-2026-08-23 (merged as #232),
-      which deliberately left it and documented its test-only reachability. This
-      contract's non_scope names inference ownership closure as out of scope.
+      KEEP is a scope decision, not a canonicality claim. PR #232 —
+      "fix(inference): remove ghost bridge and unowned KB rule loading",
+      merge commit 5868bc4 — deliberately retained this module (removing only
+      load_domain_rules and _register_condition_rule) and explicitly recorded
+      that it has no verified production edge and is reachable only from tests.
+      Resolving inference ownership — wiring it, relocating it, or removing it —
+      is outside this contract's scope and deliberately deferred. The later
+      inference-ownership closure contract is a separate, unexecuted program;
+      it did not merge as PR #232.
 
   - path: tests/contracts/test_known_gaps.py
     classification: HISTORICAL_REFERENCE
@@ -261,15 +273,44 @@ deferred_findings:
       The other 59 are unrelated dormant clusters: engine/health/**, engine/intake/**,
       engine/personas/**, engine/hoprag/**, engine/kge/** (documented dormant,
       kge_enabled=False), engine/arbitration/**, engine/outcomes/**, engine/replay/**,
-      engine/shadow/**, and notably engine/gates/registry.py +
-      engine/gates/types/all_gates.py, whose decorator-registered gate classes are never
-      imported because engine/gates/__init__.py and engine/gates/compiler.py both bypass
-      GateRegistry entirely.
+      engine/shadow/**. The gates cluster inside this set is broken
+      out as GATE-001 below.
     why_not_fixed_here: >
       Out of scope. non_scope forbids a general CEG refactor, and classifying 59 modules
       across nine unaudited subsystems is the `broaden_into_unrelated_refactor`
       prohibition. Some are plausibly legitimate staged subsystems, some plausibly
       dormant defects; neither can be asserted without this island's evidence depth.
+
+  - id: GATE-001
+    title: GateRegistry/all_gates is a production-unreachable alternate gate implementation surface
+    severity: architectural
+    state: DEFER_DEDICATED_CONVERGENCE_AUDIT
+    confidence: HIGH
+    facts:
+      - engine/gates/__init__.py exports only GateCompiler and NullHandler
+      - GateCompiler contains direct per-GateType compile handlers and is production-reachable via engine/handlers.py
+      - GateCompiler._compile_composite recursively invokes the live compiler path; it does not use GateRegistry
+      - GateRegistry._REGISTRY is a static dictionary mapping GateType values to classes imported from engine/gates/types/all_gates.py; no decorator registration exists anywhere in engine/gates/
+      - CompositeGate in all_gates.py recursively resolves subgates through GateRegistry.get_gate_class
+      - GateRegistry and all_gates.py are unreachable from all verified production roots
+      - tests directly import and exercise GateRegistry/all_gates (tests/test_boot_and_registry.py::TestGateRegistry asserts full GateType coverage of _REGISTRY)
+      - the current gate-development agent skill (.claude/skills/gate-development/SKILL.md) instructs agents to add each new gate in BOTH all_gates.py and GateRegistry._REGISTRY
+    interpretation: >
+      Not presently evidenced as "GateCompiler forgot to wire GateRegistry."
+      The stronger evidence is that CEG contains two gate compilation
+      implementation surfaces: the production-reachable GateCompiler, and an
+      unreachable GateRegistry + all_gates surface kept alive by tests and by
+      active agent guidance. Whether the alternate surface contains semantics
+      that must be preserved before consolidation is UNKNOWN until a dedicated
+      gate-by-gate parity audit.
+    prohibited_conclusions:
+      - GateRegistry must be wired into GateCompiler
+      - GateRegistry/all_gates should immediately be deleted
+      - all_gates is definitely obsolete
+      - GateCompiler is definitely incomplete
+      - both implementations are required merely because agent docs say so
+    action_in_this_pr: >
+      Record only. engine/gates/** is not modified here.
 
 reachability_invariant_decision:
   contract_preferred_design: full-tree static AST reachability gate over engine/

@@ -48,7 +48,7 @@ files:
       Its startup-recipe guard reads engine/startup_wiring.py source text; that file is
       deleted here. The guarded behaviour (no undeclared spec.kb / load_domain_rules
       recipe may reappear) is still required, so the assertion is strengthened from
-      one-file source text to a tree-wide scan. Predecessor coverage preserved, not dropped.
+      one-file source text to a tree-wide scan. PR #232's regression coverage preserved, not dropped.
   - path: docs/adr/ADR-DEC-001-candidate-identity.md
     action: MODIFY
     serves_finding: >
@@ -83,13 +83,21 @@ files:
      action: NEW, serves_finding: Phase 7 required output}
 
 explicitly_not_touched:
-  - {path: engine/inference_rule_registry.py, reason: predecessor's subject; this contract's non_scope}
-  - {path: tests/gap_fixes/test_gap3_inference_registry.py, reason: predecessor coverage, unaffected}
+  - path: engine/inference_rule_registry.py
+    reason: >
+      TEST_ONLY_IMPLEMENTATION, kept as an explicit scope decision — inference
+      ownership is outside this contract and deferred. PR #232 retained it and
+      recorded its lack of any verified production edge; KEEP here is not a
+      canonicality claim.
+  - {path: tests/gap_fixes/test_gap3_inference_registry.py, reason: exercises the retained test-only registry; unaffected}
   - path: engine/boot.py
     reason: >
       PROTECTED-adjacent lifecycle owner, and already correct — it never called the
       removed recipe. Rule: do not create new boot wiring.
-  - {path: engine/gates/registry.py, reason: DEF-001, unrelated dormant cluster, out of scope}
+  - path: engine/gates/**
+    reason: >
+      GATE-001 (see classification) — an unreachable alternate gate implementation
+      surface recorded for a dedicated parity audit; no gate code changes in this PR.
   - {path: "artifacts/**", reason: Phase 12 — generated audit output; churn restored, not committed}
   - {path: "engine/packet/**, engine/sync/**, engine/compliance/audit.py, engine/gds/scheduler.py",
      reason: canonical owners, retained unchanged — consolidation requires no edit to them}
