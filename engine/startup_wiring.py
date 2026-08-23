@@ -39,15 +39,6 @@ async def apply_all_gap_fixes(pg_dsn: str, neo4j_driver, domain_pack_loader) -> 
     await configure_audit_pool(pg_pool)
     logger.info("startup: Gap-5 audit pool wired")
 
-    # ── Gap 3: Load domain KB rules into inference registry ──────────────────
-    from engine.inference_rule_registry import load_domain_rules
-
-    for domain_id in domain_pack_loader.list_domains():
-        spec = domain_pack_loader.load_domain(domain_id)
-        if spec and spec.kb:
-            load_domain_rules(spec.kb)
-    logger.info("startup: Gap-3 inference rules loaded")
-
     # ── Gap 2: Initialise GRAPH→ENRICH return channel ────────────────────────
     from engine.graph_return_channel import GraphToEnrichReturnChannel
 
@@ -68,8 +59,7 @@ async def apply_all_gap_fixes(pg_dsn: str, neo4j_driver, domain_pack_loader) -> 
     except ImportError:
         logger.warning("startup: GDSScheduler not found — register Gap-6 hook manually")
 
-    # ── Gap 9: v1 bridge blocked by file replacement (no action needed here) ──
-    # engine/inference_bridge.py has been replaced with inference_bridge_v1_guard.py
-    # Any stray import will raise ImportError at import time, not at startup.
+    # Gap 9: the removed v1 inference bridge has no startup wiring.
+    # Do not add a successor bridge unless a real producer/consumer contract exists.
 
     logger.info("startup: all gap fixes applied successfully")
