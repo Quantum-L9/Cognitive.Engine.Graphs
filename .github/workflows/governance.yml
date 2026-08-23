@@ -1,15 +1,17 @@
-# Managed by Quantum-L9/.github. Pinned to a tag so main can move safely.
+# Managed by Quantum-L9/.github.
 #
-# This file should never need editing again. Governance logic lives in
-# Quantum-L9/.github/.github/workflows/governance-*.yml; shipping a change means
-# force-moving the v1 tag there, not touching this file.
+# Governance logic lives in Quantum-L9/.github/.github/workflows/governance-*.yml.
+# This repo's security gates (Scorecard Pinned-Dependencies, Sonar S7637) require
+# full-SHA pins, so both callees are pinned to the commit the v1 tag pointed at
+# when this file was seeded. Shipping a governance change now means bumping the
+# SHA below on re-seed, after the same preflight.
 #
 # Pin record (ops/governance-v1-pin.txt):
 #   Quantum-L9/.github/.github/workflows/governance-pr.yml@v1
 #   Quantum-L9/.github/.github/workflows/governance-issue.yml@v1
-#   tag SHA 7ed3ab8650583f6659a6caf061eae77dbd3ed1be
+#   tag SHA 7ed3ab8650583f6659a6caf061eae77dbd3ed1be  (verified 2026-08-23)
 # Preflight: `git ls-remote https://github.com/Quantum-L9/.github.git refs/tags/v1`
-# must match that SHA before re-seeding this caller.
+# must match the pinned SHA before re-seeding this caller.
 #
 # SECRETS: a called workflow does NOT inherit caller secrets automatically.
 # Both callees use only GITHUB_TOKEN. Do not add blank `secrets: inherit`.
@@ -23,6 +25,9 @@
 
 name: Governance
 
+permissions:
+  contents: read
+
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened, ready_for_review]
@@ -35,11 +40,11 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: Quantum-L9/.github/.github/workflows/governance-pr.yml@v1
+    uses: Quantum-L9/.github/.github/workflows/governance-pr.yml@7ed3ab8650583f6659a6caf061eae77dbd3ed1be # v1
 
   issue:
     if: github.event_name == 'issues'
     permissions:
       contents: read
       issues: write
-    uses: Quantum-L9/.github/.github/workflows/governance-issue.yml@v1
+    uses: Quantum-L9/.github/.github/workflows/governance-issue.yml@7ed3ab8650583f6659a6caf061eae77dbd3ed1be # v1

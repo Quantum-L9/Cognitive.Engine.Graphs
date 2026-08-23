@@ -50,9 +50,12 @@ All complaints will be reviewed and investigated promptly and fairly.
 
 ## Enforcement Guidelines
 
-**1. Correction** — Private written warning, clarity on violation, request for public apology.  
-**2. Warning** — Warning with consequences for continued behavior; no interaction with involved parties for a specified period.  
-**3. Temporary Ban** — Temporary ban from community interaction.  
+**1. Correction** — Private written warning, clarity on violation, request for public apology.
+
+**2. Warning** — Warning with consequences for continued behavior; no interaction with involved parties for a specified period.
+
+**3. Temporary Ban** — Temporary ban from community interaction.
+
 **4. Permanent Ban** — Permanent ban for sustained, severe, or repeated violations.
 
 ## Attribution

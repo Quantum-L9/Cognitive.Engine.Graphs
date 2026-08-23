@@ -130,10 +130,22 @@ jobs:
       - name: Install dependencies
         run: |
           set -euo pipefail
+          # Lockfile required so installs resolve only pinned versions (Sonar S8543,
+          # Scorecard Pinned-Dependencies). --ignore-scripts blocks package lifecycle
+          # scripts during install (Sonar S6505); a consumer whose dependencies need
+          # install-time build scripts opts out here deliberately, per repo.
           case "${PACKAGE_MANAGER}" in
-            npm)  if [ -f package-lock.json ]; then npm ci; else npm install; fi ;;
-            pnpm) corepack enable && (if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; else pnpm install; fi) ;;
-            yarn) corepack enable && (if [ -f yarn.lock ]; then yarn install --frozen-lockfile; else yarn install; fi) ;;
+            npm)
+              [ -f package-lock.json ] || { echo "::error::package-lock.json is required — commit a lockfile"; exit 1; }
+              npm ci --ignore-scripts ;;
+            pnpm)
+              corepack enable
+              [ -f pnpm-lock.yaml ] || { echo "::error::pnpm-lock.yaml is required — commit a lockfile"; exit 1; }
+              pnpm install --frozen-lockfile --ignore-scripts ;;
+            yarn)
+              corepack enable
+              [ -f yarn.lock ] || { echo "::error::yarn.lock is required — commit a lockfile"; exit 1; }
+              yarn install --frozen-lockfile --ignore-scripts ;;
             *) echo "::error::unknown PACKAGE_MANAGER ${PACKAGE_MANAGER}" && exit 1 ;;
           esac
 
@@ -142,7 +154,10 @@ jobs:
         run: |
           set -euo pipefail
           if [ -f tsconfig.json ]; then
-            npx --yes tsc --noEmit -p tsconfig.json
+            # --no-install runs the lockfile-resolved local tsc and never fetches a
+            # floating release from the registry (Sonar S6505/S8543). A repo with a
+            # tsconfig but no typescript devDependency fails here — add the dep.
+            npx --no-install tsc --noEmit -p tsconfig.json
           else
             echo "::notice::no tsconfig.json found, skipping type check"
           fi
@@ -179,10 +194,22 @@ jobs:
       - name: Install dependencies
         run: |
           set -euo pipefail
+          # Lockfile required so installs resolve only pinned versions (Sonar S8543,
+          # Scorecard Pinned-Dependencies). --ignore-scripts blocks package lifecycle
+          # scripts during install (Sonar S6505); a consumer whose dependencies need
+          # install-time build scripts opts out here deliberately, per repo.
           case "${PACKAGE_MANAGER}" in
-            npm)  if [ -f package-lock.json ]; then npm ci; else npm install; fi ;;
-            pnpm) corepack enable && (if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; else pnpm install; fi) ;;
-            yarn) corepack enable && (if [ -f yarn.lock ]; then yarn install --frozen-lockfile; else yarn install; fi) ;;
+            npm)
+              [ -f package-lock.json ] || { echo "::error::package-lock.json is required — commit a lockfile"; exit 1; }
+              npm ci --ignore-scripts ;;
+            pnpm)
+              corepack enable
+              [ -f pnpm-lock.yaml ] || { echo "::error::pnpm-lock.yaml is required — commit a lockfile"; exit 1; }
+              pnpm install --frozen-lockfile --ignore-scripts ;;
+            yarn)
+              corepack enable
+              [ -f yarn.lock ] || { echo "::error::yarn.lock is required — commit a lockfile"; exit 1; }
+              yarn install --frozen-lockfile --ignore-scripts ;;
             *) echo "::error::unknown PACKAGE_MANAGER ${PACKAGE_MANAGER}" && exit 1 ;;
           esac
 
