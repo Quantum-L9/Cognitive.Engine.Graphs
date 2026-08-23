@@ -160,7 +160,8 @@ def test_url_errors_never_echo_userinfo() -> None:
     message = str(excinfo.value)
     assert "hunter2" not in message
     assert "alice" not in message
-    assert "example.com" in message
+    # Exact, not a substring probe: the whole message is the redacted form.
+    assert message == "refusing memory URL with userinfo: http://example.com"
 
 
 @pytest.mark.unit
