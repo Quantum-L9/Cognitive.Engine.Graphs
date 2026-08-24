@@ -61,7 +61,7 @@ jobs:
           version: ${{ env.HELM_VERSION }}
 
       - name: Configure Kubernetes Context
-        uses: azure/k8s-set-context@27bfb387305b8f0ab5495d692e4a3304db7d0669 # v4.0.0
+        uses: azure/k8s-set-context@8698eba2499e9012f0d5085f8798077cce4bc526 # v5.0.1
         with:
           method: kubeconfig
           kubeconfig: ${{ secrets.KUBECONFIG }}
