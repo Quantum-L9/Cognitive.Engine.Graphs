@@ -1,0 +1,333 @@
+# Phase 6 — classification report (required before any source edit)
+# Contract: CEG-GAP-FIX-ARTIFACT-REACHABILITY-CONVERGENCE-2026-08-23
+# Base SHA: 5868bc49865eba0afd6154a0746ac06111cf1ccf
+#
+# Narrative form of these proofs is in the PR description; this file is the
+# machine-readable record. Every artifact below is CONFIRMED with zero
+# production callers.
+
+runtime_entrypoints_searched:
+  - chassis/handler_registration.py::register_engine_handlers  # -> engine.handlers.ACTION_HANDLERS
+  - chassis/actions.py::execute_action
+  - chassis/chassis_app.py                                     # L9_LIFECYCLE_HOOK -> importlib
+  - engine/boot.py::GraphLifecycle.{startup,shutdown,execute,_compliance_flush_loop}
+  - engine/handlers.py                                         # 8 action handlers
+  - engine/gds/scheduler.py::GDSScheduler
+  - engine/feedback/convergence.py::ConvergenceLoop.on_outcome_recorded
+  - engine/__init__.py                                         # packaged public API
+
+method:
+  static: git grep over engine chassis tests contracts domains docs tools Makefile .github
+  ast: >
+    Import-graph BFS over all 139 engine modules from the entrypoints above,
+    modelling absolute / from / relative / function-level imports,
+    importlib.import_module string literals, and Python ancestor-package
+    execution semantics. Shipped as tests/invariants/test_module_reachability.py.
+  cross_repo: GitHub code search over org:Quantum-L9 for every module path.
+
+artifacts:
+
+  - path: engine/compliance/audit_persistence.py
+    classification: ORPHANED_IMPLEMENTATION
+    confidence: CONFIRMED
+    canonical_owner: engine/compliance/audit.py::AuditLogger.flush_to_store
+    runtime_callers: []
+    reverse_imports: [tests/gap_fixes/test_gap5_audit.py]
+    proof: >
+      Own module-global _POOL, set only by configure_audit_pool(), which nothing
+      calls; INSERTs 5 untyped columns into `audit_log`. Canonical path is
+      boot.py -> init_dependencies(db_pool) -> EngineState ->
+      ComplianceEngine.flush_audit -> AuditLogger.flush_to_store, writing 16
+      typed columns to `packet_audit_log`. Two competing schemas, one owner.
+    behavior_preservation_requirement: none — AuditLogger unchanged
+    proposed_action: DELETE
+    validation_required: [tests/test_compliance_engine.py, tests/invariants/test_compliance.py]
+
+  - path: engine/graph_return_channel.py
+    classification: ORPHANED_IMPLEMENTATION
+    confidence: CONFIRMED
+    canonical_owner: UNKNOWN — the responsibility does not exist in CEG
+    runtime_callers: []
+    reverse_imports:
+      - engine/graph/community_export.py          # itself orphaned
+      - engine/convergence_controller_patch.py    # itself orphaned
+      - engine/startup_wiring.py                  # recipe, no caller, broken imports
+      - tests/gap_fixes/test_gap2_return_channel.py
+    proof: >
+      Its docstring names its consumer as convergence_controller.run_convergence_loop().
+      Neither exists in CEG. The canonical feedback owner, ConvergenceLoop, exposes
+      only on_outcome_recorded() and never drains a queue. Every producer is an
+      orphan, so nothing can enqueue; the consumer is absent, so nothing can drain.
+    behavior_preservation_requirement: none — a queue with no producer and no consumer
+    proposed_action: DELETE
+    validation_required: [tests/unit (feedback), tests/test_boot_and_registry.py]
+
+  - path: engine/graph/community_export.py
+    classification: ORPHANED_IMPLEMENTATION
+    confidence: CONFIRMED
+    canonical_owner: engine/gds/scheduler.py::GDSScheduler._run_louvain
+    runtime_callers: []
+    reverse_imports: [engine/startup_wiring.py]   # via non-existent `graph.` package
+    proof: >
+      Instructs attachment to a "GDSScheduler post-job completion hook".
+      GDSScheduler has no hook mechanism at all — unwireable, not merely unwired.
+      Redundant regardless: _run_louvain writes the label into the graph via
+      gds.louvain.write (writeproperty: community_id in domains/plasticos/spec.yaml)
+      and engine/scoring/assembler.py reads community_id straight off the node.
+      The graph is the transport.
+    behavior_preservation_requirement: none — GDS write and scoring read unchanged
+    proposed_action: DELETE
+    validation_required: [tests/unit/test_gds_scheduler.py, tests/unit/test_hgkr_gds_dag.py]
+
+  - path: engine/convergence_controller_patch.py
+    classification: STALE_PATCH
+    confidence: CONFIRMED
+    canonical_owner: engine/feedback/convergence.py::ConvergenceLoop
+    runtime_callers: []
+    reverse_imports: []
+    proof: >
+      Instructs the operator to call patch_convergence_controller(), a function
+      defined neither here nor anywhere else, to patch a convergence_controller.py
+      that does not exist. Its four symbols have zero importers, not even a test.
+      emit_schema_proposal dynamically imports chassis.events, which does not exist.
+    behavior_comparison_with_canonical: >
+      ConvergenceLoop.on_outcome_recorded is outcome-feedback score propagation: no
+      passes, no feature-vector confidence maps, no schema discovery, no domain_spec
+      argument. The patch supplies behavior for a different, absent subsystem — not
+      behavior missing from the canonical owner.
+    behavior_preservation_requirement: none — no canonical caller loses a capability
+    proposed_action: DELETE
+    validation_required: [tests/unit (feedback/convergence), tests/test_pareto_wiring.py]
+
+  - path: engine/graph/graph_sync_client_fix.py
+    classification: STALE_PATCH
+    confidence: CONFIRMED
+    canonical_owner: engine/sync/generator.py::SyncGenerator  # via handlers.py::handle_sync
+    runtime_callers: []
+    reverse_imports: []
+    architecture_refs: [docs/adr/ADR-DEC-001-candidate-identity.md]  # stale citation, corrected
+    proof: >
+      A "drop this over GraphSyncClient in graph/sync/client.py" replacement for a
+      package and call site that do not exist. Write shapes are incompatible:
+        canonical: MERGE (n:<sanitized targetnode> {<sanitized idproperty>: ...})
+                   SET n += row, n._tenant = $tenant
+        orphan   : MERGE (n {entity_id: row.entity_id, tenant: $tenant}) SET n:Entity
+      A labelless MERGE on a hardcoded entity_id writing `tenant`, not `_tenant`.
+      Had it run it would have built a parallel, unqueryable node keyspace.
+    adr_citation_correction_required: true
+    adr_finding: >
+      ADR-DEC-001 (Accepted) cites this file:113 as where the ungoverned `entity_id`
+      is "client-supplied at sync time". The code never had a caller, and no domain
+      spec declares idproperty: entity_id (plasticos uses facility_id, code, form_id,
+      opportunity_id, demand_id), so no canonical writer of entity_id exists at all,
+      while handlers.py:509,616,1497 still read it via silent fallbacks. Decision and
+      residual-risk finding stand; only the evidence pointer is corrected. The
+      correction widens the recorded divergence rather than narrowing it.
+    behavior_preservation_requirement: none — SyncGenerator owns sync end to end
+    proposed_action: DELETE
+    validation_required: [tests/unit (sync), tests/test_handlers.py]
+
+  - path: engine/contract_enforcement.py
+    classification: TEST_ONLY_IMPLEMENTATION
+    confidence: CONFIRMED
+    discovered_via: reverse-import closure — not in the mandatory set
+    canonical_owner: engine/packet/packet_envelope.py::PacketEnvelope
+    runtime_callers: []
+    reverse_imports:
+      - engine/graph_return_channel.py
+      - engine/graph/graph_sync_client_fix.py
+      - engine/convergence_controller_patch.py
+      - tests/gap_fixes/test_gap1_contract.py
+      - tests/gap_fixes/test_gap2_return_channel.py
+    proof: >
+      A second packet-envelope architecture with no shared type. Canonical
+      engine/packet/ (PacketType StrEnum, frozen extra=forbid models, _compute_hash)
+      is imported by chassis/actions.py, chassis/handler_registration.py,
+      engine/handlers.py, engine/config/settings.py, tools/contract_scanner.py and
+      tools/packet_envelope_gate.py. This module carries a private frozenset of
+      packet-type STRINGS (graph_inference_result, schema_proposal, community_export,
+      ...), a parallel required-fields table, and its own _compute_content_hash. Not
+      one of its packet-type strings appears in the canonical enum. Once the three
+      island importers go, every remaining importer is a test. Contract 05
+      (Redefine PacketEnvelope) exactly.
+    name_collision_checked:
+      doc: docs/L9_Contract_Enforcement_System.md
+      verdict: UNRELATED
+      reason: >
+        That document specifies the STATIC 24-contract system (tools/contract_scanner.py,
+        tools/verify_contracts.py, pre-commit, CI gates) and never references this
+        runtime module. Name similarity only.
+    behavior_preservation_requirement: none — no production path validates through it
+    proposed_action: DELETE
+    validation_required:
+      - tests/contracts/test_packet_envelope.py
+      - tests/unit/test_packet_envelope.py
+      - tests/unit/test_chassis_contract.py
+
+  - path: engine/startup_wiring.py
+    classification: STALE_PATCH
+    confidence: CONFIRMED
+    discovered_via: sole module presenting the island as installable wiring
+    canonical_owner: engine/boot.py::GraphLifecycle
+    runtime_callers: []
+    reverse_imports: [tests/gap_fixes/test_gap9_inference_authority.py]  # reads source text
+    unrunnable_proof: >
+      apply_all_gap_fixes() cannot execute once. Its first statement is
+      `from shared.audit_persistence import configure_audit_pool`; no `shared` package
+      exists, so it raises ModuleNotFoundError before applying any fix. Two later
+      imports name an absent top-level `graph` package — one of them OUTSIDE the try
+      block guarding ImportError — and it then calls GDSScheduler.register_post_job_hook,
+      which does not exist (AttributeError, uncaught).
+    activation_instruction_hazard: >
+      The Phase 13 surface. Its docstring reads "Add these calls to your application
+      lifespan / startup handler in order" — a standing instruction to activate the
+      six modules above. Deleting them and keeping this file would leave exactly the
+      resurrection vector this contract exists to close.
+    canonical_owner_proof: >
+      GraphLifecycle is the sole startup/shutdown owner (E-001) and already creates
+      the optional Postgres pool from settings.postgres_dsn, handing it to
+      init_dependencies(db_pool=...) (E-002). boot.py contains no call to
+      apply_all_gap_fixes and never has.
+    behavior_preservation_requirement: >
+      None from this file. PR #232's guard (no undeclared spec.kb /
+      load_domain_rules recipe may reappear) is preserved as a stronger tree-wide
+      invariant rather than a source-text assertion against one file.
+    proposed_action: DELETE
+    validation_required:
+      - tests/gap_fixes/test_gap9_inference_authority.py
+      - tests/test_boot_and_registry.py
+
+  # ── Explicitly retained ──
+
+  - path: engine/inference_rule_registry.py
+    classification: TEST_ONLY_IMPLEMENTATION
+    confidence: CONFIRMED
+    evidence:
+      runtime_callers: []
+      production_reachability: NONE_VERIFIED
+      test_consumers:
+        - tests/gap_fixes/test_gap3_inference_registry.py
+        - tests/gap_fixes/test_gap9_inference_authority.py
+    proposed_action: KEEP
+    reason: >
+      KEEP is a scope decision, not a canonicality claim. PR #232 —
+      "fix(inference): remove ghost bridge and unowned KB rule loading",
+      merge commit 5868bc4 — deliberately retained this module (removing only
+      load_domain_rules and _register_condition_rule) and explicitly recorded
+      that it has no verified production edge and is reachable only from tests.
+      Resolving inference ownership — wiring it, relocating it, or removing it —
+      is outside this contract's scope and deliberately deferred. The later
+      inference-ownership closure contract is a separate, unexecuted program;
+      it did not merge as PR #232.
+
+  - path: tests/contracts/test_known_gaps.py
+    classification: HISTORICAL_REFERENCE
+    confidence: CONFIRMED
+    proposed_action: KEEP
+    reason: >
+      Matched the Phase 1 filename filter on "gap" only. xfail placeholders for absent
+      contract YAML files under contracts/. No island reference.
+
+cross_repo_consumer_analysis:
+  scope: org:Quantum-L9, GitHub code search, all five module paths + contract_enforcement
+  result_total_count: 1
+  sole_hit:
+    repository: Quantum-L9/Cursor-Governance
+    path: docs/plans/BUILT/wire_gap-fix_modules_7d4d9028.plan.md
+    kind: PLAN_DOCUMENT
+    is_consumer: false
+  conclusion: >
+    No verified cross-repo consumer for any island module. No artifact qualifies as a
+    COMPATIBILITY_BOUNDARY.
+
+historical_plan_analysis:
+  document: Cursor-Governance docs/plans/BUILT/wire_gap-fix_modules_7d4d9028.plan.md
+  declared_state: every todo "completed"; filed under docs/plans/BUILT/
+  verified_state: NOT ONE OUTPUT LANDED IN CEG
+  outputs_verified_absent:
+    - engine/packet/contract_enforcement.py
+    - engine/feedback/graph_return_channel.py
+    - engine/feedback/inference_rule_registry.py
+    - engine/feedback/enrich_helpers.py
+    - engine/boot_gap_wiring.py
+    - tests/unit/test_contract_enforcement.py
+    - tests/unit/test_graph_return_channel.py
+    - tests/unit/test_inference_rule_registry.py
+    - tests/unit/test_audit_persistence.py
+  deletions_never_performed: [the 6 engine modules above, tests/gap_fixes/]
+  wiring_never_performed:
+    - "boot.py: import+call apply_all_gap_fixes() after init_dependencies"  # 0 occurrences
+    - "__init__.py export additions for feedback, packet, compliance, graph"  # all 4 unchanged
+  conclusion: >
+    E-006 confirmed in the strongest form. Per the contract's authority order and the
+    prohibited shortcut `wire_because_historical_plan_said_completed`, this plan grants
+    no authority to wire anything. Its own intent — delete the non-canonical originals —
+    agrees with this audit; the "relocate first" half was never justified by a consumer.
+
+deferred_findings:
+  - id: DEF-001
+    title: 59 further engine modules are unreachable from production entrypoints
+    severity: informational
+    evidence: >
+      The analyzer reports 66 unreachable engine modules at base; 7 are this island.
+      The other 59 are unrelated dormant clusters: engine/health/**, engine/intake/**,
+      engine/personas/**, engine/hoprag/**, engine/kge/** (documented dormant,
+      kge_enabled=False), engine/arbitration/**, engine/outcomes/**, engine/replay/**,
+      engine/shadow/**. The gates cluster inside this set is broken
+      out as GATE-001 below.
+    why_not_fixed_here: >
+      Out of scope. non_scope forbids a general CEG refactor, and classifying 59 modules
+      across nine unaudited subsystems is the `broaden_into_unrelated_refactor`
+      prohibition. Some are plausibly legitimate staged subsystems, some plausibly
+      dormant defects; neither can be asserted without this island's evidence depth.
+
+  - id: GATE-001
+    title: GateRegistry/all_gates is a production-unreachable alternate gate implementation surface
+    severity: architectural
+    state: DEFER_DEDICATED_CONVERGENCE_AUDIT
+    confidence: HIGH
+    facts:
+      - engine/gates/__init__.py exports only GateCompiler and NullHandler
+      - GateCompiler contains direct per-GateType compile handlers and is production-reachable via engine/handlers.py
+      - GateCompiler._compile_composite recursively invokes the live compiler path; it does not use GateRegistry
+      - GateRegistry._REGISTRY is a static dictionary mapping GateType values to classes imported from engine/gates/types/all_gates.py; no decorator registration exists anywhere in engine/gates/
+      - CompositeGate in all_gates.py recursively resolves subgates through GateRegistry.get_gate_class
+      - GateRegistry and all_gates.py are unreachable from all verified production roots
+      - tests directly import and exercise GateRegistry/all_gates (tests/test_boot_and_registry.py::TestGateRegistry asserts full GateType coverage of _REGISTRY)
+      - the current gate-development agent skill (.claude/skills/gate-development/SKILL.md) instructs agents to add each new gate in BOTH all_gates.py and GateRegistry._REGISTRY
+    interpretation: >
+      Not presently evidenced as "GateCompiler forgot to wire GateRegistry."
+      The stronger evidence is that CEG contains two gate compilation
+      implementation surfaces: the production-reachable GateCompiler, and an
+      unreachable GateRegistry + all_gates surface kept alive by tests and by
+      active agent guidance. Whether the alternate surface contains semantics
+      that must be preserved before consolidation is UNKNOWN until a dedicated
+      gate-by-gate parity audit.
+    prohibited_conclusions:
+      - GateRegistry must be wired into GateCompiler
+      - GateRegistry/all_gates should immediately be deleted
+      - all_gates is definitely obsolete
+      - GateCompiler is definitely incomplete
+      - both implementations are required merely because agent docs say so
+    action_in_this_pr: >
+      Record only. engine/gates/** is not modified here.
+
+reachability_invariant_decision:
+  contract_preferred_design: full-tree static AST reachability gate over engine/
+  implemented: NO — deferred with evidence
+  rationale: >
+    The contract's own constraints for this invariant prohibit a
+    `large_permanent_unreachable_baseline` and `adding_new_modules_to_baseline_to_make_test_green`.
+    A full-tree gate at this base has 59 out-of-scope unreachable modules; going green
+    needs either a 59-entry exemption list (the prohibited baseline) or a 59-module
+    classification sweep (the prohibited refactor). Both routes are closed, so shipping
+    the full-tree gate here would violate the contract that asks for it.
+  implemented_instead: >
+    tests/invariants/test_module_reachability.py — removed paths stay absent, no engine
+    or chassis module imports the removed surfaces or symbols, no gap-fix activation
+    recipe reappears, and the canonical owners remain present and production-reachable.
+    Ships and exercises the reusable AST analyzer the full gate needs, so DEF-001 can be
+    acted on by tightening scope rather than writing machinery.
+  UNKNOWN_declared: >
+    Whether each of the 59 remaining unreachable modules is a staged subsystem or a
+    dormant defect is UNKNOWN at this evidence depth and is not guessed.
