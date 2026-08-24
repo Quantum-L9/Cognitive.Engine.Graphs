@@ -13,10 +13,26 @@ def test_removed_inference_bridge_has_no_compatibility_module() -> None:
     assert not (ROOT / "engine" / "inference_bridge.py").exists()
 
 
-def test_startup_recipe_does_not_reintroduce_undeclared_kb_loading() -> None:
-    source = (ROOT / "engine" / "startup_wiring.py").read_text(encoding="utf-8")
-    assert "spec.kb" not in source
-    assert "load_domain_rules" not in source
+def test_no_module_reintroduces_undeclared_kb_loading() -> None:
+    """The recipe file this guard used to read has since been removed as an
+    unrunnable gap-fix artifact, so scan the whole engine tree instead. Broader
+    than the original assertion, and no longer tied to one file's existence.
+    """
+    banned = ("spec.kb", "load_domain_rules")
+    offenders = [
+        str(path.relative_to(ROOT))
+        for path in sorted((ROOT / "engine").rglob("*.py"))
+        if any(token in path.read_text(encoding="utf-8") for token in banned)
+    ]
+    assert offenders == []
+
+
+def test_startup_recipe_module_stays_removed() -> None:
+    """engine/startup_wiring.py instructed operators to wire five artifacts that
+    no longer exist, and could never run (its first import named a package that
+    is absent). It must not come back.
+    """
+    assert not (ROOT / "engine" / "startup_wiring.py").exists()
 
 
 def test_registry_exposes_only_supported_in_code_rule_surface() -> None:

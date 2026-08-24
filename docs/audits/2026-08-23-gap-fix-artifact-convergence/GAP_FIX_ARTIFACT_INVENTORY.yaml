@@ -1,0 +1,183 @@
+# Phase 1 — gap-fix island inventory
+# Contract: CEG-GAP-FIX-ARTIFACT-REACHABILITY-CONVERGENCE-2026-08-23
+# Base SHA: 5868bc49865eba0afd6154a0746ac06111cf1ccf (origin/main = merge commit of
+# PR #232, "fix(inference): remove ghost bridge and unowned KB rule loading")
+#
+# Discovery commands:
+#   find engine tests -type f | sort | grep -E 'gap|patch|fix|return_channel|community_export|audit_persistence|graph_sync'
+#   git grep -n -E '<island symbols>' -- engine chassis tests contracts domains docs tools Makefile
+#   AST import-graph reachability from chassis/ ingress + engine/boot.py + engine/__init__.py
+
+meta:
+  base_sha: 5868bc49865eba0afd6154a0746ac06111cf1ccf
+  open_prs_at_audit:
+    - number: 233
+      head: chore/auto-seed-governance
+      overlap_with_scope: none   # governance/CI seed files only, no engine/ or tests/ paths
+  note: >
+    Every island artifact entered the repository in the single squashed import
+    commit 0979ff5 (2026-07-23, "ci: activate l9-ci-core governed pipeline").
+    No artifact has an independent introduction commit, so introduction_commit
+    carries no per-file provenance signal for this island.
+
+artifacts:
+
+  - path: engine/compliance/audit_persistence.py
+    exists: true
+    current_blob_sha: 91e5dae2fcb0999efbda11ca2e6a84b6352a95a1
+    introduction_commit: 0979ff5
+    latest_change_commit: 0979ff5
+    declared_owner: engine-team          # L9_META
+    declared_status: active              # L9_META — contradicted by reachability
+    imports: [asyncpg (TYPE_CHECKING only)]
+    imported_by:
+      production: []
+      tests: [tests/gap_fixes/test_gap5_audit.py]
+      recipe: [engine/startup_wiring.py]   # via `from shared.audit_persistence import ...` — package `shared` does not exist
+    public_exports: []                   # engine/compliance/__init__.py exports only AuditLogger, ComplianceEngine, PIIHandler, ProhibitedFactorValidator
+    tests: [tests/gap_fixes/test_gap5_audit.py]
+    historical_plan_refs: [Cursor-Governance docs/plans/BUILT/wire_gap-fix_modules_7d4d9028.plan.md]
+    current_architecture_refs: []
+
+  - path: engine/graph_return_channel.py
+    exists: true
+    current_blob_sha: c4b51481f45dae55da078bcb53166f2ed420505a
+    introduction_commit: 0979ff5
+    latest_change_commit: 0979ff5
+    declared_owner: engine-team
+    declared_status: active
+    imports: [engine.contract_enforcement]
+    imported_by:
+      production: []
+      island: [engine/graph/community_export.py, engine/convergence_controller_patch.py]
+      tests: [tests/gap_fixes/test_gap2_return_channel.py]
+      recipe: [engine/startup_wiring.py]
+    public_exports: []                   # not in engine/__init__.py __all__
+    tests: [tests/gap_fixes/test_gap2_return_channel.py]
+    historical_plan_refs: [wire_gap-fix_modules_7d4d9028.plan.md — planned move to engine/feedback/graph_return_channel.py, never landed]
+    current_architecture_refs: []
+
+  - path: engine/graph/community_export.py
+    exists: true
+    current_blob_sha: a56a1b47044a1a4940bbf333ed64d4106887d205
+    introduction_commit: 0979ff5
+    latest_change_commit: 0979ff5
+    declared_owner: engine-team
+    declared_status: active
+    imports: [engine.graph_return_channel]
+    imported_by:
+      production: []
+      tests: []
+      recipe: [engine/startup_wiring.py]   # via `from graph.community_export import ...` — top-level package `graph` does not exist
+    public_exports: []                   # engine/graph/__init__.py exports only GraphDriver
+    tests: []
+    historical_plan_refs: [wire_gap-fix_modules_7d4d9028.plan.md]
+    current_architecture_refs: []
+
+  - path: engine/convergence_controller_patch.py
+    exists: true
+    current_blob_sha: 8d1691135aa554e427e586696e029f8548700eec
+    introduction_commit: 0979ff5
+    latest_change_commit: 0979ff5
+    declared_owner: engine-team
+    declared_status: active
+    imports: [engine.graph_return_channel, engine.contract_enforcement, chassis.events (dynamic)]
+    imported_by:
+      production: []
+      tests: []
+      recipe: []
+    public_exports: []
+    tests: []
+    historical_plan_refs: [wire_gap-fix_modules_7d4d9028.plan.md — planned split into engine/feedback/enrich_helpers.py, never landed]
+    current_architecture_refs: []
+
+  - path: engine/graph/graph_sync_client_fix.py
+    exists: true
+    current_blob_sha: 2bc8f04130de16b0052f33d7319d461edcf5d042
+    introduction_commit: 0979ff5
+    latest_change_commit: 0979ff5
+    declared_owner: engine-team
+    declared_status: active
+    imports: [engine.contract_enforcement]
+    imported_by:
+      production: []
+      tests: []
+      recipe: []
+    public_exports: []
+    tests: []
+    historical_plan_refs: [wire_gap-fix_modules_7d4d9028.plan.md — listed for deletion, never deleted]
+    current_architecture_refs:
+      - docs/adr/ADR-DEC-001-candidate-identity.md   # STALE CITATION — see classification
+
+  # ── Island members discovered during Phase 1, beyond the mandatory set ──
+
+  - path: engine/contract_enforcement.py
+    exists: true
+    current_blob_sha: null   # unchanged in this PR's base; see git
+    introduction_commit: 0979ff5
+    latest_change_commit: 998b4c7   # mechanical SonarCloud sweep (#191), not a wiring change
+    declared_owner: engine-team
+    declared_status: active
+    discovered_via: reverse-import closure of the mandatory set
+    imports: []
+    imported_by:
+      production: []
+      island:
+        - engine/graph_return_channel.py
+        - engine/graph/graph_sync_client_fix.py
+        - engine/convergence_controller_patch.py
+      tests: [tests/gap_fixes/test_gap1_contract.py, tests/gap_fixes/test_gap2_return_channel.py]
+    public_exports: []                   # engine/packet/__init__.py exports PacketEnvelope, deflate_egress, inflate_ingress — not these
+    tests: [tests/gap_fixes/test_gap1_contract.py]
+    historical_plan_refs: [wire_gap-fix_modules_7d4d9028.plan.md — planned move to engine/packet/contract_enforcement.py, never landed]
+    current_architecture_refs: []
+    name_collision_checked:
+      doc: docs/L9_Contract_Enforcement_System.md
+      verdict: UNRELATED
+      reason: >
+        That document specifies the 24-contract STATIC enforcement system
+        (tools/contract_scanner.py, tools/verify_contracts.py, pre-commit, CI
+        gates). It never references engine/contract_enforcement.py, which is a
+        runtime packet-envelope validator. Name similarity only.
+
+  - path: engine/startup_wiring.py
+    exists: true
+    current_blob_sha: null
+    introduction_commit: 0979ff5
+    latest_change_commit: 5815927   # PR #232 removed the dead spec.kb recipe block
+    declared_owner: engine-team
+    declared_status: active
+    discovered_via: sole module referencing the island as "wiring"
+    imports:
+      - shared.audit_persistence      # package `shared` DOES NOT EXIST
+      - engine.graph_return_channel
+      - graph.community_export        # top-level package `graph` DOES NOT EXIST
+      - graph.gds_scheduler           # top-level package `graph` DOES NOT EXIST
+    imported_by:
+      production: []
+      tests: [tests/gap_fixes/test_gap9_inference_authority.py]   # reads source text, does not import
+    public_exports: []
+    tests: [tests/gap_fixes/test_gap9_inference_authority.py]
+    historical_plan_refs: [wire_gap-fix_modules_7d4d9028.plan.md — listed for deletion, never deleted]
+    current_architecture_refs: []
+
+associated_tests:
+  - path: tests/gap_fixes/test_gap1_contract.py
+    covers: engine/contract_enforcement.py
+    covers_anything_else: false
+  - path: tests/gap_fixes/test_gap2_return_channel.py
+    covers: [engine/graph_return_channel.py, engine/contract_enforcement.py]
+    covers_anything_else: false
+  - path: tests/gap_fixes/test_gap5_audit.py
+    covers: engine/compliance/audit_persistence.py
+    covers_anything_else: false
+  - path: tests/gap_fixes/test_gap3_inference_registry.py
+    covers: engine/inference_rule_registry.py
+    in_scope: false                     # exercises the retained test-only registry;
+                                        # inference ownership is out of this contract's scope
+  - path: tests/gap_fixes/test_gap9_inference_authority.py
+    covers: [engine/inference_rule_registry.py, engine/startup_wiring.py (source-text assertion)]
+    in_scope: partial                   # must be updated if startup_wiring.py is removed
+  - path: tests/contracts/test_known_gaps.py
+    verdict: UNRELATED
+    reason: xfail placeholders for absent contract YAML files; no island reference.

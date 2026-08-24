@@ -21,13 +21,15 @@ The **live** match handler instead reads a bare Neo4j node property `entity_id`:
 
 - `engine/handlers.py:509`, `:616`, `:1497` — candidate identity read from the
   `entity_id` property.
-- `engine/graph/graph_sync_client_fix.py:113` — `entity_id` is client-supplied at
-  sync time (`MERGE (n {entity_id: row.entity_id, tenant: $tenant})`) and is **not**
-  defined in `engine/config/schema.py`.
+- No canonical writer sets `entity_id` at all. The live sync path is
+  `engine/handlers.py::handle_sync` → `engine/sync/generator.py::SyncGenerator`,
+  which MERGEs on the domain-declared `idproperty` (`facility_id`, `code`,
+  `form_id`, `opportunity_id`, `demand_id` in `domains/plasticos/spec.yaml`) —
+  never on `entity_id`, which is **not** defined in `engine/config/schema.py`.
 
 This is a live-vs-contract divergence: the contract's identity is a governed,
-namespaced `entity_ref`; the running code keys on an ungoverned, client-supplied
-`entity_id` node property. DEC-001 records how candidate identity is defined so the
+namespaced `entity_ref`; the running code keys on an ungoverned `entity_id` node
+property that no canonical writer populates. DEC-001 records how candidate identity is defined so the
 divergence is resolved deliberately rather than by accident.
 
 ## Options Considered
@@ -63,15 +65,29 @@ never an implicit reinterpretation of a raw integer or a database node id.
 ## Residual Reconciliation Task
 
 The live handler still keys candidate identity on the ungoverned `entity_id` node
-property (`engine/handlers.py:509,616,1497`; written at
-`engine/graph/graph_sync_client_fix.py:113`), which is not schema-defined. A
-follow-up must align the live handler and sync path with the contract `entity_ref`
+property (`engine/handlers.py:509,616,1497`), which is not schema-defined and which
+no canonical writer produces — the handler reads it through silent fallbacks
+(`.get("entity_id", "")`). A follow-up must align the live handler and sync path
+with the contract `entity_ref`
 (schema-define the identity property, or resolve `entity_ref` → stored key through the
 resolver) so runtime identity matches the contract this ADR ratifies. Until then, the
 divergence is a tracked residual risk, not a resolved state.
+
+## Citation Correction (2026-08-23)
+
+This ADR originally cited `engine/graph/graph_sync_client_fix.py:113` as the place
+where `entity_id` was "client-supplied at sync time". That module was an unwired
+gap-fix artifact with no caller anywhere in the repository, and it was removed by
+the gap-fix artifact convergence audit
+(`docs/audits/2026-08-23-gap-fix-artifact-convergence/`). Its Cypher
+(`MERGE (n {entity_id: row.entity_id, tenant: $tenant})`) never executed.
+
+The correction widens rather than narrows the divergence this ADR records: the
+handler reads `entity_id`, and nothing writes it. The decision (OPTION-B) and the
+residual reconciliation task are unchanged.
 
 ## Artifacts
 
 `engine/models/payloads.py`, `contracts/payloads/examples/match-response.json`,
 `contracts/match_response.json`, `engine/handlers.py`,
-`engine/graph/graph_sync_client_fix.py`.
+`engine/sync/generator.py`.
