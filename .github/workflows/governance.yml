@@ -2,16 +2,22 @@
 #
 # Governance logic lives in Quantum-L9/.github/.github/workflows/governance-*.yml.
 # This repo's security gates (Scorecard Pinned-Dependencies, Sonar S7637) require
-# full-SHA pins, so both callees are pinned to the commit the v1 tag pointed at
-# when this file was seeded. Shipping a governance change now means bumping the
-# SHA below on re-seed, after the same preflight.
+# full-SHA pins, so both callees are pinned to the COMMIT that annotated tag v1
+# peels to. Shipping a governance change means bumping that commit on re-seed,
+# after the preflight below.
+#
+# v1 is an ANNOTATED tag, so it has two distinct SHAs. Pin the second one:
+#   tag object SHA : 7ed3ab8650583f6659a6caf061eae77dbd3ed1be  (refs/tags/v1)
+#   peeled commit  : 3e841ea4f7f8be2a8c9fc45cad5bed46fe801d08  (refs/tags/v1^{})
+# `uses:` must reference the COMMIT. Using the tag object SHA makes the run fail
+# to start with zero jobs, because it resolves to no commit.
 #
 # Pin record (ops/governance-v1-pin.txt):
 #   Quantum-L9/.github/.github/workflows/governance-pr.yml@v1
 #   Quantum-L9/.github/.github/workflows/governance-issue.yml@v1
-#   tag SHA 7ed3ab8650583f6659a6caf061eae77dbd3ed1be  (verified 2026-08-23)
-# Preflight: `git ls-remote https://github.com/Quantum-L9/.github.git refs/tags/v1`
-# must match the pinned SHA before re-seeding this caller.
+# Preflight (verified 2026-08-24) — read the PEELED ref, not the tag ref:
+#   git ls-remote https://github.com/Quantum-L9/.github.git 'refs/tags/v1^{}'
+# must match the pinned commit before re-seeding this caller.
 #
 # SECRETS: a called workflow does NOT inherit caller secrets automatically.
 # Both callees use only GITHUB_TOKEN. Do not add blank `secrets: inherit`.
@@ -40,11 +46,11 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: Quantum-L9/.github/.github/workflows/governance-pr.yml@7ed3ab8650583f6659a6caf061eae77dbd3ed1be # v1
+    uses: Quantum-L9/.github/.github/workflows/governance-pr.yml@3e841ea4f7f8be2a8c9fc45cad5bed46fe801d08 # v1
 
   issue:
     if: github.event_name == 'issues'
     permissions:
       contents: read
       issues: write
-    uses: Quantum-L9/.github/.github/workflows/governance-issue.yml@7ed3ab8650583f6659a6caf061eae77dbd3ed1be # v1
+    uses: Quantum-L9/.github/.github/workflows/governance-issue.yml@3e841ea4f7f8be2a8c9fc45cad5bed46fe801d08 # v1
