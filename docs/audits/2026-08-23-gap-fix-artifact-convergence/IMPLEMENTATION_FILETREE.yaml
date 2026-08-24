@@ -1,0 +1,103 @@
+# Phase 7 — exact implementation filetree (hard gate)
+# Contract: CEG-GAP-FIX-ARTIFACT-REACHABILITY-CONVERGENCE-2026-08-23
+# No implementation edit may touch a file absent from this list.
+# Classifications and proofs: GAP_FIX_REACHABILITY_CLASSIFICATION.yaml
+
+files:
+
+  # ── DELETE: proven orphaned / stale / test-only ──
+  - {path: engine/compliance/audit_persistence.py, action: DELETE,
+     serves_finding: ORPHANED_IMPLEMENTATION — duplicate audit persistence,
+     canonical_owner_retained: engine/compliance/audit.py::AuditLogger.flush_to_store}
+  - {path: engine/graph_return_channel.py, action: DELETE,
+     serves_finding: ORPHANED_IMPLEMENTATION — queue with no producer and no consumer,
+     canonical_owner_retained: none required (responsibility absent from CEG)}
+  - {path: engine/graph/community_export.py, action: DELETE,
+     serves_finding: ORPHANED_IMPLEMENTATION — unwireable GDS hook, duplicate write path,
+     canonical_owner_retained: engine/gds/scheduler.py::GDSScheduler._run_louvain}
+  - {path: engine/convergence_controller_patch.py, action: DELETE,
+     serves_finding: STALE_PATCH — patches a module that does not exist,
+     canonical_owner_retained: engine/feedback/convergence.py::ConvergenceLoop}
+  - {path: engine/graph/graph_sync_client_fix.py, action: DELETE,
+     serves_finding: STALE_PATCH — replacement for an absent client; incompatible write shape,
+     canonical_owner_retained: engine/sync/generator.py::SyncGenerator}
+  - {path: engine/contract_enforcement.py, action: DELETE,
+     serves_finding: TEST_ONLY_IMPLEMENTATION — parallel PacketEnvelope architecture,
+     canonical_owner_retained: engine/packet/packet_envelope.py::PacketEnvelope}
+  - {path: engine/startup_wiring.py, action: DELETE,
+     serves_finding: STALE_PATCH — unrunnable recipe; Phase 13 activation-instruction hazard,
+     canonical_owner_retained: engine/boot.py::GraphLifecycle}
+  - {path: tests/gap_fixes/test_gap1_contract.py, action: DELETE,
+     serves_finding: sole purpose is preserving engine/contract_enforcement.py,
+     replacement: tests/invariants/test_module_reachability.py}
+  - {path: tests/gap_fixes/test_gap2_return_channel.py, action: DELETE,
+     serves_finding: sole purpose is preserving engine/graph_return_channel.py,
+     replacement: tests/invariants/test_module_reachability.py}
+  - path: tests/gap_fixes/test_gap5_audit.py
+    action: DELETE
+    serves_finding: sole purpose is preserving engine/compliance/audit_persistence.py
+    replacement: >
+      tests/invariants/test_module_reachability.py asserts absence; the audit
+      persistence behaviour still required stays covered by the canonical owner's
+      existing tests (AuditLogger.flush_to_store / ComplianceEngine).
+
+  # ── MODIFY: required by the deletions above ──
+  - path: tests/gap_fixes/test_gap9_inference_authority.py
+    action: MODIFY
+    serves_finding: >
+      Its startup-recipe guard reads engine/startup_wiring.py source text; that file is
+      deleted here. The guarded behaviour (no undeclared spec.kb / load_domain_rules
+      recipe may reappear) is still required, so the assertion is strengthened from
+      one-file source text to a tree-wide scan. PR #232's regression coverage preserved, not dropped.
+  - path: docs/adr/ADR-DEC-001-candidate-identity.md
+    action: MODIFY
+    serves_finding: >
+      Accepted ADR cites engine/graph/graph_sync_client_fix.py:113 as the writer of the
+      ungoverned entity_id property. The citation is factually wrong — that code has no
+      caller — and the file is deleted here. Evidence pointer only; the decision, options
+      and residual-reconciliation finding are unchanged.
+  - path: .l9/baselines/packet-envelope.yml
+    action: MODIFY
+    serves_finding: >
+      Deleting engine/graph/graph_sync_client_fix.py resolves the PacketEnvelope debt
+      entry recorded against it. The baseline ratchet requires the resolved entry to be
+      removed in the same PR so the baseline ratchets DOWN; leaving it fails the gate
+      with "the debt is resolved — remove the entry".
+
+  # ── NEW ──
+  - path: tests/invariants/test_module_reachability.py
+    action: NEW
+    serves_finding: >
+      Phase 9. Makes island resurrection mechanically detectable: removed paths stay
+      absent, no engine/chassis module imports the removed surfaces, no gap-fix
+      activation recipe reappears, and the five canonical owners remain sole and
+      production-reachable. Ships and exercises the reusable AST analyzer.
+    scope_note: >
+      Deliberately NOT a full-tree reachability gate — see
+      GAP_FIX_REACHABILITY_CLASSIFICATION.yaml::reachability_invariant_decision.
+  - {path: "docs/audits/2026-08-23-gap-fix-artifact-convergence/GAP_FIX_ARTIFACT_INVENTORY.yaml",
+     action: NEW, serves_finding: Phase 1 required output}
+  - {path: "docs/audits/2026-08-23-gap-fix-artifact-convergence/GAP_FIX_REACHABILITY_CLASSIFICATION.yaml",
+     action: NEW, serves_finding: Phase 6 required output}
+  - {path: "docs/audits/2026-08-23-gap-fix-artifact-convergence/IMPLEMENTATION_FILETREE.yaml",
+     action: NEW, serves_finding: Phase 7 required output}
+
+explicitly_not_touched:
+  - path: engine/inference_rule_registry.py
+    reason: >
+      TEST_ONLY_IMPLEMENTATION, kept as an explicit scope decision — inference
+      ownership is outside this contract and deferred. PR #232 retained it and
+      recorded its lack of any verified production edge; KEEP here is not a
+      canonicality claim.
+  - {path: tests/gap_fixes/test_gap3_inference_registry.py, reason: exercises the retained test-only registry; unaffected}
+  - path: engine/boot.py
+    reason: >
+      PROTECTED-adjacent lifecycle owner, and already correct — it never called the
+      removed recipe. Rule: do not create new boot wiring.
+  - path: engine/gates/**
+    reason: >
+      GATE-001 (see classification) — an unreachable alternate gate implementation
+      surface recorded for a dedicated parity audit; no gate code changes in this PR.
+  - {path: "artifacts/**", reason: Phase 12 — generated audit output; churn restored, not committed}
+  - {path: "engine/packet/**, engine/sync/**, engine/compliance/audit.py, engine/gds/scheduler.py",
+     reason: canonical owners, retained unchanged — consolidation requires no edit to them}
