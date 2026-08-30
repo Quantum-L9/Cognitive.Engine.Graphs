@@ -1,8 +1,8 @@
 ## Issue unblock (session reference)
 
-**Cluster:** CEG#138 (PacketEnvelope → TransportPacket) cycle 1; CEG#139 CLOSED already-fixed
-**Owning fix:** https://github.com/Quantum-L9/Cognitive.Engine.Graphs/pull/248 ; #139 closed 2026-08-30 (ledger empty since 8be58df)
-**Next:** finish #138 leftover tests; do not re-open #139
+**Cluster:** CEG#138 CLOSED on PR 248; CEG#139 CLOSED already-fixed
+**Owning fix:** https://github.com/Quantum-L9/Cognitive.Engine.Graphs/pull/248
+**Next:** pause issues for this repo; PR remediator later
 **Pickup:** Graphiti PICKUP written 2026-08-30
 
 <!-- L9_META
