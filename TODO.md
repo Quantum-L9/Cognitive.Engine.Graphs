@@ -1,9 +1,9 @@
 ## Issue unblock (session reference)
 
-**Cluster:** CEG#32 (mypy chassis) + CEG#33 (YAML) — closed 2026-08-11 as already clean on main
-**Owning fix:** none (evidence close; `mypy chassis/` clean; listed YAML parse OK)
-**Next:** optional CI hygiene — drop `--exclude chassis` from mypy workflow steps (CI_PIPELINE; not done)
-**Pickup:** Graphiti PICKUP written 2026-08-11
+**Cluster:** CEG#138 (PacketEnvelope → TransportPacket) cycle 1 + CEG#139 (quarantine) queued
+**Owning fix:** https://github.com/Quantum-L9/Cognitive.Engine.Graphs/pull/248
+**Next:** migrate `tests/unit/test_packet_envelope.py` then delete last 2 ledger entries; do not close #138 until then
+**Pickup:** Graphiti PICKUP written 2026-08-30
 
 <!-- L9_META
 l9_schema: 1
