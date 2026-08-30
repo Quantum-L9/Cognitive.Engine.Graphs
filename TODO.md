@@ -1,8 +1,8 @@
 ## Issue unblock (session reference)
 
-**Cluster:** CEG#138 (PacketEnvelope → TransportPacket) cycle 1 + CEG#139 (quarantine) queued
-**Owning fix:** https://github.com/Quantum-L9/Cognitive.Engine.Graphs/pull/248
-**Next:** migrate `tests/unit/test_packet_envelope.py` then delete last 2 ledger entries; do not close #138 until then
+**Cluster:** CEG#138 (PacketEnvelope → TransportPacket) cycle 1; CEG#139 CLOSED already-fixed
+**Owning fix:** https://github.com/Quantum-L9/Cognitive.Engine.Graphs/pull/248 ; #139 closed 2026-08-30 (ledger empty since 8be58df)
+**Next:** finish #138 leftover tests; do not re-open #139
 **Pickup:** Graphiti PICKUP written 2026-08-30
 
 <!-- L9_META
