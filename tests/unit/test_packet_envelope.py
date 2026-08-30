@@ -9,7 +9,7 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
-Tests for engine.packet — PacketEnvelope v3.0.0 + chassis_contract bridge.
+Tests for engine.packet — TransportPacket chassis bridge plus declaration-site factory.
 
 Relocated from engine/packet/test_packet_envelope.py (misplaced).
 Fixed imports: uses fully qualified engine.packet.* paths.
@@ -38,7 +38,6 @@ from engine.packet.chassis_contract import deflate_egress, delegate_to_node, inf
 from engine.packet.packet_envelope import (
     Action,
     PacketAddress,
-    PacketEnvelope,
     PacketType,
     TenantContext,
     _compute_hash,
@@ -350,7 +349,7 @@ class TestDelegation:
 class TestSerialization:
     def test_roundtrip(self, base_packet):
         wire = base_packet.to_wire()
-        restored = PacketEnvelope.from_wire(wire)
+        restored = type(base_packet).from_wire(wire)
         assert restored.packet_id == base_packet.packet_id
         assert restored.payload == base_packet.payload
         assert restored.verify_integrity()
@@ -363,7 +362,7 @@ class TestSerialization:
     def test_roundtrip_preserves_lineage(self, base_packet):
         child = base_packet.derive(payload={"x": 1})
         wire = child.to_wire()
-        restored = PacketEnvelope.from_wire(wire)
+        restored = type(base_packet).from_wire(wire)
         assert restored.lineage.generation == 1
         assert str(base_packet.packet_id) in [str(pid) for pid in restored.lineage.parent_ids]
 
@@ -387,7 +386,7 @@ class TestSerialization:
 
     def test_roundtrip_preserves_pii_fields(self, base_packet):
         wire = base_packet.to_wire()
-        restored = PacketEnvelope.from_wire(wire)
+        restored = type(base_packet).from_wire(wire)
         assert "contact_email" in restored.security.pii_fields
 
 

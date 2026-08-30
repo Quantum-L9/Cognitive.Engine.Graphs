@@ -5,28 +5,4 @@
 # Changes to this file require CODEOWNERS review (.github/CODEOWNERS).
 schema_version: 1.0.0
 gate: pre-commit/packet-envelope-prohibited
-entries:
-- id: packet-envelope/tests-unit-test-packet-envelope-py-import-from
-  gate: pre-commit/packet-envelope-prohibited
-  rule: packet-envelope-prohibited
-  fingerprint: c19363071291d349dbc94fa7b3d96fc78d3480b332094e8eb75a5ccf45b408fb
-  path: tests/unit/test_packet_envelope.py
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#138
-  introduced_before: af986d0
-  expires: '2026-10-21'
-  removal_condition: migrated-to:TransportPacket
-  root_cause_group: packet-envelope-migration
-  evidence: tests/unit/test_packet_envelope.py::import-from:engine.packet.packet_envelope.PacketEnvelope
-- id: packet-envelope/tests-unit-test-packet-envelope-py-name-ref
-  gate: pre-commit/packet-envelope-prohibited
-  rule: packet-envelope-prohibited
-  fingerprint: 739a949ea7a27f6790d4e44104c759232158f58cff0967af205c87c85cc54f68
-  path: tests/unit/test_packet_envelope.py
-  owner: '@cryptoxdog'
-  issue: Quantum-L9/Cognitive.Engine.Graphs#138
-  introduced_before: af986d0
-  expires: '2026-10-21'
-  removal_condition: migrated-to:TransportPacket
-  root_cause_group: packet-envelope-migration
-  evidence: tests/unit/test_packet_envelope.py::name-ref:PacketEnvelope
+entries: []
