@@ -16,16 +16,12 @@ Target Coverage: 85%+
 from __future__ import annotations
 
 import pytest
+from constellation_node_sdk import TransportPacket
 
 from engine.packet.chassis_contract import (
     deflate_egress,
     delegate_to_node,
     inflate_ingress,
-)
-from engine.packet.packet_envelope import (
-    Action,
-    PacketEnvelope,
-    PacketType,
 )
 
 # ============================================================================
@@ -38,16 +34,16 @@ class TestInflateIngress:
     """Test inflate_ingress function."""
 
     def test_creates_request_packet(self) -> None:
-        """inflate_ingress creates a REQUEST PacketEnvelope."""
+        """inflate_ingress creates a REQUEST TransportPacket."""
         packet = inflate_ingress(
             action="match",
             payload={"query": {"polymer": "HDPE"}},
             tenant="test-tenant",
             trace_id="tr_abc123",
         )
-        assert isinstance(packet, PacketEnvelope)
-        assert packet.packet_type == PacketType.REQUEST
-        assert packet.action == Action("match")
+        assert isinstance(packet, TransportPacket)
+        assert packet.header.packet_type == "request"
+        assert packet.header.action == "match"
         assert packet.tenant.actor == "test-tenant"
         assert packet.payload["query"]["polymer"] == "HDPE"
 
@@ -60,7 +56,7 @@ class TestInflateIngress:
             trace_id="tr_1",
             source_node="api-gateway",
             intent="batch_sync",
-            classification="external",
+            classification="confidential",
             on_behalf_of="admin_user",
             user_id="u_123",
             org_id="org_456",
@@ -79,14 +75,14 @@ class TestInflateIngress:
         assert packet.address.source_node == "chassis"
 
     def test_trace_id_preserved(self) -> None:
-        """inflate_ingress sets trace_id in observability."""
+        """inflate_ingress sets trace_id on the transport header."""
         packet = inflate_ingress(
             action="match",
             payload={},
             tenant="t1",
             trace_id="my_trace",
         )
-        assert packet.observability.trace_id == "my_trace"
+        assert packet.header.trace_id == "my_trace"
 
 
 @pytest.mark.unit
@@ -108,7 +104,7 @@ class TestDeflateEgress:
             processing_ms=42.5,
             responding_node="graph-engine-1",
         )
-        assert response.packet_type == PacketType.RESPONSE
+        assert response.header.packet_type == "response"
         assert response.payload["status"] == "success"
         assert response.payload["data"]["candidates"][0]["score"] == pytest.approx(0.95)
         assert response.payload["meta"]["execution_ms"] == pytest.approx(42.5)
@@ -162,11 +158,11 @@ class TestDelegateToNode:
             source_packet=source,
             from_node="graph-engine",
             to_node="enrich-engine",
-            delegated_action=Action("enrich"),
+            delegated_action="enrich",
             scope=("entity_enrichment",),
         )
-        assert delegation.packet_type == PacketType.DELEGATION
-        assert delegation.action == Action("enrich")
+        assert delegation.header.packet_type == "delegation"
+        assert delegation.header.action == "enrich"
         assert delegation.address.source_node == "graph-engine"
         assert delegation.address.destination_node == "enrich-engine"
 
@@ -182,7 +178,7 @@ class TestDelegateToNode:
             source_packet=source,
             from_node="a",
             to_node="b",
-            delegated_action=Action("sync"),
+            delegated_action="sync",
             scope=("data_sync",),
         )
         assert delegation.tenant.actor == "original_tenant"
@@ -199,7 +195,7 @@ class TestDelegateToNode:
             source_packet=source,
             from_node="a",
             to_node="b",
-            delegated_action=Action("admin"),
+            delegated_action="admin",
             scope=("admin_ops",),
         )
         assert delegation.governance.audit_required is True
@@ -216,7 +212,7 @@ class TestDelegateToNode:
             source_packet=source,
             from_node="a",
             to_node="b",
-            delegated_action=Action("enrich"),
+            delegated_action="enrich",
             scope=("enrich",),
             payload_override={"overridden": True},
         )

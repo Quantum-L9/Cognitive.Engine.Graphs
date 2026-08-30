@@ -63,7 +63,7 @@ class TestPIIDetection:
         assert "patient.contact.phone" in paths
 
     def test_get_pii_field_paths(self) -> None:
-        """get_pii_field_paths returns tuple for PacketEnvelope."""
+        """get_pii_field_paths returns tuple for TransportPacket."""
         handler = PIIHandler()
         payload = {"email": "a@b.com", "ssn": "111-22-3333", "id": 1}
 

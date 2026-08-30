@@ -9,10 +9,11 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
-engine/packet — PacketEnvelope immutable communication protocol.
+engine/packet — TransportPacket chassis bridge.
 """
 
-from engine.packet.chassis_contract import deflate_egress, inflate_ingress
-from engine.packet.packet_envelope import PacketEnvelope
+from constellation_node_sdk import TransportPacket
 
-__all__ = ["PacketEnvelope", "deflate_egress", "inflate_ingress"]
+from engine.packet.chassis_contract import deflate_egress, inflate_ingress
+
+__all__ = ["TransportPacket", "deflate_egress", "inflate_ingress"]

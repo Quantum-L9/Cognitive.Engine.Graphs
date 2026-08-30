@@ -1,4 +1,4 @@
-"""Unit tests — PacketEnvelope bridge: hash determinism, payload sensitivity.
+"""Unit tests — TransportPacket bridge: hash determinism, payload sensitivity.
 
 Note: These tests require chassis integration modules that may not be implemented.
 Tests skip gracefully if required modules are not available.
@@ -9,49 +9,35 @@ from __future__ import annotations
 import pytest
 
 
-def test_packet_envelope_content_hash_is_deterministic():
-    """PacketEnvelope content hash is deterministic for same payload."""
+def test_transport_packet_payload_hash_is_deterministic():
+    """TransportPacket payload hash is deterministic for same payload."""
     try:
-        from engine.chassis.tenant_context import TenantContext
-
-        from engine.packet.packet_envelope import PacketEnvelope, PacketType
+        from constellation_node_sdk import create_transport_packet
     except ImportError:
-        pytest.skip("engine.chassis or engine.packet.packet_envelope not implemented")
-    tenant = TenantContext(tenant_id="test", actor="unit-test")
-    p1 = PacketEnvelope(
-        packet_type=PacketType.REQUEST,
-        tenant=tenant,
+        pytest.skip("constellation_node_sdk not installed")
+    p1 = create_transport_packet(
+        action="match",
         payload={"action": "match", "x": 1},
+        tenant="test",
     )
-    p2 = PacketEnvelope(
-        packet_type=PacketType.REQUEST,
-        tenant=tenant,
+    p2 = create_transport_packet(
+        action="match",
         payload={"action": "match", "x": 1},
+        tenant="test",
     )
-    assert p1.content_hash == p2.content_hash
-    assert len(p1.content_hash) == 64  # SHA-256 hex
+    assert p1.security.payload_hash == p2.security.payload_hash
+    assert len(p1.security.payload_hash) == 64  # SHA-256 hex
 
 
-def test_packet_envelope_hash_changes_with_payload():
-    """PacketEnvelope hash changes when payload differs."""
+def test_transport_packet_hash_changes_with_payload():
+    """TransportPacket payload hash changes when payload differs."""
     try:
-        from engine.chassis.tenant_context import TenantContext
-
-        from engine.packet.packet_envelope import PacketEnvelope, PacketType
+        from constellation_node_sdk import create_transport_packet
     except ImportError:
-        pytest.skip("engine.chassis or engine.packet.packet_envelope not implemented")
-    tenant = TenantContext(tenant_id="test", actor="unit-test")
-    p1 = PacketEnvelope(
-        packet_type=PacketType.REQUEST,
-        tenant=tenant,
-        payload={"action": "match"},
-    )
-    p2 = PacketEnvelope(
-        packet_type=PacketType.REQUEST,
-        tenant=tenant,
-        payload={"action": "sync"},
-    )
-    assert p1.content_hash != p2.content_hash
+        pytest.skip("constellation_node_sdk not installed")
+    p1 = create_transport_packet(action="match", payload={"action": "match"}, tenant="test")
+    p2 = create_transport_packet(action="sync", payload={"action": "sync"}, tenant="test")
+    assert p1.security.payload_hash != p2.security.payload_hash
 
 
 def test_packet_bridge_inflate_ingress():
@@ -67,8 +53,9 @@ def test_packet_bridge_inflate_ingress():
         packet_type="graph_sync",
         payload={"entity_type": "Facility", "batch": []},
     )
-    assert packet.packet_type == "graph_sync"
-    assert packet.content_hash
+    assert packet.header.action == "graph_sync"
+    assert packet.header.packet_type == "request"
+    assert packet.security.payload_hash
     assert packet.lineage.root_id
 
 
@@ -85,7 +72,7 @@ def test_packet_bridge_derive_preserves_lineage():
         packet_type="graph_sync",
         payload={"entity_type": "Facility"},
     )
-    derived = root.derive("outcome_event", {"result": "ok"})
+    derived = root.derive(packet_type="event", action="outcome_event", payload={"result": "ok"})
     assert derived.lineage.root_id == root.lineage.root_id
-    assert derived.lineage.parent_id == root.packet_id
-    assert derived.lineage.hop_count == 1
+    assert derived.lineage.parent_id == root.header.packet_id
+    assert derived.lineage.generation == 1

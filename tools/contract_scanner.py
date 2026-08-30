@@ -233,9 +233,9 @@ RULES: list[dict] = [
         "SHARED-001",
         SHARED_MODELS_MD,
         "HIGH",
-        r"class\s+PacketEnvelope\s*\(",
-        "Redefining PacketEnvelope - import the shared model",
-        "from engine.packet.packet_envelope import PacketEnvelope",
+        r"class\s+TransportPacket\s*\(",
+        "Redefining TransportPacket - import the shared model",
+        "from constellation_node_sdk import TransportPacket",
         include_dirs=[ENGINE_DIR],
         exclude_dirs=["engine/packet/packet_envelope.py"],  # canonical envelope in this repo
     ),

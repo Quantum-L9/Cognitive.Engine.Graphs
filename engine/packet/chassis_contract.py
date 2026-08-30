@@ -9,8 +9,8 @@ owner: engine-team
 status: active
 --- /L9_META ---
 """
-# # L9 Chassis ↔ PacketEnvelope v3.0.0 Bridge
-# Inflates minimal client JSON → full constellation PacketEnvelope.
+# L9 Chassis ↔ TransportPacket bridge
+# Inflates minimal client JSON → full constellation TransportPacket.
 # Deflates engine response → wire-safe outbound envelope.
 
 from __future__ import annotations
@@ -18,16 +18,18 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from engine.packet.packet_envelope import (
-    Action,
-    HopEntry,
-    PacketAddress,
-    PacketEnvelope,
-    PacketGovernance,
-    PacketType,
-    TenantContext,
-    create_packet,
+from constellation_node_sdk import (
+    DelegationLink,
+    TransportGovernance,
+    TransportPacket,
+    create_transport_packet,
 )
+from constellation_node_sdk.transport.hop_trace import make_dispatch_hop, make_response_hop
+
+
+def _action_name(value: Any) -> str:
+    raw = getattr(value, "value", value)
+    return str(raw).strip().lower()
 
 
 def inflate_ingress(
@@ -42,118 +44,128 @@ def inflate_ingress(
     on_behalf_of: str | None = None,
     user_id: str | None = None,
     org_id: str | None = None,
-) -> PacketEnvelope:
+) -> TransportPacket:
     """
     Called by the chassis when a client POST /v1/execute arrives.
-    Minimal input → full PacketEnvelope ready for engine consumption.
+    Minimal input → full TransportPacket ready for engine consumption.
     """
-    return create_packet(
-        packet_type=PacketType.REQUEST,
-        action=Action(action),
-        source_node=source_node,
-        actor_tenant=tenant,
+    actor = tenant.strip()
+    packet = create_transport_packet(
+        action=action,
         payload=payload,
-        trace_id=trace_id,
-        on_behalf_of=on_behalf_of,
-        originator=tenant,
-        org_id=org_id,
-        user_id=user_id,
+        tenant={
+            "actor": actor,
+            "on_behalf_of": (on_behalf_of or actor),
+            "originator": actor,
+            "org_id": (org_id or actor),
+            "user_id": user_id,
+        },
+        source_node=source_node,
+        destination_node="graph",
+        reply_to=source_node,
         classification=classification,
-        intent=intent,
+        trace_id=trace_id,
     )
+    if intent:
+        packet = packet.derive(
+            governance=TransportGovernance(
+                intent=intent,
+                compliance_tags=packet.governance.compliance_tags,
+                retention_days=packet.governance.retention_days or 90,
+                redaction_applied=bool(packet.governance.redaction_applied),
+                audit_required=bool(packet.governance.audit_required),
+                data_subject_id=packet.governance.data_subject_id,
+            )
+        )
+    return packet
 
 
 def deflate_egress(
     *,
-    request: PacketEnvelope,
+    request: TransportPacket,
     engine_data: dict[str, Any],
     status: str = "success",
     processing_ms: float,
     engine_version: str = "0.0.0",
     responding_node: str,
-) -> PacketEnvelope:
+) -> TransportPacket:
     """
     Called by the chassis after engine returns.
-    Creates a response PacketEnvelope derived from the request.
+    Creates a response TransportPacket derived from the request.
     """
     now = datetime.now(UTC)
-
-    return request.derive(
-        packet_type=PacketType.RESPONSE,
+    destination = request.address.reply_to or request.address.source_node
+    response = request.derive(
+        packet_type="response",
         payload={
             "status": status,
             "data": engine_data,
             "meta": {
-                "trace_id": request.observability.trace_id,
+                "trace_id": request.header.trace_id,
                 "execution_ms": processing_ms,
                 "version": engine_version,
                 "timestamp": now.isoformat(),
             },
         },
-        address=PacketAddress(
-            source_node=responding_node,
-            destination_node=request.address.reply_to or request.address.source_node,
-        ),
-        derivation_type="response",
-        extra_hop=HopEntry(
-            node_id=responding_node,
-            action=request.action.value,
-            entered_at=request.observability.created_at,
-            exited_at=now,
-            status=status,
-        ),
+        source_node=responding_node,
+        destination_node=destination,
+        reply_to=responding_node,
     )
+    hop_status = "completed" if status == "success" else "failed"
+    hop = make_response_hop(
+        packet=response,
+        node=responding_node,
+        action=request.header.action,
+        status=hop_status,
+        duration_ms=max(0, int(processing_ms)),
+        error_message=None if status == "success" else status,
+    )
+    return response.with_hop(hop)
 
 
 def delegate_to_node(
     *,
-    source_packet: PacketEnvelope,
+    source_packet: TransportPacket,
     from_node: str,
     to_node: str,
-    delegated_action: Action,
+    delegated_action: Any,
     scope: tuple[str, ...],
     payload_override: dict[str, Any] | None = None,
-) -> PacketEnvelope:
+) -> TransportPacket:
     """
     Called when one constellation node delegates work to another.
     Creates a DELEGATION packet with proper tenant context + auth chain.
     """
-    from engine.packet.packet_envelope import DelegationLink
-
     now = datetime.now(UTC)
-
-    return source_packet.derive(
-        packet_type=PacketType.DELEGATION,
-        action=delegated_action,
-        payload=payload_override or source_packet.payload,
-        address=PacketAddress(
-            source_node=from_node,
-            destination_node=to_node,
-            reply_to=from_node,
-        ),
-        tenant=TenantContext(
-            actor=source_packet.tenant.actor,
-            on_behalf_of=source_packet.tenant.actor,
-            originator=source_packet.tenant.originator or source_packet.tenant.actor,
-            org_id=source_packet.tenant.org_id,
-            user_id=source_packet.tenant.user_id,
-        ),
-        derivation_type="delegation",
-        extra_hop=HopEntry(
-            node_id=from_node,
-            action="delegate",
-            entered_at=now,
-            status="delegated",
-        ),
-        extra_delegation=DelegationLink(
+    action = _action_name(delegated_action)
+    retention = source_packet.governance.retention_days
+    child = source_packet.derive(
+        packet_type="delegation",
+        action=action,
+        payload=payload_override if payload_override is not None else source_packet.payload,
+        source_node=from_node,
+        destination_node=to_node,
+        reply_to=from_node,
+        delegation_link=DelegationLink(
             delegator=from_node,
             delegatee=to_node,
             scope=scope,
             granted_at=now,
         ),
-        governance=PacketGovernance(
-            intent=f"Delegated {delegated_action.value} to {to_node}",
+        governance=TransportGovernance(
+            intent=f"Delegated {action} to {to_node}",
             compliance_tags=source_packet.governance.compliance_tags,
+            retention_days=90 if retention is None else retention,
+            redaction_applied=bool(source_packet.governance.redaction_applied),
             audit_required=True,
+            data_subject_id=source_packet.governance.data_subject_id,
         ),
     )
+    hop = make_dispatch_hop(
+        packet=child,
+        node=from_node,
+        action="delegate",
+        target_node=to_node,
+        status="delegated",
+    )
+    return child.with_hop(hop)
