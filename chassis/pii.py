@@ -132,7 +132,7 @@ class PIIHandler:
         return results
 
     def get_pii_paths(self, payload: dict[str, Any]) -> tuple[str, ...]:
-        """For PacketEnvelope.security.pii_fields."""
+        """For TransportPacket.security.pii_fields."""
         return tuple(d.field_path for d in self.detect(payload))
 
     def mask(self, payload: dict[str, Any], fields: list[str] | None = None) -> dict[str, Any]:

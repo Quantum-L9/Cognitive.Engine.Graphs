@@ -1,9 +1,9 @@
 ## Issue unblock (session reference)
 
-**Cluster:** CEG#32 (mypy chassis) + CEG#33 (YAML) — closed 2026-08-11 as already clean on main
-**Owning fix:** none (evidence close; `mypy chassis/` clean; listed YAML parse OK)
-**Next:** optional CI hygiene — drop `--exclude chassis` from mypy workflow steps (CI_PIPELINE; not done)
-**Pickup:** Graphiti PICKUP written 2026-08-11
+**Cluster:** CEG#138 CLOSED on PR 248; CEG#139 CLOSED already-fixed
+**Owning fix:** https://github.com/Quantum-L9/Cognitive.Engine.Graphs/pull/248
+**Next:** pause issues for this repo; PR remediator later
+**Pickup:** Graphiti PICKUP written 2026-08-30
 
 <!-- L9_META
 l9_schema: 1

@@ -245,7 +245,6 @@ def test_canonical_owners_are_production_reachable() -> None:
     reachable = reachable_from_production()
     expected = {
         "engine.compliance.audit",
-        "engine.packet.packet_envelope",
         "engine.sync.generator",
         "engine.gds.scheduler",
         "engine.boot",
