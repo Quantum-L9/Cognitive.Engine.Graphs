@@ -55,7 +55,7 @@ jobs:
       # fetch-depth is irrelevant here, but the checkout must be a real git repo:
       # discovery enumerates via `git ls-files -z`, not a filesystem walk.
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install pyyaml
