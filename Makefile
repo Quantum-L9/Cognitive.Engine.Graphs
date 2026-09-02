@@ -80,7 +80,10 @@ redis-shell:Redis CLI
 local-dbs:Start only Neo4j + Redis
 	docker compose up -d neo4j redis
 
-local-api:Run API locally against Dockerized DBs
+local-api:Run API locally against Dockerized DBs (SDK chassis; alias of local-api-sdk)
+	$(MAKE) local-api-sdk
+
+local-api-legacy:Run the legacy dict chassis locally (dev/test only; refused outside L9_ENV=dev)
 	PLASTICOS_NEO4J_URI=bolt://localhost:7687 \
 	PLASTICOS_NEO4J_PASSWORD=l9-dev-password \
 	PLASTICOS_REDIS_URL=redis://localhost:6379/0 \
@@ -103,7 +106,7 @@ local-api-sdk:Run API locally on the SDK chassis (L9_CHASSIS=sdk)
 	L9_REQUIRE_SIGNATURE=false \
 	L9_MAX_ATTACHMENTS=0 \
 	L9_MAX_ATTACHMENT_SIZE_BYTES=0 \
-	L9_ALLOWED_ACTIONS="$$(python3 -c 'from engine.handlers import ACTION_HANDLERS; print(",".join(ACTION_HANDLERS))')" \
+	L9_ALLOWED_ACTIONS="$$(python3 -c 'from engine.handlers import ACTION_HANDLERS; print(",".join(a for a in ACTION_HANDLERS if a != "enrich"))')" \
 	uvicorn chassis.entrypoint:create_app --factory --reload --port 8000
 
 # ── Production ─────────────────────────────────────────────

@@ -148,7 +148,10 @@ class Settings(BaseSettings):
     strict_tenant_database: bool = (
         False  # W7-01: require explicit database= on GraphDriver calls; no implicit 'neo4j' fallback
     )
-    require_sdk_chassis_in_prod: bool = False  # W7-02: fail startup if L9_CHASSIS != sdk when l9_env == prod
+    # W7-02 / seam audit 2026-09-02: the legacy chassis (dict ExecuteRequest, no Gate
+    # provenance, api-key auth) is a direct-ingress side door. Default ON: startup
+    # fails unless L9_CHASSIS=sdk outside dev/local/test.
+    require_sdk_chassis_in_prod: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

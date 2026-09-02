@@ -18,6 +18,7 @@ import logging
 from typing import Any
 
 from engine.config.schema import DomainSpec
+from engine.gate_egress import request_enrichment
 from engine.health.field_health import EnrichmentPriority, EntityHealth, MatchQualityDelta
 
 logger = logging.getLogger(__name__)
@@ -205,9 +206,11 @@ async def trigger_reenrichment_v2(
     tenant: str,
     historical_outcomes: list[Any] | None = None,
 ) -> dict[str, Any]:
-    """Trigger re-enrichment via PacketEnvelope if ROI justifies it.
+    """Trigger re-enrichment through Gate (CEG -> Gate -> EIE `enrich`) if ROI justifies it.
 
-    Returns the enrichment decision and packet metadata.
+    Returns the enrichment decision plus the Gate dispatch result. The request
+    is sent by engine.gate_egress.request_enrichment — one attempt, fail closed;
+    ``triggered`` is True only when Gate returned a non-failure packet.
     """
     priority = compute_enrichment_priority(entity_health, domain_spec, historical_outcomes)
 
@@ -219,10 +222,13 @@ async def trigger_reenrichment_v2(
         }
 
     # Build enrichment packet payload
+    target_fields: list[str] = [t.field_name for t in entity_health.enrichment_targets[:10]] or list(
+        entity_health.critical_gaps
+    )
     enrichment_payload = {
         "entity_id": entity_health.entity_id,
         "domain": entity_health.domain,
-        "target_fields": [t.field_name for t in entity_health.enrichment_targets[:10]],
+        "target_fields": target_fields,
         "priority": priority.recommendation,
         "estimated_cost_tokens": priority.estimated_cost_tokens,
         "roi": priority.roi,
@@ -236,9 +242,25 @@ async def trigger_reenrichment_v2(
         priority.roi,
     )
 
+    dispatch = await request_enrichment(
+        tenant=tenant,
+        entity_id=entity_health.entity_id,
+        domain=entity_health.domain,
+        target_fields=target_fields,
+    )
+    triggered = dispatch.get("status") == "ok"
+    if not triggered:
+        logger.warning(
+            "Re-enrichment for entity=%s was NOT dispatched: %s",
+            entity_health.entity_id,
+            dispatch.get("error", "unknown"),
+        )
+
     return {
-        "triggered": True,
+        "triggered": triggered,
+        "reason": None if triggered else dispatch.get("error", "dispatch_failed"),
         "recommendation": priority.recommendation,
         "priority": priority.model_dump(),
         "enrichment_payload": enrichment_payload,
+        "dispatch": dispatch,
     }
