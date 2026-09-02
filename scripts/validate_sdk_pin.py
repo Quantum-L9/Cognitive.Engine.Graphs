@@ -4,7 +4,7 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PIN = "a0827f2b94e77a981c6d6be88653e4975cf631ef"
+PIN = "69c6c67060b08440734a61473c03663423709964"
 errors: list[str] = []
 
 for rel in ["pyproject.toml", "requirements.txt", "poetry.lock"]:

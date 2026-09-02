@@ -317,7 +317,7 @@ def test_max_attachments_without_schemes_is_rejected() -> None:
 
 
 def test_sdk_default_attachment_caps_construct() -> None:
-    """Pinned SDK (a0827f2) ships mutually valid default attachment/packet caps.
+    """Pinned SDK (69c6c67 = main a0827f2 + verifying-keys env fix) ships mutually valid default attachment/packet caps.
 
     Earlier pins (a770e853) defaulted max_attachment_size_bytes above
     max_packet_bytes and failed closed on a bare construct. The current pin
