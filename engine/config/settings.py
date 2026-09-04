@@ -152,6 +152,9 @@ class Settings(BaseSettings):
     # provenance, api-key auth) is a direct-ingress side door. Default ON: startup
     # fails unless L9_CHASSIS=sdk outside dev/local/test.
     require_sdk_chassis_in_prod: bool = True
+    # Seam audit / PR remediation: paid-tier enrich_now Gate dispatch is opt-in.
+    # Default off so deploy does not immediately spend EIE budget until enabled.
+    auto_enrich_via_gate: bool = False
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

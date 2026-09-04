@@ -33,7 +33,9 @@ services:
       # SDK chassis config. NodeRuntimeConfig is frozen with extra="forbid",
       # so names must match the SDK exactly.
       # Gate is the only peer transport: registration + all egress go to GATE_URL.
-      GATE_URL: ${GATE_URL:-http://gate:9000}
+      # This compose file does not start Gate — attach an external Gate on :8080
+      # (or override GATE_URL) before make dev / docker compose up api.
+      GATE_URL: ${GATE_URL:-http://gate:8080}
       GATE_ADMIN_TOKEN: ${GATE_ADMIN_TOKEN:-dev-gate-admin-token-not-for-production}
       GATE_REGISTRATION_ENABLED: "true"
       L9_NODE_NAME: graph
@@ -51,7 +53,8 @@ services:
       # `enrich` deliberately absent: Gate owns that action name for EIE.
       L9_ALLOWED_ACTIONS: match,sync,admin,outcomes,resolve,health,healthcheck
       L9_MAX_ATTACHMENTS: "0"
-      # Required: SDK defaults (10MB attachment vs 256KB packet) are mutually invalid.
+      # Attachments intentionally disabled (0/0); bare NodeRuntimeConfig is valid with
+      # these zeros — not a workaround for mutually invalid SDK defaults.
       L9_MAX_ATTACHMENT_SIZE_BYTES: "0"
       # Neo4j — uses Docker service name, not localhost
       NEO4J_URI: bolt://neo4j:7687

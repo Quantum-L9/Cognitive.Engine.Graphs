@@ -18,6 +18,7 @@ import logging
 from typing import Any
 
 from engine.config.schema import DomainSpec
+from engine.config.settings import settings
 from engine.gate_egress import request_enrichment
 from engine.health.field_health import EnrichmentPriority, EntityHealth, MatchQualityDelta
 
@@ -233,6 +234,16 @@ async def trigger_reenrichment_v2(
         "estimated_cost_tokens": priority.estimated_cost_tokens,
         "roi": priority.roi,
     }
+
+    if not settings.auto_enrich_via_gate:
+        return {
+            "triggered": False,
+            "reason": "auto_enrich_via_gate disabled",
+            "recommendation": priority.recommendation,
+            "priority": priority.model_dump(),
+            "enrichment_payload": enrichment_payload,
+            "dispatch": {"status": "skipped", "error": "auto_enrich_via_gate_disabled"},
+        }
 
     logger.info(
         "Triggering re-enrichment for entity=%s domain=%s recommendation=%s roi=%.1f",

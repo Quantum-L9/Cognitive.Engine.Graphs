@@ -63,7 +63,7 @@ def build_enrichment_request(
     if not fields:
         msg = "at least one target field is required for an enrichment request"
         raise ValueError(msg)
-    record = {"entity_id": entity_id, "domain": domain, **(entity or {})}
+    record = {**(entity or {}), "entity_id": entity_id, "domain": domain}
     return {
         "entity": record,
         "object_type": domain,
@@ -93,9 +93,15 @@ async def request_enrichment(
     correlation_id: str | None = None,
 ) -> dict[str, Any]:
     """Ask Gate to run EIE's `enrich` for one entity. One attempt, fail closed."""
+    key = enrichment_idempotency_key(tenant, entity_id, target_fields)
     if not os.environ.get("GATE_URL", "").strip():
         logger.warning("gate_egress: GATE_URL unset — enrichment request for %s not sent", entity_id)
-        return {"status": "failed", "error": "gate_not_configured", "action": ENRICH_ACTION}
+        return {
+            "status": "failed",
+            "error": "gate_not_configured",
+            "action": ENRICH_ACTION,
+            "idempotency_key": key,
+        }
 
     payload = build_enrichment_request(
         entity_id=entity_id,
@@ -104,7 +110,6 @@ async def request_enrichment(
         entity=entity,
         objective=objective,
     )
-    key = enrichment_idempotency_key(tenant, entity_id, target_fields)
 
     try:
         client = get_gate_client()

@@ -83,7 +83,7 @@ local-dbs:Start only Neo4j + Redis
 local-api:Run API locally against Dockerized DBs (SDK chassis; alias of local-api-sdk)
 	$(MAKE) local-api-sdk
 
-local-api-legacy:Run the legacy dict chassis locally (dev/test only; refused outside L9_ENV=dev)
+local-api-legacy:Run the legacy dict chassis locally (permitted in L9_ENV=dev|local|test)
 	PLASTICOS_NEO4J_URI=bolt://localhost:7687 \
 	PLASTICOS_NEO4J_PASSWORD=l9-dev-password \
 	PLASTICOS_REDIS_URL=redis://localhost:6379/0 \
