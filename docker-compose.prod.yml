@@ -25,6 +25,27 @@ services:
     environment:
       L9_ENV: prod
       L9_LIFECYCLE_HOOK: engine.boot:GraphLifecycle
+      # Seam audit 2026-09-02: SDK chassis is mandatory in prod (legacy chassis
+      # is refused at startup). Gate is the only peer transport.
+      L9_CHASSIS: sdk
+      L9_ENVIRONMENT: production
+      L9_SERVICE_NAME: graph-engine
+      L9_SERVICE_VERSION: 1.1.0
+      HOST: 0.0.0.0
+      GATE_URL: ${GATE_URL:?GATE_URL must be set for production}
+      GATE_ADMIN_TOKEN: ${GATE_ADMIN_TOKEN:?GATE_ADMIN_TOKEN must be set for production}
+      GATE_REGISTRATION_ENABLED: "true"
+      L9_NODE_NAME: graph
+      L9_NODE_SPEC_PATH: engine/spec.yaml
+      L9_ENFORCE_GATE_ONLY_INGRESS: "true"
+      L9_GATE_NODE_NAME: gate
+      L9_REQUIRE_SIGNATURE: "true"
+      L9_SIGNING_ALGORITHM: hmac-sha256
+      L9_SIGNING_KEY: ${L9_SIGNING_KEY:?L9_SIGNING_KEY must be set for production}
+      L9_SIGNING_KEY_ID: ${L9_SIGNING_KEY_ID:-graph-engine-v1}
+      L9_ALLOWED_ACTIONS: match,sync,admin,outcomes,resolve,health,healthcheck
+      L9_MAX_ATTACHMENTS: "0"
+      L9_MAX_ATTACHMENT_SIZE_BYTES: "0"
       NEO4J_URI: bolt://neo4j:7687
       NEO4J_USERNAME: ${NEO4J_USERNAME:-neo4j}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:?NEO4J_PASSWORD must be set for production}

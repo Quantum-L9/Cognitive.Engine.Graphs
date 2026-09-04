@@ -317,19 +317,22 @@ def test_max_attachments_without_schemes_is_rejected() -> None:
 
 
 def test_sdk_default_attachment_caps_construct() -> None:
-    """Pinned SDK rejects mutually invalid default attachment/packet caps.
+    """Pinned SDK (69c6c67 = main a0827f2 + verifying-keys env fix) ships mutually valid default attachment/packet caps.
 
-    constellation-node-sdk@a770e853 still enforces
-    max_attachment_size_bytes <= max_packet_bytes. Bare construct with SDK
-    field defaults fails closed; tests must pin compatible caps via _config().
+    Earlier pins (a770e853) defaulted max_attachment_size_bytes above
+    max_packet_bytes and failed closed on a bare construct. The current pin
+    defaults attachments off (0 / 0), so a bare construct is valid and the
+    invariant max_attachment_size_bytes <= max_packet_bytes still holds.
     """
-    with pytest.raises(ValidationError, match="max_attachment_size_bytes"):
-        NodeRuntimeConfig(
-            environment="test",
-            node_name=NODE_NAME,
-            service_name=NODE_NAME,
-            service_version="1.1.0",
-        )
+    bare = NodeRuntimeConfig(
+        environment="test",
+        node_name=NODE_NAME,
+        service_name=NODE_NAME,
+        service_version="1.1.0",
+    )
+    assert bare.max_attachments == 0
+    assert bare.max_attachment_size_bytes == 0
+    assert bare.max_attachment_size_bytes <= bare.max_packet_bytes
     cfg = _config()
     assert cfg.max_packet_bytes > 0
     assert cfg.max_attachment_size_bytes >= 0

@@ -94,8 +94,46 @@ def test_entrypoint_rejects_legacy_chassis_in_production(monkeypatch: pytest.Mon
         require_sdk_chassis_in_prod=True,
     )
     with patch("engine.config.settings.settings", prod):
-        with pytest.raises(ValueError, match="production"):
+        with pytest.raises(ValueError, match="must be 'sdk'"):
             resolve_chassis()
+
+
+def test_entrypoint_defaults_to_sdk_chassis(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Seam audit: with L9_CHASSIS unset the SDK (TransportPacket) chassis is selected."""
+    from chassis.entrypoint import DEFAULT_CHASSIS, SDK, resolve_chassis
+
+    monkeypatch.delenv("L9_CHASSIS", raising=False)
+    assert DEFAULT_CHASSIS == SDK
+    assert resolve_chassis() == SDK
+
+
+def test_require_sdk_chassis_is_on_by_default() -> None:
+    """Seam audit: the legacy side door is refused unless explicitly re-enabled."""
+    from engine.config.settings import Settings
+
+    assert Settings(l9_env="dev").require_sdk_chassis_in_prod is True
+
+
+def test_entrypoint_rejects_legacy_chassis_in_staging(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Legacy is not a staging convenience either: only dev/local/test may select it."""
+    from chassis.entrypoint import resolve_chassis
+    from engine.config.settings import Settings
+
+    monkeypatch.setenv("L9_CHASSIS", "legacy")
+    staging = Settings(l9_env="staging", neo4j_password="test-pw", api_secret_key="test-key")
+    with patch("engine.config.settings.settings", staging):
+        with pytest.raises(ValueError, match="must be 'sdk'"):
+            resolve_chassis()
+
+
+def test_entrypoint_allows_legacy_chassis_in_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+    from chassis.entrypoint import resolve_chassis
+    from engine.config.settings import Settings
+
+    monkeypatch.setenv("L9_CHASSIS", "legacy")
+    dev = Settings(l9_env="dev")
+    with patch("engine.config.settings.settings", dev):
+        assert resolve_chassis() == "legacy"
 
 
 def test_entrypoint_allows_sdk_chassis_in_production(monkeypatch: pytest.MonkeyPatch) -> None:

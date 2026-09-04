@@ -29,9 +29,17 @@ services:
       # Engine lifecycle hook — wires Graph engine to chassis
       L9_LIFECYCLE_HOOK: engine.boot:GraphLifecycle
       # Chassis selection (chassis.entrypoint:create_app)
-      L9_CHASSIS: legacy
-      # SDK chassis config — inert while L9_CHASSIS=legacy. NodeRuntimeConfig
-      # is frozen with extra="forbid", so names must match the SDK exactly.
+      L9_CHASSIS: sdk
+      # SDK chassis config. NodeRuntimeConfig is frozen with extra="forbid",
+      # so names must match the SDK exactly.
+      # Gate is the only peer transport: registration + all egress go to GATE_URL.
+      # This compose file does not start Gate — attach an external Gate on :8080
+      # (or override GATE_URL) before make dev / docker compose up api.
+      GATE_URL: ${GATE_URL:-http://gate:8080}
+      GATE_ADMIN_TOKEN: ${GATE_ADMIN_TOKEN:-dev-gate-admin-token-not-for-production}
+      GATE_REGISTRATION_ENABLED: "true"
+      L9_NODE_NAME: graph
+      L9_NODE_SPEC_PATH: engine/spec.yaml
       L9_ENVIRONMENT: local
       L9_SERVICE_NAME: graph-engine
       L9_SERVICE_VERSION: 1.1.0
@@ -42,9 +50,11 @@ services:
       L9_SIGNING_ALGORITHM: hmac-sha256
       L9_SIGNING_KEY: dev-shared-hmac-secret-not-for-production
       L9_SIGNING_KEY_ID: graph-engine-v1
-      L9_ALLOWED_ACTIONS: match,sync,admin,outcomes,resolve,health,healthcheck,enrich
+      # `enrich` deliberately absent: Gate owns that action name for EIE.
+      L9_ALLOWED_ACTIONS: match,sync,admin,outcomes,resolve,health,healthcheck
       L9_MAX_ATTACHMENTS: "0"
-      # Required: SDK defaults (10MB attachment vs 256KB packet) are mutually invalid.
+      # Attachments intentionally disabled (0/0); bare NodeRuntimeConfig is valid with
+      # these zeros — not a workaround for mutually invalid SDK defaults.
       L9_MAX_ATTACHMENT_SIZE_BYTES: "0"
       # Neo4j — uses Docker service name, not localhost
       NEO4J_URI: bolt://neo4j:7687

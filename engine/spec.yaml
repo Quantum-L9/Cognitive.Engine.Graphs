@@ -22,27 +22,17 @@ node:
   max_concurrent: 100
   timeout_ms: 30000
 
+  # Advertised actions = the CEG-owned subset of engine.handlers.ACTION_HANDLERS
+  # that Gate routes (seam audit 2026-09-02). Rules, enforced by
+  # tests/architecture/test_seam_gate_only.py:
+  #   * every advertised action has a registered handler;
+  #   * `enrich` is NEVER advertised — Gate owns that name for EIE's
+  #     enrichment operation; CEG's local Cypher-property `enrich` is reached
+  #     only through Gate-authored packets that Gate will not route here;
+  #   * `admin`/`health`/`healthcheck` are operator/probe surfaces, not
+  #     collaboration routes, so they are not advertised either.
   actions:
-    - graph-query
-    - graph-traverse
-    - graph-expand
-    - graph-neighborhood
-    - graph-similarity
-    - graph-path
-    - graph-match
-    - graph-score
-    - graph-rank
-    - graph-converge
-    - graph-arbitrate
-    - graph-infer
-    - graph-resolve
-    - graph-enrich
-    - graph-intake
-    - graph-upsert
-    - graph-delete
-    - graph-feedback
-    - graph-decay
-    - graph-reinforce
-    - graph-health
-    - graph-audit
-    - graph-explain
+    - match
+    - sync
+    - outcomes
+    - resolve

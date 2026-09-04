@@ -20,11 +20,11 @@ info:
     `L9_CHASSIS`; both paths route the same `engine.handlers.ACTION_HANDLERS`
     (CONTRACT-02). The request/response envelope differs:
 
-      L9_CHASSIS=legacy (default) — chassis/chassis_app.py. The ExecuteRequest /
+      L9_CHASSIS=legacy (permitted in L9_ENV=dev|local|test; refused elsewhere when require_sdk_chassis_in_prod) — chassis/chassis_app.py. The ExecuteRequest /
         ExecuteResponse schemas below. Auth: `x-api-key`. `/v1/health` returns
         200 healthy / 503 degraded.
 
-      L9_CHASSIS=sdk — chassis/node_app.py, built by constellation-node-sdk
+      L9_CHASSIS=sdk (default) — chassis/node_app.py, built by constellation-node-sdk
         `create_node_app()`. The body is a `TransportPacket`, not ExecuteRequest:
         `action` and `payload` live under the packet, tenant arrives as
         `tenant.org_id` (== CEG domain_id), and the response is a TransportPacket
