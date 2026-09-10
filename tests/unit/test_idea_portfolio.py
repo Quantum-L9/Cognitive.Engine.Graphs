@@ -86,7 +86,7 @@ def test_domain_is_dormant_until_enabled(monkeypatch: pytest.MonkeyPatch) -> Non
 @pytest.mark.unit
 def test_projection_admission_and_rank_filtering() -> None:
     model = IdeaGraphProjection.model_validate(_projection())
-    assert model.model_dump(by_alias=True)["schema"] == "ideaos.idea-graph-projection/v1"
+    assert model.wire_schema == "ideaos.idea-graph-projection/v1"
     query = build_portfolio_match_query(model)
     assert query["requires_count"] == query["produces_count"] == query["uses_count"] == 1
     assert query["targets_count"] == 0
@@ -96,6 +96,11 @@ def test_projection_admission_and_rank_filtering() -> None:
     raw["assertions"][0]["source_refs"] = []
     with pytest.raises(ValueError, match="source_ref"):
         IdeaGraphProjection.model_validate(raw)
+
+    wrong_schema = _projection()
+    wrong_schema["schema"] = "ideaos.idea-graph-projection/v0"
+    with pytest.raises(ValueError, match="schema must equal"):
+        IdeaGraphProjection.model_validate(wrong_schema)
 
 
 @pytest.mark.unit
@@ -162,13 +167,15 @@ async def test_hydrator_feature_gate_and_atomic_revision_chain() -> None:
     writer = _Writer()
     receipt = await IdeaPortfolioHydrator(writer, enabled=True).apply(_envelope())
     assert receipt["status"] == "applied"
-    assert writer.calls == 1 and writer.database == "idea-portfolio"
+    assert writer.calls == 1
+    assert writer.database == "idea-portfolio"
     assert len(writer.tx.calls) == 3
 
     plan = compile_hydration_plan(_envelope())
     replay = _Writer(plan.graph_revision)
     receipt = await IdeaPortfolioHydrator(replay, enabled=True).apply(_envelope())
-    assert receipt["status"] == "reused" and len(replay.tx.calls) == 1
+    assert receipt["status"] == "reused"
+    assert len(replay.tx.calls) == 1
 
     conflict = _Writer(_digest("e"))
     with pytest.raises(IdeaPortfolioHydrationError, match="expected parent"):
