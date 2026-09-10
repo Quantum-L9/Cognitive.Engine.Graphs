@@ -13,26 +13,12 @@ domain:
   name: IdeaOS Portfolio Graph
   description: Cross-idea portfolio intelligence. IdeaOS owns idea/lifecycle truth; CEG owns graph persistence, intersections, and ranking.
   version: 0.1.0
-
 ontology:
   nodes:
     - label: Idea
       managedby: sync
       candidate: true
-      properties:
-        - {name: idea_id, type: string, required: true}
-        - {name: source_digest, type: string}
-        - {name: projection_digest, type: string}
-        - {name: graph_revision, type: string}
-        - {name: lifecycle_stage, type: string}
-        - {name: decision, type: enum, values: [GO, CONDITIONAL_GO, HOLD, NO_GO]}
-        - {name: proof_state, type: string}
-        - {name: execution_state, type: string}
-        - {name: unknowns_json, type: string}
-        - {name: self_dependency_facet_id, type: string}
-        - {name: active, type: bool}
-        - {name: hydrated_at, type: datetime}
-        - {name: tombstoned_at, type: datetime}
+      properties: [{name: idea_id, type: string, required: true}, {name: source_digest, type: string}, {name: projection_digest, type: string}, {name: graph_revision, type: string}, {name: lifecycle_stage, type: string}, {name: decision, type: enum, values: [GO, CONDITIONAL_GO, HOLD, NO_GO]}, {name: proof_state, type: string}, {name: execution_state, type: string}, {name: unknowns_json, type: string}, {name: self_dependency_facet_id, type: string}, {name: active, type: bool}, {name: hydrated_at, type: datetime}, {name: tombstoned_at, type: datetime}]
     - label: IdeaQuery
       managedby: api
       queryentity: true
@@ -40,21 +26,11 @@ ontology:
     - label: PortfolioFacet
       managedby: sync
       auxiliary: true
-      properties:
-        - {name: facet_id, type: string, required: true}
-        - {name: kind, type: enum, values: [capability, substrate, proof_asset, data_asset, market, customer_type, dependency]}
-        - {name: key, type: string, required: true}
-        - {name: last_seen_revision, type: string}
+      properties: [{name: facet_id, type: string, required: true}, {name: kind, type: enum, values: [capability, substrate, proof_asset, data_asset, market, customer_type, dependency]}, {name: key, type: string, required: true}, {name: last_seen_revision, type: string}]
     - label: IdeaPortfolioHydrationState
       managedby: sync
       auxiliary: true
-      properties:
-        - {name: state_id, type: string, required: true}
-        - {name: current_revision, type: string}
-        - {name: source_snapshot_ref, type: string}
-        - {name: source_snapshot_digest, type: string}
-        - {name: batch_digest, type: string}
-        - {name: completed_at, type: datetime}
+      properties: [{name: state_id, type: string, required: true}, {name: current_revision, type: string}, {name: source_snapshot_ref, type: string}, {name: source_snapshot_digest, type: string}, {name: batch_digest, type: string}, {name: completed_at, type: datetime}]
   edges:
     - &source_edge
       type: PRODUCES
@@ -63,13 +39,7 @@ ontology:
       direction: DIRECTED
       category: capability
       managedby: sync
-      properties:
-        - {name: assertion_id, type: string, required: true}
-        - {name: kind, type: string}
-        - {name: evidence_state, type: string}
-        - {name: source_refs_json, type: string}
-        - {name: projection_digest, type: string}
-        - {name: graph_revision, type: string}
+      properties: [{name: assertion_id, type: string, required: true}, {name: kind, type: string}, {name: evidence_state, type: string}, {name: source_refs_json, type: string}, {name: projection_digest, type: string}, {name: graph_revision, type: string}]
     - <<: *source_edge
       type: REQUIRES
     - <<: *source_edge
@@ -80,7 +50,6 @@ ontology:
     - <<: *source_edge
       type: DEPENDS_ON
       category: context
-
 matchentities:
   candidate: [{label: Idea, matchdirection: portfolio_context_for_idea}]
   queryentity: [{label: IdeaQuery, matchdirection: portfolio_context_for_idea}]
@@ -102,7 +71,6 @@ traversal: {steps: []}
 gates:
   - {name: active_only, type: boolean, candidateprop: active, nullbehavior: fail, matchdirections: [portfolio_context_for_idea]}
   - {name: exclude_self, type: threshold, candidateprop: idea_id, queryparam: idea_id, operator: "!=", nullbehavior: fail, matchdirections: [portfolio_context_for_idea]}
-
 # VERIFIED and source-backed SUPPORTED_INFERENCE assertions can rank.
 # HYPOTHESIS/UNKNOWN remain graph context and cannot become rank evidence.
 scoring:
@@ -155,8 +123,6 @@ scoring:
       weightkey: wcandidatedependency
       defaultweight: 0.05
       matchdirections: [portfolio_context_for_idea]
-
-# Generic SyncGenerator cannot preserve assertion provenance/revision semantics.
 sync: {endpoints: []}
 gdsjobs: []
 compliance:
