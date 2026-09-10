@@ -1,11 +1,4 @@
-"""IdeaOS portfolio projection hydration for the CEG idea-portfolio domain.
-
-IdeaOS owns canonical idea identity and lifecycle truth. This module accepts the
-narrow ``IdeaGraphProjection`` contract, validates it, compiles graph-safe
-facets, and applies one revision-chained hydration envelope atomically in CEG.
-It never parses raw IdeaOS corpus files and never infers idea identity from
-filenames.
-"""
+"""IdeaOS projection hydration and portfolio-query compilation for CEG."""
 
 from __future__ import annotations
 
@@ -14,17 +7,18 @@ import json
 import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
 DOMAIN_ID = "idea-portfolio"
 _STATE_ID = "canonical"
+_MODEL_CONFIG = ConfigDict(extra="forbid", populate_by_name=True)
 
 
 class IdeaPortfolioHydrationError(ValueError):
-    """Raised when a hydration envelope cannot be safely admitted or applied."""
+    """Raised when portfolio hydration cannot be safely admitted or applied."""
 
 
 class EvidenceState(StrEnum):
@@ -53,27 +47,26 @@ class AssertionRelation(StrEnum):
 
 
 _ALLOWED_RELATIONS: dict[AssertionKind, frozenset[AssertionRelation]] = {
-    AssertionKind.CAPABILITY: frozenset(
-        {AssertionRelation.PRODUCES, AssertionRelation.REQUIRES, AssertionRelation.USES}
-    ),
-    AssertionKind.SUBSTRATE: frozenset(
-        {AssertionRelation.PRODUCES, AssertionRelation.REQUIRES, AssertionRelation.USES}
-    ),
-    AssertionKind.PROOF_ASSET: frozenset(
-        {AssertionRelation.PRODUCES, AssertionRelation.REQUIRES, AssertionRelation.USES}
-    ),
-    AssertionKind.DATA_ASSET: frozenset(
-        {AssertionRelation.PRODUCES, AssertionRelation.REQUIRES, AssertionRelation.USES}
-    ),
-    AssertionKind.MARKET: frozenset({AssertionRelation.TARGETS}),
-    AssertionKind.CUSTOMER_TYPE: frozenset({AssertionRelation.TARGETS}),
-    AssertionKind.DEPENDENCY: frozenset({AssertionRelation.DEPENDS_ON}),
+    kind: frozenset({AssertionRelation.PRODUCES, AssertionRelation.REQUIRES, AssertionRelation.USES})
+    for kind in (
+        AssertionKind.CAPABILITY,
+        AssertionKind.SUBSTRATE,
+        AssertionKind.PROOF_ASSET,
+        AssertionKind.DATA_ASSET,
+    )
 }
+_ALLOWED_RELATIONS.update(
+    {
+        AssertionKind.MARKET: frozenset({AssertionRelation.TARGETS}),
+        AssertionKind.CUSTOMER_TYPE: frozenset({AssertionRelation.TARGETS}),
+        AssertionKind.DEPENDENCY: frozenset({AssertionRelation.DEPENDS_ON}),
+    }
+)
+_RANK_ELIGIBLE = frozenset({EvidenceState.VERIFIED, EvidenceState.SUPPORTED_INFERENCE})
 
 
 class IdeaLifecycle(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+    model_config = _MODEL_CONFIG
     stage: str = Field(min_length=1)
     decision: Literal["GO", "CONDITIONAL_GO", "HOLD", "NO_GO"] | None = None
     proof_state: str | None = None
@@ -81,8 +74,7 @@ class IdeaLifecycle(BaseModel):
 
 
 class IdeaAssertion(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+    model_config = _MODEL_CONFIG
     kind: AssertionKind
     relation: AssertionRelation
     key: str = Field(min_length=1)
@@ -90,11 +82,9 @@ class IdeaAssertion(BaseModel):
     source_refs: list[str]
 
     @model_validator(mode="after")
-    def validate_semantics(self) -> "IdeaAssertion":
+    def validate_semantics(self) -> Self:
         if self.relation not in _ALLOWED_RELATIONS[self.kind]:
-            raise ValueError(
-                f"relation {self.relation.value!r} is not valid for assertion kind {self.kind.value!r}"
-            )
+            raise ValueError(f"relation {self.relation.value!r} is not valid for assertion kind {self.kind.value!r}")
         if len(self.source_refs) != len(set(self.source_refs)):
             raise ValueError("assertion source_refs must be unique")
         if self.evidence_state != EvidenceState.UNKNOWN and not self.source_refs:
@@ -103,11 +93,10 @@ class IdeaAssertion(BaseModel):
 
 
 class IdeaGraphProjection(BaseModel):
-    """Mirror of IdeaOS ``ideaos.idea-graph-projection/v1`` at the CEG boundary."""
+    """CEG admission model for the IdeaOS idea-graph-projection/v1 wire contract."""
 
-    model_config = ConfigDict(extra="forbid")
-
-    schema: Literal["ideaos.idea-graph-projection/v1"]
+    model_config = _MODEL_CONFIG
+    schema_id: Literal["ideaos.idea-graph-projection/v1"] = Field(alias="schema")
     idea_id: str = Field(min_length=1)
     source_refs: list[str]
     source_digest: str = Field(pattern=DIGEST_PATTERN)
@@ -116,42 +105,35 @@ class IdeaGraphProjection(BaseModel):
     unknowns: list[str]
 
     @model_validator(mode="after")
-    def validate_projection(self) -> "IdeaGraphProjection":
+    def validate_projection(self) -> Self:
         if not self.source_refs:
-            raise ValueError("hydrated IdeaGraphProjection requires at least one source_ref")
+            raise ValueError("CEG hydration requires at least one projection source_ref")
         if len(self.source_refs) != len(set(self.source_refs)):
             raise ValueError("projection source_refs must be unique")
         if len(self.unknowns) != len(set(self.unknowns)):
             raise ValueError("projection unknowns must be unique")
-
-        semantic_keys = [(a.kind.value, a.relation.value, _canonical_key(a.key)) for a in self.assertions]
-        if len(semantic_keys) != len(set(semantic_keys)):
+        keys = [(a.kind.value, a.relation.value, _canonical_key(a.key)) for a in self.assertions]
+        if len(keys) != len(set(keys)):
             raise ValueError("projection contains duplicate semantic assertions")
         return self
 
 
 class IdeaPortfolioSyncRecord(BaseModel):
-    """CEG persistence command around an IdeaOS projection."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    schema: Literal["ceg.idea-portfolio-sync-record/v1"]
+    model_config = _MODEL_CONFIG
+    schema_id: Literal["ceg.idea-portfolio-sync-record/v1"] = Field(alias="schema")
     operation: Literal["upsert", "tombstone"]
     projection: IdeaGraphProjection | None = None
     idea_id: str | None = None
 
     @model_validator(mode="after")
-    def validate_operation(self) -> "IdeaPortfolioSyncRecord":
+    def validate_operation(self) -> Self:
         if self.operation == "upsert":
             if self.projection is None:
                 raise ValueError("upsert sync record requires projection")
             if self.idea_id is not None and self.idea_id != self.projection.idea_id:
                 raise ValueError("sync record idea_id does not match projection idea_id")
-        else:
-            if self.idea_id is None:
-                raise ValueError("tombstone sync record requires idea_id")
-            if self.projection is not None:
-                raise ValueError("tombstone sync record must not contain projection")
+        elif self.idea_id is None or self.projection is not None:
+            raise ValueError("tombstone requires idea_id and forbids projection")
         return self
 
     @property
@@ -159,23 +141,20 @@ class IdeaPortfolioSyncRecord(BaseModel):
         if self.projection is not None:
             return self.projection.idea_id
         if self.idea_id is None:
-            raise IdeaPortfolioHydrationError("validated tombstone record lacks idea_id")
+            raise IdeaPortfolioHydrationError("validated tombstone lacks idea_id")
         return self.idea_id
 
 
 class IdeaPortfolioHydrationEnvelope(BaseModel):
-    """One ordered corpus delta chained to the previously committed graph revision."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    schema: Literal["ceg.idea-portfolio-hydration/v1"]
+    model_config = _MODEL_CONFIG
+    schema_id: Literal["ceg.idea-portfolio-hydration/v1"] = Field(alias="schema")
     source_snapshot_ref: str = Field(min_length=1)
     source_snapshot_digest: str = Field(pattern=DIGEST_PATTERN)
     expected_graph_revision: str | None = Field(default=None, pattern=DIGEST_PATTERN)
     records: list[IdeaPortfolioSyncRecord] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def validate_records(self) -> "IdeaPortfolioHydrationEnvelope":
+    def validate_records(self) -> Self:
         idea_ids = [record.resolved_idea_id for record in self.records]
         if len(idea_ids) != len(set(idea_ids)):
             raise ValueError("hydration envelope may contain at most one record per idea_id")
@@ -223,96 +202,129 @@ def _canonical_json(value: Any) -> str:
 
 
 def _sha256_text(value: str) -> str:
-    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+    return "sha256:" + hashlib.sha256(value.encode()).hexdigest()
 
 
 def _canonical_key(value: str) -> str:
-    """Preserve source semantics while removing encoding/edge whitespace noise."""
-
     return unicodedata.normalize("NFC", value).strip()
 
 
 def _facet_id(kind: AssertionKind | str, key: str) -> str:
     kind_value = kind.value if isinstance(kind, AssertionKind) else kind
-    digest = hashlib.sha256(f"{kind_value}\x00{_canonical_key(key)}".encode()).hexdigest()
-    return f"facet:{digest}"
+    return "facet:" + hashlib.sha256(f"{kind_value}\x00{_canonical_key(key)}".encode()).hexdigest()
 
 
 def _assertion_id(idea_id: str, assertion: IdeaAssertion) -> str:
-    semantic_key = (
-        f"{idea_id}\x00{assertion.relation.value}\x00{assertion.kind.value}"
-        f"\x00{_canonical_key(assertion.key)}"
-    )
-    return "assertion:" + hashlib.sha256(semantic_key.encode()).hexdigest()
+    value = f"{idea_id}\x00{assertion.relation.value}\x00{assertion.kind.value}\x00{_canonical_key(assertion.key)}"
+    return "assertion:" + hashlib.sha256(value.encode()).hexdigest()
 
 
 def projection_digest(projection: IdeaGraphProjection) -> str:
-    return _sha256_text(_canonical_json(projection.model_dump(mode="json")))
+    return _sha256_text(_canonical_json(projection.model_dump(mode="json", by_alias=True)))
 
 
 def compile_assertions(projection: IdeaGraphProjection) -> list[CompiledAssertion]:
-    compiled: list[CompiledAssertion] = []
-    for assertion in projection.assertions:
-        compiled.append(
-            CompiledAssertion(
-                assertion_id=_assertion_id(projection.idea_id, assertion),
-                facet_id=_facet_id(assertion.kind, assertion.key),
-                kind=assertion.kind.value,
-                key=_canonical_key(assertion.key),
-                relation=assertion.relation.value,
-                evidence_state=assertion.evidence_state.value,
-                source_refs_json=_canonical_json(sorted(assertion.source_refs)),
-            )
+    return [
+        CompiledAssertion(
+            assertion_id=_assertion_id(projection.idea_id, assertion),
+            facet_id=_facet_id(assertion.kind, assertion.key),
+            kind=assertion.kind.value,
+            key=_canonical_key(assertion.key),
+            relation=assertion.relation.value,
+            evidence_state=assertion.evidence_state.value,
+            source_refs_json=_canonical_json(sorted(assertion.source_refs)),
         )
-    return compiled
+        for assertion in projection.assertions
+    ]
 
 
 def build_portfolio_match_query(projection: IdeaGraphProjection | dict[str, Any]) -> dict[str, Any]:
-    """Compile a projection into the flat query shape consumed by the current match handler."""
-
+    """Compile only source-backed rank-eligible assertions into match input."""
     model = projection if isinstance(projection, IdeaGraphProjection) else IdeaGraphProjection.model_validate(projection)
-    compiled = compile_assertions(model)
-    by_relation: dict[str, list[str]] = {relation.value: [] for relation in AssertionRelation}
-    for assertion in compiled:
-        by_relation[assertion.relation].append(assertion.facet_id)
+    by_relation = {relation.value: [] for relation in AssertionRelation}
+    for raw, compiled in zip(model.assertions, compile_assertions(model), strict=True):
+        if raw.evidence_state in _RANK_ELIGIBLE and raw.source_refs:
+            by_relation[compiled.relation].append(compiled.facet_id)
 
-    def encoded(relation: str) -> str:
-        ids = sorted(set(by_relation[relation]))
-        return "" if not ids else "|" + "|".join(ids) + "|"
+    def ids(relation: AssertionRelation) -> list[str]:
+        return sorted(set(by_relation[relation.value]))
+
+    def encoded(relation: AssertionRelation) -> str:
+        values = ids(relation)
+        return "" if not values else "|" + "|".join(values) + "|"
 
     return {
         "idea_id": model.idea_id,
-        "requires_facets": encoded(AssertionRelation.REQUIRES.value),
-        "requires_count": len(set(by_relation[AssertionRelation.REQUIRES.value])),
-        "produces_facets": encoded(AssertionRelation.PRODUCES.value),
-        "produces_count": len(set(by_relation[AssertionRelation.PRODUCES.value])),
-        "uses_facets": encoded(AssertionRelation.USES.value),
-        "uses_count": len(set(by_relation[AssertionRelation.USES.value])),
-        "targets_facets": encoded(AssertionRelation.TARGETS.value),
-        "targets_count": len(set(by_relation[AssertionRelation.TARGETS.value])),
-        "depends_on_facets": encoded(AssertionRelation.DEPENDS_ON.value),
+        "requires_facets": encoded(AssertionRelation.REQUIRES),
+        "requires_count": len(ids(AssertionRelation.REQUIRES)),
+        "produces_facets": encoded(AssertionRelation.PRODUCES),
+        "produces_count": len(ids(AssertionRelation.PRODUCES)),
+        "uses_facets": encoded(AssertionRelation.USES),
+        "uses_count": len(ids(AssertionRelation.USES)),
+        "targets_facets": encoded(AssertionRelation.TARGETS),
+        "targets_count": len(ids(AssertionRelation.TARGETS)),
+        "depends_on_facets": encoded(AssertionRelation.DEPENDS_ON),
         "self_dependency_facet_id": _facet_id(AssertionKind.DEPENDENCY, model.idea_id),
     }
 
 
 def compile_hydration_plan(envelope: IdeaPortfolioHydrationEnvelope | dict[str, Any]) -> HydrationPlan:
-    model = (
-        envelope
-        if isinstance(envelope, IdeaPortfolioHydrationEnvelope)
-        else IdeaPortfolioHydrationEnvelope.model_validate(envelope)
-    )
-    records_payload = [record.model_dump(mode="json") for record in model.records]
-    batch_digest = _sha256_text(_canonical_json(records_payload))
+    model = envelope if isinstance(envelope, IdeaPortfolioHydrationEnvelope) else IdeaPortfolioHydrationEnvelope.model_validate(envelope)
+    payload = [record.model_dump(mode="json", by_alias=True) for record in model.records]
+    batch_digest = _sha256_text(_canonical_json(payload))
     parent = model.expected_graph_revision or "GENESIS"
-    graph_revision = _sha256_text(
-        f"ceg.idea-portfolio-graph/v1\x00{parent}\x00{model.source_snapshot_digest}\x00{batch_digest}"
-    )
-    return HydrationPlan(envelope=model, batch_digest=batch_digest, graph_revision=graph_revision)
+    revision = _sha256_text(f"ceg.idea-portfolio-graph/v1\x00{parent}\x00{model.source_snapshot_digest}\x00{batch_digest}")
+    return HydrationPlan(model, batch_digest, revision)
+
+
+_UPSERT_CYPHER = """
+MERGE (idea:Idea {idea_id: $idea_id})
+SET idea.source_digest=$source_digest, idea.projection_digest=$projection_digest,
+    idea.graph_revision=$graph_revision, idea.lifecycle_stage=$lifecycle_stage,
+    idea.decision=$decision, idea.proof_state=$proof_state, idea.execution_state=$execution_state,
+    idea.unknowns_json=$unknowns_json, idea.self_dependency_facet_id=$self_dependency_facet_id,
+    idea.active=true, idea.hydrated_at=datetime(), idea.tombstoned_at=null, idea._tenant=$tenant
+WITH idea
+OPTIONAL MATCH (idea)-[old:PRODUCES|REQUIRES|TARGETS|USES|DEPENDS_ON]->(:PortfolioFacet)
+DELETE old
+WITH DISTINCT idea
+FOREACH (row IN $produces |
+  MERGE (facet:PortfolioFacet {facet_id: row.facet_id})
+  SET facet.kind=row.kind, facet.key=row.key, facet.last_seen_revision=$graph_revision, facet._tenant=$tenant
+  MERGE (idea)-[rel:PRODUCES]->(facet)
+  SET rel.assertion_id=row.assertion_id, rel.kind=row.kind, rel.evidence_state=row.evidence_state,
+      rel.source_refs_json=row.source_refs_json, rel.projection_digest=$projection_digest, rel.graph_revision=$graph_revision)
+FOREACH (row IN $requires |
+  MERGE (facet:PortfolioFacet {facet_id: row.facet_id})
+  SET facet.kind=row.kind, facet.key=row.key, facet.last_seen_revision=$graph_revision, facet._tenant=$tenant
+  MERGE (idea)-[rel:REQUIRES]->(facet)
+  SET rel.assertion_id=row.assertion_id, rel.kind=row.kind, rel.evidence_state=row.evidence_state,
+      rel.source_refs_json=row.source_refs_json, rel.projection_digest=$projection_digest, rel.graph_revision=$graph_revision)
+FOREACH (row IN $targets |
+  MERGE (facet:PortfolioFacet {facet_id: row.facet_id})
+  SET facet.kind=row.kind, facet.key=row.key, facet.last_seen_revision=$graph_revision, facet._tenant=$tenant
+  MERGE (idea)-[rel:TARGETS]->(facet)
+  SET rel.assertion_id=row.assertion_id, rel.kind=row.kind, rel.evidence_state=row.evidence_state,
+      rel.source_refs_json=row.source_refs_json, rel.projection_digest=$projection_digest, rel.graph_revision=$graph_revision)
+FOREACH (row IN $uses |
+  MERGE (facet:PortfolioFacet {facet_id: row.facet_id})
+  SET facet.kind=row.kind, facet.key=row.key, facet.last_seen_revision=$graph_revision, facet._tenant=$tenant
+  MERGE (idea)-[rel:USES]->(facet)
+  SET rel.assertion_id=row.assertion_id, rel.kind=row.kind, rel.evidence_state=row.evidence_state,
+      rel.source_refs_json=row.source_refs_json, rel.projection_digest=$projection_digest, rel.graph_revision=$graph_revision)
+FOREACH (row IN $depends_on |
+  MERGE (facet:PortfolioFacet {facet_id: row.facet_id})
+  SET facet.kind=row.kind, facet.key=row.key, facet.last_seen_revision=$graph_revision, facet._tenant=$tenant
+  MERGE (idea)-[rel:DEPENDS_ON]->(facet)
+  SET rel.assertion_id=row.assertion_id, rel.kind=row.kind, rel.evidence_state=row.evidence_state,
+      rel.source_refs_json=row.source_refs_json, rel.projection_digest=$projection_digest, rel.graph_revision=$graph_revision)
+RETURN idea.idea_id AS idea_id,
+       size($produces)+size($requires)+size($targets)+size($uses)+size($depends_on) AS assertion_count
+""".strip()
 
 
 def compile_upsert_command(projection: IdeaGraphProjection, *, graph_revision: str) -> WriteCommand:
-    p_digest = projection_digest(projection)
-    grouped: dict[str, list[dict[str, Any]]] = {relation.value: [] for relation in AssertionRelation}
+    grouped = {relation.value: [] for relation in AssertionRelation}
     for assertion in compile_assertions(projection):
         grouped[assertion.relation].append(
             {
@@ -324,122 +336,13 @@ def compile_upsert_command(projection: IdeaGraphProjection, *, graph_revision: s
                 "source_refs_json": assertion.source_refs_json,
             }
         )
-
-    cypher = """
-MERGE (idea:Idea {idea_id: $idea_id})
-SET idea.source_digest = $source_digest,
-    idea.projection_digest = $projection_digest,
-    idea.graph_revision = $graph_revision,
-    idea.lifecycle_stage = $lifecycle_stage,
-    idea.decision = $decision,
-    idea.proof_state = $proof_state,
-    idea.execution_state = $execution_state,
-    idea.unknowns_json = $unknowns_json,
-    idea.self_dependency_facet_id = $self_dependency_facet_id,
-    idea.active = true,
-    idea.hydrated_at = datetime(),
-    idea.tombstoned_at = null,
-    idea._tenant = $tenant
-WITH idea
-OPTIONAL MATCH (idea)-[old:PRODUCES|REQUIRES|TARGETS|USES|DEPENDS_ON]->(:PortfolioFacet)
-DELETE old
-WITH DISTINCT idea
-CALL {
-  WITH idea
-  UNWIND $produces AS row
-  MERGE (facet:PortfolioFacet {facet_id: row.facet_id})
-  SET facet.kind = row.kind,
-      facet.key = row.key,
-      facet.last_seen_revision = $graph_revision,
-      facet._tenant = $tenant
-  MERGE (idea)-[rel:PRODUCES]->(facet)
-  SET rel.assertion_id = row.assertion_id,
-      rel.kind = row.kind,
-      rel.evidence_state = row.evidence_state,
-      rel.source_refs_json = row.source_refs_json,
-      rel.projection_digest = $projection_digest,
-      rel.graph_revision = $graph_revision
-  RETURN count(row) AS produced_count
-}
-CALL {
-  WITH idea
-  UNWIND $requires AS row
-  MERGE (facet:PortfolioFacet {facet_id: row.facet_id})
-  SET facet.kind = row.kind,
-      facet.key = row.key,
-      facet.last_seen_revision = $graph_revision,
-      facet._tenant = $tenant
-  MERGE (idea)-[rel:REQUIRES]->(facet)
-  SET rel.assertion_id = row.assertion_id,
-      rel.kind = row.kind,
-      rel.evidence_state = row.evidence_state,
-      rel.source_refs_json = row.source_refs_json,
-      rel.projection_digest = $projection_digest,
-      rel.graph_revision = $graph_revision
-  RETURN count(row) AS required_count
-}
-CALL {
-  WITH idea
-  UNWIND $targets AS row
-  MERGE (facet:PortfolioFacet {facet_id: row.facet_id})
-  SET facet.kind = row.kind,
-      facet.key = row.key,
-      facet.last_seen_revision = $graph_revision,
-      facet._tenant = $tenant
-  MERGE (idea)-[rel:TARGETS]->(facet)
-  SET rel.assertion_id = row.assertion_id,
-      rel.kind = row.kind,
-      rel.evidence_state = row.evidence_state,
-      rel.source_refs_json = row.source_refs_json,
-      rel.projection_digest = $projection_digest,
-      rel.graph_revision = $graph_revision
-  RETURN count(row) AS target_count
-}
-CALL {
-  WITH idea
-  UNWIND $uses AS row
-  MERGE (facet:PortfolioFacet {facet_id: row.facet_id})
-  SET facet.kind = row.kind,
-      facet.key = row.key,
-      facet.last_seen_revision = $graph_revision,
-      facet._tenant = $tenant
-  MERGE (idea)-[rel:USES]->(facet)
-  SET rel.assertion_id = row.assertion_id,
-      rel.kind = row.kind,
-      rel.evidence_state = row.evidence_state,
-      rel.source_refs_json = row.source_refs_json,
-      rel.projection_digest = $projection_digest,
-      rel.graph_revision = $graph_revision
-  RETURN count(row) AS use_count
-}
-CALL {
-  WITH idea
-  UNWIND $depends_on AS row
-  MERGE (facet:PortfolioFacet {facet_id: row.facet_id})
-  SET facet.kind = row.kind,
-      facet.key = row.key,
-      facet.last_seen_revision = $graph_revision,
-      facet._tenant = $tenant
-  MERGE (idea)-[rel:DEPENDS_ON]->(facet)
-  SET rel.assertion_id = row.assertion_id,
-      rel.kind = row.kind,
-      rel.evidence_state = row.evidence_state,
-      rel.source_refs_json = row.source_refs_json,
-      rel.projection_digest = $projection_digest,
-      rel.graph_revision = $graph_revision
-  RETURN count(row) AS dependency_count
-}
-RETURN idea.idea_id AS idea_id,
-       produced_count + required_count + target_count + use_count + dependency_count AS assertion_count
-""".strip()
-
     return WriteCommand(
-        cypher=cypher,
-        parameters={
+        _UPSERT_CYPHER,
+        {
             "tenant": DOMAIN_ID,
             "idea_id": projection.idea_id,
             "source_digest": projection.source_digest,
-            "projection_digest": p_digest,
+            "projection_digest": projection_digest(projection),
             "graph_revision": graph_revision,
             "lifecycle_stage": projection.lifecycle.stage,
             "decision": projection.lifecycle.decision,
@@ -447,101 +350,69 @@ RETURN idea.idea_id AS idea_id,
             "execution_state": projection.lifecycle.execution_state,
             "unknowns_json": _canonical_json(sorted(projection.unknowns)),
             "self_dependency_facet_id": _facet_id(AssertionKind.DEPENDENCY, projection.idea_id),
-            "produces": grouped[AssertionRelation.PRODUCES.value],
-            "requires": grouped[AssertionRelation.REQUIRES.value],
-            "targets": grouped[AssertionRelation.TARGETS.value],
-            "uses": grouped[AssertionRelation.USES.value],
-            "depends_on": grouped[AssertionRelation.DEPENDS_ON.value],
+            **grouped,
         },
     )
 
 
 def compile_tombstone_command(idea_id: str, *, graph_revision: str) -> WriteCommand:
-    cypher = """
-MERGE (idea:Idea {idea_id: $idea_id})
-SET idea.active = false,
-    idea.graph_revision = $graph_revision,
-    idea.tombstoned_at = datetime(),
-    idea._tenant = $tenant
-WITH idea
-OPTIONAL MATCH (idea)-[old:PRODUCES|REQUIRES|TARGETS|USES|DEPENDS_ON]->(:PortfolioFacet)
-DELETE old
-RETURN idea.idea_id AS idea_id
-""".strip()
     return WriteCommand(
-        cypher=cypher,
-        parameters={"tenant": DOMAIN_ID, "idea_id": idea_id, "graph_revision": graph_revision},
+        """MERGE (idea:Idea {idea_id: $idea_id})
+SET idea.active=false, idea.graph_revision=$graph_revision, idea.tombstoned_at=datetime(), idea._tenant=$tenant
+WITH idea OPTIONAL MATCH (idea)-[old:PRODUCES|REQUIRES|TARGETS|USES|DEPENDS_ON]->(:PortfolioFacet)
+DELETE old RETURN idea.idea_id AS idea_id""",
+        {"tenant": DOMAIN_ID, "idea_id": idea_id, "graph_revision": graph_revision},
     )
 
 
-_LOCK_STATE_CYPHER = """
-MERGE (state:IdeaPortfolioHydrationState {state_id: $state_id})
-SET state._cas_lock = coalesce(state._cas_lock, 0) + 1,
-    state._tenant = $tenant
-RETURN state.current_revision AS current_revision
-""".strip()
-
-_FINALIZE_STATE_CYPHER = """
-MATCH (state:IdeaPortfolioHydrationState {state_id: $state_id})
-SET state.current_revision = $graph_revision,
-    state.source_snapshot_ref = $source_snapshot_ref,
-    state.source_snapshot_digest = $source_snapshot_digest,
-    state.batch_digest = $batch_digest,
-    state.completed_at = datetime(),
-    state._tenant = $tenant
-RETURN state.current_revision AS graph_revision
-""".strip()
+_LOCK_STATE_CYPHER = """MERGE (state:IdeaPortfolioHydrationState {state_id: $state_id})
+SET state._cas_lock=coalesce(state._cas_lock, 0)+1, state._tenant=$tenant
+RETURN state.current_revision AS current_revision"""
+_FINALIZE_STATE_CYPHER = """MATCH (state:IdeaPortfolioHydrationState {state_id: $state_id})
+SET state.current_revision=$graph_revision, state.source_snapshot_ref=$source_snapshot_ref,
+    state.source_snapshot_digest=$source_snapshot_digest, state.batch_digest=$batch_digest,
+    state.completed_at=datetime(), state._tenant=$tenant
+RETURN state.current_revision AS graph_revision"""
 
 
 class IdeaPortfolioHydrator:
-    """Atomically apply one revision-chained IdeaOS corpus delta to CEG."""
+    """Apply one revision-chained corpus delta in one managed Neo4j transaction."""
 
-    def __init__(self, graph_writer: GraphWriter) -> None:
+    def __init__(self, graph_writer: GraphWriter, *, enabled: bool = False) -> None:
         self.graph_writer = graph_writer
+        self.enabled = enabled
 
     async def apply(self, envelope: IdeaPortfolioHydrationEnvelope | dict[str, Any]) -> dict[str, Any]:
+        if not self.enabled:
+            raise IdeaPortfolioHydrationError("idea-portfolio hydration is disabled by configuration")
         plan = compile_hydration_plan(envelope)
 
         async def apply_transaction(tx: Any) -> dict[str, Any]:
-            state_result = await tx.run(
-                _LOCK_STATE_CYPHER,
-                {
-                    "state_id": _STATE_ID,
-                    "tenant": DOMAIN_ID,
-                },
-            )
-            state_rows = await state_result.data()
-            current_revision = state_rows[0].get("current_revision") if state_rows else None
-
-            if current_revision == plan.graph_revision:
-                return self._receipt(plan, status="reused", applied=[], tombstoned=[])
-
-            if current_revision != plan.envelope.expected_graph_revision:
-                raise IdeaPortfolioHydrationError(
-                    "hydration revision conflict: expected parent does not match committed graph revision"
-                )
+            state = await tx.run(_LOCK_STATE_CYPHER, {"state_id": _STATE_ID, "tenant": DOMAIN_ID})
+            rows = await state.data()
+            current = rows[0].get("current_revision") if rows else None
+            if current == plan.graph_revision:
+                return self._receipt(plan, "reused", [], [])
+            if current != plan.envelope.expected_graph_revision:
+                raise IdeaPortfolioHydrationError("hydration revision conflict: expected parent does not match committed graph revision")
 
             applied: list[str] = []
             tombstoned: list[str] = []
             for record in plan.envelope.records:
                 if record.operation == "upsert":
-                    projection = record.projection
-                    if projection is None:
-                        raise IdeaPortfolioHydrationError("validated upsert record lacks projection")
-                    command = compile_upsert_command(projection, graph_revision=plan.graph_revision)
+                    if record.projection is None:
+                        raise IdeaPortfolioHydrationError("validated upsert lacks projection")
+                    command = compile_upsert_command(record.projection, graph_revision=plan.graph_revision)
                     result = await tx.run(command.cypher, command.parameters)
                     await result.consume()
-                    applied.append(projection.idea_id)
+                    applied.append(record.projection.idea_id)
                 else:
-                    command = compile_tombstone_command(
-                        record.resolved_idea_id,
-                        graph_revision=plan.graph_revision,
-                    )
+                    command = compile_tombstone_command(record.resolved_idea_id, graph_revision=plan.graph_revision)
                     result = await tx.run(command.cypher, command.parameters)
                     await result.consume()
                     tombstoned.append(record.resolved_idea_id)
 
-            final_result = await tx.run(
+            final = await tx.run(
                 _FINALIZE_STATE_CYPHER,
                 {
                     "state_id": _STATE_ID,
@@ -552,13 +423,8 @@ class IdeaPortfolioHydrator:
                     "batch_digest": plan.batch_digest,
                 },
             )
-            await final_result.consume()
-            return self._receipt(
-                plan,
-                status="applied",
-                applied=applied,
-                tombstoned=tombstoned,
-            )
+            await final.consume()
+            return self._receipt(plan, "applied", applied, tombstoned)
 
         result = await self.graph_writer.execute_write(apply_transaction, database=DOMAIN_ID)
         if not isinstance(result, dict):
@@ -568,7 +434,6 @@ class IdeaPortfolioHydrator:
     @staticmethod
     def _receipt(
         plan: HydrationPlan,
-        *,
         status: Literal["applied", "reused"],
         applied: list[str],
         tombstoned: list[str],
@@ -587,9 +452,9 @@ class IdeaPortfolioHydrator:
 
 
 __all__ = [
+    "DOMAIN_ID",
     "AssertionKind",
     "AssertionRelation",
-    "DOMAIN_ID",
     "EvidenceState",
     "HydrationPlan",
     "IdeaGraphProjection",
