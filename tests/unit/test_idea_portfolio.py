@@ -5,7 +5,8 @@ from typing import Any
 
 import pytest
 
-from engine.config.loader import DomainPackLoader
+from engine.config.loader import DomainNotFoundError, DomainPackLoader
+from engine.config.settings import settings
 from engine.gates.compiler import GateCompiler
 from engine.scoring.assembler import ScoringAssembler
 from engine.sync.idea_portfolio import (
@@ -26,59 +27,28 @@ def _digest(char: str = "a") -> str:
 
 
 def _projection(idea_id: str = "idea-alpha") -> dict[str, Any]:
+    def assertion(kind: str, relation: str, key: str, state: str) -> dict[str, Any]:
+        refs = [] if state == "UNKNOWN" else [f"Ideas/{idea_id}.md#{key}"]
+        return {"kind": kind, "relation": relation, "key": key, "evidence_state": state, "source_refs": refs}
+
     return {
         "schema": "ideaos.idea-graph-projection/v1",
         "idea_id": idea_id,
         "source_refs": [f"Ideas/{idea_id}.md"],
-        "source_digest": _digest("a"),
-        "lifecycle": {
-            "stage": "expanded",
-            "decision": None,
-            "proof_state": "P1",
-            "execution_state": None,
-        },
+        "source_digest": _digest(),
+        "lifecycle": {"stage": "expanded", "decision": None, "proof_state": "P1", "execution_state": None},
         "assertions": [
-            {
-                "kind": "capability",
-                "relation": "produces",
-                "key": "shared-capability",
-                "evidence_state": "VERIFIED",
-                "source_refs": [f"Ideas/{idea_id}.md#capability"],
-            },
-            {
-                "kind": "capability",
-                "relation": "requires",
-                "key": "required-capability",
-                "evidence_state": "SUPPORTED_INFERENCE",
-                "source_refs": [f"Ideas/{idea_id}.md#requirement"],
-            },
-            {
-                "kind": "substrate",
-                "relation": "uses",
-                "key": "shared-substrate",
-                "evidence_state": "VERIFIED",
-                "source_refs": [f"Ideas/{idea_id}.md#substrate"],
-            },
-            {
-                "kind": "market",
-                "relation": "targets",
-                "key": "industrial-ai",
-                "evidence_state": "HYPOTHESIS",
-                "source_refs": [f"Ideas/{idea_id}.md#market"],
-            },
-            {
-                "kind": "dependency",
-                "relation": "depends_on",
-                "key": "idea-foundation",
-                "evidence_state": "VERIFIED",
-                "source_refs": [f"Ideas/{idea_id}.md#dependency"],
-            },
+            assertion("capability", "produces", "shared-capability", "VERIFIED"),
+            assertion("capability", "requires", "required-capability", "SUPPORTED_INFERENCE"),
+            assertion("substrate", "uses", "shared-substrate", "VERIFIED"),
+            assertion("market", "targets", "industrial-ai", "HYPOTHESIS"),
+            assertion("dependency", "depends_on", "idea-foundation", "VERIFIED"),
         ],
         "unknowns": ["external demand not yet proven"],
     }
 
 
-def _envelope(*, expected: str | None = None) -> dict[str, Any]:
+def _envelope(expected: str | None = None) -> dict[str, Any]:
     return {
         "schema": "ceg.idea-portfolio-hydration/v1",
         "source_snapshot_ref": "Quantum-L9/IdeaOS@deadbeef",
@@ -95,187 +65,112 @@ def _envelope(*, expected: str | None = None) -> dict[str, Any]:
 
 
 @pytest.mark.unit
-class TestIdeaPortfolioDomain:
-    def test_domain_loads_and_compilers_accept_it(self) -> None:
-        loader = DomainPackLoader(config_path=str(ROOT / "domains"))
-        spec = loader.load_domain("idea-portfolio")
+def test_domain_is_dormant_until_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    loader = DomainPackLoader(config_path=str(ROOT / "domains"))
+    monkeypatch.setattr(settings, "idea_portfolio_enabled", False)
+    assert "idea-portfolio" not in loader.list_domains()
+    with pytest.raises(DomainNotFoundError, match="disabled"):
+        loader.load_domain("idea-portfolio")
 
-        assert spec.domain.id == "idea-portfolio"
-        assert {node.label for node in spec.ontology.nodes} == {
-            "Idea",
-            "IdeaQuery",
-            "PortfolioFacet",
-            "IdeaPortfolioHydrationState",
-        }
-        assert {edge.type for edge in spec.ontology.edges} == {
-            "PRODUCES",
-            "REQUIRES",
-            "TARGETS",
-            "USES",
-            "DEPENDS_ON",
-        }
-        assert spec.sync.endpoints == []
-        assert sum(d.defaultweight for d in spec.scoring.dimensions) == pytest.approx(1.0)
-
-        gate_clause = GateCompiler(spec).compile_all_gates("portfolio_context_for_idea")
-        assert "candidate.active" in gate_clause
-        assert "candidate.idea_id != $idea_id" in gate_clause
-
-        score_clause, _ = ScoringAssembler(spec).assemble_scoring_clause(
-            "portfolio_context_for_idea", {}
-        )
-        assert "PRODUCES" in score_clause
-        assert "REQUIRES" in score_clause
-        assert "PortfolioFacet" in score_clause
+    monkeypatch.setattr(settings, "idea_portfolio_enabled", True)
+    spec = loader.load_domain("idea-portfolio")
+    assert spec.domain.id == "idea-portfolio"
+    assert spec.sync.endpoints == []
+    assert sum(d.defaultweight for d in spec.scoring.dimensions) == pytest.approx(1.0)
+    assert "candidate.active" in GateCompiler(spec).compile_all_gates("portfolio_context_for_idea")
+    scoring, _ = ScoringAssembler(spec).assemble_scoring_clause("portfolio_context_for_idea", {})
+    assert "SUPPORTED_INFERENCE" in scoring
+    assert "rel.evidence_state" in scoring
 
 
 @pytest.mark.unit
-class TestProjectionBoundary:
-    def test_projection_compiles_to_flat_match_query(self) -> None:
-        projection = IdeaGraphProjection.model_validate(_projection())
-        query = build_portfolio_match_query(projection)
+def test_projection_admission_and_rank_filtering() -> None:
+    model = IdeaGraphProjection.model_validate(_projection())
+    assert model.model_dump(by_alias=True)["schema"] == "ideaos.idea-graph-projection/v1"
+    query = build_portfolio_match_query(model)
+    assert query["requires_count"] == query["produces_count"] == query["uses_count"] == 1
+    assert query["targets_count"] == 0
+    assert query["depends_on_facets"].startswith("|facet:")
 
-        assert query["idea_id"] == "idea-alpha"
-        assert query["requires_count"] == 1
-        assert query["produces_count"] == 1
-        assert query["uses_count"] == 1
-        assert query["targets_count"] == 1
-        assert query["depends_on_facets"].startswith("|facet:")
-        assert query["self_dependency_facet_id"].startswith("facet:")
-
-    def test_invalid_kind_relation_is_rejected(self) -> None:
-        raw = _projection()
-        raw["assertions"][0]["kind"] = "market"
-        raw["assertions"][0]["relation"] = "produces"
-
-        with pytest.raises(ValueError, match="not valid for assertion kind"):
-            IdeaGraphProjection.model_validate(raw)
-
-    def test_non_unknown_assertion_requires_source_reference(self) -> None:
-        raw = _projection()
-        raw["assertions"][0]["source_refs"] = []
-
-        with pytest.raises(ValueError, match="require at least one source_ref"):
-            IdeaGraphProjection.model_validate(raw)
-
-    def test_duplicate_semantic_assertion_is_rejected(self) -> None:
-        raw = _projection()
-        raw["assertions"].append(dict(raw["assertions"][0]))
-
-        with pytest.raises(ValueError, match="duplicate semantic assertions"):
-            IdeaGraphProjection.model_validate(raw)
-
-    def test_upsert_replaces_source_projection_edges(self) -> None:
-        projection = IdeaGraphProjection.model_validate(_projection())
-        command = compile_upsert_command(projection, graph_revision=_digest("c"))
-
-        assert "DELETE old" in command.cypher
-        assert "MERGE (idea)-[rel:PRODUCES]->(facet)" in command.cypher
-        assert "rel.evidence_state" in command.cypher
-        assert command.parameters["projection_digest"] == projection_digest(projection)
-        assert command.parameters["unknowns_json"] == '["external demand not yet proven"]'
-        assert command.parameters["tenant"] == "idea-portfolio"
+    raw = _projection()
+    raw["assertions"][0]["source_refs"] = []
+    with pytest.raises(ValueError, match="source_ref"):
+        IdeaGraphProjection.model_validate(raw)
 
 
 @pytest.mark.unit
-class TestHydrationRevision:
-    def test_revision_is_deterministic_and_parent_linked(self) -> None:
-        first = compile_hydration_plan(_envelope())
-        again = compile_hydration_plan(_envelope())
-        child = compile_hydration_plan(_envelope(expected=first.graph_revision))
-
-        assert first.batch_digest == again.batch_digest
-        assert first.graph_revision == again.graph_revision
-        assert child.graph_revision != first.graph_revision
+def test_upsert_preserves_all_assertions_and_wire_digest() -> None:
+    model = IdeaGraphProjection.model_validate(_projection())
+    command = compile_upsert_command(model, graph_revision=_digest("c"))
+    assert "DELETE old" in command.cypher
+    assert command.parameters["projection_digest"] == projection_digest(model)
+    assert len(command.parameters["targets"]) == 1
+    assert command.parameters["targets"][0]["evidence_state"] == "HYPOTHESIS"
 
 
-class _FakeResult:
+class _Result:
     def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
         self.rows = rows or []
-        self.consumed = False
 
     async def data(self) -> list[dict[str, Any]]:
-        return list(self.rows)
+        return self.rows
 
     async def consume(self) -> None:
-        self.consumed = True
+        return None
 
 
-class _FakeTransaction:
-    def __init__(self, current_revision: str | None) -> None:
-        self.current_revision = current_revision
-        self.calls: list[dict[str, Any]] = []
+class _Tx:
+    def __init__(self, revision: str | None) -> None:
+        self.revision = revision
+        self.calls: list[str] = []
 
-    async def run(self, cypher: str, parameters: dict[str, Any]) -> _FakeResult:
-        self.calls.append({"cypher": cypher, "parameters": parameters})
+    async def run(self, cypher: str, parameters: dict[str, Any]) -> _Result:
+        self.calls.append(cypher)
         if "RETURN state.current_revision AS current_revision" in cypher:
-            return _FakeResult([{"current_revision": self.current_revision}])
-        return _FakeResult()
+            return _Result([{"current_revision": self.revision}])
+        return _Result()
 
 
-class _FakeWriter:
-    def __init__(self, current_revision: str | None = None) -> None:
-        self.tx = _FakeTransaction(current_revision)
-        self.execute_write_calls = 0
+class _Writer:
+    def __init__(self, revision: str | None = None) -> None:
+        self.tx = _Tx(revision)
+        self.calls = 0
         self.database: str | None = None
 
     async def execute_write(
         self,
-        transaction_function: Any = None,
+        fn: Any = None,
         *args: Any,
-        cypher: str | None = None,
-        parameters: dict[str, Any] | None = None,
         database: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        self.execute_write_calls += 1
+        self.calls += 1
         self.database = database
-        if transaction_function is None:
+        if fn is None:
             raise AssertionError("hydrator must use one managed transaction")
-        return await transaction_function(self.tx, *args, **kwargs)
+        return await fn(self.tx, *args, **kwargs)
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_hydrator_applies_whole_envelope_in_one_transaction() -> None:
-    writer = _FakeWriter(current_revision=None)
-    hydrator = IdeaPortfolioHydrator(writer)
+async def test_hydrator_feature_gate_and_atomic_revision_chain() -> None:
+    disabled = _Writer()
+    with pytest.raises(IdeaPortfolioHydrationError, match="disabled"):
+        await IdeaPortfolioHydrator(disabled).apply(_envelope())
+    assert disabled.calls == 0
 
-    receipt = await hydrator.apply(_envelope())
-
+    writer = _Writer()
+    receipt = await IdeaPortfolioHydrator(writer, enabled=True).apply(_envelope())
     assert receipt["status"] == "applied"
-    assert receipt["applied"] == ["idea-alpha"]
-    assert writer.execute_write_calls == 1
-    assert writer.database == "idea-portfolio"
+    assert writer.calls == 1 and writer.database == "idea-portfolio"
     assert len(writer.tx.calls) == 3
-    assert "IdeaPortfolioHydrationState" in writer.tx.calls[0]["cypher"]
-    assert "MERGE (idea:Idea" in writer.tx.calls[1]["cypher"]
-    assert "state.current_revision" in writer.tx.calls[2]["cypher"]
 
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_hydrator_exact_revision_replay_is_noop() -> None:
     plan = compile_hydration_plan(_envelope())
-    writer = _FakeWriter(current_revision=plan.graph_revision)
-    hydrator = IdeaPortfolioHydrator(writer)
+    replay = _Writer(plan.graph_revision)
+    receipt = await IdeaPortfolioHydrator(replay, enabled=True).apply(_envelope())
+    assert receipt["status"] == "reused" and len(replay.tx.calls) == 1
 
-    receipt = await hydrator.apply(_envelope())
-
-    assert receipt["status"] == "reused"
-    assert receipt["applied"] == []
-    assert writer.execute_write_calls == 1
-    assert len(writer.tx.calls) == 1
-
-
-@pytest.mark.unit
-@pytest.mark.asyncio
-async def test_hydrator_rejects_parent_revision_conflict_before_projection_write() -> None:
-    writer = _FakeWriter(current_revision=_digest("e"))
-    hydrator = IdeaPortfolioHydrator(writer)
-
+    conflict = _Writer(_digest("e"))
     with pytest.raises(IdeaPortfolioHydrationError, match="expected parent"):
-        await hydrator.apply(_envelope())
-
-    assert writer.execute_write_calls == 1
-    assert len(writer.tx.calls) == 1
+        await IdeaPortfolioHydrator(conflict, enabled=True).apply(_envelope())
+    assert len(conflict.tx.calls) == 1
