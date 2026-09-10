@@ -61,7 +61,7 @@ independently of the code default.
 | Tenant Auth (JWT allowed_tenants) | `TENANT_AUTH_ENABLED` | `True` | `True` | active |
 | Capability Auth (domain-spec model) | `CAPABILITY_AUTH_ENABLED` | `True` | `True` | active |
 | PostgreSQL Audit Pool | `POSTGRES_DSN` | unset (`None`) | set | active (opt-in, soft dependency — see §7) |
-| Idea Portfolio Graph | `IDEA_PORTFOLIO_ENABLED` / `idea_portfolio_enabled` | `False` | unset | dormant — enables IdeaOS portfolio reads and owner-native hydration |
+| Idea Portfolio Graph | `IDEA_PORTFOLIO_ENABLED` (`idea_portfolio_enabled`) | `False` | unset | dormant; opt-in IdeaOS portfolio reads/hydration |
 | Constellation Orchestration | — | — | — | accepted architectural gap — see §9 |
 
 ---
@@ -322,37 +322,6 @@ Enforces the JWT `allowed_tenants` claim against the resolved tenant. Setting th
 Enforces the domain-spec capability model, mapping each action to the permissions it
 requires. Disabling it removes per-action authorization while leaving tenant resolution
 intact.
-
----
-
-## 13. Idea Portfolio Graph
-
-**State**: Dormant
-**Flag**: `IDEA_PORTFOLIO_ENABLED=True`
-**Settings**: `idea_portfolio_enabled=False` by default
-
-Enables the CEG-owned `idea-portfolio` domain used by IdeaOS for cross-idea
-intersection and portfolio-context computation. The feature is intentionally dormant
-by default. IdeaOS remains authoritative for idea identity and lifecycle truth; CEG
-owns graph persistence, matching, ranking evidence, and derived portfolio context.
-
-### Activation Steps
-1. Set `IDEA_PORTFOLIO_ENABLED=True` in the environment.
-2. Validate `domains/idea-portfolio/spec.yaml` under strict domain validation.
-3. Hydrate only normalized `IdeaGraphProjection` artifacts through the owner-native
-   hydration seam. Do not feed raw IdeaOS ZIP names or filenames into CEG.
-4. Confirm portfolio reads and hydration both fail closed when the flag is disabled.
-
-### Validation
-- `DomainPackLoader` exposes `idea-portfolio` only when the feature flag is enabled.
-- `tools/hydrate_idea_portfolio.py --apply` refuses mutation while disabled.
-- `IdeaPortfolioHydrator` performs a second fail-closed activation check.
-- `HYPOTHESIS` and `UNKNOWN` assertions remain available as context but are excluded
-  from numeric ranking influence.
-
-### Rollback
-- Set `IDEA_PORTFOLIO_ENABLED=False`. Portfolio reads and hydration fail closed.
-- Existing graph data may remain stored but is not reachable through the gated domain.
 
 ---
 
