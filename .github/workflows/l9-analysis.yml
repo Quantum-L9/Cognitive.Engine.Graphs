@@ -1,8 +1,5 @@
 # L9 Governed Analysis Pipeline — Python Preset (LOCKED)
 #
-# DO NOT EDIT — this file is managed by l9-ci-core presets/python.
-# To update, pull the latest preset from Quantum-L9/l9-ci-core.
-#
 # Thin caller into Core analyze-semgrep.yml (SDK semgrep run → gate →
 # publish + SARIF). Language is locked to python.
 
@@ -13,11 +10,10 @@ on:
     branches: [main]
   workflow_dispatch:
 env:
-  # Pin to a full Core SHA. Bump after merging self-CI dogfood so consumers
-  # pick up analyze-semgrep SARIF + gate wiring from that merge commit.
-  # `uses:` cannot interpolate env — duplicate the SHA literally on the uses
-  # line (same as CORE_ACTIONS_PIN). Keep L9_CORE_REF here for humans/agents.
-  L9_CORE_REF: "1aa6c97b3a6f30b9e9d55e61575a172581ba8558"
+  # Immutable current Core pin. Keep this and the reusable-workflow `uses:`
+  # revision identical so the caller cannot drift between human-visible and
+  # executable authority.
+  L9_CORE_REF: "ef138020013f077bcd14bc2e65a28f32a734400f"
 permissions:
   contents: read
 concurrency:
@@ -26,25 +22,16 @@ concurrency:
 jobs:
   analyze:
     name: Analyze (semgrep)
-    uses: Quantum-L9/l9-ci-core/.github/workflows/analyze-semgrep.yml@1aa6c97b3a6f30b9e9d55e61575a172581ba8558
+    uses: Quantum-L9/l9-ci-core/.github/workflows/analyze-semgrep.yml@ef138020013f077bcd14bc2e65a28f32a734400f
     permissions:
       actions: read
       checks: write
       contents: read
       security-events: write
     with:
-      # `env` is not available in a reusable-workflow `with:` block (GitHub
-      # allows only github, needs, strategy, matrix, inputs, vars there), so
-      # the profile is selected from the github context. Each profile declares
-      # the event classes it admits — pr_fast only pull_request, merge push,
-      # nightly the class the kernel maps workflow_dispatch onto. A profile
-      # that does not admit the incoming class makes resolve-governance fail
-      # closed: "event '<class>' is not allowed for profile '<profile>'".
       profile: >-
         ${{ github.event_name == 'push' && 'merge'
          || github.event_name == 'workflow_dispatch' && 'nightly'
          || 'pr_fast' }}
       matrix-id: pr-semgrep
-      # SDK-owned Semgrep execution language: python or typescript. The SDK
-      # selects the packaged ruleset; this caller authors no --config list.
       language: python
