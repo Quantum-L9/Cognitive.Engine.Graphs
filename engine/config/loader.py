@@ -26,55 +26,52 @@ import yaml
 from pydantic import ValidationError as PydanticValidationError
 
 from engine.config.schema import DomainSpec
+from engine.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# Maximum spec file size (5MB) to prevent OOM on malicious/corrupted files
 MAX_SPEC_BYTES = 5 * 1024 * 1024
-
-# Canonical filename for a domain's spec inside its directory.
 SPEC_FILENAME = "spec.yaml"
+_DOMAIN_FEATURE_FLAGS = {"idea-portfolio": "idea_portfolio_enabled"}
 
 
 class DomainNotFoundError(Exception):
-    """Raised when a requested domain spec does not exist."""
+    """Raised when a requested domain spec does not exist or is disabled."""
 
 
 class DomainSpecError(Exception):
     """Raised when a domain spec fails validation."""
 
 
-class DomainPackLoader:
-    """
-    Loads and caches domain spec YAML files with hot-reload support.
+def _domain_enabled(domain_id: str) -> bool:
+    flag = _DOMAIN_FEATURE_FLAGS.get(domain_id)
+    return flag is None or bool(getattr(settings, flag, False))
 
-    Thread-safety: Cache operations are protected by a threading.Lock.
-    TTL-based invalidation avoids per-request stat() syscalls.
-    LRU eviction keeps cache bounded (configurable via DOMAIN_CACHE_MAX_SIZE).
-    """
+
+class DomainPackLoader:
+    """Load and cache folder-shaped domain specs with bounded hot reload."""
 
     def __init__(self, config_path: str | None = None) -> None:
         raw = config_path or os.getenv("DOMAIN_SPECS_PATH") or "domains"
         self._base_path = Path(raw).resolve()
-        self._cache: dict[str, tuple[DomainSpec, float, float]] = {}  # domain_id → (spec, mtime, cached_at)
+        self._cache: dict[str, tuple[DomainSpec, float, float]] = {}
         self._lock = threading.Lock()
         self._max_size = int(os.getenv("DOMAIN_CACHE_MAX_SIZE", "100"))
         self._ttl_seconds = float(os.getenv("DOMAIN_CACHE_TTL_SECONDS", "30"))
 
     def load_domain(self, domain_id: str) -> DomainSpec:
-        """Load and validate a domain spec with mtime-based cache invalidation."""
+        """Load a domain only when its optional feature gate admits it."""
+        if not _domain_enabled(domain_id):
+            raise DomainNotFoundError(f"Domain '{domain_id}' is disabled by configuration")
         spec_path = self._resolve_spec_path(domain_id)
 
         with self._lock:
             if domain_id in self._cache:
                 cached_spec, cached_mtime, cached_at = self._cache[domain_id]
-                # Skip stat() if within TTL
                 if (time.monotonic() - cached_at) < self._ttl_seconds:
                     return cached_spec
-                # TTL expired — check mtime
                 current_mtime = spec_path.stat().st_mtime
                 if cached_mtime >= current_mtime:
-                    # Refresh cached_at timestamp
                     self._cache[domain_id] = (cached_spec, cached_mtime, time.monotonic())
                     return cached_spec
                 logger.info("Domain spec changed on disk, reloading: %s", domain_id)
@@ -82,8 +79,6 @@ class DomainPackLoader:
                 current_mtime = spec_path.stat().st_mtime
 
             spec = self._load_and_validate(spec_path, domain_id)
-
-            # LRU eviction: if cache is full, remove oldest entry
             if len(self._cache) >= self._max_size and domain_id not in self._cache:
                 oldest_key = min(self._cache, key=lambda k: self._cache[k][2])
                 del self._cache[oldest_key]
@@ -100,96 +95,73 @@ class DomainPackLoader:
             else:
                 self._cache.clear()
 
-    # ------------------------------------------------------------------
-    # W4-03: Async loading with per-domain stampede prevention
-    # ------------------------------------------------------------------
-
     async def load_domain_async(self, domain_id: str) -> DomainSpec:
-        """Async domain loading with per-domain lock for stampede prevention.
-
-        Checks the existing TTL cache first. On miss, acquires a per-domain
-        asyncio.Lock so that concurrent requests for the same domain don't
-        all hit disk simultaneously. Loads from disk via asyncio.to_thread.
-        """
-        # Fast path: check sync cache (already TTL-bounded)
+        """Async domain loading with per-domain stampede prevention."""
+        if not _domain_enabled(domain_id):
+            raise DomainNotFoundError(f"Domain '{domain_id}' is disabled by configuration")
         with self._lock:
             if domain_id in self._cache:
                 cached_spec, _cached_mtime, cached_at = self._cache[domain_id]
                 if (time.monotonic() - cached_at) < self._ttl_seconds:
                     return cached_spec
 
-        # Per-domain async lock for stampede prevention
         if not hasattr(self, "_async_locks"):
             self._async_locks: dict[str, asyncio.Lock] = {}
         if domain_id not in self._async_locks:
             self._async_locks[domain_id] = asyncio.Lock()
 
         async with self._async_locks[domain_id]:
-            # Double-check after acquiring lock
             with self._lock:
                 if domain_id in self._cache:
                     cached_spec, _cached_mtime, cached_at = self._cache[domain_id]
                     if (time.monotonic() - cached_at) < self._ttl_seconds:
                         return cached_spec
-
-            # Load from disk in thread pool
             return await asyncio.to_thread(self.load_domain, domain_id)
 
     def list_domains(self) -> list[str]:
-        """Discover all domain directories containing spec.yaml."""
+        """Discover enabled domain directories containing spec.yaml."""
         if not self._base_path.is_dir():
             return []
-        return [d.name for d in sorted(self._base_path.iterdir()) if d.is_dir() and (d / SPEC_FILENAME).exists()]
+        return [
+            d.name
+            for d in sorted(self._base_path.iterdir())
+            if d.is_dir() and (d / SPEC_FILENAME).exists() and _domain_enabled(d.name)
+        ]
 
     def _resolve_spec_path(self, domain_id: str) -> Path:
-        """Resolve and validate spec file path — prevents path traversal and symlink attacks."""
-        # Reject empty or whitespace-only domain_id
+        """Resolve and validate spec file path, preventing traversal and symlinks."""
         if not domain_id or not domain_id.strip():
             raise DomainNotFoundError("Domain ID cannot be empty")
-
-        # Reject null bytes (potential injection attack)
         if "\x00" in domain_id:
             raise DomainNotFoundError(f"Invalid domain ID: {domain_id!r} contains null byte")
-
-        # Reject absolute domain IDs — only relative IDs are valid
         if Path(domain_id).is_absolute():
             raise DomainNotFoundError(f"Invalid domain ID: {domain_id!r} must be a relative path")
 
         candidate = (self._base_path / domain_id / SPEC_FILENAME).resolve()
-
-        # Check for symlinks before resolving - reject symlinked spec files
         raw_path = self._base_path / domain_id / SPEC_FILENAME
         if raw_path.is_symlink():
             raise DomainNotFoundError(f"Invalid domain path: {domain_id!r} spec.yaml is a symlink")
-
-        # Verify resolved path is within base directory using proper path ancestry check
         try:
             candidate.relative_to(self._base_path.resolve())
         except ValueError as exc:
             raise DomainNotFoundError(f"Invalid domain path: {domain_id!r} resolves outside base directory") from exc
-
         if not candidate.exists():
             raise DomainNotFoundError(f"Domain spec not found: {candidate}")
-
         return candidate
 
     def _load_and_validate(self, path: Path, domain_id: str) -> DomainSpec:
         """Load YAML and validate against DomainSpec schema."""
-        # Check file size before reading to prevent OOM
         file_size = path.stat().st_size
         if file_size > MAX_SPEC_BYTES:
             raise DomainSpecError(
                 f"Domain spec {domain_id} exceeds maximum size: {file_size} bytes > {MAX_SPEC_BYTES} bytes"
             )
-
         try:
             raw = yaml.safe_load(path.read_text(encoding="utf-8"))
         except yaml.YAMLError as exc:
             raise DomainSpecError(f"Invalid YAML in {path}: {exc}") from exc
-
         if not isinstance(raw, dict):
             raise DomainSpecError(f"Domain spec must be a YAML mapping, got {type(raw).__name__}")
-
         try:
             return DomainSpec.model_validate(raw)
         except PydanticValidationError as exc:
