@@ -7,14 +7,26 @@ import json
 import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Literal, Protocol, Self
+from typing import Any, ClassVar, Literal, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
 DOMAIN_ID = "idea-portfolio"
 _STATE_ID = "canonical"
-_MODEL_CONFIG = ConfigDict(extra="forbid", populate_by_name=True)
+_MODEL_CONFIG = ConfigDict(extra="forbid")
+PROJECTION_SCHEMA = "ideaos.idea-graph-projection/v1"
+SYNC_RECORD_SCHEMA = "ceg.idea-portfolio-sync-record/v1"
+HYDRATION_SCHEMA = "ceg.idea-portfolio-hydration/v1"
+
+
+def _admit_schema(value: Any, expected: str) -> Any:
+    if not isinstance(value, dict):
+        return value
+    data = dict(value)
+    if data.pop("schema", None) != expected:
+        raise ValueError(f"schema must equal {expected!r}")
+    return data
 
 
 class IdeaPortfolioHydrationError(ValueError):
@@ -96,13 +108,18 @@ class IdeaGraphProjection(BaseModel):
     """CEG admission model for the IdeaOS idea-graph-projection/v1 wire contract."""
 
     model_config = _MODEL_CONFIG
-    schema_id: Literal["ideaos.idea-graph-projection/v1"] = Field(alias="schema")
+    wire_schema: ClassVar[str] = PROJECTION_SCHEMA
     idea_id: str = Field(min_length=1)
     source_refs: list[str]
     source_digest: str = Field(pattern=DIGEST_PATTERN)
     lifecycle: IdeaLifecycle
     assertions: list[IdeaAssertion]
     unknowns: list[str]
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_schema(cls, value: Any) -> Any:
+        return _admit_schema(value, cls.wire_schema)
 
     @model_validator(mode="after")
     def validate_projection(self) -> Self:
@@ -120,10 +137,15 @@ class IdeaGraphProjection(BaseModel):
 
 class IdeaPortfolioSyncRecord(BaseModel):
     model_config = _MODEL_CONFIG
-    schema_id: Literal["ceg.idea-portfolio-sync-record/v1"] = Field(alias="schema")
+    wire_schema: ClassVar[str] = SYNC_RECORD_SCHEMA
     operation: Literal["upsert", "tombstone"]
     projection: IdeaGraphProjection | None = None
     idea_id: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_schema(cls, value: Any) -> Any:
+        return _admit_schema(value, cls.wire_schema)
 
     @model_validator(mode="after")
     def validate_operation(self) -> Self:
@@ -147,11 +169,16 @@ class IdeaPortfolioSyncRecord(BaseModel):
 
 class IdeaPortfolioHydrationEnvelope(BaseModel):
     model_config = _MODEL_CONFIG
-    schema_id: Literal["ceg.idea-portfolio-hydration/v1"] = Field(alias="schema")
+    wire_schema: ClassVar[str] = HYDRATION_SCHEMA
     source_snapshot_ref: str = Field(min_length=1)
     source_snapshot_digest: str = Field(pattern=DIGEST_PATTERN)
     expected_graph_revision: str | None = Field(default=None, pattern=DIGEST_PATTERN)
     records: list[IdeaPortfolioSyncRecord] = Field(min_length=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_schema(cls, value: Any) -> Any:
+        return _admit_schema(value, cls.wire_schema)
 
     @model_validator(mode="after")
     def validate_records(self) -> Self:
@@ -219,8 +246,20 @@ def _assertion_id(idea_id: str, assertion: IdeaAssertion) -> str:
     return "assertion:" + hashlib.sha256(value.encode()).hexdigest()
 
 
+def _projection_wire(projection: IdeaGraphProjection) -> dict[str, Any]:
+    return {"schema": PROJECTION_SCHEMA, **projection.model_dump(mode="json")}
+
+
+def _record_wire(record: IdeaPortfolioSyncRecord) -> dict[str, Any]:
+    payload = record.model_dump(mode="json", exclude={"projection"})
+    payload["schema"] = SYNC_RECORD_SCHEMA
+    if record.projection is not None:
+        payload["projection"] = _projection_wire(record.projection)
+    return payload
+
+
 def projection_digest(projection: IdeaGraphProjection) -> str:
-    return _sha256_text(_canonical_json(projection.model_dump(mode="json", by_alias=True)))
+    return _sha256_text(_canonical_json(_projection_wire(projection)))
 
 
 def compile_assertions(projection: IdeaGraphProjection) -> list[CompiledAssertion]:
@@ -278,7 +317,7 @@ def compile_hydration_plan(envelope: IdeaPortfolioHydrationEnvelope | dict[str, 
         if isinstance(envelope, IdeaPortfolioHydrationEnvelope)
         else IdeaPortfolioHydrationEnvelope.model_validate(envelope)
     )
-    payload = [record.model_dump(mode="json", by_alias=True) for record in model.records]
+    payload = [_record_wire(record) for record in model.records]
     batch_digest = _sha256_text(_canonical_json(payload))
     parent = model.expected_graph_revision or "GENESIS"
     revision = _sha256_text(
