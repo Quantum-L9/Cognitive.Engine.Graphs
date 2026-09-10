@@ -173,6 +173,9 @@ gates:
     nullbehavior: fail
     matchdirections: [portfolio_context_for_idea]
 
+# Only source-backed VERIFIED and SUPPORTED_INFERENCE assertions may influence
+# portfolio rank. HYPOTHESIS and UNKNOWN assertions remain in the graph for
+# context, but cannot be silently laundered into numeric ranking evidence.
 scoring:
   dimensions:
     - name: incoming_requirement_fit
@@ -180,8 +183,10 @@ scoring:
       computation: customcypher
       expression: >
         CASE WHEN $requires_count <= 0 THEN 0.0 ELSE
-        toFloat(size([(candidate)-[:PRODUCES]->(f:PortfolioFacet)
-        WHERE $requires_facets CONTAINS ('|' + f.facet_id + '|') | f])) /
+        toFloat(size([(candidate)-[rel:PRODUCES]->(f:PortfolioFacet)
+        WHERE rel.evidence_state IN ['VERIFIED', 'SUPPORTED_INFERENCE']
+        AND rel.source_refs_json <> '[]'
+        AND $requires_facets CONTAINS ('|' + f.facet_id + '|') | f])) /
         toFloat($requires_count) END
       weightkey: wincoming
       defaultweight: 0.25
@@ -192,8 +197,10 @@ scoring:
       computation: customcypher
       expression: >
         CASE WHEN $produces_count <= 0 THEN 0.0 ELSE
-        toFloat(size([(candidate)-[:REQUIRES]->(f:PortfolioFacet)
-        WHERE $produces_facets CONTAINS ('|' + f.facet_id + '|') | f])) /
+        toFloat(size([(candidate)-[rel:REQUIRES]->(f:PortfolioFacet)
+        WHERE rel.evidence_state IN ['VERIFIED', 'SUPPORTED_INFERENCE']
+        AND rel.source_refs_json <> '[]'
+        AND $produces_facets CONTAINS ('|' + f.facet_id + '|') | f])) /
         toFloat($produces_count) END
       weightkey: woutgoing
       defaultweight: 0.25
@@ -204,8 +211,10 @@ scoring:
       computation: customcypher
       expression: >
         CASE WHEN $uses_count <= 0 THEN 0.0 ELSE
-        toFloat(size([(candidate)-[:USES]->(f:PortfolioFacet)
-        WHERE $uses_facets CONTAINS ('|' + f.facet_id + '|') | f])) /
+        toFloat(size([(candidate)-[rel:USES]->(f:PortfolioFacet)
+        WHERE rel.evidence_state IN ['VERIFIED', 'SUPPORTED_INFERENCE']
+        AND rel.source_refs_json <> '[]'
+        AND $uses_facets CONTAINS ('|' + f.facet_id + '|') | f])) /
         toFloat($uses_count) END
       weightkey: wusage
       defaultweight: 0.20
@@ -216,8 +225,10 @@ scoring:
       computation: customcypher
       expression: >
         CASE WHEN $targets_count <= 0 THEN 0.0 ELSE
-        toFloat(size([(candidate)-[:TARGETS]->(f:PortfolioFacet)
-        WHERE $targets_facets CONTAINS ('|' + f.facet_id + '|') | f])) /
+        toFloat(size([(candidate)-[rel:TARGETS]->(f:PortfolioFacet)
+        WHERE rel.evidence_state IN ['VERIFIED', 'SUPPORTED_INFERENCE']
+        AND rel.source_refs_json <> '[]'
+        AND $targets_facets CONTAINS ('|' + f.facet_id + '|') | f])) /
         toFloat($targets_count) END
       weightkey: wtarget
       defaultweight: 0.15
@@ -239,8 +250,10 @@ scoring:
       computation: customcypher
       expression: >
         CASE WHEN $self_dependency_facet_id = '' THEN 0.0 ELSE
-        CASE WHEN size([(candidate)-[:DEPENDS_ON]->(f:PortfolioFacet)
-        WHERE f.facet_id = $self_dependency_facet_id | f]) > 0
+        CASE WHEN size([(candidate)-[rel:DEPENDS_ON]->(f:PortfolioFacet)
+        WHERE rel.evidence_state IN ['VERIFIED', 'SUPPORTED_INFERENCE']
+        AND rel.source_refs_json <> '[]'
+        AND f.facet_id = $self_dependency_facet_id | f]) > 0
         THEN 1.0 ELSE 0.0 END END
       weightkey: wcandidatedependency
       defaultweight: 0.05
@@ -266,7 +279,10 @@ compliance:
     logretentiondays: 365
   pii:
     enabled: false
-  prohibitedfactors: []
+  prohibitedfactors:
+    enabled: true
+    blockedfields: []
+    enforcement: compiletime
   regionalrules: []
   counterfactualaudit: false
 
