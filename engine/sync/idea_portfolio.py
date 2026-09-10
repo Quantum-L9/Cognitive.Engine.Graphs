@@ -240,7 +240,11 @@ def compile_assertions(projection: IdeaGraphProjection) -> list[CompiledAssertio
 
 def build_portfolio_match_query(projection: IdeaGraphProjection | dict[str, Any]) -> dict[str, Any]:
     """Compile only source-backed rank-eligible assertions into match input."""
-    model = projection if isinstance(projection, IdeaGraphProjection) else IdeaGraphProjection.model_validate(projection)
+    model = (
+        projection
+        if isinstance(projection, IdeaGraphProjection)
+        else IdeaGraphProjection.model_validate(projection)
+    )
     by_relation = {relation.value: [] for relation in AssertionRelation}
     for raw, compiled in zip(model.assertions, compile_assertions(model), strict=True):
         if raw.evidence_state in _RANK_ELIGIBLE and raw.source_refs:
@@ -269,11 +273,17 @@ def build_portfolio_match_query(projection: IdeaGraphProjection | dict[str, Any]
 
 
 def compile_hydration_plan(envelope: IdeaPortfolioHydrationEnvelope | dict[str, Any]) -> HydrationPlan:
-    model = envelope if isinstance(envelope, IdeaPortfolioHydrationEnvelope) else IdeaPortfolioHydrationEnvelope.model_validate(envelope)
+    model = (
+        envelope
+        if isinstance(envelope, IdeaPortfolioHydrationEnvelope)
+        else IdeaPortfolioHydrationEnvelope.model_validate(envelope)
+    )
     payload = [record.model_dump(mode="json", by_alias=True) for record in model.records]
     batch_digest = _sha256_text(_canonical_json(payload))
     parent = model.expected_graph_revision or "GENESIS"
-    revision = _sha256_text(f"ceg.idea-portfolio-graph/v1\x00{parent}\x00{model.source_snapshot_digest}\x00{batch_digest}")
+    revision = _sha256_text(
+        f"ceg.idea-portfolio-graph/v1\x00{parent}\x00{model.source_snapshot_digest}\x00{batch_digest}"
+    )
     return HydrationPlan(model, batch_digest, revision)
 
 
@@ -394,7 +404,9 @@ class IdeaPortfolioHydrator:
             if current == plan.graph_revision:
                 return self._receipt(plan, "reused", [], [])
             if current != plan.envelope.expected_graph_revision:
-                raise IdeaPortfolioHydrationError("hydration revision conflict: expected parent does not match committed graph revision")
+                raise IdeaPortfolioHydrationError(
+                    "hydration revision conflict: expected parent does not match committed graph revision"
+                )
 
             applied: list[str] = []
             tombstoned: list[str] = []
