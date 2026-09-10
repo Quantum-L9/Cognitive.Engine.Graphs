@@ -1,4 +1,16 @@
-"""IdeaOS projection hydration and portfolio-query compilation for CEG."""
+"""
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [sync]
+tags: [ideaos, portfolio, hydration, graph]
+owner: engine-team
+status: active
+--- /L9_META ---
+
+IdeaOS projection hydration and portfolio-query compilation for CEG.
+"""
 
 from __future__ import annotations
 
@@ -280,11 +292,9 @@ def compile_assertions(projection: IdeaGraphProjection) -> list[CompiledAssertio
 def build_portfolio_match_query(projection: IdeaGraphProjection | dict[str, Any]) -> dict[str, Any]:
     """Compile only source-backed rank-eligible assertions into match input."""
     model = (
-        projection
-        if isinstance(projection, IdeaGraphProjection)
-        else IdeaGraphProjection.model_validate(projection)
+        projection if isinstance(projection, IdeaGraphProjection) else IdeaGraphProjection.model_validate(projection)
     )
-    by_relation = {relation.value: [] for relation in AssertionRelation}
+    by_relation: dict[str, list[str]] = {relation.value: [] for relation in AssertionRelation}
     for raw, compiled in zip(model.assertions, compile_assertions(model), strict=True):
         if raw.evidence_state in _RANK_ELIGIBLE and raw.source_refs:
             by_relation[compiled.relation].append(compiled.facet_id)
@@ -373,7 +383,7 @@ RETURN idea.idea_id AS idea_id,
 
 
 def compile_upsert_command(projection: IdeaGraphProjection, *, graph_revision: str) -> WriteCommand:
-    grouped = {relation.value: [] for relation in AssertionRelation}
+    grouped: dict[str, list[dict[str, Any]]] = {relation.value: [] for relation in AssertionRelation}
     for assertion in compile_assertions(projection):
         grouped[assertion.relation].append(
             {
