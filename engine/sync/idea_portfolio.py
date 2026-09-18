@@ -219,7 +219,7 @@ class GraphWriter(Protocol):
         **kwargs: Any,
     ) -> dict[str, Any] | Any:
         """Run one managed write transaction, via a transaction function or `cypher`."""
-        raise NotImplementedError
+        ...
 
 
 @dataclass(frozen=True)
