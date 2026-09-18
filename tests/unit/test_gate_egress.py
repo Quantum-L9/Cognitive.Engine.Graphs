@@ -121,6 +121,7 @@ async def test_request_enrichment_reports_sdk_errors_as_failure(monkeypatch: pyt
     result = await request_enrichment(tenant="acme", entity_id="ent-1", domain="plasticos", target_fields=["polymer"])
     assert result["status"] == "failed"
     assert result["error"] == "GateConnectionError"
+    assert result["idempotency_key"] == enrichment_idempotency_key("acme", "ent-1", ["polymer"])
     assert len(fake.calls) == 1
 
 
