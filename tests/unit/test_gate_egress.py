@@ -82,7 +82,14 @@ async def test_request_enrichment_fails_closed_without_gate_url(monkeypatch: pyt
     fake = _FakeClient(response=_response_packet())
     monkeypatch.setattr(gate_egress, "get_gate_client", lambda: fake)
     result = await request_enrichment(tenant="acme", entity_id="ent-1", domain="plasticos", target_fields=["polymer"])
-    assert result == {"status": "failed", "error": "gate_not_configured", "action": "enrich"}
+    assert result == {
+        "status": "failed",
+        "error": "gate_not_configured",
+        "action": "enrich",
+        # The key is minted before the GATE_URL check, so a fail-closed result stays
+        # replayable: the caller can retry the same request under the same key.
+        "idempotency_key": enrichment_idempotency_key("acme", "ent-1", ["polymer"]),
+    }
     assert fake.calls == [], "no direct fallback: nothing may be sent when Gate is not configured"
 
 
