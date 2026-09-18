@@ -30,8 +30,11 @@ _STATE_ID = "canonical"
 STATE_LABEL = "IdeaPortfolioHydrationState"
 STATE_ID_PROPERTY = "state_id"
 SHOW_CONSTRAINTS_CYPHER = "SHOW CONSTRAINTS YIELD labelsOrTypes, properties, type, entityType"
-# Neo4j 5 spelling; 4.x called uniqueness UNIQUENESS. NODE_KEY implies it too.
-_UNIQUENESS_CONSTRAINT_TYPES = frozenset({"NODE_PROPERTY_UNIQUENESS", "NODE_KEY"})
+# Both spellings are load-bearing: 5.18 (the pinned test server) reports
+# UNIQUENESS, later versions renamed it NODE_PROPERTY_UNIQUENESS. Accepting only
+# the new name fails open — the constraint exists and we would not see it.
+# NODE_KEY is uniqueness plus existence, so it satisfies the precondition too.
+_UNIQUENESS_CONSTRAINT_TYPES = frozenset({"UNIQUENESS", "NODE_PROPERTY_UNIQUENESS", "NODE_KEY"})
 _MODEL_CONFIG = ConfigDict(extra="forbid")
 PROJECTION_SCHEMA = "ideaos.idea-graph-projection/v1"
 SYNC_RECORD_SCHEMA = "ceg.idea-portfolio-sync-record/v1"
