@@ -198,7 +198,8 @@ async def test_wrong_parent_revision_is_rejected(idea_portfolio_db) -> None:
     hydrator = IdeaPortfolioHydrator(driver, enabled=True)
 
     await hydrator.apply(_envelope("idea-alpha"))
+    wrong_parent = _envelope("idea-gamma", expected=_digest("f"))
     with pytest.raises(IdeaPortfolioHydrationError, match="expected parent"):
-        await hydrator.apply(_envelope("idea-gamma", expected=_digest("f")))
+        await hydrator.apply(wrong_parent)
 
     assert await _count_state_nodes(driver) == 1
