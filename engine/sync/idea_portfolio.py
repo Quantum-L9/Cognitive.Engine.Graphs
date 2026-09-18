@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import unicodedata
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, ClassVar, Literal, Protocol, Self
@@ -26,6 +27,17 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 DIGEST_PATTERN = r"^sha256:[0-9a-f]{64}$"
 DOMAIN_ID = "idea-portfolio"
 _STATE_ID = "canonical"
+STATE_LABEL = "IdeaPortfolioHydrationState"
+STATE_ID_PROPERTY = "state_id"
+
+# MERGE alone does not guarantee node uniqueness under concurrent load; Neo4j
+# requires a uniqueness constraint on the merged identifying property for that.
+# Without it two concurrent initial hydrations can each MERGE their own canonical
+# state node, both read current_revision=null, and both commit a child revision.
+SHOW_CONSTRAINTS_CYPHER = "SHOW CONSTRAINTS YIELD labelsOrTypes, properties, type, entityType"
+# Neo4j 5 names node uniqueness NODE_PROPERTY_UNIQUENESS (4.x called it UNIQUENESS);
+# NODE_KEY is uniqueness plus existence, so it satisfies the precondition too.
+_UNIQUENESS_CONSTRAINT_TYPES = frozenset({"NODE_PROPERTY_UNIQUENESS", "NODE_KEY"})
 _MODEL_CONFIG = ConfigDict(extra="forbid")
 PROJECTION_SCHEMA = "ideaos.idea-graph-projection/v1"
 SYNC_RECORD_SCHEMA = "ceg.idea-portfolio-sync-record/v1"
@@ -201,6 +213,8 @@ class IdeaPortfolioHydrationEnvelope(BaseModel):
 
 
 class GraphWriter(Protocol):
+    """Protocol for the managed-write surface hydration depends on."""
+
     async def execute_write(
         self,
         transaction_function: Any = None,
@@ -209,7 +223,21 @@ class GraphWriter(Protocol):
         parameters: dict[str, Any] | None = None,
         database: str | None = None,
         **kwargs: Any,
-    ) -> dict[str, Any] | Any: ...
+    ) -> dict[str, Any] | Any:
+        """Run one managed write transaction.
+
+        Args:
+            transaction_function: Async callable receiving the transaction.
+            *args: Positional arguments forwarded to the transaction function.
+            cypher: Single-statement form, used when no transaction function is given.
+            parameters: Query parameters for the single-statement form.
+            database: Target database name.
+            **kwargs: Keyword arguments forwarded to the transaction function.
+
+        Returns:
+            The transaction function's result, or the driver's statement result.
+        """
+        ...
 
 
 @dataclass(frozen=True)
@@ -424,7 +452,29 @@ DELETE old RETURN idea.idea_id AS idea_id""",
     )
 
 
-_LOCK_STATE_CYPHER = """MERGE (state:IdeaPortfolioHydrationState {state_id: $state_id})
+def state_uniqueness_constraint_present(rows: Iterable[Mapping[str, Any]]) -> bool:
+    """Decide whether SHOW CONSTRAINTS rows prove state_id uniqueness.
+
+    Args:
+        rows: Rows yielded by ``SHOW_CONSTRAINTS_CYPHER``.
+
+    Returns:
+        True when a node uniqueness or node key constraint covers exactly
+        ``STATE_LABEL.STATE_ID_PROPERTY``.
+    """
+    for row in rows:
+        if row.get("entityType") not in (None, "NODE"):
+            continue
+        if row.get("type") not in _UNIQUENESS_CONSTRAINT_TYPES:
+            continue
+        labels = row.get("labelsOrTypes") or []
+        properties = row.get("properties") or []
+        if STATE_LABEL in labels and list(properties) == [STATE_ID_PROPERTY]:
+            return True
+    return False
+
+
+_LOCK_STATE_CYPHER = f"""MERGE (state:{STATE_LABEL} {{{STATE_ID_PROPERTY}: $state_id}})
 SET state._cas_lock=coalesce(state._cas_lock, 0)+1, state._tenant=$tenant
 RETURN state.current_revision AS current_revision"""
 _FINALIZE_STATE_CYPHER = """MATCH (state:IdeaPortfolioHydrationState {state_id: $state_id})
@@ -514,6 +564,9 @@ class IdeaPortfolioHydrator:
 
 __all__ = [
     "DOMAIN_ID",
+    "SHOW_CONSTRAINTS_CYPHER",
+    "STATE_ID_PROPERTY",
+    "STATE_LABEL",
     "AssertionKind",
     "AssertionRelation",
     "EvidenceState",
@@ -530,4 +583,5 @@ __all__ = [
     "compile_tombstone_command",
     "compile_upsert_command",
     "projection_digest",
+    "state_uniqueness_constraint_present",
 ]
