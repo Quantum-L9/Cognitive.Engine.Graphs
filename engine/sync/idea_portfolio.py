@@ -29,14 +29,8 @@ DOMAIN_ID = "idea-portfolio"
 _STATE_ID = "canonical"
 STATE_LABEL = "IdeaPortfolioHydrationState"
 STATE_ID_PROPERTY = "state_id"
-
-# MERGE alone does not guarantee node uniqueness under concurrent load; Neo4j
-# requires a uniqueness constraint on the merged identifying property for that.
-# Without it two concurrent initial hydrations can each MERGE their own canonical
-# state node, both read current_revision=null, and both commit a child revision.
 SHOW_CONSTRAINTS_CYPHER = "SHOW CONSTRAINTS YIELD labelsOrTypes, properties, type, entityType"
-# Neo4j 5 names node uniqueness NODE_PROPERTY_UNIQUENESS (4.x called it UNIQUENESS);
-# NODE_KEY is uniqueness plus existence, so it satisfies the precondition too.
+# Neo4j 5 spelling; 4.x called uniqueness UNIQUENESS. NODE_KEY implies it too.
 _UNIQUENESS_CONSTRAINT_TYPES = frozenset({"NODE_PROPERTY_UNIQUENESS", "NODE_KEY"})
 _MODEL_CONFIG = ConfigDict(extra="forbid")
 PROJECTION_SCHEMA = "ideaos.idea-graph-projection/v1"
@@ -224,20 +218,8 @@ class GraphWriter(Protocol):
         database: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any] | Any:
-        """Run one managed write transaction.
-
-        Args:
-            transaction_function: Async callable receiving the transaction.
-            *args: Positional arguments forwarded to the transaction function.
-            cypher: Single-statement form, used when no transaction function is given.
-            parameters: Query parameters for the single-statement form.
-            database: Target database name.
-            **kwargs: Keyword arguments forwarded to the transaction function.
-
-        Returns:
-            The transaction function's result, or the driver's statement result.
-        """
-        ...
+        """Run one managed write transaction, via a transaction function or `cypher`."""
+        raise NotImplementedError
 
 
 @dataclass(frozen=True)
@@ -453,15 +435,7 @@ DELETE old RETURN idea.idea_id AS idea_id""",
 
 
 def state_uniqueness_constraint_present(rows: Iterable[Mapping[str, Any]]) -> bool:
-    """Decide whether SHOW CONSTRAINTS rows prove state_id uniqueness.
-
-    Args:
-        rows: Rows yielded by ``SHOW_CONSTRAINTS_CYPHER``.
-
-    Returns:
-        True when a node uniqueness or node key constraint covers exactly
-        ``STATE_LABEL.STATE_ID_PROPERTY``.
-    """
+    """True when SHOW CONSTRAINTS rows prove STATE_LABEL.STATE_ID_PROPERTY is unique."""
     for row in rows:
         if row.get("entityType") not in (None, "NODE"):
             continue

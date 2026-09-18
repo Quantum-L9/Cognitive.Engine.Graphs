@@ -48,23 +48,14 @@ def _dry_run(envelope: IdeaPortfolioHydrationEnvelope) -> dict[str, object]:
 
 
 async def _require_state_uniqueness(driver: GraphDriver, spec: DomainSpec) -> None:
-    """Fail closed unless the canonical state node is protected by a uniqueness constraint.
+    """Fail closed unless state_id uniqueness protects the canonical state node.
 
-    The hydrator serialises revisions with `MERGE (state:...{state_id: ...})`, and
     MERGE is only single-node-safe when a uniqueness constraint covers the merged
-    property. Without it two concurrent initial hydrations can each create a
-    canonical state node and each commit a child revision.
-
-    Runs the repository's existing schema-init contract first — the same
-    `_init_schema` the `admin`/`init_schema` subaction invokes, which provisions
-    the constraint from the domain ontology's required `state_id` — and then
-    verifies the constraint really exists. Verification is not redundant:
-    `_init_schema` logs and swallows per-constraint failures, so calling it
-    proves nothing on its own.
-
-    Args:
-        driver: Connected graph driver.
-        spec: Loaded idea-portfolio domain spec.
+    property, so without one two concurrent initial hydrations can each create a
+    canonical state node and each commit a child revision. Runs the existing
+    schema-init contract (the same `_init_schema` the `admin`/`init_schema`
+    subaction invokes), then verifies the constraint really exists — `_init_schema`
+    swallows per-constraint failures, so calling it proves nothing on its own.
 
     Raises:
         IdeaPortfolioHydrationError: The constraint is absent after schema init.
