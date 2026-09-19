@@ -134,6 +134,9 @@ async def request_enrichment(
     )
 
     try:
+        # See emit_graph_inference_result: get_gate_client() raises ValueError on
+        # missing or invalid SDK environment material, which is a configuration
+        # failure this module reports as a typed result, never one it propagates.
         client = get_gate_client()
         response = await client.execute(
             action=ENRICH_ACTION,
@@ -144,7 +147,7 @@ async def request_enrichment(
             correlation_id=correlation_id,
             compliance_tags=_SEAM_TAGS,
         )
-    except GateClientError as exc:
+    except (GateClientError, ValueError) as exc:
         logger.warning("gate_egress: %s for entity=%s tenant=%s: %s", type(exc).__name__, entity_id, tenant, exc)
         return {
             "status": "failed",
@@ -264,6 +267,10 @@ async def emit_graph_inference_result(
         }
 
     try:
+        # ValueError as well as GateClientError: get_gate_client() builds the SDK
+        # config from the environment and raises ValueError on missing or invalid
+        # material. Letting that escape would crash the admin subaction instead of
+        # returning the typed failure every other path in this module returns.
         client = get_gate_client()
         response = await client.execute(
             action=GRAPH_INFERENCE_ACTION,
@@ -274,7 +281,7 @@ async def emit_graph_inference_result(
             correlation_id=correlation_id,
             compliance_tags=_SEAM_TAGS,
         )
-    except GateClientError as exc:
+    except (GateClientError, ValueError) as exc:
         logger.warning(
             "gate_egress: %s for inference entity=%s tenant=%s: %s",
             type(exc).__name__,

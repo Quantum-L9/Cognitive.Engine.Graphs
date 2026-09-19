@@ -158,6 +158,18 @@ class Settings(BaseSettings):
     # deployment is not expected to hold. Either way the failure now names the
     # missing database and the command that provides it.
     auto_create_domain_database: bool = False
+    # CEG-006: the `health_*` admin subactions make engine/health/api.py
+    # reachable. auto_enrich_via_gate gates only the eventual outbound Gate
+    # request, not assessment, reporting or conversion tracking, so the surface
+    # itself needs its own gate. Mechanism ships dormant; operator activates.
+    health_api_enabled: bool = False
+    # CEG-009: five migrated domain packs compile to Cypher that cannot execute
+    # (a `RELATES_TO` fallback for gates written with `pattern`/`condition`, and
+    # scalar `queryparam` values emitted as parameter names such as `$85.0`).
+    # They are readable now but not correct, so they stay undiscoverable until
+    # the compiler or the query schema grows the support they assume. Turning
+    # this on serves packs whose gates are known not to execute.
+    unvalidated_domain_packs_enabled: bool = False
 
     # --- Wave 7: Explicit Tenant Database Binding ---
     strict_tenant_database: bool = (

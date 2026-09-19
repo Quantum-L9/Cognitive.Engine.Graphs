@@ -215,6 +215,15 @@ class GraphDriver:
             )
             raise ValueError(msg)
 
+        # Claim the name BEFORE the await, not after. `_raw_execute_query` is a
+        # suspension point: with the add afterwards, every request that arrived
+        # while the first CREATE was in flight passed the membership check above
+        # and issued its own administrative command — "at most once per database
+        # per process" held only when calls did not overlap, which is exactly
+        # when it does not matter. The claim is released on failure so a later
+        # attempt (different privileges, Enterprise now licensed) can retry.
+        self._ensured_databases.add(name)
+
         # Administrative commands must run against `system`, and the name is
         # back-quoted because a dash is legal in a database name but not in a
         # bare identifier. The regex above is what makes that quoting safe.
@@ -222,6 +231,7 @@ class GraphDriver:
         try:
             await self._raw_execute_query(cypher, None, "system")
         except Exception as exc:
+            self._ensured_databases.discard(name)
             logger.warning(
                 "Could not provision Neo4j database %r (%s: %s). "
                 "CREATE DATABASE is Enterprise Edition only and requires admin privileges.",
@@ -231,7 +241,6 @@ class GraphDriver:
             )
             return False
 
-        self._ensured_databases.add(name)
         logger.info("Ensured Neo4j database %r exists", name)
         return True
 

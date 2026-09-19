@@ -87,7 +87,14 @@ def main() -> int:
         print("FAIL")
         print("\n".join(errors))
         return 1
-    print(f"PASS CEG pin {CANONICAL_REPO}@{MAJOR_TAG} -> {resolved_commit(ROOT)}")
+    resolved = resolved_commit(ROOT)
+    if resolved is None:
+        # check_tree() already accepts a tree with no poetry.lock, so this is
+        # reachable. Printing "PASS ... -> None" in a build log reads as a pin
+        # that resolved to nothing; say what is actually true instead.
+        print(f"PASS CEG pin {CANONICAL_REPO}@{MAJOR_TAG} (no poetry.lock; no resolved commit recorded)")
+        return 0
+    print(f"PASS CEG pin {CANONICAL_REPO}@{MAJOR_TAG} -> {resolved}")
     return 0
 
 

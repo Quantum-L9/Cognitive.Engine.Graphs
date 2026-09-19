@@ -1197,6 +1197,12 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 "gdpr_erasure_enabled": _fs.gdpr_erasure_enabled,
                 "gdpr_dry_run": _fs.gdpr_dry_run,
                 "gds_max_staleness_hours": _fs.gds_max_staleness_hours,
+                # --- Constellation seam (EIE <-> Gate <-> CEG) ---
+                "auto_enrich_via_gate": _fs.auto_enrich_via_gate,
+                "graph_inference_feedback_enabled": _fs.graph_inference_feedback_enabled,
+                "health_api_enabled": _fs.health_api_enabled,
+                "auto_create_domain_database": _fs.auto_create_domain_database,
+                "idea_portfolio_enabled": _fs.idea_portfolio_enabled,
             },
         }
 
@@ -1431,6 +1437,19 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     # a new advertised action for the same reason `trigger_gds` does: these are
     # operator surfaces, not collaboration routes Gate load-balances.
     if subaction in {"health_assess", "health_batch_assess", "health_report"}:
+        from engine.config.settings import settings as _health_settings
+
+        # Mechanism ships dormant, operator activates — the same contract every
+        # other behavioural surface here follows. auto_enrich_via_gate gates only
+        # the eventual outbound request, not assessment, reporting or conversion
+        # tracking, so making these reachable needs a gate of their own.
+        if not _health_settings.health_api_enabled:
+            return {
+                "status": "disabled",
+                "subaction": subaction,
+                "message": "Health API is disabled. Set HEALTH_API_ENABLED=True.",
+            }
+
         from engine.health import api as health_api
 
         health_handlers = {
@@ -1463,7 +1482,21 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         entity = _require_key(payload, "entity", "admin", tenant)
         entity_id = _require_key(payload, "entity_id", "admin", tenant)
         domain_id = payload.get("domain_id", tenant)
-        requested = payload.get("rules") or list_registered_rules()
+
+        # `rules` absent means "every registered rule"; `rules: []` means "none"
+        # and must not silently become "all". A non-list is rejected rather than
+        # iterated — a bare string would otherwise be walked character by
+        # character and every char looked up as a rule name.
+        if "rules" in payload:
+            requested = payload["rules"]
+            if not isinstance(requested, list) or not all(isinstance(r, str) for r in requested):
+                raise ValidationError(
+                    "admin.rules must be a list of rule-name strings",
+                    action="admin",
+                    tenant=tenant,
+                )
+        else:
+            requested = list_registered_rules()
 
         context = InferenceContext(
             tenant_id=tenant,
@@ -1471,8 +1504,11 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             pass_number=int(payload.get("pass_number", 1)),
             known_fields=dict(entity),
         )
+        # Named `inferred`, not `result`: `result` is already bound to a
+        # dict[str, Any] earlier in this function, and reusing it here is a type
+        # error mypy catches (and did).
         results = [
-            result for rule_name in requested if (result := execute_rule(rule_name, entity, context)) is not None
+            inferred for rule_name in requested if (inferred := execute_rule(rule_name, entity, context)) is not None
         ]
         dispatch = await emit_graph_inference_result(
             tenant=tenant,
