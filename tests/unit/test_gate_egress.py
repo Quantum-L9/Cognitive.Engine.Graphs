@@ -82,7 +82,15 @@ async def test_request_enrichment_fails_closed_without_gate_url(monkeypatch: pyt
     fake = _FakeClient(response=_response_packet())
     monkeypatch.setattr(gate_egress, "get_gate_client", lambda: fake)
     result = await request_enrichment(tenant="acme", entity_id="ent-1", domain="plasticos", target_fields=["polymer"])
-    assert result == {"status": "failed", "error": "gate_not_configured", "action": "enrich"}
+    assert result == {
+        "status": "failed",
+        "error": "gate_not_configured",
+        "action": "enrich",
+        # The module contract returns the idempotency key on every path,
+        # including fail-closed, because retry is the caller's decision and
+        # requires the key (see engine/gate_egress.py docstring).
+        "idempotency_key": enrichment_idempotency_key("acme", "ent-1", ["polymer"]),
+    }
     assert fake.calls == [], "no direct fallback: nothing may be sent when Gate is not configured"
 
 
