@@ -12,7 +12,10 @@ _SPEC = importlib.util.spec_from_file_location(
     "validate_sdk_pin",
     _ROOT / "scripts" / "validate_sdk_pin.py",
 )
-assert _SPEC is not None and _SPEC.loader is not None
+if _SPEC is None:
+    raise RuntimeError("validate_sdk_pin.py did not load")
+if _SPEC.loader is None:
+    raise RuntimeError("validate_sdk_pin.py has no loader")
 _mod = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_mod)
 MAJOR_TAG = _mod.MAJOR_TAG
