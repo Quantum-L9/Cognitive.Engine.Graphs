@@ -78,6 +78,12 @@ repos:
           fi; exit 0'
         language: system
         pass_filenames: false
+      - id: cypher-lint
+        name: make cypher-lint (C-009)
+        entry: python tools/cypher_lint.py
+        language: python
+        pass_filenames: false
+        types: [python]
 
   # L9 contract enforcement (24 invariants, 27 docs)
   - repo: local

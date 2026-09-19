@@ -481,7 +481,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     )
 
     try:
-        parameters = {**resolved_query, "top_n": top_n}
+        parameters = {**resolved_query, "top_n": top_n, **scoring_assembler.last_query_params}
         results = await graph_driver.execute_query(
             cypher=cypher,
             parameters=parameters,
