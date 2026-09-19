@@ -4,6 +4,21 @@
 Policy (CEG#266 / PR #263): constellation-node-sdk tracks ``Quantum-L9/Gate_SDK@v1``.
 Manifests name the major tag. poetry.lock records that tag as ``reference`` and
 the resolved object as ``resolved_reference``.
+
+CEG-001 asked for an immutable SHA in the manifests instead. The release set
+kept the moving tag and closed the finding the other way: the **lock** is the
+identity every deployed image installs, so the lock is what this script
+verifies, and the resolved commit is printed on PASS so a build log records
+which SDK object was actually taken. ``Enrichment.Inference.Engine/scripts/
+validate_sdk_pin.py`` enforces the same contract over that repo's
+``requirements.lock``.
+
+Accepted trade-off, stated rather than hidden: a build that resolves the
+manifest live (``pip install -r requirements.txt``, and CI installs generally)
+takes whatever ``v1`` points at that minute, while a lock-driven build takes
+``resolved_reference``. They agree today. Moving the ``v1`` tag without
+refreshing the lock is what would separate them, and that is a deliberate act
+with a diff, not silent drift between two files in this repository.
 """
 
 from __future__ import annotations
@@ -57,13 +72,29 @@ def check_tree(root: Path) -> list[str]:
     return errors
 
 
+def resolved_commit(root: Path) -> str | None:
+    """The commit poetry.lock records for the major tag, for the PASS line."""
+    path = root / "poetry.lock"
+    if not path.exists():
+        return None
+    match = LOCK_REFERENCE_RE.search(path.read_text(encoding="utf-8"))
+    return None if match is None else match.group(2)
+
+
 def main() -> int:
     errors = check_tree(ROOT)
     if errors:
         print("FAIL")
         print("\n".join(errors))
         return 1
-    print(f"PASS CEG pin {CANONICAL_REPO}@{MAJOR_TAG}")
+    resolved = resolved_commit(ROOT)
+    if resolved is None:
+        # check_tree() already accepts a tree with no poetry.lock, so this is
+        # reachable. Printing "PASS ... -> None" in a build log reads as a pin
+        # that resolved to nothing; say what is actually true instead.
+        print(f"PASS CEG pin {CANONICAL_REPO}@{MAJOR_TAG} (no poetry.lock; no resolved commit recorded)")
+        return 0
+    print(f"PASS CEG pin {CANONICAL_REPO}@{MAJOR_TAG} -> {resolved}")
     return 0
 
 

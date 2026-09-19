@@ -15,6 +15,14 @@
 node:
   id: graph
   version: "1.1.0"
+  # CEG-005: declare the semantic owner instead of letting Gate infer it.
+  # The SDK flattens node.owner into metadata.owner, and Gate's registration
+  # ownership assertion is fail-closed for canonical actions. With no owner
+  # here, registration succeeded only because Gate's _OWNER_ALIASES maps the
+  # node name "graph" to "ceg" — correct today, and a name-based alias rather
+  # than a declaration. Renaming the node would have broken registration for
+  # every canonical action at once. EIE declares owner=eie for the same reason.
+  owner: ceg
   type: engine
   internal_url: "http://graph:8000"
   health_endpoint: /v1/health

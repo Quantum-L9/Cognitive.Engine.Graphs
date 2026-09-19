@@ -1,5 +1,5 @@
 """
-External dependency contract tests for Neo4j and Redis.
+External dependency contract tests for Neo4j.
 
 Sources:
   engine/graph/driver.py:GraphDriver, CircuitBreaker
@@ -62,24 +62,9 @@ def test_neo4j_dep_direct_access_forbidden(neo4j_dep):
     assert direct == "forbidden"
 
 
-# ── Redis dependency contract ────────────────────────────────────────────────
-
-
-def test_redis_dep_service_name(redis_dep):
-    assert redis_dep.get("service_name") == "redis"
-
-
-def test_redis_dep_version_is_7(redis_dep):
-    version = str(redis_dep.get("version", ""))
-    assert "7" in version
-
-
-def test_redis_dep_uses_env_var(redis_dep):
-    conn = redis_dep.get("connection", {})
-    assert conn.get("base_url_env") == "REDIS_URL"
-
-
-def test_redis_dep_usage_documents_scoring_cache(redis_dep):
-    usages = [u.get("purpose", "").lower() for u in redis_dep.get("usage", [])]
-    scoring_cached = any("scor" in u or "cache" in u or "gds" in u for u in usages)
-    assert scoring_cached
+# CEG-007: the Redis dependency-contract tests are gone with the contract they
+# asserted. redis.yaml declared "Scoring result caching" and "Domain pack cache"
+# as its usages; neither was ever implemented, and nothing under engine/ or
+# chassis/ imports redis. Four tests passed continuously against a description
+# of behaviour that did not exist — which is what made the unused dependency
+# look load-bearing.

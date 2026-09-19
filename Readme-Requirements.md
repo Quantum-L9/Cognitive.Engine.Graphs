@@ -31,7 +31,6 @@ status: active
 
 - `neo4j_uri`, `neo4j_username`, `neo4j_password` → consumed by `dependencies.py` to init `GraphDriver`[^1]
 - `domains_root` → consumed by `dependencies.py` to init `DomainPackLoader`[^2]
-- `redis_url` → lazy-init Redis client
 - Scoring weights (`w_structural`, `w_geo`, etc.) → match the spec's config reference[^3]
 - Decay half-lives → match the temporal decay system in `engine-core-modules.py`[^1]
 
@@ -39,7 +38,6 @@ status: active
 
 - `get_graph_driver()` → returns the shared async Neo4j driver
 - `get_domain_loader()` → returns the cached domain pack loader
-- `get_redis()` → lazy Redis with graceful degradation
 - `startup()` / `shutdown()` → called from `create_app()` lifespan
 
 **`requirements.txt`** pins every dep from `pyproject.toml` with `>=X,<Y` bounds — works for Docker builds and non-Poetry envs .

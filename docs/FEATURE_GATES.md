@@ -62,6 +62,10 @@ independently of the code default.
 | Capability Auth (domain-spec model) | `CAPABILITY_AUTH_ENABLED` | `True` | `True` | active |
 | PostgreSQL Audit Pool | `POSTGRES_DSN` | unset (`None`) | set | active (opt-in, soft dependency — see §7) |
 | Idea Portfolio Graph | `IDEA_PORTFOLIO_ENABLED` (`idea_portfolio_enabled`) | `False` | unset | dormant; opt-in IdeaOS portfolio reads/hydration |
+| Graph Inference Feedback | `GRAPH_INFERENCE_FEEDBACK_ENABLED` (`graph_inference_feedback_enabled`) | `False` | unset | dormant; CEG → Gate → EIE `graph-inference-result` — see §13 |
+| Domain Database Provisioning | `AUTO_CREATE_DOMAIN_DATABASE` (`auto_create_domain_database`) | `False` | unset | dormant; create the tenant domain database on first use — see §14 |
+| Health API (admin health_* subactions) | `HEALTH_API_ENABLED` (`health_api_enabled`) | `False` | unset | dormant; AI-readiness assess/report surface — see §15 |
+| Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; five packs whose gates do not compile to executable Cypher — see §16 |
 | Constellation Orchestration | — | — | — | accepted architectural gap — see §9 |
 
 ---
@@ -322,6 +326,152 @@ Enforces the JWT `allowed_tenants` claim against the resolved tenant. Setting th
 Enforces the domain-spec capability model, mapping each action to the permissions it
 requires. Disabling it removes per-action authorization while leaving tenant resolution
 intact.
+
+---
+
+## 13. Graph Inference Feedback (EIE-008 / CEG-006)
+
+**State**: Dormant
+**Flag**: `GRAPH_INFERENCE_FEEDBACK_ENABLED=False` (default off)
+
+Emits `graph-inference-result` to Enrichment.Inference.Engine through Gate.
+EIE advertises that action to Gate and implements the whole consumer side —
+packet validation, per-tenant queues, target extraction, a 0.55 confidence
+floor, injection into the convergence loop — and nothing in CEG ever produced
+the packet, so the loop had a consumer and no producer. Both sides were even
+built to the same confidence floor.
+
+### Prerequisites
+
+- `GATE_URL` configured and Gate reachable; `graph-inference-result` is owned by
+  `eie` in Gate's `CANONICAL_ACTION_OWNERS`, so Gate resolves the destination.
+- EIE registered with Gate advertising `graph-inference-result`.
+
+### Activation Steps
+
+1. Set `GRAPH_INFERENCE_FEEDBACK_ENABLED=true`.
+2. Drive the `admin` subaction `emit_inference_feedback` with an `entity`,
+   an `entity_id`, and optionally a `rules` list (defaults to every registered
+   inference rule).
+
+### Validation
+
+The dispatch result carries `sent_outputs`: how many findings cleared the 0.55
+floor and were actually sent. `status: "skipped"` with
+`no_outputs_above_confidence_floor` means nothing qualified and no packet was
+sent — an empty `inference_outputs` list is valid to EIE and would cost a Gate
+round trip to queue nothing.
+
+### Rollback
+
+Set the flag back to `False`. Each emission queues re-enrichment targets in EIE
+and therefore spends EIE budget, which is why it ships off — the same reason as
+`AUTO_ENRICH_VIA_GATE`.
+
+---
+
+## 14. Domain Database Provisioning (CEG-008)
+
+**State**: Dormant
+**Flag**: `AUTO_CREATE_DOMAIN_DATABASE=False` (default off)
+
+`match` and `sync` route queries to a Neo4j database named after the domain id.
+Neo4j does not create databases implicitly, so on a fresh instance every sync
+and match failed with an `ExecutionError` until an operator ran
+`CREATE DATABASE` by hand. With this flag on, `GraphDriver` provisions the
+database on first use — once per database per process.
+
+### Prerequisites
+
+- **Neo4j Enterprise Edition.** `CREATE DATABASE` is an Enterprise
+  administrative command; Community Edition rejects it.
+- Credentials with database administration privileges.
+
+### Activation Steps
+
+1. Set `AUTO_CREATE_DOMAIN_DATABASE=true`.
+2. No restart of Neo4j is required; the next query against an unprovisioned
+   domain creates it.
+
+### Validation
+
+`Ensured Neo4j database '<id>' exists` is logged on the provisioning call.
+A refusal (Community Edition, or missing privilege) is logged as a warning and
+does **not** raise: a deployment whose database already exists is never blocked
+by a CREATE it is not allowed to run.
+
+### Rollback
+
+Set the flag back to `False`. Provisioning stops; a query against an absent
+database then raises `DatabaseNotProvisionedError`, which names the missing
+database and the exact `CREATE DATABASE` command. That message is present
+whether or not the flag is on.
+
+---
+
+## 15. Health API (CEG-006)
+
+**State**: Dormant
+**Flag**: `HEALTH_API_ENABLED=False` (default off)
+
+Exposes `engine/health/api.py` through the `admin` subactions `health_assess`,
+`health_batch_assess` and `health_report`. That module implemented three
+handlers and was imported by nothing, so `request_enrichment` — the whole
+CEG → Gate → EIE direction — had no trigger an inbound packet could reach.
+
+`AUTO_ENRICH_VIA_GATE` is not a substitute: it gates only the eventual outbound
+Gate request, not assessment, reporting, or conversion-event tracking. The
+surface needs a gate of its own, which is what this is.
+
+### Validation
+
+With the flag off the subactions return `{"status": "disabled"}` rather than
+404-ing, so an operator can tell "switched off" from "not a subaction".
+
+### Rollback
+
+Set back to `False`. Note that assess/report append to the conversion-event
+store in `engine/health/health_report.py`, which is bounded
+(`CONVERSION_EVENT_MAX`) and discards oldest-first.
+
+---
+
+## 16. Unvalidated Domain Packs (CEG-009)
+
+**State**: Dormant
+**Flag**: `UNVALIDATED_DOMAIN_PACKS_ENABLED=False` (default off)
+
+CEG-009 moved nine domain packs out of a flat `<name>_domain_spec.yaml` shape
+the loader never reads into `domains/<id>/spec.yaml`. Making them readable
+exposed that five do not compile to executable Cypher:
+
+| Pack | Defect |
+|---|---|
+| `executive-assistant` | `RELATES_TO` fallback + `$85.0` |
+| `repo-as-agent` | `RELATES_TO` fallback + `$5` |
+| `roofing-company` | `RELATES_TO` fallback + `$1` |
+| `aios-god-agent` | `RELATES_TO` fallback |
+| `healthcare-referral` | `$1` |
+
+Two root causes, both in the spec-to-Cypher contract rather than in the files:
+
+1. `type: traversal` gates written with `pattern` and `condition`, which
+   `GateCompiler` does not consume. With no `edgetype` the compiler falls back
+   to `RELATES_TO`, an edge no ontology here declares, so the gate is a hard
+   filter that matches nothing.
+2. A scalar `queryparam` (`85.0`, `5`, `1`). `GateSpec.coerce_queryparam_to_str`
+   turns it into a string and the compiler emits it as a parameter *name*, so
+   Cypher receives `$85.0`.
+
+**Do not turn this on to "see if they work".** They do not: the first serves
+zero candidates, the second fails at execution. Fixing them means either
+compiler support for `pattern`/`condition` and literal operands, or a declared
+query-schema parameter per constant — a schema decision, not a file move.
+
+`tests/unit/test_domain_pack_shape.py` holds both ends: a discoverable pack
+must compile to executable Cypher, and a gated pack that starts compiling
+cleanly must be removed from `_DOMAIN_FEATURE_FLAGS`, so this list can only
+shrink.
 
 ---
 
