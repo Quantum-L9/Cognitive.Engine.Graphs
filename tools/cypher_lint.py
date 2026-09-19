@@ -63,9 +63,7 @@ def _fstring_lines(source: str) -> set[int]:
     try:
         tokens = tokenize.generate_tokens(io.StringIO(source).readline)
         for tok in tokens:
-            if tok.type in fstring_types or (
-                tok.type == tokenize.STRING and tok.string[:1] in "fF"
-            ):
+            if tok.type in fstring_types or (tok.type == tokenize.STRING and tok.string[:1] in "fF"):
                 for ln in range(tok.start[0], tok.end[0] + 1):
                     lines.add(ln)
     except (tokenize.TokenError, SyntaxError):
@@ -133,9 +131,7 @@ def scan_tree(root: Path) -> list[Finding]:
 def render_findings(findings: list[Finding]) -> str:
     blocks = []
     for item in findings:
-        blocks.append(
-            f"❌ {item.kind}\nFile: {item.rel_path}:{item.line_no}\nPattern: {item.pattern}"
-        )
+        blocks.append(f"❌ {item.kind}\nFile: {item.rel_path}:{item.line_no}\nPattern: {item.pattern}")
     return "\n\n".join(blocks)
 
 
