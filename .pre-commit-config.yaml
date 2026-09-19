@@ -79,6 +79,16 @@ repos:
         language: system
         pass_filenames: false
 
+  # Gate_SDK moving-major pin (CEG#266 / PR #263)
+  - repo: local
+    hooks:
+      - id: validate-sdk-pin
+        name: Gate_SDK moving-major pin
+        entry: python3 scripts/validate_sdk_pin.py
+        language: system
+        pass_filenames: false
+        always_run: true
+
   # L9 contract enforcement (24 invariants, 27 docs)
   - repo: local
     hooks:

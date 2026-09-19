@@ -209,7 +209,7 @@ clean:	## Remove volumes + containers
 
 # ── Quality Gates (local, no Docker) ───────────────────────
 
-.PHONY: lint lint-fix typecheck check
+.PHONY: lint lint-fix typecheck check sdk-pin
 
 lint:	## Ruff lint + format check (no mutation) + MyPy — matches CI's blocking gate
 	ruff check .
@@ -223,12 +223,17 @@ lint-fix:	## Autofix: ruff check --fix + ruff format . (run this when `make lint
 typecheck:	## MyPy type checking on engine/
 	mypy engine/
 
+sdk-pin:	## Fail closed unless Gate_SDK is pinned to moving major tag @v1
+	python3 scripts/validate_sdk_pin.py
+
 check:	## Full local quality gate (autofix lint + types + unit tests)
 	@echo "── Lint (autofix) ──"
 	@ruff check . --fix
 	@ruff format .
 	@echo "── Type Check ──"
 	@mypy engine/
+	@echo "── SDK pin ──"
+	@python3 scripts/validate_sdk_pin.py
 	@echo "── Unit Tests ──"
 	@PYTHONPATH="$${PYTHONPATH}:." python3 -m pytest tests/ -m "unit" --tb=short -q
 	@echo "── All checks passed ──"
