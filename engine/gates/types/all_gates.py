@@ -17,6 +17,7 @@ import logging
 from abc import ABC, abstractmethod
 
 from engine.config.schema import DomainSpec, GateSpec
+from engine.utils.security import cypher_quoted_ident
 
 logger = logging.getLogger(__name__)
 
@@ -192,8 +193,8 @@ class EnumMapGate(BaseGate):
             # Build CASE WHEN for complex mapping
             cases = []
             for query_val, candidate_vals in self.spec.mapping.items():
-                val_list = ", ".join([f"'{v}'" for v in candidate_vals])
-                cases.append(f"WHEN {param} = '{query_val}' THEN {prop} IN [{val_list}]")
+                val_list = ", ".join(cypher_quoted_ident(str(v)) for v in candidate_vals)
+                cases.append(f"WHEN {param} = {cypher_quoted_ident(str(query_val))} THEN {prop} IN [{val_list}]")
 
             case_expr = " ".join(cases)
             return f"CASE {case_expr} ELSE false END"

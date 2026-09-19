@@ -91,6 +91,7 @@ class ScoringAssembler:
         self.domain_spec = domain_spec
         self.scoring_spec = domain_spec.scoring
         self._last_active_dims: list[str] = []
+        self._query_params: dict[str, Any] = {}
         self._graph_driver = graph_driver
         self._learned_weights: dict[str, float] | None = None
         self._population_means: dict[str, float] = {}  # S2-01: cached population means
@@ -152,6 +153,7 @@ class ScoringAssembler:
         """
         from engine.config.settings import settings
 
+        self._query_params = {}
         pareto_metadata: dict[str, Any] | None = None
 
         # Pareto pre-filter (lazy import to avoid circular deps)
@@ -213,6 +215,11 @@ class ScoringAssembler:
     def last_active_dimension_names(self) -> list[str]:
         """Return dimension names from the most recent assemble_scoring_clause call."""
         return list(self._last_active_dims)
+
+    @property
+    def last_query_params(self) -> dict[str, Any]:
+        """Copy of Cypher parameters collected during the last assemble call."""
+        return dict(self._query_params)
 
     def _compile_dimension(self, dim: ScoringDimensionSpec) -> str:
         """Dispatch to computation-specific compiler.
@@ -454,21 +461,31 @@ class ScoringAssembler:
         outcome_rel = sanitize_label(metadata.get("outcome_relation", "RESULTED_IN"))
         outcome_node = sanitize_label(metadata.get("outcome_node", "TransactionOutcome"))
         success_prop = sanitize_label(metadata.get("success_property", "outcome_type"))
-        success_value = sanitize_label(metadata.get("success_value", "closed_won"))
+        success_value = metadata.get("success_value", "closed_won")
+        if not isinstance(success_value, str):
+            msg = f"Dimension '{dim.name}': success_value must be a string"
+            raise ValueError(msg)
 
         cand_community_prop = sanitize_label(dim.candidateprop or "community_id")
+        safe_dim = sanitize_label(dim.name)
+        success_key = f"pref_success_{safe_dim}"
+        default_key = f"pref_default_{safe_dim}"
+        sample_key = f"pref_sample_k_{safe_dim}"
+        self._query_params[success_key] = success_value
+        self._query_params[default_key] = default
+        self._query_params[sample_key] = int(sample_k)
 
         return (
             f"CASE "
             f"  WHEN size([(qe)-[:{outcome_rel}]->(o:{outcome_node}) "
-            f"    WHERE o.{success_prop} = '{success_value}' | o]) = 0 THEN {default} "
+            f"    WHERE o.{success_prop} = ${success_key} | o]) = 0 THEN ${default_key} "
             f"  ELSE toFloat("
             f"    size([(qe)-[:{outcome_rel}]->(o:{outcome_node}) "
-            f"      WHERE o.{success_prop} = '{success_value}' "
-            f"      AND o.community_id = candidate.{cand_community_prop} | o][0..{sample_k}])"
+            f"      WHERE o.{success_prop} = ${success_key} "
+            f"      AND o.community_id = candidate.{cand_community_prop} | o][0..${sample_key}])"
             f"  ) / toFloat("
             f"    size([(qe)-[:{outcome_rel}]->(o:{outcome_node}) "
-            f"      WHERE o.{success_prop} = '{success_value}' | o][0..{sample_k}])"
+            f"      WHERE o.{success_prop} = ${success_key} | o][0..${sample_key}])"
             f"  ) "
             f"END"
         )

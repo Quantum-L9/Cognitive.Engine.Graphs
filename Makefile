@@ -12,7 +12,7 @@
 # ─────────────────────────────────────────────────────────────
 
 .PHONY: dev dev-build dev-down dev-logs dev-restart health
-.PHONY: test test-unit test-integration seed shell neo4j-shell
+.PHONY: test test-unit test-integration seed shell neo4j-shell cypher-lint
 
 # ── Governance ─────────────────────────────────────────────
 
@@ -209,12 +209,15 @@ clean:	## Remove volumes + containers
 
 # ── Quality Gates (local, no Docker) ───────────────────────
 
-.PHONY: lint lint-fix typecheck check
+.PHONY: lint lint-fix typecheck check cypher-lint
 
 lint:	## Ruff lint + format check (no mutation) + MyPy — matches CI's blocking gate
 	ruff check .
 	ruff format --check .
 	mypy engine/
+
+cypher-lint:	## C-009: scan generated Cypher for injection vectors
+	python3 tools/cypher_lint.py
 
 lint-fix:	## Autofix: ruff check --fix + ruff format . (run this when `make lint` fails)
 	ruff check . --fix

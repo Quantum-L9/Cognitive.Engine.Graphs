@@ -38,3 +38,12 @@ def sanitize_label(label: str) -> str:
         msg = f"Invalid label or type: {label!r}"
         raise ValueError(msg)
     return label
+
+
+def cypher_quoted_ident(value: str) -> str:
+    """Return a single-quoted Cypher string literal of a sanitized identifier.
+
+    Compile-time Cypher fragments that cannot take ``$params`` use this instead
+    of interpolating ``'{value}'`` so the source never contains that pattern.
+    """
+    return "'" + sanitize_label(value) + "'"

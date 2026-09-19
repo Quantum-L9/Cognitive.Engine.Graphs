@@ -31,7 +31,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from engine.config.schema import AggregationStrategy, DomainSpec, EdgeCategory, GDSJobSpec
 from engine.graph.driver import GraphDriver
-from engine.utils.security import sanitize_label
+from engine.utils.security import cypher_quoted_ident, sanitize_label
 
 # S2-10: EdgeCategory → recommended GDS configuration mapping.
 # Paper: different relation types benefit from different algorithms/aggregation.
@@ -305,14 +305,15 @@ class GDSScheduler:
         graph_name = f"{safe_job_name}_graph"
 
         # Pre-cleanup: drop stale projection if it exists (fixes crash on re-run)
-        pre_drop = f"""
-        CALL gds.graph.exists('{graph_name}') YIELD exists
+        gds_params = {"graph_name": graph_name}
+        pre_drop = """
+        CALL gds.graph.exists($graph_name) YIELD exists
         WITH exists WHERE exists
-        CALL gds.graph.drop('{graph_name}') YIELD graphName
+        CALL gds.graph.drop($graph_name) YIELD graphName
         RETURN graphName
         """
         try:
-            await self.graph_driver.execute_query(pre_drop, database=db)
+            await self.graph_driver.execute_query(pre_drop, parameters=gds_params, database=db)
         except Exception as exc:
             exc_msg = str(exc).lower()
             if "not found" in exc_msg or "does not exist" in exc_msg:
@@ -327,27 +328,28 @@ class GDSScheduler:
         # Sanitize write property name
         write_prop = sanitize_label(job_spec.writeproperty or "communityId")
 
+        gds_params["write_prop"] = write_prop
         project_cypher = f"""
-        CALL gds.graph.project('{graph_name}', {node_labels}, {edge_types})
+        CALL gds.graph.project($graph_name, {node_labels}, {edge_types})
         YIELD graphName, nodeCount, relationshipCount
         RETURN graphName, nodeCount, relationshipCount
         """
         try:
-            await self.graph_driver.execute_query(project_cypher, database=db)
+            await self.graph_driver.execute_query(project_cypher, parameters=gds_params, database=db)
 
-            louvain_cypher = f"""
-            CALL gds.louvain.write('{graph_name}', {{writeProperty: '{write_prop}'}})
+            louvain_cypher = """
+            CALL gds.louvain.write($graph_name, {writeProperty: $write_prop})
             YIELD communityCount, modularity
             RETURN communityCount, modularity
             """
-            result = await self.graph_driver.execute_query(louvain_cypher, database=db)
+            result = await self.graph_driver.execute_query(louvain_cypher, parameters=gds_params, database=db)
             data = result[0] if result else {}
             logger.info(f"Louvain: {data}")
             return {"communities": data.get("communityCount"), "modularity": data.get("modularity")}
         finally:
-            drop_cypher = f"CALL gds.graph.drop('{graph_name}') YIELD graphName RETURN graphName"
+            drop_cypher = "CALL gds.graph.drop($graph_name) YIELD graphName RETURN graphName"
             try:
-                await self.graph_driver.execute_query(drop_cypher, database=db)
+                await self.graph_driver.execute_query(drop_cypher, parameters=gds_params, database=db)
             except Exception:
                 logger.exception(f"Failed to drop projected graph '{graph_name}'")
 
@@ -588,7 +590,9 @@ class GDSScheduler:
         equipment_props = self._get_equipment_properties(job_spec)
 
         # Build dynamic CASE statements for equipment detection
-        case_statements = [f"CASE WHEN f.{prop} = true THEN '{name}' END" for prop, name in equipment_props]
+        case_statements = [
+            f"CASE WHEN f.{prop} = true THEN {cypher_quoted_ident(name)} END" for prop, name in equipment_props
+        ]
         case_list = ",\n            ".join(case_statements)
 
         cypher = f"""
