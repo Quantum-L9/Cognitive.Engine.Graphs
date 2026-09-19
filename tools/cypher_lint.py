@@ -81,9 +81,7 @@ def _label_is_safe(expr: str, sanitized: set[str]) -> bool:
     stripped = expr.strip()
     if "sanitize_label" in stripped:
         return True
-    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", stripped) and stripped in sanitized:
-        return True
-    return False
+    return bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", stripped) and stripped in sanitized)
 
 
 def scan_file(path: Path, *, root: Path) -> list[Finding]:
