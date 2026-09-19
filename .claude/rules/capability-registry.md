@@ -28,3 +28,11 @@ Before building any of these, check if it already exists. Use the existing imple
 | Pareto scoring | engine/scoring/pareto.py | multi-objective optimization |
 | Convergence loop | engine/feedback/convergence.py | `ConvergenceLoop` |
 | Label sanitization | engine/utils/security.py | `sanitize_label()` |
+| CEG → Gate → EIE egress (the ONLY peer egress) | engine/gate_egress.py | `request_enrichment()`, `emit_graph_inference_result()` |
+| Inference outputs → EIE wire shape | engine/gate_egress.py | `build_inference_outputs()` (0.55 floor, matches EIE) |
+| Domain database provisioning | engine/graph/driver.py | `GraphDriver.ensure_database()` (flag: `auto_create_domain_database`) |
+| Database-name validation for DDL | engine/graph/driver.py | `_DATABASE_NAME_RE` — `sanitize_label()` forbids the dashes domain ids use |
+| Inference rule execution | engine/inference_rule_registry.py | `execute_rule()`, `list_registered_rules()` |
+
+Do not add a second outbound client. `engine/gate_egress.py` is the only
+CEG → peer egress; Gate resolves the destination from the action.
