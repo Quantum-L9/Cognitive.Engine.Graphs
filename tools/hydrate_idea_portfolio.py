@@ -12,6 +12,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from neo4j.exceptions import Neo4jError
+
 from engine.config.loader import DomainPackLoader
 from engine.config.schema import DomainSpec
 from engine.config.settings import settings
@@ -58,10 +60,21 @@ async def _require_state_uniqueness(driver: GraphDriver, spec: DomainSpec) -> No
     swallows per-constraint failures, so calling it proves nothing on its own.
 
     Raises:
-        IdeaPortfolioHydrationError: The constraint is absent after schema init.
+        IdeaPortfolioHydrationError: The constraint is absent, or could not be read.
     """
     await _init_schema(driver, spec)
-    rows = await driver.execute_query(SHOW_CONSTRAINTS_CYPHER, {}, database=DOMAIN_ID)
+    try:
+        rows = await driver.execute_query(SHOW_CONSTRAINTS_CYPHER, {}, database=DOMAIN_ID)
+    except Neo4jError as exc:
+        # A least-privilege database user may be denied SHOW CONSTRAINTS itself.
+        # Unreadable is not provably safe, so it fails closed like an absent
+        # constraint — but says so, since the remedy is a grant, not a schema init.
+        msg = (
+            f"idea-portfolio schema precondition unverifiable: could not read constraints on "
+            f"'{DOMAIN_ID}' ({type(exc).__name__}: {exc}). Refusing to mutate. Grant this user "
+            f"SHOW CONSTRAINT on the database, or run hydration as a user that holds it."
+        )
+        raise IdeaPortfolioHydrationError(msg) from exc
     if not state_uniqueness_constraint_present(rows):
         msg = (
             f"idea-portfolio schema precondition unmet: no uniqueness constraint on "
