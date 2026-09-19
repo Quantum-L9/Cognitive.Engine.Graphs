@@ -59,8 +59,14 @@ _PII_PATTERNS: dict[PIICategory, re.Pattern[str]] = {
     PIICategory.EMAIL: re.compile(
         r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}",
     ),
+    # The guards keep a 10-digit run from matching inside a longer alphanumeric
+    # token — opaque identifiers such as `q_5c9382647927` (handle_match's
+    # query_id) otherwise read as phone numbers and get redacted out of the
+    # response. `\b` cannot be used here because a leading `+` or `(` is not a
+    # word character, so it would break `+1 (555) 123-4567`. SSN and IP_ADDRESS
+    # below rely on `\b` for the same reason, their patterns start with a digit.
     PIICategory.PHONE: re.compile(
-        r"(?:\+?1[\-\s.]?)?\(?\d{3}\)?[\-\s.]?\d{3}[\-\s.]?\d{4}",
+        r"(?<![0-9A-Za-z_])(?:\+?1[\-\s.]?)?\(?\d{3}\)?[\-\s.]?\d{3}[\-\s.]?\d{4}(?![0-9A-Za-z_])",
     ),
     PIICategory.SSN: re.compile(
         r"\b\d{3}[\-\s]?\d{2}[\-\s]?\d{4}\b",

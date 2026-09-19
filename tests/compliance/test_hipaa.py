@@ -46,6 +46,27 @@ class TestPIIDetection:
         assert detections[0].category == PIICategory.SSN
         assert detections[0].detected_by == "pattern_match"
 
+    def test_phone_pattern_does_not_match_inside_opaque_identifier(self) -> None:
+        """A digit run inside a longer token is not a phone number.
+
+        Regression: handle_match builds query_id as `q_<12 hex chars>`. Roughly
+        1.6% of those contain a 10-digit run, which the unguarded phone pattern
+        matched — ComplianceEngine.redact_response then deleted query_id from
+        the match response for those requests.
+        """
+        handler = PIIHandler()
+
+        for opaque in ("q_5c9382647927", "q_a90333567456", "q_6281353751e8"):
+            assert handler.detect_pii({"query_id": opaque}) == [], f"{opaque} must not be treated as PII"
+
+    def test_detect_phone_by_pattern_still_matches_real_numbers(self) -> None:
+        """Guarding the phone pattern must not cost real phone detection."""
+        handler = PIIHandler()
+
+        for number in ("555-123-4567", "+1 (555) 123-4567", "5551234567", "call 555.123.4567 now"):
+            detections = handler.detect_pii({"notes": number})
+            assert [d.category for d in detections] == [PIICategory.PHONE], f"{number} must be detected as a phone"
+
     def test_detect_nested_pii(self) -> None:
         """PII detected in nested dicts."""
         handler = PIIHandler()
