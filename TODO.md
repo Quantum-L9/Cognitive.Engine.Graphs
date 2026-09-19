@@ -1,9 +1,9 @@
 ## Issue unblock (session reference)
 
-**Cluster:** CEG#138 CLOSED on PR 248; CEG#139 CLOSED already-fixed
-**Owning fix:** https://github.com/Quantum-L9/Cognitive.Engine.Graphs/pull/248
-**Next:** pause issues for this repo; PR remediator later
-**Pickup:** Graphiti PICKUP written 2026-08-30
+**Cluster:** Quantum-L9/Cognitive.Engine.Graphs#273 (+ #274 leftover, #275, #276, #277 duplicate of #276, #279)
+**Owning fix:** leftover consumer `.l9/ci.json` (`repo_class: python`) stacked on PR 280
+**Next:** do not merge from this skill; leftover issues already CLOSED; remaining CEG HUMAN issues stay OPEN
+**Pickup:** Graphiti PICKUP written 2026-09-19
 
 <!-- L9_META
 l9_schema: 1
