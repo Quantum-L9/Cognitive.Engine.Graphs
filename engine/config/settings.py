@@ -56,8 +56,12 @@ class Settings(BaseSettings):
     neo4j_max_connection_lifetime: int = 3600
     neo4j_connection_acquisition_timeout: int = 60
 
-    # --- Redis ---
-    redis_url: str = "redis://localhost:6379/0"
+    # CEG-007: there was a `redis_url` here, and a redis service in both compose
+    # files, and a redis dependency in requirements — and no `import redis`
+    # anywhere under engine/ or chassis/. The declared contract claimed scoring
+    # and domain-pack caching that was never built. Operators could not start the
+    # api service without Redis running, for a dependency nothing used. All of it
+    # is removed; if shared state is wanted later, add it with the code that uses it.
 
     # --- API ---
     api_port: int = 8000
@@ -144,6 +148,17 @@ class Settings(BaseSettings):
     # Distinct from PACKET_STORE_DSN (engine/packet/packet_store.py), which manages
     # its own lazy pool — both may point at the same Postgres instance.
 
+    # CEG-008: `match` and `sync` route queries to a Neo4j database named after
+    # the domain id, and nothing ever created it — Neo4j does not create
+    # databases implicitly, so on a fresh instance every sync and match failed
+    # with an ExecutionError until an operator ran CREATE DATABASE by hand.
+    # With this on, GraphDriver provisions the database on first use (once per
+    # database per process). Off by default: CREATE DATABASE is an Enterprise
+    # Edition administrative command requiring privileges a read-only
+    # deployment is not expected to hold. Either way the failure now names the
+    # missing database and the command that provides it.
+    auto_create_domain_database: bool = False
+
     # --- Wave 7: Explicit Tenant Database Binding ---
     strict_tenant_database: bool = (
         False  # W7-01: require explicit database= on GraphDriver calls; no implicit 'neo4j' fallback
@@ -155,6 +170,12 @@ class Settings(BaseSettings):
     # Seam audit / PR remediation: paid-tier enrich_now Gate dispatch is opt-in.
     # Default off so deploy does not immediately spend EIE budget until enabled.
     auto_enrich_via_gate: bool = False
+    # EIE-008 / CEG-006: emit `graph-inference-result` to EIE through Gate. EIE
+    # advertises and implements the consumer side end to end; nothing here ever
+    # produced the packet, so the feedback loop had no producer. Off by default
+    # for the same reason as auto_enrich_via_gate — each emission queues
+    # re-enrichment targets and so spends EIE budget.
+    graph_inference_feedback_enabled: bool = False
     # IdeaOS portfolio graph is a new behavioral surface. Keep both corpus writes
     # and portfolio-context reads dormant until explicitly activated by an operator.
     idea_portfolio_enabled: bool = False

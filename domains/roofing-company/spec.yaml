@@ -57,6 +57,19 @@ ontology:
         - {name: priceperunit, type: float, unit: currency}
         - {name: warrantyears, type: int}
 
+    # CEG-009: SERVICES_ZIP below targets ZipCode, which was never declared, so
+    # this spec failed the ontology cross-reference validator and could not load
+    # at all. Hidden by the flat <name>_domain_spec.yaml shape the loader never
+    # reads. Contractor.servicezips carries the same coverage as a raw string;
+    # the node is what the edge needs to resolve against.
+    - label: ZipCode
+      managedby: static
+      auxiliary: true
+      properties:
+        - {name: zipcode, type: string, required: true}
+        - {name: city, type: string}
+        - {name: state, type: string}
+
   edges:
     - {type: SERVICES_ZIP, from: Contractor, to: ZipCode, direction: DIRECTED, category: capability, managedby: sync}
     - {type: USES_MATERIAL, from: Contractor, to: Material, direction: DIRECTED, category: capability, managedby: sync}

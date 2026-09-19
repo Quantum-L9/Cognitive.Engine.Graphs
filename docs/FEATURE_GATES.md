@@ -62,6 +62,8 @@ independently of the code default.
 | Capability Auth (domain-spec model) | `CAPABILITY_AUTH_ENABLED` | `True` | `True` | active |
 | PostgreSQL Audit Pool | `POSTGRES_DSN` | unset (`None`) | set | active (opt-in, soft dependency — see §7) |
 | Idea Portfolio Graph | `IDEA_PORTFOLIO_ENABLED` (`idea_portfolio_enabled`) | `False` | unset | dormant; opt-in IdeaOS portfolio reads/hydration |
+| Graph Inference Feedback | `GRAPH_INFERENCE_FEEDBACK_ENABLED` (`graph_inference_feedback_enabled`) | `False` | unset | dormant; CEG → Gate → EIE `graph-inference-result` — see §13 |
+| Domain Database Provisioning | `AUTO_CREATE_DOMAIN_DATABASE` (`auto_create_domain_database`) | `False` | unset | dormant; create the tenant domain database on first use — see §14 |
 | Constellation Orchestration | — | — | — | accepted architectural gap — see §9 |
 
 ---
@@ -322,6 +324,86 @@ Enforces the JWT `allowed_tenants` claim against the resolved tenant. Setting th
 Enforces the domain-spec capability model, mapping each action to the permissions it
 requires. Disabling it removes per-action authorization while leaving tenant resolution
 intact.
+
+---
+
+## 13. Graph Inference Feedback (EIE-008 / CEG-006)
+
+**State**: Dormant
+**Flag**: `GRAPH_INFERENCE_FEEDBACK_ENABLED=False` (default off)
+
+Emits `graph-inference-result` to Enrichment.Inference.Engine through Gate.
+EIE advertises that action to Gate and implements the whole consumer side —
+packet validation, per-tenant queues, target extraction, a 0.55 confidence
+floor, injection into the convergence loop — and nothing in CEG ever produced
+the packet, so the loop had a consumer and no producer. Both sides were even
+built to the same confidence floor.
+
+### Prerequisites
+
+- `GATE_URL` configured and Gate reachable; `graph-inference-result` is owned by
+  `eie` in Gate's `CANONICAL_ACTION_OWNERS`, so Gate resolves the destination.
+- EIE registered with Gate advertising `graph-inference-result`.
+
+### Activation Steps
+
+1. Set `GRAPH_INFERENCE_FEEDBACK_ENABLED=true`.
+2. Drive the `admin` subaction `emit_inference_feedback` with an `entity`,
+   an `entity_id`, and optionally a `rules` list (defaults to every registered
+   inference rule).
+
+### Validation
+
+The dispatch result carries `sent_outputs`: how many findings cleared the 0.55
+floor and were actually sent. `status: "skipped"` with
+`no_outputs_above_confidence_floor` means nothing qualified and no packet was
+sent — an empty `inference_outputs` list is valid to EIE and would cost a Gate
+round trip to queue nothing.
+
+### Rollback
+
+Set the flag back to `False`. Each emission queues re-enrichment targets in EIE
+and therefore spends EIE budget, which is why it ships off — the same reason as
+`AUTO_ENRICH_VIA_GATE`.
+
+---
+
+## 14. Domain Database Provisioning (CEG-008)
+
+**State**: Dormant
+**Flag**: `AUTO_CREATE_DOMAIN_DATABASE=False` (default off)
+
+`match` and `sync` route queries to a Neo4j database named after the domain id.
+Neo4j does not create databases implicitly, so on a fresh instance every sync
+and match failed with an `ExecutionError` until an operator ran
+`CREATE DATABASE` by hand. With this flag on, `GraphDriver` provisions the
+database on first use — once per database per process.
+
+### Prerequisites
+
+- **Neo4j Enterprise Edition.** `CREATE DATABASE` is an Enterprise
+  administrative command; Community Edition rejects it.
+- Credentials with database administration privileges.
+
+### Activation Steps
+
+1. Set `AUTO_CREATE_DOMAIN_DATABASE=true`.
+2. No restart of Neo4j is required; the next query against an unprovisioned
+   domain creates it.
+
+### Validation
+
+`Ensured Neo4j database '<id>' exists` is logged on the provisioning call.
+A refusal (Community Edition, or missing privilege) is logged as a warning and
+does **not** raise: a deployment whose database already exists is never blocked
+by a CREATE it is not allowed to run.
+
+### Rollback
+
+Set the flag back to `False`. Provisioning stops; a query against an absent
+database then raises `DatabaseNotProvisionedError`, which names the missing
+database and the exact `CREATE DATABASE` command. That message is present
+whether or not the flag is on.
 
 ---
 

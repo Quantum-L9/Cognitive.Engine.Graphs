@@ -1424,6 +1424,69 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             "outcome_history_size": len(outcome_history),
         }
 
+    # ── CEG-006: AI-readiness health, reachable from an inbound packet ───────
+    # engine/health/api.py implemented three handlers and was imported by
+    # nothing, so `request_enrichment` — the whole CEG -> Gate -> EIE direction
+    # — had no trigger any packet could reach. It hangs off `admin` rather than
+    # a new advertised action for the same reason `trigger_gds` does: these are
+    # operator surfaces, not collaboration routes Gate load-balances.
+    if subaction in {"health_assess", "health_batch_assess", "health_report"}:
+        from engine.health import api as health_api
+
+        health_handlers = {
+            "health_assess": health_api.handle_health_assess,
+            "health_batch_assess": health_api.handle_health_batch_assess,
+            "health_report": health_api.handle_health_report,
+        }
+        return await health_handlers[subaction](tenant, payload)
+
+    # ── EIE-008: hand graph-derived field values back to EIE through Gate ────
+    # EIE advertises and implements `graph-inference-result` end to end and no
+    # code here ever produced one, so the feedback loop the architecture implies
+    # had a consumer and no producer. Flag-gated: it spends EIE budget.
+    if subaction == "emit_inference_feedback":
+        from engine.config.settings import settings as _inf_settings
+
+        if not _inf_settings.graph_inference_feedback_enabled:
+            return {
+                "status": "disabled",
+                "message": ("Graph inference feedback is disabled. Set GRAPH_INFERENCE_FEEDBACK_ENABLED=True."),
+            }
+
+        from engine.gate_egress import emit_graph_inference_result
+        from engine.inference_rule_registry import (
+            InferenceContext,
+            execute_rule,
+            list_registered_rules,
+        )
+
+        entity = _require_key(payload, "entity", "admin", tenant)
+        entity_id = _require_key(payload, "entity_id", "admin", tenant)
+        domain_id = payload.get("domain_id", tenant)
+        requested = payload.get("rules") or list_registered_rules()
+
+        context = InferenceContext(
+            tenant_id=tenant,
+            domain_id=domain_id,
+            pass_number=int(payload.get("pass_number", 1)),
+            known_fields=dict(entity),
+        )
+        results = [
+            result for rule_name in requested if (result := execute_rule(rule_name, entity, context)) is not None
+        ]
+        dispatch = await emit_graph_inference_result(
+            tenant=tenant,
+            entity_id=str(entity_id),
+            results=results,
+        )
+        return {
+            "status": "inference_feedback_emitted",
+            "entity_id": entity_id,
+            "rules_run": list(requested),
+            "results_produced": len(results),
+            "dispatch": dispatch,
+        }
+
     raise ValidationError(f"Unknown admin subaction: {subaction!r}", action="admin", tenant=tenant)
 
 

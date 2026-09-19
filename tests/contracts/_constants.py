@@ -15,7 +15,8 @@ KNOWN_ACTIONS = {"match", "sync", "admin", "outcomes", "resolve", "health", "hea
 
 OUTCOME_VALUES = {"success", "failure", "partial"}
 
-REQUIRED_ENV_VARS = ["NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD", "REDIS_URL", "API_KEY"]
+# CEG-007: REDIS_URL removed — no code under engine/ or chassis/ imports redis.
+REQUIRED_ENV_VARS = ["NEO4J_URI", "NEO4J_USERNAME", "NEO4J_PASSWORD", "API_KEY"]
 
 FORBIDDEN_PROD_SECRETS: dict[str, list[str]] = {
     "NEO4J_PASSWORD": ["password", "change-me-in-production"],

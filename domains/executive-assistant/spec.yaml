@@ -53,6 +53,18 @@ ontology:
         - {name: category, type: enum}
         - {name: steps, type: string}
 
+    # CEG-009: HAS_SKILL below targets Skill, which was never declared, so this
+    # spec failed the ontology cross-reference validator and could not load at
+    # all. It went unnoticed because the file was also in the flat
+    # <name>_domain_spec.yaml shape the loader never reads.
+    - label: Skill
+      managedby: static
+      auxiliary: true
+      properties:
+        - {name: skillid, type: string, required: true}
+        - {name: name, type: string}
+        - {name: category, type: enum}
+
   edges:
     - {type: HAS_SKILL, from: Expert, to: Skill, direction: DIRECTED, category: capability, managedby: sync}
     - {type: COMPLETED_TASK, from: Expert, to: Task, direction: DIRECTED, category: transaction, managedby: api}
