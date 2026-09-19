@@ -42,7 +42,7 @@ def test_manifests_reject_sha_and_fork() -> None:
 def test_lock_requires_tag_reference_and_resolved_sha() -> None:
     lock = (
         'name = "constellation-node-sdk"\n'
-        "version = \"1.1.0\"\n"
+        'version = "1.1.0"\n'
         "[package.source]\n"
         'type = "git"\n'
         'url = "https://github.com/Quantum-L9/Gate_SDK.git"\n'
