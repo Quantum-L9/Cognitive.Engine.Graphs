@@ -36,6 +36,20 @@ logger = logging.getLogger(__name__)
 # Cypher boolean conjunction used to join WHERE fragments.
 AND_JOINER = " AND "
 
+# C-009: tokens read from the domain spec that are interpolated verbatim pass
+# through a literal allow-list (a lookup raises on anything else) or through
+# sanitize_label(); query parameter *names* are identifiers and must be
+# validated exactly like labels, or `$name` becomes a statement injection.
+_OPERATORS: dict[str, str] = {
+    op: op for op in (">=", "<=", ">", "<", "=", "!=", "<>", "IN", "CONTAINS", "STARTS WITH", "ENDS WITH")
+}
+_LOGIC: dict[str, str] = {"AND": "AND", "OR": "OR"}
+
+
+def _param_name(name: str | None, fallback: str = "value") -> str:
+    """Validated Cypher parameter identifier for a gate's query parameter."""
+    return sanitize_label(name or fallback)
+
 
 class GateCompiler:
     """
@@ -226,7 +240,8 @@ class GateCompiler:
         """Boolean gate: candidate.prop = $param OR candidate.prop = true."""
         prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "prop"
         if gate.queryparam:
-            return f"candidate.{prop} = ${gate.queryparam}"
+            param = _param_name(gate.queryparam)
+            return f"candidate.{prop} = ${param}"
         return f"candidate.{prop} = true"
 
     def _compile_threshold(self, gate: GateSpec) -> str:
@@ -235,8 +250,9 @@ class GateCompiler:
         Supports operator override via gate.operator: >=, <=, >, <, =
         """
         prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "prop"
-        op = gate.operator or ">="
-        return f"candidate.{prop} {op} ${gate.queryparam}"
+        op = _OPERATORS[gate.operator or ">="]
+        param = _param_name(gate.queryparam)
+        return f"candidate.{prop} {op} ${param}"
 
     def _compile_range(self, gate: GateSpec) -> str:
         """
@@ -246,7 +262,7 @@ class GateCompiler:
         base_prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "prop"
         min_prop = sanitize_label(gate.candidateprop_min) if gate.candidateprop_min else f"min_{base_prop}"
         max_prop = sanitize_label(gate.candidateprop_max) if gate.candidateprop_max else f"max_{base_prop}"
-        param = gate.queryparam
+        param = _param_name(gate.queryparam)
 
         parts = []
         parts.append(f"(candidate.{min_prop} IS NULL OR candidate.{min_prop} <= ${param})")
@@ -259,9 +275,10 @@ class GateCompiler:
         Or inverse: $param IN candidate.prop_list
         """
         prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "prop"
+        param = _param_name(gate.queryparam)
         if gate.invertible:
-            return f"${gate.queryparam} IN candidate.{prop}"
-        return f"candidate.{prop} IN ${gate.queryparam}"
+            return f"${param} IN candidate.{prop}"
+        return f"candidate.{prop} IN ${param}"
 
     def _compile_exclusion(self, gate: GateSpec) -> str:
         """
@@ -287,12 +304,13 @@ class GateCompiler:
         # values only ever flow through $ parameters.
         exclusion_edge = "(candidate)-[:" + edge_type + "]->"
         if gate.queryparam:
+            param = _param_name(gate.queryparam)
             return (
                 "NOT EXISTS { MATCH "
                 + exclusion_edge
                 + "(excluded) WHERE excluded."
                 + target_prop
-                + f" = ${gate.queryparam} "
+                + f" = ${param} "
                 + "}"
             )
         return "NOT EXISTS { MATCH " + exclusion_edge + "() }"
@@ -305,7 +323,7 @@ class GateCompiler:
         if not gate.subgates:
             return "true"
 
-        combinator = f" {gate.logic or 'AND'} "
+        combinator = f" {_LOGIC[(gate.logic or 'AND').upper()]} "
         sub_fragments = []
         for sub_gate_name in gate.subgates:
             sub_gate_spec = next((g for g in self._gates if g.name == sub_gate_name), None)
@@ -330,7 +348,7 @@ class GateCompiler:
         base_prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "prop"
         min_prop = sanitize_label(gate.candidateprop_min) if gate.candidateprop_min else f"min_{base_prop}"
         max_prop = sanitize_label(gate.candidateprop_max) if gate.candidateprop_max else f"max_{base_prop}"
-        param = gate.queryparam
+        param = _param_name(gate.queryparam)
 
         return (
             f"(candidate.{min_prop} IS NULL OR candidate.{min_prop} <= ${param}) AND "
@@ -344,7 +362,7 @@ class GateCompiler:
         """
         prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "updated_at"
         duration_field = "days"
-        duration_value = gate.maxagedays or 1
+        duration_value = int(gate.maxagedays or 1)
         return f"candidate.{prop} >= datetime() - duration({{{duration_field}: {duration_value}}})"
 
     def _compile_temporal_range(self, gate: GateSpec) -> str:
@@ -352,8 +370,8 @@ class GateCompiler:
         Temporal range gate: candidate.prop between two datetime parameters.
         """
         prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "timestamp"
-        start_param = gate.queryparam_start or f"{gate.queryparam}_start"
-        end_param = gate.queryparam_end or f"{gate.queryparam}_end"
+        start_param = sanitize_label(gate.queryparam_start or f"{gate.queryparam}_start")
+        end_param = sanitize_label(gate.queryparam_end or f"{gate.queryparam}_end")
         return f"candidate.{prop} >= ${start_param} AND candidate.{prop} <= ${end_param}"
 
     def _compile_traversal(self, gate: GateSpec) -> str:
@@ -367,7 +385,8 @@ class GateCompiler:
 
         if gate.candidateprop and gate.queryparam:
             prop = sanitize_label(gate.candidateprop)
-            target_filter = f" {{{prop}: ${gate.queryparam}}}"
+            param = _param_name(gate.queryparam)
+            target_filter = f" {{{prop}: ${param}}}"
 
         label_clause = f":{target_label}" if target_label else ""
         return f"exists((candidate)-[:{edge_type}]->(t{label_clause}{target_filter}))"
@@ -389,6 +408,6 @@ class GateCompiler:
             gate_type=gate.type,
             null_behavior=null_behavior,
             gate_cypher=predicate,
-            candidate_prop=f"candidate.{gate.candidateprop}" if gate.candidateprop else None,
-            query_param=f"${gate.queryparam}" if gate.queryparam else None,
+            candidate_prop=f"candidate.{sanitize_label(gate.candidateprop)}" if gate.candidateprop else None,
+            query_param=f"${_param_name(gate.queryparam)}" if gate.queryparam else None,
         )

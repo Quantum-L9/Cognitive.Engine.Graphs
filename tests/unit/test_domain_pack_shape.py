@@ -92,15 +92,21 @@ def _cypher_defects(spec) -> list[str]:
       hit it, and no ontology here declares ``RELATES_TO``, so the gate is a
       hard filter that matches nothing.
     * ``$<non-identifier>`` — a scalar ``queryparam`` (``85.0``, ``5``, ``1``).
-      GateSpec coerces it to a string and the compiler emits it as a parameter
-      *name*, so Cypher receives ``$85.0``.
+      GateSpec coerces it to a string and the compiler used to emit it as a
+      parameter *name*, so Cypher received ``$85.0``. Since C-009 validates
+      parameter names like labels, the compiler now refuses the gate outright;
+      that refusal is the same defect, reported at compile time.
     """
     from engine.gates.compiler import GateCompiler
 
     compiler = GateCompiler(spec)
     defects: list[str] = []
     for gate in spec.gates:
-        cypher = compiler.compile(gate)
+        try:
+            cypher = compiler.compile(gate)
+        except (ValueError, KeyError) as exc:
+            defects.append(f"{gate.name}: refused by the compiler — {exc}")
+            continue
         if "RELATES_TO" in cypher and not gate.edgetype:
             defects.append(f"{gate.name}: RELATES_TO fallback — {cypher}")
         for param in re.findall(r"\$([^\s)]+)", cypher):

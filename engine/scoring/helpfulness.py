@@ -33,6 +33,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from engine.utils.security import sanitize_label
+
 logger = logging.getLogger(__name__)
 
 
@@ -199,8 +201,10 @@ def compile_helpfulness_cypher(
     Returns:
         Cypher expression string.
     """
+    similarity_prop = sanitize_label(similarity_prop)
+    importance_prop = sanitize_label(importance_prop)
     return (
-        f"CASE WHEN candidate.{similarity_prop} IS NULL THEN {default_when_null} "
-        f"ELSE ({alpha} * coalesce(candidate.{similarity_prop}, 0) + "
-        f"{1.0 - alpha} * coalesce(candidate.{importance_prop}, 0)) END"
+        f"CASE WHEN candidate.{similarity_prop} IS NULL THEN {float(default_when_null)} "
+        f"ELSE ({float(alpha)} * coalesce(candidate.{similarity_prop}, 0) + "
+        f"{1.0 - float(alpha)} * coalesce(candidate.{importance_prop}, 0)) END"
     )

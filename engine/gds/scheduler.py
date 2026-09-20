@@ -31,7 +31,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from engine.config.schema import AggregationStrategy, DomainSpec, EdgeCategory, GDSJobSpec
 from engine.graph.driver import GraphDriver
-from engine.utils.security import cypher_quoted_ident, sanitize_label
+from engine.utils.security import sanitize_label
 
 # S2-10: EdgeCategory → recommended GDS configuration mapping.
 # Paper: different relation types benefit from different algorithms/aggregation.
@@ -589,10 +589,17 @@ class GDSScheduler:
         # Get equipment properties from ontology or use defaults
         equipment_props = self._get_equipment_properties(job_spec)
 
-        # Build dynamic CASE statements for equipment detection
-        case_statements = [
-            f"CASE WHEN f.{prop} = true THEN {cypher_quoted_ident(name)} END" for prop, name in equipment_props
-        ]
+        # Build dynamic CASE statements for equipment detection. Property names
+        # are structural and pass sanitize_label; equipment type names are data
+        # (they may legitimately contain spaces or dashes) and travel as
+        # $parameters, never as quoted literals (C-009).
+        equipment_params: dict[str, Any] = {}
+        case_statements = []
+        for index, (prop, name) in enumerate(equipment_props):
+            safe_prop = sanitize_label(prop)
+            param_key = sanitize_label(f"equipment_name_{index}")
+            equipment_params[param_key] = name
+            case_statements.append(f"CASE WHEN f.{safe_prop} = true THEN ${param_key} END")
         case_list = ",\n            ".join(case_statements)
 
         cypher = f"""
@@ -606,7 +613,7 @@ class GDSScheduler:
         MERGE (f)-[:HAS_EQUIPMENT]->(e)
         RETURN count(*) AS edges_created
         """
-        result = await self.graph_driver.execute_query(cypher, database=db)
+        result = await self.graph_driver.execute_query(cypher, parameters=equipment_params, database=db)
         edges = result[0]["edges_created"] if result else 0
         logger.info(f"Equipment sync: {edges} HAS_EQUIPMENT edges for {node_label}")
         return {"edges_created": edges}
@@ -657,12 +664,13 @@ class GDSScheduler:
 
         # Build edge pattern from causal spec
         causal_spec = self.domain_spec.causal
+        depth = int(causal_spec.chain_depth_limit)
         if causal_spec.causal_edges:
             safe_types = [sanitize_label(e.edge_type) for e in causal_spec.causal_edges]
             edge_pattern = "|".join(safe_types)
-            rel_pattern = f"[:{edge_pattern}*1..{causal_spec.chain_depth_limit}]"
+            rel_pattern = f"[:{edge_pattern}*1..{depth}]"
         else:
-            rel_pattern = f"[*1..{causal_spec.chain_depth_limit}]"
+            rel_pattern = f"[*1..{depth}]"
 
         # Calculate causal influence score per entity
         cypher = f"""

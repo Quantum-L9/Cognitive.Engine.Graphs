@@ -15,6 +15,35 @@ All notable changes to L9 Engine will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security (C-009)
+- `tools/cypher_lint.py`: rewritten as an AST scanner that classifies every f-string
+  interpolation by syntactic role (quoted value, label, property, parameter name,
+  back-quoted identifier, `LIMIT`/`SKIP`, compiled fragment) instead of gating on a
+  keyword list; explicit reasoned waivers (`# cypher-lint: allow <reason>`) are
+  printed on every run.
+- `engine/gates/compiler.py`, `engine/gates/types/all_gates.py`: query parameter
+  names are validated with `sanitize_label()`; operators and composite logic pass
+  through literal allow-lists; `EnumMapGate` mapping keys/values and GDS equipment
+  type names travel as `$parameters` (`BaseGate._bind_param()` / `query_params`).
+- `engine/scoring/*`: dimension aliases validated, numeric spec values cast before
+  interpolation, `helpfulness`/`importance` builders validate property and
+  parameter names.
+- `engine/utils/security.py`: `cypher_quoted_ident()` removed; `sanitize_database_name()`
+  added for `CREATE DATABASE`.
+
+### Fixed
+- `GraphDriver.ensure_database()`: concurrent first-use callers await the single
+  in-flight `CREATE DATABASE` instead of racing past a pre-claimed name into a
+  database that does not exist yet (CEG-008 follow-up).
+- `tests/unit/test_protocol_bodies.py`: enforces the docstring-only Protocol body
+  contract — any statement after the docstring fails with its location.
+
+### CI
+- The consumer-local `l9-analysis.yml` workflow is not restored; organization
+  analysis stays owned by `l9-ci-core` (`Analyze (central Core)`).
+
 ## [1.2.0] - 2026-03-10 — KGE Mathematical Core Hardening
 
 ### Patches Applied

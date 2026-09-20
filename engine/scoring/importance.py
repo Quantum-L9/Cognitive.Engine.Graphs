@@ -34,6 +34,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from engine.utils.security import sanitize_label
+
 logger = logging.getLogger(__name__)
 
 
@@ -185,7 +187,9 @@ def compile_importance_cypher(
     Returns:
         Cypher expression string.
     """
+    visit_count_prop = sanitize_label(visit_count_prop)
+    total_visits_param = sanitize_label(total_visits_param)
     return (
-        f"CASE WHEN candidate.{visit_count_prop} IS NULL THEN {default_when_null} "
+        f"CASE WHEN candidate.{visit_count_prop} IS NULL THEN {float(default_when_null)} "
         f"ELSE toFloat(candidate.{visit_count_prop}) / ${total_visits_param} END"
     )
