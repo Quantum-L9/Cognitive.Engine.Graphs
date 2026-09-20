@@ -43,7 +43,7 @@ One engine. Any vertical. No custom code per domain.
 git clone <repo-url> && cd l9-engine
 ./scripts/setup.sh
 
-# 2. Start local stack (Neo4j + Redis + API)
+# 2. Start local stack (Neo4j + Postgres + API)
 ./scripts/dev.sh
 
 # 3. Seed sample data
@@ -81,8 +81,8 @@ All intelligence features are disabled by default and activated per-domain via Y
 │                Domain Spec Loader                     │
 │           YAML → Pydantic → Compiled Cypher          │
 ├──────────────────────────────────────────────────────┤
-│  Neo4j (multi-database)  │  Redis (cache/scheduler)  │
-└──────────────────────────┴───────────────────────────┘
+│              Neo4j (multi-database)                  │
+└──────────────────────────────────────────────────────┘
 ```
 
 ### Core Concepts
@@ -121,8 +121,7 @@ l9-engine/
 │   │   ├── pii.py                 # PII hash/encrypt/redact
 │   │   └── audit.py               # Audit logging
 │   └── db/                        # Database layer
-│       ├── neo4j.py               # Async Neo4j driver pool
-│       └── redis.py               # Redis connection
+│       └── neo4j.py               # Async Neo4j driver pool
 ├── domains/                       # Domain specification packs
 │   ├── plasticos/
 │   ├── mortgage-brokerage/
@@ -153,7 +152,6 @@ l9-engine/
 | Component | Version | Required Plugins |
 |-----------|---------|------------------|
 | Neo4j | 5.15+ Enterprise | APOC, Graph Data Science (GDS) |
-| Redis | 7.x | — |
 | Python | 3.12+ | — |
 
 **Neo4j Plugins:**
@@ -174,7 +172,6 @@ Consistent across all L9 repos. Set in `.env` (local) or SSM Parameter Store (pr
 | `NEO4J_USERNAME` | `neo4j` | Neo4j username |
 | `NEO4J_PASSWORD` | — | Neo4j password (SSM in prod) |
 | `NEO4J_DATABASE` | `neo4j` | Default database |
-| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection |
 | `API_PORT` | `8000` | API listen port |
 | `API_WORKERS` | `4` | Uvicorn workers |
 | `DOMAINS_ROOT` | `./domains` | Path to domain specs |

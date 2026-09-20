@@ -70,14 +70,6 @@ def neo4j_dep() -> dict:
 
 
 @pytest.fixture
-def redis_dep() -> dict:
-    path = CONTRACTS_ROOT / "dependencies" / "redis.yaml"
-    if not path.exists():
-        pytest.skip("redis.yaml not present")
-    return _load_yaml(path)
-
-
-@pytest.fixture
 def tool_index() -> dict:
     path = CONTRACTS_ROOT / "agents" / "tool-schemas" / "_index.yaml"
     if not path.exists():

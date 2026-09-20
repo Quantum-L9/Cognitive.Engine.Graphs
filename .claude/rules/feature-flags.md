@@ -40,6 +40,15 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | strict_tenant_database | False | Require explicit `database=` on GraphDriver calls; no implicit 'neo4j' fallback (W7-01) |
 | require_sdk_chassis_in_prod | False | Fail startup if `L9_CHASSIS != sdk` when `l9_env == prod` (W7-02) |
 
+## Constellation Seam (EIE ↔ Gate ↔ CEG)
+| Flag | Default | Purpose |
+|------|---------|---------|
+| auto_enrich_via_gate | False | Dispatch `enrich` to EIE through Gate (spends EIE budget) |
+| graph_inference_feedback_enabled | False | Emit `graph-inference-result` to EIE through Gate (EIE-008 / CEG-006) |
+| auto_create_domain_database | False | Provision the tenant domain database on first use (CEG-008; Enterprise-only CREATE DATABASE) |
+| health_api_enabled | False | Expose engine/health/api.py via admin health_* subactions (CEG-006) |
+| unvalidated_domain_packs_enabled | False | Serve the 5 migrated packs whose gates do not compile to executable Cypher (CEG-009) |
+
 ## Entity Resolution
 | Flag | Default | Purpose |
 |------|---------|---------|

@@ -32,7 +32,30 @@ logger = logging.getLogger(__name__)
 
 MAX_SPEC_BYTES = 5 * 1024 * 1024
 SPEC_FILENAME = "spec.yaml"
-_DOMAIN_FEATURE_FLAGS = {"idea-portfolio": "idea_portfolio_enabled"}
+_DOMAIN_FEATURE_FLAGS = {
+    "idea-portfolio": "idea_portfolio_enabled",
+    # CEG-009 moved nine packs into the shape this loader reads. Five of them
+    # carry gates that compile to Cypher that cannot execute, which was
+    # invisible while the loader never opened them:
+    #
+    #   * `type: traversal` gates written with `pattern` + `condition`, which
+    #     GateCompiler does not consume. With no `edgetype` they fall back to
+    #     `RELATES_TO`, an edge no ontology here declares, so the gate rejects
+    #     every candidate.
+    #   * a scalar `queryparam` (85.0, 5, 1) — GateSpec coerces it to a string
+    #     and the compiler emits it as a parameter NAME, producing `$85.0`.
+    #
+    # Making a pack readable is not the same as making it correct. Reaching
+    # these needs either compiler support for pattern/condition and literal
+    # operands, or a query-schema parameter per constant — a schema decision,
+    # not a file move. Dormant until then, guarded by
+    # tests/unit/test_domain_pack_shape.py so the set cannot grow silently.
+    "executive-assistant": "unvalidated_domain_packs_enabled",
+    "aios-god-agent": "unvalidated_domain_packs_enabled",
+    "repo-as-agent": "unvalidated_domain_packs_enabled",
+    "roofing-company": "unvalidated_domain_packs_enabled",
+    "healthcare-referral": "unvalidated_domain_packs_enabled",
+}
 
 
 class DomainNotFoundError(Exception):

@@ -15,6 +15,7 @@ Health report generation + conversion funnel tracking for Seed→Enrich upsell.
 from __future__ import annotations
 
 import logging
+from collections import deque
 from datetime import UTC, datetime
 from typing import Any
 
@@ -29,8 +30,17 @@ from engine.health.health_schemas import (
 
 logger = logging.getLogger(__name__)
 
-# In-memory conversion event store (replace with persistent store in production)
-_conversion_events: list[ConversionEvent] = []
+# In-memory conversion event store (replace with persistent store in production).
+#
+# Bounded, deliberately. CEG-006 made the `health_*` admin subactions reachable,
+# and every Seed-tier assess/report call appends a tenant- and entity-bearing
+# record here. An unbounded list in a long-lived process is a memory leak that
+# grows with traffic, and CLAUDE.md's "never create unbounded caches" covers
+# exactly this. A deque discards oldest-first at the ceiling, so funnel analysis
+# keeps a recent window rather than the whole history — the same trade the
+# "replace with persistent store" note above already anticipates.
+CONVERSION_EVENT_MAX = 10_000
+_conversion_events: deque[ConversionEvent] = deque(maxlen=CONVERSION_EVENT_MAX)
 
 
 def generate_health_report(
@@ -166,7 +176,7 @@ def analyze_conversion_funnel(
     tenant: str | None = None,
 ) -> ConversionFunnelMetrics:
     """Analyze conversion funnel metrics, optionally filtered by tenant."""
-    events = _conversion_events
+    events: list[ConversionEvent] = list(_conversion_events)
     if tenant:
         events = [e for e in events if e.tenant == tenant]
 

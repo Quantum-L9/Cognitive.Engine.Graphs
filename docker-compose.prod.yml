@@ -36,13 +36,22 @@ services:
       GATE_ADMIN_TOKEN: ${GATE_ADMIN_TOKEN:?GATE_ADMIN_TOKEN must be set for production}
       GATE_REGISTRATION_ENABLED: "true"
       L9_NODE_NAME: graph
-      L9_NODE_SPEC_PATH: engine/spec.yaml
+      # CEG-003: GATE_NODE_SPEC_PATH is the name the SDK reads. L9_NODE_SPEC_PATH
+      # had no reader; registration survived only on the SDK's default.
+      GATE_NODE_SPEC_PATH: engine/spec.yaml
       L9_ENFORCE_GATE_ONLY_INGRESS: "true"
       L9_GATE_NODE_NAME: gate
       L9_REQUIRE_SIGNATURE: "true"
       L9_SIGNING_ALGORITHM: hmac-sha256
       L9_SIGNING_KEY: ${L9_SIGNING_KEY:?L9_SIGNING_KEY must be set for production}
       L9_SIGNING_KEY_ID: ${L9_SIGNING_KEY_ID:-graph-engine-v1}
+      # CEG-002: L9_REQUIRE_SIGNATURE=true also verifies the responses Gate
+      # signs, and Gate signs with its own key id. Without this map CEG rejects
+      # every signed Gate response ("no verifying key available for transport
+      # signature verification"). Required, not defaulted: a wrong key here is a
+      # silent trust failure, so production must state it — JSON object mapping
+      # key id to key material, e.g. {"gate-v1":"<gate-key>"}.
+      L9_VERIFYING_KEYS_JSON: ${L9_VERIFYING_KEYS_JSON:?L9_VERIFYING_KEYS_JSON must be set when L9_REQUIRE_SIGNATURE is true}
       L9_ALLOWED_ACTIONS: match,sync,admin,outcomes,resolve,health,healthcheck
       L9_MAX_ATTACHMENTS: "0"
       L9_MAX_ATTACHMENT_SIZE_BYTES: "0"
@@ -50,7 +59,6 @@ services:
       NEO4J_USERNAME: ${NEO4J_USERNAME:-neo4j}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:?NEO4J_PASSWORD must be set for production}
       NEO4J_POOL_SIZE: "50"
-      REDIS_URL: redis://redis:6379/0
       API_SECRET_KEY: ${API_SECRET_KEY:?API_SECRET_KEY must be set for production}
       LOG_LEVEL: info
       CORS_ORIGINS: ${CORS_ORIGINS:-[]}
@@ -59,10 +67,10 @@ services:
       KGE_CONFIDENCE_THRESHOLD: "0.3"
       KGE_EMBEDDING_DIM: "300"
       PARETO_ENABLED: "true"
+    # CEG-007: redis was a depends_on: service_healthy here for a dependency
+    # no code imports.
     depends_on:
       neo4j:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/v1/health')"]
@@ -106,28 +114,9 @@ services:
       retries: 10
     restart: always
 
-  # ── Redis 7.x ───────────────────────────────────────────
-  redis:
-    image: redis:7-alpine
-    container_name: l9-redis-prod
-    ports:
-      - "6379:6379"
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
-    volumes:
-      - redis-data:/data
-    networks:
-      - l9-net
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-    restart: always
-
 volumes:
   neo4j-data:
   neo4j-logs:
-  redis-data:
 
 networks:
   l9-net:

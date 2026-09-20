@@ -94,17 +94,12 @@ variables:
     source: env
     sensitive: false
 
-  # ── Redis ─────────────────────────────────────────────────
-  - name: REDIS_URL
-    type: url
-    required: true
-    default: "redis://localhost:6379/0"
-    description: |
-      Redis connection URL. In Docker Compose: redis://redis:6379/0.
-      Used for scoring result caching and GDS output caching.
-    source: env
-    sensitive: false
-    example: "redis://redis:6379/0"
+  # CEG-007: REDIS_URL was declared here as required: true, described as backing
+  # "scoring result caching and GDS output caching". No such caching exists —
+  # nothing under engine/ or chassis/ imports redis at all. The variable, the
+  # dependency, the compose services and docs/contracts/dependencies/redis.yaml
+  # are removed together rather than leaving a contract that describes behaviour
+  # the code never had.
 
   # ── API Surface ───────────────────────────────────────────
   - name: API_KEY

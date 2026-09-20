@@ -47,8 +47,9 @@ class Settings(BaseSettings):
     neo4j_max_connection_lifetime: int = 3600
     neo4j_connection_acquisition_timeout: int = 60
 
-    # --- Redis ---
-    redis_url: str = "redis://localhost:6379/0"
+    # CEG-007: `redis_url` was declared here and never read — nothing under
+    # engine/ or chassis/ imports redis. Removed with the service and the
+    # dependency rather than left as a knob for a component that does not exist.
 
     # --- API ---
     api_port: int = 8000
