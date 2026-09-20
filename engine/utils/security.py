@@ -40,6 +40,23 @@ def sanitize_label(label: str) -> str:
     return label
 
 
+def cypher_number(value: object) -> float:
+    """
+    Validate a domain-spec scalar before it is interpolated into Cypher as a numeric literal.
+
+    SECURITY: a number cannot carry Cypher, so a value that survives ``float()``
+    is safe to interpolate; anything else (a string payload, ``None`` where the
+    spec promised a number) is rejected here instead of reaching the query.
+
+    Raises ValueError if the value is not numeric.
+    """
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        msg = f"Expected a numeric Cypher literal, got {value!r}"
+        raise ValueError(msg) from exc
+
+
 # Neo4j database naming rules: begins with an ASCII letter, then letters,
 # digits, dots, dashes or underscores, 3-63 characters. Domain ids legitimately
 # contain dashes ("healthcare-referral"), which is why sanitize_label does not

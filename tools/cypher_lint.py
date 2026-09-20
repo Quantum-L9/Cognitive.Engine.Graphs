@@ -32,7 +32,7 @@ anything else           compiled fragment           FAIL only when the expressio
 =====================  ==========================  ==================================
 
 An expression is *validated* when it is a call to ``sanitize_label`` /
-``sanitize_database_name``, a string literal, a name (or ``self`` attribute)
+``sanitize_database_name`` / ``cypher_number``, a string literal, a name (or ``self`` attribute)
 assigned from a validated expression anywhere in the module, a same-module
 function whose every ``return`` is validated, an f-string / ``str.join`` /
 comprehension built only from validated parts, or a loop variable over a
@@ -75,7 +75,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-SANITIZERS = frozenset({"sanitize_label", "sanitize_database_name"})
+SANITIZERS = frozenset({"sanitize_label", "sanitize_database_name", "cypher_number"})
 NUMERIC_CASTS = frozenset({"int", "float"})
 
 # Names whose attributes are domain-spec / payload data, never Cypher-safe.

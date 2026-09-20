@@ -34,7 +34,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from engine.utils.security import sanitize_label
+from engine.utils.security import cypher_number, sanitize_label
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ class ImportanceScorer:
         scorer = ImportanceScorer()
         visit_counts = {"v1": 5, "v2": 3, "v3": 2}
         result = scorer.compute("v1", visit_counts)
-        print(result.score)  # 0.5
+        logger.info("importance=%s", result.score)  # 0.5
     """
 
     def compute(
@@ -190,6 +190,6 @@ def compile_importance_cypher(
     visit_count_prop = sanitize_label(visit_count_prop)
     total_visits_param = sanitize_label(total_visits_param)
     return (
-        f"CASE WHEN candidate.{visit_count_prop} IS NULL THEN {float(default_when_null)} "
+        f"CASE WHEN candidate.{visit_count_prop} IS NULL THEN {cypher_number(default_when_null)} "
         f"ELSE toFloat(candidate.{visit_count_prop}) / ${total_visits_param} END"
     )

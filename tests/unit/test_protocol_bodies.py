@@ -106,7 +106,7 @@ def test_docstring_only_bodies_pass(body: str) -> None:
         ('        """Doc."""\n        return 0\n', "Return (return 0)"),
         ('        """Doc."""\n        x = 1\n', "Assign (x = 1)"),
         ('        """Doc."""\n        self.x: int = 1\n', "AnnAssign (self.x: int = 1)"),
-        ('        """Doc."""\n        print("x")\n', "Expr (print('x'))"),
+        ('        """Doc."""\n        len("x")\n', "Expr (len('x'))"),
         ('        """Doc."""\n        1 + 1\n', "Expr (1 + 1)"),
         ('        """Doc."""\n        if True:\n            pass\n', "If (if True:"),
         ("        ...\n", "Expr (...)"),

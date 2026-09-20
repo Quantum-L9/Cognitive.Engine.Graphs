@@ -27,7 +27,7 @@ from engine.config.schema import (
     ScoringDimensionSpec,
 )
 from engine.graph.driver import GraphDriver
-from engine.utils.security import sanitize_label
+from engine.utils.security import cypher_number, sanitize_label
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +197,7 @@ class ScoringAssembler:
                 # apply negative penalty instead of just reduced weight.
                 # Implements "primitive subtraction" from Lippl et al.
                 weight = -abs(sw_spec.penalty_factor) if learned_w < sw_spec.penalty_threshold else weight * learned_w
-            weight_exprs.append(f"({float(weight)} * {alias})")
+            weight_exprs.append(f"({cypher_number(weight)} * {alias})")
             active_dim_names.append(dim.name)
 
         self._last_active_dims = list(active_dim_names)
@@ -268,7 +268,7 @@ class ScoringAssembler:
         return base_expr
 
     def _compile_geodecay(self, dim: ScoringDimensionSpec) -> str:
-        k = float(dim.decayconstant or 50000.0)
+        k = cypher_number(dim.decayconstant or 50000.0)
         lat_prop = sanitize_label(dim.candidateprop or "lat")
         query_lat_param = sanitize_label(dim.queryprop or lat_prop)
         return (
@@ -279,7 +279,7 @@ class ScoringAssembler:
         )
 
     def _compile_lognormalized(self, dim: ScoringDimensionSpec) -> str:
-        max_val = float(dim.maxvalue or 1000.0)
+        max_val = cypher_number(dim.maxvalue or 1000.0)
         prop = sanitize_label(dim.candidateprop or "value")
         return f"log(1 + coalesce(candidate.{prop}, 0)) / log(1 + {max_val})"
 
@@ -293,7 +293,7 @@ class ScoringAssembler:
         Returns bias score if communities match, graduated score otherwise.
         Does not require APOC - uses native Cypher only.
         """
-        bias = float(dim.bias or 1.5)
+        bias = cypher_number(dim.bias or 1.5)
         cand_prop = sanitize_label(dim.candidateprop or "community_id")
         query_prop = sanitize_label(dim.queryprop or "community_id")
 
@@ -318,8 +318,8 @@ class ScoringAssembler:
         )
 
     def _compile_inverselinear(self, dim: ScoringDimensionSpec) -> str:
-        min_val = float(dim.minvalue or 0.0)
-        max_val = float(dim.maxvalue or 100.0)
+        min_val = cypher_number(dim.minvalue or 0.0)
+        max_val = cypher_number(dim.maxvalue or 100.0)
         prop = sanitize_label(dim.candidateprop or "value")
         return f"1.0 - (coalesce(candidate.{prop}, {max_val}) - {min_val}) / ({max_val} - {min_val})"
 
@@ -343,7 +343,7 @@ class ScoringAssembler:
         """
         cand_prop = sanitize_label(dim.candidateprop or "price_per_unit")
         query_prop = sanitize_label(dim.queryprop or "target_price")
-        tau = float(dim.maxvalue or 2.0)  # tolerance: 2.0 = ~7.4x ratio scores 0
+        tau = cypher_number(dim.maxvalue or 2.0)  # tolerance: 2.0 = ~7.4x ratio scores 0
         default = float(dim.defaultwhennull)  # nosemgrep: float-requires-try-except
         return (
             f"CASE "
@@ -361,7 +361,7 @@ class ScoringAssembler:
         Reads last_activity_date, touch_count_30d, and is_accelerating from node.
         """
         date_prop = sanitize_label(dim.candidateprop or "last_activity_date")
-        decay_days = float(dim.maxvalue or 90.0)
+        decay_days = cypher_number(dim.maxvalue or 90.0)
         default = float(dim.defaultwhennull)  # nosemgrep: float-requires-try-except
         # Weights for 3 signals
         w1, w2, w3 = 0.6, 0.25, 0.15
@@ -555,11 +555,11 @@ class ScoringAssembler:
             return base_expr  # No change — coalesce(..., 0.0) already handles this
         if strategy == NullStrategy.INHERIT_PRIOR:
             prop_name = sanitize_label(f"_prior_{dim.name}")
-            return f"coalesce(({base_expr}), candidate.{prop_name}, {float(dim.defaultwhennull)})"
+            return f"coalesce(({base_expr}), candidate.{prop_name}, {cypher_number(dim.defaultwhennull)})"
         if strategy == NullStrategy.POPULATION_MEAN:
             # Population mean is injected as a parameter at query time
             param = sanitize_label(f"_popmean_{dim.name}")
-            return f"coalesce(({base_expr}), ${param}, {float(dim.defaultwhennull)})"
+            return f"coalesce(({base_expr}), ${param}, {cypher_number(dim.defaultwhennull)})"
         return base_expr
 
     def _apply_cold_start_fallback(self, dim: ScoringDimensionSpec, base_expr: str) -> str:

@@ -247,8 +247,8 @@ async def test_cancelling_one_waiter_does_not_cancel_the_create_for_the_others()
     await asyncio.sleep(0)
 
     first.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await first
+    await asyncio.wait([first])
+    assert first.cancelled()
 
     driver.release.set()
     assert await second is True
@@ -262,6 +262,6 @@ async def test_in_flight_provisioning_is_forgotten_once_settled() -> None:
     await driver.create_started.wait()
     assert "plasticos" in driver._provisioning
     driver.release.set()
-    await task
+    assert await task is True
     await asyncio.sleep(0)  # done callbacks run on the next loop iteration
     assert driver._provisioning == {}

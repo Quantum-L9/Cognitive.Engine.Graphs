@@ -179,8 +179,8 @@ class PseudoQueryGenerator:
             n_incoming=2,
             m_outgoing=4,
         )
-        print(len(result.incoming))   # 2
-        print(len(result.outgoing))   # 4
+        logger.info("incoming=%d", len(result.incoming))   # 2
+        logger.info("outgoing=%d", len(result.outgoing))   # 4
     """
 
     def __init__(
