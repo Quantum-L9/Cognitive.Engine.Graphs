@@ -46,7 +46,11 @@ def test_protocol_methods_have_no_executable_stub() -> None:
     for rel, qualname, fn in _engine_protocol_methods():
         executable = []
         for stmt in fn.body:
-            if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str):
+            if (
+                isinstance(stmt, ast.Expr)
+                and isinstance(stmt.value, ast.Constant)
+                and isinstance(stmt.value.value, str)
+            ):
                 continue
             executable.append(stmt)
         for stmt in executable:
