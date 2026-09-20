@@ -168,28 +168,38 @@ class GraphDriver:
                 raise ValueError(msg)
             database = "neo4j"
 
-        # CEG-008: a tenant domain database has to exist before it can be
-        # queried. Under the flag we provision it on first use; without it we at
-        # least say what is missing instead of surfacing the driver's message.
+        await self._provision_on_first_use(database)
+        try:
+            return await self._circuit_breaker.call(self._raw_execute_query, cypher, parameters, database)
+        except Exception as exc:
+            raise self._translate_absent_database(exc, database) from exc
+
+    async def _provision_on_first_use(self, database: str) -> None:
+        """CEG-008: a tenant domain database has to exist before it can be used.
+
+        Under ``auto_create_domain_database`` we provision it on first use —
+        for reads and writes alike, since a fresh deployment's first operation
+        is as likely to be a sync write as a match query.
+        """
         from engine.config.settings import settings as _db_settings
 
         if _db_settings.auto_create_domain_database:
             await self.ensure_database(database)
 
-        try:
-            return await self._circuit_breaker.call(self._raw_execute_query, cypher, parameters, database)
-        except Exception as exc:
-            if _looks_like_absent_database(exc) and database not in _BUILTIN_DATABASES:
-                msg = (
-                    f"Neo4j database {database!r} does not exist. Domain queries route to a "
-                    f"database named after the domain id, and Neo4j does not create one "
-                    f"implicitly. Run this against the system database (Enterprise "
-                    f"Edition):  CREATE DATABASE `{database}` IF NOT EXISTS WAIT  "
-                    f"-- or set AUTO_CREATE_DOMAIN_DATABASE=true to have the engine "
-                    f"create it on first use."
-                )
-                raise DatabaseNotProvisionedError(msg) from exc
-            raise
+    @staticmethod
+    def _translate_absent_database(exc: Exception, database: str) -> Exception:
+        """Name the missing database and the command that provides it, else pass the error through."""
+        if _looks_like_absent_database(exc) and database not in _BUILTIN_DATABASES:
+            msg = (
+                f"Neo4j database {database!r} does not exist. Domain queries route to a "
+                f"database named after the domain id, and Neo4j does not create one "
+                f"implicitly. Run this against the system database (Enterprise "
+                f"Edition):  CREATE DATABASE `{database}` IF NOT EXISTS WAIT  "
+                f"-- or set AUTO_CREATE_DOMAIN_DATABASE=true to have the engine "
+                f"create it on first use."
+            )
+            return DatabaseNotProvisionedError(msg)
+        return exc
 
     async def ensure_database(self, name: str) -> bool:
         """Create the domain database if it is absent. Idempotent per process.
@@ -322,12 +332,16 @@ class GraphDriver:
                 )
                 raise ValueError(msg)
             database = "neo4j"
-        return await self._circuit_breaker.call(
-            self._raw_execute_write,
-            transaction_function,
-            *args,
-            cypher=cypher,
-            parameters=parameters,
-            database=database,
-            **kwargs,
-        )
+        await self._provision_on_first_use(database)
+        try:
+            return await self._circuit_breaker.call(
+                self._raw_execute_write,
+                transaction_function,
+                *args,
+                cypher=cypher,
+                parameters=parameters,
+                database=database,
+                **kwargs,
+            )
+        except Exception as exc:
+            raise self._translate_absent_database(exc, database) from exc

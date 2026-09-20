@@ -91,6 +91,8 @@ def _cypher_defects(spec) -> list[str]:
       declares no ``edgetype``. Packs written with ``pattern``/``condition``
       hit it, and no ontology here declares ``RELATES_TO``, so the gate is a
       hard filter that matches nothing.
+    * ``strictwhen`` — declared by ``GateSpec`` and consumed by no compiler, so
+      a gate meant to be conditional runs as an unconditional hard filter.
     * ``$<non-identifier>`` — a scalar ``queryparam`` (``85.0``, ``5``, ``1``).
       GateSpec coerces it to a string and the compiler used to emit it as a
       parameter *name*, so Cypher received ``$85.0``. Since C-009 validates
@@ -102,6 +104,10 @@ def _cypher_defects(spec) -> list[str]:
     compiler = GateCompiler(spec)
     defects: list[str] = []
     for gate in spec.gates:
+        if gate.strictwhen:
+            # Declared by GateSpec, consumed by nothing under engine/: the gate
+            # would run as an unconditional hard filter.
+            defects.append(f"{gate.name}: strictwhen {gate.strictwhen!r} is not consumed by any compiler")
         try:
             cypher = compiler.compile(gate)
         except (ValueError, KeyError) as exc:

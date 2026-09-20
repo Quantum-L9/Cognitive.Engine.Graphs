@@ -33,6 +33,20 @@ class _RecordingDriver(GraphDriver):
         self.calls: list[tuple[str, str]] = []
         self._fail_with = fail_with
 
+    async def _raw_execute_write(  # type: ignore[override]
+        self,
+        transaction_function: Any = None,
+        *args: Any,
+        cypher: str | None = None,
+        parameters: dict[str, Any] | None = None,
+        database: str = "neo4j",
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        self.calls.append((f"WRITE {cypher}", database))
+        if self._fail_with is not None and database != "system":
+            raise self._fail_with
+        return {"nodes_created": 0}
+
     async def _raw_execute_query(  # type: ignore[override]
         self,
         cypher: str,
@@ -95,7 +109,29 @@ async def test_nothing_is_provisioned_while_the_flag_is_off(no_auto_create) -> N
     assert not any("CREATE DATABASE" in cypher for cypher, _ in driver.calls)
 
 
+@pytest.mark.asyncio
+async def test_missing_database_on_a_write_names_itself_and_the_fix(no_auto_create) -> None:
+    driver = _RecordingDriver(fail_with=Exception("Database does not exist: plasticos"))
+    with pytest.raises(DatabaseNotProvisionedError, match="CREATE DATABASE"):
+        await driver.execute_write(cypher="MERGE (n:X)", database="plasticos")
+
+
 # ── On: provision once, on first use ────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_first_use_write_is_provisioned_too(auto_create) -> None:
+    """A fresh deployment's first operation can be a managed write (idea-portfolio
+    corpus sync), not a match query; provisioning must not depend on which."""
+    driver = _RecordingDriver()
+    await driver.execute_write(cypher="MERGE (n:X)", database="plasticos")
+    assert driver.calls == [
+        ("CREATE DATABASE `plasticos` IF NOT EXISTS WAIT", "system"),
+        ("WRITE MERGE (n:X)", "plasticos"),
+    ]
+    # ...and the query that follows reuses the ensured state.
+    await driver.execute_query("MATCH (n) RETURN n", database="plasticos")
+    assert sum("CREATE DATABASE" in c for c, _ in driver.calls) == 1
 
 
 @pytest.mark.asyncio

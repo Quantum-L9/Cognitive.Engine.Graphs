@@ -65,7 +65,7 @@ independently of the code default.
 | Graph Inference Feedback | `GRAPH_INFERENCE_FEEDBACK_ENABLED` (`graph_inference_feedback_enabled`) | `False` | unset | dormant; CEG → Gate → EIE `graph-inference-result` — see §13 |
 | Domain Database Provisioning | `AUTO_CREATE_DOMAIN_DATABASE` (`auto_create_domain_database`) | `False` | unset | dormant; create the tenant domain database on first use — see §14 |
 | Health API (admin health_* subactions) | `HEALTH_API_ENABLED` (`health_api_enabled`) | `False` | unset | dormant; AI-readiness assess/report surface — see §15 |
-| Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; five packs whose gates do not compile to executable Cypher — see §16 |
+| Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; seven packs whose gates do not compile to executable, faithful Cypher — see §16 |
 | Constellation Orchestration | — | — | — | accepted architectural gap — see §9 |
 
 ---
@@ -443,7 +443,7 @@ store in `engine/health/health_report.py`, which is bounded
 
 CEG-009 moved nine domain packs out of a flat `<name>_domain_spec.yaml` shape
 the loader never reads into `domains/<id>/spec.yaml`. Making them readable
-exposed that five do not compile to executable Cypher:
+exposed that seven do not compile to executable, faithful Cypher:
 
 | Pack | Defect |
 |---|---|
@@ -452,16 +452,21 @@ exposed that five do not compile to executable Cypher:
 | `roofing-company` | `RELATES_TO` fallback + `$1` |
 | `aios-god-agent` | `RELATES_TO` fallback |
 | `healthcare-referral` | `$1` |
+| `legal-discovery` | `strictwhen` on a gate, consumed by no compiler |
+| `research-agent` | `strictwhen` on two gates, consumed by no compiler |
 
-Two root causes, both in the spec-to-Cypher contract rather than in the files:
+Three root causes, all in the spec-to-Cypher contract rather than in the files:
 
 1. `type: traversal` gates written with `pattern` and `condition`, which
    `GateCompiler` does not consume. With no `edgetype` the compiler falls back
    to `RELATES_TO`, an edge no ontology here declares, so the gate is a hard
    filter that matches nothing.
 2. A scalar `queryparam` (`85.0`, `5`, `1`). `GateSpec.coerce_queryparam_to_str`
-   turns it into a string and the compiler emits it as a parameter *name*, so
-   Cypher receives `$85.0`.
+   turns it into a string; since C-009 validates parameter names like labels
+   the compiler refuses the gate outright instead of emitting `$85.0`.
+3. `strictwhen` on a gate. `GateSpec` declares it and nothing under `engine/`
+   consumes it, so a gate the author wrote as conditional (`legal-discovery`,
+   `research-agent`) runs as an unconditional hard filter.
 
 **Do not turn this on to "see if they work".** They do not: the first serves
 zero candidates, the second fails at execution. Fixing them means either

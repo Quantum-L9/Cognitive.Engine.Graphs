@@ -43,18 +43,23 @@ _DOMAIN_FEATURE_FLAGS = {
     #     `RELATES_TO`, an edge no ontology here declares, so the gate rejects
     #     every candidate.
     #   * a scalar `queryparam` (85.0, 5, 1) — GateSpec coerces it to a string
-    #     and the compiler emits it as a parameter NAME, producing `$85.0`.
+    #     and the compiler refuses it as a parameter NAME (C-009).
+    #   * `strictwhen` conditions — declared by the schema, consumed by no
+    #     compiler, so a gate meant to be conditional runs as an unconditional
+    #     hard filter and rejects candidates the pack author meant to keep.
     #
     # Making a pack readable is not the same as making it correct. Reaching
-    # these needs either compiler support for pattern/condition and literal
-    # operands, or a query-schema parameter per constant — a schema decision,
-    # not a file move. Dormant until then, guarded by
+    # these needs either compiler support for pattern/condition, literal
+    # operands and strictwhen, or a query-schema parameter per constant — a
+    # schema decision, not a file move. Dormant until then, guarded by
     # tests/unit/test_domain_pack_shape.py so the set cannot grow silently.
     "executive-assistant": "unvalidated_domain_packs_enabled",
     "aios-god-agent": "unvalidated_domain_packs_enabled",
     "repo-as-agent": "unvalidated_domain_packs_enabled",
     "roofing-company": "unvalidated_domain_packs_enabled",
     "healthcare-referral": "unvalidated_domain_packs_enabled",
+    "legal-discovery": "unvalidated_domain_packs_enabled",
+    "research-agent": "unvalidated_domain_packs_enabled",
 }
 
 

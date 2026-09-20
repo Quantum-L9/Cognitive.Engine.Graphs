@@ -227,6 +227,49 @@ def test_non_cypher_fstrings_outside_compilers_are_ignored() -> None:
     assert _blocking(src) == []
 
 
+# ── facts are lexically scoped (Codex P1 / Copilot on PR #285) ──────────────
+
+
+def test_sanitizer_binding_in_one_function_does_not_certify_another() -> None:
+    src = (
+        "def safe(value):\n"
+        "    label = sanitize_label(value)\n"
+        "    return f'MATCH (n:{label}) RETURN n'\n"
+        "def unsafe(label):\n"
+        "    return f'MATCH (n:{label}) RETURN n'\n"
+    )
+    findings = _blocking(src)
+    assert [(f.line_no, f.expression) for f in findings] == [(5, "label")]
+
+
+def test_binding_in_an_enclosing_scope_is_visible_to_nested_functions() -> None:
+    src = (
+        "LABEL = sanitize_label(spec.label)\n"
+        "def outer(x):\n"
+        "    prop = sanitize_label(x)\n"
+        "    def inner():\n"
+        "        return f'MATCH (n:{LABEL}) WHERE n.{prop} IS NULL RETURN n'\n"
+        "    return inner()\n"
+    )
+    assert _blocking(src) == []
+
+
+def test_helper_is_validated_only_by_its_own_returns() -> None:
+    """A validated return inside a nested def must not certify the outer helper."""
+    src = (
+        "class S:\n"
+        "    def _label(self, job):\n"
+        "        def _inner(v):\n"
+        "            return sanitize_label(v)\n"
+        "        return job.label\n"
+        "    def q(self, job):\n"
+        "        node_label = self._label(job)\n"
+        "        return f'MATCH (f:{node_label}) RETURN f'\n"
+    )
+    findings = _blocking(src)
+    assert [f.expression for f in findings] == ["node_label"]
+
+
 # ── waivers are explicit and visible ────────────────────────────────────────
 
 

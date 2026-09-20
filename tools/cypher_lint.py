@@ -32,11 +32,13 @@ anything else           compiled fragment           FAIL only when the expressio
 =====================  ==========================  ==================================
 
 An expression is *validated* when it is a call to ``sanitize_label`` /
-``sanitize_database_name`` / ``cypher_number``, a string literal, a name (or ``self`` attribute)
-assigned from a validated expression anywhere in the module, a same-module
-function whose every ``return`` is validated, an f-string / ``str.join`` /
-comprehension built only from validated parts, or a loop variable over a
-validated collection.
+``sanitize_database_name`` / ``cypher_number``, a string literal, a name
+bound from a validated expression in the same lexical scope (its function,
+an enclosing function, or the module — never a sibling function), a ``self``
+attribute assigned from one anywhere in the module, a same-module function
+whose own ``return`` statements (nested defs excluded) are all validated, an
+f-string / ``str.join`` / comprehension built only from validated parts, or a
+loop variable over a validated collection.
 
 An expression is a *raw domain-spec value* when it reads an attribute (or
 ``.get``) off ``spec``, ``gate``, ``job_spec``, ``dim``, ``metadata`` and
@@ -151,50 +153,113 @@ class Finding:
 # ── module facts ────────────────────────────────────────────────────────────
 
 
+_SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+_NESTED_STOP = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+
+
+def _own_nodes(root: ast.AST):
+    """Yield the nodes of ``root``'s own body, not descending into nested scopes."""
+    stack = list(ast.iter_child_nodes(root))
+    while stack:
+        node = stack.pop()
+        yield node
+        if not isinstance(node, _NESTED_STOP):
+            stack.extend(ast.iter_child_nodes(node))
+
+
+class _Scope:
+    """Validated / raw name facts for one lexical scope (module or function)."""
+
+    def __init__(self, node: ast.AST, parent: _Scope | None) -> None:
+        self.node = node
+        self.parent = parent
+        self.safe_names: set[str] = set()
+        self.raw_names: set[str] = set()
+        self.assignments: list[tuple[ast.expr, ast.expr]] = []
+        self.loops: list[tuple[ast.expr, ast.expr]] = []
+
+    def chain(self):
+        scope: _Scope | None = self
+        while scope is not None:
+            yield scope
+            scope = scope.parent
+
+
 class _ModuleFacts:
-    """Which names, ``self`` attributes and functions of a module are validated / raw."""
+    """Which names, ``self`` attributes and functions of a module are validated / raw.
+
+    Name facts are lexically scoped: a binding made inside one function is
+    visible in that function and its nested functions, never in a sibling —
+    so ``label = sanitize_label(x)`` in one method cannot certify a bare
+    ``{label}`` in another. ``self`` attributes are object state and stay
+    module-wide. Assignment order inside one scope is not tracked.
+    """
 
     def __init__(self, tree: ast.Module) -> None:
-        self.safe_names: set[str] = set()
         self.safe_attrs: set[str] = set()
-        self.safe_funcs: set[str] = set()
-        self.raw_names: set[str] = set()
         self.raw_attrs: set[str] = set()
-        self._assignments: list[tuple[ast.expr, ast.expr]] = []
-        self._loops: list[tuple[ast.expr, ast.expr]] = []
+        self.safe_funcs: set[str] = set()
+        self.parents: dict[ast.AST, ast.AST] = {}
+        for parent in ast.walk(tree):
+            for child in ast.iter_child_nodes(parent):
+                self.parents[child] = parent
+        self._scopes: dict[ast.AST, _Scope] = {tree: _Scope(tree, None)}
+        for node in ast.walk(tree):
+            if isinstance(node, _SCOPE_NODES):
+                self._scopes[node] = _Scope(node, None)
+        for node, scope in self._scopes.items():
+            if node is not tree:
+                # A nested function's parent scope is the function that
+                # contains it (closures see enclosing bindings), else the
+                # scope that contains the parent node.
+                parent_node = self.parents[node]
+                scope.parent = self._scopes.get(parent_node) or self.scope_of(parent_node)
         self._functions: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Assign):
-                self._assignments.extend((target, node.value) for target in node.targets)
+                self.scope_of(node).assignments.extend((target, node.value) for target in node.targets)
             elif (isinstance(node, (ast.AnnAssign, ast.AugAssign)) and node.value is not None) or isinstance(
                 node, ast.NamedExpr
             ):
-                self._assignments.append((node.target, node.value))
+                self.scope_of(node).assignments.append((node.target, node.value))
             elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
-                self._loops.append((node.target, node.iter))
+                self.scope_of(node).loops.append((node.target, node.iter))
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 self._functions.append(node)
         self._fixpoint()
+
+    def scope_of(self, node: ast.AST) -> _Scope:
+        """The lexical scope a node's bindings belong to (its nearest enclosing function, else module)."""
+        current: ast.AST | None = node
+        while current is not None:
+            if current in self._scopes and current is not node:
+                return self._scopes[current]
+            current = self.parents.get(current)
+        return next(iter(self._scopes.values()))
 
     def _fixpoint(self) -> None:
         changed = True
         while changed:
             changed = False
-            for target, value in self._assignments:
-                if self.is_safe(value):
-                    changed |= self._mark(target, self.safe_names, self.safe_attrs)
-                if self.is_raw(value):
-                    changed |= self._mark(target, self.raw_names, self.raw_attrs)
-            for target, iterable in self._loops:
-                if self.is_safe(iterable):
-                    changed |= self._mark(target, self.safe_names, self.safe_attrs)
-                if self.is_raw(iterable):
-                    changed |= self._mark(target, self.raw_names, self.raw_attrs)
+            for scope in self._scopes.values():
+                for target, value in scope.assignments:
+                    if self.is_safe(value, scope):
+                        changed |= self._mark(target, scope.safe_names, self.safe_attrs)
+                    if self.is_raw(value, scope):
+                        changed |= self._mark(target, scope.raw_names, self.raw_attrs)
+                for target, iterable in scope.loops:
+                    if self.is_safe(iterable, scope):
+                        changed |= self._mark(target, scope.safe_names, self.safe_attrs)
+                    if self.is_raw(iterable, scope):
+                        changed |= self._mark(target, scope.raw_names, self.raw_attrs)
             for fn in self._functions:
                 if fn.name in self.safe_funcs:
                     continue
-                returns = [n.value for n in ast.walk(fn) if isinstance(n, ast.Return) and n.value is not None]
-                if returns and all(self.is_safe(r) for r in returns):
+                # Only the function's own returns count — a validated return
+                # inside a nested helper says nothing about the outer function.
+                returns = [n.value for n in _own_nodes(fn) if isinstance(n, ast.Return) and n.value is not None]
+                fn_scope = self._scopes[fn]
+                if returns and all(self.is_safe(r, fn_scope) for r in returns):
                     self.safe_funcs.add(fn.name)
                     changed = True
 
@@ -214,13 +279,17 @@ class _ModuleFacts:
             return any(_ModuleFacts._mark(elt, names, attrs) for elt in target.elts)
         return False
 
+    @staticmethod
+    def _name_in(name: str, scope: _Scope, attr: str) -> bool:
+        return any(name in getattr(s, attr) for s in scope.chain())
+
     # -- validated? --
 
-    def is_safe(self, expr: ast.expr) -> bool:
+    def is_safe(self, expr: ast.expr, scope: _Scope) -> bool:
         if isinstance(expr, ast.Constant):
             return isinstance(expr.value, str)
         if isinstance(expr, ast.Name):
-            return expr.id in self.safe_names
+            return self._name_in(expr.id, scope, "safe_names")
         if isinstance(expr, ast.Attribute):
             return isinstance(expr.value, ast.Name) and expr.value.id == "self" and expr.attr in self.safe_attrs
         if isinstance(expr, ast.Call):
@@ -236,32 +305,32 @@ class _ModuleFacts:
                 and isinstance(expr.func.value, ast.Constant)
                 and len(expr.args) == 1
             ):
-                return self.is_safe(expr.args[0])
+                return self.is_safe(expr.args[0], scope)
             return False
         if isinstance(expr, ast.JoinedStr):
-            return all(self.is_safe(v.value) for v in expr.values if isinstance(v, ast.FormattedValue))
+            return all(self.is_safe(v.value, scope) for v in expr.values if isinstance(v, ast.FormattedValue))
         if isinstance(expr, ast.FormattedValue):
-            return self.is_safe(expr.value)
+            return self.is_safe(expr.value, scope)
         if isinstance(expr, ast.BoolOp):
-            return all(self.is_safe(v) for v in expr.values)
+            return all(self.is_safe(v, scope) for v in expr.values)
         if isinstance(expr, ast.IfExp):
-            return self.is_safe(expr.body) and self.is_safe(expr.orelse)
+            return self.is_safe(expr.body, scope) and self.is_safe(expr.orelse, scope)
         if isinstance(expr, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
-            return self.is_safe(expr.elt)
+            return self.is_safe(expr.elt, scope)
         if isinstance(expr, (ast.List, ast.Tuple, ast.Set)):
-            return bool(expr.elts) and all(self.is_safe(e) for e in expr.elts)
+            return bool(expr.elts) and all(self.is_safe(e, scope) for e in expr.elts)
         if isinstance(expr, ast.Dict):
             # a literal allow-list: `_OPERATORS[gate.operator]` raises on anything else
-            return bool(expr.values) and all(v is not None and self.is_safe(v) for v in expr.values)
+            return bool(expr.values) and all(v is not None and self.is_safe(v, scope) for v in expr.values)
         if isinstance(expr, ast.Subscript):
-            return self.is_safe(expr.value)
+            return self.is_safe(expr.value, scope)
         return False
 
     # -- raw domain-spec value? --
 
-    def is_raw(self, expr: ast.expr) -> bool:
+    def is_raw(self, expr: ast.expr, scope: _Scope) -> bool:
         if isinstance(expr, ast.Name):
-            return expr.id in self.raw_names
+            return self._name_in(expr.id, scope, "raw_names")
         if isinstance(expr, ast.Attribute):
             root = _attribute_root(expr)
             if root in RAW_ROOTS:
@@ -274,18 +343,18 @@ class _ModuleFacts:
             if name in SANITIZERS or name in self.safe_funcs or name in NUMERIC_CASTS:
                 return False
             if isinstance(expr.func, ast.Attribute) and expr.func.attr in {"get", "pop", "strip", "lower", "upper"}:
-                return self.is_raw(expr.func.value)
+                return self.is_raw(expr.func.value, scope)
             if isinstance(expr.func, ast.Name) and expr.func.id == "str":
-                return bool(expr.args) and self.is_raw(expr.args[0])
+                return bool(expr.args) and self.is_raw(expr.args[0], scope)
             return False
         if isinstance(expr, ast.BoolOp):
-            return any(self.is_raw(v) for v in expr.values)
+            return any(self.is_raw(v, scope) for v in expr.values)
         if isinstance(expr, ast.IfExp):
-            return self.is_raw(expr.body) or self.is_raw(expr.orelse)
+            return self.is_raw(expr.body, scope) or self.is_raw(expr.orelse, scope)
         if isinstance(expr, ast.Subscript):
-            return self.is_raw(expr.value)
+            return self.is_raw(expr.value, scope)
         if isinstance(expr, ast.JoinedStr):
-            return any(self.is_raw(v.value) for v in expr.values if isinstance(v, ast.FormattedValue))
+            return any(self.is_raw(v.value, scope) for v in expr.values if isinstance(v, ast.FormattedValue))
         return False
 
 
@@ -395,32 +464,32 @@ def _is_cypher_candidate(node: ast.JoinedStr, parents: dict[ast.AST, ast.AST]) -
 # ── classification ──────────────────────────────────────────────────────────
 
 
-def _classify(before: str, expr: ast.expr, facts: _ModuleFacts) -> str | None:
+def _classify(before: str, expr: ast.expr, facts: _ModuleFacts, scope: _Scope) -> str | None:
     """Return the failure kind for one interpolation, or None when it is acceptable."""
     tail = before[-1:] if before else ""
     if tail in {"'", '"'}:
         return "quoted value interpolation — pass the value as a $parameter"
     if tail == "`":
-        if not facts.is_safe(expr):
+        if not facts.is_safe(expr, scope):
             return "back-quoted identifier is not validated (sanitize_database_name / sanitize_label)"
         return None
     if tail == "$":
-        if not facts.is_safe(expr):
+        if not facts.is_safe(expr, scope):
             return "parameter name is not validated — derive it from sanitize_label() or a literal"
         return None
     if tail == ":":
-        if not facts.is_safe(expr):
+        if not facts.is_safe(expr, scope):
             return "label / relationship type is not validated (sanitize_label)"
         return None
     if tail == "." and not before.endswith(".."):
-        if not facts.is_safe(expr):
+        if not facts.is_safe(expr, scope):
             return "property name is not validated (sanitize_label)"
         return None
     if _LIMIT_SKIP_RE.search(before.rstrip()):
         return "LIMIT / SKIP bound interpolated — pass it as a $parameter"
-    if facts.is_safe(expr):
+    if facts.is_safe(expr, scope):
         return None
-    if facts.is_raw(expr):
+    if facts.is_raw(expr, scope):
         return "raw domain-spec value interpolated into Cypher — sanitize_label() it or pass it as a $parameter"
     return None
 
@@ -429,10 +498,7 @@ def scan_source(source: str, *, rel_path: str) -> list[Finding]:
     """Scan one module's source text."""
     tree = ast.parse(source, filename=rel_path)
     facts = _ModuleFacts(tree)
-    parents: dict[ast.AST, ast.AST] = {}
-    for parent in ast.walk(tree):
-        for child in ast.iter_child_nodes(parent):
-            parents[child] = parent
+    parents = facts.parents
     lines = source.splitlines()
 
     findings: list[Finding] = []
@@ -443,6 +509,7 @@ def scan_source(source: str, *, rel_path: str) -> list[Finding]:
             continue  # nested format spec of another f-string
         if _is_message_context(node, parents) or not _is_cypher_candidate(node, parents):
             continue
+        scope = facts.scope_of(node)
         before = ""
         for value in node.values:
             if isinstance(value, ast.Constant) and isinstance(value.value, str):
@@ -450,7 +517,7 @@ def scan_source(source: str, *, rel_path: str) -> list[Finding]:
                 continue
             if not isinstance(value, ast.FormattedValue):
                 continue
-            kind = _classify(before, value.value, facts)
+            kind = _classify(before, value.value, facts, scope)
             before = ""
             if kind is None:
                 continue
