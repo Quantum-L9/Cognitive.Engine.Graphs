@@ -67,7 +67,6 @@ class GraphStore(Protocol):
         Returns:
             List of dicts with 'id' and 'text' keys.
         """
-        ...
 
     async def write_edges(
         self,
@@ -83,7 +82,6 @@ class GraphStore(Protocol):
         Returns:
             Number of edges written.
         """
-        ...
 
     async def get_vertex_count(self, label: str) -> int:
         """Count vertices with given label.
@@ -94,7 +92,6 @@ class GraphStore(Protocol):
         Returns:
             Number of vertices.
         """
-        ...
 
 
 @dataclass
