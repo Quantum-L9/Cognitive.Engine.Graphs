@@ -126,7 +126,6 @@ class LLMGenerator(Protocol):
         Returns:
             Generated text response.
         """
-        ...
 
 
 class KeywordExtractor(Protocol):
@@ -141,7 +140,6 @@ class KeywordExtractor(Protocol):
         Returns:
             Set of extracted keyword strings.
         """
-        ...
 
 
 class EmbeddingEncoder(Protocol):
@@ -156,7 +154,6 @@ class EmbeddingEncoder(Protocol):
         Returns:
             Embedding vector as tuple of floats.
         """
-        ...
 
 
 # ── Main Generator ───────────────────────────────────────────────────
@@ -182,8 +179,8 @@ class PseudoQueryGenerator:
             n_incoming=2,
             m_outgoing=4,
         )
-        print(len(result.incoming))   # 2
-        print(len(result.outgoing))   # 4
+        logger.info("incoming=%d", len(result.incoming))   # 2
+        logger.info("outgoing=%d", len(result.outgoing))   # 4
     """
 
     def __init__(

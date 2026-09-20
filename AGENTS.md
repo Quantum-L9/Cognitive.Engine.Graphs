@@ -22,7 +22,7 @@ Cross-tool agent instructions for the CEG repository. Read by Claude Code, Codex
 
 ```bash
 make setup              # Install deps, pre-commit hooks, verify Neo4j
-make dev                # docker-compose (app + Neo4j + Redis + Prometheus + Grafana)
+make dev                # docker-compose (app + Neo4j + Postgres)
 make test               # Full pytest suite (unit + integration + compliance)
 make test-unit          # Gate compilation, scoring math, parameter resolution
 make test-integration   # testcontainers-neo4j full pipeline

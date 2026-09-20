@@ -121,26 +121,62 @@ git commit -m "fix: gate implementation"
 
 ### Symptom
 ```
-❌ Unparameterized value interpolation detected
+❌ quoted value interpolation — pass the value as a $parameter
 File: engine/sync/generator.py:89
-Pattern: f"SET n.status = '{status}'"
+Expression: {status}
+Pattern: cypher = f"SET n.status = '{status}'"
 ```
 
 ### Diagnosis
-This violates **Contract C-009** (Cypher Injection Prevention). Values must be parameterized.
+This violates **Contract C-009** (Cypher Injection Prevention). `tools/cypher_lint.py`
+parses every f-string that builds Cypher and classifies each `{expr}` by the text
+just before it:
+
+| Text before `{expr}` | Role | Verdict |
+|---|---|---|
+| `'` or `"` | data value | always fails — pass it as a `$parameter` |
+| `LIMIT` / `SKIP` | bound | always fails — pass it as a `$parameter` |
+| `:` | label / relationship type | must be `sanitize_label(...)` or a name derived from it |
+| `.` | property name | must be `sanitize_label(...)` or a name derived from it |
+| `$` | parameter **name** | must be `sanitize_label(...)` or a name derived from it |
+| `` ` `` | back-quoted identifier | must be `sanitize_database_name(...)` / `sanitize_label(...)` |
+| anything else | compiled fragment | fails only when the expression reads a raw `spec` / `gate` / `dim` / `metadata` value |
+
+`int(...)` / `float(...)` casts and lookups in a literal allow-list dict count as
+validated. Diagnostic strings (`raise`, `logger.*`, `msg = ...`, `reason=`) are
+recognised by AST context and skipped.
 
 ### Resolution
 ```python
-# ❌ WRONG
+# ❌ WRONG — value quoted into the statement
 cypher = f"SET n.status = '{status}'"
 await driver.execute_query(cypher)
 
-# ✅ CORRECT
+# ✅ CORRECT — value travels as a parameter
 cypher = "SET n.status = $status"
 await driver.execute_query(cypher, {"status": status})
+
+# ❌ WRONG — spec token interpolated raw (label, property, parameter name, operator)
+cypher = f"candidate.{gate.candidateprop} {gate.operator} ${gate.queryparam}"
+
+# ✅ CORRECT — identifiers validated, operator from an allow-list
+prop = sanitize_label(gate.candidateprop)
+op = _OPERATORS[gate.operator]
+param = sanitize_label(gate.queryparam)
+cypher = f"candidate.{prop} {op} ${param}"
 ```
 
-**Agent Action**: Never interpolate values into Cypher. Only labels (after `sanitize_label()`).
+Gate classes in `engine/gates/types/all_gates.py` bind run-time data with
+`self._bind_param(suffix, value)` and expose it via `gate.query_params`; merge
+that dict into the `execute_query` parameters.
+
+A finding may be waived only with `# cypher-lint: allow <reason>` on the
+interpolation's line. Waivers are printed on every run (never silent) and a
+marker without a reason is ignored.
+
+**Agent Action**: Never interpolate values into Cypher. Only validated identifiers
+(after `sanitize_label()` / `sanitize_database_name()`), and only `$parameters`
+for data.
 
 ---
 

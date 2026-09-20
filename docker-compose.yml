@@ -12,7 +12,6 @@
 # Usage: docker compose up -d
 # API:      http://localhost:8000/v1/health
 # Neo4j:    http://localhost:7474 (browser), bolt://localhost:7687
-# Redis:    localhost:6379
 # Postgres: localhost:5432 (PacketStore + ComplianceEngine audit-flush pool)
 
 services:
@@ -39,7 +38,13 @@ services:
       GATE_ADMIN_TOKEN: ${GATE_ADMIN_TOKEN:-dev-gate-admin-token-not-for-production}
       GATE_REGISTRATION_ENABLED: "true"
       L9_NODE_NAME: graph
-      L9_NODE_SPEC_PATH: engine/spec.yaml
+      # CEG-003: the SDK reads GATE_NODE_SPEC_PATH (gate/config.py). This was
+      # L9_NODE_SPEC_PATH, which nothing consumes — registration worked only
+      # because the SDK's default happens to be engine/spec.yaml and WORKDIR is
+      # /app. Relocating the spec would have silently had no effect until the
+      # default path stopped existing, at which point register_with_gate
+      # swallows FileNotFoundError and returns False.
+      GATE_NODE_SPEC_PATH: engine/spec.yaml
       L9_ENVIRONMENT: local
       L9_SERVICE_NAME: graph-engine
       L9_SERVICE_VERSION: 1.1.0
@@ -50,6 +55,16 @@ services:
       L9_SIGNING_ALGORITHM: hmac-sha256
       L9_SIGNING_KEY: dev-shared-hmac-secret-not-for-production
       L9_SIGNING_KEY_ID: graph-engine-v1
+      # CEG-002: L9_REQUIRE_SIGNATURE also turns on verification of the
+      # responses Gate signs, and Gate signs with *its* key id — not CEG's. With
+      # no verifying-key map this file shipped a node that rejected every signed
+      # Gate response with "no verifying key available for transport signature
+      # verification". The E2E only passed because its harness supplied the map.
+      # HMAC verification uses the same shared secret as signing; under ed25519
+      # these are Gate's and CEG's public keys instead.
+      L9_VERIFYING_KEYS_JSON: >-
+        {"gate-v1": "dev-shared-hmac-secret-not-for-production",
+         "graph-engine-v1": "dev-shared-hmac-secret-not-for-production"}
       # `enrich` deliberately absent: Gate owns that action name for EIE.
       L9_ALLOWED_ACTIONS: match,sync,admin,outcomes,resolve,health,healthcheck
       L9_MAX_ATTACHMENTS: "0"
@@ -61,8 +76,6 @@ services:
       NEO4J_USERNAME: neo4j
       NEO4J_PASSWORD: l9-dev-password
       NEO4J_POOL_SIZE: "20"
-      # Redis
-      REDIS_URL: redis://redis:6379/0
       # API
       API_KEY: dev-key-sha256-not-for-production
       LOG_LEVEL: debug
@@ -88,10 +101,10 @@ services:
       # Hot-reload: mount source code so changes reflect without rebuild
       - ./engine:/app/engine:ro
       - ./domains:/app/domains:ro
+    # CEG-007: redis was a depends_on: service_healthy here, so the api service
+    # could not start without a Redis nothing imports.
     depends_on:
       neo4j:
-        condition: service_healthy
-      redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
@@ -135,24 +148,6 @@ services:
     networks:
       - l9-graph
 
-  # ── Redis 7.x ───────────────────────────────────────────
-  redis:
-    image: redis:7-alpine
-    container_name: l9-graph-redis
-    ports:
-      - "6379:6379"
-    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - l9-graph
-
   # ── PostgreSQL 16 (PacketStore + ComplianceEngine audit) ──
   postgres:
     image: postgres:16-alpine
@@ -183,7 +178,6 @@ volumes:
   neo4j_data:
   neo4j_logs:
   neo4j_plugins:
-  redis_data:
   postgres_data:
 
 networks:

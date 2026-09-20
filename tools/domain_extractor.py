@@ -22,8 +22,8 @@ USAGE:
 OUTPUT:
     domains/
     ├── plasticos/spec.yaml
-    ├── mortgage_brokerage_domain_spec.yaml
-    ├── healthcare_referral_domain_spec.yaml
+    ├── mortgage-brokerage/spec.yaml
+    ├── healthcare-referral/spec.yaml
     └── ...
 """
 
@@ -67,16 +67,17 @@ def extract_domains(input_file: Path) -> None:
 
         domain_id = domain_id_match.group(1)
 
-        # Normalize domain_id (replace hyphens with underscores for filename)
-        domain_id_normalized = domain_id.replace("-", "_")
-
         # Clean up YAML (remove --- separator if at start)
         spec_clean = spec.strip()
         if spec_clean.startswith("---"):
             spec_clean = spec_clean[3:].lstrip()
 
-        # Write spec file with standard naming convention
-        spec_path = domains_dir / f"{domain_id_normalized}_domain_spec.yaml"
+        # Folder-shaped pack: domains/<domain-id>/spec.yaml is the only layout
+        # DomainPackLoader discovers (tests/unit/test_domain_pack_shape.py
+        # rejects the former flat <id>_domain_spec.yaml files).
+        pack_dir = domains_dir / domain_id
+        pack_dir.mkdir(exist_ok=True)
+        spec_path = pack_dir / "spec.yaml"
         spec_path.write_text(spec_clean)
 
         print(f"✅ Created: {spec_path} ({len(spec_clean)} bytes)")

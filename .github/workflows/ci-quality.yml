@@ -182,15 +182,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+      # CEG-007: redis service container removed with the dependency.
 
     steps:
       - name: Checkout code
@@ -215,7 +207,6 @@ jobs:
       - name: Run tests with coverage
         env:
           DATABASE_URL: postgresql://${{ vars.TEST_DB_USER || 'test' }}:${{ vars.TEST_DB_PASSWORD || 'test' }}@localhost:5432/${{ vars.TEST_DB_NAME || 'test_db' }}
-          REDIS_URL: redis://localhost:6379
           TESTING: "true"
         run: PYTHONPATH=. pytest tests/ -v --cov=engine --cov-report=xml --cov-report=term --ignore=tests/e2e
 

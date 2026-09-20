@@ -86,7 +86,7 @@ class CausalCompiler:
         up to the configured depth limit.
         """
         safe_root = sanitize_label(root_label)
-        depth = max_depth or self._causal_spec.chain_depth_limit
+        depth = int(max_depth or self._causal_spec.chain_depth_limit)
 
         if edge_types:
             safe_types = [sanitize_label(t) for t in edge_types]

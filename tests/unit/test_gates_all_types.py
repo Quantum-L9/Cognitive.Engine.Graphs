@@ -22,6 +22,7 @@ from engine.gates.compiler import GateCompiler
 from engine.gates.types.all_gates import (
     BaseGate,
     BooleanGate,
+    EnumMapGate,
     ExclusionGate,
     FreshnessGate,
     ThresholdGate,
@@ -431,3 +432,197 @@ class TestGateTypeClasses:
 
         assert "EXISTS" in cypher
         assert "HAS" in cypher
+
+
+# ============================================================================
+# C-009: GATE VALUES TRAVEL AS PARAMETERS, IDENTIFIERS ARE VALIDATED
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestGateValueParameterization:
+    """F280-1: enum mapping keys/values are data, never quoted into the fragment."""
+
+    @staticmethod
+    def _enum_gate(mapping: dict) -> EnumMapGate:
+        spec = MagicMock()
+        spec.name = "polymer-map"
+        spec.candidateprop = "polymertype"
+        spec.queryparam = "polymertype"
+        spec.mapping = mapping
+        return EnumMapGate(spec, MagicMock())
+
+    def test_mapping_values_are_bound_as_parameters(self) -> None:
+        gate = self._enum_gate({"PET": ["PET", "rPET"], "HDPE": ["HDPE"]})
+
+        cypher = gate.compile()
+        params = gate.query_params
+
+        assert cypher == (
+            "CASE WHEN $query.polymertype = $gate_polymer_map_key_0 THEN candidate.polymertype IN $gate_polymer_map_values_0 "
+            "WHEN $query.polymertype = $gate_polymer_map_key_1 THEN candidate.polymertype IN $gate_polymer_map_values_1 "
+            "ELSE false END"
+        )
+        assert params == {
+            "gate_polymer_map_key_0": "PET",
+            "gate_polymer_map_values_0": ["PET", "rPET"],
+            "gate_polymer_map_key_1": "HDPE",
+            "gate_polymer_map_values_1": ["HDPE"],
+        }
+        assert "'" not in cypher
+
+    def test_legitimate_non_identifier_values_are_accepted(self) -> None:
+        """Spaces and hyphens are valid data — sanitize_label would have rejected them."""
+        gate = self._enum_gate({"post-consumer": ["post consumer", "post-industrial", "mixed/bale"]})
+
+        cypher = gate.compile()
+
+        assert "post-consumer" not in cypher
+        assert gate.query_params["gate_polymer_map_key_0"] == "post-consumer"
+        assert gate.query_params["gate_polymer_map_values_0"] == ["post consumer", "post-industrial", "mixed/bale"]
+
+    def test_injection_shaped_values_never_reach_the_fragment(self) -> None:
+        payload = "x' OR 1=1 OR '"
+        gate = self._enum_gate({payload: ["a'] OR true OR ['b"]})
+
+        cypher = gate.compile()
+
+        assert "OR 1=1" not in cypher
+        assert "OR true" not in cypher
+        assert gate.query_params["gate_polymer_map_key_0"] == payload
+
+    def test_params_reset_between_compiles(self) -> None:
+        gate = self._enum_gate({"PET": ["PET"]})
+        gate.compile()
+        gate.spec.mapping = {"HDPE": ["HDPE"]}
+        gate.compile()
+        assert gate.query_params == {"gate_polymer_map_key_0": "HDPE", "gate_polymer_map_values_0": ["HDPE"]}
+
+    def test_no_mapping_binds_nothing(self) -> None:
+        gate = self._enum_gate({})
+        assert gate.compile() == "$query.polymertype IN candidate.polymertype"
+        assert gate.query_params == {}
+
+    def test_parameter_keys_stay_bounded_identifiers_for_long_gate_names(self) -> None:
+        gate = self._enum_gate({"PET": ["PET"]})
+        gate.spec.name = "g" * 120
+        gate.compile()
+        for key in gate.query_params:
+            assert len(key) <= 64
+            assert key.replace("_", "a").isalnum()
+
+    def test_composite_gate_collects_subgate_parameters(self) -> None:
+        from engine.config.schema import GateType
+        from engine.gates.types.all_gates import CompositeGate
+
+        sub = MagicMock()
+        sub.name = "sub"
+        sub.type = GateType.ENUMMAP
+        sub.candidateprop = "p"
+        sub.queryparam = "q"
+        sub.mapping = {"a": ["b"]}
+        composite = MagicMock()
+        composite.name = "both"
+        composite.subgates = ["sub"]
+        composite.logic = "and"
+        domain_spec = MagicMock()
+        domain_spec.gates = [sub]
+
+        gate = CompositeGate(composite, domain_spec)
+        cypher = gate.compile()
+
+        assert " AND " in cypher or cypher.count("(") == 1
+        assert gate.query_params == {"gate_sub_key_0": "a", "gate_sub_values_0": ["b"]}
+
+    def test_composite_logic_outside_allow_list_is_rejected(self) -> None:
+        from engine.gates.types.all_gates import CompositeGate
+
+        composite = MagicMock()
+        composite.name = "bad"
+        composite.subgates = ["x"]
+        composite.logic = "AND true OR"
+        domain_spec = MagicMock()
+        domain_spec.gates = []
+        with pytest.raises((KeyError, ValueError)):
+            CompositeGate(composite, domain_spec).compile()
+
+
+@pytest.mark.unit
+class TestGateIdentifierValidation:
+    """Structural identifiers read from the spec are sanitized before interpolation."""
+
+    def test_exclusion_gate_sanitizes_edge_and_node_variables(self) -> None:
+        spec = MagicMock()
+        spec.name = "blocked"
+        spec.edgetype = "BLOCKED"
+        spec.fromnode = "q"
+        spec.tonode = "c"
+        assert ExclusionGate(spec, MagicMock()).compile() == "NOT EXISTS((q)-[:BLOCKED]->(c))"
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("edgetype", "BLOCKED]->() RETURN 1 //"),
+            ("fromnode", "query) WHERE true OR (x"),
+            ("tonode", "candidate)) OR true OR (("),
+        ],
+    )
+    def test_exclusion_gate_rejects_injection_shaped_identifiers(self, field: str, value: str) -> None:
+        spec = MagicMock()
+        spec.name = "blocked"
+        spec.edgetype = "BLOCKED"
+        spec.fromnode = None
+        spec.tonode = None
+        setattr(spec, field, value)
+        with pytest.raises(ValueError):
+            ExclusionGate(spec, MagicMock()).compile()
+
+    def test_threshold_operator_outside_allow_list_is_rejected(self) -> None:
+        spec = MagicMock()
+        spec.name = "t"
+        spec.candidateprop = "score"
+        spec.queryparam = "score"
+        spec.operator = ">= 0 OR 1=1 OR candidate.score"
+        with pytest.raises(KeyError):
+            ThresholdGate(spec, MagicMock()).compile()
+
+    def test_prop_and_param_refs_validate_identifiers(self) -> None:
+        spec = MagicMock()
+        spec.name = "b"
+        spec.candidateprop = "candidate.active"
+        spec.queryparam = "$query.active"
+        assert BooleanGate(spec, MagicMock()).compile() == "candidate.active = $query.active"
+
+        spec.candidateprop = "active) OR true OR (x"
+        with pytest.raises(ValueError):
+            BooleanGate(spec, MagicMock()).compile()
+        spec.candidateprop = "active"
+        spec.queryparam = "active RETURN 1"
+        with pytest.raises(ValueError):
+            BooleanGate(spec, MagicMock()).compile()
+
+    def test_gate_compiler_validates_query_parameter_names(self) -> None:
+        gate = make_mock_gate_spec(
+            name="credit_min",
+            gate_type=GateType.THRESHOLD,
+            candidate_prop="mincreditscore",
+            query_param="creditscore RETURN 1 //",
+            operator=">=",
+        )
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+        with pytest.raises(ValueError):
+            compiler.compile(gate)
+
+    def test_gate_compiler_validates_operator_and_logic(self) -> None:
+        threshold = make_mock_gate_spec(
+            name="t", gate_type=GateType.THRESHOLD, candidate_prop="score", query_param="score", operator="=="
+        )
+        compiler = GateCompiler(make_mock_domain_spec(gates=[threshold]))
+        with pytest.raises(KeyError):
+            compiler.compile(threshold)
+
+        composite = make_mock_gate_spec(name="c", gate_type=GateType.COMPOSITE, sub_gates=["t"], combinator="AND OR")
+        threshold.operator = ">="
+        compiler = GateCompiler(make_mock_domain_spec(gates=[threshold, composite]))
+        with pytest.raises(KeyError):
+            compiler.compile(composite)

@@ -126,3 +126,27 @@ def compile_traversal_gate(spec: GateSpec) -> str:
 **Scope note:** these rules apply to `engine/` only. Abstract base classes in `chassis/`
 (for example `AuditSink.write_batch`) raise `NotImplementedError` as their defining
 contract — that is the intended use, not a stub.
+
+### `typing.Protocol` method bodies (CEG#267)
+
+A Protocol method is a structural signature. It is never instantiated and never
+executed. The only body that is valid Python *and* clean on every in-repo gate
+is a docstring and nothing else:
+
+| Body | `STUB-001` | ruff `PIE790` | github-code-quality |
+|---|---|---|---|
+| `raise NotImplementedError` | CRITICAL (blocks merge) | clean | clean |
+| `pass` | clean | PIE790 | clean |
+| `...` | clean | clean | “Statement has no effect” |
+| docstring only | clean | clean | clean |
+
+Do not “fix” a Protocol by raising. That is the opposite of a stub-free engine:
+it trips the blocking scanner so a review bot can go quiet. Chassis ABCs may
+still raise; `engine/` Protocols may not.
+
+```python
+# ✅ CORRECT — Protocol signature, no executable statement
+class GraphWriter(Protocol):
+    async def execute_write(self, *args: Any, **kwargs: Any) -> Any:
+        """Run one managed write transaction."""
+```

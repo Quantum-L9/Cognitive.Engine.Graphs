@@ -13,12 +13,27 @@ All 10 gate type implementations in one file.
 Production-grade, enterprise-quality, frontier AI lab standard.
 """
 
+import hashlib
 import logging
+import re
 from abc import ABC, abstractmethod
+from typing import Any
 
 from engine.config.schema import DomainSpec, GateSpec
+from engine.utils.security import sanitize_label
 
 logger = logging.getLogger(__name__)
+
+_PARAM_KEY_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_]")
+_MAX_PARAM_KEY_LEN = 64
+
+# C-009: spec tokens interpolated verbatim pass through a literal allow-list —
+# a lookup raises on anything else — so an operator or combinator read from
+# untrusted YAML can never carry Cypher.
+_OPERATORS: dict[str, str] = {
+    op: op for op in (">=", "<=", ">", "<", "=", "!=", "<>", "IN", "CONTAINS", "STARTS WITH", "ENDS WITH")
+}
+_LOGIC: dict[str, str] = {"AND": "AND", "OR": "OR"}
 
 
 # ============================================================================
@@ -39,6 +54,11 @@ class BaseGate(ABC):
         """
         self.spec = spec
         self.domain_spec = domain_spec
+        # C-009: data values a gate needs at run time never appear in the
+        # compiled fragment as literals. compile() registers them here under
+        # the parameter names the fragment references, and the caller merges
+        # `query_params` into the execute_query parameters.
+        self._query_params: dict[str, Any] = {}
 
     @abstractmethod
     def compile(self) -> str:
@@ -49,13 +69,40 @@ class BaseGate(ABC):
             Cypher clause (without NULL handling)
         """
 
+    @property
+    def query_params(self) -> dict[str, Any]:
+        """Cypher parameters registered by the most recent compile() call."""
+        return dict(self._query_params)
+
+    def _bind_param(self, suffix: str, value: Any) -> str:
+        """Register ``value`` as a Cypher parameter and return its ``$name`` reference.
+
+        The name is derived from the gate name so fragments from different gates
+        never collide; both parts are reduced to ``[A-Za-z0-9_]`` so the name is
+        always a valid Cypher parameter identifier.
+        """
+        safe_gate = _PARAM_KEY_UNSAFE_RE.sub("_", self.spec.name)
+        safe_suffix = _PARAM_KEY_UNSAFE_RE.sub("_", suffix)
+        raw_key = f"gate_{safe_gate}_{safe_suffix}"
+        if len(raw_key) > _MAX_PARAM_KEY_LEN:
+            # Keep the key an identifier of bounded length; the digest keeps it unique per gate.
+            digest = hashlib.sha256(safe_gate.encode()).hexdigest()[:16]
+            raw_key = f"gate_{digest}_{safe_suffix}"[:_MAX_PARAM_KEY_LEN]
+        key = sanitize_label(raw_key)
+        self._query_params[key] = value
+        return f"${key}"
+
     def _prop_ref(self, prop: str) -> str:
-        """Format property reference."""
-        return f"candidate.{prop}" if not prop.startswith("candidate.") else prop
+        """Format property reference (property name validated as an identifier)."""
+        name = sanitize_label(prop.removeprefix("candidate."))
+        return f"candidate.{name}"
 
     def _param_ref(self, param: str) -> str:
-        """Format query parameter reference."""
-        return f"$query.{param}" if not param.startswith("$") else param
+        """Format query parameter reference (parameter path validated as identifiers)."""
+        parts = param.removeprefix("$").split(".")
+        if parts[0] != "query":
+            parts.insert(0, "query")
+        return "$" + ".".join(sanitize_label(part) for part in parts)
 
 
 # ============================================================================
@@ -104,7 +151,7 @@ class ThresholdGate(BaseGate):
 
         prop = self._prop_ref(self.spec.candidateprop)
         param = self._param_ref(self.spec.queryparam)
-        operator = self.spec.operator
+        operator = _OPERATORS[self.spec.operator]
 
         return f"{prop} {operator} {param}"
 
@@ -149,6 +196,7 @@ class CompositeGate(BaseGate):
         if not self.spec.logic:
             raise ValueError(f"Gate '{self.spec.name}': logic required (AND/OR)")
 
+        self._query_params = {}
         # Find subgate specs by name
         subgate_clauses = []
         for subgate_name in self.spec.subgates:
@@ -162,8 +210,9 @@ class CompositeGate(BaseGate):
             gate_class = GateRegistry.get_gate_class(subgate_spec.type)
             gate_instance = gate_class(subgate_spec, self.domain_spec)
             subgate_clauses.append(f"({gate_instance.compile()})")
+            self._query_params.update(gate_instance.query_params)
 
-        logic_op = f" {self.spec.logic.upper()} "
+        logic_op = f" {_LOGIC[self.spec.logic.upper()]} "
         return logic_op.join(subgate_clauses)
 
 
@@ -186,14 +235,19 @@ class EnumMapGate(BaseGate):
 
         prop = self._prop_ref(self.spec.candidateprop)
         param = self._param_ref(self.spec.queryparam)
+        self._query_params = {}
 
         # Check if mapping is provided (query value → candidate values)
         if self.spec.mapping:
-            # Build CASE WHEN for complex mapping
+            # Build CASE WHEN for complex mapping. Mapping keys and values are
+            # data compared against properties, not labels: they may contain
+            # spaces, dashes or anything else, so they travel as $parameters
+            # (C-009) rather than as quoted literals in the fragment.
             cases = []
-            for query_val, candidate_vals in self.spec.mapping.items():
-                val_list = ", ".join([f"'{v}'" for v in candidate_vals])
-                cases.append(f"WHEN {param} = '{query_val}' THEN {prop} IN [{val_list}]")
+            for index, (query_val, candidate_vals) in enumerate(self.spec.mapping.items()):
+                key_ref = self._bind_param(f"key_{index}", query_val)
+                values_ref = self._bind_param(f"values_{index}", list(candidate_vals))
+                cases.append(f"WHEN {param} = {key_ref} THEN {prop} IN {values_ref}")
 
             case_expr = " ".join(cases)
             return f"CASE {case_expr} ELSE false END"
@@ -216,9 +270,12 @@ class ExclusionGate(BaseGate):
         if not self.spec.edgetype:
             raise ValueError(f"Gate '{self.spec.name}': edgetype required")
 
-        edge = self.spec.edgetype
-        from_node = self.spec.fromnode or "query"
-        to_node = self.spec.tonode or "candidate"
+        # Relationship type and node variables are structural identifiers
+        # read straight from the domain spec, which is untrusted input:
+        # sanitize before interpolation (C-009).
+        edge = sanitize_label(self.spec.edgetype)
+        from_node = sanitize_label(self.spec.fromnode or "query")
+        to_node = sanitize_label(self.spec.tonode or "candidate")
 
         return f"NOT EXISTS(({from_node})-[:{edge}]->({to_node}))"
 
@@ -265,7 +322,7 @@ class FreshnessGate(BaseGate):
             raise ValueError(f"Gate '{self.spec.name}': maxagedays required")
 
         prop = self._prop_ref(self.spec.candidateprop)
-        max_age = self.spec.maxagedays
+        max_age = int(self.spec.maxagedays)
 
         return f"duration.between({prop}, datetime()).days <= {max_age}"
 
@@ -314,10 +371,16 @@ class TraversalGate(BaseGate):
         if not self.spec.condition:
             raise ValueError(f"Gate '{self.spec.name}': condition required")
 
+        # `pattern` and `condition` are spec-authored Cypher by design — the
+        # traversal gate is the domain spec's escape hatch and has no
+        # value-level grammar to validate against. The live GateCompiler
+        # (engine/gates/compiler.py) does not honour these fields; packs that
+        # rely on them are withheld behind `unvalidated_domain_packs_enabled`
+        # (CEG-009). The waiver below keeps the scanner honest about that.
         pattern = self.spec.pattern
         condition = self.spec.condition
 
-        return f"EXISTS {{ MATCH {pattern} WHERE {condition} }}"
+        return f"EXISTS {{ MATCH {pattern} WHERE {condition} }}"  # cypher-lint: allow spec-authored Cypher escape hatch, withheld by CEG-009
 
 
 # ============================================================================

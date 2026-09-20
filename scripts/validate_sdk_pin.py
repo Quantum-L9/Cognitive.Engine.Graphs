@@ -6,10 +6,23 @@ Manifests name the major tag. poetry.lock records that tag as ``reference`` and
 the resolved object as ``resolved_reference``.
 
 Gate_SDK owns what ``v1`` means (``contracts/RELEASE_IDENTITY_LEDGER.json``,
-schema v2). The structural checks below prove CEG declares the channel; they
-cannot prove the lock still holds what the channel points at, because a moving
-tag goes stale without any local file changing. ``--verify-tag`` closes that
-gap by resolving the channel at the canonical remote.
+schema v2).
+
+CEG-001 asked for an immutable SHA in the manifests instead. The release set
+kept the moving tag and closed the finding the other way: the **lock** is the
+identity every deployed image installs, so the lock is what this script
+verifies, and the resolved commit is printed on PASS so a build log records
+which SDK object was actually taken. ``Enrichment.Inference.Engine/scripts/
+validate_sdk_pin.py`` enforces the same contract over that repo's
+``requirements.lock``.
+
+That left one trade-off documented as accepted: a build resolving the manifest
+live takes whatever ``v1`` points at that minute, while a lock-driven build
+takes ``resolved_reference``, and moving the tag without refreshing the lock
+separates them. ``--verify-tag`` turns that accepted risk into a detected
+failure — it resolves the channel at the canonical remote and compares. The
+divergence is still a deliberate act, but it is no longer one this repository
+has to notice by hand.
 
 Modes
 -----
@@ -101,6 +114,15 @@ def resolve_remote_tag(remote: str, tag: str) -> str | None:
     return peeled or direct
 
 
+def resolved_commit(root: Path) -> str | None:
+    """The commit poetry.lock records for the major tag, for the PASS line."""
+    path = root / "poetry.lock"
+    if not path.exists():
+        return None
+    match = LOCK_REFERENCE_RE.search(path.read_text(encoding="utf-8"))
+    return None if match is None else match.group(2)
+
+
 def compare_lock_to_tag(resolved: str | None, tag_sha: str | None) -> list[str]:
     """Stale-lock detection: the lock must hold what the channel points at now."""
     if tag_sha is None:
@@ -131,10 +153,8 @@ def main(argv: list[str] | None = None) -> int:
     errors = check_tree(args.root)
 
     if args.verify_tag:
-        lock_path = args.root / "poetry.lock"
-        resolved = lock_resolution(lock_path.read_text(encoding="utf-8")) if lock_path.exists() else None
         tag_sha = resolve_remote_tag(args.remote, MAJOR_TAG)
-        errors.extend(compare_lock_to_tag(resolved, tag_sha))
+        errors.extend(compare_lock_to_tag(resolved_commit(args.root), tag_sha))
         if not errors:
             print(f"NETWORK: {CANONICAL_REPO}@{MAJOR_TAG} == poetry.lock {tag_sha}")
 
@@ -143,7 +163,14 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(errors))
         return 1
     mode = "offline + networked" if args.verify_tag else "offline"
-    print(f"PASS CEG pin {CANONICAL_REPO}@{MAJOR_TAG} ({mode})")
+    resolved = resolved_commit(args.root)
+    if resolved is None:
+        # check_tree() already accepts a tree with no poetry.lock, so this is
+        # reachable. Printing "PASS ... -> None" in a build log reads as a pin
+        # that resolved to nothing; say what is actually true instead.
+        print(f"PASS CEG pin {CANONICAL_REPO}@{MAJOR_TAG} ({mode}; no poetry.lock, no resolved commit recorded)")
+        return 0
+    print(f"PASS CEG pin {CANONICAL_REPO}@{MAJOR_TAG} ({mode}) -> {resolved}")
     return 0
 
 

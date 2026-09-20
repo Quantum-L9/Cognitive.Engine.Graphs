@@ -106,6 +106,8 @@ class SignalWeightCalculator:
 
         Returns a dict with keys: weight, confidence, ci_width, lift, sample_size.
         """
+        # Validated again here so this helper is safe on its own, not only via its callers (C-009).
+        outcome_label = sanitize_label(outcome_label)
         safe_dim = sanitize_label(dimension_name)
 
         # Query outcomes where this dimension scored above median

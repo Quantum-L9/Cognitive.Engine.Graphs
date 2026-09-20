@@ -72,6 +72,8 @@ class DriftDetector:
         recent: bool,
     ) -> dict[str, float]:
         """Query dimension frequency distribution for recent or baseline outcomes."""
+        # Validated again here so this helper is safe on its own, not only via its callers (C-009).
+        outcome_label = sanitize_label(outcome_label)
         comparator = ">" if recent else "<="
         cypher = f"""
         MATCH (o:{outcome_label})
