@@ -13,6 +13,7 @@ the exact command that provides it.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -153,20 +154,114 @@ async def test_an_unsafe_database_name_is_refused(name: str) -> None:
     assert driver.calls == []
 
 
+class _RefusingDriver(_RecordingDriver):
+    """Community Edition: CREATE DATABASE is rejected, ordinary queries work."""
+
+    async def _raw_execute_query(self, cypher, parameters=None, database="neo4j"):
+        self.calls.append((cypher, database))
+        if "CREATE DATABASE" in cypher:
+            msg = "Unsupported administration command in Community Edition"
+            raise RuntimeError(msg)
+        return []
+
+
 @pytest.mark.asyncio
 async def test_provisioning_failure_is_reported_not_raised(auto_create) -> None:
     """Community Edition rejects CREATE DATABASE. A deployment whose database
     already exists must not be blocked by a CREATE it is not allowed to run."""
-
-    class _RefusingDriver(_RecordingDriver):
-        async def _raw_execute_query(self, cypher, parameters=None, database="neo4j"):
-            self.calls.append((cypher, database))
-            if "CREATE DATABASE" in cypher:
-                msg = "Unsupported administration command in Community Edition"
-                raise RuntimeError(msg)
-            return []
-
     driver = _RefusingDriver()
     assert await driver.ensure_database("plasticos") is False
     # The ordinary query still runs; it is the query that reports the truth.
     assert await driver.execute_query("MATCH (n) RETURN n", database="plasticos") == []
+
+
+@pytest.mark.asyncio
+async def test_failed_provisioning_is_retried_on_the_next_call() -> None:
+    driver = _RefusingDriver()
+    assert await driver.ensure_database("plasticos") is False
+    assert await driver.ensure_database("plasticos") is False
+    assert sum("CREATE DATABASE" in c for c, _ in driver.calls) == 2
+
+
+# ── On: concurrent first use ────────────────────────────────────────────────
+
+
+class _SlowCreateDriver(_RecordingDriver):
+    """The CREATE suspends until the test releases it, like a real `WAIT` would."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = asyncio.Event()
+        self.create_started = asyncio.Event()
+
+    async def _raw_execute_query(self, cypher, parameters=None, database="neo4j"):
+        self.calls.append((cypher, database))
+        if "CREATE DATABASE" in cypher:
+            self.create_started.set()
+            await self.release.wait()
+        return []
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_use_issues_one_create_and_no_query_runs_before_it_completes(auto_create) -> None:
+    """F283-1: a second request arriving while the CREATE is in flight must
+    wait for it — not see the name already claimed and race into the domain
+    query against a database that does not exist yet."""
+    driver = _SlowCreateDriver()
+    requests = [asyncio.create_task(driver.execute_query("MATCH (n) RETURN n", database="plasticos")) for _ in range(5)]
+
+    await driver.create_started.wait()
+    await asyncio.sleep(0)  # let every request reach its await
+    assert driver.calls == [("CREATE DATABASE `plasticos` IF NOT EXISTS WAIT", "system")], (
+        "no domain query may run while provisioning is in flight, and only one CREATE may be issued"
+    )
+    assert all(not task.done() for task in requests)
+
+    driver.release.set()
+    await asyncio.gather(*requests)
+
+    creates = [c for c, _ in driver.calls if "CREATE DATABASE" in c]
+    queries = [(c, db) for c, db in driver.calls if "CREATE DATABASE" not in c]
+    assert len(creates) == 1
+    assert queries == [("MATCH (n) RETURN n", "plasticos")] * 5
+    # The CREATE precedes every domain query in the recorded order.
+    assert driver.calls[0][0].startswith("CREATE DATABASE")
+
+
+@pytest.mark.asyncio
+async def test_concurrent_callers_share_the_provisioning_outcome() -> None:
+    driver = _SlowCreateDriver()
+    waiters = [asyncio.create_task(driver.ensure_database("plasticos")) for _ in range(3)]
+    await driver.create_started.wait()
+    driver.release.set()
+    assert await asyncio.gather(*waiters) == [True, True, True]
+    assert sum("CREATE DATABASE" in c for c, _ in driver.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_cancelling_one_waiter_does_not_cancel_the_create_for_the_others() -> None:
+    driver = _SlowCreateDriver()
+    first = asyncio.create_task(driver.ensure_database("plasticos"))
+    second = asyncio.create_task(driver.ensure_database("plasticos"))
+    await driver.create_started.wait()
+    await asyncio.sleep(0)
+
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+
+    driver.release.set()
+    assert await second is True
+    assert "plasticos" in driver._ensured_databases
+
+
+@pytest.mark.asyncio
+async def test_in_flight_provisioning_is_forgotten_once_settled() -> None:
+    driver = _SlowCreateDriver()
+    task = asyncio.create_task(driver.ensure_database("plasticos"))
+    await driver.create_started.wait()
+    assert "plasticos" in driver._provisioning
+    driver.release.set()
+    await task
+    await asyncio.sleep(0)  # done callbacks run on the next loop iteration
+    assert driver._provisioning == {}

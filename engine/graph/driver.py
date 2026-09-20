@@ -14,28 +14,20 @@ Manages connection pooling and multi-database routing.
 """
 
 import asyncio
+import functools
 import logging
 import os
-import re
 from typing import Any
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
 
 from engine.graph.circuit_breaker import CircuitBreaker
+from engine.utils.security import sanitize_database_name
 
 logger = logging.getLogger(__name__)
 
 # Databases the DBMS always provides; never candidates for provisioning.
 _BUILTIN_DATABASES = frozenset({"neo4j", "system"})
-
-# Neo4j database naming rules: begins with an ASCII letter, then letters,
-# digits, dots, dashes or underscores, 3-63 characters. CREATE DATABASE cannot
-# take the name as a query parameter (it is an administrative command, not a
-# read/write query), so the name is quoted into the statement — and therefore
-# must be validated first. Domain ids legitimately contain dashes
-# ("healthcare-referral"), which is why engine.utils.security.sanitize_label
-# does not apply here: its label grammar forbids them.
-_DATABASE_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{2,62}$")
 
 # Substrings Neo4j uses when the target database is absent. Matched case
 # insensitively against the driver's message.
@@ -86,8 +78,12 @@ class GraphDriver:
         self._driver: AsyncDriver | None = None
         self._lock = asyncio.Lock()
         # Databases this process has already provisioned or confirmed, so the
-        # CREATE is attempted at most once per database per process.
+        # CREATE is attempted at most once per database per process ...
         self._ensured_databases: set[str] = set()
+        # ... and the CREATE currently in flight per database, kept apart from
+        # the ensured set so a concurrent first use awaits that CREATE instead
+        # of either issuing its own or racing past it into the domain query.
+        self._provisioning: dict[str, asyncio.Task[bool]] = {}
 
         # W4-02: Circuit breaker — configured via settings, defaults provided
         from engine.config.settings import settings
@@ -203,35 +199,42 @@ class GraphDriver:
         privileges) — in which case the query that follows fails with the
         message above rather than here, so a read-only deployment that has the
         database already is not blocked by a CREATE it is not allowed to run.
+
+        Concurrency: the first caller for a name starts the CREATE; every caller
+        that arrives while it is in flight awaits that same CREATE and receives
+        its result, so no domain query proceeds before provisioning completes
+        and the administrative command is issued once. A failed CREATE leaves
+        nothing ensured, so a later call retries it.
         """
         if name in _BUILTIN_DATABASES or name in self._ensured_databases:
             return True
-        if not _DATABASE_NAME_RE.fullmatch(name):
-            msg = (
-                f"refusing to provision Neo4j database {name!r}: a database name must begin "
-                f"with a letter and contain only letters, digits, dots, dashes or underscores "
-                f"(3-63 characters). CREATE DATABASE takes no query parameter, so an "
-                f"unvalidated name would be interpolated into an administrative command."
-            )
-            raise ValueError(msg)
+        sanitize_database_name(name)
 
-        # Claim the name BEFORE the await, not after. `_raw_execute_query` is a
-        # suspension point: with the add afterwards, every request that arrived
-        # while the first CREATE was in flight passed the membership check above
-        # and issued its own administrative command — "at most once per database
-        # per process" held only when calls did not overlap, which is exactly
-        # when it does not matter. The claim is released on failure so a later
-        # attempt (different privileges, Enterprise now licensed) can retry.
-        self._ensured_databases.add(name)
+        task = self._provisioning.get(name)
+        if task is None or task.done():
+            # A finished task still in the map lost its race with the done
+            # callback below; its outcome is already reflected in
+            # `_ensured_databases` (success) or not (failure → retry now).
+            task = asyncio.get_running_loop().create_task(self._provision_database(name))
+            self._provisioning[name] = task
+            task.add_done_callback(functools.partial(self._forget_provisioning, name))
+        # shield: cancelling one waiting request must not cancel the CREATE the
+        # other waiters — and the ensured set — depend on.
+        return await asyncio.shield(task)
 
+    def _forget_provisioning(self, name: str, done: asyncio.Task[bool]) -> None:
+        if self._provisioning.get(name) is done:
+            del self._provisioning[name]
+
+    async def _provision_database(self, name: str) -> bool:
         # Administrative commands must run against `system`, and the name is
         # back-quoted because a dash is legal in a database name but not in a
-        # bare identifier. The regex above is what makes that quoting safe.
-        cypher = f"CREATE DATABASE `{name}` IF NOT EXISTS WAIT"
+        # bare identifier. sanitize_database_name is what makes that quoting
+        # safe; it is re-applied here so the statement is safe by construction.
+        cypher = f"CREATE DATABASE `{sanitize_database_name(name)}` IF NOT EXISTS WAIT"
         try:
             await self._raw_execute_query(cypher, None, "system")
         except Exception as exc:
-            self._ensured_databases.discard(name)
             logger.warning(
                 "Could not provision Neo4j database %r (%s: %s). "
                 "CREATE DATABASE is Enterprise Edition only and requires admin privileges.",
@@ -241,6 +244,7 @@ class GraphDriver:
             )
             return False
 
+        self._ensured_databases.add(name)
         logger.info("Ensured Neo4j database %r exists", name)
         return True
 
