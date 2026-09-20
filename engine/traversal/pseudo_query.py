@@ -126,7 +126,6 @@ class LLMGenerator(Protocol):
         Returns:
             Generated text response.
         """
-        ...
 
 
 class KeywordExtractor(Protocol):
@@ -141,7 +140,6 @@ class KeywordExtractor(Protocol):
         Returns:
             Set of extracted keyword strings.
         """
-        ...
 
 
 class EmbeddingEncoder(Protocol):
@@ -156,7 +154,6 @@ class EmbeddingEncoder(Protocol):
         Returns:
             Embedding vector as tuple of floats.
         """
-        ...
 
 
 # ── Main Generator ───────────────────────────────────────────────────

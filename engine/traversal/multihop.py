@@ -75,7 +75,6 @@ class LLMClient(Protocol):
         Returns:
             Index of the selected edge in candidate_edges.
         """
-        ...
 
 
 @dataclass(frozen=True)
@@ -132,7 +131,6 @@ class NeighborFetcher(Protocol):
         Returns:
             List of TraversalEdge objects.
         """
-        ...
 
 
 class MultiHopTraverser:
