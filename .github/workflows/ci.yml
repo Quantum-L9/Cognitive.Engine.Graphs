@@ -89,6 +89,17 @@ jobs:
           python tools/check_deprecated_imports.py --check .
           echo "✅ No deprecated DomainSpecLoader usage found"
 
+      - name: Gate_SDK declares the v1 channel (offline)
+        run: |
+          python scripts/validate_sdk_pin.py
+
+      - name: Gate_SDK lock agrees with the v1 channel (networked)
+        # The structural check above cannot see a stale lock: `v1` moves inside
+        # Gate_SDK and nothing here changes. This resolves the channel at the
+        # canonical remote and fails closed if poetry.lock no longer matches.
+        run: |
+          python scripts/validate_sdk_pin.py --verify-tag
+
       # PacketEnvelope prohibition is governed by the baseline ratchet
       # (.github/workflows/baseline-ratchet-caller.yml → l9-ci-core
       # "Baseline Ratchet / Quarantined Debt", fail-closed). The l9-ci-sdk
