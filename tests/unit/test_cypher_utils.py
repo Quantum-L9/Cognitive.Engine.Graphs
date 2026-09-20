@@ -45,3 +45,19 @@ def test_sanitize_label_rejects_too_long():
 
     with pytest.raises((ValueError, Exception)):
         sanitize_label("A" * 200)
+
+
+@pytest.mark.unit
+def test_cypher_quoted_ident_wraps_sanitized_label():
+    from engine.utils.security import cypher_quoted_ident
+
+    assert cypher_quoted_ident("Facility") == "'Facility'"
+    assert cypher_quoted_ident("closed_won") == "'closed_won'"
+
+
+@pytest.mark.unit
+def test_cypher_quoted_ident_rejects_injection():
+    from engine.utils.security import cypher_quoted_ident
+
+    with pytest.raises((ValueError, Exception)):
+        cypher_quoted_ident("'; DROP TABLE")
