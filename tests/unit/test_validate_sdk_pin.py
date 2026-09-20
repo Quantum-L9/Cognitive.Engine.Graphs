@@ -121,10 +121,11 @@ def test_a_lock_without_a_resolved_reference_fails_closed() -> None:
 
 
 @pytest.mark.unit
-def test_a_canonical_remote_is_accepted() -> None:
-    assert safe_remote("https://github.com/Quantum-L9/Gate_SDK.git") == ("https://github.com/Quantum-L9/Gate_SDK.git")
-    # Local paths are accepted so tests can resolve against a fixture repo.
-    assert safe_remote("/tmp/fixture-origin") == "/tmp/fixture-origin"
+def test_a_canonical_remote_is_accepted(tmp_path: Path) -> None:
+    url = "https://github.com/Quantum-L9/Gate_SDK.git"
+    assert safe_remote(url) == url
+    # An existing directory is accepted so tests can use a fixture repo.
+    assert safe_remote(str(tmp_path)) == str(tmp_path.resolve())
 
 
 @pytest.mark.unit
@@ -140,3 +141,9 @@ def test_a_canonical_remote_is_accepted() -> None:
 def test_a_remote_git_would_read_as_an_option_is_refused(hostile: str) -> None:
     with pytest.raises(ValueError, match="must not begin with"):
         safe_remote(hostile)
+
+
+@pytest.mark.unit
+def test_a_non_canonical_remote_that_is_not_a_repository_is_refused() -> None:
+    with pytest.raises(ValueError, match="not canonical and not a local repository"):
+        safe_remote("https://example.invalid/evil/Gate_SDK.git")
