@@ -93,10 +93,33 @@ def lock_resolution(text: str) -> str | None:
     return match.group(2) if match else None
 
 
+def safe_remote(remote: str) -> str:
+    """Reject a remote that git would parse as an option.
+
+    Passing argv as a list and never invoking a shell stops *command*
+    injection, but not *argument* injection: ``git ls-remote
+    --upload-pack=<cmd> <repo>`` runs ``<cmd>``, so a --remote value
+    beginning with ``-`` is an execution vector on its own
+    (SonarCloud pythonsecurity:S8705). Callers pass --remote, so validate it
+    here and use --end-of-options below rather than trusting either alone.
+    """
+    if not remote or remote.startswith("-"):
+        msg = f"refusing Gate_SDK remote {remote!r}: a remote must not begin with '-'"
+        raise ValueError(msg)
+    return remote
+
+
 def resolve_remote_tag(remote: str, tag: str) -> str | None:
     """Resolve ``refs/tags/<tag>`` at *remote*, preferring the peeled object."""
     completed = subprocess.run(
-        ["/usr/bin/git", "ls-remote", "--tags", remote, f"refs/tags/{tag}"],
+        [
+            "/usr/bin/git",
+            "ls-remote",
+            "--tags",
+            "--end-of-options",
+            safe_remote(remote),
+            f"refs/tags/{tag}",
+        ],
         check=False,
         text=True,
         capture_output=True,
@@ -153,10 +176,16 @@ def main(argv: list[str] | None = None) -> int:
     errors = check_tree(args.root)
 
     if args.verify_tag:
-        tag_sha = resolve_remote_tag(args.remote, MAJOR_TAG)
-        errors.extend(compare_lock_to_tag(resolved_commit(args.root), tag_sha))
-        if not errors:
-            print(f"NETWORK: {CANONICAL_REPO}@{MAJOR_TAG} == poetry.lock {tag_sha}")
+        try:
+            tag_sha = resolve_remote_tag(args.remote, MAJOR_TAG)
+        except ValueError as exc:
+            # Fails closed like any other unresolvable channel, but says which
+            # of the two reasons it was.
+            errors.append(f"--verify-tag: {exc}")
+        else:
+            errors.extend(compare_lock_to_tag(resolved_commit(args.root), tag_sha))
+            if not errors:
+                print(f"NETWORK: {CANONICAL_REPO}@{MAJOR_TAG} == poetry.lock {tag_sha}")
 
     if errors:
         print("FAIL")
