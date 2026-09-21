@@ -28,7 +28,7 @@ jobs:
     name: Baseline Ratchet
     uses: Quantum-L9/l9-ci-core/.github/workflows/baseline-ratchet.yml@059fd45ac2fb5306903b6afcf4fcf48856406418
     with:
-      core-revision: 0d28395428426853c44825c4645c23ee8ace23b1
+      core-revision: 059fd45ac2fb5306903b6afcf4fcf48856406418
       sdk-revision: b1a491414ed04bb18d665f8a8755de80947c8200
       python-version: "3.12"
       pytest-paths: tests
