@@ -28,6 +28,15 @@ All handlers: `async def handle_*(tenant: str, payload: dict) -> dict`
 | calibration_run | Score calibration vs expected ranges |
 | score_feedback | Compute weight adjustment proposal |
 | apply_weight_proposal | Apply proposed weight change |
+| health_assess | AI-readiness assessment for one entity (`engine/health/api.py`) |
+| health_batch_assess | Incremental batch readiness scan with cost ceilings |
+| health_report | Health report for an entity (Seed tier) |
+| emit_inference_feedback | Run inference rules and send `graph-inference-result` to EIE via Gate (flag: `graph_inference_feedback_enabled`) |
+
+CEG-006: the three `health_*` subactions are what makes `engine/health/api.py`
+reachable. It was imported by nothing, so `trigger_reenrichment_v2` — and with
+it the whole CEG → Gate → EIE enrichment request — had no trigger any inbound
+packet could reach.
 
 ## Dependency Map
 ```

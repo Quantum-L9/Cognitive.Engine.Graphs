@@ -71,7 +71,7 @@ class AttributionCalculator:
             msg = f"Invalid attribution model: {model!r}. Must be one of {sorted(VALID_MODELS)}"
             raise ValueError(msg)
 
-        depth = max_depth or self._spec.causal.chain_depth_limit
+        depth = int(max_depth or self._spec.causal.chain_depth_limit)
         outcome_label = sanitize_label(self._spec.feedbackloop.outcome_node_label)
 
         # Build edge pattern from causal spec

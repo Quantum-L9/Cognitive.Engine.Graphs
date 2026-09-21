@@ -27,7 +27,7 @@ from engine.config.schema import (
     ScoringDimensionSpec,
 )
 from engine.graph.driver import GraphDriver
-from engine.utils.security import sanitize_label
+from engine.utils.security import cypher_number, sanitize_label
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +91,7 @@ class ScoringAssembler:
         self.domain_spec = domain_spec
         self.scoring_spec = domain_spec.scoring
         self._last_active_dims: list[str] = []
+        self._query_params: dict[str, Any] = {}
         self._graph_driver = graph_driver
         self._learned_weights: dict[str, float] | None = None
         self._population_means: dict[str, float] = {}  # S2-01: cached population means
@@ -152,6 +153,7 @@ class ScoringAssembler:
         """
         from engine.config.settings import settings
 
+        self._query_params = {}
         pareto_metadata: dict[str, Any] | None = None
 
         # Pareto pre-filter (lazy import to avoid circular deps)
@@ -185,7 +187,8 @@ class ScoringAssembler:
             # W1-02: clamp each dimension expression to [0.0, 1.0] when enabled
             if settings.score_clamp_enabled:
                 expr = self._clamp_expression(expr)
-            dimension_exprs.append(f"{expr} AS {dim.name}")
+            alias = sanitize_label(dim.name)
+            dimension_exprs.append(f"{expr} AS {alias}")
             weight = weights.get(dim.weightkey, dim.defaultweight)
             # Convergence loop: multiply spec weight by learned adjustment factor
             if dim.name in learned and sw_spec is not None:
@@ -194,7 +197,7 @@ class ScoringAssembler:
                 # apply negative penalty instead of just reduced weight.
                 # Implements "primitive subtraction" from Lippl et al.
                 weight = -abs(sw_spec.penalty_factor) if learned_w < sw_spec.penalty_threshold else weight * learned_w
-            weight_exprs.append(f"({weight} * {dim.name})")
+            weight_exprs.append(f"({cypher_number(weight)} * {alias})")
             active_dim_names.append(dim.name)
 
         self._last_active_dims = list(active_dim_names)
@@ -213,6 +216,11 @@ class ScoringAssembler:
     def last_active_dimension_names(self) -> list[str]:
         """Return dimension names from the most recent assemble_scoring_clause call."""
         return list(self._last_active_dims)
+
+    @property
+    def last_query_params(self) -> dict[str, Any]:
+        """Copy of Cypher parameters collected during the last assemble call."""
+        return dict(self._query_params)
 
     def _compile_dimension(self, dim: ScoringDimensionSpec) -> str:
         """Dispatch to computation-specific compiler.
@@ -260,7 +268,7 @@ class ScoringAssembler:
         return base_expr
 
     def _compile_geodecay(self, dim: ScoringDimensionSpec) -> str:
-        k = dim.decayconstant or 50000.0
+        k = cypher_number(dim.decayconstant or 50000.0)
         lat_prop = sanitize_label(dim.candidateprop or "lat")
         query_lat_param = sanitize_label(dim.queryprop or lat_prop)
         return (
@@ -271,7 +279,7 @@ class ScoringAssembler:
         )
 
     def _compile_lognormalized(self, dim: ScoringDimensionSpec) -> str:
-        max_val = dim.maxvalue or 1000.0
+        max_val = cypher_number(dim.maxvalue or 1000.0)
         prop = sanitize_label(dim.candidateprop or "value")
         return f"log(1 + coalesce(candidate.{prop}, 0)) / log(1 + {max_val})"
 
@@ -285,7 +293,7 @@ class ScoringAssembler:
         Returns bias score if communities match, graduated score otherwise.
         Does not require APOC - uses native Cypher only.
         """
-        bias = dim.bias or 1.5
+        bias = cypher_number(dim.bias or 1.5)
         cand_prop = sanitize_label(dim.candidateprop or "community_id")
         query_prop = sanitize_label(dim.queryprop or "community_id")
 
@@ -310,8 +318,8 @@ class ScoringAssembler:
         )
 
     def _compile_inverselinear(self, dim: ScoringDimensionSpec) -> str:
-        min_val = dim.minvalue or 0.0
-        max_val = dim.maxvalue or 100.0
+        min_val = cypher_number(dim.minvalue or 0.0)
+        max_val = cypher_number(dim.maxvalue or 100.0)
         prop = sanitize_label(dim.candidateprop or "value")
         return f"1.0 - (coalesce(candidate.{prop}, {max_val}) - {min_val}) / ({max_val} - {min_val})"
 
@@ -335,7 +343,7 @@ class ScoringAssembler:
         """
         cand_prop = sanitize_label(dim.candidateprop or "price_per_unit")
         query_prop = sanitize_label(dim.queryprop or "target_price")
-        tau = dim.maxvalue or 2.0  # tolerance: 2.0 = ~7.4x ratio scores 0
+        tau = cypher_number(dim.maxvalue or 2.0)  # tolerance: 2.0 = ~7.4x ratio scores 0
         default = float(dim.defaultwhennull)  # nosemgrep: float-requires-try-except
         return (
             f"CASE "
@@ -353,7 +361,7 @@ class ScoringAssembler:
         Reads last_activity_date, touch_count_30d, and is_accelerating from node.
         """
         date_prop = sanitize_label(dim.candidateprop or "last_activity_date")
-        decay_days = dim.maxvalue or 90.0
+        decay_days = cypher_number(dim.maxvalue or 90.0)
         default = float(dim.defaultwhennull)  # nosemgrep: float-requires-try-except
         # Weights for 3 signals
         w1, w2, w3 = 0.6, 0.25, 0.15
@@ -454,21 +462,31 @@ class ScoringAssembler:
         outcome_rel = sanitize_label(metadata.get("outcome_relation", "RESULTED_IN"))
         outcome_node = sanitize_label(metadata.get("outcome_node", "TransactionOutcome"))
         success_prop = sanitize_label(metadata.get("success_property", "outcome_type"))
-        success_value = sanitize_label(metadata.get("success_value", "closed_won"))
+        success_value = metadata.get("success_value", "closed_won")
+        if not isinstance(success_value, str):
+            msg = f"Dimension '{dim.name}': success_value must be a string"
+            raise ValueError(msg)
 
         cand_community_prop = sanitize_label(dim.candidateprop or "community_id")
+        safe_dim = sanitize_label(dim.name)
+        success_key = f"pref_success_{safe_dim}"
+        default_key = f"pref_default_{safe_dim}"
+        sample_key = f"pref_sample_k_{safe_dim}"
+        self._query_params[success_key] = success_value
+        self._query_params[default_key] = default
+        self._query_params[sample_key] = int(sample_k)
 
         return (
             f"CASE "
             f"  WHEN size([(qe)-[:{outcome_rel}]->(o:{outcome_node}) "
-            f"    WHERE o.{success_prop} = '{success_value}' | o]) = 0 THEN {default} "
+            f"    WHERE o.{success_prop} = ${success_key} | o]) = 0 THEN ${default_key} "
             f"  ELSE toFloat("
             f"    size([(qe)-[:{outcome_rel}]->(o:{outcome_node}) "
-            f"      WHERE o.{success_prop} = '{success_value}' "
-            f"      AND o.community_id = candidate.{cand_community_prop} | o][0..{sample_k}])"
+            f"      WHERE o.{success_prop} = ${success_key} "
+            f"      AND o.community_id = candidate.{cand_community_prop} | o][0..${sample_key}])"
             f"  ) / toFloat("
             f"    size([(qe)-[:{outcome_rel}]->(o:{outcome_node}) "
-            f"      WHERE o.{success_prop} = '{success_value}' | o][0..{sample_k}])"
+            f"      WHERE o.{success_prop} = ${success_key} | o][0..${sample_key}])"
             f"  ) "
             f"END"
         )
@@ -537,11 +555,11 @@ class ScoringAssembler:
             return base_expr  # No change — coalesce(..., 0.0) already handles this
         if strategy == NullStrategy.INHERIT_PRIOR:
             prop_name = sanitize_label(f"_prior_{dim.name}")
-            return f"coalesce(({base_expr}), candidate.{prop_name}, {dim.defaultwhennull})"
+            return f"coalesce(({base_expr}), candidate.{prop_name}, {cypher_number(dim.defaultwhennull)})"
         if strategy == NullStrategy.POPULATION_MEAN:
             # Population mean is injected as a parameter at query time
             param = sanitize_label(f"_popmean_{dim.name}")
-            return f"coalesce(({base_expr}), ${param}, {dim.defaultwhennull})"
+            return f"coalesce(({base_expr}), ${param}, {cypher_number(dim.defaultwhennull)})"
         return base_expr
 
     def _apply_cold_start_fallback(self, dim: ScoringDimensionSpec, base_expr: str) -> str:

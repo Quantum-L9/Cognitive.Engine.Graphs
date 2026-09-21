@@ -123,6 +123,8 @@ class SimilarityScorer:
         label: str,
     ) -> float:
         """Jaccard similarity over comparison properties."""
+        # Validated again here so this helper is safe on its own, not only via its callers (C-009).
+        label = sanitize_label(label)
         comp_props = self._spec.comparison_properties
         if not comp_props:
             return 0.0
@@ -163,6 +165,8 @@ class SimilarityScorer:
         label: str,
     ) -> float:
         """Shared neighbor overlap (Jaccard on neighbor sets)."""
+        # Validated again here so this helper is safe on its own, not only via its callers (C-009).
+        label = sanitize_label(label)
         cypher = f"""
         MATCH (a:{label} {{entity_id: $a_id}})--(neighbor_a)
         WITH a, collect(DISTINCT id(neighbor_a)) AS neighbors_a
@@ -220,6 +224,8 @@ class SimilarityScorer:
         limit: int,
     ) -> list[str]:
         """Find candidate entity IDs that share property values."""
+        # Validated again here so this helper is safe on its own, not only via its callers (C-009).
+        label = sanitize_label(label)
         comp_props = self._spec.comparison_properties
         if not comp_props:
             # Fallback: return all entities of the same label

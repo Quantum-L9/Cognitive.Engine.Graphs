@@ -75,7 +75,6 @@ class LLMClient(Protocol):
         Returns:
             Index of the selected edge in candidate_edges.
         """
-        ...
 
 
 @dataclass(frozen=True)
@@ -132,7 +131,6 @@ class NeighborFetcher(Protocol):
         Returns:
             List of TraversalEdge objects.
         """
-        ...
 
 
 class MultiHopTraverser:
@@ -158,7 +156,7 @@ class MultiHopTraverser:
             start_vertices=["v1", "v2", "v3"],
             query_embedding=query_emb,
         )
-        print(result.visit_counts)  # {"v1": 3, "v4": 2, ...}
+        logger.info("visit_counts=%s", result.visit_counts)  # {"v1": 3, "v4": 2, ...}
     """
 
     def __init__(

@@ -14,6 +14,7 @@ Manages connection pooling and multi-database routing.
 """
 
 import asyncio
+import functools
 import logging
 import os
 from typing import Any
@@ -21,8 +22,36 @@ from typing import Any
 from neo4j import AsyncDriver, AsyncGraphDatabase
 
 from engine.graph.circuit_breaker import CircuitBreaker
+from engine.utils.security import sanitize_database_name
 
 logger = logging.getLogger(__name__)
+
+# Databases the DBMS always provides; never candidates for provisioning.
+_BUILTIN_DATABASES = frozenset({"neo4j", "system"})
+
+# Substrings Neo4j uses when the target database is absent. Matched case
+# insensitively against the driver's message.
+_DATABASE_ABSENT_MARKERS = (
+    "database does not exist",
+    "databasenotfound",
+    "unable to get a routing table for database",
+)
+
+
+class DatabaseNotProvisionedError(RuntimeError):
+    """A query named a database the DBMS does not have.
+
+    CEG-008: `match` and `sync` route to a database named after the domain id,
+    and nothing created it. Neo4j does not create databases implicitly, so on a
+    fresh instance every sync and match failed with the driver's own message
+    until an operator happened to run CREATE DATABASE by hand. This names the
+    missing database and the command that provides it.
+    """
+
+
+def _looks_like_absent_database(exc: Exception) -> bool:
+    message = str(exc).casefold()
+    return any(marker in message for marker in _DATABASE_ABSENT_MARKERS)
 
 
 class GraphDriver:
@@ -48,6 +77,13 @@ class GraphDriver:
 
         self._driver: AsyncDriver | None = None
         self._lock = asyncio.Lock()
+        # Databases this process has already provisioned or confirmed, so the
+        # CREATE is attempted at most once per database per process ...
+        self._ensured_databases: set[str] = set()
+        # ... and the CREATE currently in flight per database, kept apart from
+        # the ensured set so a concurrent first use awaits that CREATE instead
+        # of either issuing its own or racing past it into the domain query.
+        self._provisioning: dict[str, asyncio.Task[bool]] = {}
 
         # W4-02: Circuit breaker — configured via settings, defaults provided
         from engine.config.settings import settings
@@ -131,7 +167,96 @@ class GraphDriver:
                 )
                 raise ValueError(msg)
             database = "neo4j"
-        return await self._circuit_breaker.call(self._raw_execute_query, cypher, parameters, database)
+
+        await self._provision_on_first_use(database)
+        try:
+            return await self._circuit_breaker.call(self._raw_execute_query, cypher, parameters, database)
+        except Exception as exc:
+            raise self._translate_absent_database(exc, database) from exc
+
+    async def _provision_on_first_use(self, database: str) -> None:
+        """CEG-008: a tenant domain database has to exist before it can be used.
+
+        Under ``auto_create_domain_database`` we provision it on first use —
+        for reads and writes alike, since a fresh deployment's first operation
+        is as likely to be a sync write as a match query.
+        """
+        from engine.config.settings import settings as _db_settings
+
+        if _db_settings.auto_create_domain_database:
+            await self.ensure_database(database)
+
+    @staticmethod
+    def _translate_absent_database(exc: Exception, database: str) -> Exception:
+        """Name the missing database and the command that provides it, else pass the error through."""
+        if _looks_like_absent_database(exc) and database not in _BUILTIN_DATABASES:
+            msg = (
+                f"Neo4j database {database!r} does not exist. Domain queries route to a "
+                f"database named after the domain id, and Neo4j does not create one "
+                f"implicitly. Run this against the system database (Enterprise "
+                f"Edition):  CREATE DATABASE `{database}` IF NOT EXISTS WAIT  "
+                f"-- or set AUTO_CREATE_DOMAIN_DATABASE=true to have the engine "
+                f"create it on first use."
+            )
+            return DatabaseNotProvisionedError(msg)
+        return exc
+
+    async def ensure_database(self, name: str) -> bool:
+        """Create the domain database if it is absent. Idempotent per process.
+
+        Returns True when the database is known to exist afterwards, False when
+        provisioning was not possible (Community Edition, or insufficient
+        privileges) — in which case the query that follows fails with the
+        message above rather than here, so a read-only deployment that has the
+        database already is not blocked by a CREATE it is not allowed to run.
+
+        Concurrency: the first caller for a name starts the CREATE; every caller
+        that arrives while it is in flight awaits that same CREATE and receives
+        its result, so no domain query proceeds before provisioning completes
+        and the administrative command is issued once. A failed CREATE leaves
+        nothing ensured, so a later call retries it.
+        """
+        if name in _BUILTIN_DATABASES or name in self._ensured_databases:
+            return True
+        sanitize_database_name(name)
+
+        task = self._provisioning.get(name)
+        if task is None or task.done():
+            # A finished task still in the map lost its race with the done
+            # callback below; its outcome is already reflected in
+            # `_ensured_databases` (success) or not (failure → retry now).
+            task = asyncio.get_running_loop().create_task(self._provision_database(name))
+            self._provisioning[name] = task
+            task.add_done_callback(functools.partial(self._forget_provisioning, name))
+        # shield: cancelling one waiting request must not cancel the CREATE the
+        # other waiters — and the ensured set — depend on.
+        return await asyncio.shield(task)
+
+    def _forget_provisioning(self, name: str, done: asyncio.Task[bool]) -> None:
+        if self._provisioning.get(name) is done:
+            del self._provisioning[name]
+
+    async def _provision_database(self, name: str) -> bool:
+        # Administrative commands must run against `system`, and the name is
+        # back-quoted because a dash is legal in a database name but not in a
+        # bare identifier. sanitize_database_name is what makes that quoting
+        # safe; it is re-applied here so the statement is safe by construction.
+        cypher = f"CREATE DATABASE `{sanitize_database_name(name)}` IF NOT EXISTS WAIT"
+        try:
+            await self._raw_execute_query(cypher, None, "system")
+        except Exception as exc:
+            logger.warning(
+                "Could not provision Neo4j database %r (%s: %s). "
+                "CREATE DATABASE is Enterprise Edition only and requires admin privileges.",
+                name,
+                type(exc).__name__,
+                exc,
+            )
+            return False
+
+        self._ensured_databases.add(name)
+        logger.info("Ensured Neo4j database %r exists", name)
+        return True
 
     async def _raw_execute_write(
         self,
@@ -207,12 +332,16 @@ class GraphDriver:
                 )
                 raise ValueError(msg)
             database = "neo4j"
-        return await self._circuit_breaker.call(
-            self._raw_execute_write,
-            transaction_function,
-            *args,
-            cypher=cypher,
-            parameters=parameters,
-            database=database,
-            **kwargs,
-        )
+        await self._provision_on_first_use(database)
+        try:
+            return await self._circuit_breaker.call(
+                self._raw_execute_write,
+                transaction_function,
+                *args,
+                cypher=cypher,
+                parameters=parameters,
+                database=database,
+                **kwargs,
+            )
+        except Exception as exc:
+            raise self._translate_absent_database(exc, database) from exc

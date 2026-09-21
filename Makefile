@@ -12,7 +12,7 @@
 # ─────────────────────────────────────────────────────────────
 
 .PHONY: dev dev-build dev-down dev-logs dev-restart health
-.PHONY: test test-unit test-integration seed shell neo4j-shell
+.PHONY: test test-unit test-integration seed shell neo4j-shell cypher-lint
 
 # ── Governance ─────────────────────────────────────────────
 
@@ -45,8 +45,6 @@ health:Check all service health
 	@curl -sf http://localhost:8000/v1/health | python -m json.tool || echo "API: DOWN"
 	@echo "── Neo4j ──"
 	@docker exec l9-graph-neo4j cypher-shell -u neo4j -p l9-dev-password "RETURN 'ok'" 2>/dev/null || echo "Neo4j: DOWN"
-	@echo "── Redis ──"
-	@docker exec l9-graph-redis redis-cli ping || echo "Redis: DOWN"
 
 # ── Testing ────────────────────────────────────────────────
 
@@ -72,13 +70,10 @@ shell:Python shell inside API container
 neo4j-shell:Cypher shell into Neo4j
 	docker exec -it l9-graph-neo4j cypher-shell -u neo4j -p l9-dev-password
 
-redis-shell:Redis CLI
-	docker exec -it l9-graph-redis redis-cli
-
 # ── Local Dev (API outside Docker, DBs in Docker) ─────────
 
-local-dbs:Start only Neo4j + Redis
-	docker compose up -d neo4j redis
+local-dbs:Start only Neo4j + Postgres
+	docker compose up -d neo4j postgres
 
 local-api:Run API locally against Dockerized DBs (SDK chassis; alias of local-api-sdk)
 	$(MAKE) local-api-sdk
@@ -86,7 +81,6 @@ local-api:Run API locally against Dockerized DBs (SDK chassis; alias of local-ap
 local-api-legacy:Run the legacy dict chassis locally (permitted in L9_ENV=dev|local|test)
 	PLASTICOS_NEO4J_URI=bolt://localhost:7687 \
 	PLASTICOS_NEO4J_PASSWORD=l9-dev-password \
-	PLASTICOS_REDIS_URL=redis://localhost:6379/0 \
 	PLASTICOS_LOG_LEVEL=debug \
 	L9_LIFECYCLE_HOOK=engine.boot:GraphLifecycle \
 	L9_CHASSIS=legacy \
@@ -95,7 +89,6 @@ local-api-legacy:Run the legacy dict chassis locally (permitted in L9_ENV=dev|lo
 local-api-sdk:Run API locally on the SDK chassis (L9_CHASSIS=sdk)
 	PLASTICOS_NEO4J_URI=bolt://localhost:7687 \
 	PLASTICOS_NEO4J_PASSWORD=l9-dev-password \
-	PLASTICOS_REDIS_URL=redis://localhost:6379/0 \
 	PLASTICOS_LOG_LEVEL=debug \
 	L9_LIFECYCLE_HOOK=engine.boot:GraphLifecycle \
 	L9_CHASSIS=sdk \
@@ -199,8 +192,6 @@ deploy-health: guard-vps-host	## Remote healthcheck over SSH (VPS ports may be f
 	@ssh $(SSH_OPTS) $(SSH_TARGET) "curl -sf http://localhost:8000/v1/health && echo" || echo "API: DOWN"
 	@echo "── Neo4j ──"
 	@ssh $(SSH_OPTS) $(SSH_TARGET) "curl -sf http://localhost:7474 >/dev/null" && echo "Neo4j: UP" || echo "Neo4j: DOWN"
-	@echo "── Redis ──"
-	@ssh $(SSH_OPTS) $(SSH_TARGET) "docker exec l9-redis-prod redis-cli ping" || echo "Redis: DOWN"
 
 # ── Cleanup ────────────────────────────────────────────────
 
@@ -209,12 +200,15 @@ clean:	## Remove volumes + containers
 
 # ── Quality Gates (local, no Docker) ───────────────────────
 
-.PHONY: lint lint-fix typecheck check
+.PHONY: lint lint-fix typecheck check cypher-lint
 
 lint:	## Ruff lint + format check (no mutation) + MyPy — matches CI's blocking gate
 	ruff check .
 	ruff format --check .
 	mypy engine/
+
+cypher-lint:	## C-009: scan generated Cypher for injection vectors
+	python3 tools/cypher_lint.py
 
 lint-fix:	## Autofix: ruff check --fix + ruff format . (run this when `make lint` fails)
 	ruff check . --fix

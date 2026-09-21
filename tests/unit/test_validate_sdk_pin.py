@@ -21,6 +21,12 @@ _SPEC.loader.exec_module(_mod)
 MAJOR_TAG = _mod.MAJOR_TAG
 check_text = _mod.check_text
 check_tree = _mod.check_tree
+lock_resolution = _mod.lock_resolution
+compare_lock_to_tag = _mod.compare_lock_to_tag
+safe_remote = _mod.safe_remote
+
+CHANNEL_OBJECT = "e9f829f982110be13752da8f18c7a9692e8ed908"
+STALE_OBJECT = "69c6c67060b08440734a61473c03663423709964"
 
 
 @pytest.mark.unit
@@ -62,3 +68,82 @@ def test_repo_tree_matches_v1_policy() -> None:
     errors = check_tree(_ROOT)
     assert errors == [], errors
     assert MAJOR_TAG == "v1"
+
+
+# ── stale-lock agreement (--verify-tag logic, exercised without network) ──────
+#
+# The structural checks above cannot catch a stale lock: `v1` moves in Gate_SDK
+# and nothing in this repository changes. These cover the comparison that does.
+
+
+@pytest.mark.unit
+def test_lock_resolution_reads_the_resolved_object() -> None:
+    lock = (
+        'name = "constellation-node-sdk"\n'
+        "[package.source]\n"
+        'url = "https://github.com/Quantum-L9/Gate_SDK.git"\n'
+        'reference = "v1"\n'
+        f'resolved_reference = "{CHANNEL_OBJECT}"\n'
+    )
+    assert lock_resolution(lock) == CHANNEL_OBJECT
+    assert lock_resolution("no sdk source block here\n") is None
+
+
+@pytest.mark.unit
+def test_a_lock_current_with_the_channel_passes() -> None:
+    assert compare_lock_to_tag(CHANNEL_OBJECT, CHANNEL_OBJECT) == []
+
+
+@pytest.mark.unit
+def test_a_stale_lock_fails() -> None:
+    errors = compare_lock_to_tag(STALE_OBJECT, CHANNEL_OBJECT)
+    assert any("stale" in item for item in errors), errors
+
+
+@pytest.mark.unit
+def test_an_unresolvable_channel_fails_closed() -> None:
+    """Required networked mode: inability to resolve is a failure, not a pass."""
+    errors = compare_lock_to_tag(CHANNEL_OBJECT, None)
+    assert any("could not resolve" in item for item in errors), errors
+
+
+@pytest.mark.unit
+def test_a_lock_without_a_resolved_reference_fails_closed() -> None:
+    errors = compare_lock_to_tag(None, CHANNEL_OBJECT)
+    assert any("no resolved_reference" in item for item in errors), errors
+
+
+# ── remote validation (SonarCloud pythonsecurity:S8705) ──────────────────────
+#
+# argv is a list and no shell is involved, which stops command injection but
+# not argument injection: `git ls-remote --upload-pack=<cmd> <repo>` executes
+# <cmd>, so a --remote beginning with `-` is an execution vector by itself.
+
+
+@pytest.mark.unit
+def test_a_canonical_remote_is_accepted(tmp_path: Path) -> None:
+    url = "https://github.com/Quantum-L9/Gate_SDK.git"
+    assert safe_remote(url) == url
+    # An existing directory is accepted so tests can use a fixture repo.
+    assert safe_remote(str(tmp_path)) == str(tmp_path.resolve())
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        "--upload-pack=touch /tmp/pwned",
+        "-u",
+        "--exec=sh",
+        "",
+    ],
+)
+def test_a_remote_git_would_read_as_an_option_is_refused(hostile: str) -> None:
+    with pytest.raises(ValueError, match="must not begin with"):
+        safe_remote(hostile)
+
+
+@pytest.mark.unit
+def test_a_non_canonical_remote_that_is_not_a_repository_is_refused() -> None:
+    with pytest.raises(ValueError, match="not canonical and not a local repository"):
+        safe_remote("https://example.invalid/evil/Gate_SDK.git")

@@ -46,7 +46,6 @@ status: active
   test instead of stopping at the first one, while still exiting non-zero
   (failing the job) if any test fails
 - PostgreSQL service (postgres:16)
-- Redis service (redis:7-alpine)
 
 ### Phase 4: Security Scanning
 - Gitleaks (secret detection)

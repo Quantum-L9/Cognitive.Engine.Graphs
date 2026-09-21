@@ -39,7 +39,6 @@ The Graph Cognitive Engine is deployed on Hetzner Cloud.
 | **Health Check** | `http://178.104.43.11:8000/v1/health` | 8000 |
 | **Neo4j Browser** | `http://178.104.43.11:7474` | 7474 |
 | **Neo4j Bolt** | `bolt://178.104.43.11:7687` | 7687 |
-| **Redis** | `redis://178.104.43.11:6379` | 6379 |
 
 ### SSH Access
 
@@ -65,7 +64,6 @@ L9_LIFECYCLE_HOOK=engine.boot:GraphLifecycle
 NEO4J_URI=bolt://neo4j:7687
 NEO4J_USERNAME=neo4j
 NEO4J_PASSWORD=<from-secrets>
-REDIS_URL=redis://redis:6379/0
 API_PORT=8000
 LOG_LEVEL=info
 CORS_ORIGINS=[]
@@ -113,9 +111,9 @@ ssh root@178.104.43.11 "cd /opt/ceg && docker compose -f docker-compose.prod.yml
 │                    l9-ceg (178.104.43.11)                   │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │   API       │  │   Neo4j     │  │   Redis     │         │
-│  │  :8000      │  │  :7474/7687 │  │  :6379      │         │
+│  ┌─────────────┐  ┌─────────────┐                          │
+│  │   API       │  │   Neo4j     │                          │
+│  │  :8000      │  │  :7474/7687 │                          │
 │  │             │  │             │  │             │         │
 │  │ FastAPI +   │  │ Graph DB +  │  │ Cache +     │         │
 │  │ Uvicorn     │  │ GDS Plugin  │  │ Sessions    │         │
