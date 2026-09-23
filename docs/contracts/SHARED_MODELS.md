@@ -71,14 +71,17 @@ types.py             \# PacketType enum, shared type aliases
 from engine.packet.packet_envelope import PacketEnvelope, PacketLineage, PacketType, TenantContext
 from engine.packet.chassis_contract import deflate_egress, delegate_to_node, inflate_ingress
 
+
 # ❌ WRONG — redefining in engine code
 class PacketEnvelope(BaseModel):  # BANNED — already in l9-core
     packet_id: UUID
     ...
 
+
 # ❌ WRONG — redefining TransportPacket
 class TransportPacket(BaseModel):  # BANNED — already in constellation_node_sdk
     ...
+
 
 # ❌ WRONG — copying the model file into your repo
 # cp ../enrichment-engine/models/envelope.py engine/models/

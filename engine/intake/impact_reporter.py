@@ -268,16 +268,22 @@ def analyse_impact(
 def format_impact_summary(impact: ImpactAnalysis) -> str:
     """Format impact analysis as human-readable summary."""
     lines = [
-        f"YOUR CRM TODAY: {impact.current_field_count} fields, "
-        f"{impact.coverage_before:.0f}% coverage, "
-        f"AI-readiness {impact.ai_readiness_before}/10, "
-        f"{impact.gates_passable_before}/{impact.total_gates} gates",
-        f"AFTER ENRICH: {impact.coverage_after_enrich:.0f}% coverage, "
-        f"{impact.ai_readiness_after_enrich}/10, "
-        f"{impact.gates_passable_after}/{impact.total_gates} gates",
-        f"WITH DISCOVER: {impact.coverage_after_discover:.0f}% coverage, "
-        f"{impact.ai_readiness_after_discover}/10, "
-        f"{impact.total_gates}/{impact.total_gates} gates",
+        (
+            f"YOUR CRM TODAY: {impact.current_field_count} fields, "
+            f"{impact.coverage_before:.0f}% coverage, "
+            f"AI-readiness {impact.ai_readiness_before}/10, "
+            f"{impact.gates_passable_before}/{impact.total_gates} gates"
+        ),
+        (
+            f"AFTER ENRICH: {impact.coverage_after_enrich:.0f}% coverage, "
+            f"{impact.ai_readiness_after_enrich}/10, "
+            f"{impact.gates_passable_after}/{impact.total_gates} gates"
+        ),
+        (
+            f"WITH DISCOVER: {impact.coverage_after_discover:.0f}% coverage, "
+            f"{impact.ai_readiness_after_discover}/10, "
+            f"{impact.total_gates}/{impact.total_gates} gates"
+        ),
     ]
     if impact.coverage_before > 0:
         improvement = impact.coverage_after_discover / impact.coverage_before

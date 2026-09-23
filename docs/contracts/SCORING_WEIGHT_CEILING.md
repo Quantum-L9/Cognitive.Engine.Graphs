@@ -41,6 +41,7 @@ causal, persona) without breaching the ceiling.
 ```python
 _WEIGHT_CEILING = 1.0
 
+
 def _assert_default_weight_sum() -> None:
     weight_sum = settings.w_structural + settings.w_geo + settings.w_reinforcement + settings.w_freshness
     if weight_sum > _WEIGHT_CEILING + _WEIGHT_SUM_TOLERANCE:

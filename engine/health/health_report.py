@@ -148,6 +148,7 @@ def track_conversion_event(
     tenant: str,
     entity_id: str,
     event_type: str,
+    *,
     tier_from: str = "seed",
     tier_to: str | None = None,
     metadata: dict[str, Any] | None = None,

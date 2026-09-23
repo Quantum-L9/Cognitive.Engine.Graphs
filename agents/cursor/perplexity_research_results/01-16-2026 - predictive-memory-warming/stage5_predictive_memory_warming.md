@@ -31,6 +31,7 @@ Production-Grade Predictive Memory Warming System for LLM Agents achieving ~40% 
 ```python
 class GapSeverity(str, Enum):
     """Enumeration of knowledge gap severity levels."""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -40,6 +41,7 @@ class GapSeverity(str, Enum):
 @dataclass
 class KnowledgeGap:
     """Represents a detected knowledge gap with metadata for prioritization."""
+
     gap_id: str
     gap_type: str  # "entity_missing", "relationship_missing", "attention_uncertainty"
     severity: GapSeverity
@@ -53,6 +55,7 @@ class KnowledgeGap:
 
 class AttentionConfig(BaseModel):
     """Configuration for attention-based gap detection."""
+
     entropy_threshold_low: float = Field(0.5, ge=0.0, le=2.0)
     entropy_threshold_high: float = Field(1.5, ge=0.0, le=2.0)
     min_attention_span_tokens: int = Field(3, ge=1)
@@ -65,6 +68,7 @@ class AttentionConfig(BaseModel):
 ```python
 class SubgraphEntry(BaseModel):
     """Represents a cached subgraph entry."""
+
     entity_id: str
     neighbors: dict[str, dict[str, Any]]  # neighbor_id -> properties
     relationship_types: dict[str, list[str]]  # rel_type -> [neighbor_ids]
@@ -74,6 +78,7 @@ class SubgraphEntry(BaseModel):
 
 class CacheMetrics(BaseModel):
     """Metrics tracking cache performance."""
+
     cache_hits: int = 0
     cache_misses: int = 0
     total_warming_calls: int = 0
@@ -92,6 +97,7 @@ class CacheMetrics(BaseModel):
 ```python
 class ReasoningPhase(str, Enum):
     """Phases of the reasoning cycle."""
+
     ACTION = "action"
     THINK = "think"
     MEMORY = "memory"
@@ -101,6 +107,7 @@ class ReasoningPhase(str, Enum):
 @dataclass
 class ActionProposal:
     """Proposed action with rationale."""
+
     action_description: str
     action_params: dict[str, Any]
     confidence_score: float  # 0.0 to 1.0
@@ -112,6 +119,7 @@ class ActionProposal:
 @dataclass
 class ThinkingOutput:
     """Output from thinking phase."""
+
     goal_progress_assessment: str
     moves_toward_goal: bool
     identified_gaps: list[str]
@@ -123,6 +131,7 @@ class ThinkingOutput:
 @dataclass
 class MemoryContext:
     """Retrieved and warmed memory context."""
+
     retrieved_entities: dict[str, Any]
     entity_relationships: dict[str, set[str]]
     cache_hit_ratio: float
@@ -137,10 +146,7 @@ Three detection strategies:
 
 ```python
 async def _detect_attention_gaps(
-    self,
-    attention_weights: np.ndarray,
-    layer_idx: Optional[int],
-    head_idx: Optional[int]
+    self, attention_weights: np.ndarray, layer_idx: Optional[int], head_idx: Optional[int]
 ) -> list[KnowledgeGap]:
     """
     Detect gaps based on attention entropy analysis.
@@ -154,8 +160,7 @@ async def _detect_attention_gaps(
         # Dynamic threshold based on percentile of history
         if len(self._entropy_history) > 10:
             percentile_value = np.percentile(
-                self._entropy_history,
-                self.config.attention_config.entropy_percentile_for_gap
+                self._entropy_history, self.config.attention_config.entropy_percentile_for_gap
             )
 
         if entropy > percentile_value:
@@ -167,9 +172,7 @@ async def _detect_attention_gaps(
 
 ```python
 async def _detect_entity_gaps(
-    self,
-    mentioned_entities: list[str],
-    entity_memory_graph: dict[str, set[str]]
+    self, mentioned_entities: list[str], entity_memory_graph: dict[str, set[str]]
 ) -> list[KnowledgeGap]:
     """
     Detect gaps based on missing or incomplete entity references.
@@ -183,9 +186,7 @@ async def _detect_entity_gaps(
 
 ```python
 async def _detect_relationship_gaps(
-    self,
-    mentioned_entities: list[str],
-    entity_memory_graph: dict[str, set[str]]
+    self, mentioned_entities: list[str], entity_memory_graph: dict[str, set[str]]
 ) -> list[KnowledgeGap]:
     """
     Detect missing relationships between mentioned entities.
@@ -249,16 +250,11 @@ proposal  vs goal   cache   action
 ### Prometheus Metrics
 
 ```python
-self.gap_detection_count = Counter(
-    'gap_detection_count', 'Total gaps detected', ['gap_type']
-)
+self.gap_detection_count = Counter("gap_detection_count", "Total gaps detected", ["gap_type"])
 self.attention_entropy_histogram = Histogram(
-    'attention_entropy_values', 'Attention entropy measurements',
-    buckets=[0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
+    "attention_entropy_values", "Attention entropy measurements", buckets=[0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
 )
-self.gap_detector_latency = Histogram(
-    'gap_detector_latency_ms', 'Time to detect gaps'
-)
+self.gap_detector_latency = Histogram("gap_detector_latency_ms", "Time to detect gaps")
 ```
 
 ### Target Metrics

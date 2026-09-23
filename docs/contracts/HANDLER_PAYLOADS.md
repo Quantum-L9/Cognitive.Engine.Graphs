@@ -20,11 +20,12 @@ incoming payloads against these schemas before processing.
 > TASK-040 / ADR-106: prefer `engine.models.payloads.MatchRequest` / `MatchResponse` (payload-only; no transport fields; no ungoverned weights).
 ```python
 class MatchPayload(BaseModel):
-    query: dict[str, Any]              # Entity attributes to match against
-    match_direction: str               # e.g., "buyer_to_seller"
-    top_n: int = 10                    # Max candidates to return (1-1000)
-    weights: dict[str, float] = {}     # Override scoring dimension weights
-    filters: dict[str, Any] = {}       # Additional Cypher filters
+    query: dict[str, Any]  # Entity attributes to match against
+    match_direction: str  # e.g., "buyer_to_seller"
+    top_n: int = 10  # Max candidates to return (1-1000)
+    weights: dict[str, float] = {}  # Override scoring dimension weights
+    filters: dict[str, Any] = {}  # Additional Cypher filters
+
 
 class MatchResponse(BaseModel):
     candidates: list[dict[str, Any]]
@@ -39,8 +40,9 @@ class MatchResponse(BaseModel):
 
 ```python
 class SyncPayload(BaseModel):
-    entity_type: str                   # Must match a sync endpoint path
-    batch: list[dict[str, Any]]        # 1-10000 entities per batch
+    entity_type: str  # Must match a sync endpoint path
+    batch: list[dict[str, Any]]  # 1-10000 entities per batch
+
 
 class SyncResponse(BaseModel):
     status: Literal["success"]
@@ -54,8 +56,9 @@ class SyncResponse(BaseModel):
 ```python
 class AdminPayload(BaseModel):
     subaction: Literal["list_domains", "get_domain", "init_schema", "trigger_gds"]
-    domain_id: str | None = None       # Required for get_domain, init_schema, trigger_gds
-    job_name: str | None = None        # Required for trigger_gds
+    domain_id: str | None = None  # Required for get_domain, init_schema, trigger_gds
+    job_name: str | None = None  # Required for trigger_gds
+
 
 class AdminResponse(BaseModel):
     # Varies by subaction — always a dict

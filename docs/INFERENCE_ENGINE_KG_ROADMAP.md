@@ -206,10 +206,10 @@ class CompGCNLayer(nn.Module):
     def forward(self, x, rel, edge_index, edge_type, basis, coeff):
         out = torch.zeros_like(x)
         for r in range(len(rel)):
-            mask = (edge_type == r)
+            mask = edge_type == r
             src, dst = edge_index[:, mask]
             composed = circular_corr(x[src], rel[r].expand(len(src), -1))  # φ(x_u, z_r)
-            W_r = torch.einsum('b,boi->oi', coeff[r], basis)               # basis decomp
+            W_r = torch.einsum("b,boi->oi", coeff[r], basis)  # basis decomp
             out[dst] += W_r @ composed.t()
         # CRITICAL: also update relation embeddings via reverse aggregation
         return F.relu(out), updated_rel
@@ -222,19 +222,20 @@ def bellman_ford(h_prev, graph, W_r, query_rel, T=6):
         h_next = torch.zeros_like(h_prev)
         for v in graph.nodes:
             msgs = []
-            for (u, r, v_) in graph.incoming_edges(v):
-                if v_ == v and random() > 0.1:          # 10% edge dropout
-                    w_q = W_r[r] @ query_rel + b_r[r]   # relation-only edge repr (inductive)
+            for u, r, v_ in graph.incoming_edges(v):
+                if v_ == v and random() > 0.1:  # 10% edge dropout
+                    w_q = W_r[r] @ query_rel + b_r[r]  # relation-only edge repr (inductive)
                     msgs.append(rotate(h_prev[u], w_q))  # RotatE MESSAGE
             if msgs:
                 h_next[v] = pna_aggregate(msgs, degree=len(msgs))
         h_prev = h_next
     return h_prev
 
+
 def pna_aggregate(messages, degree):
     M = torch.stack(messages)
     aggs = torch.cat([M.mean(0), M.max(0)[0], M.sum(0), M.std(0)])  # 4 aggregators
-    return mlp(aggs * learned_scalers * math.log(degree + 1))        # degree scaling
+    return mlp(aggs * learned_scalers * math.log(degree + 1))  # degree scaling
 ```
 
 ### CompoundE3D Operator (Milestone 4)
@@ -244,13 +245,17 @@ class CompoundE3DOperator(nn.Module):
         h_blocks = h.view(-1, 3)  # d=256 → 85 blocks of 3×3
         out = []
         for i, v in enumerate(h_blocks):
-            v = v @ self.H_shear[rel_idx, i]                                 # shear
+            v = v @ self.H_shear[rel_idx, i]  # shear
             n = F.normalize(self.F_normal[rel_idx, i], dim=-1)
-            v = v - 2 * (v @ n) * n                                           # reflection
-            v = v * F.softplus(self.S_log[rel_idx, i])                       # scaling (positive)
-            v = v @ self._quaternion_to_rotation(                              # SO(3) rotation
-                F.normalize(self.R_quat[rel_idx, i], dim=-1)).t()
-            v = v + self.T[rel_idx, i]                                        # translation
+            v = v - 2 * (v @ n) * n  # reflection
+            v = v * F.softplus(self.S_log[rel_idx, i])  # scaling (positive)
+            v = (
+                v
+                @ self._quaternion_to_rotation(  # SO(3) rotation
+                    F.normalize(self.R_quat[rel_idx, i], dim=-1)
+                ).t()
+            )
+            v = v + self.T[rel_idx, i]  # translation
             out.append(v)
         return torch.stack(out).view(-1)
 ```
@@ -259,8 +264,9 @@ class CompoundE3DOperator(nn.Module):
 ```python
 # Sanitize external API response
 def sanitize(results, session_salt):
-    return [{'id': hmac(r.id, session_salt), 'score': round(r.score, 3)} for r in results]
+    return [{"id": hmac(r.id, session_salt), "score": round(r.score, 3)} for r in results]
     # Never return: dimension_scores, gates_passed, explanation paths, neighbor IDs
+
 
 # Rate limit high-novelty sessions
 async def match_endpoint(request, session_id=Header(...)):
@@ -270,12 +276,14 @@ async def match_endpoint(request, session_id=Header(...)):
     traversal_monitor.check_query(session_id, request.queried_entities)
     return sanitize(await run_matching(request), session_salt=session_id)
 
+
 # Watermark: 0.1% phantom triples per session for attribution
 def inject_watermark(graph, session_id):
     rng = np.random.RandomState(int(sha256(session_id.encode()).hexdigest(), 16) % 10_000)
     for _ in range(max(1, len(graph.edges) // 1000)):
-        graph.add_edge(rng.choice(graph.nodes), rng.choice(graph.relations),
-                       rng.choice(graph.nodes), watermark=session_id)
+        graph.add_edge(
+            rng.choice(graph.nodes), rng.choice(graph.relations), rng.choice(graph.nodes), watermark=session_id
+        )
 ```
 
 ### Active Enrichment Scheduler (M7)

@@ -58,9 +58,10 @@ node:
 ## BANNED
 
 ```python
-"ScoreEngine"       # WRONG → "score-engine" (lowercase, hyphenated)
-"score_engine"      # WRONG → "score-engine" (hyphens, not underscores)
-"SCORE"             # WRONG → "score-engine" (full name, not abbreviation)
+"ScoreEngine"  # WRONG → "score-engine" (lowercase, hyphenated)
+
+"score_engine"  # WRONG → "score-engine" (hyphens, not underscores)
+"SCORE"  # WRONG → "score-engine" (full name, not abbreviation)
 ```
 
 ```

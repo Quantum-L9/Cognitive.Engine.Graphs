@@ -36,6 +36,7 @@ async def handle_match(tenant: str, payload: dict) -> dict:
     if not payload.get("query"):
         raise ValueError("Missing required field: query")
 
+
 # ❌ WRONG — returning error dict
 async def handle_match(tenant: str, payload: dict) -> dict:
     if not payload.get("query"):
@@ -48,16 +49,16 @@ async def handle_match(tenant: str, payload: dict) -> dict:
 ```python
 # The chassis produces:
 {
-    "status": "success",        # or "failed"
+    "status": "success",  # or "failed"
     "action": "match",
     "tenant": "plasticos",
-    "data": { ... },            # ← THIS is what the engine returns
+    "data": {...},  # ← THIS is what the engine returns
     "meta": {
         "trace_id": "abc-123",
         "execution_ms": 45.2,
         "version": "1.1.0",
         "timestamp": "2026-03-01T20:00:00Z",
-    }
+    },
 }
 ```
 

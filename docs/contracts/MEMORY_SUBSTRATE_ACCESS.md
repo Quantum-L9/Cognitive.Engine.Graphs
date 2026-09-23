@@ -37,11 +37,13 @@ When delegating to the constellation memory substrate node, the ingestion contra
 `ingest_packet()` on that node — reached via the delegation protocol, not by importing it:
 
 ```python
-await ingest_packet(PacketEnvelopeIn(
-    packet_type="enrichment_result",
-    payload={"entity_id": "abc-123", "enriched_fields": {...}},
-    tenant=TenantContext(actor="enrichment-engine", org_id="acme"),
-))
+await ingest_packet(
+    PacketEnvelopeIn(
+        packet_type="enrichment_result",
+        payload={"entity_id": "abc-123", "enriched_fields": {...}},
+        tenant=TenantContext(actor="enrichment-engine", org_id="acme"),
+    )
+)
 ```
 
 

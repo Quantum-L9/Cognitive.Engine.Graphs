@@ -77,6 +77,7 @@ from core.gmp.meta_learning_engine import (
 # PYDANTIC MODEL TESTS
 # ============================================================================
 
+
 class TestAutonomyLevel:
     """Tests for AutonomyLevel enum."""
 
@@ -104,7 +105,7 @@ class TestGMPExecutionResult:
             todo_count=5,
             execution_minutes=30.0,
             final_confidence=95.0,
-            audit_result="PASS"
+            audit_result="PASS",
         )
         assert result.gmp_id == "GMP-TEST-001"
         assert result.error_count == 0  # Default
@@ -119,7 +120,7 @@ class TestGMPExecutionResult:
                 todo_count=5,
                 execution_minutes=30.0,
                 final_confidence=150.0,  # Invalid
-                audit_result="PASS"
+                audit_result="PASS",
             )
 
     def test_invalid_todo_count_negative(self):
@@ -131,7 +132,7 @@ class TestGMPExecutionResult:
                 todo_count=-1,  # Invalid
                 execution_minutes=30.0,
                 final_confidence=95.0,
-                audit_result="PASS"
+                audit_result="PASS",
             )
 
     def test_defaults_populated(self):
@@ -142,7 +143,7 @@ class TestGMPExecutionResult:
             todo_count=1,
             execution_minutes=1.0,
             final_confidence=100.0,
-            audit_result="PASS"
+            audit_result="PASS",
         )
         assert result.error_types == []
         assert result.files_modified == []
@@ -161,7 +162,7 @@ class TestLearnedHeuristic:
             condition="if x > 10",
             recommendation="do something",
             confidence=0.85,
-            impact_estimate="faster"
+            impact_estimate="faster",
         )
         assert h.pattern_text == "Test pattern"
         assert h.confidence == 0.85
@@ -176,24 +177,20 @@ class TestLearnedHeuristic:
                 condition="x",
                 recommendation="y",
                 confidence=1.5,  # Invalid > 1
-                impact_estimate="faster"
+                impact_estimate="faster",
             )
 
     def test_heuristic_hashable(self):
         """Test that heuristics can be used in sets."""
         h1 = LearnedHeuristic(
-            pattern_text="Same pattern",
-            condition="x",
-            recommendation="y",
-            confidence=0.5,
-            impact_estimate="z"
+            pattern_text="Same pattern", condition="x", recommendation="y", confidence=0.5, impact_estimate="z"
         )
         h2 = LearnedHeuristic(
             pattern_text="Same pattern",
             condition="different",
             recommendation="different",
             confidence=0.9,
-            impact_estimate="different"
+            impact_estimate="different",
         )
         # Same pattern_text = same hash
         assert hash(h1) == hash(h2)
@@ -217,6 +214,7 @@ class TestAutonomyGraduationMetrics:
 # ============================================================================
 # CORRELATION FUNCTION TEST
 # ============================================================================
+
 
 class TestCorrelation:
     """Tests for correlation calculation."""
@@ -260,6 +258,7 @@ class TestCorrelation:
 # AUTONOMY CONTROLLER LOGIC TESTS
 # ============================================================================
 
+
 class TestAutonomyControllerLogic:
     """Tests for AutonomyController business logic (no DB)."""
 
@@ -295,6 +294,7 @@ class TestAutonomyControllerLogic:
 # GRADUATION CRITERIA TESTS
 # ============================================================================
 
+
 class TestGraduationCriteria:
     """Tests for graduation prerequisite logic."""
 
@@ -327,7 +327,7 @@ class TestGraduationCriteria:
             execution_minutes=30.0,
             error_count=0,
             final_confidence=95.0,
-            audit_result="PASS"
+            audit_result="PASS",
         )
 
         # Not perfect: has errors
@@ -338,7 +338,7 @@ class TestGraduationCriteria:
             execution_minutes=30.0,
             error_count=1,
             final_confidence=95.0,
-            audit_result="PASS"
+            audit_result="PASS",
         )
 
         # Not perfect: low confidence
@@ -349,7 +349,7 @@ class TestGraduationCriteria:
             execution_minutes=30.0,
             error_count=0,
             final_confidence=90.0,
-            audit_result="PASS"
+            audit_result="PASS",
         )
 
         # Not perfect: failed
@@ -360,7 +360,7 @@ class TestGraduationCriteria:
             execution_minutes=30.0,
             error_count=0,
             final_confidence=95.0,
-            audit_result="FAIL"
+            audit_result="FAIL",
         )
 
         # Check criteria
@@ -376,6 +376,7 @@ class TestGraduationCriteria:
 # ============================================================================
 # INTEGRATION TEST MARKERS
 # ============================================================================
+
 
 @pytest.mark.integration
 class TestEngineIntegration:

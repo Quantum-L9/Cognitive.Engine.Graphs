@@ -68,6 +68,7 @@ The following are **absolutely prohibited** throughout the codebase:
 ```python
 # ✅ REQUIRED
 from cachetools import TTLCache
+
 _cache: TTLCache = TTLCache(maxsize=1000, ttl=300)
 
 # 🚫 FORBIDDEN

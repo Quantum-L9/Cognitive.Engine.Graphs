@@ -145,13 +145,7 @@ class L9AsyncPostgresCheckpointer(AsyncPostgresSaver):
         self.base_retry_delay = base_retry_delay
         self._pool = conn_pool
 
-    async def _execute_with_retry(
-        self,
-        operation_name: str,
-        operation_func,
-        *args: Any,
-        **kwargs: Any
-    ) -> Any:
+    async def _execute_with_retry(self, operation_name: str, operation_func, *args: Any, **kwargs: Any) -> Any:
         """Execute checkpoint operation with exponential backoff retry."""
         last_exception = None
 
@@ -170,7 +164,7 @@ class L9AsyncPostgresCheckpointer(AsyncPostgresSaver):
 
             except Exception as e:
                 last_exception = e
-                delay = self.base_retry_delay * (2 ** attempt)
+                delay = self.base_retry_delay * (2**attempt)
 
                 logger.warning(
                     "checkpoint_operation_retry",
@@ -196,34 +190,17 @@ class L9AsyncPostgresCheckpointer(AsyncPostgresSaver):
         await self._execute_with_retry("setup", super().setup)
         logger.info("checkpoint_schema_initialized")
 
-    async def aget_tuple(
-        self, config: Dict[str, Any]
-    ) -> Optional[CheckpointTuple]:
+    async def aget_tuple(self, config: Dict[str, Any]) -> Optional[CheckpointTuple]:
         """Get checkpoint tuple with retry logic."""
-        return await self._execute_with_retry(
-            "aget_tuple",
-            super().aget_tuple,
-            config
-        )
+        return await self._execute_with_retry("aget_tuple", super().aget_tuple, config)
 
     async def aput(
-        self,
-        config: Dict[str, Any],
-        checkpoint: Checkpoint,
-        metadata: Dict[str, Any],
-        new_versions: Dict[str, Any]
+        self, config: Dict[str, Any], checkpoint: Checkpoint, metadata: Dict[str, Any], new_versions: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Put checkpoint with retry logic and observability."""
         start_time = datetime.utcnow()
 
-        result = await self._execute_with_retry(
-            "aput",
-            super().aput,
-            config,
-            checkpoint,
-            metadata,
-            new_versions
-        )
+        result = await self._execute_with_retry("aput", super().aput, config, checkpoint, metadata, new_versions)
 
         duration_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
 
@@ -307,32 +284,24 @@ class L9ThreadIDBuilder:
     """Build composite thread IDs for L9 multi-tenant isolation."""
 
     @staticmethod
-    def build_thread_id(
-        tenant_id: str,
-        user_id: str,
-        session_id: Optional[str] = None
-    ) -> str:
+    def build_thread_id(tenant_id: str, user_id: str, session_id: Optional[str] = None) -> str:
         """Build hierarchical thread ID for tenant isolation."""
         import uuid
+
         session_id = session_id or str(uuid.uuid4())
         return f"{tenant_id}:user:{user_id}:session:{session_id}"
 
     @staticmethod
     def build_config(
-        tenant_id: str,
-        user_id: str,
-        session_id: Optional[str] = None,
-        checkpoint_ns: str = ""
+        tenant_id: str, user_id: str, session_id: Optional[str] = None, checkpoint_ns: str = ""
     ) -> Dict[str, Any]:
         """Build complete config dict for graph execution."""
         return {
             "configurable": {
-                "thread_id": L9ThreadIDBuilder.build_thread_id(
-                    tenant_id, user_id, session_id
-                ),
+                "thread_id": L9ThreadIDBuilder.build_thread_id(tenant_id, user_id, session_id),
                 "checkpoint_ns": f"{tenant_id}:{checkpoint_ns}",
                 "tenant_id": tenant_id,
-                "user_id": user_id
+                "user_id": user_id,
             }
         }
 ```
@@ -344,10 +313,10 @@ class L9ThreadIDBuilder:
 ```python
 # Recommended pool settings for L9 production
 POOL_CONFIG = {
-    "min_size": 2,      # Baseline connections
-    "max_size": 10,     # Peak concurrent checkpoints
-    "timeout": 30.0,    # Connection acquisition timeout
-    "max_idle": 300,    # Max idle time before connection closed
+    "min_size": 2,  # Baseline connections
+    "max_size": 10,  # Peak concurrent checkpoints
+    "timeout": 30.0,  # Connection acquisition timeout
+    "max_idle": 300,  # Max idle time before connection closed
     "max_lifetime": 3600,  # Max connection lifetime
 }
 ```

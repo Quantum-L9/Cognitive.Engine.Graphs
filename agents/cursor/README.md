@@ -167,7 +167,6 @@ class RetrievalSource:
     """Decision engine managing cursor context retrieval order, ensuring cache and memory checks precede repository scans for efficient knowledge access."""
 
     # Key methods:
-
 ```
 
 **Lines:** 41-60 in `cursor_retrieval_kernel.py`
@@ -203,7 +202,6 @@ class AutonomyLevel:
     """Graduated autonomy levels in GMP v2.0."""
 
     # Key methods:
-
 ```
 
 **Lines:** 64-70 in `gmp_meta_learning.py`
@@ -242,15 +240,19 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
 
+
 class AgentsCursorRequest(BaseModel):
     """Request model for agents_cursor operations."""
+
     id: str
     data: dict
     timestamp: datetime
     correlation_id: Optional[str] = None
 
+
 class AgentsCursorResponse(BaseModel):
     """Response model for agents_cursor operations."""
+
     success: bool
     result: Optional[dict] = None
     error: Optional[str] = None

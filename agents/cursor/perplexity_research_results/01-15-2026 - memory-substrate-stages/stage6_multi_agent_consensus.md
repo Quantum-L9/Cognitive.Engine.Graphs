@@ -32,12 +32,13 @@ Production-Grade Multi-Agent Belief-Calibrated Consensus System (BCCS) for LLM C
 @dataclass
 class CalibrationScore:
     """Quantifies an agent's calibration quality and reliability."""
+
     agent_id: str
     domain: str
     confidence_score: float  # 0.0-1.0, how well confidence aligns with accuracy
     domain_expertise: float  # 0.0-1.0, experience in this domain
-    recent_accuracy: float   # 0.0-1.0, recent correctness rate
-    ece_metric: float        # 0.0-1.0, Expected Calibration Error (lower = better)
+    recent_accuracy: float  # 0.0-1.0, recent correctness rate
+    ece_metric: float  # 0.0-1.0, Expected Calibration Error (lower = better)
     sample_count: int
     samples_in_domain: int
     last_updated: datetime
@@ -55,6 +56,7 @@ class CalibrationScore:
 ```python
 class AgentProposal(BaseModel):
     """Represents a single agent's proposal in a consensus round."""
+
     agent_id: str
     round_number: int = Field(ge=1, le=10)
     proposed_value: str
@@ -67,6 +69,7 @@ class AgentProposal(BaseModel):
 
 class ConsensusDecision(BaseModel):
     """Final consensus decision with full provenance."""
+
     operation_id: UUID
     problem_description: str
     final_decision: str
@@ -131,9 +134,9 @@ Multi-round BCCS protocol:
 ### Protocol Parameters
 
 ```python
-MAX_ROUNDS = 10          # Maximum iterations
+MAX_ROUNDS = 10  # Maximum iterations
 WEIGHT_THRESHOLD = 0.70  # 70% weighted agreement required
-STABILITY_ROUNDS = 2     # Agreement must persist across 2 rounds
+STABILITY_ROUNDS = 2  # Agreement must persist across 2 rounds
 ```
 
 ### Consensus Pipeline

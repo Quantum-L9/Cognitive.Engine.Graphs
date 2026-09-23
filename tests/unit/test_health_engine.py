@@ -83,6 +83,7 @@ def _make_domain_spec(
 
 def _make_field_health(
     name: str,
+    *,
     populated: bool = True,
     confidence: float | None = 0.9,
     gate_critical: bool = False,

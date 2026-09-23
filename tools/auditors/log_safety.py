@@ -92,6 +92,7 @@ class LogSafetyAuditor(BaseAuditor):
 
     def _emit_finding(
         self,
+        *,
         result: AuditResult,
         counter: list[int],
         tok: str,
@@ -126,7 +127,7 @@ class LogSafetyAuditor(BaseAuditor):
             ll = line.lower()
             for tok in SENSITIVE:
                 if tok in ll:
-                    self._emit_finding(result, counter, tok, is_log, rel, i)
+                    self._emit_finding(result=result, counter=counter, tok=tok, is_log=is_log, rel=rel, lineno=i)
                     break
 
     def _scan_trace_leaks(

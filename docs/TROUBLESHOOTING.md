@@ -230,7 +230,7 @@ w_new_dimension = 0.10  # ❌ causes sum = 0.95
 
 # After (sum = 0.95 → 0.90):
 w_structural = 0.28  # reduced
-w_geo = 0.23        # reduced
+w_geo = 0.23  # reduced
 w_reinforcement = 0.19  # reduced
 w_freshness = 0.10  # unchanged
 w_new_dimension = 0.10  # new
@@ -255,6 +255,7 @@ This violates **Contract C-001** (Single Ingress). Engine NEVER imports FastAPI.
 ```python
 # ❌ WRONG (in engine/)
 from fastapi import HTTPException
+
 raise HTTPException(status_code=400, detail="Invalid gate")
 
 # ✅ CORRECT (in engine/)
@@ -263,6 +264,7 @@ raise ValueError(msg)
 
 # ✅ CORRECT (in chassis/ only)
 from fastapi import HTTPException
+
 raise HTTPException(status_code=400, detail="Invalid gate")
 ```
 

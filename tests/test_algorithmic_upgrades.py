@@ -154,7 +154,7 @@ class TestChiSquaredDissimilarity:
 
 class TestDetectDrift:
     def _make_fp(
-        self, persona_id: str, window_id: str, score_dist: dict, dim_dom: dict, entropy: float, concentration: float
+        self, persona_id: str, window_id: str, score_dist: dict, dim_dom: dict, *, entropy: float, concentration: float
     ):
         return AlgorithmicFingerprint(
             persona_id=persona_id,
@@ -168,36 +168,38 @@ class TestDetectDrift:
         )
 
     def test_no_drift_identical(self):
-        fp = self._make_fp("p1", "w1", {"low": 0.5, "high": 0.5}, {"geo": 0.6, "rev": 0.4}, 1.0, 0.5)
+        fp = self._make_fp(
+            "p1", "w1", {"low": 0.5, "high": 0.5}, {"geo": 0.6, "rev": 0.4}, entropy=1.0, concentration=0.5
+        )
         report = detect_drift(fp, fp)
         assert not report.drift_detected
         assert report.severity == "none"
         assert report.drift_reasons == []
 
     def test_drift_score_shift(self):
-        baseline = self._make_fp("p1", "w1", {"low": 0.8, "high": 0.2}, {"geo": 0.5}, 0.7, 0.8)
-        current = self._make_fp("p1", "w2", {"low": 0.2, "high": 0.8}, {"geo": 0.5}, 0.7, 0.8)
+        baseline = self._make_fp("p1", "w1", {"low": 0.8, "high": 0.2}, {"geo": 0.5}, entropy=0.7, concentration=0.8)
+        current = self._make_fp("p1", "w2", {"low": 0.2, "high": 0.8}, {"geo": 0.5}, entropy=0.7, concentration=0.8)
         report = detect_drift(baseline, current, score_threshold=0.1)
         assert report.drift_detected
         assert any("Score distribution" in r for r in report.drift_reasons)
 
     def test_drift_entropy_change(self):
-        baseline = self._make_fp("p1", "w1", {"low": 0.5, "high": 0.5}, {"geo": 0.5}, 0.5, 0.5)
-        current = self._make_fp("p1", "w2", {"low": 0.5, "high": 0.5}, {"geo": 0.5}, 1.5, 0.5)
+        baseline = self._make_fp("p1", "w1", {"low": 0.5, "high": 0.5}, {"geo": 0.5}, entropy=0.5, concentration=0.5)
+        current = self._make_fp("p1", "w2", {"low": 0.5, "high": 0.5}, {"geo": 0.5}, entropy=1.5, concentration=0.5)
         report = detect_drift(baseline, current, entropy_threshold=0.3)
         assert report.drift_detected
         assert any("Entropy" in r for r in report.drift_reasons)
 
     def test_high_severity_multiple_reasons(self):
-        baseline = self._make_fp("p1", "w1", {"low": 0.9, "high": 0.1}, {"geo": 0.9}, 0.3, 0.9)
-        current = self._make_fp("p1", "w2", {"low": 0.1, "high": 0.9}, {"rev": 0.9}, 1.5, 0.1)
+        baseline = self._make_fp("p1", "w1", {"low": 0.9, "high": 0.1}, {"geo": 0.9}, entropy=0.3, concentration=0.9)
+        current = self._make_fp("p1", "w2", {"low": 0.1, "high": 0.9}, {"rev": 0.9}, entropy=1.5, concentration=0.1)
         report = detect_drift(baseline, current)
         assert report.drift_detected
         assert report.severity == "high"
         assert len(report.drift_reasons) >= 3
 
     def test_to_dict(self):
-        baseline = self._make_fp("p1", "w1", {"low": 0.5}, {"geo": 0.5}, 1.0, 0.5)
+        baseline = self._make_fp("p1", "w1", {"low": 0.5}, {"geo": 0.5}, entropy=1.0, concentration=0.5)
         report = detect_drift(baseline, baseline)
         d = report.to_dict()
         assert isinstance(d, dict)
