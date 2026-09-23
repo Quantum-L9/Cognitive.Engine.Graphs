@@ -63,7 +63,7 @@ logger.info("pii_field_hashed", field="contact_email", handling=spec.compliance.
 
 ```python
 logger.info("processing contact", email=candidate["contact_email"])  # WRONG → PII in logs
-key = "s3cr3t-aes-key"                                               # WRONG → hardcoded key
+key = "s3cr3t-aes-key"  # WRONG → hardcoded key
 ```
 
 ## Key sources

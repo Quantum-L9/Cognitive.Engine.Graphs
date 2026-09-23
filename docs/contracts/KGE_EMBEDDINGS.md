@@ -69,7 +69,7 @@ belong in the single scoring clause.
 
 ```python
 # WRONG — cross-tenant vector reuse
-index = shared_vector_index                 # violates tenant isolation
+index = shared_vector_index  # violates tenant isolation
 ```
 
 ## Verified by

@@ -651,10 +651,7 @@ In `"similarity"` mode, the traverser replaces the LLM call with:
 
 ```python
 def _select_next_edge_similarity(self, query_embedding, candidate_edges):
-    best_edge = max(
-        candidate_edges,
-        key=lambda e: cosine_similarity(query_embedding, e.embedding)
-    )
+    best_edge = max(candidate_edges, key=lambda e: cosine_similarity(query_embedding, e.embedding))
     return best_edge
 ```
 

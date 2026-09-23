@@ -35,8 +35,10 @@
 ```python
 # Stage 4: Belief Revision Models (GMP-STAGE4)
 
+
 class ContradictionType(str, Enum):
     """Types of contradictions between facts."""
+
     DIRECT = "direct"
     SEMANTIC = "semantic"
     TEMPORAL = "temporal"
@@ -46,6 +48,7 @@ class ContradictionType(str, Enum):
 
 class ResolutionStrategy(str, Enum):
     """Strategies for resolving belief conflicts."""
+
     REPLACE = "replace"
     BRANCH = "branch"
     MERGE = "merge"
@@ -55,6 +58,7 @@ class ResolutionStrategy(str, Enum):
 
 class ConflictingFactPair(BaseModel):
     """Pair of facts in conflict."""
+
     fact_a_id: UUID
     fact_b_id: UUID
     contradiction_type: ContradictionType
@@ -65,6 +69,7 @@ class ConflictingFactPair(BaseModel):
 
 class ConflictExplanation(BaseModel):
     """Explanation of conflict with resolution recommendation."""
+
     explanation_id: UUID = Field(default_factory=uuid4)
     conflict_pair_id: UUID
     contradiction_type: ContradictionType
@@ -77,6 +82,7 @@ class ConflictExplanation(BaseModel):
 
 class ResolutionRecord(BaseModel):
     """Audit record of resolution execution."""
+
     resolution_id: UUID = Field(default_factory=uuid4)
     explanation_id: UUID
     selected_strategy: ResolutionStrategy
@@ -89,6 +95,7 @@ class ResolutionRecord(BaseModel):
 
 class BeliefResolutionAuditRow(BaseModel):
     """DTO for belief_resolution_audit table."""
+
     audit_id: UUID
     resolution_id: UUID
     timestamp: datetime
@@ -235,6 +242,7 @@ END $$;
 ```python
 # ADD to SubstrateRepository class (after existing methods, ~line 400+)
 
+
 async def get_conflicting_facts_for_subject(
     self,
     subject: str,
@@ -243,6 +251,7 @@ async def get_conflicting_facts_for_subject(
 ) -> list[SemanticFactRow]:
     """Get facts that may conflict with a given subject."""
     ...
+
 
 async def insert_belief_resolution_audit(
     self,
@@ -256,6 +265,7 @@ async def insert_belief_resolution_audit(
     """Insert belief resolution audit record."""
     ...
 
+
 async def update_fact_contradiction_count(
     self,
     fact_id: UUID,
@@ -263,6 +273,7 @@ async def update_fact_contradiction_count(
 ) -> None:
     """Increment contradiction count for a fact."""
     ...
+
 
 async def get_resolution_audit_history(
     self,
@@ -287,6 +298,7 @@ async def get_resolution_audit_history(
 self._explanation_engine: Optional[ExplanationEngine] = None
 self._conflict_resolver: Optional[ConflictResolver] = None
 
+
 # ADD accessor methods (after get_retention_engine, ~line 940)
 def get_explanation_engine(self) -> ExplanationEngine:
     """Get explanation engine instance (lazy initialization)."""
@@ -295,12 +307,14 @@ def get_explanation_engine(self) -> ExplanationEngine:
 
     logger.info("Initializing explanation_engine...")
     from memory.explanation_engine import ExplanationEngine
+
     self._explanation_engine = ExplanationEngine(
         semantic_service=self._semantic_service,
         # llm_client injected at runtime
     )
     logger.info("explanation_engine loaded successfully")
     return self._explanation_engine
+
 
 def get_conflict_resolver(self) -> ConflictResolver:
     """Get conflict resolver instance (lazy initialization)."""
@@ -309,6 +323,7 @@ def get_conflict_resolver(self) -> ConflictResolver:
 
     logger.info("Initializing conflict_resolver...")
     from memory.conflict_resolver import ConflictResolver
+
     explanation_engine = self.get_explanation_engine()
     self._conflict_resolver = ConflictResolver(
         repository=self._repository,
@@ -316,6 +331,7 @@ def get_conflict_resolver(self) -> ConflictResolver:
     )
     logger.info("conflict_resolver loaded successfully")
     return self._conflict_resolver
+
 
 # ADD high-level API method
 async def resolve_belief_conflicts(
@@ -361,6 +377,7 @@ BELIEF_RESOLUTION_LATENCY = Histogram(
     buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0],
 )
 
+
 def record_belief_resolution(
     strategy: str,
     contradiction_type: str,
@@ -369,6 +386,7 @@ def record_belief_resolution(
     """Record belief resolution metrics."""
     BELIEF_RESOLUTIONS.labels(strategy=strategy, contradiction_type=contradiction_type).inc()
     BELIEF_RESOLUTION_LATENCY.observe(latency_seconds)
+
 
 def record_contradiction_detection(contradiction_type: str) -> None:
     """Record contradiction detection."""

@@ -98,19 +98,12 @@ def collaborative_filtering_rank(query_entity, candidate_pool):
     """
 
     # Step 1: Find historical successes for similar queries
-    similar_queries = graph.traverse(
-        start=query_entity,
-        relationship="SIMILAR_TO",
-        depth=1
-    )
+    similar_queries = graph.traverse(start=query_entity, relationship="SIMILAR_TO", depth=1)
 
     historical_successes = []
     for similar_q in similar_queries:
         successes = graph.traverse(
-            start=similar_q,
-            relationship="HISTORICAL_SUCCESS",
-            filters={"outcome": "positive"},
-            depth=1
+            start=similar_q, relationship="HISTORICAL_SUCCESS", filters={"outcome": "positive"}, depth=1
         )
         historical_successes.extend(successes)
 
@@ -120,24 +113,16 @@ def collaborative_filtering_rank(query_entity, candidate_pool):
         # How often did this candidate co-occur with
         # historically successful candidates?
         co_occurrences = graph.traverse(
-            start=candidate,
-            relationship="CO_OCCURRED_WITH",
-            targets=historical_successes,
-            depth=1
+            start=candidate, relationship="CO_OCCURRED_WITH", targets=historical_successes, depth=1
         )
 
         # Score = frequency × lift × recency decay
-        score = sum(
-            edge.frequency * edge.lift * decay(edge.timestamp)
-            for edge in co_occurrences
-        )
+        score = sum(edge.frequency * edge.lift * decay(edge.timestamp) for edge in co_occurrences)
 
         candidate_scores[candidate] = score
 
     # Step 3: Rank and return top-K
-    return sorted(candidate_scores.items(),
-                  key=lambda x: x[1],
-                  reverse=True)[:K]
+    return sorted(candidate_scores.items(), key=lambda x: x[1], reverse=True)[:K]
 ```
 
 #### PlasticOS Revenue Impact Projection
@@ -274,7 +259,7 @@ def disambiguate_via_context(query, context_signals):
     candidates = graph.traverse(
         start=query,
         relationship="COULD_BE",  # Ambiguous mapping
-        depth=1
+        depth=1,
     )
 
     if len(candidates) == 1:
@@ -287,10 +272,7 @@ def disambiguate_via_context(query, context_signals):
 
         # Traverse context → candidate compatibility
         for context in context_signals:
-            compatibility = graph.get_edge(
-                context, candidate,
-                relationship="SUPPORTS_ENTITY"
-            )
+            compatibility = graph.get_edge(context, candidate, relationship="SUPPORTS_ENTITY")
             if compatibility:
                 score += compatibility.strength * context.signal_strength
 
@@ -388,14 +370,12 @@ LIMIT 1
 
 # Step 1: Train embeddings from graph structure
 embeddings = graph_neural_network(
-    graph=knowledge_graph,
-    node_features=attributes,
-    edge_features=relationships,
-    embedding_dim=128
+    graph=knowledge_graph, node_features=attributes, edge_features=relationships, embedding_dim=128
 )
 
 # Step 2: Index for fast similarity search
 index = build_vector_index(embeddings)  # FAISS, Annoy, etc.
+
 
 # Step 3: Query-time similarity
 def find_similar(query_entity, k=10):
@@ -532,11 +512,7 @@ def real_time_rank(base_candidates, session_context):
     final_scores = {}
     for candidate in base_candidates:
         # Combine graph score + context
-        features = {
-            'base_graph_score': base_scores[candidate.id],
-            **context_features,
-            **candidate.real_time_attributes
-        }
+        features = {"base_graph_score": base_scores[candidate.id], **context_features, **candidate.real_time_attributes}
 
         final_scores[candidate.id] = ranking_model.predict(features)
 
@@ -773,6 +749,7 @@ collaborative_filtering:
 from datetime import datetime, timedelta
 from neo4j import AsyncGraphDatabase
 
+
 async def build_co_occurrence_edges(tx, window_days: int = 90):
     """
     Build CO_OCCURRED_WITH edges from transaction history
@@ -822,14 +799,17 @@ async def build_co_occurrence_edges(tx, window_days: int = 90):
 from pydantic import BaseModel
 from typing import Optional
 
+
 class RealTimeContext(BaseModel):
     urgency: Optional[str] = "normal"  # "normal" | "high" | "urgent"
     current_capacity: Optional[dict] = None  # Facility capacity overrides
     recent_performance: Optional[dict] = None  # Last 7 days performance metrics
 
+
 class MatchRequest(BaseModel):
     # ... existing fields ...
     real_time_context: Optional[RealTimeContext] = None
+
 
 @router.post("/v1/match")
 async def match_with_context(request: MatchRequest):
@@ -847,20 +827,13 @@ async def match_with_context(request: MatchRequest):
 
     # Step 2: Real-time re-ranking
     context_features = {
-        'urgency_multiplier': {
-            'normal': 1.0,
-            'high': 1.5,
-            'urgent': 2.0
-        }.get(request.real_time_context.urgency, 1.0),
-        'capacity_boost': request.real_time_context.current_capacity or {},
-        'performance_boost': request.real_time_context.recent_performance or {}
+        "urgency_multiplier": {"normal": 1.0, "high": 1.5, "urgent": 2.0}.get(request.real_time_context.urgency, 1.0),
+        "capacity_boost": request.real_time_context.current_capacity or {},
+        "performance_boost": request.real_time_context.recent_performance or {},
     }
 
     # Step 3: Apply re-ranking model (XGBoost trained on graph + context features)
-    reranked_candidates = await rerank_with_context(
-        base_candidates,
-        context_features
-    )
+    reranked_candidates = await rerank_with_context(base_candidates, context_features)
 
     return reranked_candidates
 ```

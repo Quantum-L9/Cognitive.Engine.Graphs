@@ -116,10 +116,10 @@ class AnalyticsResponse(BaseModel):
 # Dependency to get engine
 def get_gmp_engine() -> GMPMetaLearningEngine:
     from api.server import gmp_learning_engine
+
     if gmp_learning_engine is None:
         raise HTTPException(
-            status_code=503,
-            detail="GMP Learning Engine not initialized. Set L9_GMP_LEARNING_ENABLED=true"
+            status_code=503, detail="GMP Learning Engine not initialized. Set L9_GMP_LEARNING_ENABLED=true"
         )
     return gmp_learning_engine
 
@@ -128,19 +128,19 @@ def get_gmp_engine() -> GMPMetaLearningEngine:
 LEVEL_INFO = {
     "L2": {
         "description": "Constrained Execution",
-        "capabilities": ["locked_todo_plans", "static_audit", "no_learning"]
+        "capabilities": ["locked_todo_plans", "static_audit", "no_learning"],
     },
     "L3": {
         "description": "Adaptive Execution",
-        "capabilities": ["adaptive_todos", "failure_recovery", "pattern_matching"]
+        "capabilities": ["adaptive_todos", "failure_recovery", "pattern_matching"],
     },
     "L4": {
         "description": "Meta-Strategic Execution",
-        "capabilities": ["architectural_reasoning", "optimization_suggestions", "cross_gmp_analysis"]
+        "capabilities": ["architectural_reasoning", "optimization_suggestions", "cross_gmp_analysis"],
     },
     "L5": {
         "description": "Fully Autonomous",
-        "capabilities": ["autonomous_goal", "self_healing", "proactive_improvements"]
+        "capabilities": ["autonomous_goal", "self_healing", "proactive_improvements"],
     },
 }
 
@@ -154,9 +154,7 @@ async def get_autonomy_level(engine: GMPMetaLearningEngine = Depends(get_gmp_eng
     info = LEVEL_INFO.get(level.value, LEVEL_INFO["L2"])
 
     return AutonomyLevelResponse(
-        current_level=level.value,
-        description=info["description"],
-        capabilities=info["capabilities"]
+        current_level=level.value, description=info["description"], capabilities=info["capabilities"]
     )
 
 
@@ -174,7 +172,7 @@ async def get_graduation_status(engine: GMPMetaLearningEngine = Depends(get_gmp_
         can_graduate=can_graduate,
         reason=reason,
         current_level=current.value,
-        next_level=next_level_map.get(current.value)
+        next_level=next_level_map.get(current.value),
     )
 
 
@@ -189,10 +187,7 @@ async def graduate_to_next_level(engine: GMPMetaLearningEngine = Depends(get_gmp
     next_level_map = {"L2": "L3", "L3": "L4", "L4": "L5", "L5": None}
 
     return GraduationStatusResponse(
-        can_graduate=success,
-        reason=message,
-        current_level=current.value,
-        next_level=next_level_map.get(current.value)
+        can_graduate=success, reason=message, current_level=current.value, next_level=next_level_map.get(current.value)
     )
 
 
@@ -214,7 +209,7 @@ async def get_heuristics(engine: GMPMetaLearningEngine = Depends(get_gmp_engine)
                 "supporting_gmps": len(h.supporting_gmp_ids),
             }
             for h in heuristics
-        ]
+        ],
     )
 
 
@@ -230,7 +225,7 @@ async def get_analytics(engine: GMPMetaLearningEngine = Depends(get_gmp_engine))
             avg_confidence=0.0,
             error_rate=0.0,
             pass_rate=0.0,
-            by_task_type={}
+            by_task_type={},
         )
 
     return AnalyticsResponse(
@@ -239,15 +234,12 @@ async def get_analytics(engine: GMPMetaLearningEngine = Depends(get_gmp_engine))
         avg_confidence=stats["avg_confidence"],
         error_rate=stats["error_rate"],
         pass_rate=stats["pass_rate"],
-        by_task_type=stats.get("by_task_type", {})
+        by_task_type=stats.get("by_task_type", {}),
     )
 
 
 @router.post("/log-execution")
-async def log_execution(
-    result: GMPExecutionResult,
-    engine: GMPMetaLearningEngine = Depends(get_gmp_engine)
-):
+async def log_execution(result: GMPExecutionResult, engine: GMPMetaLearningEngine = Depends(get_gmp_engine)):
     """Log a GMP execution result (internal use)."""
     success = await engine.log_execution(result)
 
@@ -264,7 +256,7 @@ async def log_execution(
             "current_level": metrics.current_level.value,
             "perfect_executions": metrics.perfect_executions_l2,
             "l2_to_l3_ready": metrics.l2_to_l3_ready,
-        }
+        },
     }
 
 
@@ -281,7 +273,7 @@ async def trigger_heuristic_generation(engine: GMPMetaLearningEngine = Depends(g
                 "confidence": h.confidence,
             }
             for h in heuristics
-        ]
+        ],
     }
 ```
 

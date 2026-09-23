@@ -56,9 +56,9 @@ def test_proximity_gate_compiles_sanitized_label():
     domain = make_domain_spec(targetnode="Contact")
     gate = ProximityGate()
     clause = gate.compile_where(spec, domain)
-    assert "$max_distance" in clause          # parameterized
-    assert "Contact" not in clause            # label not in WHERE
-    assert "distance" in clause               # prop name present
+    assert "$max_distance" in clause  # parameterized
+    assert "Contact" not in clause  # label not in WHERE
+    assert "distance" in clause  # prop name present
 ```
 
 ### Scoring Math Tests
@@ -68,6 +68,7 @@ def test_lift_formula_clamps_to_bounds():
     calc = SignalWeightCalculator(min_weight=0.1, max_weight=2.0)
     weight = calc.compute(positive_count=5, total_count=5, base_rate=0.5)
     assert 0.1 <= weight <= 2.0
+
 
 def test_confidence_dampening_reduces_uncertain_weights():
     weight_small_sample = calc.compute(positive_count=2, total_count=3, base_rate=0.5)
@@ -115,6 +116,7 @@ def test_age_gate_rejected_at_compile_time():
     with pytest.raises(ProhibitedFactorError, match="age"):
         gate_compiler.compile(spec, domain)
 
+
 def test_gender_scoring_dimension_blocked():
     spec = ScoringDimension(field="gender")
     with pytest.raises(ProhibitedFactorError, match="gender"):
@@ -147,10 +149,12 @@ Contract C-001 through C-024 must all pass before any merge.
 # tests/property/test_score_bounds.py
 from hypothesis import given, strategies as st
 
+
 @given(st.floats(min_value=-1000, max_value=1000))
 def test_score_always_clamped(raw_score):
     result = clamp_score(raw_score)
     assert 0.0 <= result <= 1.0
+
 
 @given(st.dictionaries(st.text(), st.floats(0, 1), min_size=1))
 def test_weight_sum_assertion(weights):

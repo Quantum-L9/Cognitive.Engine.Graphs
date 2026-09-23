@@ -30,6 +30,7 @@ Production-Grade Explanation-Based Belief Revision System for LLM Memory integra
 ```python
 class ConfidenceLevel(str, Enum):
     """Enumeration of confidence levels for assertions and explanations."""
+
     VERY_LOW = "very_low"
     LOW = "low"
     MEDIUM = "medium"
@@ -39,6 +40,7 @@ class ConfidenceLevel(str, Enum):
 
 class ContradictionType(str, Enum):
     """Types of contradictions that can be detected between facts."""
+
     DIRECT = "direct"  # Direct contradiction: A and NOT A
     SEMANTIC = "semantic"  # Semantic contradiction: incompatible meanings
     TEMPORAL = "temporal"  # Temporal contradiction: ordering conflicts
@@ -48,6 +50,7 @@ class ContradictionType(str, Enum):
 
 class ResolutionStrategy(str, Enum):
     """Strategies for resolving belief conflicts."""
+
     REPLACE = "replace"  # Replace old belief with new belief
     BRANCH = "branch"  # Both beliefs true in different contexts
     MERGE = "merge"  # Synthesize beliefs into unified representation
@@ -60,6 +63,7 @@ class ResolutionStrategy(str, Enum):
 ```python
 class Fact(BaseModel):
     """Represents a single fact stored in the knowledge graph."""
+
     fact_id: UUID = Field(default_factory=uuid4)
     content: str = Field(..., min_length=1, max_length=4096)
     entity_type: str
@@ -73,13 +77,12 @@ class Fact(BaseModel):
 
     def is_currently_valid(self, as_of: Optional[datetime] = None) -> bool:
         check_time = as_of or datetime.now(timezone.utc)
-        return self.valid_from <= check_time and (
-            self.valid_to is None or self.valid_to > check_time
-        )
+        return self.valid_from <= check_time and (self.valid_to is None or self.valid_to > check_time)
 
 
 class ConflictingFactPair(BaseModel):
     """Represents a pair of facts that conflict with each other."""
+
     fact_a_id: UUID
     fact_b_id: UUID
     contradiction_type: ContradictionType
@@ -90,6 +93,7 @@ class ConflictingFactPair(BaseModel):
 
 class ConflictExplanation(BaseModel):
     """Structured explanation of why two facts conflict and how to resolve."""
+
     explanation_id: UUID = Field(default_factory=uuid4)
     conflict_pair_id: UUID
     contradiction_type: ContradictionType
@@ -106,6 +110,7 @@ class ConflictExplanation(BaseModel):
 
 class ResolutionRecord(BaseModel):
     """Records the outcome of a belief conflict resolution."""
+
     resolution_id: UUID = Field(default_factory=uuid4)
     explanation_id: UUID
     selected_strategy: ResolutionStrategy

@@ -128,19 +128,13 @@ docker run -d --name neo4j-test \
 import pytest
 from engine.gates.types.threshold import ThresholdGate
 
+
 def test_threshold_gate_lte_pass():
     gate = ThresholdGate(
-        name="credit_min",
-        candidateprop="mincreditscore",
-        queryparam="creditscore",
-        operator="<=",
-        nullbehavior="fail"
+        name="credit_min", candidateprop="mincreditscore", queryparam="creditscore", operator="<=", nullbehavior="fail"
     )
 
-    cypher = gate.compile(
-        candidate_alias="c",
-        query_alias="$query"
-    )
+    cypher = gate.compile(candidate_alias="c", query_alias="$query")
 
     assert "c.mincreditscore <= $query.creditscore" in cypher
 ```
@@ -150,6 +144,7 @@ def test_threshold_gate_lte_pass():
 # tests/integration/test_match_pipeline.py
 import pytest
 from testcontainers.neo4j import Neo4jContainer
+
 
 @pytest.mark.asyncio
 async def test_full_match_pipeline(neo4j_container, test_domain):
@@ -165,16 +160,11 @@ async def test_full_match_pipeline(neo4j_container, test_domain):
 import pytest
 from engine.compliance.prohibited_factors import ProhibitedFactorValidator
 
-def test_ecoa_blocks_race_in_gates():
-    validator = ProhibitedFactorValidator(
-        regime="ECOA",
-        blocked_fields=["race", "ethnicity"]
-    )
 
-    gate_config = {
-        "candidateprop": "race",
-        "queryparam": "race"
-    }
+def test_ecoa_blocks_race_in_gates():
+    validator = ProhibitedFactorValidator(regime="ECOA", blocked_fields=["race", "ethnicity"])
+
+    gate_config = {"candidateprop": "race", "queryparam": "race"}
 
     with pytest.raises(ProhibitedFactorError):
         validator.validate_gate(gate_config)

@@ -20,12 +20,15 @@ the exact constructor signature. Do NOT guess.
 import pytest
 from engine.config.schema import DomainSpec, GateSpec, GateType
 
+
 @pytest.fixture
 def sample_spec() -> DomainSpec:
     """Load a real domain spec — do NOT construct manually."""
     from engine.config.loader import DomainPackLoader
+
     loader = DomainPackLoader(domains_dir=Path("domains"))
     return loader.load_domain("plasticos")
+
 
 def test_range_gate_compilation(sample_spec: DomainSpec):
     compiler = GateCompiler(sample_spec)  # Match METHOD_SIGNATURES.md
@@ -41,10 +44,12 @@ def test_range_gate_compilation(sample_spec: DomainSpec):
 import pytest
 from testcontainers.neo4j import Neo4jContainer
 
+
 @pytest.fixture(scope="module")
 def neo4j():
     with Neo4jContainer("neo4j:5-enterprise") as container:
         yield container
+
 
 # NEVER mock GraphDriver for integration tests
 # ALWAYS use testcontainers-neo4j

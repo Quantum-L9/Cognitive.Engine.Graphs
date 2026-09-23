@@ -96,9 +96,11 @@ from uuid import uuid4
 import structlog
 from prometheus_client import Counter, Histogram
 
+
 # Type definitions and enums
 class GapSeverity(str, Enum):
     """Enumeration of knowledge gap severity levels."""
+
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
@@ -108,6 +110,7 @@ class GapSeverity(str, Enum):
 @dataclass
 class KnowledgeGap:
     """Represents a detected knowledge gap in the entity graph."""
+
     gap_id: str = field(default_factory=lambda: str(uuid4()))
     gap_type: str = ""  # "entity", "relationship", "attribute"
     severity: GapSeverity = GapSeverity.LOW
@@ -117,17 +120,13 @@ class KnowledgeGap:
 
 
 # Prometheus metrics
-gap_detection_count = Counter(
-    'gap_detection_count',
-    'Total gaps detected by gap detector',
-    ['gap_type', 'severity']
-)
+gap_detection_count = Counter("gap_detection_count", "Total gaps detected by gap detector", ["gap_type", "severity"])
 
 gap_detector_latency = Histogram(
-    'gap_detector_latency_seconds',
-    'Latency of gap detection operations',
-    ['operation'],
-    buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0)
+    "gap_detector_latency_seconds",
+    "Latency of gap detection operations",
+    ["operation"],
+    buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0),
 )
 
 
@@ -163,9 +162,7 @@ class GapDetector:
         self.critical_path_entities: Set[str] = set()
 
     async def detect_entity_gaps(
-        self,
-        mentioned_entities: List[str],
-        entity_graph: Dict[str, Set[str]]
+        self, mentioned_entities: List[str], entity_graph: Dict[str, Set[str]]
     ) -> List[KnowledgeGap]:
         """
         Detect entities referenced but missing from the knowledge graph.
@@ -188,10 +185,7 @@ class GapDetector:
         gaps: List[KnowledgeGap] = []
 
         try:
-            await self.logger.ainfo(
-                "detecting_entity_gaps",
-                entity_count=len(mentioned_entities)
-            )
+            await self.logger.ainfo("detecting_entity_gaps", entity_count=len(mentioned_entities))
 
             if not mentioned_entities:
                 raise ValueError("mentioned_entities cannot be empty")
@@ -214,24 +208,15 @@ class GapDetector:
                 severity = GapSeverity.CRITICAL if is_critical else GapSeverity.HIGH
 
                 gap = KnowledgeGap(
-                    gap_type="entity",
-                    severity=severity,
-                    entity_ids=[entity_id],
-                    confidence_score=confidence
+                    gap_type="entity", severity=severity, entity_ids=[entity_id], confidence_score=confidence
                 )
                 gaps.append(gap)
 
                 # Record metric
-                gap_detection_count.labels(
-                    gap_type="entity",
-                    severity=severity.value
-                ).inc()
+                gap_detection_count.labels(gap_type="entity", severity=severity.value).inc()
 
                 await self.logger.ainfo(
-                    "entity_gap_detected",
-                    entity_id=entity_id,
-                    confidence=confidence,
-                    severity=severity.value
+                    "entity_gap_detected", entity_id=entity_id, confidence=confidence, severity=severity.value
                 )
 
             elapsed = time.time() - start_time
@@ -240,17 +225,11 @@ class GapDetector:
             return gaps
 
         except Exception as e:
-            await self.logger.aerror(
-                "entity_gap_detection_failed",
-                error=str(e),
-                entity_count=len(mentioned_entities)
-            )
+            await self.logger.aerror("entity_gap_detection_failed", error=str(e), entity_count=len(mentioned_entities))
             raise
 
     async def detect_relationship_gaps(
-        self,
-        mentioned_entities: List[str],
-        entity_graph: Dict[str, Set[str]]
+        self, mentioned_entities: List[str], entity_graph: Dict[str, Set[str]]
     ) -> List[KnowledgeGap]:
         """
         Detect missing relationships between entities in the knowledge graph.
@@ -277,10 +256,7 @@ class GapDetector:
         gaps: List[KnowledgeGap] = []
 
         try:
-            await self.logger.ainfo(
-                "detecting_relationship_gaps",
-                entity_count=len(mentioned_entities)
-            )
+            await self.logger.ainfo("detecting_relationship_gaps", entity_count=len(mentioned_entities))
 
             if not mentioned_entities or len(mentioned_entities) < 2:
                 return []
@@ -313,20 +289,14 @@ class GapDetector:
                             gap_type="relationship",
                             severity=GapSeverity.MEDIUM,
                             entity_ids=[entity_a, entity_b],
-                            confidence_score=confidence
+                            confidence_score=confidence,
                         )
                         gaps.append(gap)
 
-                        gap_detection_count.labels(
-                            gap_type="relationship",
-                            severity=GapSeverity.MEDIUM.value
-                        ).inc()
+                        gap_detection_count.labels(gap_type="relationship", severity=GapSeverity.MEDIUM.value).inc()
 
                         await self.logger.ainfo(
-                            "relationship_gap_detected",
-                            entity_a=entity_a,
-                            entity_b=entity_b,
-                            confidence=confidence
+                            "relationship_gap_detected", entity_a=entity_a, entity_b=entity_b, confidence=confidence
                         )
 
             elapsed = time.time() - start_time
@@ -335,16 +305,11 @@ class GapDetector:
             return gaps
 
         except Exception as e:
-            await self.logger.aerror(
-                "relationship_gap_detection_failed",
-                error=str(e)
-            )
+            await self.logger.aerror("relationship_gap_detection_failed", error=str(e))
             raise
 
     async def detect_all_gaps(
-        self,
-        mentioned_entities: List[str],
-        entity_graph: Dict[str, Set[str]]
+        self, mentioned_entities: List[str], entity_graph: Dict[str, Set[str]]
     ) -> List[KnowledgeGap]:
         """
         Detect all gap types (entity, relationship, attribute).
@@ -366,31 +331,21 @@ class GapDetector:
         start_time = time.time()
 
         try:
-            await self.logger.ainfo(
-                "detecting_all_gaps",
-                entity_count=len(mentioned_entities)
-            )
+            await self.logger.ainfo("detecting_all_gaps", entity_count=len(mentioned_entities))
 
             # Run detection operations concurrently
             entity_gaps, relationship_gaps = await asyncio.gather(
                 self.detect_entity_gaps(mentioned_entities, entity_graph),
                 self.detect_relationship_gaps(mentioned_entities, entity_graph),
-                return_exceptions=False
+                return_exceptions=False,
             )
 
             # Combine results and sort by severity and confidence
             all_gaps = entity_gaps + relationship_gaps
 
             # Sort by severity (CRITICAL first) then by confidence (highest first)
-            severity_order = {
-                GapSeverity.CRITICAL: 0,
-                GapSeverity.HIGH: 1,
-                GapSeverity.MEDIUM: 2,
-                GapSeverity.LOW: 3
-            }
-            all_gaps.sort(
-                key=lambda g: (severity_order[g.severity], -g.confidence_score)
-            )
+            severity_order = {GapSeverity.CRITICAL: 0, GapSeverity.HIGH: 1, GapSeverity.MEDIUM: 2, GapSeverity.LOW: 3}
+            all_gaps.sort(key=lambda g: (severity_order[g.severity], -g.confidence_score))
 
             elapsed = time.time() - start_time
             gap_detector_latency.labels(operation="detect_all_gaps").observe(elapsed)
@@ -400,17 +355,13 @@ class GapDetector:
                 total_gaps=len(all_gaps),
                 entity_gaps=len(entity_gaps),
                 relationship_gaps=len(relationship_gaps),
-                latency_ms=elapsed * 1000
+                latency_ms=elapsed * 1000,
             )
 
             return all_gaps
 
         except Exception as e:
-            await self.logger.aerror(
-                "all_gap_detection_failed",
-                error=str(e),
-                entity_count=len(mentioned_entities)
-            )
+            await self.logger.aerror("all_gap_detection_failed", error=str(e), entity_count=len(mentioned_entities))
             raise
 
     def update_gap_frequency(self, entity_id: str, increment: float = 1.0) -> None:
@@ -441,10 +392,7 @@ class GapDetector:
             entity_ids: Set of entity IDs considered critical
         """
         self.critical_path_entities = entity_ids
-        self.logger.info(
-            "critical_path_entities_updated",
-            count=len(entity_ids)
-        )
+        self.logger.info("critical_path_entities_updated", count=len(entity_ids))
 ```
 
 ## Implementation: Predictive Cache Module
@@ -482,6 +430,7 @@ except ImportError:
 @dataclass
 class SubgraphEntry:
     """Represents a cached subgraph entry for a knowledge graph entity."""
+
     entity_id: str
     neighbors: Dict[str, List[str]] = field(default_factory=dict)  # rel_type -> [neighbor_ids]
     relationship_types: Dict[str, int] = field(default_factory=dict)  # rel_type -> count
@@ -503,6 +452,7 @@ class SubgraphEntry:
 @dataclass
 class CacheMetrics:
     """Metrics tracking cache performance."""
+
     cache_hits: int = 0
     cache_misses: int = 0
     total_warming_calls: int = 0
@@ -524,7 +474,7 @@ class PredictiveCacheConfig:
         cache_ttl_seconds: int = 300,
         max_subgraph_neighbors: int = 20,
         max_cache_entries: int = 1000,
-        warming_concurrency: int = 20
+        warming_concurrency: int = 20,
     ):
         """
         Initialize cache configuration.
@@ -544,35 +494,23 @@ class PredictiveCacheConfig:
 
 
 # Prometheus metrics
-cache_hits = Counter(
-    'cache_hits_total',
-    'Total cache hits',
-    ['cache_layer']
-)
+cache_hits = Counter("cache_hits_total", "Total cache hits", ["cache_layer"])
 
-cache_misses = Counter(
-    'cache_misses_total',
-    'Total cache misses',
-    ['cache_layer']
-)
+cache_misses = Counter("cache_misses_total", "Total cache misses", ["cache_layer"])
 
 warming_latency = Histogram(
-    'warming_latency_seconds',
-    'Entity warming operation latency',
-    ['operation'],
-    buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0)
+    "warming_latency_seconds",
+    "Entity warming operation latency",
+    ["operation"],
+    buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0),
 )
 
-cache_entries = Gauge(
-    'cache_entries_total',
-    'Current number of entries in cache',
-    ['cache_layer']
-)
+cache_entries = Gauge("cache_entries_total", "Current number of entries in cache", ["cache_layer"])
 
 warming_operations = Counter(
-    'warming_operations_total',
-    'Total warming operations attempted',
-    ['status']  # success, failure
+    "warming_operations_total",
+    "Total warming operations attempted",
+    ["status"],  # success, failure
 )
 
 
@@ -621,33 +559,25 @@ class PredictiveCache:
         try:
             if redis_async is None:
                 await self.logger.awarning(
-                    "redis_not_available",
-                    message="redis.asyncio not installed, using L1 cache only"
+                    "redis_not_available", message="redis.asyncio not installed, using L1 cache only"
                 )
                 self._initialized = True
                 return
 
             self.redis_client = await redis_async.from_url(
-                self.config.redis_url,
-                encoding="utf-8",
-                decode_responses=True
+                self.config.redis_url, encoding="utf-8", decode_responses=True
             )
 
             # Test connectivity
             await self.redis_client.ping()
 
             await self.logger.ainfo(
-                "cache_initialized",
-                redis_url=self.config.redis_url,
-                cache_ttl_seconds=self.config.cache_ttl_seconds
+                "cache_initialized", redis_url=self.config.redis_url, cache_ttl_seconds=self.config.cache_ttl_seconds
             )
             self._initialized = True
 
         except Exception as e:
-            await self.logger.aerror(
-                "cache_initialization_failed",
-                error=str(e)
-            )
+            await self.logger.aerror("cache_initialization_failed", error=str(e))
             raise
 
     async def warm_entity(self, entity_id: str) -> Optional[SubgraphEntry]:
@@ -671,10 +601,7 @@ class PredictiveCache:
 
         try:
             async with self._warming_semaphore:
-                await self.logger.ainfo(
-                    "warming_entity",
-                    entity_id=entity_id
-                )
+                await self.logger.ainfo("warming_entity", entity_id=entity_id)
 
                 # Simulate Neo4j query for subgraph data
                 # In production, replace with actual Neo4j driver call
@@ -692,43 +619,30 @@ class PredictiveCache:
                 if self.redis_client is not None:
                     try:
                         await self.redis_client.setex(
-                            f"entity:{entity_id}",
-                            self.config.cache_ttl_seconds,
-                            subgraph_entry.to_json()
+                            f"entity:{entity_id}", self.config.cache_ttl_seconds, subgraph_entry.to_json()
                         )
                     except Exception as e:
-                        await self.logger.awarning(
-                            "redis_store_failed",
-                            entity_id=entity_id,
-                            error=str(e)
-                        )
+                        await self.logger.awarning("redis_store_failed", entity_id=entity_id, error=str(e))
 
                 elapsed = time.time() - start_time
                 warming_latency.labels(operation="warm_entity").observe(elapsed)
                 warming_operations.labels(status="success").inc()
 
                 self.metrics.total_warming_calls += 1
-                self.metrics.avg_warming_latency_ms = (
-                    0.9 * self.metrics.avg_warming_latency_ms +
-                    0.1 * (elapsed * 1000)
-                )
+                self.metrics.avg_warming_latency_ms = 0.9 * self.metrics.avg_warming_latency_ms + 0.1 * (elapsed * 1000)
 
                 await self.logger.ainfo(
                     "entity_warmed",
                     entity_id=entity_id,
                     neighbors_count=sum(len(v) for v in subgraph_entry.neighbors.values()),
-                    latency_ms=elapsed * 1000
+                    latency_ms=elapsed * 1000,
                 )
 
                 return subgraph_entry
 
         except Exception as e:
             warming_operations.labels(status="failure").inc()
-            await self.logger.aerror(
-                "entity_warming_failed",
-                entity_id=entity_id,
-                error=str(e)
-            )
+            await self.logger.aerror("entity_warming_failed", entity_id=entity_id, error=str(e))
             return None
 
     async def warm_entities(self, entity_ids: List[str]) -> List[SubgraphEntry]:
@@ -747,10 +661,7 @@ class PredictiveCache:
         start_time = time.time()
 
         try:
-            await self.logger.ainfo(
-                "warming_entities_batch",
-                entity_count=len(entity_ids)
-            )
+            await self.logger.ainfo("warming_entities_batch", entity_count=len(entity_ids))
 
             # Create warming tasks with gather
             tasks = [self.warm_entity(eid) for eid in entity_ids]
@@ -766,17 +677,13 @@ class PredictiveCache:
                 "entities_warming_complete",
                 requested=len(entity_ids),
                 successful=len(successful_entries),
-                latency_ms=elapsed * 1000
+                latency_ms=elapsed * 1000,
             )
 
             return successful_entries
 
         except Exception as e:
-            await self.logger.aerror(
-                "entities_warming_failed",
-                entity_count=len(entity_ids),
-                error=str(e)
-            )
+            await self.logger.aerror("entities_warming_failed", entity_count=len(entity_ids), error=str(e))
             return []
 
     async def get_cached(self, entity_id: str) -> Optional[SubgraphEntry]:
@@ -802,10 +709,7 @@ class PredictiveCache:
                 cache_hits.labels(cache_layer="l1").inc()
                 self.metrics.cache_hits += 1
 
-                await self.logger.ainfo(
-                    "cache_hit_l1",
-                    entity_id=entity_id
-                )
+                await self.logger.ainfo("cache_hit_l1", entity_id=entity_id)
 
                 return entry
 
@@ -819,10 +723,7 @@ class PredictiveCache:
                         entry.accessed_count += 1
 
                         # Refresh TTL
-                        await self.redis_client.expire(
-                            f"entity:{entity_id}",
-                            self.config.cache_ttl_seconds
-                        )
+                        await self.redis_client.expire(f"entity:{entity_id}", self.config.cache_ttl_seconds)
 
                         # Promote to L1
                         self.l1_cache[entity_id] = entry
@@ -830,37 +731,23 @@ class PredictiveCache:
                         cache_hits.labels(cache_layer="l2").inc()
                         self.metrics.cache_hits += 1
 
-                        await self.logger.ainfo(
-                            "cache_hit_l2",
-                            entity_id=entity_id
-                        )
+                        await self.logger.ainfo("cache_hit_l2", entity_id=entity_id)
 
                         return entry
 
                 except Exception as e:
-                    await self.logger.awarning(
-                        "redis_get_failed",
-                        entity_id=entity_id,
-                        error=str(e)
-                    )
+                    await self.logger.awarning("redis_get_failed", entity_id=entity_id, error=str(e))
 
             # Cache miss
             cache_misses.labels(cache_layer="both").inc()
             self.metrics.cache_misses += 1
 
-            await self.logger.ainfo(
-                "cache_miss",
-                entity_id=entity_id
-            )
+            await self.logger.ainfo("cache_miss", entity_id=entity_id)
 
             return None
 
         except Exception as e:
-            await self.logger.aerror(
-                "cache_get_failed",
-                entity_id=entity_id,
-                error=str(e)
-            )
+            await self.logger.aerror("cache_get_failed", entity_id=entity_id, error=str(e))
             return None
 
     def get_metrics(self) -> CacheMetrics:
@@ -893,20 +780,12 @@ class PredictiveCache:
         neighbors = {
             "knows": ["entity_2", "entity_3", "entity_4"],
             "similar_to": ["entity_5", "entity_6"],
-            "related_to": ["entity_7"]
+            "related_to": ["entity_7"],
         }
 
-        relationship_types = {
-            "knows": 3,
-            "similar_to": 2,
-            "related_to": 1
-        }
+        relationship_types = {"knows": 3, "similar_to": 2, "related_to": 1}
 
-        return SubgraphEntry(
-            entity_id=entity_id,
-            neighbors=neighbors,
-            relationship_types=relationship_types
-        )
+        return SubgraphEntry(entity_id=entity_id, neighbors=neighbors, relationship_types=relationship_types)
 
     async def clear_expired(self) -> None:
         """
@@ -929,10 +808,7 @@ class PredictiveCache:
         cache_entries.labels(cache_layer="l1").set(len(self.l1_cache))
 
         if expired_keys:
-            await self.logger.ainfo(
-                "expired_entries_cleared",
-                count=len(expired_keys)
-            )
+            await self.logger.ainfo("expired_entries_cleared", count=len(expired_keys))
 
     async def shutdown(self) -> None:
         """
@@ -944,10 +820,7 @@ class PredictiveCache:
             try:
                 await self.redis_client.close()
             except Exception as e:
-                await self.logger.awarning(
-                    "redis_close_failed",
-                    error=str(e)
-                )
+                await self.logger.awarning("redis_close_failed", error=str(e))
 
         self.l1_cache.clear()
         await self.logger.ainfo("cache_shutdown_complete")
@@ -985,28 +858,18 @@ from prometheus_client import Counter, Gauge, Histogram
 
 
 # Prometheus metrics
-warming_service_calls = Counter(
-    'warming_service_calls_total',
-    'Total warming service calls',
-    ['operation', 'status']
-)
+warming_service_calls = Counter("warming_service_calls_total", "Total warming service calls", ["operation", "status"])
 
 warming_service_latency = Histogram(
-    'warming_service_latency_seconds',
-    'Warming service operation latency',
-    ['operation'],
-    buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0)
+    "warming_service_latency_seconds",
+    "Warming service operation latency",
+    ["operation"],
+    buckets=(0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0),
 )
 
-entities_warmed_total = Counter(
-    'entities_warmed_total',
-    'Total entities warmed into cache'
-)
+entities_warmed_total = Counter("entities_warmed_total", "Total entities warmed into cache")
 
-gaps_addressed = Counter(
-    'gaps_addressed_total',
-    'Total knowledge gaps addressed by warming'
-)
+gaps_addressed = Counter("gaps_addressed_total", "Total knowledge gaps addressed by warming")
 
 
 class MemoryWarmingService:
@@ -1033,7 +896,7 @@ class MemoryWarmingService:
     def __init__(
         self,
         gap_detector: Any,  # GapDetector instance
-        cache: Any  # PredictiveCache instance
+        cache: Any,  # PredictiveCache instance
     ):
         """
         Initialize the memory warming service.
@@ -1058,17 +921,11 @@ class MemoryWarmingService:
             await self.cache.initialize()
             await self.logger.ainfo("warming_service_initialized")
         except Exception as e:
-            await self.logger.aerror(
-                "warming_service_initialization_failed",
-                error=str(e)
-            )
+            await self.logger.aerror("warming_service_initialization_failed", error=str(e))
             raise
 
     async def warm_for_query(
-        self,
-        query: str,
-        mentioned_entities: List[str],
-        max_gaps_to_warm: int = 10
+        self, query: str, mentioned_entities: List[str], max_gaps_to_warm: int = 10
     ) -> Dict[str, Any]:
         """
         Warm memory for an incoming query.
@@ -1099,22 +956,17 @@ class MemoryWarmingService:
 
         try:
             await self.logger.ainfo(
-                "warming_for_query",
-                query_preview=query[:100],
-                entity_count=len(mentioned_entities)
+                "warming_for_query", query_preview=query[:100], entity_count=len(mentioned_entities)
             )
 
             # Phase 1: Detect gaps
-            detected_gaps = await self.gap_detector.detect_all_gaps(
-                mentioned_entities,
-                self.entity_graph
-            )
+            detected_gaps = await self.gap_detector.detect_all_gaps(mentioned_entities, self.entity_graph)
 
             await self.logger.ainfo(
                 "gaps_detected",
                 total_gaps=len(detected_gaps),
                 critical=sum(1 for g in detected_gaps if g.severity.value == "critical"),
-                high=sum(1 for g in detected_gaps if g.severity.value == "high")
+                high=sum(1 for g in detected_gaps if g.severity.value == "high"),
             )
 
             # Phase 2: Prioritize and select gaps to warm
@@ -1146,17 +998,14 @@ class MemoryWarmingService:
 
             elapsed = time.time() - start_time
             warming_service_latency.labels(operation="warm_for_query").observe(elapsed)
-            warming_service_calls.labels(
-                operation="warm_for_query",
-                status="success"
-            ).inc()
+            warming_service_calls.labels(operation="warm_for_query", status="success").inc()
 
             result = {
                 "gaps_detected": len(detected_gaps),
                 "gaps_addressed": gaps_to_address,
                 "entities_warmed": len(warmed_entities),
                 "warming_latency_ms": elapsed * 1000,
-                "cache_metrics": self._format_cache_metrics()
+                "cache_metrics": self._format_cache_metrics(),
             }
 
             await self.logger.ainfo(
@@ -1164,29 +1013,22 @@ class MemoryWarmingService:
                 gaps_detected=len(detected_gaps),
                 gaps_addressed=gaps_to_address,
                 entities_warmed=len(warmed_entities),
-                latency_ms=elapsed * 1000
+                latency_ms=elapsed * 1000,
             )
 
             return result
 
         except Exception as e:
-            warming_service_calls.labels(
-                operation="warm_for_query",
-                status="failure"
-            ).inc()
+            warming_service_calls.labels(operation="warm_for_query", status="failure").inc()
 
-            await self.logger.aerror(
-                "query_warming_failed",
-                error=str(e),
-                entity_count=len(mentioned_entities)
-            )
+            await self.logger.aerror("query_warming_failed", error=str(e), entity_count=len(mentioned_entities))
 
             return {
                 "gaps_detected": 0,
                 "gaps_addressed": gaps_to_address,
                 "entities_warmed": 0,
                 "warming_latency_ms": (time.time() - start_time) * 1000,
-                "error": str(e)
+                "error": str(e),
             }
 
     def set_entity_graph(self, entity_graph: Dict[str, Set[str]]) -> None:
@@ -1206,9 +1048,7 @@ class MemoryWarmingService:
         self.logger.info(
             "entity_graph_updated",
             entity_count=len(entity_graph),
-            total_relationships=sum(
-                len(neighbors) for neighbors in entity_graph.values()
-            )
+            total_relationships=sum(len(neighbors) for neighbors in entity_graph.values()),
         )
 
     def get_service_metrics(self) -> Dict[str, Any]:
@@ -1232,11 +1072,11 @@ class MemoryWarmingService:
                 "cache_misses": cache_metrics.cache_misses,
                 "cache_hit_ratio": cache_metrics.cache_hit_ratio,
                 "avg_warming_latency_ms": cache_metrics.avg_warming_latency_ms,
-                "total_warming_calls": cache_metrics.total_warming_calls
+                "total_warming_calls": cache_metrics.total_warming_calls,
             },
             "warming_history": self._warming_history.copy(),
             "entity_graph_size": len(self.entity_graph),
-            "l1_cache_size": len(self.cache.l1_cache)
+            "l1_cache_size": len(self.cache.l1_cache),
         }
 
     def _format_cache_metrics(self) -> Dict[str, Any]:
@@ -1254,7 +1094,7 @@ class MemoryWarmingService:
             "hits": metrics.cache_hits,
             "misses": metrics.cache_misses,
             "hit_ratio_percent": metrics.cache_hit_ratio,
-            "avg_latency_ms": metrics.avg_warming_latency_ms
+            "avg_latency_ms": metrics.avg_warming_latency_ms,
         }
 
     async def maintenance_cycle(self) -> None:
@@ -1268,16 +1108,10 @@ class MemoryWarmingService:
         try:
             await self.cache.clear_expired()
 
-            await self.logger.ainfo(
-                "maintenance_cycle_complete",
-                l1_cache_size=len(self.cache.l1_cache)
-            )
+            await self.logger.ainfo("maintenance_cycle_complete", l1_cache_size=len(self.cache.l1_cache))
 
         except Exception as e:
-            await self.logger.aerror(
-                "maintenance_cycle_failed",
-                error=str(e)
-            )
+            await self.logger.aerror("maintenance_cycle_failed", error=str(e))
 
     async def shutdown(self) -> None:
         """
@@ -1290,10 +1124,7 @@ class MemoryWarmingService:
             await self.cache.shutdown()
             await self.logger.ainfo("warming_service_shutdown_complete")
         except Exception as e:
-            await self.logger.aerror(
-                "warming_service_shutdown_failed",
-                error=str(e)
-            )
+            await self.logger.aerror("warming_service_shutdown_failed", error=str(e))
 
 
 # Example usage and integration patterns
@@ -1312,9 +1143,7 @@ async def example_warming_workflow():
     # Initialize components
     gap_detector = GapDetector()
     cache_config = PredictiveCacheConfig(
-        redis_url="redis://localhost:6379",
-        cache_ttl_seconds=300,
-        warming_concurrency=20
+        redis_url="redis://localhost:6379", cache_ttl_seconds=300, warming_concurrency=20
     )
     cache = PredictiveCache(cache_config)
 
@@ -1329,14 +1158,13 @@ async def example_warming_workflow():
         "entity_3": {"entity_1", "entity_6"},
         "entity_4": {"entity_1"},
         "entity_5": {"entity_2"},
-        "entity_6": {"entity_3"}
+        "entity_6": {"entity_3"},
     }
     service.set_entity_graph(entity_graph)
 
     # Warm for incoming query
     result = await service.warm_for_query(
-        query="Find all entities related to entity_1",
-        mentioned_entities=["entity_1", "entity_2", "entity_3"]
+        query="Find all entities related to entity_1", mentioned_entities=["entity_1", "entity_2", "entity_3"]
     )
 
     print("Warming result:", result)
