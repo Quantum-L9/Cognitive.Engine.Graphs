@@ -28,6 +28,7 @@ def make_mock_domain_spec() -> MagicMock:
 
 
 def make_mock_sync_endpoint(
+    *,
     path: str = "/sync/test",
     strategy: SyncStrategy = SyncStrategy.UNWINDMERGE,
     target_node: str = "TestNode",

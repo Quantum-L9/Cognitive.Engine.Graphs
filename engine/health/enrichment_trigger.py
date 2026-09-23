@@ -150,6 +150,7 @@ def measure_health_impact(
     domain: str,
     health_before: EntityHealth,
     health_after: EntityHealth,
+    *,
     enrichment_cost_usd: float = 0.0,
     enrichment_tokens: int = 0,
     match_outcomes_before: list[Any] | None = None,
