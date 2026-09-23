@@ -58,17 +58,18 @@ class PacketEnvelope(BaseModel, frozen=True):
 ## Standard Optional Fields
 
 ```python
-metadata: PacketMetadata | None  # schema_version, agent, domain
-provenance: PacketProvenance | None  # source, tool, derive_type
-confidence: PacketConfidence | None  # score (0.0-1.0), rationale
-reasoning_block: dict | None  # StructuredReasoningBlock if applicable
-thread_id: UUID | None  # Conversation/task grouping
-lineage: PacketLineage | None  # parent_ids, derivation_type, generation
-tags: list[str]  # Lightweight labels
-ttl: datetime | None  # Expiration for garbage collection
-trace_id: str | None  # W3C Trace Context ID
-correlation_id: str | None  # Cross-service correlation
-content_hash: str  # SHA-256 — auto-computed, UNIQUE constraint in DB
+class PacketEnvelope(BaseModel, frozen=True):  # continued: optional fields
+    metadata: PacketMetadata | None  # schema_version, agent, domain
+    provenance: PacketProvenance | None  # source, tool, derive_type
+    confidence: PacketConfidence | None  # score (0.0-1.0), rationale
+    reasoning_block: dict | None  # StructuredReasoningBlock if applicable
+    thread_id: UUID | None  # Conversation/task grouping
+    lineage: PacketLineage | None  # parent_ids, derivation_type, generation
+    tags: list[str]  # Lightweight labels
+    ttl: datetime | None  # Expiration for garbage collection
+    trace_id: str | None  # W3C Trace Context ID
+    correlation_id: str | None  # Cross-service correlation
+    content_hash: str  # SHA-256 — auto-computed, UNIQUE constraint in DB
 ```
 
 
