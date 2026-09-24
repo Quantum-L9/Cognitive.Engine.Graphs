@@ -27,10 +27,12 @@ status: active
 # ✅ GOOD — sanitized label, parameterized values, explicit types
 from engine.utils.security import sanitize_label
 
+
 async def query_candidates(driver: GraphDriver, spec: DomainSpec) -> list[dict[str, Any]]:
     label = sanitize_label(spec.targetnode)
     cypher = f"MATCH (n:{label}) WHERE n.active = $active RETURN n LIMIT $limit"
     return await driver.execute_query(cypher, {"active": True, "limit": settings.max_results})
+
 
 # 🚫 BAD — unsanitized label, hardcoded limit, no type hints
 async def query_candidates(driver, spec):
@@ -47,6 +49,7 @@ def validate_weights(weights: dict[str, float] | None = None) -> None:
         msg = f"Weight sum {sum(weights.values()):.4f} exceeds 1.0 ceiling"
         raise ValidationError(msg)
 
+
 # 🚫 BAD — f-string in raise, implicit Optional, no flag gate
 def validate_weights(weights: dict = None):
     if weights and sum(weights.values()) > 1.0:
@@ -57,9 +60,11 @@ def validate_weights(weights: dict = None):
 # ✅ GOOD — gate type extends BaseGate, registered in enum
 class ProximityGate(BaseGate):
     """Gate that filters by graph distance."""
+
     def compile_where(self, spec: GateSpec, domain: DomainSpec) -> str:
         field = sanitize_label(spec.candidateprop)
         return f"candidate.{field} <= $max_distance"
+
 
 # 🚫 BAD — standalone function, no BaseGate, no sanitization
 def proximity_gate(spec, domain):

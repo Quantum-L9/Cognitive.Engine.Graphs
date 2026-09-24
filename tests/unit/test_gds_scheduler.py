@@ -43,6 +43,7 @@ from engine.gds.scheduler import GDSScheduler
 def _job(
     name: str,
     algorithm: str,
+    *,
     schedule_type: str = "cron",
     cron: str | None = "0 2 * * *",
     node_labels: list[str] | None = None,

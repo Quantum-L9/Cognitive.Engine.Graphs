@@ -40,14 +40,15 @@ gates:
 # Python (engine/config/schema.py)
 class DomainSpec(BaseModel):
     domain: DomainMeta
-    match_entities: MatchEntitiesSpec   # ← SAME as YAML key
+    match_entities: MatchEntitiesSpec  # ← SAME as YAML key
     gates: list[GateSpec]
+
 
 class GateSpec(BaseModel):
     type: GateType
     field: str
     query_param: str
-    null_behavior: str = "fail"         # ← SAME as YAML key
+    null_behavior: str = "fail"  # ← SAME as YAML key
 ```
 
 
@@ -58,9 +59,11 @@ class GateSpec(BaseModel):
 class GateSpec(BaseModel):
     null_behavior: str = Field(alias="nullBehavior")  # BANNED
 
+
 # ❌ No flatcase
 class DomainSpec(BaseModel):
     matchentities: MatchEntitiesSpec  # BANNED — must be match_entities
+
 
 # ❌ No camelCase
 class DomainSpec(BaseModel):

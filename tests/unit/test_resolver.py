@@ -24,6 +24,7 @@ from engine.resolution.similarity import SimilarityScorer
 
 
 def _make_spec(
+    *,
     threshold: float = 0.85,
     property_weight: float = 0.5,
     structural_weight: float = 0.3,

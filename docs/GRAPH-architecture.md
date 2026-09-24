@@ -112,12 +112,7 @@ Gates are **hard filters** that entities MUST pass. Each returns `GateResult`:
 
 ```python
 gate_result = gate_evaluator.evaluate_gate(
-    gate=WhereGate.MATERIAL_MATCH,
-    entity_id='company_123',
-    context={
-        'required_material': 'HDPE',
-        'min_products': 3
-    }
+    gate=WhereGate.MATERIAL_MATCH, entity_id="company_123", context={"required_material": "HDPE", "min_products": 3}
 )
 
 if not gate_result.passed:
@@ -161,11 +156,7 @@ facility_score = min(1.0, facility_count / 3.0)
 product_score = min(1.0, product_count / 5.0)
 material_diversity = min(1.0, material_count / 4.0)
 
-capability_score = (
-    facility_score * 0.4 +
-    product_score * 0.3 +
-    material_diversity * 0.3
-)
+capability_score = facility_score * 0.4 + product_score * 0.3 + material_diversity * 0.3
 ```
 
 ### 2. COMPATIBILITY — "Does it fit our requirements?"
@@ -191,11 +182,7 @@ RETURN c.id as entity_id,
 
 **Scoring Logic:**
 ```python
-compatibility_score = (
-    grade_match_score * 0.5 +
-    product_count_score * 0.2 +
-    mfi_score * 0.3
-)
+compatibility_score = grade_match_score * 0.5 + product_count_score * 0.2 + mfi_score * 0.3
 ```
 
 ### 3. CAPACITY — "Can they handle the volume?"
@@ -257,11 +244,7 @@ success_score = success_rate  # Primary indicator
 response_score = 1.0 / (1.0 + avg_response_time / 24.0)
 consistency_score = 1.0 / (1.0 + response_consistency / 12.0)
 
-commitment_score = (
-    success_score * 0.6 +
-    response_score * 0.25 +
-    consistency_score * 0.15
-)
+commitment_score = success_score * 0.6 + response_score * 0.25 + consistency_score * 0.15
 ```
 
 ---
@@ -281,32 +264,18 @@ if not required_pass:
     return EntityScore(composite_score=0.0)
 
 # Step 3: Score dimensions
-dimension_scores = {
-    dim: score_dimension(dim, entity_id, context)
-    for dim in ScoringDimension
-}
+dimension_scores = {dim: score_dimension(dim, entity_id, context) for dim in ScoringDimension}
 
 # Step 4: Weighted composite
-weights = {
-    CAPABILITY: 0.25,
-    COMPATIBILITY: 0.30,
-    CAPACITY: 0.25,
-    COMMITMENT: 0.20
-}
+weights = {CAPABILITY: 0.25, COMPATIBILITY: 0.30, CAPACITY: 0.25, COMMITMENT: 0.20}
 
-composite = sum(
-    dimension_scores[dim].score * weights[dim]
-    for dim in ScoringDimension
-)
+composite = sum(dimension_scores[dim].score * weights[dim] for dim in ScoringDimension)
 
 # Step 5: Apply gate pass rate modifier
 composite *= gate_pass_rate
 
 return EntityScore(
-    entity_id=entity_id,
-    gate_results=gate_results,
-    dimension_scores=dimension_scores,
-    composite_score=composite
+    entity_id=entity_id, gate_results=gate_results, dimension_scores=dimension_scores, composite_score=composite
 )
 ```
 
@@ -386,11 +355,11 @@ entity_score = engine.evaluate_entity(entity_id, gates, context)
 ```python
 # After engagement, capture actual outcome
 outcome = {
-    'entity_id': entity_id,
-    'predicted_score': 0.85,
-    'actual_outcome': 'success',  # or 'failure'
-    'actual_score': 0.95,  # Measured performance
-    'timestamp': datetime.utcnow()
+    "entity_id": entity_id,
+    "predicted_score": 0.85,
+    "actual_outcome": "success",  # or 'failure'
+    "actual_score": 0.95,  # Measured performance
+    "timestamp": datetime.utcnow(),
 }
 ```
 
@@ -413,13 +382,13 @@ if error > 0.1:  # Under-predicted
 if abs(error) > 0.2:
     inference_packet = PacketEnvelope(
         payload={
-            'entity_id': entity_id,
-            'inference_type': 'capability_reassessment',
-            'reason': f'prediction_error={error:.2f}',
-            'priority': 'high'
+            "entity_id": entity_id,
+            "inference_type": "capability_reassessment",
+            "reason": f"prediction_error={error:.2f}",
+            "priority": "high",
         },
-        source='GRAPH',
-        destination='ENRICH'
+        source="GRAPH",
+        destination="ENRICH",
     )
     enrich_service.submit(inference_packet)
 ```
@@ -440,15 +409,11 @@ if abs(error) > 0.2:
 ### Feature Vector Extraction
 ```python
 feature_vector = {
-    'entity_id': 'company_123',
-    'entity_types': ['Company', 'Manufacturer'],
-    'out_degree': 45,  # Number of outgoing relationships
-    'relationship_types': ['PRODUCES', 'OPERATES', 'INTERACTED_WITH'],
-    'attributes': {
-        'industry': 'plastics_recycling',
-        'employee_count': 250,
-        'revenue': 15000000
-    }
+    "entity_id": "company_123",
+    "entity_types": ["Company", "Manufacturer"],
+    "out_degree": 45,  # Number of outgoing relationships
+    "relationship_types": ["PRODUCES", "OPERATES", "INTERACTED_WITH"],
+    "attributes": {"industry": "plastics_recycling", "employee_count": 250, "revenue": 15000000},
 }
 ```
 
@@ -456,9 +421,9 @@ feature_vector = {
 ```python
 # Prepare triples
 triples = [
-    ('company_123', 'PRODUCES', 'product_456'),
-    ('company_123', 'OPERATES', 'facility_789'),
-    ('product_456', 'CONTAINS', 'material_hdpe')
+    ("company_123", "PRODUCES", "product_456"),
+    ("company_123", "OPERATES", "facility_789"),
+    ("product_456", "CONTAINS", "material_hdpe"),
 ]
 
 # Train CompoundE3D
@@ -466,7 +431,7 @@ model = CompoundE3D(dim=256)
 model.train(triples, epochs=100)
 
 # Get embedding
-embedding = model.embed('company_123')  # [256-dim vector]
+embedding = model.embed("company_123")  # [256-dim vector]
 ```
 
 ### Use Cases
@@ -549,9 +514,10 @@ embedding = model.embed('company_123')  # [256-dim vector]
 @dataclass
 class PacketEnvelope:
     """Immutable communication contract"""
+
     payload: Dict[str, any]
-    source: str         # Originating service
-    destination: str    # Target service
+    source: str  # Originating service
+    destination: str  # Target service
     packet_id: str = field(default_factory=uuid4)
     timestamp: datetime = field(default_factory=datetime.utcnow)
     provenance: List[str] = field(default_factory=list)
@@ -562,18 +528,14 @@ class PacketEnvelope:
 # ENRICH completes convergence, sends enriched entity to GRAPH
 packet = PacketEnvelope(
     payload={
-        'entity_id': 'company_123',
-        'entity_type': 'Company',
-        'enrichment_data': {
-            'industry': 'plastics_recycling',
-            'facility_count': 3,
-            'material_types': ['HDPE', 'LDPE']
-        },
-        'confidence': 0.92,
-        'convergence_passes': 3
+        "entity_id": "company_123",
+        "entity_type": "Company",
+        "enrichment_data": {"industry": "plastics_recycling", "facility_count": 3, "material_types": ["HDPE", "LDPE"]},
+        "confidence": 0.92,
+        "convergence_passes": 3,
     },
-    source='ENRICH',
-    destination='GRAPH'
+    source="ENRICH",
+    destination="GRAPH",
 )
 
 graph_service.ingest(packet)
@@ -584,19 +546,14 @@ graph_service.ingest(packet)
 # GRAPH completes scoring, sends results to SCORE
 packet = PacketEnvelope(
     payload={
-        'entity_id': 'company_123',
-        'composite_score': 0.85,
-        'dimension_scores': {
-            'capability': 0.80,
-            'compatibility': 0.92,
-            'capacity': 0.78,
-            'commitment': 0.88
-        },
-        'gates_passed': 12,
-        'gates_failed': 2
+        "entity_id": "company_123",
+        "composite_score": 0.85,
+        "dimension_scores": {"capability": 0.80, "compatibility": 0.92, "capacity": 0.78, "commitment": 0.88},
+        "gates_passed": 12,
+        "gates_failed": 2,
     },
-    source='GRAPH',
-    destination='SCORE'
+    source="GRAPH",
+    destination="SCORE",
 )
 
 score_service.rank(packet)
@@ -711,33 +668,33 @@ Each tier naturally upsells to the next:
 ### Context (from Sales Request)
 ```python
 context = {
-    'required_material': 'HDPE',
-    'required_grade': 'post-consumer',
-    'target_mfi': 0.8,
-    'required_capacity': 50000,  # kg/month
-    'max_tier': 2,
-    'lookback_days': 365
+    "required_material": "HDPE",
+    "required_grade": "post-consumer",
+    "target_mfi": 0.8,
+    "required_capacity": 50000,  # kg/month
+    "max_tier": 2,
+    "lookback_days": 365,
 }
 ```
 
 ### Evaluation
 ```python
 gates = [
-    WhereGate.MATERIAL_MATCH,        # ✅ Produces HDPE
-    WhereGate.GRADE_COMPATIBILITY,   # ✅ Post-consumer grade
-    WhereGate.MFI_RANGE_MATCH,       # ✅ MFI 0.5-1.5 (target 0.8)
-    WhereGate.FACILITY_TIER,         # ✅ Tier 2 facilities
-    WhereGate.CAPACITY_THRESHOLD,    # ✅ 150K > 50K required
-    WhereGate.COMPLIANCE_STATUS      # ✅ ISO + FDA certified
+    WhereGate.MATERIAL_MATCH,  # ✅ Produces HDPE
+    WhereGate.GRADE_COMPATIBILITY,  # ✅ Post-consumer grade
+    WhereGate.MFI_RANGE_MATCH,  # ✅ MFI 0.5-1.5 (target 0.8)
+    WhereGate.FACILITY_TIER,  # ✅ Tier 2 facilities
+    WhereGate.CAPACITY_THRESHOLD,  # ✅ 150K > 50K required
+    WhereGate.COMPLIANCE_STATUS,  # ✅ ISO + FDA certified
 ]
 
-score = engine.evaluate_entity('company_123', gates, context)
+score = engine.evaluate_entity("company_123", gates, context)
 ```
 
 ### Output
 ```python
 EntityScore(
-    entity_id='company_123',
+    entity_id="company_123",
     composite_score=0.87,
     gates_passed=6,
     gates_failed=0,
@@ -745,30 +702,22 @@ EntityScore(
         CAPABILITY: ScoringResult(score=0.85, confidence=0.90),
         COMPATIBILITY: ScoringResult(score=0.92, confidence=0.88),
         CAPACITY: ScoringResult(score=0.81, confidence=0.85),
-        COMMITMENT: ScoringResult(score=0.88, confidence=0.92)
-    }
+        COMMITMENT: ScoringResult(score=0.88, confidence=0.92),
+    },
 )
 ```
 
 ### Downstream Action
 ```python
 # Send to SCORE for ranking
-score_packet = PacketEnvelope(
-    payload={'entity_score': score.to_dict()},
-    source='GRAPH',
-    destination='SCORE'
-)
+score_packet = PacketEnvelope(payload={"entity_score": score.to_dict()}, source="GRAPH", destination="SCORE")
 
 # If high score, send to ROUTE for assignment
 if score.composite_score > 0.8:
     route_packet = PacketEnvelope(
-        payload={
-            'entity_id': 'company_123',
-            'score': 0.87,
-            'recommended_action': 'assign_to_senior_rep'
-        },
-        source='GRAPH',
-        destination='ROUTE'
+        payload={"entity_id": "company_123", "score": 0.87, "recommended_action": "assign_to_senior_rep"},
+        source="GRAPH",
+        destination="ROUTE",
     )
 ```
 

@@ -22,6 +22,7 @@ references. No singletons, no service locators, no FastAPI Depends.
 _graph_driver: GraphDriver | None = None
 _domain_loader: DomainPackLoader | None = None
 
+
 def init_dependencies(graph_driver: GraphDriver, domain_loader: DomainPackLoader) -> None:
     global _graph_driver, _domain_loader
     _graph_driver = graph_driver
@@ -51,6 +52,7 @@ async def lifespan(app):
 # ❌ No creating drivers inside handlers
 async def handle_match(tenant, payload):
     driver = GraphDriver(...)  # BANNED — creates new connection per request
+
 
 # ❌ No importing settings directly in engine modules
 from chassis.settings import get_settings  # BANNED — chassis concern

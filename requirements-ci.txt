@@ -6,8 +6,8 @@
 # Dev:     pip install -r requirements-ci.txt -r requirements-dev.txt
 
 # ── Lint & type checking ──────────────────────────────────────────────────────
-ruff==0.15.12
-mypy==1.14.0
+ruff==0.16.8
+mypy==2.3.1
 
 # ── Type stubs ────────────────────────────────────────────────────────────────
 types-PyYAML==6.0.12.20250915

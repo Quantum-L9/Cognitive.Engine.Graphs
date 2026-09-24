@@ -46,24 +46,29 @@ equally acceptable. Match the surrounding module; do not convert existing files.
 
 ```python
 import logging
+
 logger = logging.getLogger(__name__)
 
 # ✅ CORRECT — stdlib logger, chassis owns handlers and formatting
-logger.info("Gate compilation complete", extra={
-    "gate_count": 10,
-    "match_direction": "buyer_to_seller",
-})
+logger.info(
+    "Gate compilation complete",
+    extra={
+        "gate_count": 10,
+        "match_direction": "buyer_to_seller",
+    },
+)
 
 # ✅ ALSO CORRECT — structlog getter, still zero configuration
 import structlog
+
 logger = structlog.get_logger(__name__)
 logger.info("gate_compilation_complete", gate_count=10)
 
 # ❌ WRONG — configuring logging in engine
-structlog.configure(...)                    # BANNED (OBS-001) — chassis does this
+structlog.configure(...)  # BANNED (OBS-001) — chassis does this
 
 # ❌ WRONG — creating custom formatters
-logging.basicConfig(format="...")           # BANNED (OBS-002) — chassis does this
+logging.basicConfig(format="...")  # BANNED (OBS-002) — chassis does this
 ```
 
 > **Note:** no `structlog.configure()` call exists in `chassis/` in this repo either. Until the

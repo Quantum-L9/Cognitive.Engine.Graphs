@@ -47,8 +47,8 @@ def _rule(
     severity: str,
     pattern: str,
     message: str,
-    remediation: str,
     *,
+    remediation: str,
     include_dirs: list[str] | None = None,
     exclude_dirs: list[str] | None = None,
 ) -> dict:
@@ -75,7 +75,7 @@ RULES: list[dict] = [
         "CRITICAL",
         r'f["\'].*MATCH\s*\(.*\{[^$]',
         "Cypher label interpolation without sanitize_label()",
-        "Use sanitize_label() for labels, $param for values",
+        remediation="Use sanitize_label() for labels, $param for values",
         include_dirs=[ENGINE_DIR],
         exclude_dirs=[
             "engine/sync/generator.py",
@@ -90,7 +90,7 @@ RULES: list[dict] = [
         "CRITICAL",
         r"\beval\s*\(",
         "eval() is banned - code injection risk",
-        "Use operator dispatch table or ast.literal_eval()",
+        remediation="Use operator dispatch table or ast.literal_eval()",
         exclude_dirs=["tests/", CONTRACT_SCANNER_PATH, "engine/utils/safe_eval.py"],  # AST-based; no eval()
     ),
     _rule(
@@ -99,7 +99,7 @@ RULES: list[dict] = [
         "CRITICAL",
         r"\bexec\s*\(",
         "exec() is banned - code injection risk",
-        "Remove entirely",
+        remediation="Remove entirely",
         exclude_dirs=["tests/", CONTRACT_SCANNER_PATH, "engine/security/"],
     ),
     _rule(
@@ -108,7 +108,7 @@ RULES: list[dict] = [
         "CRITICAL",
         r'f["\'].*LIMIT\s*\{',
         "LIMIT value interpolation - use $limit parameter",
-        "LIMIT $limit with params={'limit': n}",
+        remediation="LIMIT $limit with params={'limit': n}",
     ),
     _rule(
         "SEC-005",
@@ -116,7 +116,7 @@ RULES: list[dict] = [
         "CRITICAL",
         r'f["\'].*(?:SELECT|INSERT|UPDATE|DELETE)\s.*\{',
         "SQL string interpolation - use parameterized queries",
-        "Use $1/$2 placeholders or ORM",
+        remediation="Use $1/$2 placeholders or ORM",
     ),
     _rule(
         "SEC-006",
@@ -124,7 +124,7 @@ RULES: list[dict] = [
         "CRITICAL",
         r"pickle\.loads?\s*\(",
         "pickle banned - deserialization attack vector",
-        "Use json.loads()",
+        remediation="Use json.loads()",
     ),
     _rule(
         "SEC-007",
@@ -132,7 +132,7 @@ RULES: list[dict] = [
         "CRITICAL",
         r"yaml\.load\s*\([^)]*\)\s*$",
         "yaml.load() without SafeLoader",
-        "yaml.safe_load()",
+        remediation="yaml.safe_load()",
     ),
     # -- CONTRACT 4: ERROR_HANDLING.md --
     _rule(
@@ -141,7 +141,7 @@ RULES: list[dict] = [
         "HIGH",
         r"except\s*:",
         "Bare except: clause",
-        "except SpecificError as e:",
+        remediation="except SpecificError as e:",
         exclude_dirs=[CONTRACT_SCANNER_PATH],
     ),
     _rule(
@@ -150,7 +150,7 @@ RULES: list[dict] = [
         "HIGH",
         r"except\s+\w+.*:\s*\n\s*pass",
         "Swallowed exception - except + pass",
-        "Log and re-raise",
+        remediation="Log and re-raise",
     ),
     # -- CONTRACT 10: BANNED_PATTERNS.md (Architecture) --
     _rule(
@@ -159,7 +159,7 @@ RULES: list[dict] = [
         "CRITICAL",
         r"from\s+fastapi\s+import",
         "FastAPI import in engine/ - chassis owns HTTP",
-        "Register handlers in engine/handlers.py",
+        remediation="Register handlers in engine/handlers.py",
         include_dirs=[ENGINE_DIR],
     ),
     _rule(
@@ -168,7 +168,7 @@ RULES: list[dict] = [
         "CRITICAL",
         r"from\s+starlette\s+import",
         "Starlette import in engine/ - chassis owns middleware",
-        "Remove",
+        remediation="Remove",
         include_dirs=[ENGINE_DIR],
     ),
     _rule(
@@ -177,7 +177,7 @@ RULES: list[dict] = [
         "CRITICAL",
         r"import\s+uvicorn",
         "uvicorn import in engine/ - chassis owns ASGI",
-        "Remove",
+        remediation="Remove",
         include_dirs=[ENGINE_DIR],
     ),
     # -- CONTRACT 7: DEPENDENCY_INJECTION.md --
@@ -187,7 +187,7 @@ RULES: list[dict] = [
         "HIGH",
         r"from\s+fastapi\s+import\s+Depends",
         "FastAPI Depends in engine/ - chassis concern",
-        "Use init_dependencies() pattern",
+        remediation="Use init_dependencies() pattern",
         include_dirs=[ENGINE_DIR],
     ),
     # -- CONTRACT 12: DELEGATION_PROTOCOL.md --
@@ -197,7 +197,7 @@ RULES: list[dict] = [
         "CRITICAL",
         r"httpx\.(post|get|put|delete|patch)\s*\(",
         "Raw HTTP to another node - use delegate_to_node()",
-        "from engine.packet.chassis_contract import delegate_to_node",
+        remediation="from engine.packet.chassis_contract import delegate_to_node",
         include_dirs=[ENGINE_DIR],
     ),
     _rule(
@@ -206,7 +206,7 @@ RULES: list[dict] = [
         "CRITICAL",
         r"requests\.(post|get|put|delete|patch)\s*\(",
         "Raw HTTP via requests - use delegate_to_node()",
-        "from engine.packet.chassis_contract import delegate_to_node",
+        remediation="from engine.packet.chassis_contract import delegate_to_node",
         include_dirs=[ENGINE_DIR],
     ),
     # -- CONTRACT 19: MEMORY_SUBSTRATE_ACCESS.md --
@@ -216,7 +216,7 @@ RULES: list[dict] = [
         "CRITICAL",
         r"INSERT\s+INTO\s+packetstore",
         "Direct write to packetstore - use ingest_packet()",
-        "Persist via engine.packet.packet_store, or delegate to the memory substrate node",
+        remediation="Persist via engine.packet.packet_store, or delegate to the memory substrate node",
         include_dirs=[ENGINE_DIR],
     ),
     _rule(
@@ -225,7 +225,7 @@ RULES: list[dict] = [
         "CRITICAL",
         r"INSERT\s+INTO\s+memory_embeddings",
         "Direct write to memory_embeddings - use ingest_packet()",
-        "Embeddings generated by LangGraph DAG",
+        remediation="Embeddings generated by LangGraph DAG",
         include_dirs=[ENGINE_DIR],
     ),
     # -- CONTRACT 20: SHARED_MODELS.md --
@@ -235,7 +235,7 @@ RULES: list[dict] = [
         "HIGH",
         r"class\s+TransportPacket\s*\(",
         "Redefining TransportPacket - import the shared model",
-        "from constellation_node_sdk import TransportPacket",
+        remediation="from constellation_node_sdk import TransportPacket",
         include_dirs=[ENGINE_DIR],
         exclude_dirs=["engine/packet/packet_envelope.py"],  # canonical envelope in this repo
     ),
@@ -245,7 +245,7 @@ RULES: list[dict] = [
         "HIGH",
         r"class\s+TenantContext\s*\(",
         "Redefining TenantContext - import the shared model",
-        "from engine.packet.packet_envelope import TenantContext",
+        remediation="from engine.packet.packet_envelope import TenantContext",
         include_dirs=[ENGINE_DIR],
         exclude_dirs=["engine/packet/packet_envelope.py"],  # canonical envelope in this repo
     ),
@@ -255,7 +255,7 @@ RULES: list[dict] = [
         "HIGH",
         r"class\s+ExecuteRequest\s*\(",
         "Redefining ExecuteRequest - the chassis owns this model",
-        "from chassis.chassis_app import ExecuteRequest",
+        remediation="from chassis.chassis_app import ExecuteRequest",
         include_dirs=[ENGINE_DIR],
     ),
     # -- CONTRACT 18: OBSERVABILITY.md --
@@ -265,7 +265,7 @@ RULES: list[dict] = [
         "HIGH",
         r"structlog\.configure\s*\(",
         "Configuring structlog in engine - chassis does this",
-        "Use logging.getLogger(__name__)",
+        remediation="Use logging.getLogger(__name__)",
         include_dirs=[ENGINE_DIR],
     ),
     _rule(
@@ -274,7 +274,7 @@ RULES: list[dict] = [
         "HIGH",
         r"logging\.basicConfig\s*\(",
         "Configuring logging in engine - chassis does this",
-        "Use logging.getLogger(__name__) only",
+        remediation="Use logging.getLogger(__name__) only",
         include_dirs=[ENGINE_DIR],
     ),
     # -- CONTRACT 6: PYDANTIC_YAML_MAPPING.md --
@@ -284,7 +284,7 @@ RULES: list[dict] = [
         "HIGH",
         r"Field\s*\(\s*alias\s*=",
         "Pydantic Field alias banned - snake_case everywhere",
-        "Remove alias, use snake_case matching YAML key",
+        remediation="Remove alias, use snake_case matching YAML key",
         include_dirs=[ENGINE_DIR],
     ),
     # -- CONTRACT 13: PACKET_TYPE_REGISTRY.md --
@@ -294,7 +294,7 @@ RULES: list[dict] = [
         "HIGH",
         r'packet_type\s*[=:]\s*["\'][A-Z]',
         "Uppercase packet_type - must be lowercase snake_case",
-        "Check PACKET_TYPE_REGISTRY.md",
+        remediation="Check PACKET_TYPE_REGISTRY.md",
         exclude_dirs=["agents/cursor/"],
     ),
     # -- CONTRACT 17: zero-stub protocol (TEST_PATTERNS.md / BANNED_PATTERNS.md) --
@@ -306,7 +306,7 @@ RULES: list[dict] = [
         "CRITICAL",
         r"raise\s+NotImplementedError",
         "Stub in engine/ - unimplemented code path",
-        "Ship the implementation or record the gap in DEFERRED.md",
+        remediation="Ship the implementation or record the gap in DEFERRED.md",
         include_dirs=[ENGINE_DIR],
     ),
     _rule(
@@ -315,7 +315,7 @@ RULES: list[dict] = [
         "HIGH",
         r"#\s*TODO\b",
         "TODO comment in engine/ - deferred work must be tracked, not inlined",
-        "Implement it now or add an entry to DEFERRED.md and drop the comment",
+        remediation="Implement it now or add an entry to DEFERRED.md and drop the comment",
         include_dirs=[ENGINE_DIR],
     ),
     _rule(
@@ -324,7 +324,7 @@ RULES: list[dict] = [
         "HIGH",
         r"#\s*(?:PLACEHOLDER|FIXME|XXX)\b",
         "PLACEHOLDER/FIXME comment in engine/ - deferred work must be tracked, not inlined",
-        "Implement it now or add an entry to DEFERRED.md and drop the comment",
+        remediation="Implement it now or add an entry to DEFERRED.md and drop the comment",
         include_dirs=[ENGINE_DIR],
     ),
     # -- CONTRACT 05: ENV_VARS.md --
@@ -334,7 +334,7 @@ RULES: list[dict] = [
         "MEDIUM",
         r'os\.environ\[["\']?(?:NEO4J_URI|NEO4J_URL|DATABASE_URL|REDIS_HOST|API_KEY)["\']?\]',
         "Non-standard env var name",
-        "Use L9_* or ENGINE_* prefix per ENV_VARS.md",
+        remediation="Use L9_* or ENGINE_* prefix per ENV_VARS.md",
     ),
 ]
 

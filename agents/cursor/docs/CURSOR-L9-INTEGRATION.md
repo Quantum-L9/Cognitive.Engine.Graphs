@@ -93,8 +93,8 @@ import httpx
 from pydantic import BaseModel
 
 # NOT L9 Pattern
-import logging    # Use structlog instead
-import requests   # Use httpx instead
+import logging  # Use structlog instead
+import requests  # Use httpx instead
 ```
 
 ---
@@ -215,12 +215,12 @@ When generating code for L9, Cursor MUST follow these patterns from the kernels:
 
 ```python
 # REQUIRED - Always use these
-import structlog              # NOT logging
-import httpx                  # NOT requests
+import structlog  # NOT logging
+import httpx  # NOT requests
 from pydantic import BaseModel  # Pydantic v2 (not v1)
 
 # FORBIDDEN - Never use these
-import logging   # Use structlog instead
+import logging  # Use structlog instead
 import requests  # Use httpx instead
 ```
 

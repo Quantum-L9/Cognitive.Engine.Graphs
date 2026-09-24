@@ -105,6 +105,7 @@ class CursorSessionHooks:
         branch: str,
         tool_id: str,
         args: dict[str, Any],
+        *,
         success: bool = True,
         error: str | None = None,
         repo_state_hash: str | None = None,

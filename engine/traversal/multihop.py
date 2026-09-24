@@ -162,6 +162,7 @@ class MultiHopTraverser:
     def __init__(
         self,
         neighbor_fetcher: NeighborFetcher,
+        *,
         reasoning_mode: ReasoningMode = ReasoningMode.SIMILARITY,
         max_hops: int = 4,
         top_k: int = 12,
@@ -297,6 +298,7 @@ class MultiHopTraverser:
 
     async def _execute_hop(
         self,
+        *,
         hop: int,
         queue: deque[str],
         llm_calls: int,

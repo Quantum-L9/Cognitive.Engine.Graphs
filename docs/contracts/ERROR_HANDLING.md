@@ -58,6 +58,7 @@ def compile_gate(self, gate: GateSpec) -> str | None:
     if gate.type not in SUPPORTED_TYPES:
         return None  # silent skip
 
+
 # ✅ CORRECT
 def compile_gate(self, gate: GateSpec) -> str:
     if gate.type not in SUPPORTED_TYPES:
@@ -70,11 +71,14 @@ def compile_gate(self, gate: GateSpec) -> str:
 All error logs must include: tenant, action, trace_id (if available).
 
 ```python
-logger.error(f"Gate compilation failed", extra={
-    "tenant": tenant,
-    "gate_type": gate.type,
-    "match_direction": match_direction,
-})
+logger.error(
+    f"Gate compilation failed",
+    extra={
+        "tenant": tenant,
+        "gate_type": gate.type,
+        "match_direction": match_direction,
+    },
+)
 ```
 
 ```

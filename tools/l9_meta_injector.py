@@ -506,7 +506,7 @@ FILE_REGISTRY: list[FileMeta] = [
     FileMeta(".gitleaks.toml", "l9-template", ["security"], ["L9_TEMPLATE", "gitleaks", "secrets"], "platform"),
     # --- docs/ folder ---
     FileMeta("docs/ARCHITECTURE.md", "engine-specific", ["docs"], ["architecture", "design"], "engine-team"),
-    FileMeta("docs/ACTION ITEMS.MD", "engine-specific", ["docs"], ["action-items"], "engine-team"),
+    FileMeta("docs/ACTION ITEMS.md", "engine-specific", ["docs"], ["action-items"], "engine-team"),
     FileMeta("docs/Audit Harness-Explained.md", "engine-specific", ["docs"], ["audit", "harness"], "engine-team"),
     FileMeta("docs/What the Audit Harness Does.md", "engine-specific", ["docs"], ["audit", "harness"], "engine-team"),
     FileMeta("docs/GRAPH-architecture.md", "engine-specific", ["docs"], ["architecture", "graph"], "engine-team"),

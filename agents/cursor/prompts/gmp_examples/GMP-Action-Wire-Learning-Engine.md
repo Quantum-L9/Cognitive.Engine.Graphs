@@ -85,6 +85,7 @@ from core.gmp import GMPMetaLearningEngine
 
 gmp_learning_engine: Optional[GMPMetaLearningEngine] = None
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ... existing init ...

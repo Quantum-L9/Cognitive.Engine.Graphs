@@ -54,9 +54,11 @@ import logging
 router = APIRouter(prefix="/api/v1", tags=["resource"])
 logger = logging.getLogger(__name__)
 
+
 class ResourceCreate(BaseModel):
     name: str
     description: Optional[str] = None
+
 
 class ResourceResponse(BaseModel):
     id: int
@@ -64,11 +66,9 @@ class ResourceResponse(BaseModel):
     description: Optional[str]
     created_at: str
 
+
 @router.post("/resources", response_model=ResourceResponse, status_code=201)
-async def create_resource(
-    resource: ResourceCreate,
-    db = Depends(get_db)
-) -> ResourceResponse:
+async def create_resource(resource: ResourceCreate, db=Depends(get_db)) -> ResourceResponse:
     """
     Create a new resource.
 
@@ -209,11 +209,13 @@ def process_order(order):
     # Save
     db.save(order)
 
+
 # After
 def process_order(order):
     validate_order(order)
     order.total = calculate_order_total(order)
     save_order(order)
+
 
 def validate_order(order):
     if not order.items:
@@ -221,11 +223,13 @@ def validate_order(order):
     if order.total < 0:
         raise ValueError("Negative total")
 
+
 def calculate_order_total(order):
     TAX_RATE = 0.08
     subtotal = sum(item.price * item.quantity for item in order.items)
     tax = subtotal * TAX_RATE
     return subtotal + tax
+
 
 def save_order(order):
     db.save(order)
@@ -247,27 +251,30 @@ def calculate_shipping(order_type, weight):
     elif order_type == "overnight":
         return weight * 3.0
 
+
 # After
 class ShippingStrategy:
-    def calculate(self, weight): pass
+    def calculate(self, weight):
+        pass
+
 
 class StandardShipping(ShippingStrategy):
     def calculate(self, weight):
         return weight * 0.5
 
+
 class ExpressShipping(ShippingStrategy):
     def calculate(self, weight):
         return weight * 1.5
+
 
 class OvernightShipping(ShippingStrategy):
     def calculate(self, weight):
         return weight * 3.0
 
-SHIPPING_STRATEGIES = {
-    "standard": StandardShipping(),
-    "express": ExpressShipping(),
-    "overnight": OvernightShipping()
-}
+
+SHIPPING_STRATEGIES = {"standard": StandardShipping(), "express": ExpressShipping(), "overnight": OvernightShipping()}
+
 
 def calculate_shipping(order_type, weight):
     strategy = SHIPPING_STRATEGIES.get(order_type)
@@ -289,9 +296,11 @@ def calculate_discount(total):
         return total * 0.1
     return 0
 
+
 # After
 DISCOUNT_THRESHOLD = 100
 DISCOUNT_RATE = 0.1
+
 
 def calculate_discount(total):
     if total > DISCOUNT_THRESHOLD:
@@ -334,13 +343,16 @@ for order in orders:
 from functools import lru_cache
 import redis
 
+
 # In-memory cache for pure functions
 @lru_cache(maxsize=1000)
 def expensive_calculation(n: int) -> int:
     return sum(i**2 for i in range(n))
 
+
 # Redis cache for API responses
-redis_client = redis.Redis(host='localhost', port=6379)
+redis_client = redis.Redis(host="localhost", port=6379)
+
 
 async def get_user(user_id: int):
     cache_key = f"user:{user_id}"
@@ -409,6 +421,7 @@ from functools import wraps
 
 logger = logging.getLogger(__name__)
 
+
 def log_execution(func):
     @wraps(func)
     async def wrapper(*args, **kwargs):
@@ -420,7 +433,9 @@ def log_execution(func):
         except Exception as e:
             logger.error(f"{func.__name__} failed: {e}", exc_info=True)
             raise
+
     return wrapper
+
 
 @log_execution
 async def process_payment(order_id: int, amount: float):
@@ -440,12 +455,8 @@ class PaymentError(Exception):
         super().__init__(self.message)
 
     def to_dict(self):
-        return {
-            "error": self.message,
-            "order_id": self.order_id,
-            "amount": self.amount,
-            "provider": self.provider
-        }
+        return {"error": self.message, "order_id": self.order_id, "amount": self.amount, "provider": self.provider}
+
 
 try:
     process_payment(order_id, amount, provider)
@@ -464,17 +475,20 @@ except PaymentError as e:
 # Bad: Race condition
 counter = 0
 
+
 async def increment():
     global counter
     temp = counter
     await asyncio.sleep(0.001)
     counter = temp + 1
 
+
 # Good: Thread-safe
 import asyncio
 
 counter_lock = asyncio.Lock()
 counter = 0
+
 
 async def increment():
     global counter
@@ -492,6 +506,7 @@ class DataProcessor:
 
     def add_listener(self, listener):
         self.listeners.append(listener)
+
 
 # Good: Cleanup
 class DataProcessor:

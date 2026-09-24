@@ -39,6 +39,7 @@ from engine.feedback.signal_weights import SignalWeightCalculator
 
 
 def _spec_with_dimensions(
+    *,
     dimensions: list[ScoringDimensionSpec] | None = None,
     min_weight: float = 0.1,
     max_weight: float = 3.0,
