@@ -126,7 +126,7 @@ jobs:
           # deny-licenses. Keep the allow-list (stricter); deny-list is implied.
           # SPDX AND compounds in allow-licenses do not match package Dual
           # licenses and also break MIT matching (upload-artifact 7.0.1).
-          allow-licenses: ${{ vars.ALLOWED_LICENSES || 'MIT, Apache-2.0, BSD-3-Clause, BSD-2-Clause, ISC' }}
+          allow-licenses: ${{ vars.ALLOWED_LICENSES || 'MIT, Apache-2.0, BSD-3-Clause, BSD-2-Clause, ISC, MPL-2.0' }}
           allow-dependencies-licenses: pkg:pypi/structlog, pkg:pypi/prometheus-client
           comment-summary-in-pr: on-failure
 
