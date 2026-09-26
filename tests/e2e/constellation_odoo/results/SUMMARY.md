@@ -8,6 +8,7 @@ Unpack with `tar -xzf <bundle>.tar.gz`. Logs are `*.log.txt`.
 ## `odoo-rail-20260926T191817Z-after-fixes.tar.gz`
 
 - AFTER fixes 1-5 — Odoo rail, pristine images, no accommodation · sha256 `bef89ff8fcc6fc5a6f332b121cb17972adadc625ec23d81dadbaf72ace60b92a`
+- Re-verified with the mandatory `PROVENANCE_images_and_sdk` row added after review: **PASS** (every image revision equals its recorded source head; SDK `e9f829f98211` in all four images)
 
 ```text
 MANDATORY  O_INSTALL                                 PASS

@@ -81,10 +81,10 @@ docker restart l9e2e-ceg >/dev/null 2>&1 || true
 
 await_registry() {  # $1 = expected node count
   for i in $(seq 1 60); do
-    n="$(curl -sS --noproxy '*' http://127.0.0.1:19000/v1/registry 2>/dev/null \
-         | python3 -c 'import json,sys
-try: print(sum(1 for v in json.load(sys.stdin).values() if v.get("healthy")))
-except Exception: print(0)')"
+    curl -sS --noproxy '*' -o "$EV/registry_probe.json" http://127.0.0.1:19000/v1/registry 2>/dev/null || true
+    n="$(python3 -c 'import json,sys
+try: print(sum(1 for v in json.load(open(sys.argv[1])).values() if v.get("healthy")))
+except Exception: print(0)' "$EV/registry_probe.json")"
     [[ "$n" == "$1" ]] && { echo "registry: $n healthy nodes after ~$((i*5))s"; return 0; }
     sleep 5
   done
@@ -99,7 +99,9 @@ docker exec -w /app l9e2e-eie alembic upgrade head > "$EV/eie_migrations.txt" 2>
 docker exec l9e2e-eie-pg psql -U enrich -d enrich -Atc \
   "select table_name from information_schema.tables where table_schema='public' order by 1" \
   >> "$EV/eie_migrations.txt" 2>&1 || true
-curl -sS --noproxy '*' http://127.0.0.1:19000/v1/registry | python3 -m json.tool > "$EV/gate_registry.json" || true
+curl -sS --noproxy '*' -o "$EV/registry_probe.json" http://127.0.0.1:19000/v1/registry || true
+python3 -m json.tool "$EV/registry_probe.json" > "$EV/gate_registry.json" || true
+rm -f "$EV/registry_probe.json"
 
 # ── 4. what actually runs: image revisions, accommodations, SDK commits ──────
 python3 - "$EV/image_provenance.json" <<'PY'

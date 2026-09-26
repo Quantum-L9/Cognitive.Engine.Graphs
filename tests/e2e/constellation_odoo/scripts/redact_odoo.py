@@ -33,7 +33,7 @@ def secrets_from(env_file: str) -> list[str]:
             try:
                 found.update(str(v) for v in json.loads(value).values())
             except json.JSONDecodeError:
-                pass
+                pass  # not a JSON keyring: the raw value below is still redacted
         found.add(value)
     return sorted((s for s in found if len(s) >= MIN_SECRET_LEN), key=len, reverse=True)
 

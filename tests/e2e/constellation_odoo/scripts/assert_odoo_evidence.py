@@ -9,6 +9,9 @@ Odoo -> Gate -> CEG leg and are reported but do not gate the Odoo -> EIE verdict
 the rail was built for. GAP probes are authorization findings: they record
 what an admitted consumer key can do, and are reported, not gated. Test
 accommodations read from image labels are listed so a PASS can never hide one.
+PROVENANCE is mandatory: every node image must carry the revision of the source
+tree recorded for the run, and every image must contain the same, known SDK
+commit — otherwise the verdict would certify a release set it did not run.
 Exit 0 only when every mandatory check passed.
 """
 
@@ -54,6 +57,23 @@ def load(path: Path) -> dict:
         return json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
         return {}
+
+
+IMAGE_NODES = ("gate", "eie", "ceg", "odoo")
+
+
+def provenance_problems(prov: dict, sources: dict) -> list[str]:
+    problems = []
+    for node in IMAGE_NODES:
+        info = prov.get(node) or {}
+        rev = (info.get("labels") or {}).get("org.opencontainers.image.revision")
+        head = (sources.get(node) or {}).get("head")
+        if not rev or not head or rev != head:
+            problems.append(f"{node} image {str(rev)[:12]} != source {str(head)[:12]}")
+    sdk = {(prov.get(n) or {}).get("sdk_commit") for n in IMAGE_NODES}
+    if None in sdk or "" in sdk or len(sdk) != 1:
+        problems.append(f"sdk commits not aligned: {sorted(str(c)[:12] for c in sdk)}")
+    return problems
 
 
 def main(bundle: Path) -> int:
@@ -106,6 +126,9 @@ def main(bundle: Path) -> int:
             rows.append(("FINDING", c, status_of(phase, c)))
 
     prov = load(bundle / "image_provenance.json")
+    problems = provenance_problems(prov, load(bundle / "source_revisions.json"))
+    failed += 1 if problems else 0
+    rows.append(("MANDATORY", "PROVENANCE_images_and_sdk", "; ".join(problems) + " -> FAIL" if problems else "PASS"))
     deviations = []
     for node, info in sorted(prov.items()):
         acc = (info.get("labels") or {}).get("io.l9.e2e.accommodation")

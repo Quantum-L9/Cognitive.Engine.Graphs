@@ -84,6 +84,7 @@ Gate, which re-signs every hop.
 | `O_N3` | mandatory | Odoo's key id with the wrong secret is rejected |
 | `O_N4` | mandatory | A consumer can't register itself as the owner of `converge` (no admin token) |
 | `O_N5` | mandatory | Pointing the SDK at EIE directly can't work: the name doesn't resolve |
+| `PROVENANCE_images_and_sdk` | mandatory | Every image carries the revision recorded for its source tree, and all four images contain the same known SDK commit |
 | `O_P1` | proposal | Odoo request + a target `schema` from Odoo's own allowlist lands through the real review and Inject path, with one provenance row per written field (proves proposed fix P3) |
 | `O_F1` | finding | EIE reports an empty, provider-less result as `completed` |
 | `O_M1/M2` | match | `Odoo -> Gate -> CEG match`: M1 uses Odoo's own `MatchRequest` contract, M2 the direction CEG's spec declares |
