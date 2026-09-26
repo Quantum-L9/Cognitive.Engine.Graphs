@@ -66,6 +66,7 @@ independently of the code default.
 | Domain Database Provisioning | `AUTO_CREATE_DOMAIN_DATABASE` (`auto_create_domain_database`) | `False` | unset | dormant; create the tenant domain database on first use — see §14 |
 | Health API (admin health_* subactions) | `HEALTH_API_ENABLED` (`health_api_enabled`) | `False` | unset | dormant; AI-readiness assess/report surface — see §15 |
 | Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; seven packs whose gates do not compile to executable, faithful Cypher — see §16 |
+| Gate Re-registration | `GATE_REREGISTRATION_ENABLED` (`gate_reregistration_enabled`), `GATE_REREGISTRATION_INTERVAL_SECONDS` | `True`, `300` | unset | active; keeps the node routable after a Gate restart — see §17 |
 | Constellation Orchestration | — | — | — | accepted architectural gap — see §9 |
 
 ---
@@ -477,6 +478,24 @@ query-schema parameter per constant — a schema decision, not a file move.
 must compile to executable Cypher, and a gated pack that starts compiling
 cleanly must be removed from `_DOMAIN_FEATURE_FLAGS`, so this list can only
 shrink.
+
+---
+
+## 17. Gate Re-registration
+
+Gate keeps its node registry in memory, and its health monitor only probes
+nodes that are already registered — it never discovers an unregistered one.
+A single startup registration therefore leaves this node unroutable after any
+Gate restart (observed on the Constellation Docker rail: after `docker restart`
+of Gate, `match` answered `404 no node registered` until CEG itself restarted),
+or when Gate was unreachable at CEG's startup.
+
+With `gate_reregistration_enabled` (default `True`, hardening), `GraphLifecycle`
+re-runs the same `register_from_env()` call every
+`gate_reregistration_interval_seconds` (default `300`, matching EIE). Each cycle
+is `overwrite=True`, so repeats are idempotent; a failed cycle is logged and the
+loop continues. Set the flag to `False` (or the interval to `0`) to register
+once at startup only. The task is cancelled in `GraphLifecycle.shutdown()`.
 
 ---
 
