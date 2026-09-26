@@ -1,6 +1,6 @@
-2026-09-26 18:48:32,315 113 WARNING ? odoo.tools.config: missing --http-interface/http_interface, using 0.0.0.0 by default, will change to 127.0.0.1 in 20.0 
-2026-09-26 18:48:33,893 113 WARNING l9e2e odoo.fields: Field plasticos.freight.estimate.status: unknown parameter 'tracking', if this is an actual parameter you may want to override the method _valid_field_parameter on the relevant model in order to allow it 
-2026-09-26 18:48:33,894 113 WARNING l9e2e odoo.fields: Field plasticos.freight.quote.selected: unknown parameter 'tracking', if this is an actual parameter you may want to override the method _valid_field_parameter on the relevant model in order to allow it 
+2026-09-26 18:48:32,315 113 WARNING ? odoo.tools.config: missing --http-interface/http_interface, using 0.0.0.0 by default, will change to 127.0.0.1 in 20.0
+2026-09-26 18:48:33,893 113 WARNING l9e2e odoo.fields: Field plasticos.freight.estimate.status: unknown parameter 'tracking', if this is an actual parameter you may want to override the method _valid_field_parameter on the relevant model in order to allow it
+2026-09-26 18:48:33,894 113 WARNING l9e2e odoo.fields: Field plasticos.freight.quote.selected: unknown parameter 'tracking', if this is an actual parameter you may want to override the method _valid_field_parameter on the relevant model in order to allow it
 2026-09-26 18:48:34,397 113 WARNING l9e2e py.warnings: /usr/local/lib/python3.12/dist-packages/pythonjsonlogger/jsonlogger.py:11: DeprecationWarning: pythonjsonlogger.jsonlogger has been moved to pythonjsonlogger.json
   File "/usr/bin/odoo", line 6, in <module>
     odoo.cli.main()
@@ -26,7 +26,7 @@
     from pythonjsonlogger import jsonlogger
   File "/usr/local/lib/python3.12/dist-packages/pythonjsonlogger/jsonlogger.py", line 11, in <module>
     warnings.warn(
- 
+
 L9E2E-RESULT-BEGIN
 {
  "phase": "configure",
