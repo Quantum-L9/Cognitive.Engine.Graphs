@@ -36,11 +36,12 @@ MANDATORY = {
     ],
 }
 MATCH = {"match": ["O_M1_MATCH_ODOO_CONTRACT", "O_M2_MATCH_CEG_SPEC_DIRECTION"]}
+# Authorization probes that must be refused now that Gate scopes consumer keys.
+MUST_ENFORCE = {"adversarial": ["O_G1_CONSUMER_ACTION_SCOPE"]}
 PROPOSALS = {"business": ["O_P1_SCHEMA_FIX_REACHES_WRITEBACK"]}
 GAPS = {
     "transport": ["O_F1_EIE_EMPTY_RESULT_REPORTED_COMPLETED"],
     "adversarial": [
-        "O_G1_CONSUMER_ACTION_SCOPE",
         "O_G2_KEY_TO_IDENTITY_BINDING",
         "O_G3_KEY_TO_TENANT_BINDING",
         "O_G4_REGISTRY_DISCLOSURE",
@@ -69,6 +70,17 @@ def main(bundle: Path) -> int:
             ok = st == "PASS"
             failed += 0 if ok else 1
             rows.append(("MANDATORY", c, st if ok else f"{st} -> FAIL"))
+
+    for phase, checks in MUST_ENFORCE.items():
+        for c in checks:
+            st = status_of(phase, c)
+            ok = st == "ENFORCED"
+            failed += 0 if ok else 1
+            rows.append(("MANDATORY", c, st if ok else f"{st} -> FAIL"))
+
+    recovery = load(bundle / "flows" / "gate_restart_recovery.json").get("verdict", "NOT_RUN")
+    failed += 0 if recovery == "PASS" else 1
+    rows.append(("MANDATORY", "GATE_RESTART_RECOVERY", recovery))
 
     iso = load(bundle / "flows" / "isolation.json").get("verdict", "NOT_RUN")
     failed += 0 if iso == "PASS" else 1

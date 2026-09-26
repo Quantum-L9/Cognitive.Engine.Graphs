@@ -92,9 +92,8 @@ except Exception: print(0)')"
 }
 await_registry 2 | tee "$EV/registry_wait.txt" || true
 
-# EIE deploy step: its documented schema migration. Nothing in EIE's image or
-# compose runs it, and without it every durable `converge` fails with
-# `relation "enrichment_results" does not exist` (reported as a finding).
+# EIE's image entrypoint runs `alembic upgrade head` on start; re-running it
+# here is an idempotent check that the schema is at head (no-op when it is).
 docker exec -w /app l9e2e-eie alembic upgrade head > "$EV/eie_migrations.txt" 2>&1 \
   || echo "EIE MIGRATION FAILED (see eie_migrations.txt)"
 docker exec l9e2e-eie-pg psql -U enrich -d enrich -Atc \
@@ -172,6 +171,31 @@ await_registry 2 | tee "$EV/registry_wait_business.txt" || true
 docker exec l9e2e-eie sh -c 'echo "L9_ENVIRONMENT=$L9_ENVIRONMENT L9_ENRICHMENT_PROVIDER=$L9_ENRICHMENT_PROVIDER"' \
   > "$EV/eie_business_profile.txt" 2>&1 || true
 echo "== odoo: business ==";     odoo_phase business
+
+# ── 5b. Gate restart: Gate's registry is in memory; both workers must
+#        re-register on their own (EIE loop, CEG gate_reregistration_enabled).
+echo "== Gate restart recovery =="
+docker restart l9e2e-gate >/dev/null
+python3 - "$EV/flows/gate_restart_recovery.json" <<'PY'
+import json, sys, time, urllib.request
+t0 = time.time(); seen = {}; nodes = []
+while time.time() - t0 < 120:
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:19000/v1/registry", timeout=4) as r:
+            nodes = sorted(json.load(r))
+    except Exception:
+        nodes = []
+    for n in nodes:
+        seen.setdefault(n, round(time.time() - t0, 1))
+    if {"enrichment-engine", "graph"} <= set(nodes):
+        break
+    time.sleep(2)
+res = {"reregistered_after_s": seen, "registry": nodes,
+       "verdict": "PASS" if {"enrichment-engine", "graph"} <= set(nodes) else "FAIL"}
+json.dump(res, open(sys.argv[1], "w"), indent=1)
+print("gate restart recovery:", res["verdict"], seen)
+PY
+echo "== odoo: match after Gate restart =="; odoo_phase match
 
 # ── 6. structural isolation, asserted against Docker itself ─────────────────
 python3 - "$EV/flows/isolation.json" <<'PY'

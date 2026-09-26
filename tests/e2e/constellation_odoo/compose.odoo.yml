@@ -30,6 +30,19 @@ services:
     environment:
       # gate-e2e, eie-e2e, ceg-e2e + the one admitted consumer, odoo-e2e.
       L9_VERIFYING_KEYS_JSON: ${L9E2E_GATE_VERIFYING_KEYS_JSON:?gate keyring incl. odoo-e2e required}
+      # The consumer gets exactly what Odoo calls in production: EIE converge
+      # and CEG match. Worker key ids stay unscoped.
+      L9_KEY_ALLOWED_ACTIONS_JSON: '{"odoo-e2e": ["converge", "match"]}'
+
+  # Short re-registration intervals so the Gate-restart recovery check
+  # (GATE_RESTART_RECOVERY) completes in seconds instead of the 300 s default.
+  enrichment-engine:
+    environment:
+      L9_GATE_REREGISTRATION_INTERVAL_SECONDS: "10"
+
+  graph:
+    environment:
+      GATE_REREGISTRATION_INTERVAL_SECONDS: "10"
 
   odoo-db:
     image: postgres:16
