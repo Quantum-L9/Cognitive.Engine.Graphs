@@ -283,13 +283,9 @@ def phase_business() -> None:
             "fields_written": fresh.fields_written,
             "partner_after": {f: bool(partner[f]) for f in ("website", "city", "phone", "email")},
         }
-        prov_model = "plasticos.enrichment.provenance"
-        if prov_model in env:
-            injected["provenance_rows"] = (
-                env[prov_model].search_count([("partner_id", "=", partner.id)])
-                if "partner_id" in env[prov_model]._fields
-                else None
-            )
+        injected["provenance_rows"] = env["plasticos.enrichment.provenance"].search_count(
+            [("partner_id", "=", partner.id)]
+        )
         check(
             "O_B3_APPROVE_INJECT",
             "PASS" if fresh.state == "injected" and (fresh.fields_written or 0) > 0 else "FAIL",
@@ -368,9 +364,17 @@ def phase_business_schema_probe() -> None:
         run.invalidate_recordset()
         partner.invalidate_recordset()
         filled = sorted(f for f in ("website", "city", "zip", "street", "email", "phone") if partner[f])
+        # ADR-012: every automated partner write carries a provenance row.
+        provenance_rows = env["plasticos.enrichment.provenance"].search_count([("partner_id", "=", partner.id)])
         check(
             "O_P1_SCHEMA_FIX_REACHES_WRITEBACK",
-            "PASS" if run.state == "injected" and filled and partner.name == name_before else "FAIL",
+            "PASS"
+            if run.state == "injected"
+            and filled
+            and partner.name == name_before
+            and provenance_rows == (run.fields_written or 0)
+            else "FAIL",
+            provenance_rows=provenance_rows,
             eie_state=resp.status,
             proposed_fields=sorted(proposed),
             run_state=run.state,

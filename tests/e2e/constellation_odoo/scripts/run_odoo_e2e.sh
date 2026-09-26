@@ -203,7 +203,10 @@ docker ps -a --format '{{json .}}' | grep l9e2e > "$EV/container_state.json" || 
 # ── 8. verdict ───────────────────────────────────────────────────────────────
 python3 "${HERE}/redact_odoo.py" --scan "$EV" "$ODOO_ENV" > "$EV/secret_scan.json" || true
 cat "$EV/secret_scan.json"
-python3 "${HERE}/assert_odoo_evidence.py" "$EV" | tee "$EV/assertions.txt"
-status=${PIPESTATUS[0]}
+# `set -e` + pipefail would abort on a FAIL verdict before the bundle path is
+# printed; capture the verdict's status explicitly instead.
+status=0
+python3 "${HERE}/assert_odoo_evidence.py" "$EV" > "$EV/assertions.txt" || status=$?
+cat "$EV/assertions.txt"
 echo "evidence bundle: $EV"
 exit "$status"

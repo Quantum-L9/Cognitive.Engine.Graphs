@@ -76,7 +76,7 @@ Gate, which re-signs every hop.
 | `O_INSTALL` | mandatory | `plasticos_gate`, `plasticos_enrichment`, `plasticos_matching` installed by Odoo 19 |
 | `O_CONFIG` | mandatory | Odoo's own signing check passes, with no secret in ICP |
 | `O_ISOLATION` | mandatory | From inside Odoo, only `gate` resolves |
-| `O_T1_ROUNDTRIP` | mandatory | Odoo's `send_converge_action` gets a Gate-signed `response` (`source_node=gate`, `signing_key_id=gate-e2e`) carrying EIE's answer. EIE runs unchanged (staging, live provider, no provider egress). |
+| `O_T1_ROUNDTRIP` | mandatory | Odoo's `send_converge_action` gets a `response` packet carrying EIE's answer, **re-signed by Gate** (`signing_key_id=gate-e2e`) and verified by Odoo. Gate relays the worker's packet, so `source_node` stays `enrichment-engine`: Gate's authority on the return leg is the signature, not the source string. EIE runs unchanged (staging, live provider, no provider egress). |
 | `O_T2_OPERATOR_FAIL_CLOSED` | mandatory | The real **Execute** button on an EIE answer that is not `completed` fails closed: never `injected`, and no local fallback |
 | `O_B1…B4` | mandatory | With EIE on the deterministic source: Execute leads to `review` with an allowlisted proposal (B1), the partner is untouched before approval (B2), **Inject** writes and blank-fills fields (B3), and a duplicate of one logical operation is served from Gate's idempotency cache (B4) |
 | `O_N1` | mandatory | Odoo with signing removed is rejected by Gate |
@@ -84,6 +84,8 @@ Gate, which re-signs every hop.
 | `O_N3` | mandatory | Odoo's key id with the wrong secret is rejected |
 | `O_N4` | mandatory | A consumer can't register itself as the owner of `converge` (no admin token) |
 | `O_N5` | mandatory | Pointing the SDK at EIE directly can't work: the name doesn't resolve |
+| `O_P1` | proposal | Odoo request + a target `schema` from Odoo's own allowlist lands through the real review and Inject path, with one provenance row per written field (proves proposed fix P3) |
+| `O_F1` | finding | EIE reports an empty, provider-less result as `completed` |
 | `O_M1/M2` | match | `Odoo -> Gate -> CEG match`: M1 uses Odoo's own `MatchRequest` contract, M2 the direction CEG's spec declares |
 | `O_G1…G4` | finding | What an **admitted** consumer key can also do (authorization gaps; reported, not gated) |
 
@@ -92,13 +94,18 @@ Gate, which re-signs every hop.
 These are read back from image labels and the bundle, and printed in the verdict:
 
 1. **CA layer** per stage, inherited from the base rail (transport only).
-2. **EIE `sqlalchemy[asyncio]` layer.** This is applied only if the unmodified EIE image cannot
-   `import sqlalchemy.ext.asyncio`. At EIE `b583c9e` it cannot: `pip install ".[dev]"` resolves
-   the unpinned `sqlalchemy` to 2.1.x, which no longer pulls in `greenlet`, so the container exits
-   before it registers. The layer is removed once EIE declares the extra.
-3. **EIE `L9_ENVIRONMENT=test`** for the business phase only. The deterministic source is
+2. **EIE dependency layer** (`sqlalchemy[asyncio]`, `alembic`). Each package is added only if a
+   probe shows the unmodified EIE image lacks it. At EIE `b583c9e` both are missing:
+   - `pip install ".[dev]"` resolves the unpinned `sqlalchemy` to 2.1.x, which no longer pulls in
+     `greenlet`, so the container exits before it registers.
+   - `alembic` is not declared, so EIE's documented schema step cannot run.
+
+   The layer disappears once EIE declares both.
+3. **EIE `alembic upgrade head`**, run by the orchestrator as an explicit deploy step. Nothing in
+   EIE's image or compose runs it, and without it every durable `converge` fails.
+4. **EIE `L9_ENVIRONMENT=test`** for the business phase only. The deterministic source is
    refused in staging, by design. Gate stays `staging` with mandatory signatures.
-4. **`plasticos.gate.allow_insecure_http=1`.** Inside the Docker network Gate speaks plain HTTP.
+5. **`plasticos.gate.allow_insecure_http=1`.** Inside the Docker network Gate speaks plain HTTP.
    Integrity comes from HMAC packet signatures, not TLS.
 
 ## Latest result

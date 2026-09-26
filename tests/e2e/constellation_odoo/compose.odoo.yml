@@ -50,7 +50,7 @@ services:
     container_name: l9e2e-odoo
     networks: [odoo_gate_net, odoo_data_net]
     depends_on:
-      gate:    { condition: service_healthy }
+      gate: { condition: service_healthy }
       odoo-db: { condition: service_healthy }
     volumes:
       # The IB-Odoo_19 checkout, read-only, exactly as Odoo.sh mounts custom addons.
