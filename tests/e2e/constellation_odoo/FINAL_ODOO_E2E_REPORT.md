@@ -174,9 +174,9 @@ identity/tenant binding were **not** in scope and are unchanged.
 
 | # | Repo | Commit | Change |
 |---|---|---|---|
-| 1 | Constellation.Gate | `8885140` | `L9_KEY_ALLOWED_ACTIONS_JSON`: a verified key id listed there may invoke only its actions (else `403 action_not_permitted`); unlisted key ids unchanged; a scope for an unknown key id fails startup. Odoo: `{"odoo-k1": ["converge","match"]}`. |
+| 1 | Constellation.Gate | `8885140`, `d64d58e` | `L9_KEY_ALLOWED_ACTIONS_JSON`: a verified key id listed there may invoke only its actions (else `403 action_not_permitted`); unlisted key ids unchanged; a scope for an unknown key id fails startup; scopes require `L9_REQUIRE_SIGNATURE=true` and unsigned packets are refused while scopes exist (`d64d58e`, review). Odoo: `{"odoo-k1": ["converge","match"]}`. |
 | 2 | Cognitive.Engine.Graphs | `ba1b340` | `GraphLifecycle` re-runs the existing `register_from_env()` every `gate_reregistration_interval_seconds` (300) behind `gate_reregistration_enabled` (default on, FEATURE_GATES §17). |
-| 3 | Enrichment.Inference.Engine | `c199c52`, `3fbf353` | `sqlalchemy[asyncio]` + `alembic>=1.13` declared; lock regenerated (+alembic, mako, markupsafe only); `scripts/docker-entrypoint.sh` runs `alembic upgrade head` before the unchanged CMD in both Dockerfiles; cross-repo fixture mirrors Odoo's `schema`. |
+| 3 | Enrichment.Inference.Engine | `c199c52`, `3fbf353`, `3b4108e`, `3ffa180` | `sqlalchemy[asyncio]` + `alembic>=1.13` declared; lock regenerated (+alembic, mako, markupsafe only); the dev image's `scripts/docker-entrypoint.sh` runs `alembic upgrade head` before the unchanged CMD; production applies it as an explicit operator step (`3ffa180`, review: AGENTS.md forbids it in production context); `requirements-ci.txt` declares the same (`3b4108e`); cross-repo fixture mirrors Odoo's `schema`. |
 | 4 | IB-Odoo_19 | `9c5cdf4` | `ConvergeRequest.schema` = `PARTNER_WRITEBACK_FIELD_ALLOWLIST` (`{field: "string"}`). |
 | 5 | IB-Odoo_19 | `9c5cdf4` | `MatchRequest.match_direction` default = `supply_opportunity_to_buyer_facility`; `plasticos_gate` 19.0.1.9.2. |
 
