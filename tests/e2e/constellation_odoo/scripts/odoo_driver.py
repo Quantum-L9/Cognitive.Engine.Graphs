@@ -26,6 +26,7 @@ import json
 import os
 import secrets
 import socket
+import sys
 import traceback
 import urllib.error
 import urllib.request
@@ -605,6 +606,4 @@ try:
     PHASES[PHASE]()
 except Exception:
     RESULT["driver_error"] = traceback.format_exc()[-3000:]
-print("L9E2E-RESULT-BEGIN")
-print(json.dumps(RESULT, indent=1, default=str))
-print("L9E2E-RESULT-END")
+sys.stdout.write("L9E2E-RESULT-BEGIN\n" + json.dumps(RESULT, indent=1, default=str) + "\nL9E2E-RESULT-END\n")

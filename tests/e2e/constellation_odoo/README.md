@@ -37,7 +37,7 @@ Odoo shares a network with Gate and nothing else, so it cannot resolve
 | `scripts/run_odoo_e2e.sh` | Orchestrator: clean slate, boot, scenarios, isolation, logs, verdict |
 | `scripts/assert_odoo_evidence.py` | Produces one verdict from one bundle. A missing mandatory check counts as FAIL. |
 | `scripts/redact_odoo.py` | Redacts evidence and scans for leaks. Every env value is treated as a secret. |
-| `results/` | Published run results (redacted), next to the base rail's `FINAL_E2E_REPORT.md` |
+| `results/` | Published runs: one redacted, deterministic `.tar.gz` per run plus `SUMMARY.md` (verbatim verdicts + sha256), next to the base rail's `FINAL_E2E_REPORT.md` |
 
 ## Reproduce
 
@@ -113,5 +113,6 @@ These are read back from image labels and the bundle, and printed in the verdict
 See [`FINAL_ODOO_E2E_REPORT.md`](FINAL_ODOO_E2E_REPORT.md) for the diagnosis,
 per-check results, findings and the proposed fixes (not applied). Redacted
 evidence bundles are under `results/`: the Odoo rail plus both Gate-rail
-baselines, pristine and EIE-accommodated. Logs are stored as `*.log.txt`
-because this repository ignores `*.log`.
+baselines, pristine and EIE-accommodated. Each is a `.tar.gz` so the PR stays
+within CEG's reviewable-size policy. `results/SUMMARY.md` carries each verdict
+verbatim and its checksum. Inside the bundles, logs are `*.log.txt`.

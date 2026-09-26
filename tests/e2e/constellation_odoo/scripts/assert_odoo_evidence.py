@@ -106,18 +106,18 @@ def main(bundle: Path) -> int:
 
     width = max(len(r[1]) for r in rows)
     for kind, name, st in rows:
-        print(f"{kind:<10} {name:<{width}}  {st}")
-    print(f"SDK commits: {json.dumps(sdk)}")
-    print(f"SDK aligned: {len(set(sdk.values())) == 1 and '?' not in sdk.values()}")
+        sys.stdout.write(f"{kind:<10} {name:<{width}}  {st}\n")
+    sys.stdout.write(f"SDK commits: {json.dumps(sdk)}\n")
+    sys.stdout.write(f"SDK aligned: {len(set(sdk.values())) == 1 and '?' not in sdk.values()}\n")
     for d in deviations:
-        print(f"DEVIATION  {d}")
+        sys.stdout.write(f"DEVIATION  {d}\n")
     verdict = "PASS" if failed == 0 else f"FAIL ({failed} mandatory)"
-    print(f"VERDICT: {verdict}")
+    sys.stdout.write(f"VERDICT: {verdict}\n")
     return 0 if failed == 0 else 1
 
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print(__doc__, file=sys.stderr)
+        sys.stderr.write(str(__doc__) + "\n")
         sys.exit(2)
     sys.exit(main(Path(sys.argv[1])))

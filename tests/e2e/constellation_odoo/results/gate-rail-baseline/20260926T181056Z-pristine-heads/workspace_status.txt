@@ -1,3 +1,0 @@
-### Constellation.Gate
-### Enrichment.Inference.Engine
-### Cognitive.Engine.Graphs

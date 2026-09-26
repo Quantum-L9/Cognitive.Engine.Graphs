@@ -70,11 +70,11 @@ The existing cross-repo Docker rail lives in **Constellation.Gate**
 two CI configs exclude a `tests/e2e/` directory that did not exist. This work
 adds `tests/e2e/constellation_odoo/` to CEG as an **overlay** on the Gate rail,
 so the three-node configuration is reused and not forked. Results are published
-here under `results/`. Commands are in `README.md`.
+here under `results/`: one redacted `.tar.gz` per run, with verdicts verbatim in `results/SUMMARY.md`. Commands are in `README.md`.
 
 ## 3. Results
 
-### 3.1 Odoo rail — `results/odoo-rail/20260926T184524Z/`
+### 3.1 Odoo rail — `results/odoo-rail-20260926T184524Z.tar.gz`
 
 | Check | Result | Evidence |
 |---|---|---|
@@ -95,7 +95,7 @@ here under `results/`. Commands are in `README.md`.
 | O_G1…G4 | GAP ×4 | F-G1…G4. The G1 write is visible in Neo4j: `E2E-ODOO-AUTHZ-PROBE` (`flows/neo4j_odoo_authz_probe.txt`) |
 | EVIDENCE_no_secrets | PASS | every env value scanned across the bundle; 0 leaks |
 
-### 3.2 Gate rail baselines — `results/gate-rail-baseline/`
+### 3.2 Gate rail baselines — `results/gate-rail-*.tar.gz`
 
 - `…181056Z-pristine-heads` **FAIL**. The EIE container exits with `ImportError: …requires that the Python 'greenlet' library is installed` (`logs/eie.log.txt`). These checks fail: P1, P5, P6, N6, REG and PERSIST. Every Gate⇄CEG check and every signature, replay and forgery negative passes.
 - `…182720Z-eie-accommodated` **PASS 21/21**, including all three provenance gates. The only change is the `sqlalchemy[asyncio]` layer.

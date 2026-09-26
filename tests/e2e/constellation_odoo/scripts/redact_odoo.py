@@ -53,14 +53,14 @@ def main(argv: list[str]) -> int:
                 text = path.read_text(errors="replace")
                 if any(s in text for s in secrets):
                     leaks.append(str(path))
-        print(json.dumps({"secret_scan": "FAIL" if leaks else "PASS", "leaking_files": leaks}))
+        sys.stdout.write(json.dumps({"secret_scan": "FAIL" if leaks else "PASS", "leaking_files": leaks}) + "\n")
         return 1 if leaks else 0
     if len(argv) == 4:
         secrets = secrets_from(argv[3])
         text = sys.stdin.read() if argv[1] == "-" else Path(argv[1]).read_text(errors="replace")
         Path(argv[2]).write_text(redact_text(text, secrets))
         return 0
-    print(__doc__, file=sys.stderr)
+    sys.stderr.write(str(__doc__) + "\n")
     return 2
 
 

@@ -1,8 +1,0 @@
-l9e2e-odoo Up 2 minutes (healthy)
-l9e2e-eie Up 2 minutes (healthy)
-l9e2e-ceg Up 2 minutes (healthy)
-l9e2e-odoo-db Up 2 minutes (healthy)
-l9e2e-eie-pg Up 2 minutes
-l9e2e-eie-redis Up 2 minutes
-l9e2e-gate Up 2 minutes (healthy)
-l9e2e-neo4j Up 2 minutes (healthy)

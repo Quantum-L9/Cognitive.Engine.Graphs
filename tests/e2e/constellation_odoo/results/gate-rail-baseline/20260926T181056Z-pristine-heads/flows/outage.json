@@ -1,7 +1,0 @@
-{
- "N5_worker_down_fails_closed": {
-  "status": "PASS",
-  "http_status": 502,
-  "body": "{\"detail\":{\"code\":\"worker_transport_failed\",\"message\":\"could not reach worker 'graph' at http://graph:8000/v1/execute (ConnectError: [Errno -2] Name or service not known)\",\"node\":\"graph\"}}"
- }
-}
