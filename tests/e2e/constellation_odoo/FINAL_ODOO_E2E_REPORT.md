@@ -1,10 +1,11 @@
-# Odoo on the Constellation Docker rail — diagnosis, results, proposed fixes
+# Odoo on the Constellation Docker rail — diagnosis, results, fixes
 
-> **Status:** current-head run on 2026-09-26, run id `20260926T184524Z`, revision set in §1.
-> Reproduced across three consecutive clean-slate runs with the same verdict: `…183719Z`, a manual phase-by-phase pass, and `…184524Z`.
-> **Scope of change:** test harness and evidence only. **No product code, and no
-> registration or routing logic, was changed in any repository.** Every fix
-> below is a *proposal* awaiting approval (§6).
+> **Status (after fixes, 2026-09-26):** approved fixes 1–5 (§7) are applied in
+> their owning repositories. With pristine images built from those revisions,
+> **the Odoo rail PASSES 19/19 mandatory checks** (run `20260926T191817Z`)
+> and **the Gate 3-node rail PASSES 21/21** (run `20260926T192218Z`), with no
+> image accommodation. §0–§6 below are the **pre-fix** diagnosis
+> (run `20260926T184524Z`) and are kept as the record that justified the fixes.
 
 ## 0. Verdict
 
@@ -147,7 +148,7 @@ Severity: **S1** blocks the Odoo use case or is a security boundary gap · **S2*
 4. The business phase runs EIE with `L9_ENVIRONMENT=test` + the deterministic provider. The live provider needs a key and egress, and the deterministic source is refused in staging by design. Gate stays `staging` with mandatory signatures.
 5. `plasticos.gate.allow_insecure_http=1`. Plain HTTP runs inside the Docker network; integrity comes from the HMAC signature.
 
-## 6. Proposed fixes (not applied; awaiting approval)
+## 6. Proposed fixes (pre-fix proposal; see §7 for what was applied)
 
 Ordered by leverage. Each is scoped to the repository that owns the concern.
 
@@ -164,3 +165,31 @@ Ordered by leverage. Each is scoped to the repository that owns the concern.
 
 Once P1, P3, P4 and P5 land, re-running `run_odoo_e2e.sh` is expected to give an
 unqualified **PASS** with no EIE accommodation. That remains a prediction until the run happens.
+
+## 7. Applied fixes and after-fix proof
+
+Fixes 1–5 (approved), each in its owning repository on
+`claude/odoo-gate-sdk-integration-yg6osh`. P2, P7, P8 and the per-key
+identity/tenant binding were **not** in scope and are unchanged.
+
+| # | Repo | Commit | Change |
+|---|---|---|---|
+| 1 | Constellation.Gate | `8885140` | `L9_KEY_ALLOWED_ACTIONS_JSON`: a verified key id listed there may invoke only its actions (else `403 action_not_permitted`); unlisted key ids unchanged; a scope for an unknown key id fails startup. Odoo: `{"odoo-k1": ["converge","match"]}`. |
+| 2 | Cognitive.Engine.Graphs | `ba1b340` | `GraphLifecycle` re-runs the existing `register_from_env()` every `gate_reregistration_interval_seconds` (300) behind `gate_reregistration_enabled` (default on, FEATURE_GATES §17). |
+| 3 | Enrichment.Inference.Engine | `c199c52`, `3fbf353` | `sqlalchemy[asyncio]` + `alembic>=1.13` declared; lock regenerated (+alembic, mako, markupsafe only); `scripts/docker-entrypoint.sh` runs `alembic upgrade head` before the unchanged CMD in both Dockerfiles; cross-repo fixture mirrors Odoo's `schema`. |
+| 4 | IB-Odoo_19 | `9c5cdf4` | `ConvergeRequest.schema` = `PARTNER_WRITEBACK_FIELD_ALLOWLIST` (`{field: "string"}`). |
+| 5 | IB-Odoo_19 | `9c5cdf4` | `MatchRequest.match_direction` default = `supply_opportunity_to_buyer_facility`; `plasticos_gate` 19.0.1.9.2. |
+
+| Check | Before | After |
+|---|---|---|
+| Gate rail, pristine heads | FAIL 15/21 (EIE does not boot) | **PASS 21/21**, no accommodation, no key scope configured (fix 1 backward compatible) |
+| O_B3 Approve → Inject | FAIL (nothing writable) | **PASS** |
+| O_M1 match, Odoo's own contract | FAIL (`No candidate entity for direction 'intake_to_buyer'`) | **PASS** |
+| O_G1 Odoo key → CEG `sync` | GAP (accepted, wrote Neo4j) | **ENFORCED** (`403 action_not_permitted`) |
+| GATE_RESTART_RECOVERY (new) | — (manual repro: CEG never returned, match 404) | **PASS**: EIE and CEG back in the registry ~4 s after Gate restart (test interval 10 s); Odoo match passes through the recovered Gate |
+| EIE image accommodation | `sqlalchemy[asyncio]`, `alembic` | **none** (probe: not needed) |
+
+Unit suites on the changed trees: Gate 505 passed; CEG 1883 passed; EIE 1784
+passed; Odoo 909 passed. Remaining reported, unscoped findings: O_F1 (EIE empty
+result reported `completed`), O_G2/O_G3 (key not bound to node name / tenant),
+O_G4 (unauthenticated `/v1/registry`).

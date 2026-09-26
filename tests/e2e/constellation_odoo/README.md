@@ -100,9 +100,9 @@ These are read back from image labels and the bundle, and printed in the verdict
      `greenlet`, so the container exits before it registers.
    - `alembic` is not declared, so EIE's documented schema step cannot run.
 
-   The layer disappears once EIE declares both.
-3. **EIE `alembic upgrade head`**, run by the orchestrator as an explicit deploy step. Nothing in
-   EIE's image or compose runs it, and without it every durable `converge` fails.
+   The layer disappears once EIE declares both — true from EIE `c199c52` (probe: not needed).
+3. **EIE `alembic upgrade head`**: from EIE `c199c52` the image entrypoint runs it; the
+   orchestrator re-runs it as an idempotent check.
 4. **EIE `L9_ENVIRONMENT=test`** for the business phase only. The deterministic source is
    refused in staging, by design. Gate stays `staging` with mandatory signatures.
 5. **`plasticos.gate.allow_insecure_http=1`.** Inside the Docker network Gate speaks plain HTTP.
