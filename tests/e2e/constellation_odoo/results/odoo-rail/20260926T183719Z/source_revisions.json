@@ -1,0 +1,58 @@
+{
+ "gate": {
+  "repo": "Constellation.Gate",
+  "head": "a90fb0b3c4242137edd673b764ec82f553f09862",
+  "branch": "claude/odoo-gate-sdk-integration-yg6osh",
+  "clean": true,
+  "dirty_paths": []
+ },
+ "eie": {
+  "repo": "Enrichment.Inference.Engine",
+  "head": "b583c9edc05ec96038cd251a8687d34005af3d7f",
+  "branch": "claude/odoo-gate-sdk-integration-yg6osh",
+  "clean": true,
+  "dirty_paths": []
+ },
+ "ceg": {
+  "repo": "Cognitive.Engine.Graphs",
+  "head": "9601aceeff26f07b42a6c50551e1551a2fee8e07",
+  "branch": "claude/odoo-gate-sdk-integration-yg6osh",
+  "clean": true,
+  "dirty_paths": []
+ },
+ "odoo": {
+  "repo": "IB-Odoo_19",
+  "head": "f53d3cdff5bdceb10ae7fd3457734e2fe6a32aa6",
+  "branch": "claude/odoo-gate-sdk-integration-yg6osh",
+  "clean": false,
+  "dirty_paths": [
+   " M .claude/skills/.l9-managed-skills.json",
+   " M .claude/skills/l9-api-smoke-testing",
+   " M .claude/skills/l9-architecture-decision-records",
+   " M .claude/skills/l9-auditing-performance",
+   " M .claude/skills/l9-auditing-security",
+   " M .claude/skills/l9-aws-secrets",
+   " M .claude/skills/l9-bounded-autonomy",
+   " M .claude/skills/l9-chat-extraction",
+   " M .claude/skills/l9-ci-ops",
+   " M .claude/skills/l9-cli-optimization",
+   " M .claude/skills/l9-code-analysis",
+   " M .claude/skills/l9-code-graph-rag-mcp",
+   " M .claude/skills/l9-code-maintenance",
+   " M .claude/skills/l9-component-verification",
+   " M .claude/skills/l9-context7-docs",
+   " M .claude/skills/l9-dag-authoring",
+   " M .claude/skills/l9-e2e-blocker-resolution",
+   " M .claude/skills/l9-end-session",
+   " M .claude/skills/l9-forge",
+   " M .claude/skills/l9-gap-analysis"
+  ]
+ },
+ "sdk": {
+  "repo": "Gate_SDK",
+  "head": "17bffaa3f164ff3a21ff6e1f15d4cfc409241e18",
+  "branch": "claude/odoo-gate-sdk-integration-yg6osh",
+  "clean": true,
+  "dirty_paths": []
+ }
+}

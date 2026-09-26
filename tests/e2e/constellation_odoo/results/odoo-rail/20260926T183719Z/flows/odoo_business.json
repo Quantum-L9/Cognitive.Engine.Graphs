@@ -1,0 +1,102 @@
+{
+ "phase": "business",
+ "checks": {
+  "O_B1_CONVERGE_REVIEW": {
+   "status": "PASS",
+   "run_id": 5,
+   "state": "review",
+   "engine_used": "gate",
+   "failure_class": null,
+   "availability_status": "available",
+   "gate_packet_id": "21616f37-387d-4cdd-9d66-7295f0f96818",
+   "gate_correlation_id": "plasticos.enrichment.run:5",
+   "validation_issues": [
+    "Gate converge proposal awaiting human review (auto-writeback disabled)."
+   ],
+   "user_error": null,
+   "proposed_partner_fields": [
+    "name"
+   ],
+   "eie_provenance_keys": [
+    "confidence",
+    "inference_version",
+    "kb_content_hash",
+    "kb_fragment_ids",
+    "pass_count",
+    "processing_time_ms",
+    "quality_tier",
+    "tokens_used",
+    "uncertainty_score",
+    "variation_count"
+   ]
+  },
+  "O_B2_NO_WRITE_BEFORE_APPROVAL": {
+   "status": "PASS",
+   "partner_before": {
+    "website": null,
+    "city": null,
+    "phone": null,
+    "email": null
+   }
+  },
+  "O_B3_APPROVE_INJECT": {
+   "status": "FAIL",
+   "error": {
+    "type": "UserError",
+    "message": "Gate proposal has no writable partner fields after allowlist filtering."
+   },
+   "tb": "Traceback (most recent call last):\n  File \"<string>\", line 277, in phase_business\n  File \"/mnt/extra-addons/plasticos_enrichment/models/enrichment_run.py\", line 522, in action_inject\n    return self._inject_gate_proposal()\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/mnt/extra-addons/plasticos_enrichment/models/enrichment_run.py\", line 486, in _inject_gate_proposal\n    raise UserError(_(\"Gate proposal has no writable partner fields after allowlist filtering.\"))\nodoo.exceptions.UserError: Gate proposal has no writable partner fields after allowlist filtering.\n"
+  },
+  "O_B4_IDEMPOTENT_REPLAY": {
+   "status": "PASS",
+   "first": {
+    "packet_id": "a716977d-6129-4ef6-b0e0-d96401a02b4e",
+    "packet_type": "response",
+    "action": "converge",
+    "source_node": "enrichment-engine",
+    "destination_node": "gate",
+    "signing_key_id": "gate-e2e",
+    "signature_present": true,
+    "idempotency_key": "odoo:enrichment:l9e2e:plasticos.enrichment.run:6",
+    "correlation_id": "plasticos.enrichment.run:6"
+   },
+   "second": {
+    "packet_id": "a716977d-6129-4ef6-b0e0-d96401a02b4e",
+    "packet_type": "response",
+    "action": "converge",
+    "source_node": "enrichment-engine",
+    "destination_node": "gate",
+    "signing_key_id": "gate-e2e",
+    "signature_present": true,
+    "idempotency_key": "odoo:enrichment:l9e2e:plasticos.enrichment.run:6",
+    "correlation_id": "plasticos.enrichment.run:6"
+   },
+   "state": "completed"
+  },
+  "O_P1_SCHEMA_FIX_REACHES_WRITEBACK": {
+   "status": "PASS",
+   "eie_state": "ok",
+   "proposed_fields": [
+    "city",
+    "email",
+    "name",
+    "phone",
+    "street",
+    "street2",
+    "website",
+    "zip"
+   ],
+   "run_state": "injected",
+   "fields_written": 7,
+   "partner_fields_filled": [
+    "city",
+    "email",
+    "phone",
+    "street",
+    "website",
+    "zip"
+   ],
+   "existing_name_preserved": true
+  }
+ }
+}

@@ -1,0 +1,44 @@
+{
+ "check": "P5_ceg_to_gate_to_eie",
+ "raw_result": {
+  "status": "ok",
+  "action": "enrich",
+  "idempotency_key": "ceg:enrich:plasticos:E2E-CEG-EGRESS-1:b78f8adb7bc2c7fa",
+  "packet_id": "917d030c-ccff-4649-b140-194a68640aff",
+  "packet_type": "response",
+  "correlation_id": "3cf8bd51-4ebb-486b-b967-bfff09c5b69a",
+  "payload": {
+   "fields": {},
+   "confidence": 0.0,
+   "kb_content_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "variation_count": 5,
+   "consensus_threshold": 0.65,
+   "uncertainty_score": 0.0,
+   "pass_count": 1,
+   "inference_version": "v2.2.0",
+   "processing_time_ms": 176,
+   "enrichment_payload": null,
+   "feature_vector": null,
+   "kb_files_consulted": [],
+   "kb_fragment_ids": [],
+   "inferences": [],
+   "quality_tier": "unknown",
+   "grade_matches": [],
+   "tokens_used": 0,
+   "failure_reason": "no_valid_responses (5 errors: APIConnectionError: Connection error.; APIConnectionError: Connection error.; APIConnectionError: Connection error.)",
+   "state": "failed"
+  }
+ },
+ "checks": {
+  "result_is_dict": true,
+  "status_ok": true,
+  "response_packet": true,
+  "packet_id_present": true,
+  "eie_handler_ran": true
+ },
+ "reached_eie": true,
+ "status": "PASS",
+ "eie_inference_version": "v2.2.0",
+ "business_state": "failed",
+ "business_failure_reason": "no_valid_responses (5 errors: APIConnectionError: Connection error.; APIConnectionError: Connection error.; APIConnectionError: Connection error.)"
+}

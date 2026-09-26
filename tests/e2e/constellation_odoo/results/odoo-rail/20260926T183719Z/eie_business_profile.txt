@@ -1,0 +1,1 @@
+L9_ENVIRONMENT=test L9_ENRICHMENT_PROVIDER=deterministic

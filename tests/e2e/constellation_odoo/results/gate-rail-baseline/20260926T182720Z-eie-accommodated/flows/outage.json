@@ -1,0 +1,7 @@
+{
+ "N5_worker_down_fails_closed": {
+  "status": "PASS",
+  "http_status": 503,
+  "body": "{\"detail\":{\"code\":\"no_healthy_node\",\"message\":\"no healthy node for action: sync (graph unhealthy)\"}}"
+ }
+}

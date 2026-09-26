@@ -1,0 +1,152 @@
+{
+ "phase": "adversarial",
+ "checks": {
+  "O_N1_UNSIGNED_REJECTED": {
+   "status": "PASS",
+   "run_id": 4,
+   "state": "failed",
+   "engine_used": "gate",
+   "failure_class": "permanent",
+   "availability_status": "available",
+   "gate_packet_id": null,
+   "gate_correlation_id": null,
+   "validation_issues": [
+    "Gate execute returned HTTP 400"
+   ],
+   "user_error": "Gate enrichment failed (permanent): Gate execute returned HTTP 400",
+   "proposed_partner_fields": [],
+   "eie_provenance_keys": []
+  },
+  "O_N2_UNKNOWN_CONSUMER_REJECTED": {
+   "status": "PASS",
+   "accepted": false,
+   "error": {
+    "type": "GateHTTPError",
+    "message": "Gate execute returned HTTP 400",
+    "http_status": 400
+   }
+  },
+  "O_N3_FORGED_SIGNATURE_REJECTED": {
+   "status": "PASS",
+   "accepted": false,
+   "error": {
+    "type": "GateHTTPError",
+    "message": "Gate execute returned HTTP 400",
+    "http_status": 400
+   }
+  },
+  "O_N4_CONSUMER_SELF_REGISTRATION_REJECTED": {
+   "status": "PASS",
+   "http_status": 401
+  },
+  "O_N5_DIRECT_WORKER_BYPASS_IMPOSSIBLE": {
+   "status": "PASS",
+   "accepted": false,
+   "error": {
+    "type": "GateConnectionError",
+    "message": "could not reach Gate at http://enrichment-engine:8000/v1/execute (ConnectError: [Errno -2] Name or service not known)",
+    "cause_type": "ConnectError",
+    "cause": "[Errno -2] Name or service not known"
+   }
+  },
+  "O_G1_CONSUMER_ACTION_SCOPE": {
+   "status": "GAP",
+   "accepted": true,
+   "response_packet": {
+    "packet_id": "e806cbc4-98ff-4dbd-aa8b-a35f7f729c7d",
+    "packet_type": "response",
+    "action": "sync",
+    "source_node": "graph",
+    "destination_node": "gate",
+    "signing_key_id": "gate-e2e",
+    "signature_present": true,
+    "idempotency_key": null,
+    "correlation_id": "0db57a65-acae-4f2a-b12b-b0577ccea72a"
+   },
+   "payload_keys": [
+    "entity_type",
+    "status",
+    "synced_count"
+   ]
+  },
+  "O_G2_KEY_TO_IDENTITY_BINDING": {
+   "status": "GAP",
+   "accepted": true,
+   "response_packet": {
+    "packet_id": "8874d2a8-6c50-4fef-b869-c98e0c9a83d4",
+    "packet_type": "response",
+    "action": "converge",
+    "source_node": "enrichment-engine",
+    "destination_node": "gate",
+    "signing_key_id": "gate-e2e",
+    "signature_present": true,
+    "idempotency_key": null,
+    "correlation_id": "9a579be0-ded3-426e-a1da-e5ff35631545"
+   },
+   "payload_keys": [
+    "confidence",
+    "consensus_threshold",
+    "enrichment_payload",
+    "failure_reason",
+    "feature_vector",
+    "fields",
+    "grade_matches",
+    "inference_version",
+    "inferences",
+    "kb_content_hash",
+    "kb_files_consulted",
+    "kb_fragment_ids",
+    "pass_count",
+    "processing_time_ms",
+    "quality_tier",
+    "state",
+    "tokens_used",
+    "uncertainty_score",
+    "variation_count"
+   ]
+  },
+  "O_G3_KEY_TO_TENANT_BINDING": {
+   "status": "GAP",
+   "accepted": true,
+   "response_packet": {
+    "packet_id": "dade6b78-f3e9-4fe8-819c-a84cd3555891",
+    "packet_type": "response",
+    "action": "converge",
+    "source_node": "enrichment-engine",
+    "destination_node": "gate",
+    "signing_key_id": "gate-e2e",
+    "signature_present": true,
+    "idempotency_key": null,
+    "correlation_id": "2da3b167-f6aa-493a-99d9-54cfca010fc0"
+   },
+   "payload_keys": [
+    "confidence",
+    "consensus_threshold",
+    "enrichment_payload",
+    "failure_reason",
+    "feature_vector",
+    "fields",
+    "grade_matches",
+    "inference_version",
+    "inferences",
+    "kb_content_hash",
+    "kb_files_consulted",
+    "kb_fragment_ids",
+    "pass_count",
+    "processing_time_ms",
+    "quality_tier",
+    "state",
+    "tokens_used",
+    "uncertainty_score",
+    "variation_count"
+   ]
+  },
+  "O_G4_REGISTRY_DISCLOSURE": {
+   "status": "GAP",
+   "internal_urls": [
+    "http://enrichment-engine:8000",
+    "http://graph:8000"
+   ]
+  }
+ }
+}

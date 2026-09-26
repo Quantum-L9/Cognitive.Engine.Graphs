@@ -1,0 +1,21 @@
+Changed password for user 'neo4j'. IMPORTANT: this change will only take effect if performed before the database is started for the first time.
+2026-09-26 18:11:20.595+0000 INFO  Logging config in use: File '/var/lib/neo4j/conf/user-logs.xml'
+2026-09-26 18:11:20.606+0000 INFO  The license agreement was accepted with environment variable NEO4J_ACCEPT_LICENSE_AGREEMENT=yes when the Software was started.
+
+
+2026-09-26 18:11:20.638+0000 INFO  Starting...
+2026-09-26 18:11:23.525+0000 INFO  ======== Neo4j 5.26.31 ========
+2026-09-26 18:11:23.585+0000 INFO  This instance is ServerId{1ff2e018} (1ff2e018-3a6f-4b13-ae3b-b5c68fc8ae1b)
+2026-09-26 18:11:23.764+0000 INFO  Resolved endpoints with LIST{endpoints:'[5d4b1cac26bb:5000]'} to '[5d4b1cac26bb:5000]'
+2026-09-26 18:11:25.176+0000 INFO  Resolved endpoints with LIST{endpoints:'[5d4b1cac26bb:5000]'} to '[5d4b1cac26bb:5000]'
+2026-09-26 18:11:27.704+0000 INFO  Default database 'neo4j' is created
+2026-09-26 18:11:28.018+0000 INFO  Sending metrics to CSV file at /var/lib/neo4j/metrics
+2026-09-26 18:11:28.061+0000 INFO  Anonymous Usage Data is being sent to Neo4j, see https://neo4j.com/docs/usage-data/
+2026-09-26 18:11:28.076+0000 INFO  Bolt enabled on 0.0.0.0:7687.
+2026-09-26 18:11:28.081+0000 INFO  Bolt (Routing) enabled on 0.0.0.0:7688.
+2026-09-26 18:11:28.956+0000 INFO  HTTP enabled on 0.0.0.0:7474.
+2026-09-26 18:11:28.958+0000 INFO  Remote interface available at http://localhost:7474/
+2026-09-26 18:11:28.960+0000 INFO  id: 2CE29CACD7000AB5A797BE0ADA016A84C2CF5602BC2A1B064F2A348B969E0B7E
+2026-09-26 18:11:28.960+0000 INFO  name: system
+2026-09-26 18:11:28.960+0000 INFO  creationDate: 2026-09-26T18:11:26.421Z
+2026-09-26 18:11:28.960+0000 INFO  Started.

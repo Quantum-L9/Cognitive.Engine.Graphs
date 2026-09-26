@@ -1,0 +1,57 @@
+{
+ "phase": "match",
+ "checks": {
+  "O_M1_MATCH_ODOO_CONTRACT": {
+   "status": "FAIL",
+   "match_direction": "intake_to_buyer",
+   "response_packet": {
+    "packet_id": "6ac0c2a3-abd3-4fa1-afa7-d22076afbb85",
+    "packet_type": "failure",
+    "action": "match",
+    "source_node": "graph",
+    "destination_node": "gate",
+    "signing_key_id": "gate-e2e",
+    "signature_present": true,
+    "idempotency_key": "odoo:matching:e2e:97dd28c7",
+    "correlation_id": "42965923-cc93-42a7-8f3f-8fe2bd4763b8"
+   },
+   "payload_keys": [
+    "error",
+    "message",
+    "packet_id",
+    "status"
+   ],
+   "candidate_count": 0,
+   "ceg_status": "failed",
+   "error": "ValidationError",
+   "message": "ValidationError"
+  },
+  "O_M2_MATCH_CEG_SPEC_DIRECTION": {
+   "status": "PASS",
+   "match_direction": "supply_opportunity_to_buyer_facility",
+   "response_packet": {
+    "packet_id": "2a55db6d-11d8-47fa-b6d4-84d73d440c75",
+    "packet_type": "response",
+    "action": "match",
+    "source_node": "graph",
+    "destination_node": "gate",
+    "signing_key_id": "gate-e2e",
+    "signature_present": true,
+    "idempotency_key": "odoo:matching:e2e:5c2eeb45",
+    "correlation_id": "498f0636-b288-48ec-86dc-980fb6c6ae3f"
+   },
+   "payload_keys": [
+    "candidates",
+    "execution_time_ms",
+    "match_direction",
+    "query_id",
+    "scoring_meta",
+    "total_candidates"
+   ],
+   "candidate_count": 0,
+   "ceg_status": null,
+   "error": null,
+   "message": null
+  }
+ }
+}

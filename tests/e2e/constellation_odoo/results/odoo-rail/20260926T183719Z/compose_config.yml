@@ -1,0 +1,267 @@
+name: l9-constellation-e2e
+services:
+  eie-postgres:
+    container_name: l9e2e-eie-pg
+    environment:
+      POSTGRES_DB: enrich
+      POSTGRES_PASSWORD: ***REDACTED-BY-L9-E2E***
+      POSTGRES_USER: enrich
+    image: postgres:16-alpine
+    networks:
+      eie_data_net: null
+  eie-redis:
+    container_name: l9e2e-eie-redis
+    image: redis:7-alpine
+    networks:
+      eie_data_net: null
+  enrichment-engine:
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --workers
+      - "1"
+    container_name: l9e2e-eie
+    depends_on:
+      eie-postgres:
+        condition: service_started
+        required: true
+      eie-redis:
+        condition: service_started
+        required: true
+      gate:
+        condition: service_healthy
+        required: true
+    environment:
+      DATABASE_URL: postgresql+asyncpg://enrich:***REDACTED-BY-L9-E2E***@eie-postgres:5432/enrich
+      GATE_ADMIN_TOKEN: ***REDACTED-BY-L9-E2E***
+      GATE_INTERNAL_URL: http://enrichment-engine:8000
+      GATE_REGISTER_OVERWRITE: "true"
+      GATE_REGISTRATION_ENABLED: "true"
+      GATE_URL: http://gate:9000
+      HTTPS_PROXY: ""
+      L9_DEV_MODE: "false"
+      L9_ENFORCE_GATE_ONLY_INGRESS: "true"
+      L9_ENVIRONMENT: staging
+      L9_GATE_NODE_NAME: gate
+      L9_NODE_NAME: enrichment-engine
+      L9_REQUIRE_SIGNATURE: "true"
+      L9_SIGNING_ALGORITHM: hmac-sha256
+      L9_SIGNING_KEY: ***REDACTED-BY-L9-E2E***
+      L9_SIGNING_KEY_ID: eie-e2e
+      L9_VERIFYING_KEYS_JSON: '***REDACTED-BY-L9-E2E***'
+      REDIS_URL: redis://eie-redis:6379/0
+      https_proxy: ""
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -fsS
+        - http://127.0.0.1:8000/v1/health
+      timeout: 5s
+      interval: 5s
+      retries: 30
+      start_period: 10s
+    image: l9e2e/eie:local
+    networks:
+      eie_data_net: null
+      gate_eie_net: null
+  gate:
+    container_name: l9e2e-gate
+    environment:
+      GATE_ADMIN_TOKEN: ***REDACTED-BY-L9-E2E***
+      GATE_LOCAL_NODE: gate
+      HOST: 0.0.0.0
+      HTTPS_PROXY: ""
+      L9_DEV_MODE: "false"
+      L9_ENVIRONMENT: staging
+      L9_REPLAY_ENABLED: "true"
+      L9_REQUIRE_SIGNATURE: "true"
+      L9_SIGNING_ALGORITHM: hmac-sha256
+      L9_SIGNING_KEY: ***REDACTED-BY-L9-E2E***
+      L9_SIGNING_KEY_ID: gate-e2e
+      L9_TRUSTED_INGRESS_BOUNDARY: signature
+      L9_VERIFYING_KEYS_JSON: '***REDACTED-BY-L9-E2E***'
+      PORT: "9000"
+      https_proxy: ""
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9000/v1/health',timeout=4).status==200 else 1)
+      timeout: 5s
+      interval: 5s
+      retries: 30
+      start_period: 10s
+    image: l9e2e/gate:local
+    networks:
+      control_net: null
+      gate_ceg_net: null
+      gate_eie_net: null
+      odoo_gate_net: null
+    ports:
+      - mode: ingress
+        target: 9000
+        published: "19000"
+        protocol: tcp
+  graph:
+    container_name: l9e2e-ceg
+    depends_on:
+      gate:
+        condition: service_healthy
+        required: true
+      neo4j:
+        condition: service_healthy
+        required: true
+    environment:
+      GATE_ADMIN_TOKEN: ***REDACTED-BY-L9-E2E***
+      GATE_NODE_SPEC_PATH: engine/spec.yaml
+      GATE_REGISTER_OVERWRITE: "true"
+      GATE_REGISTRATION_ENABLED: "true"
+      GATE_URL: http://gate:9000
+      HTTPS_PROXY: ""
+      L9_DEV_MODE: "false"
+      L9_ENFORCE_GATE_ONLY_INGRESS: "true"
+      L9_ENV: staging
+      L9_ENVIRONMENT: staging
+      L9_GATE_NODE_NAME: gate
+      L9_NODE_NAME: graph
+      L9_REQUIRE_SIGNATURE: "true"
+      L9_SIGNING_ALGORITHM: hmac-sha256
+      L9_SIGNING_KEY: ***REDACTED-BY-L9-E2E***
+      L9_SIGNING_KEY_ID: ceg-e2e
+      L9_VERIFYING_KEYS_JSON: '***REDACTED-BY-L9-E2E***'
+      NEO4J_PASSWORD: ***REDACTED-BY-L9-E2E***
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USERNAME: neo4j
+      https_proxy: ""
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/v1/health',timeout=4).status==200 else 1)
+      timeout: 5s
+      interval: 5s
+      retries: 30
+      start_period: 15s
+    image: l9e2e/ceg:local
+    networks:
+      ceg_data_net: null
+      gate_ceg_net: null
+  neo4j:
+    container_name: l9e2e-neo4j
+    environment:
+      L9E2E_NEO4J_PASSWORD: ***REDACTED-BY-L9-E2E***
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+      NEO4J_AUTH: neo4j/***REDACTED-BY-L9-E2E***
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1G
+      NEO4J_server_memory_pagecache_size: 512m
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - cypher-shell -u neo4j -p $${L9E2E_NEO4J_PASSWORD} 'RETURN 1' || exit 1
+      timeout: 10s
+      interval: 10s
+      retries: 30
+      start_period: 30s
+    image: neo4j:5-enterprise
+    networks:
+      ceg_data_net: null
+  odoo:
+    command:
+      - odoo
+      - --addons-path=/mnt/extra-addons,/usr/lib/python3/dist-packages/odoo/addons
+      - -d
+      - l9e2e
+      - --db_host=odoo-db
+      - --db_port=5432
+      - --db_user=odoo
+      - --db_password=***REDACTED-BY-L9-E2E***
+      - --without-demo=all
+      - --no-database-list
+      - -i
+      - plasticos_gate,plasticos_enrichment,plasticos_matching
+      - --workers=0
+      - --max-cron-threads=0
+      - --http-port=8069
+    container_name: l9e2e-odoo
+    depends_on:
+      gate:
+        condition: service_healthy
+        required: true
+      odoo-db:
+        condition: service_healthy
+        required: true
+    environment:
+      HOST: odoo-db
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      L9E2E_ODOO_DB_PASSWORD: ***REDACTED-BY-L9-E2E***
+      PASSWORD: ***REDACTED-BY-L9-E2E***
+      PLASTICOS_GATE_SIGNING_KEY: ***REDACTED-BY-L9-E2E***
+      PLASTICOS_GATE_VERIFYING_KEYS_JSON: '***REDACTED-BY-L9-E2E***'
+      USER: odoo
+      http_proxy: ""
+      https_proxy: ""
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8069/web/health',timeout=4).status==200 else 1)
+      timeout: 5s
+      interval: 10s
+      retries: 90
+      start_period: 1m0s
+    image: l9e2e/odoo:local
+    networks:
+      odoo_data_net: null
+      odoo_gate_net: null
+    volumes:
+      - type: bind
+        source: /home/user/IB-Odoo_19
+        target: /mnt/extra-addons
+        read_only: true
+        bind: {}
+      - type: bind
+        source: /home/user/Cognitive.Engine.Graphs/tests/e2e/constellation_odoo/scripts
+        target: /l9e2e
+        read_only: true
+        bind: {}
+  odoo-db:
+    container_name: l9e2e-odoo-db
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ***REDACTED-BY-L9-E2E***
+      POSTGRES_USER: odoo
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U odoo -d postgres
+      timeout: 5s
+      interval: 5s
+      retries: 30
+    image: postgres:16
+    networks:
+      odoo_data_net: null
+networks:
+  ceg_data_net:
+    name: l9e2e_ceg_data
+  control_net:
+    name: l9e2e_control
+  eie_data_net:
+    name: l9e2e_eie_data
+  gate_ceg_net:
+    name: l9e2e_gate_ceg
+  gate_eie_net:
+    name: l9e2e_gate_eie
+  odoo_data_net:
+    name: l9e2e_odoo_data
+  odoo_gate_net:
+    name: l9e2e_odoo_gate

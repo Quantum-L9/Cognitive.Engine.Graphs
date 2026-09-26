@@ -1,0 +1,38 @@
+{
+ "gate": {
+  "dist_info": "constellation_node_sdk-1.1.0.dist-info",
+  "direct_url": {
+   "archive_info": {
+    "hash": "sha256=eb71f08de7738b48281f430cebca139be2175fd00b056a34ccf4fce423db5f1d",
+    "hashes": {
+     "sha256": "eb71f08de7738b48281f430cebca139be2175fd00b056a34ccf4fce423db5f1d"
+    }
+   },
+   "url": "https://github.com/Quantum-L9/Gate_SDK/archive/e9f829f982110be13752da8f18c7a9692e8ed908.tar.gz"
+  },
+  "archive_commit_id": "e9f829f982110be13752da8f18c7a9692e8ed908",
+  "commit_source": "container archive url"
+ },
+ "eie": {
+  "dist_info": "constellation_node_sdk-1.1.0.dist-info",
+  "direct_url": {
+   "url": "https://github.com/Quantum-L9/Gate_SDK.git",
+   "vcs_info": {
+    "commit_id": "e9f829f982110be13752da8f18c7a9692e8ed908",
+    "requested_revision": "v1",
+    "vcs": "git"
+   }
+  }
+ },
+ "ceg": {
+  "dist_info": "constellation_node_sdk-1.1.0.dist-info",
+  "direct_url": {
+   "url": "https://github.com/Quantum-L9/Gate_SDK.git",
+   "vcs_info": {
+    "commit_id": "e9f829f982110be13752da8f18c7a9692e8ed908",
+    "requested_revision": "v1",
+    "vcs": "git"
+   }
+  }
+ }
+}

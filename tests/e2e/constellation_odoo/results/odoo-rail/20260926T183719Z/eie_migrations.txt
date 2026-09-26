@@ -1,0 +1,10 @@
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade  -> 001, Initial schema: enrichment_results, convergence_runs,
+field_confidence_history, schema_proposals.
+INFO  [alembic.runtime.migration] Running upgrade 001 -> 002, Scope enrichment_results idempotency uniqueness to the tenant.
+alembic_version
+convergence_runs
+enrichment_results
+field_confidence_history
+schema_proposals

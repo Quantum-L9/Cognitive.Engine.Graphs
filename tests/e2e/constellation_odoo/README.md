@@ -100,3 +100,11 @@ These are read back from image labels and the bundle, and printed in the verdict
    refused in staging, by design. Gate stays `staging` with mandatory signatures.
 4. **`plasticos.gate.allow_insecure_http=1`.** Inside the Docker network Gate speaks plain HTTP.
    Integrity comes from HMAC packet signatures, not TLS.
+
+## Latest result
+
+See [`FINAL_ODOO_E2E_REPORT.md`](FINAL_ODOO_E2E_REPORT.md) for the diagnosis,
+per-check results, findings and the proposed fixes (not applied). Redacted
+evidence bundles are under `results/`: the Odoo rail plus both Gate-rail
+baselines, pristine and EIE-accommodated. Logs are stored as `*.log.txt`
+because this repository ignores `*.log`.

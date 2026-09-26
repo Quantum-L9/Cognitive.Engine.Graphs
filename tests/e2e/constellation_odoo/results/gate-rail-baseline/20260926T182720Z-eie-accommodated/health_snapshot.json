@@ -1,0 +1,6 @@
+{
+    "status": "healthy",
+    "service_name": "constellation-gate",
+    "node_name": "gate",
+    "environment": "staging"
+}

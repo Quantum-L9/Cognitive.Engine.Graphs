@@ -1,0 +1,11 @@
+2026-09-26 18:28:28 [info     ] packet_routed                  action=sync attempt=1 gate_url=http://gate:9000 packet_id=89138beb-4b7f-4200-a598-53214bfa8341 packet_type=response target=graph
+{
+ "check": "P6_eie_to_gate_to_ceg",
+ "raw_result": {
+  "status": "success",
+  "entity_type": "facilities",
+  "synced_count": 1,
+  "packet_id": "89138beb-4b7f-4200-a598-53214bfa8341"
+ },
+ "status": "PASS"
+}

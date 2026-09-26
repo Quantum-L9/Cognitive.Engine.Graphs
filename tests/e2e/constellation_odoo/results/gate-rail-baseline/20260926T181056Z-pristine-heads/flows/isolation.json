@@ -1,0 +1,47 @@
+{
+ "eie_to_ceg_must_fail": {
+  "container": "l9e2e-eie",
+  "host": "graph",
+  "exit_code": 1,
+  "stdout": ""
+ },
+ "ceg_to_eie_must_fail": {
+  "container": "l9e2e-ceg",
+  "host": "enrichment-engine",
+  "exit_code": 2,
+  "stdout": ""
+ },
+ "eie_to_gate_must_work": {
+  "container": "l9e2e-eie",
+  "host": "gate",
+  "exit_code": 1,
+  "stdout": ""
+ },
+ "ceg_to_gate_must_work": {
+  "container": "l9e2e-ceg",
+  "host": "gate",
+  "exit_code": 0,
+  "stdout": "172.22.0.2      gate"
+ },
+ "verdict": "FAIL",
+ "network_membership": {
+  "l9e2e_control": [
+   "l9e2e-gate"
+  ],
+  "l9e2e_gate_eie": [
+   "l9e2e-gate"
+  ],
+  "l9e2e_gate_ceg": [
+   "l9e2e-ceg",
+   "l9e2e-gate"
+  ],
+  "l9e2e_eie_data": [
+   "l9e2e-eie-redis",
+   "l9e2e-eie-pg"
+  ],
+  "l9e2e_ceg_data": [
+   "l9e2e-neo4j",
+   "l9e2e-ceg"
+  ]
+ }
+}

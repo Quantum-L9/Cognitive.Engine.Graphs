@@ -1,0 +1,56 @@
+2026-09-26 18:27:43 [info     ] otel_initialized               endpoint=http://otel-collector:4317 environment=development service=enrichment-engine
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+{"asctime": "2026-09-26 18:27:43,092", "levelname": "INFO", "name": "kb_resolver", "message": "KB loaded: 1 files, 0 polymers, 0 grades, 0 rules"}
+{"url": "redis://eie-redis:6379/0", "event": "redis_connected", "level": "info", "timestamp": "2026-09-26T18:27:43.093711Z"}
+{"handlers": ["enrich", "enrichbatch", "converge", "discover", "simulate", "writeback", "enrich-and-sync"], "gate_url": "http://gate:9000", "event": "orchestration.registered", "level": "info", "timestamp": "2026-09-26T18:27:43.093869Z"}
+{"handlers": ["community-export", "converge", "discover", "enrich", "enrich-and-sync", "enrichbatch", "graph-inference-result", "schema-proposal", "simulate", "writeback"], "event": "sdk_handlers_registered", "level": "info", "timestamp": "2026-09-26T18:27:43.095272Z"}
+{"pool_size": 10, "max_overflow": 20, "event": "pg_engine_initialized", "level": "info", "timestamp": "2026-09-26T18:27:43.178133Z"}
+{"event": "pg_store_initialized", "level": "info", "timestamp": "2026-09-26T18:27:43.178682Z"}
+{"profiles": ["failed_match", "high_null", "new_intake", "nightly_stale"], "state_backend": "redis", "event": "converge_module_configured", "level": "info", "timestamp": "2026-09-26T18:27:43.180650Z"}
+{"asctime": "2026-09-26 18:27:43,427", "levelname": "INFO", "name": "httpx", "message": "HTTP Request: POST http://gate:9000/v1/admin/register?overwrite=true \"HTTP/1.1 200 OK\""}
+{"result": true, "event": "gate_registration_attempted", "level": "info", "timestamp": "2026-09-26T18:27:43.428130Z"}
+{"started": true, "interval_seconds": 300.0, "event": "gate_reregistration_loop", "level": "info", "timestamp": "2026-09-26T18:27:43.428215Z"}
+{"version": "2.3.0", "event": "api_started", "level": "info", "timestamp": "2026-09-26T18:27:43.428244Z"}
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:32810 - "GET /v1/health HTTP/1.1" 200 OK
+{"asctime": "2026-09-26 18:27:48,011", "levelname": "WARNING", "name": "opentelemetry.exporter.otlp.proto.grpc.exporter", "message": "Transient error StatusCode.UNAVAILABLE encountered while exporting traces to otel-collector:4317, retrying in 1.03s. Error details: errors resolving otel-collector:4317: [field:hostname lookup error:address lookup failed for otel-collector:4317: Domain name not found]"}
+INFO:     127.0.0.1:59830 - "GET /v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.2:48020 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59834 - "GET /v1/health HTTP/1.1" 200 OK
+{"asctime": "2026-09-26 18:27:55,378", "levelname": "ERROR", "name": "opentelemetry.exporter.otlp.proto.grpc.exporter", "message": "Failed to export traces to otel-collector:4317, error code: StatusCode.UNAVAILABLE, error details: errors resolving otel-collector:4317: [field:hostname lookup error:address lookup failed for otel-collector:4317: Domain name not found]"}
+INFO:     127.0.0.1:37196 - "GET /v1/health HTTP/1.1" 200 OK
+{"asctime": "2026-09-26 18:28:00,392", "levelname": "WARNING", "name": "opentelemetry.exporter.otlp.proto.grpc.exporter", "message": "Transient error StatusCode.UNAVAILABLE encountered while exporting traces to otel-collector:4317, retrying in 0.83s. Error details: errors resolving otel-collector:4317: [field:hostname lookup error:address lookup failed for otel-collector:4317: Domain name not found]"}
+INFO:     127.0.0.1:37206 - "GET /v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.2:35432 - "GET /api/v1/health HTTP/1.1" 200 OK
+{"asctime": "2026-09-26 18:28:07,899", "levelname": "ERROR", "name": "opentelemetry.exporter.otlp.proto.grpc.exporter", "message": "Failed to export traces to otel-collector:4317, error code: StatusCode.UNAVAILABLE, error details: errors resolving otel-collector:4317: [field:hostname lookup error:address lookup failed for otel-collector:4317: Domain name not found]"}
+INFO:     127.0.0.1:47350 - "GET /v1/health HTTP/1.1" 200 OK
+{"asctime": "2026-09-26 18:28:12,901", "levelname": "WARNING", "name": "opentelemetry.exporter.otlp.proto.grpc.exporter", "message": "Transient error StatusCode.UNAVAILABLE encountered while exporting traces to otel-collector:4317, retrying in 0.85s. Error details: errors resolving otel-collector:4317: [field:hostname lookup error:address lookup failed for otel-collector:4317: Domain name not found]"}
+INFO:     127.0.0.1:47378 - "GET /v1/health HTTP/1.1" 200 OK
+{"asctime": "2026-09-26 18:28:19,881", "levelname": "ERROR", "name": "opentelemetry.exporter.otlp.proto.grpc.exporter", "message": "Failed to export traces to otel-collector:4317, error code: StatusCode.UNAVAILABLE, error details: errors resolving otel-collector:4317: [field:hostname lookup error:address lookup failed for otel-collector:4317: Domain name not found]"}
+INFO:     127.0.0.1:58002 - "GET /v1/health HTTP/1.1" 200 OK
+INFO:     172.19.0.2:34790 - "GET /api/v1/health HTTP/1.1" 200 OK
+{"asctime": "2026-09-26 18:28:24,887", "levelname": "WARNING", "name": "opentelemetry.exporter.otlp.proto.grpc.exporter", "message": "Transient error StatusCode.UNAVAILABLE encountered while exporting traces to otel-collector:4317, retrying in 1.16s. Error details: errors resolving otel-collector:4317: [field:hostname lookup error:address lookup failed for otel-collector:4317: Domain name not found]"}
+{"asctime": "2026-09-26 18:28:25,518", "levelname": "INFO", "name": "app.services.graph_return_channel", "message": "GraphReturnChannel: submitted 1 targets for tenant=plasticos (packet=befe33d1-b088-4e3b-98e7-4b13caba950f)"}
+INFO:     172.19.0.2:34790 - "POST /v1/execute HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58008 - "GET /v1/health HTTP/1.1" 200 OK
+{"entity_name": "?", "object_type": "plasticos", "variations": 5, "kb_fragments": 0, "sonar_optimized": false, "model": "sonar-reasoning", "event": "pipeline_started", "level": "info", "timestamp": "2026-09-26T18:28:29.605306Z"}
+{"effective_timeout_s": 120.0, "deadline_bound": false, "event": "provider_timeout_resolved", "level": "info", "timestamp": "2026-09-26T18:28:29.605414Z"}
+{"sdk_max_retries": 0, "event": "client_initialized", "level": "info", "timestamp": "2026-09-26T18:28:29.623352Z"}
+{"sdk_max_retries": 0, "event": "client_initialized", "level": "info", "timestamp": "2026-09-26T18:28:29.624703Z"}
+{"sdk_max_retries": 0, "event": "client_initialized", "level": "info", "timestamp": "2026-09-26T18:28:29.626573Z"}
+{"error": "Connection error.", "event": "variation_failed", "level": "warning", "timestamp": "2026-09-26T18:28:29.781387Z"}
+{"error": "Connection error.", "event": "variation_failed", "level": "warning", "timestamp": "2026-09-26T18:28:29.781530Z"}
+{"error": "Connection error.", "event": "variation_failed", "level": "warning", "timestamp": "2026-09-26T18:28:29.781567Z"}
+{"error": "Connection error.", "event": "variation_failed", "level": "warning", "timestamp": "2026-09-26T18:28:29.781589Z"}
+{"error": "Connection error.", "event": "variation_failed", "level": "warning", "timestamp": "2026-09-26T18:28:29.781607Z"}
+INFO:     172.19.0.2:34790 - "POST /v1/execute HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36816 - "GET /v1/health HTTP/1.1" 200 OK
+{"asctime": "2026-09-26 18:28:31,838", "levelname": "ERROR", "name": "opentelemetry.exporter.otlp.proto.grpc.exporter", "message": "Failed to export traces to otel-collector:4317, error code: StatusCode.UNAVAILABLE, error details: errors resolving otel-collector:4317: [field:hostname lookup error:address lookup failed for otel-collector:4317: Domain name not found]"}
+INFO:     172.19.0.2:52018 - "GET /api/v1/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36820 - "GET /v1/health HTTP/1.1" 200 OK
+{"asctime": "2026-09-26 18:28:36,840", "levelname": "WARNING", "name": "opentelemetry.exporter.otlp.proto.grpc.exporter", "message": "Transient error StatusCode.UNAVAILABLE encountered while exporting traces to otel-collector:4317, retrying in 1.16s. Error details: errors resolving otel-collector:4317: [field:hostname lookup error:address lookup failed for otel-collector:4317: Domain name not found]"}
+INFO:     127.0.0.1:36692 - "GET /v1/health HTTP/1.1" 200 OK
+{"asctime": "2026-09-26 18:28:43,001", "levelname": "WARNING", "name": "opentelemetry.exporter.otlp.proto.grpc.exporter", "message": "Transient error StatusCode.UNAVAILABLE encountered while exporting metrics to otel-collector:4317, retrying in 1.15s. Error details: errors resolving otel-collector:4317: [field:hostname lookup error:address lookup failed for otel-collector:4317: Domain name not found]"}
+{"asctime": "2026-09-26 18:28:44,286", "levelname": "ERROR", "name": "opentelemetry.exporter.otlp.proto.grpc.exporter", "message": "Failed to export traces to otel-collector:4317, error code: StatusCode.UNAVAILABLE, error details: errors resolving otel-collector:4317: [field:hostname lookup error:address lookup failed for otel-collector:4317: Domain name not found]"}

@@ -1,0 +1,3 @@
+facility_id, tenant, enriched_by, marker
+"E2E-F-001", "plasticos", NULL, "docker-rail"
+"E2E-REPLAY", "plasticos", NULL, NULL
