@@ -63,6 +63,10 @@ services:
       PLASTICOS_GATE_SIGNING_KEY: ${L9E2E_ODOO_KEY:?odoo signing key required}
       PLASTICOS_GATE_VERIFYING_KEYS_JSON: ${L9E2E_ODOO_GATE_VERIFYING_KEYS_JSON:?gate response key required}
       L9E2E_ODOO_DB_PASSWORD: ${L9E2E_ODOO_PG_PASSWORD:?}
+      # The odoo image entrypoint's wait-for-psql reads these (default host "db").
+      HOST: odoo-db
+      USER: odoo
+      PASSWORD: ${L9E2E_ODOO_PG_PASSWORD:?}
       HTTPS_PROXY: ""
       https_proxy: ""
       HTTP_PROXY: ""

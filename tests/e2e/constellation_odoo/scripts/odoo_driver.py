@@ -222,21 +222,35 @@ def phase_transport() -> None:
     try:
         raw = direct_converge(run)
         pkt = raw["response_packet"]
+        # Gate relays the worker's response packet (source_node stays the
+        # worker) and re-signs it with its own key; Odoo's SDK verifies that
+        # signature against Gate's key only. Gate authority on the return leg
+        # is therefore the signature, not the source_node string.
         ok = (
-            pkt["packet_type"] in {"response", "PacketType.RESPONSE"}
-            and pkt["source_node"] == "gate"
+            pkt["packet_type"] == "response"
             and pkt["signing_key_id"] == "gate-e2e"
             and pkt["signature_present"]
+            and pkt["idempotency_key"] == raw["request_idempotency_key"]
             and raw["state"] is not None
         )
         check("O_T1_ROUNDTRIP", "PASS" if ok else "FAIL", **raw)
+        # EIE contract probe: with no provider reachable, is an empty result
+        # reported as `completed`? (Odoo must not trust it; see O_T2.)
+        empty_success = raw["state"] == "completed" and not raw["field_names"] and not raw["failure_reason"]
+        check(
+            "O_F1_EIE_EMPTY_RESULT_REPORTED_COMPLETED",
+            "GAP" if empty_success else "ENFORCED",
+            state=raw["state"],
+            field_names=raw["field_names"],
+            failure_reason=raw["failure_reason"],
+        )
     except Exception as exc:
         check("O_T1_ROUNDTRIP", "FAIL", error=gate_error(exc), tb=traceback.format_exc()[-1500:])
     # The operator path on a fresh run: Odoo must fail CLOSED on a non-completed
     # EIE answer — degraded, never injected, never a local fallback.
     run2 = new_run(new_partner("TRANSPORT-UI"))
     res = execute_run(run2)
-    closed = res["state"] in {"degraded", "failed", "retryable"} or res["state"] == "review"
+    closed = res["state"] in {"degraded", "failed", "retryable"}
     check("O_T2_OPERATOR_FAIL_CLOSED", "PASS" if closed else "FAIL", **res)
 
 
@@ -302,6 +316,72 @@ def phase_business() -> None:
     except Exception as exc:
         check("O_B4_IDEMPOTENT_REPLAY", "FAIL", error=gate_error(exc))
 
+    phase_business_schema_probe()
+
+
+def phase_business_schema_probe() -> None:
+    """PROPOSAL probe (not gated): Odoo's request + a target `schema`.
+
+    EIE fills only the fields named in EnrichRequest.schema; Odoo's
+    build_converge_request sends none, so EIE has nothing to target and echoes
+    the input. This probe sends the SAME Odoo request with `schema` derived from
+    Odoo's own writeback allowlist, then lands the answer through the real
+    review -> Inject path — i.e. it proves the proposed one-line Odoo fix
+    end to end without changing Odoo's code.
+    """
+    from odoo.addons.plasticos_gate.services.gate_allowlists import PARTNER_WRITEBACK_FIELD_ALLOWLIST
+    from odoo.addons.plasticos_gate.services.gate_builders import build_converge_request
+    from odoo.addons.plasticos_gate.services.gate_client import send_converge_action
+    from odoo.addons.plasticos_gate.services.gate_mappers import (
+        extract_audit_metadata,
+        map_converge_response,
+        partner_writeback_from_converge,
+    )
+
+    partner = new_partner("SCHEMA-PROBE")
+    run = new_run(partner)
+    try:
+        request = build_converge_request(env, run)
+        payload = {
+            **request.to_dict(),
+            "schema": dict.fromkeys(sorted(PARTNER_WRITEBACK_FIELD_ALLOWLIST), "string"),
+        }
+        key = f"{request.idempotency_key}:schema-probe"
+        payload["idempotency_key"] = key
+        result = send_converge_action(env, payload=payload, idempotency_key=key)
+        resp = map_converge_response(result["payload"])
+        proposed = partner_writeback_from_converge(resp)
+        audit = extract_audit_metadata(result["packet"])
+        run.write(
+            {
+                "engine_used": "gate",
+                "state": "review",
+                "gate_packet_id": audit.get("gate_packet_id"),
+                "gate_correlation_id": audit.get("gate_correlation_id"),
+                "gate_proposal": {"final_fields": resp.final_fields, "proposed_partner_fields": proposed},
+            }
+        )
+        env.cr.commit()
+        name_before = partner.name
+        run.action_inject()
+        env.cr.commit()
+        run.invalidate_recordset()
+        partner.invalidate_recordset()
+        filled = sorted(f for f in ("website", "city", "zip", "street", "email", "phone") if partner[f])
+        check(
+            "O_P1_SCHEMA_FIX_REACHES_WRITEBACK",
+            "PASS" if run.state == "injected" and filled and partner.name == name_before else "FAIL",
+            eie_state=resp.status,
+            proposed_fields=sorted(proposed),
+            run_state=run.state,
+            fields_written=run.fields_written,
+            partner_fields_filled=filled,
+            existing_name_preserved=partner.name == name_before,
+        )
+    except Exception as exc:
+        env.cr.rollback()
+        check("O_P1_SCHEMA_FIX_REACHES_WRITEBACK", "FAIL", error=gate_error(exc), tb=traceback.format_exc()[-1500:])
+
 
 def phase_match() -> None:
     """Odoo -> Gate -> CEG match, through the matching adapter Odoo uses.
@@ -343,7 +423,7 @@ def phase_match() -> None:
             )
             body = result["payload"]
             pkt = packet_summary(result["packet"])
-            ok = "candidates" in body and pkt["source_node"] == "gate"
+            ok = "candidates" in body and pkt["packet_type"] == "response" and pkt["signing_key_id"] == "gate-e2e"
             check(
                 name,
                 "PASS" if ok else "FAIL",
@@ -351,8 +431,9 @@ def phase_match() -> None:
                 response_packet=pkt,
                 payload_keys=sorted(body.keys()),
                 candidate_count=len(body.get("candidates") or []),
-                status=body.get("status"),
-                error=body.get("error") or body.get("detail") or body.get("message"),
+                ceg_status=body.get("status"),
+                error=body.get("error") or body.get("detail"),
+                message=body.get("message"),
             )
         except Exception as exc:
             check(

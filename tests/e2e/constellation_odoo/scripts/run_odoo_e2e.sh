@@ -91,6 +91,15 @@ except Exception: print(0)')"
   echo "registry: expected $1 healthy nodes, have ${n:-0}"; return 1
 }
 await_registry 2 | tee "$EV/registry_wait.txt" || true
+
+# EIE deploy step: its documented schema migration. Nothing in EIE's image or
+# compose runs it, and without it every durable `converge` fails with
+# `relation "enrichment_results" does not exist` (reported as a finding).
+docker exec -w /app l9e2e-eie alembic upgrade head > "$EV/eie_migrations.txt" 2>&1 \
+  || echo "EIE MIGRATION FAILED (see eie_migrations.txt)"
+docker exec l9e2e-eie-pg psql -U enrich -d enrich -Atc \
+  "select table_name from information_schema.tables where table_schema='public' order by 1" \
+  >> "$EV/eie_migrations.txt" 2>&1 || true
 curl -sS --noproxy '*' http://127.0.0.1:19000/v1/registry | python3 -m json.tool > "$EV/gate_registry.json" || true
 
 # ── 4. what actually runs: image revisions, accommodations, SDK commits ──────

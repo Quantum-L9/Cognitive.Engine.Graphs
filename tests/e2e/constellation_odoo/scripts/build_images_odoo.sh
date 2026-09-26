@@ -11,15 +11,17 @@
 #   odoo              IB-Odoo_19/Dockerfile                   -> l9e2e/odoo:local
 #   eie-accommodated  l9e2e/eie:local + one declared layer    -> l9e2e/eie:local
 #
-# eie-accommodated exists because EIE's image does not start at its current
-# HEAD: the Dockerfile installs `.[dev]` from pyproject.toml, whose unpinned
-# `sqlalchemy` resolves to 2.1.x, where greenlet is only pulled by the
-# `asyncio` extra; app/services/pg_store.py imports sqlalchemy.ext.asyncio and
-# the process exits with ImportError before registering with Gate.
-# The accommodation installs the extra EIE's code already requires
-# (`sqlalchemy[asyncio]`, the minimal change) ON TOP of the unmodified image,
+# eie-accommodated exists because EIE's image, built from its own Dockerfile at
+# b583c9e, cannot serve `converge`:
+#   1. `pip install ".[dev]"` resolves the unpinned `sqlalchemy` to 2.1.x, where
+#      greenlet is only pulled by the `asyncio` extra; app/services/pg_store.py
+#      imports sqlalchemy.ext.asyncio and the process exits before registering.
+#   2. `alembic` is not a dependency, so the documented schema step
+#      (`alembic upgrade head`) cannot run and every durable converge fails
+#      with `relation "enrichment_results" does not exist`.
+# The accommodation adds ONLY what is missing, ON TOP of the unmodified image,
 # labels the image so the verdict can see it, and is reported as a deviation.
-# It is removed the moment EIE fixes its dependency declaration.
+# It disappears on its own once EIE declares these dependencies.
 set -Eeuo pipefail
 
 WORKSPACE="${L9_E2E_WORKSPACE:-/home/user}"
@@ -46,22 +48,33 @@ build_odoo() {
 build_eie_accommodated() {
   docker image inspect l9e2e/eie:local >/dev/null \
     || { echo "FATAL: build l9e2e/eie:local with the Gate rail first" >&2; return 1; }
-  if docker image inspect l9e2e/eie:local \
-       --format '{{index .Config.Labels "io.l9.e2e.accommodation"}}' | grep -q sqlalchemy; then
-    echo "eie: accommodation already applied"; return 0
+  # Probe first: accommodate only a defect that is actually present in the
+  # image as built from EIE's own Dockerfile.
+  #   sqlalchemy[asyncio]  app/services/pg_store.py imports sqlalchemy.ext.asyncio
+  #   alembic              migrations/ + alembic.ini ship in the image and
+  #                        `alembic upgrade head` is EIE's documented schema
+  #                        step, but alembic is not a declared dependency
+  local missing=()
+  docker run --rm --entrypoint python l9e2e/eie:local -c "import sqlalchemy.ext.asyncio" \
+    >/dev/null 2>&1 || missing+=("sqlalchemy[asyncio]")
+  docker run --rm --entrypoint python l9e2e/eie:local -c "import alembic" \
+    >/dev/null 2>&1 || missing+=("alembic")
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    echo "eie: no accommodation needed"; return 0
   fi
-  # Probe first: only accommodate a defect that is actually present.
-  if docker run --rm --entrypoint python l9e2e/eie:local -c \
-       "import sqlalchemy.ext.asyncio" >/dev/null 2>&1; then
-    echo "eie: sqlalchemy.ext.asyncio imports — no accommodation needed"; return 0
-  fi
+  local prior label
+  prior="$(docker image inspect l9e2e/eie:local \
+             --format '{{index .Config.Labels "io.l9.e2e.accommodation"}}' 2>/dev/null || true)"
+  [[ "$prior" == "<no value>" ]] && prior=""
+  label="$(IFS=,; echo "${prior:+${prior},}${missing[*]}")"
   local df="${OUT}/eie-accommodation.Dockerfile"
-  cat > "$df" <<'EOF'
-FROM l9e2e/eie:local
-RUN pip install --no-cache-dir "sqlalchemy[asyncio]"
-EOF
+  {
+    echo "FROM l9e2e/eie:local"
+    printf 'RUN pip install --no-cache-dir'; printf ' "%s"' "${missing[@]}"; echo
+  } > "$df"
+  echo "eie: accommodating ${missing[*]}"
   docker buildx build --network host --progress plain \
-    --label "io.l9.e2e.accommodation=sqlalchemy[asyncio]" \
+    --label "io.l9.e2e.accommodation=${label}" \
     --build-arg "HTTPS_PROXY=${PROXY}" --build-arg "https_proxy=${PROXY}" \
     -f "$df" -t l9e2e/eie:local --load "${OUT}" \
     2>&1 | tee "${OUT}/eie-accommodation.build.log" | tail -5

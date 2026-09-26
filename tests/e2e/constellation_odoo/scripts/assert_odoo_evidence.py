@@ -36,13 +36,15 @@ MANDATORY = {
     ],
 }
 MATCH = {"match": ["O_M1_MATCH_ODOO_CONTRACT", "O_M2_MATCH_CEG_SPEC_DIRECTION"]}
+PROPOSALS = {"business": ["O_P1_SCHEMA_FIX_REACHES_WRITEBACK"]}
 GAPS = {
+    "transport": ["O_F1_EIE_EMPTY_RESULT_REPORTED_COMPLETED"],
     "adversarial": [
         "O_G1_CONSUMER_ACTION_SCOPE",
         "O_G2_KEY_TO_IDENTITY_BINDING",
         "O_G3_KEY_TO_TENANT_BINDING",
         "O_G4_REGISTRY_DISCLOSURE",
-    ]
+    ],
 }
 
 
@@ -84,6 +86,9 @@ def main(bundle: Path) -> int:
     for phase, checks in MATCH.items():
         for c in checks:
             rows.append(("MATCH", c, status_of(phase, c)))
+    for phase, checks in PROPOSALS.items():
+        for c in checks:
+            rows.append(("PROPOSAL", c, status_of(phase, c)))
     for phase, checks in GAPS.items():
         for c in checks:
             rows.append(("FINDING", c, status_of(phase, c)))
