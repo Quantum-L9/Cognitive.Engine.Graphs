@@ -1,0 +1,20 @@
+# Business-path overlay: recreate ONLY enrichment-engine with the in-repo
+# deterministic enrichment source (EIE app/services/deterministic_provider.py).
+#
+# Why this exists: EIE's live provider is Perplexity. With no provider egress,
+# `converge` returns state=failed / no_valid_responses and Odoo correctly fails
+# closed as `degraded` — that proves transport, not the business result.
+#
+# EIE refuses the deterministic source outside {local, dev, test}
+# (EIE-212-F002), so this overlay moves EIE — and only EIE — to `test`.
+# RECORDED DEVIATION: in `test` EIE's runtime forces dev_mode on. It still
+# verifies any signature it receives (keyring configured) and is still
+# unreachable except through Gate (network topology), but it would also accept
+# an unsigned packet. Gate stays `staging` with mandatory signatures, and Gate
+# is the consumer admission boundary under test.
+
+services:
+  enrichment-engine:
+    environment:
+      L9_ENVIRONMENT: test
+      L9_ENRICHMENT_PROVIDER: deterministic
