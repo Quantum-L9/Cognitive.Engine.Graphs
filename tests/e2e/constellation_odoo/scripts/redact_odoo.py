@@ -16,7 +16,9 @@ import json
 import sys
 from pathlib import Path
 
-PLACEHOLDER = "***REDACTED-BY-L9-E2E***"
+# YAML-safe: a leading "*" makes an unquoted value parse as an alias, which
+# broke check-yaml on redacted `docker compose config` output.
+PLACEHOLDER = "REDACTED-BY-L9-E2E"
 MIN_SECRET_LEN = 12
 
 
