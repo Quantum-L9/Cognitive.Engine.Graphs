@@ -8,7 +8,7 @@
    "engine_used": "gate",
    "failure_class": null,
    "availability_status": "available",
-   "gate_packet_id": "21616f37-387d-4cdd-9d66-7295f0f96818",
+   "gate_packet_id": "51a7d54a-7c5a-4ccd-af2c-dbe165a5d01a",
    "gate_correlation_id": "plasticos.enrichment.run:5",
    "validation_issues": [
     "Gate converge proposal awaiting human review (auto-writeback disabled)."
@@ -50,7 +50,7 @@
   "O_B4_IDEMPOTENT_REPLAY": {
    "status": "PASS",
    "first": {
-    "packet_id": "a716977d-6129-4ef6-b0e0-d96401a02b4e",
+    "packet_id": "68d32e42-4f07-4372-b880-d9eaa4887996",
     "packet_type": "response",
     "action": "converge",
     "source_node": "enrichment-engine",
@@ -61,7 +61,7 @@
     "correlation_id": "plasticos.enrichment.run:6"
    },
    "second": {
-    "packet_id": "a716977d-6129-4ef6-b0e0-d96401a02b4e",
+    "packet_id": "68d32e42-4f07-4372-b880-d9eaa4887996",
     "packet_type": "response",
     "action": "converge",
     "source_node": "enrichment-engine",
@@ -75,6 +75,7 @@
   },
   "O_P1_SCHEMA_FIX_REACHES_WRITEBACK": {
    "status": "PASS",
+   "provenance_rows": 7,
    "eie_state": "ok",
    "proposed_fields": [
     "city",

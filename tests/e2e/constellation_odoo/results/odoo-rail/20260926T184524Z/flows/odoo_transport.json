@@ -5,7 +5,7 @@
    "status": "PASS",
    "request_idempotency_key": "odoo:enrichment:l9e2e:plasticos.enrichment.run:1",
    "response_packet": {
-    "packet_id": "01eafd74-2da4-403f-a3f7-d8d29bc75d8b",
+    "packet_id": "d1e0a8b9-e076-4cf8-83ef-207ca1b3fef3",
     "packet_type": "response",
     "action": "converge",
     "source_node": "enrichment-engine",

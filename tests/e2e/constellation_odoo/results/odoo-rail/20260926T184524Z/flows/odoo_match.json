@@ -5,15 +5,15 @@
    "status": "FAIL",
    "match_direction": "intake_to_buyer",
    "response_packet": {
-    "packet_id": "6ac0c2a3-abd3-4fa1-afa7-d22076afbb85",
+    "packet_id": "9755207f-22c4-42e9-b85a-67442f9c8354",
     "packet_type": "failure",
     "action": "match",
     "source_node": "graph",
     "destination_node": "gate",
     "signing_key_id": "gate-e2e",
     "signature_present": true,
-    "idempotency_key": "odoo:matching:e2e:97dd28c7",
-    "correlation_id": "42965923-cc93-42a7-8f3f-8fe2bd4763b8"
+    "idempotency_key": "odoo:matching:e2e:990746aa",
+    "correlation_id": "2e67af69-f8cb-4464-99df-e2d46dc05552"
    },
    "payload_keys": [
     "error",
@@ -30,15 +30,15 @@
    "status": "PASS",
    "match_direction": "supply_opportunity_to_buyer_facility",
    "response_packet": {
-    "packet_id": "2a55db6d-11d8-47fa-b6d4-84d73d440c75",
+    "packet_id": "346602bf-3bba-4903-a39b-d6e0bb1b0842",
     "packet_type": "response",
     "action": "match",
     "source_node": "graph",
     "destination_node": "gate",
     "signing_key_id": "gate-e2e",
     "signature_present": true,
-    "idempotency_key": "odoo:matching:e2e:5c2eeb45",
-    "correlation_id": "498f0636-b288-48ec-86dc-980fb6c6ae3f"
+    "idempotency_key": "odoo:matching:e2e:d0abfde9",
+    "correlation_id": "f9e83af0-0961-4a05-8e66-d890ea730035"
    },
    "payload_keys": [
     "candidates",

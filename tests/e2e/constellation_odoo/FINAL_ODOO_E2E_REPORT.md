@@ -1,6 +1,7 @@
 # Odoo on the Constellation Docker rail — diagnosis, results, proposed fixes
 
-> **Status:** current-head run on 2026-09-26, run id `20260926T183719Z`, revision set in §1.
+> **Status:** current-head run on 2026-09-26, run id `20260926T184524Z`, revision set in §1.
+> Reproduced across three consecutive clean-slate runs with the same verdict: `…183719Z`, a manual phase-by-phase pass, and `…184524Z`.
 > **Scope of change:** test harness and evidence only. **No product code, and no
 > registration or routing logic, was changed in any repository.** Every fix
 > below is a *proposal* awaiting approval (§6).
@@ -54,7 +55,7 @@ Plain answers to the four questions asked:
 |---|---|---|
 | Constellation.Gate | `a90fb0b3c424` | yes |
 | Enrichment.Inference.Engine | `b583c9edc05e` | yes |
-| Cognitive.Engine.Graphs | `9601aceeff26` (= main `ebe7795` + this harness) | yes |
+| Cognitive.Engine.Graphs | `e1983c6c614d` (= main `ebe7795` + this harness) | yes |
 | IB-Odoo_19 | `f53d3cdff5bd` | addon tree clean. 46 `.claude/skills/*` symlinks were rewired by the session's governance bootstrap; no `plasticos_*` byte differs. |
 | Gate_SDK | `17bffaa3f164` | yes |
 
@@ -73,7 +74,7 @@ here under `results/`. Commands are in `README.md`.
 
 ## 3. Results
 
-### 3.1 Odoo rail — `results/odoo-rail/20260926T183719Z/`
+### 3.1 Odoo rail — `results/odoo-rail/20260926T184524Z/`
 
 | Check | Result | Evidence |
 |---|---|---|
@@ -89,7 +90,7 @@ here under `results/`. Commands are in `README.md`.
 | O_N1…N5 | PASS | unsigned: Gate 400 (`signature required`); unknown key id: Gate 400; forged: Gate 400; self-register: 401; direct EIE: DNS failure |
 | O_M1_MATCH_ODOO_CONTRACT | **FAIL** | CEG `ValidationError`: `No candidate entity for direction 'intake_to_buyer'` (F-O2) |
 | O_M2_MATCH_CEG_SPEC_DIRECTION | PASS | same request, `supply_opportunity_to_buyer_facility`, returns a `response` with `candidates` |
-| O_P1 (proposal probe) | PASS | Odoo request + `schema` from Odoo's own allowlist: EIE returns 8 fields; real Inject writes 7 and keeps the existing `name` |
+| O_P1 (proposal probe) | PASS | Odoo request + `schema` from Odoo's own allowlist: EIE returns 8 fields; the real Inject writes 7 fields (the six checked, city · email · phone · street · website · zip, all filled), creates **7 provenance rows**, and keeps the existing `name` |
 | O_F1 | GAP | F-E3 |
 | O_G1…G4 | GAP ×4 | F-G1…G4. The G1 write is visible in Neo4j: `E2E-ODOO-AUTHZ-PROBE` (`flows/neo4j_odoo_authz_probe.txt`) |
 | EVIDENCE_no_secrets | PASS | every env value scanned across the bundle; 0 leaks |

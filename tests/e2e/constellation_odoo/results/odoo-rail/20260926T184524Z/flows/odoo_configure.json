@@ -49,7 +49,7 @@
   "O_ISOLATION": {
    "status": "PASS",
    "dns": {
-    "gate": "172.24.0.2",
+    "gate": "172.23.0.2",
     "enrichment-engine": "UNRESOLVABLE (gaierror)",
     "graph": "UNRESOLVABLE (gaierror)",
     "neo4j": "UNRESOLVABLE (gaierror)",

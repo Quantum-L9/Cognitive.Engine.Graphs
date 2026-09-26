@@ -1,7 +1,7 @@
-2026-09-26 18:40:51,873 149 WARNING ? odoo.tools.config: missing --http-interface/http_interface, using 0.0.0.0 by default, will change to 127.0.0.1 in 20.0 
-2026-09-26 18:40:53,483 149 WARNING l9e2e odoo.fields: Field plasticos.freight.estimate.status: unknown parameter 'tracking', if this is an actual parameter you may want to override the method _valid_field_parameter on the relevant model in order to allow it 
-2026-09-26 18:40:53,484 149 WARNING l9e2e odoo.fields: Field plasticos.freight.quote.selected: unknown parameter 'tracking', if this is an actual parameter you may want to override the method _valid_field_parameter on the relevant model in order to allow it 
-2026-09-26 18:40:53,886 149 WARNING l9e2e py.warnings: /usr/local/lib/python3.12/dist-packages/pythonjsonlogger/jsonlogger.py:11: DeprecationWarning: pythonjsonlogger.jsonlogger has been moved to pythonjsonlogger.json
+2026-09-26 18:48:38,772 143 WARNING ? odoo.tools.config: missing --http-interface/http_interface, using 0.0.0.0 by default, will change to 127.0.0.1 in 20.0 
+2026-09-26 18:48:40,421 143 WARNING l9e2e odoo.fields: Field plasticos.freight.estimate.status: unknown parameter 'tracking', if this is an actual parameter you may want to override the method _valid_field_parameter on the relevant model in order to allow it 
+2026-09-26 18:48:40,422 143 WARNING l9e2e odoo.fields: Field plasticos.freight.quote.selected: unknown parameter 'tracking', if this is an actual parameter you may want to override the method _valid_field_parameter on the relevant model in order to allow it 
+2026-09-26 18:48:40,849 143 WARNING l9e2e py.warnings: /usr/local/lib/python3.12/dist-packages/pythonjsonlogger/jsonlogger.py:11: DeprecationWarning: pythonjsonlogger.jsonlogger has been moved to pythonjsonlogger.json
   File "/usr/bin/odoo", line 6, in <module>
     odoo.cli.main()
   File "/usr/lib/python3/dist-packages/odoo/cli/command.py", line 133, in main
@@ -12,8 +12,8 @@
     self.console(local_vars)
   File "/usr/lib/python3/dist-packages/odoo/cli/shell.py", line 82, in console
     exec(sys.stdin.read(), local_vars)
-  File "<string>", line 601, in <module>
-  File "<string>", line 394, in phase_match
+  File "<string>", line 605, in <module>
+  File "<string>", line 398, in phase_match
   File "/mnt/extra-addons/plasticos_gate/services/gate_client.py", line 36, in <module>
     from constellation_node_sdk import (  # type: ignore[no-redef]  # noqa: F811
   File "/usr/local/lib/python3.12/dist-packages/constellation_node_sdk/__init__.py", line 30, in <module>
@@ -27,8 +27,8 @@
   File "/usr/local/lib/python3.12/dist-packages/pythonjsonlogger/jsonlogger.py", line 11, in <module>
     warnings.warn(
  
-2026-09-26 18:40:54,107 149 INFO l9e2e httpx: HTTP Request: POST http://gate:9000/v1/execute "HTTP/1.1 200 OK" 
-2026-09-26 18:40:55,415 149 INFO l9e2e httpx: HTTP Request: POST http://gate:9000/v1/execute "HTTP/1.1 200 OK" 
+2026-09-26 18:48:41,091 143 INFO l9e2e httpx: HTTP Request: POST http://gate:9000/v1/execute "HTTP/1.1 200 OK" 
+2026-09-26 18:48:42,334 143 INFO l9e2e httpx: HTTP Request: POST http://gate:9000/v1/execute "HTTP/1.1 200 OK" 
 L9E2E-RESULT-BEGIN
 {
  "phase": "match",
@@ -37,15 +37,15 @@ L9E2E-RESULT-BEGIN
    "status": "FAIL",
    "match_direction": "intake_to_buyer",
    "response_packet": {
-    "packet_id": "6ac0c2a3-abd3-4fa1-afa7-d22076afbb85",
+    "packet_id": "9755207f-22c4-42e9-b85a-67442f9c8354",
     "packet_type": "failure",
     "action": "match",
     "source_node": "graph",
     "destination_node": "gate",
     "signing_key_id": "gate-e2e",
     "signature_present": true,
-    "idempotency_key": "odoo:matching:e2e:97dd28c7",
-    "correlation_id": "42965923-cc93-42a7-8f3f-8fe2bd4763b8"
+    "idempotency_key": "odoo:matching:e2e:990746aa",
+    "correlation_id": "2e67af69-f8cb-4464-99df-e2d46dc05552"
    },
    "payload_keys": [
     "error",
@@ -62,15 +62,15 @@ L9E2E-RESULT-BEGIN
    "status": "PASS",
    "match_direction": "supply_opportunity_to_buyer_facility",
    "response_packet": {
-    "packet_id": "2a55db6d-11d8-47fa-b6d4-84d73d440c75",
+    "packet_id": "346602bf-3bba-4903-a39b-d6e0bb1b0842",
     "packet_type": "response",
     "action": "match",
     "source_node": "graph",
     "destination_node": "gate",
     "signing_key_id": "gate-e2e",
     "signature_present": true,
-    "idempotency_key": "odoo:matching:e2e:5c2eeb45",
-    "correlation_id": "498f0636-b288-48ec-86dc-980fb6c6ae3f"
+    "idempotency_key": "odoo:matching:e2e:d0abfde9",
+    "correlation_id": "f9e83af0-0961-4a05-8e66-d890ea730035"
    },
    "payload_keys": [
     "candidates",

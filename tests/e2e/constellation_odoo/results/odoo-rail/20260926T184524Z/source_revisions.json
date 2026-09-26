@@ -15,7 +15,7 @@
  },
  "ceg": {
   "repo": "Cognitive.Engine.Graphs",
-  "head": "9601aceeff26f07b42a6c50551e1551a2fee8e07",
+  "head": "e1983c6c614d150e7ae7b292889a97a3c62b420d",
   "branch": "claude/odoo-gate-sdk-integration-yg6osh",
   "clean": true,
   "dirty_paths": []

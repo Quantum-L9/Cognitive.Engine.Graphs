@@ -40,7 +40,7 @@
  "ceg": {
   "labels": {
    "io.l9.e2e.node": "ceg",
-   "org.opencontainers.image.revision": "9601aceeff26f07b42a6c50551e1551a2fee8e07"
+   "org.opencontainers.image.revision": "e1983c6c614d150e7ae7b292889a97a3c62b420d"
   },
   "sdk": {
    "dist_info": "constellation_node_sdk-1.1.0.dist-info",

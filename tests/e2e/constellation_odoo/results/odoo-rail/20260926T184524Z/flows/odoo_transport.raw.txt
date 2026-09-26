@@ -1,7 +1,7 @@
-2026-09-26 18:40:48,181 137 WARNING ? odoo.tools.config: missing --http-interface/http_interface, using 0.0.0.0 by default, will change to 127.0.0.1 in 20.0 
-2026-09-26 18:40:49,739 137 WARNING l9e2e odoo.fields: Field plasticos.freight.estimate.status: unknown parameter 'tracking', if this is an actual parameter you may want to override the method _valid_field_parameter on the relevant model in order to allow it 
-2026-09-26 18:40:49,740 137 WARNING l9e2e odoo.fields: Field plasticos.freight.quote.selected: unknown parameter 'tracking', if this is an actual parameter you may want to override the method _valid_field_parameter on the relevant model in order to allow it 
-2026-09-26 18:40:50,288 137 WARNING l9e2e py.warnings: /usr/local/lib/python3.12/dist-packages/pythonjsonlogger/jsonlogger.py:11: DeprecationWarning: pythonjsonlogger.jsonlogger has been moved to pythonjsonlogger.json
+2026-09-26 18:48:35,253 129 WARNING ? odoo.tools.config: missing --http-interface/http_interface, using 0.0.0.0 by default, will change to 127.0.0.1 in 20.0 
+2026-09-26 18:48:36,829 129 WARNING l9e2e odoo.fields: Field plasticos.freight.estimate.status: unknown parameter 'tracking', if this is an actual parameter you may want to override the method _valid_field_parameter on the relevant model in order to allow it 
+2026-09-26 18:48:36,830 129 WARNING l9e2e odoo.fields: Field plasticos.freight.quote.selected: unknown parameter 'tracking', if this is an actual parameter you may want to override the method _valid_field_parameter on the relevant model in order to allow it 
+2026-09-26 18:48:37,373 129 WARNING l9e2e py.warnings: /usr/local/lib/python3.12/dist-packages/pythonjsonlogger/jsonlogger.py:11: DeprecationWarning: pythonjsonlogger.jsonlogger has been moved to pythonjsonlogger.json
   File "/usr/bin/odoo", line 6, in <module>
     odoo.cli.main()
   File "/usr/lib/python3/dist-packages/odoo/cli/command.py", line 133, in main
@@ -12,7 +12,7 @@
     self.console(local_vars)
   File "/usr/lib/python3/dist-packages/odoo/cli/shell.py", line 82, in console
     exec(sys.stdin.read(), local_vars)
-  File "<string>", line 601, in <module>
+  File "<string>", line 605, in <module>
   File "<string>", line 223, in phase_transport
   File "<string>", line 135, in direct_converge
   File "/mnt/extra-addons/plasticos_gate/services/gate_client.py", line 36, in <module>
@@ -28,8 +28,8 @@
   File "/usr/local/lib/python3.12/dist-packages/pythonjsonlogger/jsonlogger.py", line 11, in <module>
     warnings.warn(
  
-2026-09-26 18:40:50,745 137 INFO l9e2e httpx: HTTP Request: POST http://gate:9000/v1/execute "HTTP/1.1 200 OK" 
-2026-09-26 18:40:50,953 137 INFO l9e2e httpx: HTTP Request: POST http://gate:9000/v1/execute "HTTP/1.1 200 OK" 
+2026-09-26 18:48:37,715 129 INFO l9e2e httpx: HTTP Request: POST http://gate:9000/v1/execute "HTTP/1.1 200 OK" 
+2026-09-26 18:48:37,918 129 INFO l9e2e httpx: HTTP Request: POST http://gate:9000/v1/execute "HTTP/1.1 200 OK" 
 L9E2E-RESULT-BEGIN
 {
  "phase": "transport",
@@ -38,7 +38,7 @@ L9E2E-RESULT-BEGIN
    "status": "PASS",
    "request_idempotency_key": "odoo:enrichment:l9e2e:plasticos.enrichment.run:1",
    "response_packet": {
-    "packet_id": "01eafd74-2da4-403f-a3f7-d8d29bc75d8b",
+    "packet_id": "d1e0a8b9-e076-4cf8-83ef-207ca1b3fef3",
     "packet_type": "response",
     "action": "converge",
     "source_node": "enrichment-engine",
