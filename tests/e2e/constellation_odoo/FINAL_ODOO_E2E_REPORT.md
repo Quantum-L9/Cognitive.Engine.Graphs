@@ -243,4 +243,3 @@ CEG adopt it in their own repositories.
 2. **Odoo adopts the SDK.** Odoo replaces `classify_transport_failure` with `err.retryable` and calls `activate()` in its configuration check.
 3. **Release.** Gate_SDK 1.2.0 is released and promoted to `@v1`.
 4. **Acid test.** A new node, such as the Reconciler, is born with only `create_node_app()`.
-

@@ -203,7 +203,11 @@ repos:
             \.github/pr_review_config\.yaml|
             \.github/.*\.yml
           )$
+      # Unified diffs are data: a blank context line is a single space, and
+      # stripping it corrupts the patch (tests/e2e/constellation_odoo/patches).
       - id: end-of-file-fixer
+        exclude: \.(diff|patch)$
       - id: trailing-whitespace
+        exclude: \.(diff|patch)$
       - id: check-added-large-files
         args: [--maxkb=1000]
