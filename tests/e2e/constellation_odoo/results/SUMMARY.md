@@ -5,6 +5,62 @@ deterministic `.tar.gz` (sorted entries, fixed mtime and owner) so this PR stays
 CEG's reviewable-size policy. Secret scan over every env value: **PASS** for every bundle.
 Unpack with `tar -xzf <bundle>.tar.gz`. Logs are `*.log.txt`.
 
+## `odoo-rail-20260927T022821Z-sdk-participation.tar.gz`
+
+- **What:** the Gate_SDK participation closure (L9-PARTICIPATION-01) in SDK participation mode.
+- **Images:**
+  - Gate_SDK `eaac6a8` in all five images.
+  - EIE and CEG carry their SDK adoption diffs.
+  - The zero-code `sdk-minimal-node`.
+- **sha256:** `9d160b3697ac40594053fe27a7901f4786ec89249582fe798fbdfce54002f45e`
+
+```text
+MANDATORY  O_INSTALL                                 PASS
+MANDATORY  O_CONFIG                                  PASS
+MANDATORY  O_ISOLATION                               PASS
+MANDATORY  O_T1_ROUNDTRIP                            PASS
+MANDATORY  O_T2_OPERATOR_FAIL_CLOSED                 PASS
+MANDATORY  O_B1_CONVERGE_REVIEW                      PASS
+MANDATORY  O_B2_NO_WRITE_BEFORE_APPROVAL             PASS
+MANDATORY  O_B3_APPROVE_INJECT                       PASS
+MANDATORY  O_B4_IDEMPOTENT_REPLAY                    PASS
+MANDATORY  O_N1_UNSIGNED_REJECTED                    PASS
+MANDATORY  O_N2_UNKNOWN_CONSUMER_REJECTED            PASS
+MANDATORY  O_N3_FORGED_SIGNATURE_REJECTED            PASS
+MANDATORY  O_N4_CONSUMER_SELF_REGISTRATION_REJECTED  PASS
+MANDATORY  O_N5_DIRECT_WORKER_BYPASS_IMPOSSIBLE      PASS
+MANDATORY  O_G1_CONSUMER_ACTION_SCOPE                ENFORCED
+MANDATORY  GATE_RESTART_RECOVERY                     PASS
+MANDATORY  DOCKER_ISOLATION                          PASS
+MANDATORY  EVIDENCE_no_secrets                       PASS
+MANDATORY  REG_live_registration                     PASS
+MANDATORY  C_ADMISSION_RECEIPT                       PASS
+MANDATORY  C_REQUIRED_ACTION_MISSING                 PASS
+MANDATORY  C_ADMISSION_UNKNOWN_KEY_REJECTED          PASS
+MANDATORY  C_TYPED_403                               PASS
+MANDATORY  P_SDK_NODE_ACTIVE                         PASS
+MANDATORY  P_SDK_NODE_ROUTABLE                       PASS
+MANDATORY  P_SDK_NODE_RECOVERY                       PASS
+MATCH      O_M1_MATCH_ODOO_CONTRACT                  PASS
+MATCH      O_M2_MATCH_CEG_SPEC_DIRECTION             PASS
+PROPOSAL   O_P1_SCHEMA_FIX_REACHES_WRITEBACK         PASS
+FINDING    O_F1_EIE_EMPTY_RESULT_REPORTED_COMPLETED  GAP
+FINDING    O_G2_KEY_TO_IDENTITY_BINDING              GAP
+FINDING    O_G3_KEY_TO_TENANT_BINDING                GAP
+FINDING    O_G4_REGISTRY_DISCLOSURE                  GAP
+MANDATORY  PROVENANCE_images_and_sdk                 PASS
+SDK commits: {"gate": "eaac6a84d49c", "eie": "eaac6a84d49c", "ceg": "eaac6a84d49c", "odoo": "eaac6a84d49c", "sdk-node": "eaac6a84d49c"}
+SDK aligned: True
+DEVIATION  ceg: Gate_SDK overlay eaac6a84d49c
+DEVIATION  ceg: SDK adoption ceg-sdk-adoption.diff@sha256:fa3cdeba0edac9f3
+DEVIATION  eie: Gate_SDK overlay eaac6a84d49c
+DEVIATION  eie: SDK adoption eie-sdk-adoption.diff@sha256:728d340c770d44e0
+DEVIATION  gate: Gate_SDK overlay eaac6a84d49c
+DEVIATION  odoo: Gate_SDK overlay eaac6a84d49c
+DEVIATION  eie business phase: L9_ENVIRONMENT=test L9_ENRICHMENT_PROVIDER=deterministic
+VERDICT: PASS
+```
+
 ## `odoo-rail-20260926T191817Z-after-fixes.tar.gz`
 
 - AFTER fixes 1-5 — Odoo rail, pristine images, no accommodation · sha256 `bef89ff8fcc6fc5a6f332b121cb17972adadc625ec23d81dadbaf72ace60b92a`

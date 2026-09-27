@@ -193,3 +193,54 @@ Unit suites on the changed trees: Gate 505 passed; CEG 1883 passed; EIE 1784
 passed; Odoo 909 passed. Remaining reported, unscoped findings: O_F1 (EIE empty
 result reported `completed`), O_G2/O_G3 (key not bound to node name / tenant),
 O_G4 (unauthenticated `/v1/registry`).
+
+## 8. Gate_SDK participation closure (L9-PARTICIPATION-01)
+
+The fixes above still left each participant doing its own Gate integration:
+- EIE and CEG each carried a registration loop, CEG's added as fix 2.
+- EIE had registration-aware readiness of its own.
+- Odoo classified Gate failures itself.
+- A consumer learned whether Gate admitted it only from a 403 on a real call.
+
+That machinery now lives in Gate_SDK (Quantum-L9/Gate_SDK#55). Gate gained the
+matching admission probe (`POST /v1/admission`, Constellation.Gate#25,
+`b8cf238`). The rail proves both in its SDK participation mode
+(`L9E2E_SDK_PARTICIPATION=1`, see README).
+
+### Run under test
+
+- **Run:** `results/odoo-rail-20260927T022821Z-sdk-participation.tar.gz` — **VERDICT PASS**, 27/27 mandatory.
+- **Image sources:** every image runs Gate_SDK `eaac6a8`: gate `b8cf238`, EIE `3ffa180`, CEG `db8fdb4`, Odoo `9c5cdf4`, sdk-node = Gate_SDK `eaac6a8`.
+- **EIE and CEG** run with their own registration code removed (`patches/*-sdk-adoption.diff`, a labelled image layer). Their participation is the SDK's.
+- **`sdk-minimal-node`** is Gate_SDK `examples/minimal_node`: handlers, a spec file and `create_node_app()`. It has no Gate integration code.
+
+### Checks
+
+| Check | Result |
+|---|---|
+| P_SDK_NODE_ACTIVE | EIE, CEG and the minimal node are all `active` with `/v1/ready` 200; all three are in Gate's registry. |
+| P_SDK_NODE_ROUTABLE | The minimal node's `sdk-echo` goes out through Gate and back to the node. It returns Gate-signed (`gate-e2e`) with `{"echo": {"probe": "l9e2e"}}`. |
+| P_SDK_NODE_RECOVERY | Gate is stopped. All three nodes turn `/v1/ready` 503 `degraded`, observed 9 s into the outage. When Gate is back they re-register (minimal node 4 s, EIE 6 s, CEG 10 s; interval 10 s) and return to 200 `active`. No node code is involved. |
+| C_ADMISSION_RECEIPT | Odoo's production config builder plus `GateClient.activate()` returns key `odoo-e2e`, `restricted`, granted `converge` and `match`. Nine actions are routable. |
+| C_REQUIRED_ACTION_MISSING | Requiring `sync` raises `GateAuthorizationError(code="action_not_permitted")`, not retryable. |
+| C_ADMISSION_UNKNOWN_KEY_REJECTED | An unknown key gets 400 `invalid_transport_packet`. It is not reported as an authorization error. |
+| C_TYPED_403 | An out-of-scope `sync` raises a typed `GateAuthorizationError` (403 `action_not_permitted`). |
+| All 20 previous mandatory checks | PASS, including O_B3, O_G1 ENFORCED, GATE_RESTART_RECOVERY and PROVENANCE. |
+
+### Declared deviations
+
+These are printed by the verdict:
+- the Gate_SDK overlay on every image;
+- the EIE and CEG adoption diffs;
+- EIE's deterministic business phase.
+
+The overlay and the diffs go away when Gate_SDK 1.2.0 is on `@v1` and EIE and
+CEG adopt it in their own repositories.
+
+### After approval
+
+1. **EIE and CEG adopt the SDK.** The adoption diffs become their PRs: `create_node_app(registration=...)`, with their loops deleted. After that they also delete their now-dead registration modules and tests.
+2. **Odoo adopts the SDK.** Odoo replaces `classify_transport_failure` with `err.retryable` and calls `activate()` in its configuration check.
+3. **Release.** Gate_SDK 1.2.0 is released and promoted to `@v1`.
+4. **Acid test.** A new node, such as the Reconciler, is born with only `create_node_app()`.
+
