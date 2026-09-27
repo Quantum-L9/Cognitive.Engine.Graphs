@@ -36,6 +36,9 @@ Odoo shares a network with Gate and nothing else, so it cannot resolve
 | `scripts/odoo_driver.py` | Scenarios, run under `odoo shell` against the real registry |
 | `scripts/run_odoo_e2e.sh` | Orchestrator: clean slate, boot, scenarios, isolation, logs, verdict |
 | `scripts/assert_odoo_evidence.py` | Produces one verdict from one bundle. A missing mandatory check counts as FAIL. |
+| `compose.sdk-participation.yml` | SDK participation overlay: the Gate_SDK minimal node on its own Gate-only network, SDK re-registration interval for EIE/CEG |
+| `patches/{eie,ceg}-sdk-adoption.diff` | What EIE and CEG change to adopt SDK participation (their own registration loops removed); applied only as a labelled image layer |
+| `scripts/sdk_participation_verdict.py` | Writes the P_SDK_* checks and the Gate-restart recovery verdict |
 | `scripts/redact_odoo.py` | Redacts evidence and scans for leaks. Every env value is treated as a secret. |
 | `results/` | Published runs: one redacted, deterministic `.tar.gz` per run plus `SUMMARY.md` (verbatim verdicts + sha256), next to the base rail's `FINAL_E2E_REPORT.md` |
 
@@ -90,6 +93,31 @@ Gate, which re-signs every hop.
 | `O_M1/M2` | match | `Odoo -> Gate -> CEG match`: M1 uses Odoo's own `MatchRequest` contract, M2 the direction CEG's spec declares |
 | `O_G1…G4` | finding | What an **admitted** consumer key can also do (authorization gaps; reported, not gated) |
 
+## Proving a Gate_SDK change (L9-PARTICIPATION-01)
+
+```bash
+bash tests/e2e/constellation_odoo/scripts/build_images_odoo.sh sdk-participation
+L9E2E_SDK_PARTICIPATION=1 bash tests/e2e/constellation_odoo/scripts/run_odoo_e2e.sh
+```
+
+`sdk-participation` installs the Gate_SDK checkout's HEAD commit into every
+image (from its GitHub archive, so provenance records the commit), applies
+`patches/*-sdk-adoption.diff` to EIE and CEG, and builds `l9e2e/sdk-node:local`
+from `examples/minimal_node`. The run adds these mandatory checks:
+
+| Check | Proves |
+|---|---|
+| `P_SDK_NODE_ACTIVE` | EIE, CEG and the minimal node are registered and `/v1/ready` is 200 / `active` on SDK participation |
+| `P_SDK_NODE_ROUTABLE` | The minimal node — zero Gate code — is reachable through Gate: its own `sdk-echo` round-trips, Gate-signed |
+| `P_SDK_NODE_RECOVERY` | With Gate down, all three turn `/v1/ready` 503 / `degraded`; when Gate returns they re-register and turn 200 / `active` without node code |
+| `C_ADMISSION_RECEIPT` | Odoo's own client config + `GateClient.activate()` returns Gate's receipt: `odoo-e2e`, restricted, granted `converge`,`match` |
+| `C_REQUIRED_ACTION_MISSING` | Requiring `sync` is a typed `GateAuthorizationError(code="action_not_permitted")` |
+| `C_ADMISSION_UNKNOWN_KEY_REJECTED` | A key Gate does not know is refused at admission (400), not mistaken for authorization |
+| `C_TYPED_403` | An out-of-scope business call raises `GateAuthorizationError`, not retryable — no consumer classifier needed |
+
+Provenance additionally requires every image to carry the Gate_SDK checkout's
+own head.
+
 ## Declared deviations
 
 These are read back from image labels and the bundle, and printed in the verdict:
@@ -108,6 +136,9 @@ These are read back from image labels and the bundle, and printed in the verdict
    refused in staging, by design. Gate stays `staging` with mandatory signatures.
 5. **`plasticos.gate.allow_insecure_http=1`.** Inside the Docker network Gate speaks plain HTTP.
    Integrity comes from HMAC packet signatures, not TLS.
+6. **SDK participation mode only:** the Gate_SDK overlay (`io.l9.e2e.sdk_overlay`) on every
+   image and the adoption diffs (`io.l9.e2e.sdk_adoption`) on EIE and CEG. Both disappear once
+   the Gate_SDK release is on `@v1` and EIE/CEG adopt it in their own repositories.
 
 ## Latest result
 

@@ -8,6 +8,12 @@
 #     build_images.sh; l9e2e/odoo:local from build_images_odoo.sh
 #   * sibling checkouts under L9_E2E_WORKSPACE (default /home/user)
 #
+# L9E2E_SDK_PARTICIPATION=1 proves a Gate_SDK change (L9-PARTICIPATION-01):
+# build with `build_images_odoo.sh sdk-participation` first; the run adds the
+# SDK minimal node (compose.sdk-participation.yml), expects three registered
+# nodes, proves they are active/routable and recover from a Gate outage on SDK
+# code alone, and runs Odoo's consumer_sdk phase.
+#
 # Every run starts from zero (down -v) and writes a secret-free, timestamped
 # evidence bundle. The verdict (assert_odoo_evidence.py) is non-zero on any
 # mandatory check that failed OR did not run.
@@ -27,7 +33,16 @@ echo "evidence: $EV"
 
 export L9E2E_ODOO_REPO="${WORKSPACE}/IB-Odoo_19"
 export L9E2E_ODOO_SCRIPTS="${HERE}"
+SDKP="${L9E2E_SDK_PARTICIPATION:-0}"
 BASE_COMPOSE=(docker compose --env-file "$ODOO_ENV" -f "${GATE_RAIL}/compose.yml" -f "${RAIL}/compose.odoo.yml")
+NODES=2
+IMAGES=(gate eie ceg odoo)
+if [[ "$SDKP" == "1" ]]; then
+  BASE_COMPOSE+=(-f "${RAIL}/compose.sdk-participation.yml")
+  NODES=3
+  IMAGES+=(sdk-node)
+fi
+echo "sdk participation mode: ${SDKP} (expecting ${NODES} registered nodes)"
 DET_COMPOSE=("${BASE_COMPOSE[@]}" -f "${RAIL}/compose.eie-deterministic.yml")
 
 envval() { python3 - "$1" "$2" <<'PY'
@@ -90,7 +105,7 @@ except Exception: print(0)' "$EV/registry_probe.json")"
   done
   echo "registry: expected $1 healthy nodes, have ${n:-0}"; return 1
 }
-await_registry 2 | tee "$EV/registry_wait.txt" || true
+await_registry "$NODES" | tee "$EV/registry_wait.txt" || true
 
 # EIE's image entrypoint runs `alembic upgrade head` on start; re-running it
 # here is an idempotent check that the schema is at head (no-op when it is).
@@ -104,7 +119,7 @@ python3 -m json.tool "$EV/registry_probe.json" > "$EV/gate_registry.json" || tru
 rm -f "$EV/registry_probe.json"
 
 # ── 4. what actually runs: image revisions, accommodations, SDK commits ──────
-python3 - "$EV/image_provenance.json" <<'PY'
+python3 - "$EV/image_provenance.json" "${IMAGES[@]}" <<'PY'
 import json, subprocess, sys
 probe = ("import json,glob,os\n"
          "o={}\n"
@@ -114,7 +129,7 @@ probe = ("import json,glob,os\n"
          "    o['direct_url']=json.load(open(p)) if os.path.exists(p) else None\n"
          "print(json.dumps(o))\n")
 out = {}
-for node in ("gate", "eie", "ceg", "odoo"):
+for node in sys.argv[2:]:
     img = f"l9e2e/{node}:local"
     fmt = '{{json .Config.Labels}}'
     labels = subprocess.run(["docker", "image", "inspect", img, "--format", fmt], capture_output=True, text=True)
@@ -132,8 +147,45 @@ for node in ("gate", "eie", "ceg", "odoo"):
 json.dump(out, open(sys.argv[1], "w"), indent=1)
 print(json.dumps({k: {"rev": (v["labels"] or {}).get("org.opencontainers.image.revision", "")[:9],
                       "accommodation": (v["labels"] or {}).get("io.l9.e2e.accommodation"),
+                      "sdk_overlay": ((v["labels"] or {}).get("io.l9.e2e.sdk_overlay") or "")[:9],
+                      "sdk_adoption": (v["labels"] or {}).get("io.l9.e2e.sdk_adoption"),
                       "sdk": (v["sdk_commit"] or "")[:9]} for k, v in out.items()}, indent=1))
 PY
+
+# ── 4b. SDK participation: nodes active + routable with zero node Gate code ──
+node_ready() {  # $1 container -> "<http status> <participation state>"
+  docker exec "$1" python3 -c '
+import json, sys, urllib.request, urllib.error
+try:
+    with urllib.request.urlopen("http://127.0.0.1:8000/v1/ready", timeout=4) as r:
+        code, body = r.status, json.load(r)
+except urllib.error.HTTPError as e:
+    code, body = e.code, json.load(e)
+except Exception:
+    code, body = 0, {}
+print(code, (body.get("gate_participation") or {}).get("state", "unknown"))
+' 2>/dev/null || echo "0 unreachable"
+}
+SDK_CONTAINERS=(l9e2e-eie l9e2e-ceg l9e2e-sdk-node)
+if [[ "$SDKP" == "1" ]]; then
+  echo "== SDK participation: active + routable =="
+  for c in "${SDK_CONTAINERS[@]}"; do echo "$c $(node_ready "$c")"; done > "$EV/sdk_ready_boot.txt"
+  cat "$EV/sdk_ready_boot.txt"
+  # Routable: the minimal node calls its own action THROUGH Gate with the SDK's
+  # GateClient and env config; Gate resolves sdk-echo to the node it registered.
+  docker exec l9e2e-sdk-node python3 -c '
+import asyncio, json
+from constellation_node_sdk import GateClient, get_gate_client_config_from_env
+async def main():
+    client = GateClient(get_gate_client_config_from_env())
+    pkt = await client.execute(action="sdk-echo", payload={"probe": "l9e2e"}, tenant="l9e2e", timeout_ms=15000)
+    print(json.dumps({"source_node": pkt.address.source_node, "signing_key_id": pkt.security.signing_key_id,
+                      "payload": pkt.payload}))
+asyncio.run(main())
+' > "$EV/sdk_routable.txt" 2>&1 || true
+  cat "$EV/sdk_routable.txt"
+  python3 "${HERE}/sdk_participation_verdict.py" boot "$EV"
+fi
 
 # ── 5. Odoo scenarios, inside the real Odoo 19 registry ──────────────────────
 odoo_phase() {  # $1 = phase
@@ -166,37 +218,48 @@ echo "== odoo: configure ==";   odoo_phase configure
 echo "== odoo: transport (EIE staging, live provider) =="; odoo_phase transport
 echo "== odoo: match (Odoo -> Gate -> CEG) =="; odoo_phase match
 echo "== odoo: adversarial ==";  odoo_phase adversarial
+if [[ "$SDKP" == "1" ]]; then
+  echo "== odoo: consumer_sdk (activate + typed refusals) =="; odoo_phase consumer_sdk
+fi
 
 echo "== EIE -> deterministic source (business path) =="
 "${DET_COMPOSE[@]}" up -d --wait --wait-timeout 300 enrichment-engine || true
-await_registry 2 | tee "$EV/registry_wait_business.txt" || true
+await_registry "$NODES" | tee "$EV/registry_wait_business.txt" || true
 docker exec l9e2e-eie sh -c 'echo "L9_ENVIRONMENT=$L9_ENVIRONMENT L9_ENRICHMENT_PROVIDER=$L9_ENRICHMENT_PROVIDER"' \
   > "$EV/eie_business_profile.txt" 2>&1 || true
 echo "== odoo: business ==";     odoo_phase business
 
-# ── 5b. Gate restart: Gate's registry is in memory; both workers must
-#        re-register on their own (EIE loop, CEG gate_reregistration_enabled).
-echo "== Gate restart recovery =="
-docker restart l9e2e-gate >/dev/null
-python3 - "$EV/flows/gate_restart_recovery.json" <<'PY'
-import json, sys, time, urllib.request
-t0 = time.time(); seen = {}; nodes = []
-while time.time() - t0 < 120:
-    try:
-        with urllib.request.urlopen("http://127.0.0.1:19000/v1/registry", timeout=4) as r:
-            nodes = sorted(json.load(r))
-    except Exception:
-        nodes = []
-    for n in nodes:
-        seen.setdefault(n, round(time.time() - t0, 1))
-    if {"enrichment-engine", "graph"} <= set(nodes):
-        break
-    time.sleep(2)
-res = {"reregistered_after_s": seen, "registry": nodes,
-       "verdict": "PASS" if {"enrichment-engine", "graph"} <= set(nodes) else "FAIL"}
-json.dump(res, open(sys.argv[1], "w"), indent=1)
-print("gate restart recovery:", res["verdict"], seen)
-PY
+# ── 5b. Gate restart: Gate's registry is in memory; every node must
+#        re-register on its own. Default mode: the nodes' own loops (EIE, CEG).
+#        SDK mode: Gate is DOWN long enough for a re-registration to fail, so
+#        readiness must drop (503, degraded) and come back (200, active) when
+#        Gate returns, driven by Gate_SDK alone.
+if [[ "$SDKP" == "1" ]]; then
+  echo "== Gate outage + recovery (SDK participation) =="
+  docker stop l9e2e-gate >/dev/null
+  t0=$(date +%s)
+  for _ in $(seq 1 45); do
+    states="$(for c in "${SDK_CONTAINERS[@]}"; do node_ready "$c"; done | awk '{print $1}' | sort -u | tr '\n' ' ')"
+    [[ "$states" == "503 " ]] && { echo "$(( $(date +%s) - t0 ))" > "$EV/sdk_degraded_after_s.txt"; break; }
+    sleep 2
+  done
+  for c in "${SDK_CONTAINERS[@]}"; do echo "$c $(node_ready "$c")"; done > "$EV/sdk_ready_outage.txt"
+  cat "$EV/sdk_ready_outage.txt"
+  docker start l9e2e-gate >/dev/null
+else
+  docker restart l9e2e-gate >/dev/null
+fi
+python3 "${HERE}/sdk_participation_verdict.py" registry "$EV" "$NODES"
+if [[ "$SDKP" == "1" ]]; then
+  for _ in $(seq 1 30); do
+    states="$(for c in "${SDK_CONTAINERS[@]}"; do node_ready "$c"; done | awk '{print $1}' | sort -u | tr '\n' ' ')"
+    [[ "$states" == "200 " ]] && break
+    sleep 2
+  done
+  for c in "${SDK_CONTAINERS[@]}"; do echo "$c $(node_ready "$c")"; done > "$EV/sdk_ready_recovered.txt"
+  cat "$EV/sdk_ready_recovered.txt"
+  python3 "${HERE}/sdk_participation_verdict.py" recovery "$EV"
+fi
 echo "== odoo: match after Gate restart =="; odoo_phase match
 
 # ── 6. structural isolation, asserted against Docker itself ─────────────────
@@ -219,7 +282,9 @@ print("isolation:", res["verdict"])
 PY
 
 # ── 7. logs (redacted) + state ───────────────────────────────────────────────
-for c in gate eie ceg odoo neo4j; do
+LOG_CONTAINERS=(gate eie ceg odoo neo4j)
+[[ "$SDKP" == "1" ]] && LOG_CONTAINERS+=(sdk-node)
+for c in "${LOG_CONTAINERS[@]}"; do
   docker logs "l9e2e-$c" > "$EV/logs/$c.log.unredacted" 2>&1 || true
   python3 "${HERE}/redact_odoo.py" "$EV/logs/$c.log.unredacted" "$EV/logs/$c.log" "$ODOO_ENV"
   rm -f "$EV/logs/$c.log.unredacted"

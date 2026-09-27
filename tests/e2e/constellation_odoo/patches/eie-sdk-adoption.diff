@@ -1,0 +1,68 @@
+--- a/app/main.py
++++ b/app/main.py
+@@ -126,25 +126,9 @@
+             state_backend="redis" if _idem else "memory",
+         )
+ 
+-        # Explicit, non-fatal Gate registration. auto_register_with_gate is
+-        # False, so we register here exactly once per process lifecycle and keep
+-        # the result authoritative for readiness. The HTTP, the retry loop and
+-        # the Gate status taxonomy belong to the SDK's register_node(); EIE
+-        # supplies only the node-specific values.
+-        if _gate_registered is None:
+-            _gate_registered = await _register_with_gate(settings)
+-            logger.info("gate_registration_attempted", result=_gate_registered)
+-
+-        # Reconcile periodically thereafter. Without this, a Gate that was down
+-        # at startup (or that restarted and lost its registry) leaves this node
+-        # serving traffic no route reaches until the process is restarted.
+-        global _reregistration_task
+-        _reregistration_task = start_reregistration_loop(settings)
+-        logger.info(
+-            "gate_reregistration_loop",
+-            started=_reregistration_task is not None,
+-            interval_seconds=settings.l9_gate_reregistration_interval_seconds,
+-        )
++        # Gate participation (registration, re-registration after a Gate
++        # restart, readiness) is owned by the SDK: create_node_app(registration=...)
++        # below. L9-PARTICIPATION-01.
+ 
+         logger.info("api_started", version="2.3.0")
+ 
+@@ -375,7 +359,7 @@
+     version="2.3.0",
+     lifecycle_hook=EnrichmentLifecycle(),
+     config=_build_runtime_config(),
+-    auto_register_with_gate=False,
++    registration=build_node_registration(get_settings()),
+ )
+ 
+ app.add_middleware(RateLimitMiddleware, requests_per_minute=120)
+@@ -400,13 +384,11 @@
+     holds no route to, which is exactly the condition an operator opens /health
+     to discover.
+     """
+-    if not settings.gate_registration_enabled or not settings.gate_url:
+-        return "disabled"
+-    if _gate_registered is True:
+-        return "registered"
+-    if _gate_registered is False:
+-        return "failed"
+-    return "not_attempted"
++    # The SDK's participation state, in EIE's historical vocabulary.
++    state = app.state.participation.status.state.value
++    return {"active": "registered", "degraded": "failed", "disabled": "disabled"}.get(
++        state, "not_attempted"
++    )
+ 
+ 
+ @app.get("/api/v1/health", response_model=HealthCheckResponse)
+@@ -423,7 +405,7 @@
+         kb_grades=kb.index.total_grades,
+         kb_rules=kb.index.total_rules,
+         circuit_breaker_state=breaker.state,
+-        gate_registered=_gate_registered,
++        gate_registered=app.state.participation.status.state.value == "active",
+     )
+ 
+ 

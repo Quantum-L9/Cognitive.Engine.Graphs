@@ -13,7 +13,7 @@ spoofed node name) use the installed SDK's public GateClient directly, from
 the same container and network position as Odoo.
 
 Phase is selected by L9E2E_PHASE: configure | transport | business | match |
-adversarial. One JSON object per phase is printed between the
+adversarial | consumer_sdk. One JSON object per phase is printed between the
 L9E2E-RESULT-BEGIN/END markers. Secrets are never printed.
 """
 
@@ -594,12 +594,95 @@ def phase_adversarial() -> None:
         check("O_G4_REGISTRY_DISCLOSURE", "ENFORCED", http_status=exc.code)
 
 
+def phase_consumer_sdk() -> None:
+    """L9-PARTICIPATION-01, consumer half: Odoo's own client config + Gate_SDK only.
+
+    The config comes from the addon's production builder (build_gate_client_config),
+    so these checks prove what Odoo gets from the SDK without Odoo-side glue:
+    admission confirmed up front, and Gate's refusals typed and classified.
+    """
+    from constellation_node_sdk import GateAuthorizationError, GateClient, GateHTTPError
+    from odoo.addons.plasticos_gate.services.gate_config import build_gate_client_config
+
+    apply_icp()
+    config = build_gate_client_config(env)
+
+    def run(coro: Any) -> Any:
+        return asyncio.run(coro)
+
+    # C1 — the admitted consumer learns its admission and grant before any business call.
+    try:
+        receipt = run(GateClient(config).activate(required_actions=("converge", "match")))
+        ok = (
+            receipt.key_id == "odoo-e2e"
+            and receipt.scope == "restricted"
+            and set(receipt.granted_actions) == {"converge", "match"}
+            and receipt.admitted
+        )
+        check(
+            "C_ADMISSION_RECEIPT",
+            "PASS" if ok else "FAIL",
+            key_id=receipt.key_id,
+            scope=receipt.scope,
+            scoped_actions=receipt.scoped_actions,
+            granted_actions=receipt.granted_actions,
+            routable_actions=receipt.routable_actions,
+        )
+    except Exception as exc:
+        check("C_ADMISSION_RECEIPT", "FAIL", error=gate_error(exc))
+
+    # C2 — asking for an action Gate did not grant is a typed refusal, not a surprise later.
+    try:
+        run(GateClient(config).activate(required_actions=("converge", "sync")))
+        check("C_REQUIRED_ACTION_MISSING", "FAIL", error="activate() accepted an ungranted action")
+    except GateAuthorizationError as exc:
+        ok = exc.code == "action_not_permitted" and exc.retryable is False
+        check("C_REQUIRED_ACTION_MISSING", "PASS" if ok else "FAIL", code=exc.code, retryable=exc.retryable)
+    except Exception as exc:
+        check("C_REQUIRED_ACTION_MISSING", "FAIL", error=gate_error(exc))
+
+    # C3 — a key Gate does not know is refused at admission (and is not an authorization error).
+    stranger = config.model_copy(update={"signing_key": secrets.token_hex(32), "signing_key_id": "stranger-e2e"})
+    try:
+        run(GateClient(stranger).activate())
+        check("C_ADMISSION_UNKNOWN_KEY_REJECTED", "FAIL", error="unknown key was admitted")
+    except GateHTTPError as exc:
+        ok = exc.status_code == 400 and not isinstance(exc, GateAuthorizationError)
+        check(
+            "C_ADMISSION_UNKNOWN_KEY_REJECTED",
+            "PASS" if ok else "FAIL",
+            status_code=exc.status_code,
+            code=exc.code,
+            retryable=exc.retryable,
+        )
+    except Exception as exc:
+        check("C_ADMISSION_UNKNOWN_KEY_REJECTED", "FAIL", error=gate_error(exc))
+
+    # C4 — an out-of-scope business call is typed: no consumer classifier needed.
+    try:
+        run(
+            GateClient(config).execute(
+                action="sync",
+                payload={"entity_type": "facilities", "batch": []},
+                tenant={"actor": TENANT, "on_behalf_of": TENANT, "org_id": TENANT, "originator": "odoo"},
+                timeout_ms=15000,
+            )
+        )
+        check("C_TYPED_403", "FAIL", error="out-of-scope sync was accepted")
+    except GateAuthorizationError as exc:
+        ok = exc.status_code == 403 and exc.code == "action_not_permitted" and not exc.retryable
+        check("C_TYPED_403", "PASS" if ok else "FAIL", status_code=exc.status_code, code=exc.code)
+    except Exception as exc:
+        check("C_TYPED_403", "FAIL", error=gate_error(exc))
+
+
 PHASES = {
     "configure": phase_configure,
     "transport": phase_transport,
     "business": phase_business,
     "match": phase_match,
     "adversarial": phase_adversarial,
+    "consumer_sdk": phase_consumer_sdk,
 }
 
 try:

@@ -7,8 +7,10 @@
 # Secrets generated here:
 #   L9E2E_ODOO_KEY          Odoo's own HMAC signing secret (key id odoo-e2e)
 #   L9E2E_ODOO_PG_PASSWORD  Odoo's database password
+#   L9E2E_SDKNODE_KEY       the SDK minimal node's HMAC secret (key id sdk-node-e2e;
+#                           used only by compose.sdk-participation.yml)
 # Derived maps (values are secrets, keys are key ids):
-#   L9E2E_GATE_VERIFYING_KEYS_JSON       Gate keyring: gate/eie/ceg + odoo-e2e
+#   L9E2E_GATE_VERIFYING_KEYS_JSON       Gate keyring: gate/eie/ceg + odoo-e2e + sdk-node-e2e
 #   L9E2E_ODOO_GATE_VERIFYING_KEYS_JSON  what Odoo needs to verify Gate: gate-e2e
 set -Eeuo pipefail
 
@@ -26,13 +28,15 @@ for line in open(base_path):
         env[k] = v.strip("'")
 
 odoo_key = secrets.token_hex(32)
+sdknode_key = secrets.token_hex(32)
 pg_pw = secrets.token_urlsafe(18).replace("-", "x").replace("_", "y")
 node_ring = json.loads(env["L9E2E_VERIFYING_KEYS_JSON"])
-gate_ring = {**node_ring, "odoo-e2e": odoo_key}
+gate_ring = {**node_ring, "odoo-e2e": odoo_key, "sdk-node-e2e": sdknode_key}
 
 extra = {
     "L9E2E_ODOO_KEY": odoo_key,
     "L9E2E_ODOO_PG_PASSWORD": pg_pw,
+    "L9E2E_SDKNODE_KEY": sdknode_key,
     "L9E2E_GATE_VERIFYING_KEYS_JSON": json.dumps(gate_ring),
     "L9E2E_ODOO_GATE_VERIFYING_KEYS_JSON": json.dumps({"gate-e2e": env["L9E2E_GATE_KEY"]}),
 }
@@ -46,6 +50,6 @@ try:
 finally:
     os.umask(old_umask)
 print(f"wrote {out_path}")
-print("key_ids=gate-e2e,eie-e2e,ceg-e2e,odoo-e2e (distinct secrets per identity)")
+print("key_ids=gate-e2e,eie-e2e,ceg-e2e,odoo-e2e,sdk-node-e2e (distinct secrets per identity)")
 print("secrets_printed=false")
 PY

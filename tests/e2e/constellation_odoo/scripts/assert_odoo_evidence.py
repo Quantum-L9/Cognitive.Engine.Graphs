@@ -12,6 +12,10 @@ accommodations read from image labels are listed so a PASS can never hide one.
 PROVENANCE is mandatory: every node image must carry the revision of the source
 tree recorded for the run, and every image must contain the same, known SDK
 commit — otherwise the verdict would certify a release set it did not run.
+SDK participation mode (the bundle's provenance names an ``sdk-node`` image)
+adds mandatory checks: the SDK-owned node lifecycle (P_SDK_*) and the
+consumer's admission and typed refusals (C_*), and requires every image to run
+the Gate_SDK checkout's own head.
 Exit 0 only when every mandatory check passed.
 """
 
@@ -41,6 +45,16 @@ MANDATORY = {
 MATCH = {"match": ["O_M1_MATCH_ODOO_CONTRACT", "O_M2_MATCH_CEG_SPEC_DIRECTION"]}
 # Authorization probes that must be refused now that Gate scopes consumer keys.
 MUST_ENFORCE = {"adversarial": ["O_G1_CONSUMER_ACTION_SCOPE"]}
+# SDK participation mode only (L9-PARTICIPATION-01).
+SDK_MANDATORY = {
+    "consumer_sdk": [
+        "C_ADMISSION_RECEIPT",
+        "C_REQUIRED_ACTION_MISSING",
+        "C_ADMISSION_UNKNOWN_KEY_REJECTED",
+        "C_TYPED_403",
+    ],
+}
+SDK_NODE_CHECKS = ("P_SDK_NODE_ACTIVE", "P_SDK_NODE_ROUTABLE", "P_SDK_NODE_RECOVERY")
 PROPOSALS = {"business": ["O_P1_SCHEMA_FIX_REACHES_WRITEBACK"]}
 GAPS = {
     "transport": ["O_F1_EIE_EMPTY_RESULT_REPORTED_COMPLETED"],
@@ -64,16 +78,52 @@ IMAGE_NODES = ("gate", "eie", "ceg", "odoo")
 
 def provenance_problems(prov: dict, sources: dict) -> list[str]:
     problems = []
-    for node in IMAGE_NODES:
+    sdk_mode = "sdk-node" in prov
+    nodes = (*IMAGE_NODES, "sdk-node") if sdk_mode else IMAGE_NODES
+    for node in nodes:
         info = prov.get(node) or {}
         rev = (info.get("labels") or {}).get("org.opencontainers.image.revision")
-        head = (sources.get(node) or {}).get("head")
+        head = (sources.get("sdk" if node == "sdk-node" else node) or {}).get("head")
         if not rev or not head or rev != head:
             problems.append(f"{node} image {str(rev)[:12]} != source {str(head)[:12]}")
-    sdk = {(prov.get(n) or {}).get("sdk_commit") for n in IMAGE_NODES}
+    sdk = {(prov.get(n) or {}).get("sdk_commit") for n in nodes}
     if None in sdk or "" in sdk or len(sdk) != 1:
         problems.append(f"sdk commits not aligned: {sorted(str(c)[:12] for c in sdk)}")
+    elif sdk_mode and sdk != {(sources.get("sdk") or {}).get("head")}:
+        problems.append(f"sdk commit {next(iter(sdk))[:12]} is not the Gate_SDK checkout head")
     return problems
+
+
+def sdk_participation_rows(bundle: Path, status_of) -> list[tuple[str, str, str]]:
+    """Mandatory rows of SDK participation mode (L9-PARTICIPATION-01)."""
+    rows: list[tuple[str, str, str]] = []
+    for phase, checks in SDK_MANDATORY.items():
+        for c in checks:
+            st = status_of(phase, c)
+            rows.append(("MANDATORY", c, st if st == "PASS" else f"{st} -> FAIL"))
+    sdk_checks = load(bundle / "flows" / "sdk_participation.json").get("checks") or {}
+    for c in SDK_NODE_CHECKS:
+        st = str((sdk_checks.get(c) or {}).get("status", "NOT_RUN"))
+        rows.append(("MANDATORY", c, st if st == "PASS" else f"{st} -> FAIL"))
+    return rows
+
+
+def deviations_of(prov: dict, bundle: Path) -> list[str]:
+    """Every declared difference from the pinned release set, so a PASS hides none."""
+    deviations = []
+    for node, info in sorted(prov.items()):
+        labels = info.get("labels") or {}
+        acc = labels.get("io.l9.e2e.accommodation")
+        if acc:
+            deviations.append(f"{node}: image accommodation {acc}")
+        if labels.get("io.l9.e2e.sdk_overlay"):
+            deviations.append(f"{node}: Gate_SDK overlay {labels['io.l9.e2e.sdk_overlay'][:12]}")
+        if labels.get("io.l9.e2e.sdk_adoption"):
+            deviations.append(f"{node}: SDK adoption {labels['io.l9.e2e.sdk_adoption']}")
+    profile = bundle / "eie_business_profile.txt"
+    if profile.exists():
+        deviations.append(f"eie business phase: {profile.read_text().strip()}")
+    return deviations
 
 
 def main(bundle: Path) -> int:
@@ -115,6 +165,11 @@ def main(bundle: Path) -> int:
     failed += 0 if reg_ok else 1
     rows.append(("MANDATORY", "REG_live_registration", "PASS" if reg_ok else f"FAIL {sorted(registry)}"))
 
+    if "sdk-node" in load(bundle / "image_provenance.json"):
+        sdk_rows = sdk_participation_rows(bundle, status_of)
+        rows.extend(sdk_rows)
+        failed += sum(1 for r in sdk_rows if r[2].endswith("-> FAIL"))
+
     for phase, checks in MATCH.items():
         for c in checks:
             rows.append(("MATCH", c, status_of(phase, c)))
@@ -129,14 +184,7 @@ def main(bundle: Path) -> int:
     problems = provenance_problems(prov, load(bundle / "source_revisions.json"))
     failed += 1 if problems else 0
     rows.append(("MANDATORY", "PROVENANCE_images_and_sdk", "; ".join(problems) + " -> FAIL" if problems else "PASS"))
-    deviations = []
-    for node, info in sorted(prov.items()):
-        acc = (info.get("labels") or {}).get("io.l9.e2e.accommodation")
-        if acc:
-            deviations.append(f"{node}: image accommodation {acc}")
-    profile = bundle / "eie_business_profile.txt"
-    if profile.exists():
-        deviations.append(f"eie business phase: {profile.read_text().strip()}")
+    deviations = deviations_of(prov, bundle)
     sdk = {n: (i.get("sdk_commit") or "?")[:12] for n, i in prov.items()}
 
     width = max(len(r[1]) for r in rows)

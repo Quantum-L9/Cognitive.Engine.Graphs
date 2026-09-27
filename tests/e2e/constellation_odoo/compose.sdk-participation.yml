@@ -1,0 +1,62 @@
+# SDK participation overlay (L9-PARTICIPATION-01) for the Odoo rail.
+#
+# Applied ON TOP of Gate's compose.yml + compose.odoo.yml when the run proves a
+# Gate_SDK change (L9E2E_SDK_PARTICIPATION=1, see ../README.md):
+#
+#   * sdk-minimal-node — Gate_SDK's examples/minimal_node: handlers + spec +
+#     create_node_app(), zero Gate integration code. It must register, become
+#     ready, be routable and recover after a Gate restart on SDK code alone.
+#   * EIE and CEG run with the rail's sdk-adoption overlay (their own
+#     registration loops removed, SDK participation on), so the SDK path — not
+#     the node's — is what recovers them.
+#
+# The node gets its own network with Gate only: it reaches Gate, Gate reaches
+# it, nothing else does.
+
+networks:
+  gate_sdknode_net: { name: l9e2e_gate_sdknode }
+
+services:
+  gate:
+    networks: [control_net, gate_eie_net, gate_ceg_net, odoo_gate_net, gate_sdknode_net]
+
+  # The SDK's re-registration interval (both adopted nodes read the same
+  # GATE_REREGISTRATION_INTERVAL_SECONDS the minimal node does).
+  enrichment-engine:
+    environment:
+      GATE_REREGISTRATION_INTERVAL_SECONDS: "10"
+
+  graph:
+    environment:
+      GATE_REREGISTRATION_INTERVAL_SECONDS: "10"
+
+  sdk-minimal-node:
+    image: l9e2e/sdk-node:local
+    container_name: l9e2e-sdk-node
+    networks: [gate_sdknode_net]
+    command: ["uvicorn", "examples.minimal_node.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      GATE_URL: http://gate:9000
+      GATE_ADMIN_TOKEN: ${L9E2E_ADMIN_TOKEN:?}
+      GATE_NODE_SPEC_PATH: /srv/examples/minimal_node/spec.yaml
+      GATE_REREGISTRATION_INTERVAL_SECONDS: "10"
+      L9_NODE_NAME: sdk-minimal-node
+      L9_GATE_NODE_NAME: gate
+      L9_ENVIRONMENT: staging
+      L9_DEV_MODE: "false"
+      L9_ENFORCE_GATE_ONLY_INGRESS: "true"
+      L9_REQUIRE_SIGNATURE: "true"
+      L9_SIGNING_ALGORITHM: hmac-sha256
+      L9_SIGNING_KEY: ${L9E2E_SDKNODE_KEY:?sdk node signing key required}
+      L9_SIGNING_KEY_ID: sdk-node-e2e
+      L9_VERIFYING_KEYS_JSON: ${L9E2E_VERIFYING_KEYS_JSON:?}
+      HTTPS_PROXY: ""
+      https_proxy: ""
+    depends_on:
+      gate: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/v1/health',timeout=4).status==200 else 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
