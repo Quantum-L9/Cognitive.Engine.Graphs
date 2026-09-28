@@ -139,16 +139,14 @@ class SdkLifecycleAdapter(SdkLifecycleHook):
 def create_app() -> FastAPI:
     """Build the SDK-native node app with engine handlers registered.
 
-    auto_register_with_gate=False: GraphLifecycle.startup() already calls
-    register_node_with_gate(), so letting the SDK lifespan also call
-    register_from_env() would double-register whenever GATE_URL is set.
+    The SDK owns this node's Gate participation (L9-PARTICIPATION-01): it
+    registers at startup from GATE_NODE_SPEC_PATH, re-registers every
+    GATE_REREGISTRATION_INTERVAL_SECONDS so the node recovers after a Gate
+    restart, and answers GET /v1/ready 503 until Gate has accepted the node.
     """
     register_engine_handlers()
     logger.info("Building SDK chassis app (L9_CHASSIS=sdk)")
-    app = create_node_app(
-        lifecycle_hook=SdkLifecycleAdapter(),
-        auto_register_with_gate=False,
-    )
+    app = create_node_app(lifecycle_hook=SdkLifecycleAdapter())
 
     if _env_bool("L9_ENFORCE_GATE_ONLY_INGRESS", default=True):
         gate_node = os.environ.get("L9_GATE_NODE_NAME", "gate").strip().lower()
