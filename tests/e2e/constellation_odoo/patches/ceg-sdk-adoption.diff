@@ -1,0 +1,34 @@
+--- a/engine/boot.py
++++ b/engine/boot.py
+@@ -115,14 +115,9 @@
+ 
+         init_dependencies(self._graph_driver, self._domain_loader, db_pool=self._db_pool)
+ 
+-        # Gate_SDK: self-register this node with Gate routing table
+-        from engine.gate_registration import register_node_with_gate, reregister_with_gate_forever
+-
+-        await register_node_with_gate()
+-        if settings.gate_reregistration_enabled and settings.gate_reregistration_interval_seconds > 0:
+-            self._gate_reregistration_task = asyncio.create_task(
+-                reregister_with_gate_forever(settings.gate_reregistration_interval_seconds)
+-            )
++        # Gate participation (registration, re-registration after a Gate
++        # restart, readiness) is owned by the SDK's create_node_app().
++        # L9-PARTICIPATION-01.
+ 
+         # Start GDS schedulers for all loaded domains (if GDS enabled)
+         if settings.gds_enabled:
+--- a/chassis/node_app.py
++++ b/chassis/node_app.py
+@@ -145,10 +145,7 @@
+     """
+     register_engine_handlers()
+     logger.info("Building SDK chassis app (L9_CHASSIS=sdk)")
+-    app = create_node_app(
+-        lifecycle_hook=SdkLifecycleAdapter(),
+-        auto_register_with_gate=False,
+-    )
++    app = create_node_app(lifecycle_hook=SdkLifecycleAdapter())
+ 
+     if _env_bool("L9_ENFORCE_GATE_ONLY_INGRESS", default=True):
+         gate_node = os.environ.get("L9_GATE_NODE_NAME", "gate").strip().lower()

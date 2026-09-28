@@ -1,0 +1,106 @@
+# Odoo consumer overlay for the Constellation Docker rail.
+#
+# Applied ON TOP of Constellation.Gate's release-set rail
+# (constellation-gate/tests/e2e/docker/compose.yml), never instead of it:
+#
+#   docker compose -f <gate>/tests/e2e/docker/compose.yml \
+#                  -f tests/e2e/constellation_odoo/compose.odoo.yml ...
+#
+# Topology added:
+#
+#     odoo ── odoo_gate_net ── gate ── (gate_eie_net / gate_ceg_net as before)
+#       │
+#   odoo_data_net ── odoo-db
+#
+# Odoo shares a network with Gate ONLY. It cannot resolve enrichment-engine or
+# graph, so "Odoo is a Gate consumer" is structural, not a convention.
+#
+# Consumer admission: Gate's verifying keyring is widened with exactly one
+# consumer identity (odoo-e2e). The worker nodes' keyrings are NOT widened —
+# they only ever verify Gate. Everything else about Gate is unchanged
+# (staging, signatures mandatory, replay guard on, registry starts empty).
+
+networks:
+  odoo_gate_net: { name: l9e2e_odoo_gate }
+  odoo_data_net: { name: l9e2e_odoo_data }
+
+services:
+  gate:
+    networks: [control_net, gate_eie_net, gate_ceg_net, odoo_gate_net]
+    environment:
+      # gate-e2e, eie-e2e, ceg-e2e + the one admitted consumer, odoo-e2e.
+      L9_VERIFYING_KEYS_JSON: ${L9E2E_GATE_VERIFYING_KEYS_JSON:?gate keyring incl. odoo-e2e required}
+      # The consumer gets exactly what Odoo calls in production: EIE converge
+      # and CEG match. Worker key ids stay unscoped.
+      L9_KEY_ALLOWED_ACTIONS_JSON: '{"odoo-e2e": ["converge", "match"]}'
+
+  # Short re-registration intervals so the Gate-restart recovery check
+  # (GATE_RESTART_RECOVERY) completes in seconds instead of the 300 s default.
+  enrichment-engine:
+    environment:
+      L9_GATE_REREGISTRATION_INTERVAL_SECONDS: "10"
+
+  graph:
+    environment:
+      GATE_REREGISTRATION_INTERVAL_SECONDS: "10"
+
+  odoo-db:
+    image: postgres:16
+    container_name: l9e2e-odoo-db
+    networks: [odoo_data_net]
+    environment:
+      POSTGRES_USER: odoo
+      POSTGRES_PASSWORD: ${L9E2E_ODOO_PG_PASSWORD:?ephemeral odoo db password required}
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U odoo -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  odoo:
+    image: l9e2e/odoo:local
+    container_name: l9e2e-odoo
+    networks: [odoo_gate_net, odoo_data_net]
+    depends_on:
+      gate: { condition: service_healthy }
+      odoo-db: { condition: service_healthy }
+    volumes:
+      # The IB-Odoo_19 checkout, read-only, exactly as Odoo.sh mounts custom addons.
+      - ${L9E2E_ODOO_REPO:?path to IB-Odoo_19 checkout required}:/mnt/extra-addons:ro
+      - ${L9E2E_ODOO_SCRIPTS:?path to this rail scripts dir required}:/l9e2e:ro
+    environment:
+      # Real Odoo process env. Secrets reach the addon only through the env
+      # variables plasticos_gate/services/gate_config.py reads; nothing is
+      # written to ir.config_parameter.
+      PLASTICOS_GATE_SIGNING_KEY: ${L9E2E_ODOO_KEY:?odoo signing key required}
+      PLASTICOS_GATE_VERIFYING_KEYS_JSON: ${L9E2E_ODOO_GATE_VERIFYING_KEYS_JSON:?gate response key required}
+      L9E2E_ODOO_DB_PASSWORD: ${L9E2E_ODOO_PG_PASSWORD:?}
+      # The odoo image entrypoint's wait-for-psql reads these (default host "db").
+      HOST: odoo-db
+      USER: odoo
+      PASSWORD: ${L9E2E_ODOO_PG_PASSWORD:?}
+      HTTPS_PROXY: ""
+      https_proxy: ""
+      HTTP_PROXY: ""
+      http_proxy: ""
+    # Install the Gate consumer addons into a fresh database, then serve.
+    # plasticos_matching pulls plasticos_intake/facility_profile; auto_install
+    # cascades are left to Odoo — what installs is what Odoo.sh would install.
+    command: >
+      odoo
+      --addons-path=/mnt/extra-addons,/usr/lib/python3/dist-packages/odoo/addons
+      -d l9e2e
+      --db_host=odoo-db --db_port=5432 --db_user=odoo
+      --db_password=${L9E2E_ODOO_PG_PASSWORD:?}
+      --without-demo=all
+      --no-database-list
+      -i plasticos_gate,plasticos_enrichment,plasticos_matching
+      --workers=0 --max-cron-threads=0
+      --http-port=8069
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8069/web/health',timeout=4).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 90
+      start_period: 60s

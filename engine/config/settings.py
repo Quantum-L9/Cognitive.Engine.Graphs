@@ -143,6 +143,12 @@ class Settings(BaseSettings):
     domain_cache_maxsize: int = 100  # W4-03: max entries in domain pack cache
     compliance_flush_interval: int = 60  # W4-04: seconds between compliance audit flushes
     compliance_buffer_max: int = 100  # W4-04: max buffered audit entries before forced flush
+    # Gate keeps its routing table in memory: after a Gate restart this node is
+    # unroutable until it registers again. Re-run the startup registration on an
+    # interval (overwrite=True, idempotent). Hardening that restores routability,
+    # so it ships on; see docs/FEATURE_GATES.md §17.
+    gate_reregistration_enabled: bool = True
+    gate_reregistration_interval_seconds: float = 300.0
     postgres_dsn: str | None = None  # W4-04: asyncpg DSN for ComplianceEngine audit-flush pool.
     # None = compliance audit flush is disabled (flush_audit() no-ops with a warning).
     # Distinct from PACKET_STORE_DSN (engine/packet/packet_store.py), which manages

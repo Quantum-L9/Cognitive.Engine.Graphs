@@ -67,6 +67,7 @@ class GraphLifecycle(LifecycleHook):
         self._domain_loader: DomainPackLoader | None = None
         self._schedulers: list[Any] = []
         self._compliance_flush_task: asyncio.Task[None] | None = None
+        self._gate_reregistration_task: asyncio.Task[None] | None = None
         self._db_pool: Any | None = None
 
     # --- lifecycle ----------------------------------------------------------
@@ -115,9 +116,13 @@ class GraphLifecycle(LifecycleHook):
         init_dependencies(self._graph_driver, self._domain_loader, db_pool=self._db_pool)
 
         # Gate_SDK: self-register this node with Gate routing table
-        from engine.gate_registration import register_node_with_gate
+        from engine.gate_registration import register_node_with_gate, reregister_with_gate_forever
 
         await register_node_with_gate()
+        if settings.gate_reregistration_enabled and settings.gate_reregistration_interval_seconds > 0:
+            self._gate_reregistration_task = asyncio.create_task(
+                reregister_with_gate_forever(settings.gate_reregistration_interval_seconds)
+            )
 
         # Start GDS schedulers for all loaded domains (if GDS enabled)
         if settings.gds_enabled:
@@ -196,6 +201,11 @@ class GraphLifecycle(LifecycleHook):
 
     async def shutdown(self) -> None:
         logger.info("GraphLifecycle.shutdown → stopping schedulers and closing Neo4j pool")
+
+        if self._gate_reregistration_task is not None:
+            self._gate_reregistration_task.cancel()
+            await asyncio.gather(self._gate_reregistration_task, return_exceptions=True)
+            self._gate_reregistration_task = None
 
         # W4-04: Cancel compliance flush task
         if self._compliance_flush_task is not None:
