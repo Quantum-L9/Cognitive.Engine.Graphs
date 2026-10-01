@@ -1,16 +1,16 @@
 """
-Gate participation is owned by Gate_SDK, not by CEG (L9-PARTICIPATION-01).
+Gate participation defaults to Gate_SDK (L9-PARTICIPATION-01).
 
 Verifies:
-- CEG's own registration module and its re-registration settings are gone
-- the SDK chassis leaves registration on, so create_node_app() registers,
-  re-registers after a Gate restart, and binds /v1/ready to Gate's acceptance
-- GraphLifecycle no longer registers (no double registration)
+- sdk_participation_enabled defaults on, and the CEG loop remains for rollback
+- the SDK chassis leaves registration on while that flag is on
+- the SDK chassis disables its own registration when the flag is off
+- GraphLifecycle registers only on the rollback path
+- the installed SDK exposes participation readiness
 """
 
 from __future__ import annotations
 
-import importlib.util
 import inspect
 from typing import Any
 
@@ -20,24 +20,28 @@ from fastapi import FastAPI
 pytest.importorskip("constellation_node_sdk", reason="constellation-node-sdk not installed")
 
 
-def test_ceg_registration_loop_is_retired() -> None:
+def test_sdk_participation_defaults_on_and_keeps_a_rollback() -> None:
     from engine.config.settings import Settings
+    from engine.gate_registration import register_node_with_gate
 
-    assert importlib.util.find_spec("engine.gate_registration") is None
-    for field in ("gate_reregistration_enabled", "gate_reregistration_interval_seconds"):
-        assert field not in Settings.model_fields, f"Settings.{field} must not exist"
+    fields = Settings.model_fields
+    assert fields["sdk_participation_enabled"].default is True
+    assert fields["gate_reregistration_enabled"].default is True
+    assert fields["gate_reregistration_interval_seconds"].default == 300.0
+    assert inspect.iscoroutinefunction(register_node_with_gate)
 
 
-def test_graph_lifecycle_does_not_register() -> None:
+def test_graph_lifecycle_registers_only_when_participation_is_off() -> None:
     from engine.boot import GraphLifecycle
 
     source = inspect.getsource(GraphLifecycle)
-    for name in ("register_from_env", "register_node", "gate_registration"):
-        assert name not in source, f"GraphLifecycle still calls {name}"
+    assert "if not settings.sdk_participation_enabled:" in source
+    assert "register_node_with_gate" in source
 
 
-def test_sdk_chassis_leaves_participation_to_the_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sdk_chassis_follows_the_participation_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     from chassis import node_app
+    from engine.config.settings import settings
 
     captured: dict[str, Any] = {}
 
@@ -48,10 +52,14 @@ def test_sdk_chassis_leaves_participation_to_the_sdk(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(node_app, "create_node_app", spy)
     monkeypatch.setenv("L9_ENFORCE_GATE_ONLY_INGRESS", "false")
 
+    monkeypatch.setattr(settings, "sdk_participation_enabled", True)
     node_app.create_app()
-
-    assert captured.get("auto_register_with_gate", True) is True
+    assert captured["auto_register_with_gate"] is True
     assert isinstance(captured["lifecycle_hook"], node_app.SdkLifecycleAdapter)
+
+    monkeypatch.setattr(settings, "sdk_participation_enabled", False)
+    node_app.create_app()
+    assert captured["auto_register_with_gate"] is False
 
 
 def test_sdk_runtime_exposes_participation_readiness() -> None:

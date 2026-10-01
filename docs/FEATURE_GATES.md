@@ -66,7 +66,8 @@ independently of the code default.
 | Domain Database Provisioning | `AUTO_CREATE_DOMAIN_DATABASE` (`auto_create_domain_database`) | `False` | unset | dormant; create the tenant domain database on first use — see §14 |
 | Health API (admin health_* subactions) | `HEALTH_API_ENABLED` (`health_api_enabled`) | `False` | unset | dormant; AI-readiness assess/report surface — see §15 |
 | Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; seven packs whose gates do not compile to executable, faithful Cypher — see §16 |
-| Gate Re-registration | `GATE_REREGISTRATION_INTERVAL_SECONDS` (read by Gate_SDK, not a CEG setting) | `300` | unset | active; SDK-owned, keeps the node routable after a Gate restart — see §17 |
+| SDK Participation | `SDK_PARTICIPATION_ENABLED` (`sdk_participation_enabled`) | `True` | unset | active; Gate_SDK owns registration and readiness; off restores CEG's loop — see §17 |
+| Gate Re-registration | `GATE_REREGISTRATION_ENABLED` (`gate_reregistration_enabled`), `GATE_REREGISTRATION_INTERVAL_SECONDS` | `True`, `300` | unset | active only while SDK participation is off — see §17 |
 | Constellation Orchestration | — | — | — | accepted architectural gap — see §9 |
 
 ---
@@ -490,16 +491,21 @@ Gate restart (observed on the Constellation Docker rail: after `docker restart`
 of Gate, `match` answered `404 no node registered` until CEG itself restarted),
 or when Gate was unreachable at CEG's startup.
 
-Participation is owned by Gate_SDK, not by CEG (L9-PARTICIPATION-01).
-`chassis/node_app.py` calls `create_node_app()` with SDK registration on: the
-SDK registers at startup from `GATE_NODE_SPEC_PATH`, re-registers every
+`sdk_participation_enabled` (default `True`, hardening) gives Gate
+participation to Gate_SDK (L9-PARTICIPATION-01). `chassis/node_app.py` then
+calls `create_node_app(auto_register_with_gate=True)`: the SDK registers at
+startup from `GATE_NODE_SPEC_PATH`, re-registers every
 `GATE_REREGISTRATION_INTERVAL_SECONDS` (default `300`; `0` registers once
 only), each attempt `overwrite=True` so repeats are idempotent, and answers
 `GET /v1/ready` 503 while Gate has not accepted the node. `GET /v1/health`
 stays a liveness probe and reports the participation state.
-`GATE_REGISTRATION_ENABLED=false` turns registration off. CEG's former
-`engine/gate_registration.py` loop and its `gate_reregistration_*` settings
-are removed; the legacy chassis (dev/test only) does not register.
+`GATE_REGISTRATION_ENABLED=false` turns the SDK registration off.
+
+`SDK_PARTICIPATION_ENABLED=false` rolls the cutover back. GraphLifecycle then
+runs `engine/gate_registration.py`, and `gate_reregistration_enabled` plus
+`gate_reregistration_interval_seconds` (default `300`) bound that loop. The
+SDK chassis passes `auto_register_with_gate=False` on that path so the two
+loops do not both register.
 
 ---
 
