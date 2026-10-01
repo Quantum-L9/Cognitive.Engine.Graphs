@@ -115,14 +115,16 @@ class GraphLifecycle(LifecycleHook):
 
         init_dependencies(self._graph_driver, self._domain_loader, db_pool=self._db_pool)
 
-        # Gate_SDK: self-register this node with Gate routing table
-        from engine.gate_registration import register_node_with_gate, reregister_with_gate_forever
+        # SDK participation is the default (L9-PARTICIPATION-01). The CEG loop
+        # runs only when an operator turns that flag off.
+        if not settings.sdk_participation_enabled:
+            from engine.gate_registration import register_node_with_gate, reregister_with_gate_forever
 
-        await register_node_with_gate()
-        if settings.gate_reregistration_enabled and settings.gate_reregistration_interval_seconds > 0:
-            self._gate_reregistration_task = asyncio.create_task(
-                reregister_with_gate_forever(settings.gate_reregistration_interval_seconds)
-            )
+            await register_node_with_gate()
+            if settings.gate_reregistration_enabled and settings.gate_reregistration_interval_seconds > 0:
+                self._gate_reregistration_task = asyncio.create_task(
+                    reregister_with_gate_forever(settings.gate_reregistration_interval_seconds)
+                )
 
         # Start GDS schedulers for all loaded domains (if GDS enabled)
         if settings.gds_enabled:
