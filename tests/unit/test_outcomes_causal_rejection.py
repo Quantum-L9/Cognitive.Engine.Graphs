@@ -133,6 +133,16 @@ async def test_missing_causal_fields_stay_lenient() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mixed_offset_timestamps_record_the_outcome() -> None:
+    """Uncomparable timestamps stay lenient instead of failing the request."""
+    mixed = {"source_ts": "2026-03-02T00:00:00+00:00", "target_ts": "2026-03-01T00:00:00", "confidence": 0.9}
+    result, calls = await _run(mixed, _spec())
+
+    assert result["status"] == "recorded"
+    assert _outcome_write(calls)["create_resulted_in"] is True
+
+
+@pytest.mark.asyncio
 async def test_flag_off_keeps_log_only_behaviour(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "causal_rejection_enforcement_enabled", False)
     result, calls = await _run(_LATE, _spec())

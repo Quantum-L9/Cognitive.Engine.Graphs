@@ -142,6 +142,34 @@ def test_audit_wrapper_takes_explicit_packet_aware_signature() -> None:
     assert all(p.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD for p in parameters)
 
 
+def test_audit_wrapper_flag_off_restores_reconstructed_request(
+    monkeypatch: pytest.MonkeyPatch,
+    persisted_packets: list[tuple[Any, Any]],
+) -> None:
+    """INGRESS_PACKET_AUDIT_ENABLED=false is the operator rollback for CEG-FIX-002."""
+    import inspect
+
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "ingress_packet_audit_enabled", False)
+
+    async def spy(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return {"ok": True}
+
+    wrapped = _with_packet_audit("match", spy)
+    assert [p.name for p in inspect.signature(wrapped).parameters.values()] == ["tenant", "payload"]
+
+    register_handler("match", wrapped)
+    ingress = _identified_gate_packet()
+    with TestClient(_app()) as client:
+        response = client.post("/v1/execute", json=ingress.model_dump_json_dict())
+
+    assert response.status_code == 200
+    ((request, _response),) = persisted_packets
+    assert request.header.packet_id != ingress.header.packet_id
+    assert request.header.trace_id != "trace-ceg-fix-002"
+
+
 # ── Routing and tenant invariant ────────────────────────────────────────────
 
 

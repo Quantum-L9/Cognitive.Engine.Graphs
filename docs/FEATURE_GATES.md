@@ -69,6 +69,7 @@ independently of the code default.
 | SDK Participation | `SDK_PARTICIPATION_ENABLED` (`sdk_participation_enabled`) | `True` | unset | active; Gate_SDK owns registration and readiness; off restores CEG's loop — see §17 |
 | Gate Re-registration | `GATE_REREGISTRATION_ENABLED` (`gate_reregistration_enabled`), `GATE_REREGISTRATION_INTERVAL_SECONDS` | `True`, `300` | unset | active only while SDK participation is off — see §17 |
 | Causal Rejection Enforcement | `CAUSAL_REJECTION_ENFORCEMENT_ENABLED` (`causal_rejection_enforcement_enabled`) | `True` | unset | active; an R3-rejected RESULTED_IN edge is not written — see §18 |
+| Ingress Packet Audit | `INGRESS_PACKET_AUDIT_ENABLED` (`ingress_packet_audit_enabled`) | `True` | unset | active; SDK audit pairs record Gate's ingress packet — see §19 |
 | Constellation Orchestration | — | — | — | accepted architectural gap — see §9 |
 
 ---
@@ -535,6 +536,28 @@ Domains with `causal.enabled=false` are unaffected: the validator is not
 consulted and the edge is written as before.
 
 `CAUSAL_REJECTION_ENFORCEMENT_ENABLED=false` restores the log-only behaviour.
+
+---
+
+## 19. Ingress Packet Audit (CEG-FIX-002)
+
+On the SDK chassis (`L9_CHASSIS=sdk`), `chassis/handler_registration.py` wraps
+every engine handler so each call persists a request/response packet pair to
+PacketStore. Before CEG-FIX-002 the wrapper minted a new trace id and rebuilt
+the request with `inflate_ingress`, so the audited pair carried a `packet_id`,
+`trace_id`, `correlation_id` and lineage `root_id` unrelated to the packet Gate
+sent. Gate_SDK holds one trace, one correlation and one root across every
+generation of a request.
+
+`ingress_packet_audit_enabled` (default `True`, hardening) registers the
+wrapper in the SDK's packet-aware `(tenant, payload, packet)` form: the audited
+request is the ingress packet itself and the audited response derives from it.
+Engine handlers keep their `(tenant, payload)` signature, and the wire
+response is unchanged.
+
+The flag is read when handlers are registered (node app startup), because the
+SDK dispatches on the wrapper's parameter count.
+`INGRESS_PACKET_AUDIT_ENABLED=false` restores the reconstructed request.
 
 ---
 
