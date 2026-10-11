@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 import pytest_asyncio
 
-from engine.config.schema import CausalEdgeSpec, CausalSubgraphSpec, DomainSpec
+from engine.config.schema import DomainSpec
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -44,54 +44,21 @@ _TENANT = "neo4j"
 _RUN_TAG = "ceg_fix_001"
 
 
-def _domain_spec(*, causal_enabled: bool = True) -> DomainSpec:
-    return DomainSpec(
-        domain={"id": _DB, "name": "CEG-FIX-001", "version": "0.0.1"},
-        ontology={
-            "nodes": [
-                {
-                    "label": "Facility",
-                    "managedby": "sync",
-                    "candidate": True,
-                    "matchdirection": "d1",
-                    "properties": [{"name": "facility_id", "type": "int", "required": True}],
-                },
-                {
-                    "label": "Query",
-                    "managedby": "api",
-                    "queryentity": True,
-                    "matchdirection": "d1",
-                    "properties": [{"name": "query_id", "type": "int", "required": True}],
-                },
-                {
-                    "label": "TransactionOutcome",
-                    "managedby": "api",
-                    "properties": [{"name": "outcome_id", "type": "string", "required": True}],
-                },
-            ],
-            "edges": [],
-        },
-        matchentities={
-            "candidate": [{"label": "Facility", "matchdirection": "d1"}],
-            "queryentity": [{"label": "Query", "matchdirection": "d1"}],
-        },
-        queryschema={"matchdirections": ["d1"], "fields": []},
-        traversal={"steps": []},
-        gates=[],
-        scoring={"dimensions": []},
-        causal=CausalSubgraphSpec(
-            enabled=causal_enabled,
-            causal_edges=[
-                CausalEdgeSpec(
-                    edge_type="RESULTED_IN",
-                    source_label="Facility",
-                    target_label="TransactionOutcome",
-                    temporal_validation=True,
-                    confidence_threshold=0.5,
-                ),
-            ],
-        ),
-    )
+_RESULTED_IN = {
+    "edge_type": "RESULTED_IN",
+    "source_label": "Facility",
+    "target_label": "TransactionOutcome",
+    "temporal_validation": True,
+    "confidence_threshold": 0.5,
+}
+
+
+def _domain_spec(base: DomainSpec, *, causal_enabled: bool = True) -> DomainSpec:
+    """The shared minimal spec, bound to the ``neo4j`` database, with R3 on RESULTED_IN."""
+    raw = base.model_dump(by_alias=True)
+    raw["domain"]["id"] = _DB
+    raw["causal"] = {"enabled": causal_enabled, "causal_edges": [_RESULTED_IN]}
+    return DomainSpec.model_validate(raw)
 
 
 class _Loader:
@@ -105,9 +72,13 @@ class _Loader:
 class _Wire:
     """One test's isolated slice of the shared graph: its own candidate and tag."""
 
-    def __init__(self, graph_driver: Any, tag: str) -> None:
+    def __init__(self, graph_driver: Any, tag: str, base: DomainSpec) -> None:
         self._driver = graph_driver
         self.tag = tag
+        self._base = base
+
+    def spec(self, *, causal_enabled: bool = True) -> DomainSpec:
+        return _domain_spec(self._base, causal_enabled=causal_enabled)
 
     async def bind(self, spec: DomainSpec) -> None:
         from engine.handlers import init_dependencies
@@ -126,7 +97,7 @@ class _Wire:
 
 
 @pytest_asyncio.fixture
-async def wire(graph_driver) -> AsyncGenerator[_Wire, None]:
+async def wire(graph_driver, minimal_domain_spec) -> AsyncGenerator[_Wire, None]:
     """Bind the real handler DI to the real driver; seed and clean one candidate.
 
     Every test gets a unique tag so parallel workers sharing one server never
@@ -140,7 +111,7 @@ async def wire(graph_driver) -> AsyncGenerator[_Wire, None]:
         parameters={"cid": f"{tag}_cand", "tag": tag},
         database=_DB,
     )
-    yield _Wire(graph_driver, tag)
+    yield _Wire(graph_driver, tag, minimal_domain_spec)
     get_state().reset()
     await graph_driver.execute_write(
         cypher=("MATCH (n) WHERE n.run_tag = $tag OR (n:TransactionOutcome AND n.match_id = $match) DETACH DELETE n"),
@@ -166,7 +137,7 @@ async def _outcome_graph(graph_driver, outcome_id: str) -> dict[str, Any]:
 async def test_temporally_invalid_edge_is_not_persisted(wire, graph_driver) -> None:
     from engine.handlers import handle_outcomes
 
-    await wire.bind(_domain_spec())
+    await wire.bind(wire.spec())
     result = await handle_outcomes(
         _TENANT,
         wire.payload(
@@ -187,7 +158,7 @@ async def test_temporally_invalid_edge_is_not_persisted(wire, graph_driver) -> N
 async def test_below_threshold_edge_is_not_persisted(wire, graph_driver) -> None:
     from engine.handlers import handle_outcomes
 
-    await wire.bind(_domain_spec())
+    await wire.bind(wire.spec())
     result = await handle_outcomes(
         _TENANT,
         wire.payload(
@@ -207,7 +178,7 @@ async def test_below_threshold_edge_is_not_persisted(wire, graph_driver) -> None
 async def test_valid_edge_is_persisted_once(wire, graph_driver) -> None:
     from engine.handlers import handle_outcomes
 
-    await wire.bind(_domain_spec())
+    await wire.bind(wire.spec())
     result = await handle_outcomes(
         _TENANT,
         wire.payload(
@@ -229,7 +200,7 @@ async def test_causal_disabled_keeps_unvalidated_edge(wire, graph_driver) -> Non
     """With causal off the validator is not consulted — existing behaviour."""
     from engine.handlers import handle_outcomes
 
-    await wire.bind(_domain_spec(causal_enabled=False))
+    await wire.bind(wire.spec(causal_enabled=False))
     result = await handle_outcomes(
         _TENANT,
         wire.payload(
@@ -251,7 +222,7 @@ async def test_enforcement_flag_off_restores_log_only(wire, graph_driver, monkey
     from engine.handlers import handle_outcomes
 
     monkeypatch.setattr(settings, "causal_rejection_enforcement_enabled", False)
-    await wire.bind(_domain_spec())
+    await wire.bind(wire.spec())
     result = await handle_outcomes(
         _TENANT,
         wire.payload(
