@@ -1711,12 +1711,17 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
     _enforce_capability(tenant, "outcomes", domain_spec)
     outcome_id = f"out_{uuid.uuid4().hex[:12]}"
 
-    # R3: Causal validation for RESULTED_IN edge
+    # R3: Causal validation for RESULTED_IN edge. CEG-FIX-001: a rejection
+    # suppresses the edge in both write paths below; the outcome node is the
+    # observation and is still recorded.
+    create_resulted_in = True
     if domain_spec.causal.enabled:
         from engine.causal.causal_validator import CausalEdgeRuntimeValidator
+        from engine.config.settings import settings as _causal_settings
 
         validator = CausalEdgeRuntimeValidator(domain_spec.causal)
         edge_record = {
+            "edge_type": "RESULTED_IN",
             "source_ts": payload.get("source_ts"),
             "target_ts": payload.get("target_ts"),
             "confidence": payload.get("confidence"),
@@ -1727,6 +1732,7 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
                 "Causal validation rejected RESULTED_IN edge: %s",
                 rejected[0].get("rejection_reason"),
             )
+            create_resulted_in = not _causal_settings.causal_rejection_enforcement_enabled
 
     # R5: Extract match fingerprint from payload
     fingerprint = payload.get("fingerprint", {})
@@ -1750,7 +1756,7 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
     })
     WITH o
     OPTIONAL MATCH (c {entity_id: $candidate_id})
-    FOREACH (_ IN CASE WHEN c IS NOT NULL THEN [1] ELSE [] END |
+    FOREACH (_ IN CASE WHEN c IS NOT NULL AND $create_resulted_in THEN [1] ELSE [] END |
         CREATE (c)-[:RESULTED_IN]->(o)
     )
     RETURN o.outcome_id AS outcome_id
@@ -1771,6 +1777,7 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
                 "gates_passed": gates_passed,
                 "match_direction": match_direction,
                 "candidate_count": candidate_count,
+                "create_resulted_in": create_resulted_in,
             },
             database=domain_spec.domain.id,
         )
@@ -1801,6 +1808,8 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
         compliance.log_outcome(tenant=tenant, outcome_id=outcome_id, outcome=outcome)
 
     response: dict[str, Any] = {"status": "recorded", "outcome_id": outcome_id}
+    if not create_resulted_in:
+        response["rejected_count"] = 1
 
     # Feedback loop: propagate outcome to signal weights and score adjustments
     if domain_spec.feedbackloop.enabled:
@@ -1854,7 +1863,7 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
 
         compiler = CausalCompiler(domain_spec)
         for edge_spec in domain_spec.causal.causal_edges:
-            if edge_spec.edge_type == "RESULTED_IN":
+            if edge_spec.edge_type == "RESULTED_IN" and create_resulted_in:
                 edge_cypher = compiler.compile_causal_edge_create(edge_spec)
                 try:
                     await graph_driver.execute_query(

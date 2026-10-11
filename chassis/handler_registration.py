@@ -12,23 +12,28 @@ chassis/handler_registration.py
 Registers engine.handlers.ACTION_HANDLERS with the constellation-node-sdk
 handler registry, wrapping each handler with the PacketEnvelope audit side
 effect that chassis/actions.py performs on the legacy path.
+
+The audited request is the ingress TransportPacket the SDK hands the handler,
+never a reconstruction: Gate owns its packet_id, trace_id, correlation_id and
+lineage root, and the audited response derives from it (CEG-FIX-002).
 """
 
 from __future__ import annotations
 
 import logging
 import time
-import uuid
 from typing import TYPE_CHECKING, Any
 
 from constellation_node_sdk import register_handler
 
 from engine.handlers import ACTION_HANDLERS
-from engine.packet.chassis_contract import deflate_egress, inflate_ingress
+from engine.packet.chassis_contract import deflate_egress
 from engine.packet.packet_store import get_packet_store
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
+
+    from constellation_node_sdk import TransportPacket
 
 logger = logging.getLogger(__name__)
 
@@ -39,25 +44,20 @@ _RESPONDING_NODE = "graph-engine"
 def _with_packet_audit(
     action: str,
     fn: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]],
-) -> Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]:
+) -> Callable[[str, dict[str, Any], TransportPacket], Awaitable[dict[str, Any]]]:
     """Wrap an engine handler so each call emits a request/response packet pair.
 
-    The wrapper keeps an explicit two-parameter signature: the SDK's
-    ``_invoke_handler`` dispatches on ``len(inspect.signature(handler).parameters)``,
-    so ``*args`` would silently reroute the call to the one-arg (packet) form.
+    The wrapper takes the SDK's packet-aware ``(tenant, payload, packet)`` form
+    so the ingress packet itself is audited. Its parameters stay explicit: the
+    SDK's ``_invoke_handler`` dispatches on
+    ``len(inspect.signature(handler).parameters)``, so ``*args`` would silently
+    reroute the call to the one-arg (packet) form. The engine handler keeps its
+    ``(tenant, payload)`` contract.
     """
 
-    async def wrapped(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
-        trace_id = str(uuid.uuid4())
+    async def wrapped(tenant: str, payload: dict[str, Any], packet: TransportPacket) -> dict[str, Any]:
         start = time.time()
-
-        request_packet = inflate_ingress(
-            action=action,
-            payload=payload,
-            tenant=tenant,
-            trace_id=trace_id,
-            source_node="gate",
-        )
+        request_packet = packet
 
         try:
             engine_data = await fn(tenant, payload)

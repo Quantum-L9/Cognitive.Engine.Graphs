@@ -68,6 +68,7 @@ independently of the code default.
 | Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; seven packs whose gates do not compile to executable, faithful Cypher — see §16 |
 | SDK Participation | `SDK_PARTICIPATION_ENABLED` (`sdk_participation_enabled`) | `True` | unset | active; Gate_SDK owns registration and readiness; off restores CEG's loop — see §17 |
 | Gate Re-registration | `GATE_REREGISTRATION_ENABLED` (`gate_reregistration_enabled`), `GATE_REREGISTRATION_INTERVAL_SECONDS` | `True`, `300` | unset | active only while SDK participation is off — see §17 |
+| Causal Rejection Enforcement | `CAUSAL_REJECTION_ENFORCEMENT_ENABLED` (`causal_rejection_enforcement_enabled`) | `True` | unset | active; an R3-rejected RESULTED_IN edge is not written — see §18 |
 | Constellation Orchestration | — | — | — | accepted architectural gap — see §9 |
 
 ---
@@ -506,6 +507,34 @@ runs `engine/gate_registration.py`, and `gate_reregistration_enabled` plus
 `gate_reregistration_interval_seconds` (default `300`) bound that loop. The
 SDK chassis passes `auto_register_with_gate=False` on that path so the two
 loops do not both register.
+
+---
+
+## 18. Causal Rejection Enforcement (CEG-FIX-001)
+
+When a domain sets `causal.enabled`, `handle_outcomes` runs
+`CausalEdgeRuntimeValidator` (R3) over the outcome's RESULTED_IN edge record
+(`source_ts`, `target_ts`, `confidence`, judged against the domain's
+`RESULTED_IN` `CausalEdgeSpec`). Before CEG-FIX-001 a rejection was only
+logged, and both write paths still created the edge.
+
+`causal_rejection_enforcement_enabled` (default `True`, hardening) makes the
+rejection binding. A rejected edge is not created by either write path, the
+`TransactionOutcome` node is still recorded — the validator judges the edge,
+not the outcome observation (`docs/contracts/data/graph-schema.yaml`) — and
+the response carries `rejected_count`, matching `handle_sync`.
+
+Two consequences follow from the domain's causal configuration:
+
+- the edge record names `RESULTED_IN`, so `CausalEdgeSpec.temporal_validation`
+  is applied: `source_ts` must strictly precede `target_ts` when both are given;
+- with `causal.enabled` and no `RESULTED_IN` entry in `causal.causal_edges`,
+  every outcome edge is rejected as `invalid_edge_type`.
+
+Domains with `causal.enabled=false` are unaffected: the validator is not
+consulted and the edge is written as before.
+
+`CAUSAL_REJECTION_ENFORCEMENT_ENABLED=false` restores the log-only behaviour.
 
 ---
 
