@@ -10,11 +10,14 @@ from pydantic import ValidationError
 
 from engine.models.payloads import SyncProjection
 from engine.sync.projection import ProjectionStore
+from tests.fixtures.domain_contracts import PLASTICOS_EXAMPLE_CONTRACT
 
 ROOT = Path(__file__).resolve().parents[2]
 PAYLOADS = ROOT / "contracts" / "payloads"
 EXAMPLES = PAYLOADS / "examples"
 NEGATIVES = PAYLOADS / "negative_examples"
+# The fixtures are the PlasticOS example; they admit against the example contract.
+CTX = PLASTICOS_EXAMPLE_CONTRACT.context()
 
 
 def _load(path: Path) -> dict:
@@ -23,19 +26,19 @@ def _load(path: Path) -> dict:
 
 @pytest.mark.unit
 def test_sync_projection_fixture_validates() -> None:
-    SyncProjection.model_validate(_load(EXAMPLES / "sync-projection.json"))
+    SyncProjection.model_validate(_load(EXAMPLES / "sync-projection.json"), context=CTX)
 
 
 @pytest.mark.unit
 def test_tombstone_fixture_validates() -> None:
-    SyncProjection.model_validate(_load(EXAMPLES / "sync-projection-tombstone.json"))
+    SyncProjection.model_validate(_load(EXAMPLES / "sync-projection-tombstone.json"), context=CTX)
 
 
 @pytest.mark.unit
 def test_unknown_operation_rejected() -> None:
     data = _load(NEGATIVES / "sync-projection-unknown-operation.json")
     with pytest.raises(ValidationError):
-        SyncProjection.model_validate(data)
+        SyncProjection.model_validate(data, context=CTX)
 
 
 @pytest.mark.unit
@@ -43,13 +46,13 @@ def test_transport_fields_forbidden() -> None:
     payload = _load(EXAMPLES / "sync-projection.json")
     payload["correlation_id"] = "nope"
     with pytest.raises(ValidationError):
-        SyncProjection.model_validate(payload)
+        SyncProjection.model_validate(payload, context=CTX)
 
 
 @pytest.mark.unit
 def test_upsert_tombstone_revision_idempotent_and_rebuild() -> None:
     store = ProjectionStore()
-    upsert = SyncProjection.model_validate(_load(EXAMPLES / "sync-projection.json"))
+    upsert = SyncProjection.model_validate(_load(EXAMPLES / "sync-projection.json"), context=CTX)
     first = store.apply(upsert)
     assert first.accepted == ["res.partner:102"]
     assert store.get("res.partner:102") is not None
@@ -71,12 +74,13 @@ def test_upsert_tombstone_revision_idempotent_and_rebuild() -> None:
                     "source_record": {**upsert.records[0].source_record.model_dump(), "revision": 1},
                 }
             ],
-        }
+        },
+        context=CTX,
     )
     stale_result = store.apply(stale)
     assert stale_result.rejected[0]["reason"] == "stale_revision"
 
-    tomb = SyncProjection.model_validate(_load(EXAMPLES / "sync-projection-tombstone.json"))
+    tomb = SyncProjection.model_validate(_load(EXAMPLES / "sync-projection-tombstone.json"), context=CTX)
     tomb_result = store.apply(tomb)
     assert tomb_result.accepted == ["res.partner:102"]
     assert store.get("res.partner:102").tombstoned is True

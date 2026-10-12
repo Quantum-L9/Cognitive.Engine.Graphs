@@ -399,20 +399,69 @@ class TestImpactReporter:
 class TestVerticalDiscovery:
     """Tests for vertical_discovery.discover_vertical_fields."""
 
-    def test_known_vertical_detection(self, intake_spec: DomainSpec) -> None:
-        """Known vertical keywords should be detected."""
-        result = discover_vertical_fields("We are a plastic recycling facility", spec=intake_spec)
-        assert result.vertical_name == "plasticos"
+    def test_caller_supplied_keywords_are_detected(self, intake_spec: DomainSpec) -> None:
+        """Vertical detection runs over the keyword table the caller supplies (example data)."""
+        result = discover_vertical_fields(
+            "We run an orbital propellant depot",
+            spec=intake_spec,
+            vertical_keywords={"propellant": "orbital-logistics", "cheese": "cheese-aging"},
+        )
+        assert result.vertical_name == "orbital-logistics"
         assert not result.discovery_suggested
+
+    def test_engine_ships_no_keyword_table(self, intake_spec: DomainSpec) -> None:
+        """Stage 2 R06: without caller-supplied keywords no vertical is ever detected."""
+        result = discover_vertical_fields("We are a plastic recycling facility", spec=intake_spec)
+        assert result.vertical_name == "unknown"
+        assert result.discovery_suggested
+        assert result.vertical_fields == []
 
     def test_unknown_vertical(self) -> None:
         """Unknown vertical → discovery suggested."""
-        result = discover_vertical_fields("We make artisanal soap")
+        result = discover_vertical_fields(
+            "We make artisanal soap", vertical_keywords={"propellant": "orbital-logistics"}
+        )
         assert result.vertical_name == "unknown"
         assert result.discovery_suggested
         assert len(result.vertical_fields) == 0
 
     def test_no_domain_spec_available(self) -> None:
-        """No spec + no YAML → empty fields, discovery suggested."""
-        result = discover_vertical_fields("plastic recycling", domains_dir="/nonexistent/path")
-        assert result.discovery_suggested or len(result.vertical_fields) >= 0
+        """Detected vertical + no spec + no YAML → empty fields, discovery suggested."""
+        result = discover_vertical_fields(
+            "orbital depot", domains_dir="/nonexistent/path", vertical_keywords={"orbital": "orbital-logistics"}
+        )
+        assert result.vertical_name == "orbital-logistics"
+        assert result.discovery_suggested
+        assert result.vertical_fields == []
+
+
+@pytest.mark.unit
+class TestCallerSuppliedRecipes:
+    """Stage 2 R06: derivation chains and ambiguity tables are explicit inputs, never built in."""
+
+    def test_no_derivation_without_a_supplied_graph(self, intake_spec: DomainSpec) -> None:
+        result = compile_intake({"lat": "float", "lon": "float"}, "any business", intake_spec)
+        assert FieldOrigin.L9_ENRICHABLE not in set(result.field_origins.values())
+
+    def test_supplied_derivation_graph_is_applied(self, intake_spec: DomainSpec) -> None:
+        result = compile_intake(
+            {"lat": "float", "lon": "float"},
+            "any business",
+            intake_spec,
+            derivation_graph={"credit_score": ["lat", "lon"]},
+        )
+        assert result.field_origins["credit_score"] == FieldOrigin.L9_ENRICHABLE
+        assert "derived_from" in result.domain_spec_yaml
+
+    def test_no_ambiguity_without_supplied_patterns(self) -> None:
+        from engine.intake.intake_compiler import _check_ambiguous
+
+        assert _check_ambiguous("name", None) is None
+        assert _check_ambiguous("type", {}) is None
+
+    def test_supplied_ambiguity_patterns_resolve(self) -> None:
+        from engine.intake.intake_compiler import _check_ambiguous
+
+        patterns = {"name": ["depot_name", "operator_name"]}
+        assert _check_ambiguous(" Name ", patterns) == ["depot_name", "operator_name"]
+        assert _check_ambiguous("type", patterns) is None

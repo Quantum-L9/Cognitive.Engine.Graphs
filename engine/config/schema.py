@@ -802,6 +802,11 @@ class PluginsSpec(BaseModel):
     prematchhooks: list[str] = Field(default_factory=list)
     postmatchhooks: list[str] = Field(default_factory=list)
     syncvalidators: list[str] = Field(default_factory=list)
+    # Names of registered inference rules (engine.inference_rule_registry) this
+    # domain authorizes the admin `emit_inference_feedback` pathway to execute.
+    # Empty means none: the generic engine never runs business inference a
+    # domain did not declare.
+    inference_rules: list[str] = Field(default_factory=list)
 
 
 class SignalWeightSpec(BaseModel):
@@ -963,7 +968,12 @@ class FeatureCatalogEntry(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     feature_id: str
-    owner: Literal["ceg", "eie", "odoo"]
+    # The system that owns this feature's evidence. An identifier the domain
+    # declares (e.g. the engine itself, an enrichment node, the business system
+    # of record) — not a closed list the engine maintains. Payload admission
+    # resolves `source_record.system` against the owners declared here plus
+    # the core systems (engine.models.payloads.CORE_SOURCE_SYSTEMS).
+    owner: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
     scoring_dimension: str | None = None
     evidence_required: bool = True
     description: str | None = None
@@ -999,6 +1009,20 @@ class OutcomeSignalSpec(BaseModel):
     calibration_label: bool = True
 
 
+class DomainActivation(StrEnum):
+    """Serving posture a domain pack declares for itself.
+
+    ``active`` packs are served as soon as they validate and their gates compile
+    (``engine.config.loader.withholding_reason``). ``dormant`` packs are
+    discoverable on disk but withheld until an operator sets
+    ``DORMANT_DOMAIN_PACKS_ENABLED=true``. The posture belongs to the authorized
+    domain owner's contract, so the engine never names a domain to withhold it.
+    """
+
+    ACTIVE = "active"
+    DORMANT = "dormant"
+
+
 class DomainMetadata(BaseModel):
     """Domain pack metadata."""
 
@@ -1007,6 +1031,7 @@ class DomainMetadata(BaseModel):
     description: str | None = None
     version: str
     alternatedomains: list[str] = Field(default_factory=list)
+    activation: DomainActivation = DomainActivation.ACTIVE
 
 
 class DomainSpec(BaseModel):

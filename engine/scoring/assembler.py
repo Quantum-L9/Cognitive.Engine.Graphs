@@ -444,11 +444,12 @@ class ScoringAssembler:
         community-overlap between candidate and each outcome, and returns
         normalized weighted score.
 
-        Properties from domain spec YAML (via dim.metadata or defaults):
-        - outcome_relation (default: "RESULTED_IN")
-        - outcome_node (default: "TransactionOutcome")
+        Properties from domain spec YAML (via dim.metadata):
+        - outcome_relation (default: the domain's feedbackloop.outcome_edge_type)
+        - outcome_node (default: the domain's feedbackloop.outcome_node_label)
         - success_property (default: "outcome_type")
-        - success_value (default: "closed_won")
+        - success_value (REQUIRED — which outcome value counts as success is
+          business semantics the domain must declare; there is no engine default)
 
         Ref: Liu et al., Scientific Reports (2023) 13:6987, §3.2 preference attention.
         """
@@ -457,12 +458,20 @@ class ScoringAssembler:
             self.scoring_spec.preference_sample_size if hasattr(self.scoring_spec, "preference_sample_size") else 28
         )
 
-        # Configurable properties with safe defaults
+        # Outcome vocabulary comes from the domain spec; only the structural
+        # property name has an engine default.
         metadata = dim.metadata if hasattr(dim, "metadata") and dim.metadata else {}
-        outcome_rel = sanitize_label(metadata.get("outcome_relation", "RESULTED_IN"))
-        outcome_node = sanitize_label(metadata.get("outcome_node", "TransactionOutcome"))
+        feedback = self.domain_spec.feedbackloop
+        outcome_rel = sanitize_label(metadata.get("outcome_relation", feedback.outcome_edge_type))
+        outcome_node = sanitize_label(metadata.get("outcome_node", feedback.outcome_node_label))
         success_prop = sanitize_label(metadata.get("success_property", "outcome_type"))
-        success_value = metadata.get("success_value", "closed_won")
+        success_value = metadata.get("success_value")
+        if success_value is None:
+            msg = (
+                f"Dimension '{dim.name}': preference_attention requires metadata.success_value "
+                "(the outcome value the domain counts as success); the engine has no default"
+            )
+            raise ValueError(msg)
         if not isinstance(success_value, str):
             msg = f"Dimension '{dim.name}': success_value must be a string"
             raise ValueError(msg)

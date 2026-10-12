@@ -1,7 +1,11 @@
 $schema: https://json-schema.org/draft/2020-12/schema
 $id: urn:l9:plasticos:contracts:common:1.0.0-draft
-title: PlasticOS Common Payload Definitions
+title: CEG Common Payload Definitions
 description: Shared $defs for payload-only contracts. Not a transport envelope.
+  Domain-neutral — the domain id, match directions, entity types, outcome
+  types and source systems a payload names are resolved against the
+  authorized domain spec at admission (engine.models.payloads.DomainContract),
+  not enumerated here.
 x-publication-status: draft-unpublished
 $defs:
   contract_version:
@@ -9,7 +13,12 @@ $defs:
     const: 1.0.0-draft
   domain:
     type: string
-    const: plasticos
+    description: Domain pack id (directory under the domains root). Admission requires it to equal the loaded domain.
+    pattern: ^[a-z0-9][a-z0-9_-]{0,63}$
+  identifier:
+    type: string
+    description: A name the domain spec declares (match direction, entity type, outcome type, source system).
+    pattern: ^[A-Za-z_][A-Za-z0-9_]*$
   entity_ref:
     type: string
     pattern: ^[a-z0-9_.-]+:[^\s]+$
@@ -38,13 +47,8 @@ $defs:
     - record_ref
     properties:
       system:
-        type: string
-        enum:
-        - odoo
-        - eie
-        - ceg
-        - operator
-        - external_source
+        $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/identifier
+        description: Core systems (ceg, operator, external_source) plus the owners the domain's feature_catalog declares.
       record_ref:
         $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/entity_ref
       revision:

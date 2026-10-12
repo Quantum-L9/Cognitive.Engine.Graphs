@@ -81,6 +81,12 @@ async def handle_intake_compile(tenant: str, payload: dict[str, Any]) -> dict[st
       - crm_fields: dict[str, str] | list[str]  — CRM field export
       - business_profile: str                    — company description
       - domain: str (optional)                   — domain ID override
+      - vertical_keywords: dict[str, str] (optional)      — keyword → domain id, caller-supplied example data
+      - derivation_graph: dict[str, list[str]] (optional) — target → source fields, caller-supplied
+      - ambiguity_patterns: dict[str, list[str]] (optional) — ambiguous name → candidates, caller-supplied
+
+    The engine ships none of the three tables (Stage 2 R06): the sales
+    demonstration passes its own example data explicitly.
 
     Returns:
       IntakeResult as dict.
@@ -91,7 +97,14 @@ async def handle_intake_compile(tenant: str, payload: dict[str, Any]) -> dict[st
     domain_id = payload.get("domain", tenant)
 
     spec: DomainSpec = loader.load_domain(domain_id)
-    result = compile_intake(crm_fields, business_profile, spec)
+    result = compile_intake(
+        crm_fields,
+        business_profile,
+        spec,
+        vertical_keywords=payload.get("vertical_keywords"),
+        derivation_graph=payload.get("derivation_graph"),
+        ambiguity_patterns=payload.get("ambiguity_patterns"),
+    )
 
     logger.info("intake_compile complete: tier=%s", result.delivery_tier)
     return result.model_dump(mode="json")

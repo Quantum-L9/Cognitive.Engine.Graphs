@@ -13,6 +13,11 @@ domain:
   name: IdeaOS Portfolio Graph
   description: Cross-idea portfolio intelligence. IdeaOS owns idea/lifecycle truth; CEG owns graph persistence, intersections, and ranking.
   version: 0.1.0
+  # New behavioral surface whose semantic owner (IdeaOS) has not cleared it for
+  # traffic. Withheld by the generic loader admission policy until an operator
+  # sets DORMANT_DOMAIN_PACKS_ENABLED=true (replaces the former
+  # idea_portfolio_enabled flag; the engine itself names no domain).
+  activation: dormant
 ontology:
   nodes:
     - label: Idea

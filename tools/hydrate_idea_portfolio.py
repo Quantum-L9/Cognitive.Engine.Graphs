@@ -14,9 +14,8 @@ sys.path.insert(0, str(ROOT))
 
 from neo4j.exceptions import Neo4jError
 
-from engine.config.loader import DomainPackLoader
+from engine.config.loader import DomainNotFoundError, DomainPackLoader
 from engine.config.schema import DomainSpec
-from engine.config.settings import settings
 from engine.graph.driver import GraphDriver
 from engine.handlers import _init_schema
 from engine.sync.idea_portfolio import (
@@ -86,9 +85,13 @@ async def _require_state_uniqueness(driver: GraphDriver, spec: DomainSpec) -> No
 
 
 async def _apply(envelope: IdeaPortfolioHydrationEnvelope) -> dict[str, object]:
-    if not settings.idea_portfolio_enabled:
-        raise IdeaPortfolioHydrationError("idea-portfolio hydration is disabled by configuration")
-    spec = DomainPackLoader(config_path=str(ROOT / "domains")).load_domain(DOMAIN_ID)
+    # The pack declares itself dormant (domain.activation: dormant) and the
+    # generic loader admission policy withholds it unless the operator opted in
+    # with DORMANT_DOMAIN_PACKS_ENABLED=true. Hydration must not outrun that.
+    try:
+        spec = DomainPackLoader(config_path=str(ROOT / "domains")).load_domain(DOMAIN_ID)
+    except DomainNotFoundError as exc:
+        raise IdeaPortfolioHydrationError(f"idea-portfolio hydration is disabled by configuration: {exc}") from exc
     driver = GraphDriver()
     await driver.connect()
     try:

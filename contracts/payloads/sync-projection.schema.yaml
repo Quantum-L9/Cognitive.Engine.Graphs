@@ -1,7 +1,7 @@
 $schema: https://json-schema.org/draft/2020-12/schema
 $id: urn:l9:plasticos:contracts:payload:sync-projection:1.0.0-draft
-title: PlasticOS CEG Sync Projection
-description: Provider-neutral upsert or tombstone records for CEG. Odoo remains authority.
+title: CEG Sync Projection
+description: Provider-neutral upsert or tombstone records for CEG. The domain's business system of record remains authority.
 x-publication-status: draft-unpublished
 type: object
 additionalProperties: false

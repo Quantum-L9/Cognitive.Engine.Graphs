@@ -61,7 +61,7 @@ independently of the code default.
 | Tenant Auth (JWT allowed_tenants) | `TENANT_AUTH_ENABLED` | `True` | `True` | active |
 | Capability Auth (domain-spec model) | `CAPABILITY_AUTH_ENABLED` | `True` | `True` | active |
 | PostgreSQL Audit Pool | `POSTGRES_DSN` | unset (`None`) | set | active (opt-in, soft dependency — see §7) |
-| Idea Portfolio Graph | `IDEA_PORTFOLIO_ENABLED` (`idea_portfolio_enabled`) | `False` | unset | dormant; opt-in IdeaOS portfolio reads/hydration |
+| Dormant Domain Packs | `DORMANT_DOMAIN_PACKS_ENABLED` (`dormant_domain_packs_enabled`) | `False` | unset | dormant; serve packs that declare `domain.activation: dormant` (replaces the per-domain `idea_portfolio_enabled`) — see §16 |
 | Graph Inference Feedback | `GRAPH_INFERENCE_FEEDBACK_ENABLED` (`graph_inference_feedback_enabled`) | `False` | unset | dormant; CEG → Gate → EIE `graph-inference-result` — see §13 |
 | Domain Database Provisioning | `AUTO_CREATE_DOMAIN_DATABASE` (`auto_create_domain_database`) | `False` | unset | dormant; create the tenant domain database on first use — see §14 |
 | Health API (admin health_* subactions) | `HEALTH_API_ENABLED` (`health_api_enabled`) | `False` | unset | dormant; AI-readiness assess/report surface — see §15 |
@@ -438,10 +438,27 @@ store in `engine/health/health_report.py`, which is bounded
 
 ---
 
-## 16. Unvalidated Domain Packs (CEG-009)
+## 16. Domain Pack Admission: Unvalidated and Dormant Packs (CEG-009 / Stage 2 R07)
 
 **State**: Dormant
-**Flag**: `UNVALIDATED_DOMAIN_PACKS_ENABLED=False` (default off)
+**Flags**: `UNVALIDATED_DOMAIN_PACKS_ENABLED=False`, `DORMANT_DOMAIN_PACKS_ENABLED=False` (both default off)
+
+The loader admits a pack through one generic, fail-closed policy
+(`engine.config.loader.withholding_reason`) that names no domain:
+
+1. the pack validates against `DomainSpec`;
+2. the pack does not declare `domain.activation: dormant` — or the operator set
+   `DORMANT_DOMAIN_PACKS_ENABLED=true`;
+3. every gate compiles to executable Cypher (`admission_defects`) — or the
+   operator set `UNVALIDATED_DOMAIN_PACKS_ENABLED=true`.
+
+A withheld pack is neither listed by `list_domains` nor loadable; the refusal
+names the reason and the override. This replaced the former per-domain flag
+allowlist (`idea_portfolio_enabled`, and the seven CEG-009 packs named in the
+loader). The same packs are withheld as before — `idea-portfolio` because its
+pack now declares itself dormant, the seven below because their gates still do
+not compile — but the engine no longer knows any of them by name, and an
+unknown but valid pack is admitted on the same terms.
 
 CEG-009 moved nine domain packs out of a flat `<name>_domain_spec.yaml` shape
 the loader never reads into `domains/<id>/spec.yaml`. Making them readable
@@ -475,10 +492,10 @@ zero candidates, the second fails at execution. Fixing them means either
 compiler support for `pattern`/`condition` and literal operands, or a declared
 query-schema parameter per constant — a schema decision, not a file move.
 
-`tests/unit/test_domain_pack_shape.py` holds both ends: a discoverable pack
-must compile to executable Cypher, and a gated pack that starts compiling
-cleanly must be removed from `_DOMAIN_FEATURE_FLAGS`, so this list can only
-shrink.
+`tests/unit/test_domain_pack_shape.py` holds both ends: an admitted pack must
+compile to executable Cypher, and every withheld pack must still have a live
+generic reason (a compile defect or a declared dormant posture). A pack fixed
+later is served automatically — there is no per-domain list to forget it in.
 
 ---
 

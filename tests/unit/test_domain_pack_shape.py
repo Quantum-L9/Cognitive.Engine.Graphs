@@ -4,7 +4,8 @@
 (``loader.SPEC_FILENAME``). Nine specs used a flat
 ``<name>_domain_spec.yaml`` convention instead and were therefore unreachable:
 they looked like available verticals in a directory listing, but a tenant id
-matching one of them failed to resolve. Only ``plasticos`` loaded by default.
+matching one of them failed to resolve. Only the packs already in the directory
+shape loaded by default.
 
 Two of those nine were additionally invalid — ``executive-assistant`` declared
 an edge to an undeclared ``Skill`` node, ``roofing-company`` one to ``ZipCode``
@@ -14,14 +15,13 @@ validated either.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
 import yaml
 
-from engine.config.loader import SPEC_FILENAME, DomainPackLoader
-from engine.config.schema import DomainSpec
+from engine.config.loader import SPEC_FILENAME, DomainPackLoader, admission_defects, withholding_reason
+from engine.config.schema import DomainActivation, DomainSpec
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOMAINS_ROOT = REPO_ROOT / "domains"
@@ -58,15 +58,15 @@ def test_directory_name_matches_declared_domain_id(domain_dir: Path) -> None:
     assert raw["domain"]["id"] == domain_dir.name
 
 
-def test_loader_discovers_every_unflagged_domain() -> None:
-    from engine.config.loader import _DOMAIN_FEATURE_FLAGS
-
+def test_loader_discovers_every_admitted_domain() -> None:
+    """Everything on disk but not listed is withheld by the generic policy, for a stated reason."""
     loader = DomainPackLoader(str(DOMAINS_ROOT))
     discovered = set(loader.list_domains())
     on_disk = {d.name for d in _domain_dirs()}
     assert discovered <= on_disk
-    # Everything withheld is withheld deliberately, by a declared flag.
-    assert on_disk - discovered <= set(_DOMAIN_FEATURE_FLAGS)
+    for name in sorted(on_disk - discovered):
+        raw = yaml.safe_load((DOMAINS_ROOT / name / SPEC_FILENAME).read_text(encoding="utf-8"))
+        assert withholding_reason(DomainSpec.model_validate(raw)) is not None, f"{name} withheld without a reason"
 
 
 def test_every_discovered_domain_actually_loads() -> None:
@@ -77,89 +77,67 @@ def test_every_discovered_domain_actually_loads() -> None:
 
 # --------------------------------------------------------------------------
 # Readable is not the same as correct.
+#
+# The defect classifier lives in the engine (``engine.config.loader.admission_defects``)
+# and is the loader's own admission check, so these tests exercise the policy
+# that runs in production rather than a test-only reimplementation.
 # --------------------------------------------------------------------------
 
-_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
-
-def _cypher_defects(spec) -> list[str]:
-    """Gate compilations that would fail or silently reject every candidate.
-
-    Two shapes, both found only after CEG-009 made these packs readable:
-
-    * ``RELATES_TO`` — the compiler's fallback when a ``type: traversal`` gate
-      declares no ``edgetype``. Packs written with ``pattern``/``condition``
-      hit it, and no ontology here declares ``RELATES_TO``, so the gate is a
-      hard filter that matches nothing.
-    * ``strictwhen`` — declared by ``GateSpec`` and consumed by no compiler, so
-      a gate meant to be conditional runs as an unconditional hard filter.
-    * ``$<non-identifier>`` — a scalar ``queryparam`` (``85.0``, ``5``, ``1``).
-      GateSpec coerces it to a string and the compiler used to emit it as a
-      parameter *name*, so Cypher received ``$85.0``. Since C-009 validates
-      parameter names like labels, the compiler now refuses the gate outright;
-      that refusal is the same defect, reported at compile time.
-    """
-    from engine.gates.compiler import GateCompiler
-
-    compiler = GateCompiler(spec)
-    defects: list[str] = []
-    for gate in spec.gates:
-        if gate.strictwhen:
-            # Declared by GateSpec, consumed by nothing under engine/: the gate
-            # would run as an unconditional hard filter.
-            defects.append(f"{gate.name}: strictwhen {gate.strictwhen!r} is not consumed by any compiler")
-        try:
-            cypher = compiler.compile(gate)
-        except (ValueError, KeyError) as exc:
-            defects.append(f"{gate.name}: refused by the compiler — {exc}")
-            continue
-        if "RELATES_TO" in cypher and not gate.edgetype:
-            defects.append(f"{gate.name}: RELATES_TO fallback — {cypher}")
-        for param in re.findall(r"\$([^\s)]+)", cypher):
-            if not _IDENTIFIER.fullmatch(param):
-                defects.append(f"{gate.name}: '${param}' is not a parameter name — {cypher}")
-    return defects
+def _spec(domain_dir: Path) -> DomainSpec:
+    return DomainSpec.model_validate(yaml.safe_load((domain_dir / SPEC_FILENAME).read_text(encoding="utf-8")))
 
 
 @pytest.mark.parametrize("domain_dir", _domain_dirs(), ids=lambda p: p.name)
-def test_discoverable_domain_gates_compile_to_executable_cypher(domain_dir: Path) -> None:
+def test_admitted_domain_gates_compile_to_executable_cypher(domain_dir: Path) -> None:
     """A pack the loader will serve must produce Cypher that can run.
 
     The gap this closes: validating a spec against DomainSpec proves it parses,
-    not that its gates execute. Five packs passed Pydantic validation and still
-    compiled to `exists((candidate)-[:RELATES_TO]->(t))` or `$85.0`.
-
-    A pack behind a feature flag is exempt — that is what the flag records.
+    not that its gates execute. Packs that passed Pydantic validation still
+    compiled to `exists((candidate)-[:RELATES_TO]->(t))` or `$85.0`. The generic
+    policy withholds exactly those packs; a pack it withholds is exempt here,
+    because withholding is what the policy records.
     """
-    from engine.config.loader import _DOMAIN_FEATURE_FLAGS
-
-    if domain_dir.name in _DOMAIN_FEATURE_FLAGS:
-        pytest.skip(f"{domain_dir.name} is flag-gated: {_DOMAIN_FEATURE_FLAGS[domain_dir.name]}")
-
-    raw = yaml.safe_load((domain_dir / SPEC_FILENAME).read_text(encoding="utf-8"))
-    defects = _cypher_defects(DomainSpec.model_validate(raw))
+    spec = _spec(domain_dir)
+    reason = withholding_reason(spec)
+    if reason is not None:
+        pytest.skip(reason)
+    defects = admission_defects(spec)
     assert defects == [], f"{domain_dir.name} would serve unexecutable Cypher:\n  " + "\n  ".join(defects)
 
 
-def test_flag_gated_packs_are_gated_for_a_reason_that_still_holds() -> None:
-    """Shrink-only: when a dormant pack starts compiling, un-gate it.
+def test_withheld_packs_are_withheld_for_a_reason_that_still_holds() -> None:
+    """Every pack on disk that the policy withholds has a live, generic reason.
 
-    Without this, a pack fixed later stays invisible and the flag becomes a
-    place defects go to be forgotten.
+    Either its gates still do not compile (``admission_defects``) or it declares
+    itself dormant. No pack is withheld by name: there is no per-domain flag to
+    forget a fixed pack in.
     """
-    from engine.config.loader import _DOMAIN_FEATURE_FLAGS
+    withheld = [d for d in _domain_dirs() if withholding_reason(_spec(d)) is not None]
+    assert withheld, "no pack is withheld; this suite documents a policy that is no longer exercised"
+    for domain_dir in withheld:
+        spec = _spec(domain_dir)
+        dormant = spec.domain.activation is DomainActivation.DORMANT
+        assert dormant or admission_defects(spec), (
+            f"{domain_dir.name} is withheld but compiles cleanly and is not dormant — the policy has no reason"
+        )
 
-    still_broken, now_clean = [], []
-    for name, flag in _DOMAIN_FEATURE_FLAGS.items():
-        if flag != "unvalidated_domain_packs_enabled":
-            continue
-        path = DOMAINS_ROOT / name / SPEC_FILENAME
-        if not path.is_file():
-            continue
-        spec = DomainSpec.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
-        (still_broken if _cypher_defects(spec) else now_clean).append(name)
 
-    assert now_clean == [], (
-        f"{now_clean} now compile cleanly — remove them from _DOMAIN_FEATURE_FLAGS so the loader serves them again."
-    )
-    assert still_broken, "no pack is gated as unvalidated; drop the flag and this test"
+def test_operator_overrides_are_generic_and_default_off() -> None:
+    """The only ways to serve a withheld pack are two generic settings, both off by default."""
+    from engine.config.settings import Settings
+
+    defaults = Settings(neo4j_password="test-pw", api_secret_key="test-key")
+    assert defaults.unvalidated_domain_packs_enabled is False
+    assert defaults.dormant_domain_packs_enabled is False
+    assert not hasattr(defaults, "idea_portfolio_enabled")
+
+
+def test_loader_source_names_no_domain() -> None:
+    """The admission policy must not special-case any domain id."""
+    import engine.config.loader as loader_module
+
+    source = Path(loader_module.__file__).read_text(encoding="utf-8")
+    assert "_DOMAIN_FEATURE_FLAGS" not in source
+    for name in (d.name for d in _domain_dirs()):
+        assert f'"{name}"' not in source, f"loader names domain {name!r}"

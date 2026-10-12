@@ -43,6 +43,8 @@ class DomainFieldMap:
     domain_id: str
     node_label: str
     fields: dict[str, FieldMetadata] = field(default_factory=dict)
+    # Inference-rule descriptors ({input_fields, output_field}) for gap
+    # prioritisation. See _extract_inference_rules for why this is empty today.
     inference_rules: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -109,10 +111,20 @@ def _compute_impact_tier(is_gate: bool, scoring_weight: float, required: bool) -
 
 
 def _extract_inference_rules(domain_spec: DomainSpec) -> list[dict[str, Any]]:
-    """Extract inference rules from domain spec plugins if defined."""
-    if not domain_spec.plugins:
-        return []
-    # Inference rules may be stored in plugins as custom config
-    plugins_dict = domain_spec.plugins.model_dump() if hasattr(domain_spec.plugins, "model_dump") else {}
-    result: list[dict[str, Any]] = plugins_dict.get("inference_rules", [])
-    return result
+    """Inference-rule descriptors for gap prioritisation and inference potential.
+
+    ``plugins.inference_rules`` names the registered rules a domain *authorizes*
+    (ADR-112); it carries no ``input_fields`` / ``output_field`` descriptors, and
+    no shipped domain contract ever has — before the field existed this read an
+    absent key and returned ``[]`` for every pack. Health therefore scores no
+    inference unlock until a domain contract supplies descriptors; authorization
+    names are not substituted for them.
+    """
+    from engine.inference_rule_registry import authorized_rules
+
+    if authorized_rules(domain_spec):
+        logger.debug(
+            "domain %s authorizes inference rules; health has no field descriptors for them",
+            domain_spec.domain.id,
+        )
+    return []
