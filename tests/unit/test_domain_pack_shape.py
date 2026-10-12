@@ -142,3 +142,28 @@ def test_loader_source_names_no_domain() -> None:
     assert "_DOMAIN_FEATURE_FLAGS" not in source
     for name in (d.name for d in _domain_dirs()):
         assert f'"{name}"' not in source, f"loader names domain {name!r}"
+
+
+@pytest.mark.parametrize(
+    ("cypher", "expected"),
+    [
+        ("exists((candidate)-[:SERVES]->(t {route_code: $route_code}))", ["route_code"]),
+        (
+            "candidate.capacity >= $min_capacity AND candidate.tier IN [$tier_a, $tier_b]",
+            ["min_capacity", "tier_a", "tier_b"],
+        ),
+        ("candidate.ids CONTAINS $x; RETURN $y", ["x", "y"]),
+        ("candidate.utilization <= $85.0", ["85.0"]),
+        ("candidate.active = $True)", ["True"]),
+    ],
+)
+def test_parameter_capture_stops_at_closing_punctuation(cypher: str, expected: list[str]) -> None:
+    """`$param}` in a traversal target filter is the identifier `param`, not a defect (PR #318 review)."""
+    from engine.config.loader import _IDENTIFIER, _PARAM_REF
+
+    captured = _PARAM_REF.findall(cypher)
+    assert captured == expected
+    # The scalar-queryparam defect the capture exists to report is still reported.
+    assert [p for p in captured if not _IDENTIFIER.fullmatch(p)] == [
+        p for p in expected if not p[0].isalpha() and p[0] != "_"
+    ]

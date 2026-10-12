@@ -38,6 +38,12 @@ SPEC_FILENAME = "spec.yaml"
 # is a scalar `queryparam` that GateSpec coerced to a string and the compiler
 # would hand to Neo4j as a parameter *name*.
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# A `$` reference in compiled Cypher, captured up to the next whitespace or
+# closing punctuation. The capture must stop at `}` / `]` / `,` / `;` as well as
+# `)`: the traversal-gate target filter form `{prop: $param}` would otherwise
+# yield `param}` and withhold a valid pack for a misreported reason (PR #318
+# review, verified on Neo4j 5 in the Stage 4 proof).
+_PARAM_REF = re.compile(r"\$([^\s)}\],;]+)")
 
 
 class DomainNotFoundError(Exception):
@@ -88,7 +94,7 @@ def admission_defects(spec: DomainSpec) -> list[str]:
             continue
         if "RELATES_TO" in cypher and not gate.edgetype:
             defects.append(f"{gate.name}: RELATES_TO fallback — {cypher}")
-        for param in re.findall(r"\$([^\s)]+)", cypher):
+        for param in _PARAM_REF.findall(cypher):
             if not _IDENTIFIER.fullmatch(param):
                 defects.append(f"{gate.name}: parameter {param!r} is not an identifier — {cypher}")
     # plugins.inference_rules authorizes registered rules by name; a name the
