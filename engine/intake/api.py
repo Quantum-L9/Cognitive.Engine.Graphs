@@ -51,6 +51,29 @@ def _require_key(payload: dict[str, Any], key: str, action: str) -> Any:
     return payload[key]
 
 
+def _optional_str_map(payload: dict[str, Any], key: str, action: str) -> dict[str, str] | None:
+    """Optional ``{str: str}`` table, validated before it reaches the compiler."""
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in value.items()):
+        raise ValueError(f"Field '{key}' in {action} payload must be an object of string → string")
+    return value
+
+
+def _optional_str_list_map(payload: dict[str, Any], key: str, action: str) -> dict[str, list[str]] | None:
+    """Optional ``{str: [str, ...]}`` table, validated before it reaches the compiler."""
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not all(
+        isinstance(k, str) and isinstance(v, list) and all(isinstance(item, str) for item in v)
+        for k, v in value.items()
+    ):
+        raise ValueError(f"Field '{key}' in {action} payload must be an object of string → list of strings")
+    return value
+
+
 async def handle_intake_scan(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     """
     Scan CRM fields against graph spec ontology.
@@ -101,9 +124,9 @@ async def handle_intake_compile(tenant: str, payload: dict[str, Any]) -> dict[st
         crm_fields,
         business_profile,
         spec,
-        vertical_keywords=payload.get("vertical_keywords"),
-        derivation_graph=payload.get("derivation_graph"),
-        ambiguity_patterns=payload.get("ambiguity_patterns"),
+        vertical_keywords=_optional_str_map(payload, "vertical_keywords", "intake_compile"),
+        derivation_graph=_optional_str_list_map(payload, "derivation_graph", "intake_compile"),
+        ambiguity_patterns=_optional_str_list_map(payload, "ambiguity_patterns", "intake_compile"),
     )
 
     logger.info("intake_compile complete: tier=%s", result.delivery_tier)

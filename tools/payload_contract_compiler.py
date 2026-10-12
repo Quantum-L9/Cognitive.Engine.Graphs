@@ -43,6 +43,10 @@ except ImportError:  # CI unit env may omit optional requirements-dev extras
     Draft202012Validator = None  # type: ignore[misc, assignment]
 
 ROOT = Path(__file__).resolve().parents[1]
+# The compiler admits fixtures through engine.models.payloads; make a bare
+# `python tools/payload_contract_compiler.py` work like the sibling tools do.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 PAYLOADS = ROOT / "contracts" / "payloads"
 DEFAULT_DOMAINS_ROOT = ROOT / "domains"
 DEFAULT_REPORT = ROOT / "artifacts" / "payload-contract-compiler-report.json"

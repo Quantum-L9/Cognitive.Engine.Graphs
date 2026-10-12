@@ -17,8 +17,8 @@ $defs:
     pattern: ^[a-z0-9][a-z0-9_-]{0,63}$
   identifier:
     type: string
-    description: A name the domain spec declares (match direction, entity type, outcome type, source system).
-    pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+    description: A name the domain spec declares (match direction, entity type, outcome type, source system). Shape only; membership is checked against the domain contract.
+    pattern: ^[A-Za-z_][A-Za-z0-9_.-]*$
   entity_ref:
     type: string
     pattern: ^[a-z0-9_.-]+:[^\s]+$

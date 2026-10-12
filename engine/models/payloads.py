@@ -62,10 +62,11 @@ ENTITY_REF_PATTERN = r"^[a-z0-9_.-]+:[^\s]+$"
 _ENTITY_REF = re.compile(ENTITY_REF_PATTERN)
 # Domain ids are directory names under the domains root (DomainPackLoader).
 DOMAIN_ID_PATTERN = r"^[a-z0-9][a-z0-9_-]{0,63}$"
-# Match directions, entity types, outcome types and source systems are
-# identifiers the domain spec declares; structural shape only — membership is
-# checked against the DomainContract.
-IDENTIFIER_PATTERN = r"^[A-Za-z_][A-Za-z0-9_]*$"
+# Match directions, entity types, outcome types and source systems are names
+# the domain spec declares. DomainSpec puts no grammar on them, so this is
+# shape only — a single token with no whitespace or quoting, hyphens and dots
+# allowed — and membership is checked against the DomainContract.
+IDENTIFIER_PATTERN = r"^[A-Za-z_][A-Za-z0-9_.-]*$"
 
 DOMAIN_CONTRACT_CONTEXT_KEY = "domain_contract"
 

@@ -27,6 +27,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import yaml
 
 from engine.config.loader import DomainNotFoundError, DomainPackLoader
 from engine.config.schema import DomainSpec
@@ -310,3 +311,23 @@ async def test_outcome_node_label_comes_from_the_domain_spec() -> None:
     assert writes, calls
     assert "CREATE (o:DockingResult {" in writes[0]
     assert "TransactionOutcome" not in writes[0]
+
+
+def test_unregistered_inference_rule_name_withholds_the_pack(tmp_path: Path) -> None:
+    """plugins.inference_rules names registered rules; a name the registry lacks is an admission defect."""
+    from engine.config.loader import admission_defects
+    from engine.inference_rule_registry import list_registered_rules
+
+    raw = (SYNTHETIC_DOMAINS_ROOT / "cheese-aging" / "spec.yaml").read_text()
+    (tmp_path / "cheese-aging").mkdir()
+    (tmp_path / "cheese-aging" / "spec.yaml").write_text(
+        raw + "\nplugins:\n  inference_rules:\n    - infer_company_size_tier\n    - infer_wheel_ripeness\n"
+    )
+    with pytest.raises(DomainNotFoundError, match="'infer_wheel_ripeness' is not a registered inference rule"):
+        DomainPackLoader(config_path=str(tmp_path)).load_domain("cheese-aging")
+
+    assert "infer_company_size_tier" in list_registered_rules()
+    good = DomainSpec.model_validate(
+        {**yaml.safe_load(raw), "plugins": {"inference_rules": ["infer_company_size_tier"]}}
+    )
+    assert admission_defects(good) == []

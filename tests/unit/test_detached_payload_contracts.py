@@ -10,6 +10,7 @@ system) is accepted only when the authorized domain declares it.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -254,3 +255,27 @@ def test_contract_from_spec_matches_declared_vocabulary() -> None:
         source_systems=frozenset({"ceg", "operator", "external_source", "station_ledger"}),
         outcome_types=frozenset({"docked", "aborted"}),
     )
+
+
+def test_declared_vocabulary_with_hyphens_or_dots_is_admitted() -> None:
+    """DomainSpec puts no grammar on directions, signals or owners; the payload layer adds none either.
+
+    Shape only (one token, no whitespace) — membership against the contract is
+    the authoritative check, so a pack that declares ``window-to-depot`` must be
+    usable through the typed contracts exactly as the loader accepted it.
+    """
+    base = synthetic_contract("orbital-logistics")
+    contract = base.model_copy(update={"match_directions": base.match_directions | {"window-to-depot"}})
+    payload = example_payload_for("orbital-logistics", "match-request.json")
+    payload["direction"] = "window-to-depot"
+    assert admit_payload(MatchRequest, payload, contract).direction == "window-to-depot"
+
+    schema_pattern = yaml.safe_load((PAYLOADS / "common.schema.yaml").read_text(encoding="utf-8"))["$defs"][
+        "identifier"
+    ]["pattern"]
+    from engine.models.payloads import IDENTIFIER_PATTERN
+
+    assert schema_pattern == IDENTIFIER_PATTERN
+    assert re.fullmatch(IDENTIFIER_PATTERN, "window-to-depot")
+    assert re.fullmatch(IDENTIFIER_PATTERN, "Orbital.Depot")
+    assert not re.fullmatch(IDENTIFIER_PATTERN, "two words")

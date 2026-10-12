@@ -91,6 +91,16 @@ def admission_defects(spec: DomainSpec) -> list[str]:
         for param in re.findall(r"\$([^\s)]+)", cypher):
             if not _IDENTIFIER.fullmatch(param):
                 defects.append(f"{gate.name}: parameter {param!r} is not an identifier — {cypher}")
+    # plugins.inference_rules authorizes registered rules by name; a name the
+    # registry does not know would surface only when emit_inference_feedback
+    # runs it (KeyError), so it is an admission defect, not a runtime surprise.
+    if spec.plugins and spec.plugins.inference_rules:
+        from engine.inference_rule_registry import list_registered_rules
+
+        registered = set(list_registered_rules())
+        for rule_name in spec.plugins.inference_rules:
+            if rule_name not in registered:
+                defects.append(f"plugins.inference_rules: {rule_name!r} is not a registered inference rule")
     return defects
 
 

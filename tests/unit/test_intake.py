@@ -465,3 +465,51 @@ class TestCallerSuppliedRecipes:
         patterns = {"name": ["depot_name", "operator_name"]}
         assert _check_ambiguous(" Name ", patterns) == ["depot_name", "operator_name"]
         assert _check_ambiguous("type", patterns) is None
+
+
+class TestIntakeCompileHandlerValidation:
+    """Caller-supplied tables are validated at the handler, not deep in the compiler."""
+
+    @pytest.fixture(autouse=True)
+    def _bind_loader(self, intake_spec: DomainSpec) -> None:
+        from unittest.mock import MagicMock
+
+        from engine.intake import api
+
+        loader = MagicMock()
+        loader.load_domain.return_value = intake_spec
+        api.init_intake(loader)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("key", "value", "expected"),
+        [
+            ("vertical_keywords", "plastic", "object of string → string"),
+            ("vertical_keywords", {"plastic": 1}, "object of string → string"),
+            ("derivation_graph", [], "object of string → list of strings"),
+            ("derivation_graph", {"total": "quantity"}, "object of string → list of strings"),
+            ("ambiguity_patterns", {"name": [1, 2]}, "object of string → list of strings"),
+        ],
+    )
+    async def test_malformed_tables_are_rejected_with_a_structured_error(
+        self, key: str, value: object, expected: str
+    ) -> None:
+        from engine.intake.api import handle_intake_compile
+
+        payload = {"crm_fields": ["name"], "business_profile": "a company", key: value}
+        with pytest.raises(ValueError, match=expected):
+            await handle_intake_compile("test-intake", payload)
+
+    @pytest.mark.asyncio
+    async def test_well_formed_tables_reach_the_compiler(self) -> None:
+        from engine.intake.api import handle_intake_compile
+
+        payload = {
+            "crm_fields": ["name"],
+            "business_profile": "a plastic recycler",
+            "vertical_keywords": {"plastic": "test-intake"},
+            "derivation_graph": {"total": ["quantity"]},
+            "ambiguity_patterns": {"name": ["company_name"]},
+        }
+        result = await handle_intake_compile("test-intake", payload)
+        assert result["delivery_tier"]
