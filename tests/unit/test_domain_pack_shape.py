@@ -15,6 +15,7 @@ validated either.
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import pytest
@@ -135,9 +136,9 @@ def test_operator_overrides_are_generic_and_default_off() -> None:
 
 def test_loader_source_names_no_domain() -> None:
     """The admission policy must not special-case any domain id."""
-    import engine.config.loader as loader_module
-
-    source = Path(loader_module.__file__).read_text(encoding="utf-8")
+    loader_file = inspect.getsourcefile(withholding_reason)
+    assert loader_file is not None
+    source = Path(loader_file).read_text(encoding="utf-8")
     assert "_DOMAIN_FEATURE_FLAGS" not in source
     for name in (d.name for d in _domain_dirs()):
         assert f'"{name}"' not in source, f"loader names domain {name!r}"

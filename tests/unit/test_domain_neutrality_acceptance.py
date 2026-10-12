@@ -21,6 +21,7 @@ rather than a built-in recipe. They are verification inputs, not products.
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -69,14 +70,18 @@ def synthetic(request: pytest.FixtureRequest) -> tuple[str, DomainSpec]:
 
 def test_core_imports_without_any_domain_pack() -> None:
     """The engine's executable modules import with no pack on disk at all."""
-    import engine.boot
-    import engine.gds.scheduler
-    import engine.handlers
-    import engine.inference_rule_registry
-    import engine.models.payloads
-
-    assert engine.boot.GraphLifecycle
-    assert engine.handlers.ACTION_HANDLERS
+    modules = {
+        name: importlib.import_module(name)
+        for name in (
+            "engine.boot",
+            "engine.gds.scheduler",
+            "engine.handlers",
+            "engine.inference_rule_registry",
+            "engine.models.payloads",
+        )
+    }
+    assert modules["engine.boot"].GraphLifecycle
+    assert modules["engine.handlers"].ACTION_HANDLERS
 
 
 @pytest.mark.asyncio
