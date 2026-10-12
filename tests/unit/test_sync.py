@@ -195,6 +195,33 @@ class TestSyncGenerator:
         with pytest.raises(ValueError, match="edgedirection must be"):
             SyncGenerator(make_mock_domain_spec()).generate_sync_query(endpoint, batch_data=[])
 
+    def test_child_entity_sync_legacy_path_behind_flag(self, monkeypatch) -> None:
+        """C-21: childsync_foreach_projection=False restores the pre-Stage-2 UNWIND path."""
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "childsync_foreach_projection", False)
+        child = MagicMock()
+        child.targetnode = "Instrument"
+        child.targetid = "instrument_id"
+        child.field = "instruments"
+        child.edgetype = "INSTALLED_IN"
+        child.edgedirection = "childtoparent"
+
+        endpoint = make_mock_sync_endpoint(
+            path="/sync/laboratories",
+            strategy=SyncStrategy.UNWINDMERGE,
+            target_node="Laboratory",
+            id_property="lab_id",
+            child_sync=[child],
+        )
+
+        cypher = SyncGenerator(make_mock_domain_spec()).generate_sync_query(endpoint, batch_data=[])
+
+        assert "SET n += row, n._tenant = $tenant" in cypher
+        assert "UNWIND coalesce(row.instruments, []) AS child_row" in cypher
+        assert "MERGE (n)-[:INSTALLED_IN]<-(c)" in cypher
+        assert "FOREACH" not in cypher
+
     def test_parent_without_childsync_keeps_plain_set(self) -> None:
         """Endpoints without childsync keep `SET n += row` unchanged."""
         endpoint = make_mock_sync_endpoint(

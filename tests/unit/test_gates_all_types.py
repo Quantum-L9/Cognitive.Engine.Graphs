@@ -256,6 +256,28 @@ class TestGateCompiler:
             "(EXISTS { MATCH (candidate)-[:SERVES_ROUTE]->(t:Route) WHERE t.route_code = $route_code }))"
         )
 
+    def test_compile_traversal_gate_legacy_path_behind_flag(self, monkeypatch) -> None:
+        """C-21: traversal_gate_exists_subquery=False restores the pre-Stage-2 predicate and null wrap."""
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "traversal_gate_exists_subquery", False)
+        gate = make_mock_gate_spec(
+            name="route_match",
+            gate_type=GateType.TRAVERSAL,
+            edge_type="SERVES_ROUTE",
+            to_node="Route",
+            candidate_prop="route_code",
+            query_param="route_code",
+            null_behavior=NullBehavior.FAIL,
+        )
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+
+        cypher = compiler.compile(gate)
+
+        assert "exists((candidate)-[:SERVES_ROUTE]->(t:Route {route_code: $route_code}))" in cypher
+        assert "candidate.route_code IS NOT NULL" in cypher
+        assert "EXISTS {" not in cypher
+
     def test_compile_traversal_gate_without_target_filter(self) -> None:
         """No candidateprop/queryparam: the gate only requires that some edge exists."""
         gate = make_mock_gate_spec(

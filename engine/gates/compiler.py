@@ -388,9 +388,20 @@ class GateCompiler:
         what makes a domain pack self-sufficient. The EXISTS subquery is the
         same form the exclusion gate already uses.
         """
+        from engine.config.settings import settings
+
         edge_type = sanitize_label(gate.edgetype) if gate.edgetype else "RELATES_TO"
         target_label = sanitize_label(gate.tonode) if gate.tonode else ""
+        label_clause = f":{target_label}" if target_label else ""
         target_filter = ""
+
+        if not settings.traversal_gate_exists_subquery:
+            # Legacy predicate (C-21 rollback path). Not executable on Neo4j 5.
+            if gate.candidateprop and gate.queryparam:
+                prop = sanitize_label(gate.candidateprop)
+                param = _param_name(gate.queryparam)
+                target_filter = f" {{{prop}: ${param}}}"
+            return f"exists((candidate)-[:{edge_type}]->(t{label_clause}{target_filter}))"
 
         if gate.candidateprop and gate.queryparam:
             # candidateprop names the TARGET node's property here (the related
@@ -399,7 +410,6 @@ class GateCompiler:
             param = _param_name(gate.queryparam)
             target_filter = f" WHERE t.{prop} = ${param}"
 
-        label_clause = f":{target_label}" if target_label else ""
         # Concatenated like the exclusion gate above: edge_type / target_label /
         # prop are sanitize_label()-validated and values only ever flow through
         # $ parameters (C-009; tools/contract_scanner.py SEC-001).
@@ -422,9 +432,13 @@ class GateCompiler:
         # property, which the EXISTS subquery already tests. Wrapping it as
         # `candidate.<prop>` would make the gate pass or fail on whether the
         # candidate happens to carry a same-named property — a hidden coupling
-        # between the candidate's shape and its taxonomy (Stage 2, P4).
+        # between the candidate's shape and its taxonomy (Stage 2, P4). The
+        # legacy wrap is kept behind the same flag as the legacy predicate.
+        from engine.config.settings import settings
+
+        skip_candidate_prop = gate.type == GateType.TRAVERSAL and settings.traversal_gate_exists_subquery
         candidate_prop: str | None = None
-        if gate.candidateprop and gate.type != GateType.TRAVERSAL:
+        if gate.candidateprop and not skip_candidate_prop:
             candidate_prop = f"candidate.{sanitize_label(gate.candidateprop)}"
 
         return NullHandler.wrap_gate_with_null_logic(

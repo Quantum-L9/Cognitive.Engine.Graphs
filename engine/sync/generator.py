@@ -57,8 +57,10 @@ class SyncGenerator:
         # can only be of primitive types or arrays thereof"), so childsync could
         # never execute. Null-override the child fields in a map projection so
         # the parent receives only its own properties.
+        from engine.config.settings import settings
+
         child_fields = [sanitize_label(child.field) for child in spec.childsync or []]
-        if child_fields:
+        if child_fields and settings.childsync_foreach_projection:
             null_overrides = ", ".join(f"{field}: null" for field in child_fields)
             set_clause = f"SET n += row{{.*, {null_overrides}}}, n._tenant = $tenant"
         else:
@@ -89,6 +91,20 @@ class SyncGenerator:
                 sanitized_child_edge = sanitize_label(child.edgetype)
                 sanitized_child_field = sanitize_label(child.field)
                 sanitized_child_target_id = sanitize_label(child.targetid)
+                if not settings.childsync_foreach_projection:
+                    # Legacy path (C-21 rollback). Not executable on Neo4j 5:
+                    # the parent SET above still carries the child collection.
+                    direction = "->" if child.edgedirection == "parenttochild" else "<-"
+                    cypher_parts.extend(
+                        [
+                            "WITH n, row",
+                            f"UNWIND coalesce(row.{sanitized_child_field}, []) AS child_row",
+                            f"MERGE (c:{sanitized_child_node} {{{sanitized_child_target_id}: child_row.{sanitized_child_target_id}}})",
+                            "SET c += child_row, c._tenant = $tenant",
+                            f"MERGE (n)-[:{sanitized_child_edge}]{direction}(c)",
+                        ]
+                    )
+                    continue
                 # Stage 2 (P3): `(n)-[:T]<-(c)` is not Cypher; the reverse edge
                 # is `(n)<-[:T]-(c)`. An undeclared direction is refused rather
                 # than silently picking one.
