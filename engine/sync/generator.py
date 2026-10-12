@@ -50,10 +50,24 @@ class SyncGenerator:
 
         sanitized_target = sanitize_label(spec.targetnode)
         sanitized_id = sanitize_label(spec.idproperty)
+
+        # Stage 2 (CEG Stage 4 proof, P3): a childsync row carries its children
+        # as a list of maps under `field`. `SET n += row` copied that list onto
+        # the parent and Neo4j rejected the whole statement ("Property values
+        # can only be of primitive types or arrays thereof"), so childsync could
+        # never execute. Null-override the child fields in a map projection so
+        # the parent receives only its own properties.
+        child_fields = [sanitize_label(child.field) for child in spec.childsync or []]
+        if child_fields:
+            null_overrides = ", ".join(f"{field}: null" for field in child_fields)
+            set_clause = f"SET n += row{{.*, {null_overrides}}}, n._tenant = $tenant"
+        else:
+            set_clause = "SET n += row, n._tenant = $tenant"
+
         cypher_parts = [
             "UNWIND $batch AS row",
             f"MERGE (n:{sanitized_target} {{{sanitized_id}: row.{sanitized_id}}})",
-            "SET n += row, n._tenant = $tenant",
+            set_clause,
         ]
 
         if spec.taxonomyedges:
@@ -75,14 +89,30 @@ class SyncGenerator:
                 sanitized_child_edge = sanitize_label(child.edgetype)
                 sanitized_child_field = sanitize_label(child.field)
                 sanitized_child_target_id = sanitize_label(child.targetid)
-                direction = "->" if child.edgedirection == "parenttochild" else "<-"
+                # Stage 2 (P3): `(n)-[:T]<-(c)` is not Cypher; the reverse edge
+                # is `(n)<-[:T]-(c)`. An undeclared direction is refused rather
+                # than silently picking one.
+                if child.edgedirection == "parenttochild":
+                    edge_pattern = f"(n)-[:{sanitized_child_edge}]->(c)"
+                elif child.edgedirection == "childtoparent":
+                    edge_pattern = f"(n)<-[:{sanitized_child_edge}]-(c)"
+                else:
+                    msg = (
+                        f"Endpoint '{spec.path}': childsync '{child.field}' edgedirection must be "
+                        f"'parenttochild' or 'childtoparent', got {child.edgedirection!r}"
+                    )
+                    raise ValueError(msg)
+                # FOREACH keeps one output row per parent, so a parent with no
+                # children (or several childsync blocks) never truncates the
+                # statement the way UNWIND over an empty list does.
                 cypher_parts.extend(
                     [
                         "WITH n, row",
-                        f"UNWIND coalesce(row.{sanitized_child_field}, []) AS child_row",
-                        f"MERGE (c:{sanitized_child_node} {{{sanitized_child_target_id}: child_row.{sanitized_child_target_id}}})",
-                        "SET c += child_row, c._tenant = $tenant",
-                        f"MERGE (n)-[:{sanitized_child_edge}]{direction}(c)",
+                        f"FOREACH (child_row IN coalesce(row.{sanitized_child_field}, []) |",
+                        f"  MERGE (c:{sanitized_child_node} {{{sanitized_child_target_id}: child_row.{sanitized_child_target_id}}})",
+                        "  SET c += child_row, c._tenant = $tenant",
+                        f"  MERGE {edge_pattern}",
+                        ")",
                     ]
                 )
 
