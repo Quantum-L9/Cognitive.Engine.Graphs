@@ -518,11 +518,21 @@ class TestHandleAdmin:
 class TestRegisterAll:
     """Test register_all function."""
 
-    def test_registers_all_8_handlers(self) -> None:
-        """register_all registers exactly 8 handlers."""
+    def test_registers_all_9_handlers(self) -> None:
+        """register_all registers exactly 9 handlers (HEALTH-01 added health-assess)."""
         mock_router = MagicMock()
         register_all(mock_router)
-        assert mock_router.register_handler.call_count == 8
+        assert mock_router.register_handler.call_count == 9
         registered = {call.args[0] for call in mock_router.register_handler.call_args_list}
-        expected = {"match", "sync", "admin", "outcomes", "resolve", "health", "healthcheck", "enrich"}
+        expected = {
+            "match",
+            "sync",
+            "admin",
+            "outcomes",
+            "resolve",
+            "health",
+            "healthcheck",
+            "health-assess",
+            "enrich",
+        }
         assert registered == expected

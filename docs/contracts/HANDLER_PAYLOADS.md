@@ -66,6 +66,31 @@ class AdminResponse(BaseModel):
 ```
 
 
+## health-assess (HEALTH-01)
+
+The canonical health route. Gate owns the action name for `ceg`; it is the
+only advertised way to reach `engine/health/api.py`. `admin` is never
+advertised, so health is not routed through `admin` — the same three
+subactions remain on `admin` only as a direct operator surface in dev.
+
+```python
+class HealthAssessPayload(BaseModel):
+    subaction: Literal["health_assess", "health_batch_assess", "health_report"]
+    domain: str | None = None  # HEALTH-05: absent or equal to the packet tenant; anything else is rejected
+    # Remaining keys are the subaction's own request model in engine/health/health_schemas.py
+    # (HealthAssessmentRequest, BatchHealthRequest) or, for health_report, entity_id.
+
+
+class HealthAssessResponse(BaseModel):
+    # The subaction's own response model (EntityHealthResponse, BatchHealthReport, HealthReport);
+    # {"status": "disabled", ...} while HEALTH_API_ENABLED is off.
+    pass
+```
+
+Any other `subaction` raises `ValidationError` (`action="health-assess"`);
+nothing else `handle_admin` offers is reachable from this action.
+
+
 ## Validation Pattern
 
 ```python

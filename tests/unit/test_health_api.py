@@ -20,6 +20,8 @@ Findings covered:
   HEALTH-03                       assess surfaces the trigger_reenrichment_v2 outcome;
                                   reason token == dispatch.error
   HEALTH-05                       payload.domain must equal the packet tenant
+  HEALTH-01                       the canonical `health-assess` action dispatches the same
+                                  three subactions with the same results as `admin`
 
 The field analysis pipeline (analyzer, scorer, field map, gap prioritizer,
 ROI priority) is replaced with deterministic fakes: these tests are about the
@@ -456,3 +458,121 @@ class TestDomainMustEqualTenant:
                         await handle_admin(TENANT, {"subaction": subaction, "domain": "other-tenant"})
         finally:
             _reset_singleton()
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  H9 — HEALTH-01: canonical `health-assess` action
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+@pytest.fixture
+def engine_up(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """An initialised engine with no tenant allowlist (CEG-AUTH-01 admits all outside prod)."""
+    from engine.handlers import init_dependencies
+    from engine.state import _reset_singleton
+
+    monkeypatch.delenv("TENANT_ALLOWLIST", raising=False)
+    _reset_singleton()
+    init_dependencies(MagicMock(), MagicMock())
+    try:
+        yield
+    finally:
+        _reset_singleton()
+
+
+def _health_payload(subaction: str) -> dict[str, Any]:
+    if subaction == "health_assess":
+        return _assess_payload(subaction=subaction)
+    if subaction == "health_batch_assess":
+        return {"subaction": subaction, "entities": _entities(2)}
+    return {"subaction": subaction, "entity_id": "ent-1"}
+
+
+@pytest.mark.finding("HEALTH-01")
+class TestHealthAssessAction:
+    def test_registered_as_its_own_action(self) -> None:
+        from engine.handlers import ACTION_HANDLERS, handle_admin, handle_health_assess
+
+        assert ACTION_HANDLERS["health-assess"] is handle_health_assess
+        assert ACTION_HANDLERS["health-assess"] is not handle_admin
+
+    @pytest.mark.parametrize("subaction", ["health_assess", "health_batch_assess", "health_report"])
+    async def test_same_result_as_admin(self, subaction: str, pipeline: _Pipeline, engine_up: None) -> None:
+        """One dispatcher: the Gate route and the operator route return identical bodies."""
+        from engine.handlers import handle_admin, handle_health_assess
+
+        with patch("engine.config.settings.settings", _settings(health_api_enabled=True)):
+            via_action = await handle_health_assess(TENANT, _health_payload(subaction))
+            via_admin = await handle_admin(TENANT, _health_payload(subaction))
+        # health_report stamps `generated_at` from the wall clock on every call;
+        # it is the one field two sequential calls legitimately differ on.
+        if subaction == "health_report":
+            assert via_action.pop("generated_at")
+            assert via_admin.pop("generated_at")
+        assert via_action == via_admin
+        assert via_action.get("status") != "disabled"
+        assert pipeline.loaded_domains == [TENANT, TENANT]
+
+    @pytest.mark.parametrize("subaction", ["health_assess", "health_batch_assess", "health_report"])
+    async def test_disabled_flag_reads_disabled_like_admin(
+        self, subaction: str, pipeline: _Pipeline, engine_up: None
+    ) -> None:
+        from engine.handlers import handle_admin, handle_health_assess
+
+        with patch("engine.config.settings.settings", _settings(health_api_enabled=False)):
+            via_action = await handle_health_assess(TENANT, _health_payload(subaction))
+            via_admin = await handle_admin(TENANT, _health_payload(subaction))
+        assert via_action == via_admin
+        assert via_action["status"] == "disabled"
+        assert via_action["subaction"] == subaction
+        assert pipeline.loaded_domains == []
+
+    async def test_refuses_non_health_subaction_before_any_work(self, pipeline: _Pipeline, engine_up: None) -> None:
+        from engine.handlers import ValidationError, handle_health_assess
+
+        with patch("engine.config.settings.settings", _settings(health_api_enabled=True)):
+            with pytest.raises(ValidationError, match="is not a health subaction") as exc_info:
+                await handle_health_assess(TENANT, {"subaction": "list_domains"})
+        assert exc_info.value.action == "health-assess"
+        assert pipeline.loaded_domains == []
+
+    async def test_missing_subaction_is_refused(self, pipeline: _Pipeline, engine_up: None) -> None:
+        from engine.handlers import ValidationError, handle_health_assess
+
+        with pytest.raises(ValidationError, match="Missing required field 'subaction' in health-assess payload"):
+            await handle_health_assess(TENANT, _assess_payload())
+        assert pipeline.loaded_domains == []
+
+    async def test_foreign_domain_rejected_before_dispatch(
+        self, pipeline: _Pipeline, engine_up: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """HEALTH-05 holds on the canonical route exactly as on admin."""
+        from engine.handlers import ValidationError, handle_health_assess
+
+        async def _must_not_run(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
+            raise AssertionError("health handler must not be reached for a foreign domain")
+
+        monkeypatch.setattr(health_api, "handle_health_assess", _must_not_run)
+        monkeypatch.setattr(health_api, "handle_health_batch_assess", _must_not_run)
+        monkeypatch.setattr(health_api, "handle_health_report", _must_not_run)
+        with patch("engine.config.settings.settings", _settings(health_api_enabled=True)):
+            for subaction in ("health_assess", "health_batch_assess", "health_report"):
+                with pytest.raises(ValidationError, match="does not match packet tenant") as exc_info:
+                    await handle_health_assess(TENANT, {"subaction": subaction, "domain": "other-tenant"})
+                assert exc_info.value.action == "health-assess"
+
+    async def test_tenant_allowlist_applies(self, pipeline: _Pipeline, monkeypatch: pytest.MonkeyPatch) -> None:
+        """CEG-AUTH-01: the canonical route honours TENANT_ALLOWLIST like every other action."""
+        from engine.handlers import ValidationError, handle_health_assess, init_dependencies
+        from engine.state import _reset_singleton
+
+        monkeypatch.setenv("TENANT_ALLOWLIST", "someone-else")
+        _reset_singleton()
+        init_dependencies(MagicMock(), MagicMock())
+        try:
+            with patch("engine.config.settings.settings", _settings(health_api_enabled=True)):
+                with pytest.raises(ValidationError, match="not in authorized allowlist"):
+                    await handle_health_assess(TENANT, _health_payload("health_assess"))
+        finally:
+            _reset_singleton()
+        assert pipeline.loaded_domains == []

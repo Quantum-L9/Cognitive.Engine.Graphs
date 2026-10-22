@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import ast
 import re
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
@@ -24,6 +27,12 @@ CHASSIS = ROOT / "chassis"
 # `enrich` is owned by EIE in Gate's action-ownership map; CEG's local handler of
 # the same name must never be advertised or accepted from Gate.
 _NOT_ADVERTISED = {"enrich", "admin", "health", "healthcheck"}
+
+# HEALTH-01 (operator decision 2026-10-22): the advertised set is exactly the
+# three EIE->CEG seam actions, resolve, and the canonical health route. Health is
+# not routed through `admin`.
+_ADVERTISED_EXPECTED = {"match", "sync", "outcomes", "resolve", "health-assess"}
+_HEALTH_SUBACTIONS = ("health_assess", "health_batch_assess", "health_report")
 _PEER_ENV_NAMES = ("EIE_URL", "EIE_BASE_URL", "ENRICHMENT_URL", "ENRICHMENT_ENGINE_URL", "PEER_URL", "NODE_URL")
 
 
@@ -189,3 +198,123 @@ def test_reverse_path_is_wired_through_gate_egress():
 def test_gate_client_singleton_is_the_only_gateclient_constructor():
     sites = sorted(rel for rel, src in _production_sources() if re.search(r"\bGateClient\s*\(", src))
     assert sites == ["engine/gate_client.py"], f"GateClient constructed outside the singleton: {sites}"
+
+
+# ── HEALTH-01: the canonical health route is `health-assess`, never `admin` ────
+
+
+def test_spec_advertised_set_is_exact():
+    advertised = set(_spec()["node"]["actions"])
+    assert advertised == _ADVERTISED_EXPECTED, (
+        f"advertised {sorted(advertised)} != {sorted(_ADVERTISED_EXPECTED)}: health is routed through "
+        "`health-assess` (HEALTH-01); add or remove an advertised action here deliberately"
+    )
+
+
+@pytest.mark.parametrize("surface", ["admin", "health", "healthcheck"])
+def test_spec_never_advertises_operator_surfaces(surface: str):
+    """Gate must never be able to route `admin` (or the liveness probes) to CEG."""
+    assert surface not in _spec()["node"]["actions"], f"{surface!r} is an operator/probe surface, not a Gate route"
+
+
+def test_health_assess_is_its_own_handler_not_admin():
+    from engine.handlers import ACTION_HANDLERS, handle_admin, handle_health_assess
+
+    assert ACTION_HANDLERS["health-assess"] is handle_health_assess
+    assert ACTION_HANDLERS["health-assess"] is not handle_admin
+    assert "admin" in ACTION_HANDLERS, "admin stays registered for direct operator calls in dev"
+
+
+def _admin_subactions_from_source() -> list[str]:
+    """Every literal `subaction == "..."` branch of handle_admin, from the AST.
+
+    The `subaction in {...}` health branch compares with `In`, not `Eq`, so the
+    three health subactions are not part of this list by construction.
+    """
+    tree = ast.parse((ENGINE / "handlers.py").read_text(encoding="utf-8"))
+    admin = next(fn for fn in ast.walk(tree) if isinstance(fn, ast.AsyncFunctionDef) and fn.name == "handle_admin")
+    found: set[str] = set()
+    for node in ast.walk(admin):
+        if not isinstance(node, ast.Compare) or len(node.ops) != 1 or not isinstance(node.ops[0], ast.Eq):
+            continue
+        if not (isinstance(node.left, ast.Name) and node.left.id == "subaction"):
+            continue
+        right = node.comparators[0]
+        if isinstance(right, ast.Constant) and isinstance(right.value, str):
+            found.add(right.value)
+    return sorted(found)
+
+
+_ADMIN_SUBACTIONS = _admin_subactions_from_source()
+
+
+def test_admin_subaction_enumeration_is_meaningful():
+    """Guard the parametrisation below against a silent empty list."""
+    assert len(_ADMIN_SUBACTIONS) >= 20, _ADMIN_SUBACTIONS
+    for must in ("list_domains", "init_schema", "trigger_gds", "erase_subject", "delegate_capability", "trigger_kge"):
+        assert must in _ADMIN_SUBACTIONS
+    assert not set(_ADMIN_SUBACTIONS) & set(_HEALTH_SUBACTIONS)
+
+
+@pytest.fixture
+def engine_up(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """An initialised engine with no tenant allowlist and the health API on."""
+    from engine.config.settings import Settings
+    from engine.handlers import init_dependencies
+    from engine.state import _reset_singleton
+
+    monkeypatch.delenv("TENANT_ALLOWLIST", raising=False)
+    _reset_singleton()
+    init_dependencies(MagicMock(), MagicMock())
+    settings = Settings(neo4j_password="test-pw", api_secret_key="test-key", health_api_enabled=True)
+    try:
+        with patch("engine.config.settings.settings", settings):
+            yield
+    finally:
+        _reset_singleton()
+
+
+@pytest.fixture
+def health_handlers_must_not_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.health import api as health_api
+
+    async def _must_not_run(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("a health handler ran for a request health-assess must refuse")
+
+    for name in ("handle_health_assess", "handle_health_batch_assess", "handle_health_report"):
+        monkeypatch.setattr(health_api, name, _must_not_run)
+
+
+@pytest.mark.parametrize("subaction", _ADMIN_SUBACTIONS)
+async def test_health_assess_refuses_every_admin_subaction(
+    subaction: str, engine_up: None, health_handlers_must_not_run: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rest of `admin` is unreachable through the canonical health route."""
+    from engine import handlers
+
+    async def _admin_must_not_run(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("health-assess must never delegate to handle_admin")
+
+    monkeypatch.setattr(handlers, "handle_admin", _admin_must_not_run)
+    with pytest.raises(handlers.ValidationError, match="is not a health subaction") as exc_info:
+        await handlers.handle_health_assess("plasticos", {"subaction": subaction, "domain_id": "plasticos"})
+    assert exc_info.value.action == "health-assess"
+
+
+async def test_health_assess_requires_a_subaction(engine_up: None, health_handlers_must_not_run: None) -> None:
+    from engine import handlers
+
+    with pytest.raises(handlers.ValidationError, match="Missing required field 'subaction' in health-assess payload"):
+        await handlers.handle_health_assess("plasticos", {})
+
+
+@pytest.mark.parametrize("subaction", _HEALTH_SUBACTIONS)
+async def test_health_assess_binds_domain_to_tenant(
+    subaction: str, engine_up: None, health_handlers_must_not_run: None
+) -> None:
+    """HEALTH-05 on the canonical route: payload.domain must equal the packet tenant."""
+    from engine import handlers
+
+    with pytest.raises(handlers.ValidationError, match="does not match packet tenant") as exc_info:
+        await handlers.handle_health_assess("plasticos", {"subaction": subaction, "domain": "other-tenant"})
+    assert exc_info.value.action == "health-assess"

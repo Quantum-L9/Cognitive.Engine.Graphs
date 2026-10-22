@@ -38,9 +38,14 @@ node:
   #     enrichment operation; CEG's local Cypher-property `enrich` is reached
   #     only through Gate-authored packets that Gate will not route here;
   #   * `admin`/`health`/`healthcheck` are operator/probe surfaces, not
-  #     collaboration routes, so they are not advertised either.
+  #     collaboration routes, so they are NEVER advertised;
+  #   * `health-assess` is the canonical health route (HEALTH-01, operator
+  #     decision 2026-10-22): Gate owns the action name for `ceg`, and it
+  #     dispatches only the three health subactions — health is not routed
+  #     through `admin`.
   actions:
     - match
     - sync
     - outcomes
     - resolve
+    - health-assess
