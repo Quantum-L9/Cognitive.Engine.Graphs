@@ -372,15 +372,21 @@ class GateSpec(BaseModel):
     description: str | None = None
     type: GateType
     candidateprop: str | None = None
-    queryparam: str | None = None
+    # A string is the NAME of a declared query parameter (`queryparam: density`
+    # → `$density`). A YAML scalar (`queryparam: 85.0`, `queryparam: true`) is a
+    # literal OPERAND: the compiler binds it under a generated parameter name
+    # (CEG-009b). The earlier validator stringified scalars, so `true` became
+    # the parameter name `$True` and `85.0` the refused name `$85.0`.
+    queryparam: str | int | float | bool | None = None
 
     @field_validator("queryparam", mode="before")
     @classmethod
-    def coerce_queryparam_to_str(cls, v: object) -> object:
-        """YAML parses unquoted booleans/numbers as native types; coerce to str."""
-        if v is not None and not isinstance(v, str):
-            return str(v)
-        return v
+    def validate_queryparam_shape(cls, v: object) -> object:
+        """Accept a parameter name or a scalar literal; refuse anything else outright."""
+        if v is None or isinstance(v, (str, bool, int, float)):
+            return v
+        msg = f"queryparam must be a parameter name or a scalar literal, got {type(v).__name__}"
+        raise ValueError(msg)
 
     operator: str | None = None
 
@@ -402,7 +408,10 @@ class GateSpec(BaseModel):
     relaxedpenalty: float = 0.0
     matchdirections: list[str] | None = None
     invertible: bool = False
-    strictwhen: str | None = None  # Conditional strictness expression
+    # Conditional strictness (CEG-009c): the gate filters only while this holds.
+    # Parsed by GateCompiler against its expression grammar, e.g.
+    # "$query.urgency = 'emergency'"; literals are bound as parameters.
+    strictwhen: str | None = None
     cypheroverride: str | None = None  # Custom Cypher for complex gates
     # Type-specific fields
     subgates: list[str] | None = None  # For composite
@@ -419,7 +428,11 @@ class GateSpec(BaseModel):
     queryparam_end: str | None = None
     candidateprop_start: str | None = None
     candidateprop_end: str | None = None
-    pattern: str | None = None  # For traversal gate
+    # Traversal gate, pattern form (CEG-009a): one hop from `(candidate)` to a
+    # named target node, parsed by GateCompiler's traversal grammar — never
+    # interpolated. Example: "(candidate)-[:SERVICES_ZIP]->(z:ZipCode)" with
+    # condition "z.zipcode = $query.zipcode".
+    pattern: str | None = None
     condition: str | None = None
 
 
@@ -1103,8 +1116,9 @@ class DomainSpec(BaseModel):
                     msg = f"Gate '{gate.name}' references unknown edge type '{gate.edgetype}'"
                     raise ValueError(msg)
 
-            # (d) W1-01: No gate references an undeclared parameter
-            if settings.domain_strict_validation and gate.queryparam and all_param_names:
+            # (d) W1-01: No gate references an undeclared parameter. A literal
+            # queryparam is an operand, not a reference, and is bound by the compiler.
+            if settings.domain_strict_validation and isinstance(gate.queryparam, str) and all_param_names:
                 if gate.queryparam not in all_param_names:
                     # Allow params that look like compound refs (e.g. with _min/_max suffixes)
                     base = gate.queryparam.removesuffix("_min").removesuffix("_max")

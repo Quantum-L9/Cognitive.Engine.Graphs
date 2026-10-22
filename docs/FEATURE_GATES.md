@@ -71,6 +71,7 @@ independently of the code default.
 | Constellation Orchestration | — | — | — | accepted architectural gap — see §9 |
 | Traversal Gate EXISTS Subquery | `TRAVERSAL_GATE_EXISTS_SUBQUERY` (`traversal_gate_exists_subquery`) | `True` | unset | active; traversal gates compile to an `EXISTS { … }` subquery Neo4j 5 accepts — see §20 |
 | Childsync FOREACH Projection | `CHILDSYNC_FOREACH_PROJECTION` (`childsync_foreach_projection`) | `True` | unset | active; childsync writes children in `FOREACH` without copying them onto the parent — see §20 |
+| Gate Declared Bounds | `GATE_DECLARED_BOUNDS_ENABLED` (`gate_declared_bounds_enabled`) | `True` | unset | active; range honours `queryparam_min`/`queryparam_max`, temporalrange honours `candidateprop_start`/`candidateprop_end` — see §21 |
 
 ---
 
@@ -572,3 +573,41 @@ with both flags on. Unit coverage: `tests/unit/test_gates_all_types.py`
 ### Rollback
 
 Set either flag to `false`. The legacy Cypher is emitted again verbatim.
+
+---
+
+## 21. Gate Declared Bounds (CEG-009b)
+
+**State**: Active (hardening)
+**Flag**: `GATE_DECLARED_BOUNDS_ENABLED=True` (default on)
+
+`GateSpec` declares `queryparam_min` / `queryparam_max` (a range gate whose
+candidate property must fall inside a query window) and `candidateprop_start`
+/ `candidateprop_end` (a temporalrange gate whose candidate window must overlap
+the query window). `GateCompiler` ignored all four, so:
+
+| Gate as written | Emitted before | Emitted now |
+|---|---|---|
+| `range` with `queryparam_min: a`, `queryparam_max: b` | `candidate.min_<prop> <= $value AND $value <= candidate.max_<prop>` | `candidate.<prop> >= $a AND candidate.<prop> <= $b` |
+| `temporalrange` with `candidateprop_start: s`, `candidateprop_end: e` | `candidate.timestamp >= $start AND candidate.timestamp <= $end` | `candidate.s <= $end AND candidate.e >= $start` |
+
+`$value` is a parameter nothing supplies and `candidate.timestamp` a property
+no such candidate carries, so neither legacy fragment ever matched what the
+spec author wrote. `freight-matching`'s `availability_window` is the live case:
+it compared `candidate.timestamp` and therefore rejected every candidate.
+
+Off: the legacy fragments, for C-21 rollback only. The surrounding CEG-009b
+change — a scalar `queryparam` (`85.0`, `true`) is bound as a generated
+parameter (`$gate_<name>_value`, exposed on `GateCompiler.last_query_params`)
+instead of being emitted as a parameter *name* — has no flag: the previous
+output (`$85.0`, `$True`) could not execute, so there is no legacy behaviour
+to return to.
+
+### Validation
+
+`tests/unit/test_gates_all_types.py` (`TestLiteralOperands`,
+`TestDeclaredBounds`) assert both shapes and the flag-off fragments.
+
+### Rollback
+
+Set the flag to `false`. The placeholder fragments are emitted again verbatim.

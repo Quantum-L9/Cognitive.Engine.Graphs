@@ -13,19 +13,15 @@ All 10 gate type implementations in one file.
 Production-grade, enterprise-quality, frontier AI lab standard.
 """
 
-import hashlib
 import logging
-import re
 from abc import ABC, abstractmethod
 from typing import Any
 
 from engine.config.schema import DomainSpec, GateSpec
+from engine.gates.compiler import GateCompiler, bind_param_key
 from engine.utils.security import sanitize_label
 
 logger = logging.getLogger(__name__)
-
-_PARAM_KEY_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_]")
-_MAX_PARAM_KEY_LEN = 64
 
 # C-009: spec tokens interpolated verbatim pass through a literal allow-list —
 # a lookup raises on anything else — so an operator or combinator read from
@@ -79,18 +75,23 @@ class BaseGate(ABC):
 
         The name is derived from the gate name so fragments from different gates
         never collide; both parts are reduced to ``[A-Za-z0-9_]`` so the name is
-        always a valid Cypher parameter identifier.
+        always a valid Cypher parameter identifier. The derivation is shared
+        with ``GateCompiler`` (``bind_param_key``) so the two never collide.
         """
-        safe_gate = _PARAM_KEY_UNSAFE_RE.sub("_", self.spec.name)
-        safe_suffix = _PARAM_KEY_UNSAFE_RE.sub("_", suffix)
-        raw_key = f"gate_{safe_gate}_{safe_suffix}"
-        if len(raw_key) > _MAX_PARAM_KEY_LEN:
-            # Keep the key an identifier of bounded length; the digest keeps it unique per gate.
-            digest = hashlib.sha256(safe_gate.encode()).hexdigest()[:16]
-            raw_key = f"gate_{digest}_{safe_suffix}"[:_MAX_PARAM_KEY_LEN]
-        key = sanitize_label(raw_key)
+        # bind_param_key already validates; sanitize_label here keeps the
+        # C-009 provenance visible to tools/cypher_lint.py in this module.
+        key = sanitize_label(bind_param_key(self.spec.name, suffix))
         self._query_params[key] = value
         return f"${key}"
+
+    def _query_operand(self) -> str:
+        """``$`` reference for the gate's `queryparam`: a name, or a bound literal (CEG-009b)."""
+        value = self.spec.queryparam
+        if value is None:
+            raise ValueError(f"Gate '{self.spec.name}': queryparam required")
+        if isinstance(value, str):
+            return self._param_ref(value)
+        return self._bind_param("value", value)
 
     def _prop_ref(self, prop: str) -> str:
         """Format property reference (property name validated as an identifier)."""
@@ -144,13 +145,13 @@ class ThresholdGate(BaseGate):
         """
         if not self.spec.candidateprop:
             raise ValueError(f"Gate '{self.spec.name}': candidateprop required")
-        if not self.spec.queryparam:
+        if self.spec.queryparam is None:
             raise ValueError(f"Gate '{self.spec.name}': queryparam required")
         if not self.spec.operator:
             raise ValueError(f"Gate '{self.spec.name}': operator required (>=, <=, >, <, =)")
 
         prop = self._prop_ref(self.spec.candidateprop)
-        param = self._param_ref(self.spec.queryparam)
+        param = self._query_operand()
         operator = _OPERATORS[self.spec.operator]
 
         return f"{prop} {operator} {param}"
@@ -170,11 +171,11 @@ class BooleanGate(BaseGate):
         """
         if not self.spec.candidateprop:
             raise ValueError(f"Gate '{self.spec.name}': candidateprop required")
-        if not self.spec.queryparam:
+        if self.spec.queryparam is None:
             raise ValueError(f"Gate '{self.spec.name}': queryparam required")
 
         prop = self._prop_ref(self.spec.candidateprop)
-        param = self._param_ref(self.spec.queryparam)
+        param = self._query_operand()
 
         return f"{prop} = {param}"
 
@@ -230,11 +231,11 @@ class EnumMapGate(BaseGate):
         """
         if not self.spec.candidateprop:
             raise ValueError(f"Gate '{self.spec.name}': candidateprop required")
-        if not self.spec.queryparam:
+        if self.spec.queryparam is None:
             raise ValueError(f"Gate '{self.spec.name}': queryparam required")
 
         prop = self._prop_ref(self.spec.candidateprop)
-        param = self._param_ref(self.spec.queryparam)
+        param = self._query_operand()
         self._query_params = {}
 
         # Check if mapping is provided (query value → candidate values)
@@ -294,12 +295,12 @@ class SelfRangeGate(BaseGate):
         """
         if not self.spec.candidateprop_min or not self.spec.candidateprop_max:
             raise ValueError(f"Gate '{self.spec.name}': candidateprop_min and candidateprop_max required")
-        if not self.spec.queryparam:
+        if self.spec.queryparam is None:
             raise ValueError(f"Gate '{self.spec.name}': queryparam required")
 
         min_prop = self._prop_ref(self.spec.candidateprop_min)
         max_prop = self._prop_ref(self.spec.candidateprop_max)
-        param = self._param_ref(self.spec.queryparam)
+        param = self._query_operand()
 
         return f"{param} >= {min_prop} AND {param} <= {max_prop}"
 
@@ -359,28 +360,27 @@ class TemporalRangeGate(BaseGate):
 
 
 class TraversalGate(BaseGate):
-    """Gate checks condition on a traversed relationship or node."""
+    """Gate checks condition on a traversed relationship or node.
+
+    Delegates to ``GateCompiler.compile_traversal`` (CEG-009a): a spec's
+    ``pattern`` / ``condition`` — or its structured ``edgetype`` / ``tonode`` /
+    ``candidateprop`` / ``queryparam`` — is parsed against the one traversal
+    grammar in the engine and re-emitted. This class used to interpolate the
+    two strings verbatim (``EXISTS { MATCH <pattern> WHERE <condition> }``),
+    a raw-Cypher escape hatch that no live path reached and that the grammar
+    now replaces. Query parameters compile to ``$name`` (the live compiler's
+    convention) rather than this module's ``$query.name``.
+    """
 
     def compile(self) -> str:
         """
         Example: EXISTS { MATCH (candidate)-[:OPERATESIN]->(s:State)
-                          WHERE s.statecode = $query.propertystate }
+                          WHERE s.statecode = $propertystate }
         """
-        if not self.spec.pattern:
-            raise ValueError(f"Gate '{self.spec.name}': pattern required")
-        if not self.spec.condition:
-            raise ValueError(f"Gate '{self.spec.name}': condition required")
-
-        # `pattern` and `condition` are spec-authored Cypher by design — the
-        # traversal gate is the domain spec's escape hatch and has no
-        # value-level grammar to validate against. The live GateCompiler
-        # (engine/gates/compiler.py) does not honour these fields; packs that
-        # rely on them are withheld behind `unvalidated_domain_packs_enabled`
-        # (CEG-009). The waiver below keeps the scanner honest about that.
-        pattern = self.spec.pattern
-        condition = self.spec.condition
-
-        return f"EXISTS {{ MATCH {pattern} WHERE {condition} }}"  # cypher-lint: allow spec-authored Cypher escape hatch, withheld by CEG-009
+        compiler = GateCompiler(self.domain_spec)
+        fragment = compiler.compile_traversal(self.spec)
+        self._query_params = compiler.last_query_params
+        return fragment
 
 
 # ============================================================================

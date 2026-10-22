@@ -32,34 +32,57 @@ logger = logging.getLogger(__name__)
 
 MAX_SPEC_BYTES = 5 * 1024 * 1024
 SPEC_FILENAME = "spec.yaml"
+
+# CEG-009 moved nine packs into the shape this loader reads. Seven of them
+# carried gates that compiled to Cypher that could not execute, which was
+# invisible while the loader never opened them: `type: traversal` gates
+# written with `pattern` + `condition` that fell back to a `RELATES_TO` edge
+# no ontology declares; scalar `queryparam` values (85.0, 5, 1, true)
+# stringified into parameter names; and `strictwhen` conditions consumed by no
+# compiler. Making a pack readable is not the same as making it correct, and
+# `unvalidated_domain_packs_enabled` withholds every pack on either ledger
+# below until it is. tests/unit/test_domain_pack_shape.py holds each ledger to
+# its reason, so a pack can only move forward and the set cannot grow silently.
+#
+# Ledger 1 — a static defect `_cypher_defects` still reports. The reason is
+# written beside the pack; when it compiles cleanly the test says to move it.
+STATIC_DEFECT_PACKS: dict[str, str] = {
+    "aios-god-agent": (
+        "capability_match: traversal `pattern` names `(query)` as a bound node and a `REQUIRES` edge "
+        "no ontology declares; the query entity travels as parameters"
+    ),
+    "executive-assistant": (
+        "skill_match: traversal `pattern` names `(query)` as a bound node and a `REQUIRES` edge no ontology declares"
+    ),
+    "repo-as-agent": (
+        "code_ownership: traversal `pattern` names `(query)` as a bound node and an `AFFECTS` edge no ontology declares"
+    ),
+    "roofing-company": (
+        "service_area: traversal `pattern` is not parenthesised and filters ZipCode on `code`, "
+        "a property the ontology does not declare (the node carries `zipcode`)"
+    ),
+    "mortgage-brokerage": (
+        "loanamount_range: a query-window range over `minloanamountusd` / `maxloanamountusd`, "
+        "which no queryschema field or derived parameter supplies (before CEG-009b the compiler "
+        "ignored the declared bounds and emitted the placeholder `$value`); the spec needs those "
+        "two query fields, or a candidate-window gate on `loanamountusd`"
+    ),
+}
+# Ledger 2 — statically clean; waiting on the per-pack Neo4j 5 witness in
+# tests/integration/test_domain_packs_neo4j.py (CEG-009d). A pack leaves this
+# set, and the flag, only once that witness has run green against it.
+WITNESS_PENDING_PACKS: frozenset[str] = frozenset(
+    {
+        "healthcare-referral",
+        "legal-discovery",
+        "research-agent",
+    }
+)
+
 _DOMAIN_FEATURE_FLAGS = {
     "idea-portfolio": "idea_portfolio_enabled",
-    # CEG-009 moved nine packs into the shape this loader reads. Five of them
-    # carry gates that compile to Cypher that cannot execute, which was
-    # invisible while the loader never opened them:
-    #
-    #   * `type: traversal` gates written with `pattern` + `condition`, which
-    #     GateCompiler does not consume. With no `edgetype` they fall back to
-    #     `RELATES_TO`, an edge no ontology here declares, so the gate rejects
-    #     every candidate.
-    #   * a scalar `queryparam` (85.0, 5, 1) — GateSpec coerces it to a string
-    #     and the compiler refuses it as a parameter NAME (C-009).
-    #   * `strictwhen` conditions — declared by the schema, consumed by no
-    #     compiler, so a gate meant to be conditional runs as an unconditional
-    #     hard filter and rejects candidates the pack author meant to keep.
-    #
-    # Making a pack readable is not the same as making it correct. Reaching
-    # these needs either compiler support for pattern/condition, literal
-    # operands and strictwhen, or a query-schema parameter per constant — a
-    # schema decision, not a file move. Dormant until then, guarded by
-    # tests/unit/test_domain_pack_shape.py so the set cannot grow silently.
-    "executive-assistant": "unvalidated_domain_packs_enabled",
-    "aios-god-agent": "unvalidated_domain_packs_enabled",
-    "repo-as-agent": "unvalidated_domain_packs_enabled",
-    "roofing-company": "unvalidated_domain_packs_enabled",
-    "healthcare-referral": "unvalidated_domain_packs_enabled",
-    "legal-discovery": "unvalidated_domain_packs_enabled",
-    "research-agent": "unvalidated_domain_packs_enabled",
+    **dict.fromkeys(STATIC_DEFECT_PACKS, "unvalidated_domain_packs_enabled"),
+    **dict.fromkeys(WITNESS_PENDING_PACKS, "unvalidated_domain_packs_enabled"),
 }
 
 

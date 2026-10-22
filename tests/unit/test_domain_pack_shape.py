@@ -10,6 +10,13 @@ Two of those nine were additionally invalid — ``executive-assistant`` declared
 an edge to an undeclared ``Skill`` node, ``roofing-company`` one to ``ZipCode``
 — and nothing caught it, because a file the loader never opens is never
 validated either.
+
+Readable is not the same as correct, and statically correct is not the same
+as proven: ``_cypher_defects`` below is the static half, and
+``tests/integration/test_domain_packs_neo4j.py`` is the live Neo4j 5 witness
+a pack needs before it leaves ``unvalidated_domain_packs_enabled``
+(CEG-009d). The loader keeps the two ledgers — ``STATIC_DEFECT_PACKS`` and
+``WITNESS_PENDING_PACKS`` — and this module holds each to its reason.
 """
 
 from __future__ import annotations
@@ -20,7 +27,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-from engine.config.loader import SPEC_FILENAME, DomainPackLoader
+from engine.config.loader import (
+    SPEC_FILENAME,
+    STATIC_DEFECT_PACKS,
+    WITNESS_PENDING_PACKS,
+    DomainPackLoader,
+)
 from engine.config.schema import DomainSpec
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -29,6 +41,11 @@ DOMAINS_ROOT = REPO_ROOT / "domains"
 
 def _domain_dirs() -> list[Path]:
     return sorted(p for p in DOMAINS_ROOT.iterdir() if p.is_dir())
+
+
+def _load(domain_id: str) -> DomainSpec:
+    raw = yaml.safe_load((DOMAINS_ROOT / domain_id / SPEC_FILENAME).read_text(encoding="utf-8"))
+    return DomainSpec.model_validate(raw)
 
 
 def test_no_flat_domain_spec_files_remain() -> None:
@@ -80,44 +97,56 @@ def test_every_discovered_domain_actually_loads() -> None:
 # --------------------------------------------------------------------------
 
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# Every `$…` token in a compiled fragment, up to the next delimiter. The
+# capture is deliberately loose so a malformed name (`$85.0`) is captured and
+# reported rather than skipped.
+_PARAM_TOKEN = re.compile(r"\$([^\s(),}\]]*)")
 
 
-def _cypher_defects(spec) -> list[str]:
-    """Gate compilations that would fail or silently reject every candidate.
+def _cypher_defects(spec: DomainSpec) -> list[str]:
+    """Gate compilations that would fail, or that no parameter could ever satisfy.
 
-    Two shapes, both found only after CEG-009 made these packs readable:
+    A spec that validates against ``DomainSpec`` has proven it parses. A gate
+    that compiles has proven it emits a fragment. Neither proves the fragment
+    can execute: the match handler supplies exactly the query-schema fields,
+    the derived parameters and whatever the compiler bound itself
+    (``GateCompiler.last_query_params``), so every ``$name`` the fragment
+    references must come from one of those three or Neo4j answers
+    ``ParameterMissing`` at execution time.
 
-    * ``RELATES_TO`` — the compiler's fallback when a ``type: traversal`` gate
-      declares no ``edgetype``. Packs written with ``pattern``/``condition``
-      hit it, and no ontology here declares ``RELATES_TO``, so the gate is a
-      hard filter that matches nothing.
-    * ``strictwhen`` — declared by ``GateSpec`` and consumed by no compiler, so
-      a gate meant to be conditional runs as an unconditional hard filter.
-    * ``$<non-identifier>`` — a scalar ``queryparam`` (``85.0``, ``5``, ``1``).
-      GateSpec coerces it to a string and the compiler used to emit it as a
-      parameter *name*, so Cypher received ``$85.0``. Since C-009 validates
-      parameter names like labels, the compiler now refuses the gate outright;
-      that refusal is the same defect, reported at compile time.
+    Shapes this has caught, in the order they were found:
+
+    * ``$<non-identifier>`` — a scalar ``queryparam`` (``85.0``) stringified
+      into a parameter name. Bound as a literal since CEG-009b.
+    * ``RELATES_TO`` — the former fallback relationship type for a traversal
+      gate without ``edgetype``; no ontology declares it, so the gate rejected
+      every candidate. Such a gate is refused outright since CEG-009a.
+    * ``$True`` / ``$False`` — ``queryparam: true`` stringified; a valid
+      identifier, so the earlier name check let it through.
+    * ``$value`` — the placeholder the range compiler emitted when it ignored
+      a declared ``queryparam_min`` / ``queryparam_max``.
+    * a declared name that is in no query schema, which nothing supplies.
     """
     from engine.gates.compiler import GateCompiler
 
     compiler = GateCompiler(spec)
+    declared = {f.name for f in spec.queryschema.fields} | {p.name for p in spec.derivedparameters}
     defects: list[str] = []
     for gate in spec.gates:
-        if gate.strictwhen:
-            # Declared by GateSpec, consumed by nothing under engine/: the gate
-            # would run as an unconditional hard filter.
-            defects.append(f"{gate.name}: strictwhen {gate.strictwhen!r} is not consumed by any compiler")
         try:
             cypher = compiler.compile(gate)
         except (ValueError, KeyError) as exc:
             defects.append(f"{gate.name}: refused by the compiler — {exc}")
             continue
-        if "RELATES_TO" in cypher and not gate.edgetype:
-            defects.append(f"{gate.name}: RELATES_TO fallback — {cypher}")
-        for param in re.findall(r"\$([^\s)]+)", cypher):
+        bound = set(compiler.last_query_params)
+        for param in _PARAM_TOKEN.findall(cypher):
             if not _IDENTIFIER.fullmatch(param):
                 defects.append(f"{gate.name}: '${param}' is not a parameter name — {cypher}")
+            elif param not in declared and param not in bound:
+                defects.append(
+                    f"{gate.name}: '${param}' is neither a queryschema field, a derived parameter, "
+                    f"nor bound by the compiler — {cypher}"
+                )
     return defects
 
 
@@ -126,8 +155,8 @@ def test_discoverable_domain_gates_compile_to_executable_cypher(domain_dir: Path
     """A pack the loader will serve must produce Cypher that can run.
 
     The gap this closes: validating a spec against DomainSpec proves it parses,
-    not that its gates execute. Five packs passed Pydantic validation and still
-    compiled to `exists((candidate)-[:RELATES_TO]->(t))` or `$85.0`.
+    not that its gates execute. Seven packs passed Pydantic validation and still
+    compiled to `exists((candidate)-[:RELATES_TO]->(t))`, `$85.0` or `$True`.
 
     A pack behind a feature flag is exempt — that is what the flag records.
     """
@@ -136,30 +165,48 @@ def test_discoverable_domain_gates_compile_to_executable_cypher(domain_dir: Path
     if domain_dir.name in _DOMAIN_FEATURE_FLAGS:
         pytest.skip(f"{domain_dir.name} is flag-gated: {_DOMAIN_FEATURE_FLAGS[domain_dir.name]}")
 
-    raw = yaml.safe_load((domain_dir / SPEC_FILENAME).read_text(encoding="utf-8"))
-    defects = _cypher_defects(DomainSpec.model_validate(raw))
+    defects = _cypher_defects(_load(domain_dir.name))
     assert defects == [], f"{domain_dir.name} would serve unexecutable Cypher:\n  " + "\n  ".join(defects)
 
 
-def test_flag_gated_packs_are_gated_for_a_reason_that_still_holds() -> None:
-    """Shrink-only: when a dormant pack starts compiling, un-gate it.
+# --------------------------------------------------------------------------
+# The two reasons a pack sits behind `unvalidated_domain_packs_enabled`, each
+# held to itself so the flag can never become a place defects go to be
+# forgotten.
+# --------------------------------------------------------------------------
 
-    Without this, a pack fixed later stays invisible and the flag becomes a
-    place defects go to be forgotten.
-    """
+
+def test_unvalidated_flag_is_exactly_the_two_ledgers() -> None:
     from engine.config.loader import _DOMAIN_FEATURE_FLAGS
 
-    still_broken, now_clean = [], []
-    for name, flag in _DOMAIN_FEATURE_FLAGS.items():
-        if flag != "unvalidated_domain_packs_enabled":
-            continue
-        path = DOMAINS_ROOT / name / SPEC_FILENAME
-        if not path.is_file():
-            continue
-        spec = DomainSpec.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
-        (still_broken if _cypher_defects(spec) else now_clean).append(name)
+    gated = {name for name, flag in _DOMAIN_FEATURE_FLAGS.items() if flag == "unvalidated_domain_packs_enabled"}
+    assert gated == set(STATIC_DEFECT_PACKS) | set(WITNESS_PENDING_PACKS)
+    assert not set(STATIC_DEFECT_PACKS) & set(WITNESS_PENDING_PACKS), "a pack is on both ledgers"
+    assert gated, "no pack is gated as unvalidated; drop the flag and these tests"
+    for name in sorted(gated):
+        assert (DOMAINS_ROOT / name / SPEC_FILENAME).is_file(), f"{name} is gated but has no spec on disk"
 
-    assert now_clean == [], (
-        f"{now_clean} now compile cleanly — remove them from _DOMAIN_FEATURE_FLAGS so the loader serves them again."
+
+@pytest.mark.parametrize("name", sorted(WITNESS_PENDING_PACKS))
+def test_witness_pending_pack_has_no_static_defect(name: str) -> None:
+    """A pack waiting on the Neo4j 5 witness owes nothing to the static check.
+
+    If one of these regresses, the static reason has come back and the pack
+    belongs on ``STATIC_DEFECT_PACKS`` with that reason written down.
+    """
+    defects = _cypher_defects(_load(name))
+    assert defects == [], f"{name} is listed as witness-pending but has static defects:\n  " + "\n  ".join(defects)
+
+
+@pytest.mark.parametrize("name", sorted(STATIC_DEFECT_PACKS))
+def test_static_defect_pack_still_has_the_defect_on_record(name: str) -> None:
+    """Shrink-only: when a statically defective pack starts compiling, move it on.
+
+    Without this, a pack fixed later stays invisible behind the flag.
+    """
+    defects = _cypher_defects(_load(name))
+    assert defects, (
+        f"{name} now compiles cleanly — move it from STATIC_DEFECT_PACKS to WITNESS_PENDING_PACKS "
+        "so the Neo4j 5 witness is the only thing between it and the loader."
     )
-    assert still_broken, "no pack is gated as unvalidated; drop the flag and this test"
+    assert STATIC_DEFECT_PACKS[name].strip(), f"{name} is on the static ledger with no reason recorded"
