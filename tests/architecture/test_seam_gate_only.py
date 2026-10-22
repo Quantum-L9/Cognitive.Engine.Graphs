@@ -318,3 +318,47 @@ async def test_health_assess_binds_domain_to_tenant(
     with pytest.raises(handlers.ValidationError, match="does not match packet tenant") as exc_info:
         await handlers.handle_health_assess("plasticos", {"subaction": subaction, "domain": "other-tenant"})
     assert exc_info.value.action == "health-assess"
+
+
+# ── Deployment allowlists: the SDK inbound policy accepts only L9_ALLOWED_ACTIONS ──
+# A Gate-routed action absent from the list is refused before any handler runs,
+# so every checked-in deployment must list exactly ACTION_HANDLERS minus `enrich`
+# (what `make dev` derives) — in particular the canonical `health-assess` route.
+# Operator approval 2026-10-22 covers these three protected files.
+
+_ALLOWLIST_FILES = ("docker-compose.yml", "docker-compose.prod.yml", ".env.template")
+
+
+def _allowed_actions_in(filename: str) -> set[str]:
+    """The L9_ALLOWED_ACTIONS value a checked-in deployment file hands the SDK."""
+    text = (ROOT / filename).read_text(encoding="utf-8")
+    if filename.endswith(".yml"):
+        services = yaml.safe_load(text)["services"]
+        values = [
+            svc["environment"]["L9_ALLOWED_ACTIONS"]
+            for svc in services.values()
+            if isinstance(svc.get("environment"), dict) and "L9_ALLOWED_ACTIONS" in svc["environment"]
+        ]
+    else:
+        values = re.findall(r"^L9_ALLOWED_ACTIONS=(.*)$", text, flags=re.MULTILINE)
+    assert len(values) == 1, f"{filename}: expected exactly one L9_ALLOWED_ACTIONS, found {values!r}"
+    return {item.strip() for item in str(values[0]).split(",") if item.strip()}
+
+
+@pytest.mark.parametrize("filename", _ALLOWLIST_FILES)
+def test_deployment_allowlist_is_action_handlers_minus_enrich(filename: str):
+    from engine.handlers import ACTION_HANDLERS
+
+    allowed = _allowed_actions_in(filename)
+    expected = set(ACTION_HANDLERS) - {"enrich"}
+    assert allowed == expected, (
+        f"{filename}: L9_ALLOWED_ACTIONS {sorted(allowed)} != ACTION_HANDLERS minus enrich {sorted(expected)}; "
+        "an advertised action missing here is refused by the SDK inbound policy before its handler runs"
+    )
+
+
+@pytest.mark.parametrize("filename", _ALLOWLIST_FILES)
+def test_deployment_allowlist_accepts_every_advertised_action(filename: str):
+    advertised = set(_spec()["node"]["actions"])
+    missing = sorted(advertised - _allowed_actions_in(filename))
+    assert missing == [], f"{filename}: Gate may route {missing} to CEG but L9_ALLOWED_ACTIONS refuses them"

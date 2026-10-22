@@ -52,7 +52,10 @@ services:
       # silent trust failure, so production must state it — JSON object mapping
       # key id to key material, e.g. {"gate-v1":"<gate-key>"}.
       L9_VERIFYING_KEYS_JSON: ${L9_VERIFYING_KEYS_JSON:?L9_VERIFYING_KEYS_JSON must be set when L9_REQUIRE_SIGNATURE is true}
-      L9_ALLOWED_ACTIONS: match,sync,admin,outcomes,resolve,health,healthcheck
+      # ACTION_HANDLERS minus `enrich` (Gate owns that name for EIE); includes the
+      # canonical `health-assess` route (HEALTH-01). Parity with engine/spec.yaml is
+      # asserted by tests/architecture/test_seam_gate_only.py.
+      L9_ALLOWED_ACTIONS: match,sync,admin,outcomes,resolve,health,healthcheck,health-assess
       L9_MAX_ATTACHMENTS: "0"
       L9_MAX_ATTACHMENT_SIZE_BYTES: "0"
       NEO4J_URI: bolt://neo4j:7687
