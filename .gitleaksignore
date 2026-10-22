@@ -1,3 +1,6 @@
 # Known false positives — add SHA:path:rule triples here
 # Format: <commit-sha>:<file-path>:<rule-id>
 # Only add entries after manual verification that the match is NOT a real secret.
+# packet_store.py module docstring: the placeholder DSN shape "postgresql://user:pass@host:5432/dbname"
+# (moved, not introduced, by PERSIST-01; reworded to "<user>:<password>" in the following commit).
+0b5b858c2326663e78a79c785d895f7aeb0c9af3:engine/packet/packet_store.py:postgres-connection:32
