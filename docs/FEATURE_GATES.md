@@ -646,18 +646,10 @@ default is now `True` and an omitted `database=` raises a `ValueError` that
 names the method and this flag.
 
 `handle_health`'s liveness probe passes `database="neo4j"` explicitly and is
-unaffected.
-
-### Known exception
-
-`engine/compliance/pii.py: PIIHandler.erase_subject()` issues one
-`execute_query` with no `database=`. It runs only on the live (non-dry-run)
-GDPR erasure path — `GDPR_ERASURE_ENABLED=true` **and** `GDPR_DRY_RUN=false`,
-both opt-in — and under the strict default it fails closed with the
-`ValueError` above, wrapped by `handle_admin` as `ExecutionError("GDPR erasure
-failed")`. That call should take the domain database like the dry-run count
-beside it does; until it is repaired, live erasure on a strict deployment
-requires `STRICT_TENANT_DATABASE=false`.
+unaffected. Live GDPR erasure (`erase_subject` admin subaction with
+`GDPR_DRY_RUN=false`) passes the subject's domain database — the caller's
+`domain_id`, the same value its dry-run count queries — so it runs under the
+strict default without an opt-out.
 
 ### Rollback
 
