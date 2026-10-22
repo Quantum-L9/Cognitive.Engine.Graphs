@@ -114,7 +114,7 @@ class TestCEGAuth01TenantAllowlistFailsClosedInProd:
 
     Outside prod the allowlist is optional (single-tenant local development).
     In prod, forgetting it used to open the engine to every tenant with only a
-    WARNING in the log.
+    logged WARNING.
     """
 
     @staticmethod

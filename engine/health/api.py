@@ -245,6 +245,13 @@ async def handle_health_batch_assess(tenant: str, payload: dict[str, Any]) -> di
         priority = compute_enrichment_priority(entity_health, domain_spec)
 
         if priority.recommendation != "skip":
+            # The ceiling bounds what this batch may commit to, so an eligible
+            # entity is admitted only if its estimate still fits; otherwise it
+            # stays unassessed (counted from the window below) and cost_usd
+            # never exceeds the server-owned ceiling.
+            if total_cost + priority.estimated_cost_usd > cost_ceiling:
+                ceiling_reached = True
+                break
             total_cost += priority.estimated_cost_usd
             estimated_eligible += 1
         else:

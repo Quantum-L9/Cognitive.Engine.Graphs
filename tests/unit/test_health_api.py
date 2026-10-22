@@ -339,6 +339,21 @@ class TestBatchAccounting:
         assert result["total_scanned"] + result["total_skipped"] + result["total_truncated"] == 4
         assert "total_enriched" not in result
 
+    async def test_ceiling_is_checked_before_an_entity_is_admitted(self, pipeline: _Pipeline) -> None:
+        # Two eligible entities at 0.02 each against a 0.03 ceiling: the second
+        # would take the batch to 0.04, so it is never admitted and cost_usd
+        # stays within the server-owned ceiling (it used to report 0.04).
+        pipeline.cost_usd = 0.02
+        s = _settings(health_batch_max_entities=3, health_batch_cost_ceiling_usd=0.03)
+        with patch("engine.config.settings.settings", s):
+            result = await health_api.handle_health_batch_assess(TENANT, {"entities": _entities(3)})
+        assert result["total_scanned"] == 1
+        assert result["estimated_eligible"] == 1
+        assert result["total_skipped"] == 2
+        assert result["cost_usd"] == pytest.approx(0.02)
+        assert result["cost_usd"] <= result["cost_ceiling_usd"]
+        assert result["cost_ceiling_reached"] is True
+
     async def test_skip_recommendations_count_once(self, pipeline: _Pipeline, settings_off: Settings) -> None:
         pipeline.recommendations = ["skip", "enrich_low_priority", "skip"]
         result = await health_api.handle_health_batch_assess(TENANT, {"entities": _entities(3)})
@@ -430,6 +445,13 @@ class TestDomainMustEqualTenant:
         await health_api.handle_health_batch_assess(TENANT, {"entities": _entities(1)})
         await health_api.handle_health_report(TENANT, {"entity_id": "ent-1"})
         assert pipeline.loaded_domains == [TENANT, TENANT]
+
+    async def test_assess_without_domain_resolves_to_tenant(self, pipeline: _Pipeline, settings_off: Settings) -> None:
+        payload = _assess_payload()
+        del payload["domain"]
+        result = await health_api.handle_health_assess(TENANT, payload)
+        assert result["entity_health"]["domain"] == TENANT
+        assert pipeline.loaded_domains == [TENANT]
 
     async def test_matching_domain_is_accepted(self, pipeline: _Pipeline, settings_off: Settings) -> None:
         result = await health_api.handle_health_assess(TENANT, _assess_payload(domain=TENANT))

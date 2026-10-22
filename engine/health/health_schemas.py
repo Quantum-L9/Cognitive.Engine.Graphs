@@ -154,10 +154,14 @@ class HealthAssessmentRequest(BaseModel):
 
     ``tier`` is the caller's declaration. It is echoed back as
     ``requested_tier`` and never grants a capability (HEALTH-02).
+
+    ``domain`` may be omitted: the domain a health call reads is the packet
+    tenant (HEALTH-05, ``api.resolve_domain``), and a value naming anything
+    else is rejected there.
     """
 
     entity_id: str
-    domain: str
+    domain: str | None = None
     node_label: str
     entity_data: dict[str, Any] = Field(default_factory=dict)
     field_confidences: dict[str, float] | None = None

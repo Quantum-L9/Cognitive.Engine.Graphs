@@ -29,7 +29,7 @@ Configuration (PERSIST-01: read through ``engine.config.settings.Settings``,
 the settings SSOT, under the same environment variable names as before):
   - PACKET_STORE_ENABLED  -> settings.packet_store_enabled   (default False)
   - PACKET_STORE_DSN      -> settings.packet_store_dsn       (PostgreSQL DSN,
-    e.g. "postgresql://user:pass@host:5432/dbname"; required when enabled)
+    shape "postgresql://<user>:<password>@<host>:5432/<db>"; required when enabled)
   - PACKET_STORE_POOL_MIN -> settings.packet_store_pool_min  (default 2)
   - PACKET_STORE_POOL_MAX -> settings.packet_store_pool_max  (default 10)
 Production activation prerequisites are in docs/FEATURE_GATES.md §7.
