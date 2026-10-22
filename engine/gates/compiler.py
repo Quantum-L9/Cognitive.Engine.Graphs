@@ -79,10 +79,16 @@ def bind_param_key(gate_name: str, suffix: str) -> str:
     safe_gate = _PARAM_KEY_UNSAFE_RE.sub("_", gate_name)
     safe_suffix = _PARAM_KEY_UNSAFE_RE.sub("_", suffix)
     raw_key = f"gate_{safe_gate}_{safe_suffix}"
-    if len(raw_key) > _MAX_PARAM_KEY_LEN:
-        # Keep the key an identifier of bounded length; the digest keeps it unique per gate.
-        digest = hashlib.sha256(safe_gate.encode()).hexdigest()[:16]
-        raw_key = f"gate_{digest}_{safe_suffix}"[:_MAX_PARAM_KEY_LEN]
+    if safe_gate != gate_name or len(raw_key) > _MAX_PARAM_KEY_LEN:
+        # Normalisation is lossy — "risk-a" and "risk_a" both become "risk_a" —
+        # so a name it changed, or one too long to keep whole, is identified by
+        # a digest of the ORIGINAL name instead. Distinct names therefore never
+        # share a key (hashing the normalised form would collide the same way).
+        digest = hashlib.sha256(gate_name.encode()).hexdigest()[:16]
+        raw_key = f"gate_{digest}_{safe_suffix}"
+        if len(raw_key) > _MAX_PARAM_KEY_LEN:
+            suffix_digest = hashlib.sha256(suffix.encode()).hexdigest()[:16]
+            raw_key = f"gate_{digest}_{suffix_digest}"
     return sanitize_label(raw_key)
 
 
@@ -388,8 +394,10 @@ class GateCompiler:
         self.domain_spec = domain_spec
         self._gates: list[GateSpec] = domain_spec.gates if domain_spec.gates else []
         self._compliance = getattr(domain_spec, "compliance", None)
-        # C-009: literal operands bound during compilation, keyed by generated name.
+        # C-009: literal operands bound during compilation, keyed by generated name,
+        # and which (gate, suffix) owns each key so two gates can never share one.
         self._query_params: dict[str, Any] = {}
+        self._bound_by: dict[str, tuple[str, str]] = {}
         # CEG-009c: composite gates currently being expanded (cycle guard).
         self._composite_stack: list[str] = []
 
@@ -502,6 +510,7 @@ class GateCompiler:
             Combined Cypher WHERE clause (without the WHERE keyword)
         """
         self._query_params = {}
+        self._bound_by = {}
         fragments: list[str] = []
 
         for gate in self._gates:
@@ -534,6 +543,7 @@ class GateCompiler:
         Only gates with relaxedpenalty == 0.0 are included as hard WHERE.
         """
         self._query_params = {}
+        self._bound_by = {}
         hard_fragments: list[str] = []
 
         for gate in self._gates:
@@ -564,8 +574,24 @@ class GateCompiler:
     # ── Parameter binding (C-009 / CEG-009b) ────────────────
 
     def _bind(self, gate: GateSpec, suffix: str, value: LiteralOperand | str | list[Any]) -> str:
-        """Register ``value`` under a generated name and return its ``$`` reference."""
+        """Register ``value`` under a generated name and return its ``$`` reference.
+
+        Defence in depth behind ``bind_param_key``: a key already owned by a
+        different (gate, suffix) is refused rather than silently overwritten,
+        which would make one predicate evaluate against another gate's operand.
+        The same gate re-binding the same suffix (a gate compiled twice in one
+        accumulation) is idempotent.
+        """
         key = bind_param_key(gate.name, suffix)
+        owner = (gate.name, suffix)
+        previous = self._bound_by.get(key)
+        if previous is not None and previous != owner:
+            msg = (
+                f"Gate '{gate.name}' and gate '{previous[0]}' both bind the Cypher parameter '${key}' "
+                f"(suffixes {suffix!r} / {previous[1]!r}); rename one gate so their operands cannot collide"
+            )
+            raise ValueError(msg)
+        self._bound_by[key] = owner
         self._query_params[key] = value
         return f"${key}"
 

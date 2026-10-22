@@ -474,8 +474,8 @@ is now clean for every one of the seven; what remains is the live half.
 | `roofing-company` | `RELATES_TO` fallback + `$1` + `$True` | `service_area` rewritten to `edgetype: SERVICES_ZIP` → `ZipCode.zipcode = $zipcode` (the pattern filtered on `code`, undeclared); `specialty_match` marked `invertible: true` (the candidate holds the list); `1` / `true` now bind; `emergency_availability` is conditional via `strictwhen` | Neo4j 5 witness. Scoring references `$param`, `$target_price`, `candidate.value`, `candidate.price_per_unit` |
 | `aios-god-agent` | `RELATES_TO` fallback | `capability_match` rewritten to `edgetype: HAS_CAPABILITY` → `Capability.capabilityid = $requiredcapabilities` | Neo4j 5 witness. Scoring references `$param` |
 | `healthcare-referral` | `$1` + `$True` | both bind; the `insurance_check` traversal step (a property map `TraversalAssembler` forbids, which failed every match before any gate ran) is now the `insurance_accepted` traversal gate; the `specialty_match` step over an undeclared `Condition`/`REQUIRES` is removed | Neo4j 5 witness. Scoring `geodecay` references `$lat`/`$lon` and `candidate.lat`/`candidate.lon`, none declared |
-| `legal-discovery` | `strictwhen` on a gate | consumed: `privilege_filter` filters only while `$includeprivileged = false` | Neo4j 5 witness. Scoring `temporalproximity` reads `candidate.last_activity_date`, `touch_count_30d`, `is_accelerating`, none declared |
-| `research-agent` | `strictwhen` on two gates | consumed: `code_availability` / `dataset_availability` filter only while their `requires*` flag is true | Neo4j 5 witness. Same `temporalproximity` property references as above |
+| `legal-discovery` | `strictwhen` on a gate | consumed: `privilege_filter` filters only while `$includeprivileged = false` | Neo4j 5 witness. Scoring `temporalproximity` reads `candidate.last_activity_date`, `touch_count_30d`, `is_accelerating`, none declared — inside a null-guarded `CASE`, so it executes and scores 0.0 on that dimension (tier 2 runs as an ordinary test) |
+| `research-agent` | `strictwhen` on two gates | consumed: `code_availability` / `dataset_availability` filter only while their `requires*` flag is true | Neo4j 5 witness. Same `temporalproximity` property references as above — executes, scores 0.0 on that dimension |
 
 The loader keeps two ledgers behind this flag (`engine/config/loader.py`):
 
@@ -489,7 +489,12 @@ The loader keeps two ledgers behind this flag (`engine/config/loader.py`):
   un-gated. The "still pending" column lists what the full-pipeline half is
   expected to surface — scoring-side references no query schema supplies —
   which belongs to the scoring assembler and the packs' `scoring:` sections,
-  not to the gate compiler.
+  not to the gate compiler. The tier-2 cases that are known to raise today are
+  `xfail(strict=True, raises=ExecutionError)` in that module
+  (`TIER2_KNOWN_EXECUTION_DEFECTS`, keyed to this table): the suite passes on
+  Docker now and turns red the moment a scoring fix lands, at which point the
+  entry — and the "still pending" text here — comes out. That ledger shrinks
+  only; it never grows without a row in this table.
 - `STATIC_DEFECT_PACKS` — a defect the static check still reports, with its
   reason written beside the pack. Empty at the time of writing: the new
   identifier check found `mortgage-brokerage`'s `loanamount_range` (a

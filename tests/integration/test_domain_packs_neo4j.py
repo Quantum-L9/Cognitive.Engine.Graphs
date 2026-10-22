@@ -31,6 +31,19 @@ the rest of the integration suite uses, in two tiers per pack:
 A pack leaves ``WITNESS_PENDING_PACKS`` — and ``unvalidated_domain_packs_enabled``
 — only when both tiers are green for it. The scenarios below are the record
 of what "green" means per pack; they are not fixtures to be relaxed.
+
+**Tier-2 xfail ledger.** ``TIER2_KNOWN_EXECUTION_DEFECTS`` names the packs whose
+``handle_match`` is known to raise today because their ``scoring:`` section
+references parameters nothing supplies — the defects recorded against them in
+``docs/FEATURE_GATES.md`` §16. Those tier-2 cases are ``xfail(strict=True,
+raises=ExecutionError)``: the suite passes on a Docker-enabled run today and
+flips to a failure (strict XPASS) the moment a scoring fix lands, so the entry
+must then be removed. This set is the §16 ledger: it shrinks as defects are
+fixed and may never grow without a matching §16 entry. Tier-1 compiled-WHERE
+witnesses are ordinary tests. legal-discovery and research-agent are not on it:
+their §16 defect (``temporalproximity`` reading undeclared candidate
+properties) sits inside a null-guarded ``CASE`` and executes, scoring 0.0 on
+that dimension rather than raising.
 """
 
 from __future__ import annotations
@@ -47,6 +60,7 @@ import yaml
 from engine.config.loader import SPEC_FILENAME, WITNESS_PENDING_PACKS
 from engine.config.schema import DomainSpec
 from engine.gates.compiler import GateCompiler
+from engine.handlers import ExecutionError
 from engine.utils.security import sanitize_database_name, sanitize_label
 
 DOMAINS_DIR = Path(__file__).resolve().parents[2] / "domains"
@@ -450,12 +464,62 @@ PACK_WITNESSES: dict[str, PackWitness] = {
 }
 
 
+# Codex P1 (PR #327): the tier-2 cases that raise today, keyed to FEATURE_GATES §16.
+# Shrink-only; an entry here needs a §16 row, and a §16 fix removes its entry.
+TIER2_KNOWN_EXECUTION_DEFECTS: dict[str, str] = {
+    "healthcare-referral": (
+        "healthcare-referral: scoring geodecay references $lat/$lon (and candidate.lat/lon), "
+        "none declared in queryschema or the Provider node — see docs/FEATURE_GATES.md §16; "
+        "remove when the scoring section is fixed"
+    ),
+    "executive-assistant": (
+        "executive-assistant: scoring inverselinear references $param, which nothing supplies "
+        "— see docs/FEATURE_GATES.md §16; remove when the scoring section is fixed"
+    ),
+    "repo-as-agent": (
+        "repo-as-agent: scoring inverselinear references $param and customcypher references "
+        "$query.labels, neither supplied — see docs/FEATURE_GATES.md §16; remove when the "
+        "scoring section is fixed"
+    ),
+    "aios-god-agent": (
+        "aios-god-agent: scoring inverselinear references $param, which nothing supplies "
+        "— see docs/FEATURE_GATES.md §16; remove when the scoring section is fixed"
+    ),
+    "roofing-company": (
+        "roofing-company: scoring references $param and $target_price (unsupplied) and "
+        "candidate.value / candidate.price_per_unit (undeclared) — see docs/FEATURE_GATES.md §16; "
+        "remove when the scoring section is fixed"
+    ),
+}
+
+
+def _tier2_params() -> list[Any]:
+    params: list[Any] = []
+    for pack in sorted(PACK_WITNESSES):
+        reason = TIER2_KNOWN_EXECUTION_DEFECTS.get(pack)
+        if reason is None:
+            params.append(pack)
+        else:
+            params.append(
+                pytest.param(pack, marks=pytest.mark.xfail(strict=True, raises=ExecutionError, reason=reason))
+            )
+    return params
+
+
 def test_every_witness_pending_pack_has_a_witness_record() -> None:
     """The ledger and this record move together (no Neo4j needed)."""
     assert set(PACK_WITNESSES) == set(WITNESS_PENDING_PACKS), (
         "WITNESS_PENDING_PACKS and PACK_WITNESSES disagree — a pack on the ledger needs a witness here, "
         "and a pack that left the ledger should keep its witness as a regression record only if it is still gated."
     )
+
+
+def test_tier2_xfail_ledger_only_names_witnessed_packs() -> None:
+    """The xfail ledger is a subset of the witness record and every entry cites §16."""
+    assert set(TIER2_KNOWN_EXECUTION_DEFECTS) <= set(PACK_WITNESSES)
+    for pack, reason in TIER2_KNOWN_EXECUTION_DEFECTS.items():
+        assert reason.startswith(f"{pack}: "), pack
+        assert "FEATURE_GATES.md §16" in reason, pack
 
 
 def test_every_scenario_expects_a_declared_candidate() -> None:
@@ -601,7 +665,7 @@ async def test_compiled_gates_execute_and_filter_on_neo4j(graph_driver, pack: st
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-@pytest.mark.parametrize("pack", sorted(PACK_WITNESSES))
+@pytest.mark.parametrize("pack", _tier2_params())
 async def test_handle_match_pipeline_serves_the_pack(graph_driver, domain_loader, pack: str, monkeypatch) -> None:
     """handle_match runs end to end for the pack and returns the passing candidate.
 

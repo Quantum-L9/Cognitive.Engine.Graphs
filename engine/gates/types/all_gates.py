@@ -211,7 +211,16 @@ class CompositeGate(BaseGate):
             gate_class = GateRegistry.get_gate_class(subgate_spec.type)
             gate_instance = gate_class(subgate_spec, self.domain_spec)
             subgate_clauses.append(f"({gate_instance.compile()})")
-            self._query_params.update(gate_instance.query_params)
+            # Lockstep with GateCompiler._bind: a key another subgate already
+            # bound to a different value is a collision, never an overwrite.
+            sub_params = gate_instance.query_params
+            for key, value in sub_params.items():
+                if key in self._query_params and self._query_params[key] != value:
+                    raise ValueError(
+                        f"Gate '{self.spec.name}': subgate '{subgate_name}' binds the Cypher parameter "
+                        f"'${key}' already bound by an earlier subgate with a different value"
+                    )
+            self._query_params.update(sub_params)
 
         logic_op = f" {_LOGIC[self.spec.logic.upper()]} "
         return logic_op.join(subgate_clauses)

@@ -511,7 +511,7 @@ class TestGateValueParameterization:
     @staticmethod
     def _enum_gate(mapping: dict) -> EnumMapGate:
         spec = MagicMock()
-        spec.name = "polymer-map"
+        spec.name = "polymer_map"
         spec.candidateprop = "polymertype"
         spec.queryparam = "polymertype"
         spec.mapping = mapping
@@ -1131,3 +1131,111 @@ class TestTraversalGrammar:
         spec.condition = "true"
         with pytest.raises(ValueError, match="not accepted"):
             TraversalGate(spec, MagicMock()).compile()
+
+
+# ============================================================================
+# Codex P2 (PR #327): GENERATED PARAMETER KEYS NEVER COLLIDE ACROSS GATES
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestBoundKeyCollisions:
+    """`bind_param_key` normalises names into identifiers; normalisation must not merge gates."""
+
+    def test_unchanged_name_keeps_the_readable_key(self) -> None:
+        from engine.gates.compiler import bind_param_key
+
+        assert bind_param_key("risk_a", "value") == "gate_risk_a_value"
+
+    def test_normalised_name_is_keyed_by_a_digest_of_the_original(self) -> None:
+        from engine.gates.compiler import bind_param_key
+
+        hyphen = bind_param_key("risk-a", "value")
+        underscore = bind_param_key("risk_a", "value")
+        assert hyphen != underscore
+        assert hyphen != "gate_risk_a_value"
+        assert hyphen.replace("_", "a").isalnum()
+        assert hyphen.endswith("_value")
+        assert bind_param_key("risk-a", "value") == hyphen  # deterministic
+        assert bind_param_key("risk.a", "value") not in {hyphen, underscore}
+
+    def test_distinct_gates_with_colliding_normalised_names_both_survive(self) -> None:
+        from engine.gates.compiler import bind_param_key
+
+        hyphen = make_mock_gate_spec(
+            name="risk-a", gate_type=GateType.BOOLEAN, candidate_prop="flagged", query_param=True
+        )
+        underscore = make_mock_gate_spec(name="risk_a", gate_type=GateType.BOOLEAN, candidate_prop="reviewed")
+        underscore.queryparam = False  # the helper's `or` chain drops a falsy literal
+        compiler = GateCompiler(make_mock_domain_spec(gates=[hyphen, underscore]))
+
+        where = compiler.compile_all_gates("any")
+
+        key_hyphen = bind_param_key("risk-a", "value")
+        key_underscore = bind_param_key("risk_a", "value")
+        assert compiler.last_query_params == {key_hyphen: True, key_underscore: False}
+        assert f"candidate.flagged = ${key_hyphen}" in where
+        assert f"candidate.reviewed = ${key_underscore}" in where
+
+    def test_duplicate_bound_key_is_refused(self, monkeypatch) -> None:
+        """Defence in depth: if the key function ever collides, the compiler says so."""
+        import engine.gates.compiler as compiler_module
+
+        monkeypatch.setattr(compiler_module, "bind_param_key", lambda name, suffix: "gate_same_value")
+        a = make_mock_gate_spec(name="a", gate_type=GateType.BOOLEAN, candidate_prop="p", query_param=True)
+        b = make_mock_gate_spec(name="b", gate_type=GateType.THRESHOLD, candidate_prop="q", query_param=5)
+        compiler = GateCompiler(make_mock_domain_spec(gates=[a, b]))
+
+        with pytest.raises(ValueError, match="both bind the Cypher parameter '\\$gate_same_value'"):
+            compiler.compile_all_gates("any")
+
+    def test_same_gate_rebinding_is_idempotent(self) -> None:
+        gate = make_mock_gate_spec(name="a", gate_type=GateType.BOOLEAN, candidate_prop="p", query_param=True)
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+
+        compiler.compile(gate)
+        compiler.compile(gate)
+
+        assert compiler.last_query_params == {"gate_a_value": True}
+
+    def test_all_gates_bind_param_is_in_lockstep(self) -> None:
+        from engine.gates.compiler import bind_param_key
+
+        spec = MagicMock()
+        spec.name = "polymer-map"
+        spec.candidateprop = "polymertype"
+        spec.queryparam = "polymertype"
+        spec.mapping = {"PET": ["PET"]}
+        gate = EnumMapGate(spec, MagicMock())
+
+        gate.compile()
+
+        assert set(gate.query_params) == {
+            bind_param_key("polymer-map", "key_0"),
+            bind_param_key("polymer-map", "values_0"),
+        }
+        assert "gate_polymer_map_key_0" not in gate.query_params
+
+    def test_composite_refuses_subgates_whose_keys_collide(self, monkeypatch) -> None:
+        import engine.gates.types.all_gates as all_gates_module
+        from engine.gates.types.all_gates import CompositeGate
+
+        monkeypatch.setattr(all_gates_module, "bind_param_key", lambda name, suffix: "gate_same_key")
+        subs = []
+        for name, mapping in (("x", {"a": ["b"]}), ("y", {"c": ["d"]})):
+            sub = MagicMock()
+            sub.name = name
+            sub.type = GateType.ENUMMAP
+            sub.candidateprop = "p"
+            sub.queryparam = "q"
+            sub.mapping = mapping
+            subs.append(sub)
+        composite = MagicMock()
+        composite.name = "both"
+        composite.subgates = ["x", "y"]
+        composite.logic = "AND"
+        domain_spec = MagicMock()
+        domain_spec.gates = subs
+
+        with pytest.raises(ValueError, match="already bound by an earlier subgate"):
+            CompositeGate(composite, domain_spec).compile()
