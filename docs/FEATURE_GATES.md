@@ -56,9 +56,9 @@ independently of the code default.
 | Strict Null Gates | `STRICT_NULL_GATES` | `True` | `True` | active |
 | Param Strict Mode | `PARAM_STRICT_MODE` | `True` | `True` | active |
 | LLM Security (ValidatedLLMClient) | `LLM_PROVIDER` | `openai` (implicit) | `openai` | active — fully implemented, requires `OPENAI_API_KEY` |
-| PacketStore Persistence | `PACKET_STORE_ENABLED` | `False` | `True` | active (opt-in, needs `PACKET_STORE_DSN`) |
+| PacketStore Persistence | `PACKET_STORE_ENABLED` (`packet_store_enabled`), `PACKET_STORE_DSN` (`packet_store_dsn`) | `False` | `True` | active (opt-in; read through `Settings` since PERSIST-01 — see §7) |
 | Outcome Persistence | `OUTCOME_PERSISTENCE_ENABLED` | `False` | `True` | active (opt-in; requires PacketStore — see §5) |
-| Tenant Auth (JWT allowed_tenants) | `TENANT_AUTH_ENABLED` | `True` | `True` | active |
+| Tenant Auth (JWT allowed_tenants) | `TENANT_AUTH_ENABLED` | `True` | `True` | active in the chassis only — claim decoded, not enforced; `TENANT_ALLOWLIST` is the enforced control — see §11 |
 | Capability Auth (domain-spec model) | `CAPABILITY_AUTH_ENABLED` | `True` | `True` | active |
 | PostgreSQL Audit Pool | `POSTGRES_DSN` | unset (`None`) | set | active (opt-in, soft dependency — see §7) |
 | Idea Portfolio Graph | `IDEA_PORTFOLIO_ENABLED` (`idea_portfolio_enabled`) | `False` | unset | dormant; opt-in IdeaOS portfolio reads/hydration |
@@ -68,6 +68,9 @@ independently of the code default.
 | Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; seven packs whose gates do not compile to executable, faithful Cypher — see §16 |
 | SDK Participation | `SDK_PARTICIPATION_ENABLED` (`sdk_participation_enabled`) | `True` | unset | active; Gate_SDK owns registration and readiness; off restores CEG's loop — see §17 |
 | Gate Re-registration | `GATE_REREGISTRATION_ENABLED` (`gate_reregistration_enabled`), `GATE_REREGISTRATION_INTERVAL_SECONDS` | `True`, `300` | unset | active only while SDK participation is off — see §17 |
+| Health Commercial Mode | `HEALTH_COMMERCIAL_MODE_ENABLED` (`health_commercial_mode_enabled`), `HEALTH_ENTITLED_TIER` | `False`, `seed` | unset | dormant; tier entitlements, upgrade prompts and conversion events — see §18 |
+| Health Batch Ceilings | `HEALTH_BATCH_MAX_ENTITIES`, `HEALTH_BATCH_COST_CEILING_USD` | `100`, `10.0` | unset | active; server-owned caps a request may lower but not raise — see §18 |
+| Strict Tenant Database | `STRICT_TENANT_DATABASE` (`strict_tenant_database`) | `True` | unset | active (hardening); an omitted `database=` on `GraphDriver` raises — see §19 |
 | Constellation Orchestration | — | — | — | accepted architectural gap — see §9 |
 
 ---
@@ -196,7 +199,42 @@ by design they are not merged, even though they may target the same instance:
 | Pool | Config | Consumer | Behavior when unset |
 |---|---|---|---|
 | ComplianceEngine audit-flush | `POSTGRES_DSN` (`settings.postgres_dsn`) | `engine/compliance/audit.py: AuditLogger.flush_to_store()` | `flush_audit()` no-ops with a warning log — never blocks startup |
-| PacketStore | `PACKET_STORE_ENABLED` + `PACKET_STORE_DSN` | `engine/packet/packet_store.py` | `PacketStore` disabled — persistence calls no-op |
+| PacketStore | `PACKET_STORE_ENABLED` (`settings.packet_store_enabled`) + `PACKET_STORE_DSN` (`settings.packet_store_dsn`); pool size `PACKET_STORE_POOL_MIN` / `PACKET_STORE_POOL_MAX` (`settings.packet_store_pool_min` / `_max`, defaults 2 / 10) | `engine/packet/packet_store.py` | `PacketStore` disabled — persistence calls no-op |
+
+### PacketStore configuration (PERSIST-01)
+
+`engine/packet/packet_store.py` used to read its four variables with
+`os.environ.get`, so the only module that persists packets was configured
+outside the settings SSOT and invisible to `feature_status`, `.env` loading and
+the production-secret validator. They are now `Settings` fields with the same
+environment variable names (pydantic-settings matches field names to env vars
+case-insensitively, so nothing an operator has set changes). `.env.template`
+already carries `PACKET_STORE_ENABLED` and `PACKET_STORE_DSN`; the two pool-size
+variables are documented here rather than added to that protected file.
+
+### Production activation prerequisites (PacketStore)
+
+Enabling persistence in production requires, in this order:
+
+1. A PostgreSQL instance reachable from the engine with
+   `engine/packet/packet_store.sql` applied (the docker-compose `postgres`
+   service applies it on first init only; a managed instance needs it run by
+   hand), including migration `0001_outcome_jsonb` for `record_outcome()`.
+2. `PACKET_STORE_DSN` set to that instance with a role that can `INSERT` into
+   `packet_store`, `lineage_graph`, `hop_trace`, `delegation_chain` and
+   `UPDATE packet_store.outcome_jsonb`. The DSN is a secret: provide it from the
+   deployment's secret store, never from a committed file.
+3. `asyncpg` installed in the image (`PacketStore` raises `RuntimeError`
+   naming the package otherwise).
+4. `PACKET_STORE_ENABLED=true`. With it on and the DSN unset, the first persist
+   raises `RuntimeError("PACKET_STORE_DSN ... is required")` — the store does
+   not degrade silently to disabled.
+5. Only then `OUTCOME_PERSISTENCE_ENABLED=true` (§10), which depends on this
+   store.
+
+Compose changes that provision or wire the store are infrastructure and belong
+to a separately approved change (`CONTRACT-05`); this section documents the
+contract they must satisfy.
 
 ### Wiring
 
@@ -310,13 +348,33 @@ without a reachable PacketStore degrades to logged warnings rather than hard fai
 
 ---
 
-## 11. Tenant Auth (W3-01)
+## 11. Tenant Auth (W3-01) and the tenant allowlist (CEG-AUTH-01)
 
-**State**: Active
+**State**: `TENANT_AUTH_ENABLED` active in the chassis; `TENANT_ALLOWLIST` is the
+enforced control
 **Flag**: `TENANT_AUTH_ENABLED=True` (default on)
 
-Enforces the JWT `allowed_tenants` claim against the resolved tenant. Setting this to
-`False` disables that check — acceptable only for single-tenant local development.
+What `TENANT_AUTH_ENABLED` does today: `chassis/auth/auth.py` decodes the JWT
+`allowed_tenants` claim onto `request.state` and honours the service-to-service
+bypass key. It does **not** compare the claim against the request tenant — the
+middleware defers that "to the handler layer", and no caller ever forwarded the
+claim into the engine. The engine-side branch of `_validate_tenant_access` that
+would have compared it was therefore unreachable; CEG-AUTH-01 removed it rather
+than keep code that documented an enforcement which did not exist. Wiring the
+claim through the execute route is a chassis change and is not done here.
+
+The control that is enforced on every action is `TENANT_ALLOWLIST`
+(comma-separated tenant ids, resolved into `EngineState` at startup):
+
+| `TENANT_ALLOWLIST` | `L9_ENV` | Behaviour |
+|---|---|---|
+| set | any | tenants not listed are rejected (`ValidationError`, 422) |
+| unset | `dev` / `local` / `test` / `staging` | every tenant admitted, with a WARNING at startup |
+| unset | `prod` | **every tenant rejected** (fail closed) and an ERROR at startup naming the fix |
+
+Before CEG-AUTH-01 the last row admitted every tenant with only a warning. A
+production deployment that forgot the allowlist now refuses requests instead of
+running open.
 
 ---
 
@@ -430,11 +488,19 @@ surface needs a gate of its own, which is what this is.
 With the flag off the subactions return `{"status": "disabled"}` rather than
 404-ing, so an operator can tell "switched off" from "not a subaction".
 
+### Identity (HEALTH-05)
+
+Tenant id, domain spec id and Neo4j database name are one identity — there is
+no mapping layer (operator decision 2026-10-22). `payload.domain` may be absent
+or equal to the packet tenant; any other value is rejected by `handle_admin`
+before a domain pack is loaded, and again by `engine/health/api.py` for direct
+callers. A health call cannot read another tenant's spec.
+
 ### Rollback
 
 Set back to `False`. Note that assess/report append to the conversion-event
-store in `engine/health/health_report.py`, which is bounded
-(`CONVERSION_EVENT_MAX`) and discards oldest-first.
+store in `engine/health/health_report.py` only while commercial mode (§18) is
+on; that store is bounded (`CONVERSION_EVENT_MAX`) and discards oldest-first.
 
 ---
 
@@ -506,6 +572,96 @@ runs `engine/gate_registration.py`, and `gate_reregistration_enabled` plus
 `gate_reregistration_interval_seconds` (default `300`) bound that loop. The
 SDK chassis passes `auto_register_with_gate=False` on that path so the two
 loops do not both register.
+
+---
+
+## 18. Health Commercial Mode (HEALTH-02 / COMM-01 / COMM-02) and batch ceilings (BATCH-01 / BATCH-02)
+
+**State**: Dormant
+**Flags**: `HEALTH_COMMERCIAL_MODE_ENABLED=False` (default off),
+`HEALTH_ENTITLED_TIER=seed`, `HEALTH_BATCH_MAX_ENTITIES=100`,
+`HEALTH_BATCH_COST_CEILING_USD=10.0`
+
+The health surface (§15) carries a Seed → Enrich → Discover → Autonomous
+commercial model: `TIER_FEATURES` in `engine/health/health_schemas.py`, upgrade
+prompts, and a Seed → Enrich conversion funnel. Nothing in this deployment
+bills or entitles a tenant, and the tier used to be whatever the request
+declared — so any caller could claim `autonomous` and receive auto-enrichment
+(an EIE spend), while Seed callers were upsold and recorded in a funnel for a
+product that cannot be bought.
+
+One resolver, `resolve_effective_capabilities()` in `health_schemas.py`, now
+decides every health call's capabilities. The request's `tier` is echoed back
+as `requested_tier` and grants nothing, in either mode.
+
+| Mode | Effective tier | Upgrade prompts | Conversion events |
+|---|---|---|---|
+| off (default) | full capability set (`autonomous` row, with `conversion_tracking` forced off) | never | never |
+| on | `HEALTH_ENTITLED_TIER` (server-owned; unknown value → `seed`, logged) | yes | per the entitled tier's `TIER_FEATURES` row |
+
+The enum, `TIER_FEATURES` and the report helpers are retained; only who
+selects the row changed. Auto-enrichment is still separately gated by
+`AUTO_ENRICH_VIA_GATE` (the outbound Gate request), and every assess response
+now carries `enrichment_dispatch` — the full `trigger_reenrichment_v2` result —
+with `reason` equal to `dispatch.error` on every non-dispatched path
+(HEALTH-03).
+
+### Batch ceilings
+
+`health_batch_assess` accepts `max_entities` and `cost_ceiling_usd` as
+*requests*. Each is bounded above by `HEALTH_BATCH_MAX_ENTITIES` /
+`HEALTH_BATCH_COST_CEILING_USD`; a request may lower a ceiling and never raise
+it, and a negative or non-numeric value is rejected (422). The report's buckets
+partition the request: `total_scanned` + `total_skipped` + `total_truncated`
+= `total_candidates`; `estimated_eligible` replaces `total_enriched` (a batch
+scan enriches nothing) and `dispatched` is `0` until a dispatch path exists.
+
+### Activation Steps
+
+1. Decide the entitlement source. `HEALTH_ENTITLED_TIER` is a deployment-wide
+   value; per-tenant entitlement needs a lookup that does not exist yet.
+2. Set `HEALTH_COMMERCIAL_MODE_ENABLED=true` and `HEALTH_ENTITLED_TIER`.
+3. The conversion-event store is in-memory and bounded; a persistent funnel
+   store is a prerequisite for reading the metrics in anger.
+
+### Rollback
+
+Set the flag back to `False`. Prompts stop, events stop, and every call runs
+with the full capability set again.
+
+---
+
+## 19. Strict Tenant Database (W7-01 / DB-STRICT-01)
+
+**State**: Active (hardening; default flipped to on 2026-10-22)
+**Flag**: `STRICT_TENANT_DATABASE=True` (default on)
+
+Every tenant's data lives in a Neo4j database named after its domain id, so a
+`GraphDriver.execute_query` / `execute_write` call that names no `database=`
+can only mean the caller forgot — and the old silent fallback put that caller's
+reads and writes on the shared `neo4j` database. The flag shipped `False` while
+callers were audited; the audit found every engine caller names its database
+(handlers, GDS scheduler, feedback, resolution, causal, scoring, sync), so the
+default is now `True` and an omitted `database=` raises a `ValueError` that
+names the method and this flag.
+
+`handle_health`'s liveness probe passes `database="neo4j"` explicitly and is
+unaffected.
+
+### Known exception
+
+`engine/compliance/pii.py: PIIHandler.erase_subject()` issues one
+`execute_query` with no `database=`. It runs only on the live (non-dry-run)
+GDPR erasure path — `GDPR_ERASURE_ENABLED=true` **and** `GDPR_DRY_RUN=false`,
+both opt-in — and under the strict default it fails closed with the
+`ValueError` above, wrapped by `handle_admin` as `ExecutionError("GDPR erasure
+failed")`. That call should take the domain database like the dry-run count
+beside it does; until it is repaired, live erasure on a strict deployment
+requires `STRICT_TENANT_DATABASE=false`.
+
+### Rollback
+
+`STRICT_TENANT_DATABASE=false` restores the `neo4j` fallback.
 
 ---
 

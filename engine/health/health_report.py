@@ -21,11 +21,12 @@ from typing import Any
 
 from engine.health.field_health import EntityHealth
 from engine.health.health_schemas import (
-    TIER_FEATURES,
     ConversionEvent,
     ConversionFunnelMetrics,
+    EffectiveHealthCapabilities,
     HealthAction,
     HealthReport,
+    resolve_effective_capabilities,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,10 +47,19 @@ _conversion_events: deque[ConversionEvent] = deque(maxlen=CONVERSION_EVENT_MAX)
 def generate_health_report(
     entity_health: EntityHealth,
     tier: str = "seed",
+    *,
+    capabilities: EffectiveHealthCapabilities | None = None,
 ) -> HealthReport:
-    """Generate a structured health report from an EntityHealth assessment."""
-    actions = _build_recommended_actions(entity_health, tier)
-    upgrade_recs = _build_upgrade_recommendations(entity_health, tier)
+    """Generate a structured health report from an EntityHealth assessment.
+
+    ``tier`` is kept for callers that pass one, but the report's content is
+    decided by the server-resolved capabilities (HEALTH-02): when
+    ``capabilities`` is not supplied it is resolved here with ``tier`` as the
+    *requested* tier, which grants nothing.
+    """
+    caps = capabilities or resolve_effective_capabilities(tier)
+    actions = _build_recommended_actions(entity_health, caps)
+    upgrade_recs = _build_upgrade_recommendations(entity_health, caps)
 
     return HealthReport(
         entity_id=entity_health.entity_id,
@@ -67,11 +77,11 @@ def generate_health_report(
 
 def _build_recommended_actions(
     entity_health: EntityHealth,
-    tier: str,
+    caps: EffectiveHealthCapabilities,
 ) -> list[HealthAction]:
     """Build actionable recommendations based on health assessment."""
     actions: list[HealthAction] = []
-    features = TIER_FEATURES.get(tier, TIER_FEATURES["seed"])
+    features = caps.features
 
     # Gate-critical gaps are always urgent
     for gap in entity_health.critical_gaps:
@@ -117,10 +127,17 @@ def _build_recommended_actions(
 
 def _build_upgrade_recommendations(
     entity_health: EntityHealth,
-    tier: str,
+    caps: EffectiveHealthCapabilities,
 ) -> list[str]:
-    """Build tier upgrade recommendations (Seed→Enrich conversion engine)."""
+    """Build tier upgrade recommendations (Seed→Enrich conversion engine).
+
+    COMM-02: empty unless commercial mode is on — an upsell for a product with
+    no billing path is noise, not a recommendation.
+    """
     recs: list[str] = []
+    if not caps.upgrade_prompts:
+        return recs
+    tier = caps.tier
 
     if tier == "seed":
         if entity_health.critical_gaps:

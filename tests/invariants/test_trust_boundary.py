@@ -108,6 +108,109 @@ class TestT103TenantIsolation:
             state._tenant_allowlist = original
 
 
+@pytest.mark.finding("CEG-AUTH-01")
+class TestCEGAuth01TenantAllowlistFailsClosedInProd:
+    """CEG-AUTH-01: an unset TENANT_ALLOWLIST must deny, not admit, in production.
+
+    Outside prod the allowlist is optional (single-tenant local development).
+    In prod, forgetting it used to open the engine to every tenant with only a
+    WARNING in the log.
+    """
+
+    @staticmethod
+    def _settings(env: str):
+        from engine.config.settings import Settings
+
+        return Settings(l9_env=env, neo4j_password="real-pass", api_secret_key="real-key")
+
+    def test_prod_without_allowlist_rejects_every_tenant(self):
+        from engine.handlers import ValidationError, _validate_tenant_access
+        from engine.state import get_state
+
+        state = get_state()
+        original = state._tenant_allowlist
+        try:
+            state._tenant_allowlist = None
+            with patch("engine.config.settings.settings", self._settings("prod")):
+                with pytest.raises(ValidationError, match="TENANT_ALLOWLIST is not configured"):
+                    _validate_tenant_access("any_tenant", "match")
+        finally:
+            state._tenant_allowlist = original
+
+    def test_prod_with_allowlist_still_admits_listed_tenant(self):
+        from engine.handlers import _validate_tenant_access
+        from engine.state import get_state
+
+        state = get_state()
+        original = state._tenant_allowlist
+        try:
+            state._tenant_allowlist = {"tenant_a"}
+            with patch("engine.config.settings.settings", self._settings("prod")):
+                _validate_tenant_access("tenant_a", "match")
+        finally:
+            state._tenant_allowlist = original
+
+    @pytest.mark.parametrize("env", ["dev", "local", "test", "staging"])
+    def test_non_prod_without_allowlist_still_permits(self, env):
+        from engine.handlers import _validate_tenant_access
+        from engine.state import get_state
+
+        state = get_state()
+        original = state._tenant_allowlist
+        try:
+            state._tenant_allowlist = None
+            with patch("engine.config.settings.settings", self._settings(env)):
+                _validate_tenant_access("any_tenant", "match")
+        finally:
+            state._tenant_allowlist = original
+
+    def test_init_dependencies_in_prod_logs_error_not_warning(self, caplog):
+        import logging
+        from unittest.mock import MagicMock
+
+        from engine.handlers import init_dependencies
+        from engine.state import _reset_singleton
+
+        _reset_singleton()
+        try:
+            with (
+                patch.dict("os.environ", {"TENANT_ALLOWLIST": ""}),
+                patch("engine.config.settings.settings", self._settings("prod")),
+                caplog.at_level(logging.WARNING, logger="engine.handlers"),
+            ):
+                init_dependencies(MagicMock(), MagicMock())
+        finally:
+            _reset_singleton()
+        records = [r for r in caplog.records if "TENANT_ALLOWLIST" in r.getMessage()]
+        assert records
+        assert records[-1].levelno == logging.ERROR
+
+    def test_unreachable_jwt_branch_is_gone(self):
+        """The JWT allowed_tenants branch had no caller; it is removed, not kept as dead code.
+
+        The claim is decoded by chassis/auth/auth.py onto request.state and was
+        never forwarded into the engine, so an engine-side check could never run.
+        Checked on the AST so the docstring that explains the removal may still
+        name the identifier while no parameter, name, attribute or keyword does.
+        """
+        import ast
+        import inspect
+
+        from engine.handlers import _validate_tenant_access
+
+        assert "allowed_tenants" not in inspect.signature(_validate_tenant_access).parameters
+        tree = ast.parse((ROOT / "engine" / "handlers.py").read_text(encoding="utf-8"))
+        offenders = [
+            node.lineno
+            for node in ast.walk(tree)
+            if (isinstance(node, ast.arg) and node.arg == "allowed_tenants")
+            or (isinstance(node, ast.Name) and node.id == "allowed_tenants")
+            or (isinstance(node, ast.Attribute) and node.attr == "allowed_tenants")
+            or (isinstance(node, ast.keyword) and node.arg == "allowed_tenants")
+        ]
+        assert offenders == [], f"engine/handlers.py re-introduces allowed_tenants at lines {offenders}"
+
+
 @pytest.mark.finding("T1-05")
 class TestT105ParameterResolution:
     """T1-05: ParameterResolver must not silently swallow errors."""

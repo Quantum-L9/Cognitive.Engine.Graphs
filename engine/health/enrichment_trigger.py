@@ -216,11 +216,17 @@ async def trigger_reenrichment_v2(
     """
     priority = compute_enrichment_priority(entity_health, domain_spec, historical_outcomes)
 
+    # HEALTH-03: every return carries a ``dispatch`` block and ``reason`` is the
+    # same machine token as ``dispatch["error"]`` on every non-dispatched path,
+    # so a caller surfacing this result (handle_health_assess does) can branch
+    # on one field. The human-readable ROI breakdown stays in ``priority``.
     if priority.recommendation == "skip":
         return {
             "triggered": False,
-            "reason": priority.reasoning,
+            "reason": "enrichment_not_recommended",
+            "recommendation": priority.recommendation,
             "priority": priority.model_dump(),
+            "dispatch": {"status": "skipped", "error": "enrichment_not_recommended"},
         }
 
     # Build enrichment packet payload
@@ -239,7 +245,7 @@ async def trigger_reenrichment_v2(
     if not settings.auto_enrich_via_gate:
         return {
             "triggered": False,
-            "reason": "auto_enrich_via_gate disabled",
+            "reason": "auto_enrich_via_gate_disabled",
             "recommendation": priority.recommendation,
             "priority": priority.model_dump(),
             "enrichment_payload": enrichment_payload,
@@ -270,7 +276,7 @@ async def trigger_reenrichment_v2(
 
     return {
         "triggered": triggered,
-        "reason": None if triggered else dispatch.get("error", "dispatch_failed"),
+        "reason": None if triggered else str(dispatch.get("error") or "dispatch_failed"),
         "recommendation": priority.recommendation,
         "priority": priority.model_dump(),
         "enrichment_payload": enrichment_payload,

@@ -153,8 +153,20 @@ class Settings(BaseSettings):
     gate_reregistration_interval_seconds: float = 300.0
     postgres_dsn: str | None = None  # W4-04: asyncpg DSN for ComplianceEngine audit-flush pool.
     # None = compliance audit flush is disabled (flush_audit() no-ops with a warning).
-    # Distinct from PACKET_STORE_DSN (engine/packet/packet_store.py), which manages
-    # its own lazy pool — both may point at the same Postgres instance.
+    # Distinct from packet_store_dsn below, which feeds PacketStore's own lazy
+    # pool — both may point at the same Postgres instance.
+
+    # --- PERSIST-01: PacketStore persistence (engine/packet/packet_store.py) ---
+    # These were read with os.environ.get inside packet_store.py, so the only
+    # module that persists packets was configured outside the settings SSOT.
+    # The env var names are unchanged (PACKET_STORE_ENABLED, PACKET_STORE_DSN,
+    # PACKET_STORE_POOL_MIN, PACKET_STORE_POOL_MAX): pydantic-settings matches
+    # field names to env vars case-insensitively. Activation prerequisites for
+    # production are in docs/FEATURE_GATES.md §7.
+    packet_store_enabled: bool = False
+    packet_store_dsn: str | None = None
+    packet_store_pool_min: int = 2
+    packet_store_pool_max: int = 10
 
     # CEG-008: `match` and `sync` route queries to a Neo4j database named after
     # the domain id, and nothing ever created it — Neo4j does not create
@@ -171,6 +183,22 @@ class Settings(BaseSettings):
     # request, not assessment, reporting or conversion tracking, so the surface
     # itself needs its own gate. Mechanism ships dormant; operator activates.
     health_api_enabled: bool = False
+    # HEALTH-02 / COMM-01 / COMM-02: the health surface carries a Seed -> Enrich
+    # -> Discover -> Autonomous commercial model (TIER_FEATURES, upgrade prompts,
+    # conversion events) that nothing in this deployment bills or entitles. The
+    # request's self-declared `tier` must never grant capabilities. Off (the
+    # default): every call runs with the engine's full health capabilities, and
+    # upgrade prompts and conversion-event tracking are suppressed. On: the
+    # server-owned `health_entitled_tier` decides the capability set and the
+    # conversion funnel is active. See docs/FEATURE_GATES.md §18.
+    health_commercial_mode_enabled: bool = False
+    # Used only while health_commercial_mode_enabled is True. Must be a key of
+    # engine.health.health_schemas.TIER_FEATURES; anything else resolves to seed.
+    health_entitled_tier: str = "seed"
+    # BATCH-01 / BATCH-02: server-owned ceilings for health_batch_assess. A
+    # request may lower either value; it can never raise it above these.
+    health_batch_max_entities: int = 100
+    health_batch_cost_ceiling_usd: float = 10.0
     # CEG-009: five migrated domain packs compile to Cypher that cannot execute
     # (a `RELATES_TO` fallback for gates written with `pattern`/`condition`, and
     # scalar `queryparam` values emitted as parameter names such as `$85.0`).
@@ -180,9 +208,12 @@ class Settings(BaseSettings):
     unvalidated_domain_packs_enabled: bool = False
 
     # --- Wave 7: Explicit Tenant Database Binding ---
-    strict_tenant_database: bool = (
-        False  # W7-01: require explicit database= on GraphDriver calls; no implicit 'neo4j' fallback
-    )
+    # W7-01 / DB-STRICT-01: GraphDriver.execute_query / execute_write require an
+    # explicit database=. Shipped False while callers were audited; the audit
+    # (2026-10-22) found every engine caller names its database, so the default
+    # is now True and an omitted database= is a programming error, not a silent
+    # landing on the shared 'neo4j' database. False restores the fallback.
+    strict_tenant_database: bool = True
     # W7-02 / seam audit 2026-09-02: the legacy chassis (dict ExecuteRequest, no Gate
     # provenance, api-key auth) is a direct-ingress side door. Default ON: startup
     # fails unless L9_CHASSIS=sdk outside dev/local/test.
