@@ -194,6 +194,29 @@ def _require_key(payload: dict[str, Any], key: str, action: str, tenant: str) ->
     return payload[key]
 
 
+_FEEDBACK_DISABLED_MESSAGE = (
+    "Feedback loop is disabled. It runs only with FEEDBACK_ENABLED=True and "
+    "feedbackloop.enabled: true in the domain pack."
+)
+
+
+def _feedback_effective(domain_spec: DomainSpec) -> bool:
+    """FEEDBACK-01: the one feedback predicate.
+
+    The outcome feedback loop runs only when the operator enables it globally
+    (``FEEDBACK_ENABLED``) AND the domain pack opts in (``feedbackloop.enabled``).
+    Every feedback site reads this predicate — learned-weight loading on match,
+    the outcome sync type, the admin ``score_feedback`` / ``apply_weight_proposal``
+    subactions and outcome propagation — so one policy has one gate. Before this
+    the sites split between the two flags, and a domain with ``feedbackloop``
+    off still propagated outcomes while a domain with it on could not sync them.
+    """
+    # Imported at call time: tests patch ``engine.config.settings.settings``.
+    from engine.config.settings import settings as _feedback_settings
+
+    return bool(_feedback_settings.feedback_enabled) and bool(domain_spec.feedbackloop.enabled)
+
+
 # Allowed Cypher function patterns for enrich action (whitelist approach)
 _SAFE_CYPHER_FUNCTIONS = frozenset(
     [
@@ -457,8 +480,8 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     traversal_clauses = traversal_assembler.assemble_traversal(match_direction)
 
     scoring_assembler = ScoringAssembler(domain_spec, graph_driver=graph_driver)
-    # Convergence loop: load learned weights from feedback loop
-    if domain_spec.feedbackloop.enabled and domain_spec.feedbackloop.signal_weights.enabled:
+    # Convergence loop: load learned weights from feedback loop (FEEDBACK-01 predicate)
+    if _feedback_effective(domain_spec) and domain_spec.feedbackloop.signal_weights.enabled:
         await scoring_assembler.load_learned_weights()
     scoring_clause, pareto_metadata = scoring_assembler.assemble_scoring_clause(match_direction, weights)
 
@@ -658,9 +681,9 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         )
 
     # --- W2-02: Outcome record type via sync ---
-    from engine.config.settings import settings as _sync_settings
-
-    if entity_type == "outcome" and _sync_settings.feedback_enabled:
+    # FEEDBACK-01: global flag AND domain opt-in; otherwise "outcome" is an
+    # ordinary entity type and falls through to the configured sync path.
+    if entity_type == "outcome" and _feedback_effective(domain_loader.load_domain(tenant)):
         domain_spec = domain_loader.load_domain(tenant)
         _enforce_capability(tenant, "sync", domain_spec)
         synced = 0
@@ -812,12 +835,10 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # --- W2-02: Score Feedback ---
     if subaction == "score_feedback":
-        from engine.config.settings import settings as _fb_settings
-
-        if not _fb_settings.feedback_enabled:
-            return {"status": "disabled", "message": "Feedback loop is disabled. Set FEEDBACK_ENABLED=True."}
         domain_id = _require_key(payload, "domain_id", "admin", tenant)
         spec = domain_loader.load_domain(domain_id)
+        if not _feedback_effective(spec):
+            return {"status": "disabled", "message": _FEEDBACK_DISABLED_MESSAGE}
         # Read recent outcomes from Neo4j
         outcome_cypher = """
         MATCH (o:TransactionOutcome)
@@ -848,10 +869,10 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {"status": "feedback_computed", **result}
 
     if subaction == "apply_weight_proposal":
-        from engine.config.settings import settings as _fb_settings
-
-        if not _fb_settings.feedback_enabled:
-            return {"status": "disabled", "message": "Feedback loop is disabled. Set FEEDBACK_ENABLED=True."}
+        # The tenant id is the spec id (identity contract 2026-10-22), so the
+        # domain whose weights are being applied is the caller's own.
+        if not _feedback_effective(domain_loader.load_domain(tenant)):
+            return {"status": "disabled", "message": _FEEDBACK_DISABLED_MESSAGE}
         proposed = _require_key(payload, "proposed_weights", "admin", tenant)
         current = _require_key(payload, "current_weights", "admin", tenant)
         from engine.scoring.feedback import OutcomeFeedback
@@ -1812,7 +1833,8 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
         response["rejected_count"] = 1
 
     # Feedback loop: propagate outcome to signal weights and score adjustments
-    if domain_spec.feedbackloop.enabled:
+    # (FEEDBACK-01: same predicate as every other feedback site).
+    if _feedback_effective(domain_spec):
         from engine.feedback.convergence import ConvergenceLoop
 
         outcome_data = {
