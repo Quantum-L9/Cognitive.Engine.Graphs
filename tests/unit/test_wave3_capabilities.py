@@ -12,7 +12,9 @@ status: active
 Tests for Wave 3: Capability & Access Control (seL4-inspired).
 
 Covers:
-- W3-01: Tenant authorization enforcement (JWT allowed_tenants, bypass key)
+- W3-01: Tenant authorization enforcement (JWT claim decoding and bypass key in the
+  chassis; TENANT_ALLOWLIST in the engine — the engine-side JWT branch was removed by
+  CEG-AUTH-01 because nothing ever forwarded the claim to it)
 - W3-02: Capability model (register, validate, derive, revoke, chain check)
 - W3-03: Action-level permissions (ACTION_PERMISSION_MAP, check_action_permission)
 - W3-04: Delegation/revocation audit trail
@@ -112,7 +114,7 @@ def minimal_domain_spec_with_caps() -> DomainSpec:
 
 
 class TestTenantAuthEnforcement:
-    """W3-01: JWT allowed_tenants check and bypass key."""
+    """W3-01: JWT claim decoding, bypass key, and the engine's TENANT_ALLOWLIST check."""
 
     def test_jwt_payload_decode(self):
         """_decode_jwt_payload extracts claims from a valid JWT."""
@@ -144,51 +146,76 @@ class TestTenantAuthEnforcement:
 
         assert _decode_jwt_payload("a.b.c") == {}
 
-    def test_validate_tenant_access_with_allowed_tenants(self):
-        """_validate_tenant_access rejects tenant not in allowed_tenants."""
+    # CEG-AUTH-01: the engine-side JWT ``allowed_tenants`` branch was unreachable
+    # (chassis/auth/auth.py decodes the claim onto request.state and nothing ever
+    # forwarded it) and was removed. The tests below cover the control that is
+    # enforced in the engine — the TENANT_ALLOWLIST on EngineState — including
+    # the production fail-closed rule that replaced "unset admits everyone".
+
+    @staticmethod
+    def _settings(env: str):
+        from engine.config.settings import Settings
+
+        return Settings(l9_env=env, neo4j_password="real-pass", api_secret_key="real-key")
+
+    @staticmethod
+    def _state(allowlist):
+        mock_state = MagicMock()
+        mock_state.tenant_allowlist = allowlist
+        return mock_state
+
+    def test_validate_tenant_access_rejects_unlisted_tenant(self):
+        """_validate_tenant_access rejects a tenant not in the allowlist."""
         from engine.handlers import ValidationError, _validate_tenant_access
 
-        mock_state = MagicMock()
-        mock_state.tenant_allowlist = None
-        with patch("engine.handlers.get_state", return_value=mock_state):
-            with patch("engine.config.settings.settings") as mock_settings:
-                mock_settings.tenant_auth_enabled = True
-                with pytest.raises(ValidationError, match="not in JWT allowed_tenants"):
-                    _validate_tenant_access("evil_corp", "match", allowed_tenants=["acme", "globex"])
+        with patch("engine.handlers.get_state", return_value=self._state({"acme", "globex"})):
+            with pytest.raises(ValidationError, match="not in authorized allowlist"):
+                _validate_tenant_access("evil_corp", "match")
 
-    def test_validate_tenant_access_allowed(self):
-        """_validate_tenant_access passes when tenant is in allowed_tenants."""
+    def test_validate_tenant_access_allows_listed_tenant(self):
+        """_validate_tenant_access passes when the tenant is in the allowlist."""
         from engine.handlers import _validate_tenant_access
 
-        mock_state = MagicMock()
-        mock_state.tenant_allowlist = None
-        with patch("engine.handlers.get_state", return_value=mock_state):
-            with patch("engine.config.settings.settings") as mock_settings:
-                mock_settings.tenant_auth_enabled = True
-                # Should not raise
-                _validate_tenant_access("acme", "match", allowed_tenants=["acme", "globex"])
+        with patch("engine.handlers.get_state", return_value=self._state({"acme", "globex"})):
+            _validate_tenant_access("acme", "match")
 
-    def test_validate_tenant_access_wildcard(self):
-        """Wildcard * in allowed_tenants allows any tenant."""
+    def test_validate_tenant_access_allowlist_is_exact_no_wildcard(self):
+        """The allowlist is a set of tenant ids; '*' is a literal, not a wildcard."""
+        from engine.handlers import ValidationError, _validate_tenant_access
+
+        with patch("engine.handlers.get_state", return_value=self._state({"*"})):
+            _validate_tenant_access("*", "match")
+            with pytest.raises(ValidationError, match="not in authorized allowlist"):
+                _validate_tenant_access("anything", "match")
+
+    def test_validate_tenant_access_unset_allowlist_permits_outside_prod(self):
+        """Unset TENANT_ALLOWLIST outside production admits every tenant (unchanged)."""
         from engine.handlers import _validate_tenant_access
 
-        mock_state = MagicMock()
-        mock_state.tenant_allowlist = None
-        with patch("engine.handlers.get_state", return_value=mock_state):
-            with patch("engine.config.settings.settings") as mock_settings:
-                mock_settings.tenant_auth_enabled = True
-                _validate_tenant_access("anything", "match", allowed_tenants=["*"])
+        with (
+            patch("engine.handlers.get_state", return_value=self._state(None)),
+            patch("engine.config.settings.settings", self._settings("dev")),
+        ):
+            _validate_tenant_access("evil_corp", "match")
 
-    def test_validate_tenant_access_disabled(self):
-        """When tenant_auth_enabled is False, skip JWT check."""
+    def test_validate_tenant_access_unset_allowlist_denies_in_prod(self):
+        """CEG-AUTH-01: unset TENANT_ALLOWLIST with L9_ENV=prod fails closed."""
+        from engine.handlers import ValidationError, _validate_tenant_access
+
+        with (
+            patch("engine.handlers.get_state", return_value=self._state(None)),
+            patch("engine.config.settings.settings", self._settings("prod")),
+        ):
+            with pytest.raises(ValidationError, match="TENANT_ALLOWLIST is not configured"):
+                _validate_tenant_access("acme", "match")
+
+    def test_validate_tenant_access_has_no_jwt_parameter(self):
+        """No caller can pass allowed_tenants= into the engine check any more."""
+        import inspect
+
         from engine.handlers import _validate_tenant_access
 
-        mock_state = MagicMock()
-        mock_state.tenant_allowlist = None
-        with patch("engine.handlers.get_state", return_value=mock_state):
-            with patch("engine.config.settings.settings") as mock_settings:
-                mock_settings.tenant_auth_enabled = False
-                _validate_tenant_access("evil_corp", "match", allowed_tenants=["acme"])
+        assert list(inspect.signature(_validate_tenant_access).parameters) == ["tenant", "action"]
 
 
 # ═══════════════════════════════════════════════════════════════════

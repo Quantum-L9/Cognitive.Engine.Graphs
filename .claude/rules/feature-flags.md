@@ -37,7 +37,7 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 ## Wave 7 — Explicit Tenant Database Binding
 | Flag | Default | Purpose |
 |------|---------|---------|
-| strict_tenant_database | False | Require explicit `database=` on GraphDriver calls; no implicit 'neo4j' fallback (W7-01) |
+| strict_tenant_database | True | Require explicit `database=` on GraphDriver calls; no implicit 'neo4j' fallback (W7-01; default flipped on by DB-STRICT-01 after the 2026-10-22 caller audit — `STRICT_TENANT_DATABASE=false` restores the fallback) |
 | require_sdk_chassis_in_prod | False | Fail startup if `L9_CHASSIS != sdk` when `l9_env == prod` (W7-02) |
 
 ## Constellation Seam (EIE ↔ Gate ↔ CEG)
@@ -47,6 +47,10 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | graph_inference_feedback_enabled | False | Emit `graph-inference-result` to EIE through Gate (EIE-008 / CEG-006) |
 | auto_create_domain_database | False | Provision the tenant domain database on first use (CEG-008; Enterprise-only CREATE DATABASE) |
 | health_api_enabled | False | Expose engine/health/api.py via admin health_* subactions (CEG-006) |
+| health_commercial_mode_enabled | False | Tier entitlements, upgrade prompts and conversion events on the health surface; off = full capabilities, no funnel. The request's `tier` never grants (HEALTH-02 / COMM-01 / COMM-02) |
+| health_entitled_tier | `seed` | Server-owned tier used only while commercial mode is on |
+| health_batch_max_entities / health_batch_cost_ceiling_usd | 100 / 10.0 | Server-owned ceilings for `health_batch_assess`; a request may lower, never raise (BATCH-01) |
+| packet_store_enabled / packet_store_dsn | False / unset | PacketStore persistence, read through Settings (PERSIST-01; env names unchanged) |
 | unvalidated_domain_packs_enabled | False | Serve the 5 migrated packs whose gates do not compile to executable Cypher (CEG-009) |
 
 ## Entity Resolution
