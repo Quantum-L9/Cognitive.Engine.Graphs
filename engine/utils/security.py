@@ -75,10 +75,6 @@ TENANT_ID_GRAMMAR = (
     "dots or dashes, and never starting with 'system'"
 )
 
-# Retained name: tools/cypher_lint.py and the driver reference it; the grammar is
-# the tenant-id grammar because the two identifiers are one identifier.
-_DATABASE_NAME_RE = _TENANT_ID_RE
-
 
 def tenant_id_defect(name: str) -> str | None:
     """Return why ``name`` is not a legal tenant id, or None when it is legal."""
