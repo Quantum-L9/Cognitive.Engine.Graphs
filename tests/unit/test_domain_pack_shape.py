@@ -198,15 +198,17 @@ def test_witness_pending_pack_has_no_static_defect(name: str) -> None:
     assert defects == [], f"{name} is listed as witness-pending but has static defects:\n  " + "\n  ".join(defects)
 
 
-@pytest.mark.parametrize("name", sorted(STATIC_DEFECT_PACKS))
-def test_static_defect_pack_still_has_the_defect_on_record(name: str) -> None:
+def test_static_defect_packs_still_have_the_defect_on_record() -> None:
     """Shrink-only: when a statically defective pack starts compiling, move it on.
 
-    Without this, a pack fixed later stays invisible behind the flag.
+    Without this, a pack fixed later stays invisible behind the flag. The ledger
+    may be empty (it is, since mortgage-brokerage was rewritten); an entry that
+    exists must still be earning its place.
     """
-    defects = _cypher_defects(_load(name))
-    assert defects, (
-        f"{name} now compiles cleanly — move it from STATIC_DEFECT_PACKS to WITNESS_PENDING_PACKS "
-        "so the Neo4j 5 witness is the only thing between it and the loader."
-    )
-    assert STATIC_DEFECT_PACKS[name].strip(), f"{name} is on the static ledger with no reason recorded"
+    for name in sorted(STATIC_DEFECT_PACKS):
+        assert STATIC_DEFECT_PACKS[name].strip(), f"{name} is on the static ledger with no reason recorded"
+        defects = _cypher_defects(_load(name))
+        assert defects, (
+            f"{name} now compiles cleanly — move it from STATIC_DEFECT_PACKS to WITNESS_PENDING_PACKS "
+            "so the Neo4j 5 witness is the only thing between it and the loader."
+        )

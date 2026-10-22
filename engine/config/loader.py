@@ -47,12 +47,10 @@ SPEC_FILENAME = "spec.yaml"
 # Ledger 1 — a static defect `_cypher_defects` still reports. The reason is
 # written beside the pack; when it compiles cleanly the test says to move it.
 STATIC_DEFECT_PACKS: dict[str, str] = {
-    "mortgage-brokerage": (
-        "loanamount_range: a query-window range over `minloanamountusd` / `maxloanamountusd`, "
-        "which no queryschema field or derived parameter supplies (before CEG-009b the compiler "
-        "ignored the declared bounds and emitted the placeholder `$value`); the spec needs those "
-        "two query fields, or a candidate-window gate on `loanamountusd`"
-    ),
+    # Empty since CEG-009d: mortgage-brokerage's `loanamount_range` (a query-window
+    # range over two parameters no queryschema field supplied, previously hidden
+    # behind the placeholder `$value`) is rewritten to the candidate-window form.
+    # Add a pack here, with its reason, the moment `_cypher_defects` reports one.
 }
 # Ledger 2 — statically clean; waiting on the per-pack Neo4j 5 witness in
 # tests/integration/test_domain_packs_neo4j.py (CEG-009d). A pack leaves this

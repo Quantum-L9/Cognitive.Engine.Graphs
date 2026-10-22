@@ -65,7 +65,7 @@ independently of the code default.
 | Graph Inference Feedback | `GRAPH_INFERENCE_FEEDBACK_ENABLED` (`graph_inference_feedback_enabled`) | `False` | unset | dormant; CEG → Gate → EIE `graph-inference-result` — see §13 |
 | Domain Database Provisioning | `AUTO_CREATE_DOMAIN_DATABASE` (`auto_create_domain_database`) | `False` | unset | dormant; create the tenant domain database on first use — see §14 |
 | Health API (admin health_* subactions) | `HEALTH_API_ENABLED` (`health_api_enabled`) | `False` | unset | dormant; AI-readiness assess/report surface — see §15 |
-| Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; eight packs — seven statically clean and awaiting the Neo4j 5 witness, one with a static defect on record — see §16 |
+| Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; seven packs, statically clean and awaiting the Neo4j 5 witness — see §16 |
 | SDK Participation | `SDK_PARTICIPATION_ENABLED` (`sdk_participation_enabled`) | `True` | unset | active; Gate_SDK owns registration and readiness; off restores CEG's loop — see §17 |
 | Gate Re-registration | `GATE_REREGISTRATION_ENABLED` (`gate_reregistration_enabled`), `GATE_REREGISTRATION_INTERVAL_SECONDS` | `True`, `300` | unset | active only while SDK participation is off — see §17 |
 | Constellation Orchestration | — | — | — | accepted architectural gap — see §9 |
@@ -476,7 +476,6 @@ is now clean for every one of the seven; what remains is the live half.
 | `healthcare-referral` | `$1` + `$True` | both bind; the `insurance_check` traversal step (a property map `TraversalAssembler` forbids, which failed every match before any gate ran) is now the `insurance_accepted` traversal gate; the `specialty_match` step over an undeclared `Condition`/`REQUIRES` is removed | Neo4j 5 witness. Scoring `geodecay` references `$lat`/`$lon` and `candidate.lat`/`candidate.lon`, none declared |
 | `legal-discovery` | `strictwhen` on a gate | consumed: `privilege_filter` filters only while `$includeprivileged = false` | Neo4j 5 witness. Scoring `temporalproximity` reads `candidate.last_activity_date`, `touch_count_30d`, `is_accelerating`, none declared |
 | `research-agent` | `strictwhen` on two gates | consumed: `code_availability` / `dataset_availability` filter only while their `requires*` flag is true | Neo4j 5 witness. Same `temporalproximity` property references as above |
-| `mortgage-brokerage` (was discoverable) | `loanamount_range` compiled against the placeholder `$value` | the compiler now honours `queryparam_min`/`queryparam_max` (§21), which exposes that `minloanamountusd` / `maxloanamountusd` are declared by no query-schema field | static defect on record: the spec needs those two query fields, or a candidate-window gate on `loanamountusd`. Its `lenderresolve` traversal step also fails `TraversalAssembler` validation |
 
 The loader keeps two ledgers behind this flag (`engine/config/loader.py`):
 
@@ -492,7 +491,16 @@ The loader keeps two ledgers behind this flag (`engine/config/loader.py`):
   which belongs to the scoring assembler and the packs' `scoring:` sections,
   not to the gate compiler.
 - `STATIC_DEFECT_PACKS` — a defect the static check still reports, with its
-  reason written beside the pack.
+  reason written beside the pack. Empty at the time of writing: the new
+  identifier check found `mortgage-brokerage`'s `loanamount_range` (a
+  discoverable pack) referencing `$minloanamountusd` / `$maxloanamountusd`,
+  which no query-schema field supplies — hidden until §21 stopped the range
+  compiler emitting the placeholder `$value` — and the gate is rewritten to
+  the candidate-window form (`candidateprop_min` / `candidateprop_max` on the
+  `LoanProduct`, `queryparam: loanamountusd`), so the pack stays discoverable.
+  Its `lenderresolve` / `lenderstatelicensing` traversal steps still fail
+  `TraversalAssembler` validation (unparenthesised nodes; a property map with
+  a parameter), which predates this change and is outside the gate compiler.
 
 **Do not turn this on to "see if they work".** Static cleanliness is
 necessary, not sufficient. `tests/unit/test_domain_pack_shape.py` holds each
