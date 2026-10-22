@@ -20,8 +20,15 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
-from engine.config.loader import SPEC_FILENAME, DomainPackLoader, admission_defects, withholding_reason
+from engine.config.loader import (
+    SPEC_FILENAME,
+    DomainNotFoundError,
+    DomainPackLoader,
+    admission_defects,
+    withholding_reason,
+)
 from engine.config.schema import DomainActivation, DomainSpec
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -167,3 +174,59 @@ def test_parameter_capture_stops_at_closing_punctuation(cypher: str, expected: l
     assert [p for p in captured if not _IDENTIFIER.fullmatch(p)] == [
         p for p in expected if not p[0].isalpha() and p[0] != "_"
     ]
+
+
+# --------------------------------------------------------------------------
+# Identity contract (CEG-IDENT-01 / CEG-DBNAME-01, decided 2026-10-22):
+# tenant id == domain.id == directory name == Neo4j database name.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("domain_dir", _domain_dirs(), ids=lambda p: p.name)
+def test_every_domain_directory_is_a_legal_tenant_id(domain_dir: Path) -> None:
+    """A shipped pack's directory is what a tenant id and a database will be named."""
+    from engine.utils.security import validate_tenant_id
+
+    assert validate_tenant_id(domain_dir.name) == domain_dir.name
+
+
+def test_loader_refuses_an_illegal_tenant_id_before_reading_disk(tmp_path: Path) -> None:
+    """A pack whose directory could not name a database is never opened.
+
+    The grammar runs before path resolution, so even a directory that exists
+    with a valid spec inside is refused by id, not by content.
+    """
+    pack = tmp_path / "Acme_Roofing"
+    pack.mkdir()
+    (pack / SPEC_FILENAME).write_text((DOMAINS_ROOT / "plasticos" / SPEC_FILENAME).read_text(encoding="utf-8"))
+    loader = DomainPackLoader(str(tmp_path))
+    with pytest.raises(DomainNotFoundError, match="not a legal tenant id"):
+        loader.load_domain("Acme_Roofing")
+    assert loader.list_domains() == []
+
+
+def test_customer_spec_carries_template_provenance_and_keeps_tenant_identity() -> None:
+    """A customer cut from a vertical keeps its own id; the vertical is provenance only."""
+    raw = yaml.safe_load((DOMAINS_ROOT / "plasticos" / SPEC_FILENAME).read_text(encoding="utf-8"))
+    raw["domain"]["id"] = "acme.recycling"
+    raw["domain"]["template"] = {"id": "plasticos", "version": raw["domain"]["version"], "source": "crm-scan"}
+    spec = DomainSpec.model_validate(raw)
+    assert spec.domain.id == "acme.recycling"
+    assert spec.domain.template is not None
+    assert (spec.domain.template.id, spec.domain.template.source) == ("plasticos", "crm-scan")
+    # Shipped verticals are the templates themselves: no provenance block.
+    assert DomainSpec.model_validate(_raw("plasticos")).domain.template is None
+
+
+def _raw(domain_id: str) -> dict[str, object]:
+    raw = yaml.safe_load((DOMAINS_ROOT / domain_id / SPEC_FILENAME).read_text(encoding="utf-8"))
+    assert isinstance(raw, dict)
+    return raw
+
+
+def test_template_provenance_requires_id_and_version() -> None:
+    raw = _raw("plasticos")
+    raw["domain"]["id"] = "acme.recycling"
+    raw["domain"]["template"] = {"id": "plasticos"}
+    with pytest.raises(ValidationError):
+        DomainSpec.model_validate(raw)

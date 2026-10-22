@@ -172,7 +172,9 @@ class TestPathTraversalSecurity:
     def test_symlink_spec_file_rejected(self, domains_dir: Path) -> None:
         """Reject spec.yaml that is a symlink."""
         # Create a symlink domain
-        symlink_domain = domains_dir / "symlink_domain"
+        # The directory name is a legal tenant id, so the symlink check (not the
+        # tenant-id grammar) is what refuses it.
+        symlink_domain = domains_dir / "symlink-domain"
         symlink_domain.mkdir()
         real_spec = domains_dir / "testdomain" / "spec.yaml"
         symlink_spec = symlink_domain / "spec.yaml"
@@ -180,7 +182,7 @@ class TestPathTraversalSecurity:
 
         loader = DomainPackLoader(str(domains_dir))
         with pytest.raises(DomainNotFoundError, match="symlink"):
-            loader.load_domain("symlink_domain")
+            loader.load_domain("symlink-domain")
 
 
 class TestFileSizeLimit:

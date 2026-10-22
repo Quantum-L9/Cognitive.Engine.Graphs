@@ -1023,6 +1023,21 @@ class DomainActivation(StrEnum):
     DORMANT = "dormant"
 
 
+class TemplateProvenance(BaseModel):
+    """Which vertical template a customer spec was derived from (CEG-IDENT-01).
+
+    Under the identity contract a tenant id is the spec id and the database name,
+    so a vertical ("roofing-company") is never itself a tenant: a customer spec
+    lives in ``domains/<tenant>/spec.yaml`` with ``domain.id == <tenant>`` and
+    records the vertical it was cut from here. The engine reads this block for
+    provenance only; it never resolves a tenant to a template at runtime.
+    """
+
+    id: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    source: str | None = None
+
+
 class DomainMetadata(BaseModel):
     """Domain pack metadata."""
 
@@ -1032,6 +1047,9 @@ class DomainMetadata(BaseModel):
     version: str
     alternatedomains: list[str] = Field(default_factory=list)
     activation: DomainActivation = DomainActivation.ACTIVE
+    # Required on customer specs by docs/contracts/DOMAIN_SPEC_VERSIONING.md;
+    # absent on the shipped vertical packs, which are the templates themselves.
+    template: TemplateProvenance | None = None
 
 
 class DomainSpec(BaseModel):
