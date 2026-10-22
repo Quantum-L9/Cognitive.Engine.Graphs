@@ -5,3 +5,6 @@
 # user and password words (moved, not introduced, by PERSIST-01; the words are now
 # angle-bracketed so the line no longer matches the postgres-connection rule).
 0b5b858c2326663e78a79c785d895f7aeb0c9af3:engine/packet/packet_store.py:postgres-connection:32
+# The first version of the comment above (commit 28c407c, PR #328) quoted that same
+# placeholder DSN; it is history now, reworded in 77d5204. Same words, not a credential.
+28c407c47c32daa3fe48fb9263ad543b3507c070:.gitleaksignore:postgres-connection:4
