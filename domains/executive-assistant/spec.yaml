@@ -15,7 +15,7 @@ domain:
   description: >
     AI-first executive assistant matching tasks to optimal experts, resources,
     and workflows with calendar integration and priority routing.
-  version: 1.0.0
+  version: 1.0.1
 
 ontology:
   nodes:
@@ -88,9 +88,16 @@ queryschema:
 
 gates:
   - name: skill_match
+    description: >
+      The expert holds the skill the task requires. The query entity is never a
+      bound node, so the former two-hop pattern through (query)-[:REQUIRES]->
+      (an edge this ontology does not declare) could not execute; the required
+      skill arrives as the query field and is matched on Skill.name.
     type: traversal
-    pattern: "candidate-[:HAS_SKILL]->(s:Skill)<-[:REQUIRES]-(query)"
-    condition: "s IS NOT NULL"
+    edgetype: HAS_SKILL
+    tonode: Skill
+    candidateprop: name
+    queryparam: requiredskills
   - name: availability_check
     type: threshold
     candidateprop: availablehours

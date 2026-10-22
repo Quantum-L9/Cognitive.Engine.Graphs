@@ -15,7 +15,7 @@ domain:
   description: >
     Repository-as-agent matching issues to optimal contributors with code
     ownership, expertise signals, and collaboration patterns.
-  version: 1.0.0
+  version: 1.0.1
 
 ontology:
   nodes:
@@ -71,9 +71,16 @@ queryschema:
 
 gates:
   - name: code_ownership
+    description: >
+      The contributor owns the module the issue affects. The query entity is
+      never a bound node, so the former two-hop pattern through (query)-[:AFFECTS]->
+      (an edge this ontology does not declare) could not execute; the affected
+      module path arrives as the query field and is matched on CodeModule.modulepath.
     type: traversal
-    pattern: "candidate-[:OWNS_MODULE]->(m:CodeModule)<-[:AFFECTS]-(query)"
-    condition: "m IS NOT NULL"
+    edgetype: OWNS_MODULE
+    tonode: CodeModule
+    candidateprop: modulepath
+    queryparam: affectedfiles
   - name: capacity_check
     type: threshold
     candidateprop: activeprs

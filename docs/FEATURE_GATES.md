@@ -65,7 +65,7 @@ independently of the code default.
 | Graph Inference Feedback | `GRAPH_INFERENCE_FEEDBACK_ENABLED` (`graph_inference_feedback_enabled`) | `False` | unset | dormant; CEG → Gate → EIE `graph-inference-result` — see §13 |
 | Domain Database Provisioning | `AUTO_CREATE_DOMAIN_DATABASE` (`auto_create_domain_database`) | `False` | unset | dormant; create the tenant domain database on first use — see §14 |
 | Health API (admin health_* subactions) | `HEALTH_API_ENABLED` (`health_api_enabled`) | `False` | unset | dormant; AI-readiness assess/report surface — see §15 |
-| Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; seven packs whose gates do not compile to executable, faithful Cypher — see §16 |
+| Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; eight packs — seven statically clean and awaiting the Neo4j 5 witness, one with a static defect on record — see §16 |
 | SDK Participation | `SDK_PARTICIPATION_ENABLED` (`sdk_participation_enabled`) | `True` | unset | active; Gate_SDK owns registration and readiness; off restores CEG's loop — see §17 |
 | Gate Re-registration | `GATE_REREGISTRATION_ENABLED` (`gate_reregistration_enabled`), `GATE_REREGISTRATION_INTERVAL_SECONDS` | `True`, `300` | unset | active only while SDK participation is off — see §17 |
 | Constellation Orchestration | — | — | — | accepted architectural gap — see §9 |
@@ -448,40 +448,59 @@ store in `engine/health/health_report.py`, which is bounded
 
 CEG-009 moved nine domain packs out of a flat `<name>_domain_spec.yaml` shape
 the loader never reads into `domains/<id>/spec.yaml`. Making them readable
-exposed that seven do not compile to executable, faithful Cypher:
-
-| Pack | Defect |
-|---|---|
-| `executive-assistant` | `RELATES_TO` fallback + `$85.0` |
-| `repo-as-agent` | `RELATES_TO` fallback + `$5` |
-| `roofing-company` | `RELATES_TO` fallback + `$1` |
-| `aios-god-agent` | `RELATES_TO` fallback |
-| `healthcare-referral` | `$1` |
-| `legal-discovery` | `strictwhen` on a gate, consumed by no compiler |
-| `research-agent` | `strictwhen` on two gates, consumed by no compiler |
-
-Three root causes, all in the spec-to-Cypher contract rather than in the files:
+exposed that seven did not compile to executable, faithful Cypher. Three root
+causes, all in the spec-to-Cypher contract:
 
 1. `type: traversal` gates written with `pattern` and `condition`, which
-   `GateCompiler` does not consume. With no `edgetype` the compiler falls back
-   to `RELATES_TO`, an edge no ontology here declares, so the gate is a hard
-   filter that matches nothing.
-2. A scalar `queryparam` (`85.0`, `5`, `1`). `GateSpec.coerce_queryparam_to_str`
-   turns it into a string; since C-009 validates parameter names like labels
-   the compiler refuses the gate outright instead of emitting `$85.0`.
-3. `strictwhen` on a gate. `GateSpec` declares it and nothing under `engine/`
-   consumes it, so a gate the author wrote as conditional (`legal-discovery`,
-   `research-agent`) runs as an unconditional hard filter.
+   `GateCompiler` did not consume. With no `edgetype` the compiler fell back
+   to `RELATES_TO`, an edge no ontology declares, so the gate was a hard
+   filter that matched nothing.
+2. A scalar `queryparam` (`85.0`, `5`, `1`, `true`). `GateSpec` stringified it
+   into a parameter *name*: `$85.0` (refused by C-009) or `$True` (a valid
+   identifier nothing supplies).
+3. `strictwhen` on a gate. `GateSpec` declared it and nothing under `engine/`
+   consumed it, so a gate the author wrote as conditional ran as an
+   unconditional hard filter.
 
-**Do not turn this on to "see if they work".** They do not: the first serves
-zero candidates, the second fails at execution. Fixing them means either
-compiler support for `pattern`/`condition` and literal operands, or a declared
-query-schema parameter per constant — a schema decision, not a file move.
+CEG-009a-c closed all three in the compiler (traversal grammar, literal
+operand binding, `strictwhen` — see `engine/gates/compiler.py`), and CEG-009d
+rewrote the pack YAML the compiler could not be right about. The static half
+is now clean for every one of the seven; what remains is the live half.
 
-`tests/unit/test_domain_pack_shape.py` holds both ends: a discoverable pack
-must compile to executable Cypher, and a gated pack that starts compiling
-cleanly must be removed from `_DOMAIN_FEATURE_FLAGS`, so this list can only
-shrink.
+| Pack | Original defect | Static fix | Still pending |
+|---|---|---|---|
+| `executive-assistant` | `RELATES_TO` fallback + `$85.0` | `skill_match` rewritten to `edgetype: HAS_SKILL` → `Skill.name = $requiredskills` (the two-hop pattern named `(query)`, never a bound node, over an undeclared `REQUIRES` edge); `85.0` now binds | Neo4j 5 witness. `deadline_feasibility` compares `avgresponsetimehours` (float) with `deadline` (datetime) — a type mismatch the witness exercises only in its null-pass form. Scoring references `$param` |
+| `repo-as-agent` | `RELATES_TO` fallback + `$5` | `code_ownership` rewritten to `edgetype: OWNS_MODULE` → `CodeModule.modulepath = $affectedfiles`; `5` now binds | Neo4j 5 witness. Scoring references `$param` and `$query.labels` |
+| `roofing-company` | `RELATES_TO` fallback + `$1` + `$True` | `service_area` rewritten to `edgetype: SERVICES_ZIP` → `ZipCode.zipcode = $zipcode` (the pattern filtered on `code`, undeclared); `specialty_match` marked `invertible: true` (the candidate holds the list); `1` / `true` now bind; `emergency_availability` is conditional via `strictwhen` | Neo4j 5 witness. Scoring references `$param`, `$target_price`, `candidate.value`, `candidate.price_per_unit` |
+| `aios-god-agent` | `RELATES_TO` fallback | `capability_match` rewritten to `edgetype: HAS_CAPABILITY` → `Capability.capabilityid = $requiredcapabilities` | Neo4j 5 witness. Scoring references `$param` |
+| `healthcare-referral` | `$1` + `$True` | both bind; the `insurance_check` traversal step (a property map `TraversalAssembler` forbids, which failed every match before any gate ran) is now the `insurance_accepted` traversal gate; the `specialty_match` step over an undeclared `Condition`/`REQUIRES` is removed | Neo4j 5 witness. Scoring `geodecay` references `$lat`/`$lon` and `candidate.lat`/`candidate.lon`, none declared |
+| `legal-discovery` | `strictwhen` on a gate | consumed: `privilege_filter` filters only while `$includeprivileged = false` | Neo4j 5 witness. Scoring `temporalproximity` reads `candidate.last_activity_date`, `touch_count_30d`, `is_accelerating`, none declared |
+| `research-agent` | `strictwhen` on two gates | consumed: `code_availability` / `dataset_availability` filter only while their `requires*` flag is true | Neo4j 5 witness. Same `temporalproximity` property references as above |
+| `mortgage-brokerage` (was discoverable) | `loanamount_range` compiled against the placeholder `$value` | the compiler now honours `queryparam_min`/`queryparam_max` (§21), which exposes that `minloanamountusd` / `maxloanamountusd` are declared by no query-schema field | static defect on record: the spec needs those two query fields, or a candidate-window gate on `loanamountusd`. Its `lenderresolve` traversal step also fails `TraversalAssembler` validation |
+
+The loader keeps two ledgers behind this flag (`engine/config/loader.py`):
+
+- `WITNESS_PENDING_PACKS` — statically clean; waiting on the per-pack Neo4j 5
+  witness, `tests/integration/test_domain_packs_neo4j.py`. The witness seeds a
+  passing candidate and one failing candidate per gate, runs the compiled
+  WHERE clause against `neo4j:5.18-enterprise`, and then runs the whole
+  `handle_match` pipeline. **A pack leaves this ledger, and the flag, only
+  when both halves are green for it.** The witness has not yet run: the
+  change that wrote it had no Docker daemon, so no pack is proven and none is
+  un-gated. The "still pending" column lists what the full-pipeline half is
+  expected to surface — scoring-side references no query schema supplies —
+  which belongs to the scoring assembler and the packs' `scoring:` sections,
+  not to the gate compiler.
+- `STATIC_DEFECT_PACKS` — a defect the static check still reports, with its
+  reason written beside the pack.
+
+**Do not turn this on to "see if they work".** Static cleanliness is
+necessary, not sufficient. `tests/unit/test_domain_pack_shape.py` holds each
+ledger to its reason: a discoverable pack must compile to executable Cypher
+referencing only parameters something supplies, a witness-pending pack must
+stay statically clean, and a static-defect pack that starts compiling cleanly
+must be moved on — so a pack can only move forward and never get forgotten
+behind the flag.
 
 ---
 

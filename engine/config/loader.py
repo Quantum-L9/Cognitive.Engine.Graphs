@@ -47,20 +47,6 @@ SPEC_FILENAME = "spec.yaml"
 # Ledger 1 — a static defect `_cypher_defects` still reports. The reason is
 # written beside the pack; when it compiles cleanly the test says to move it.
 STATIC_DEFECT_PACKS: dict[str, str] = {
-    "aios-god-agent": (
-        "capability_match: traversal `pattern` names `(query)` as a bound node and a `REQUIRES` edge "
-        "no ontology declares; the query entity travels as parameters"
-    ),
-    "executive-assistant": (
-        "skill_match: traversal `pattern` names `(query)` as a bound node and a `REQUIRES` edge no ontology declares"
-    ),
-    "repo-as-agent": (
-        "code_ownership: traversal `pattern` names `(query)` as a bound node and an `AFFECTS` edge no ontology declares"
-    ),
-    "roofing-company": (
-        "service_area: traversal `pattern` is not parenthesised and filters ZipCode on `code`, "
-        "a property the ontology does not declare (the node carries `zipcode`)"
-    ),
     "mortgage-brokerage": (
         "loanamount_range: a query-window range over `minloanamountusd` / `maxloanamountusd`, "
         "which no queryschema field or derived parameter supplies (before CEG-009b the compiler "
@@ -73,9 +59,13 @@ STATIC_DEFECT_PACKS: dict[str, str] = {
 # set, and the flag, only once that witness has run green against it.
 WITNESS_PENDING_PACKS: frozenset[str] = frozenset(
     {
+        "aios-god-agent",
+        "executive-assistant",
         "healthcare-referral",
         "legal-discovery",
+        "repo-as-agent",
         "research-agent",
+        "roofing-company",
     }
 )
 

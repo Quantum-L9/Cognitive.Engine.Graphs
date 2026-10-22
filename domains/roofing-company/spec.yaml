@@ -15,7 +15,7 @@ domain:
   description: >
     Match roofing projects to optimal contractors and materials with weather
     windows, insurance claims, and permit tracking.
-  version: 1.0.0
+  version: 1.0.1
 
 ontology:
   nodes:
@@ -95,13 +95,25 @@ queryschema:
 
 gates:
   - name: service_area
+    description: >
+      The contractor services the project's zip code. ZipCode carries `zipcode`
+      (the former pattern filtered on `code`, a property the ontology does not
+      declare, so the gate rejected every candidate).
     type: traversal
-    pattern: "candidate-[:SERVICES_ZIP]->(z:ZipCode {code: $query.zipcode})"
-    condition: "z IS NOT NULL"
+    edgetype: SERVICES_ZIP
+    tonode: ZipCode
+    candidateprop: zipcode
+    queryparam: zipcode
   - name: specialty_match
+    description: >
+      The project's roof type is one of the contractor's specialties. The
+      contractor holds the list, so the gate is invertible
+      (`$rooftype IN candidate.specialties`); the non-inverted form asked whether
+      a list is IN a single enum value, which Neo4j rejects at execution.
     type: enummap
     candidateprop: specialties
     queryparam: rooftype
+    invertible: true
   - name: capacity_check
     type: selfrange
     candidateprop_min: currentprojectcount

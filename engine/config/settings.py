@@ -171,12 +171,17 @@ class Settings(BaseSettings):
     # request, not assessment, reporting or conversion tracking, so the surface
     # itself needs its own gate. Mechanism ships dormant; operator activates.
     health_api_enabled: bool = False
-    # CEG-009: five migrated domain packs compile to Cypher that cannot execute
-    # (a `RELATES_TO` fallback for gates written with `pattern`/`condition`, and
-    # scalar `queryparam` values emitted as parameter names such as `$85.0`).
-    # They are readable now but not correct, so they stay undiscoverable until
-    # the compiler or the query schema grows the support they assume. Turning
-    # this on serves packs whose gates are known not to execute.
+    # CEG-009: seven migrated domain packs compiled to Cypher that could not
+    # execute — a `RELATES_TO` fallback for traversal gates written with
+    # `pattern`/`condition`, scalar `queryparam` values stringified into
+    # parameter names (`$85.0`, `$True`), and `strictwhen` consumed by nothing.
+    # CEG-009a-c taught the compiler all three and CEG-009d rewrote the pack
+    # YAML the compiler could not be right about, so every one of them now
+    # compiles statically clean. They stay undiscoverable until the per-pack
+    # Neo4j 5 witness (tests/integration/test_domain_packs_neo4j.py) has run
+    # green against them; the loader's WITNESS_PENDING_PACKS / STATIC_DEFECT_PACKS
+    # ledgers say which reason still holds for which pack. Turning this on
+    # serves packs that have not yet been proven to execute.
     unvalidated_domain_packs_enabled: bool = False
 
     # --- Wave 7: Explicit Tenant Database Binding ---

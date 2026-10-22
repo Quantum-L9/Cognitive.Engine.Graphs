@@ -15,7 +15,7 @@ domain:
   description: >
     AI operating system matching user intents to optimal tool chains with
     capability composition and execution orchestration.
-  version: 1.0.0
+  version: 1.0.1
 
 ontology:
   nodes:
@@ -70,9 +70,16 @@ queryschema:
 
 gates:
   - name: capability_match
+    description: >
+      The tool has the capability the intent requires. The query entity is never
+      a bound node, so the former two-hop pattern through (query)-[:REQUIRES]->
+      (an edge this ontology does not declare) could not execute; the required
+      capability arrives as the query field and is matched on Capability.capabilityid.
     type: traversal
-    pattern: "candidate-[:HAS_CAPABILITY]->(c:Capability)<-[:REQUIRES]-(query)"
-    condition: "c IS NOT NULL"
+    edgetype: HAS_CAPABILITY
+    tonode: Capability
+    candidateprop: capabilityid
+    queryparam: requiredcapabilities
   - name: execution_time_limit
     type: threshold
     candidateprop: avgexecutiontimeseconds

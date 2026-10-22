@@ -15,7 +15,7 @@ domain:
   description: >
     Match patients to optimal providers and specialists with HIPAA-compliant
     filtering and capacity-aware routing.
-  version: 1.0.0
+  version: 1.0.1
 
 ontology:
   nodes:
@@ -79,16 +79,21 @@ queryschema:
     - {name: urgency, type: enum}
     - {name: maxdistancemiles, type: float}
 
-traversal:
-  steps:
-    - name: insurance_check
-      pattern: "candidate-[:ACCEPTS_INSURANCE]->(ins:InsurancePlan {planid: $query.insuranceplan})"
-      required: true
-    - name: specialty_match
-      pattern: "candidate-[:SPECIALIZES_IN]->(sp:Specialty)<-[:REQUIRES]-(cond:Condition {name: $query.primarycondition})"
-      required: false
+# Traversal steps removed (CEG-009d). `insurance_check` carried a property map,
+# which TraversalAssembler forbids ("subquery braces forbidden in pattern"), so
+# every match on this pack failed before any gate ran; its intent — the provider
+# accepts the patient's plan — is the `insurance_accepted` traversal gate below.
+# `specialty_match` reached (cond:Condition) over a REQUIRES edge, neither of
+# which this ontology declares, and no scoring dimension read its alias.
 
 gates:
+  - name: insurance_accepted
+    description: The provider accepts the patient's insurance plan.
+    type: traversal
+    edgetype: ACCEPTS_INSURANCE
+    tonode: InsurancePlan
+    candidateprop: planid
+    queryparam: insuranceplan
   - name: accepts_new_patients
     type: boolean
     candidateprop: acceptsnewpatients
