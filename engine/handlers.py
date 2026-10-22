@@ -835,10 +835,12 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # --- W2-02: Score Feedback ---
     if subaction == "score_feedback":
+        # The tenant id is the spec id (identity contract 2026-10-22), so the
+        # caller's own pack decides the domain half of the predicate.
+        if not _feedback_effective(domain_loader.load_domain(tenant)):
+            return {"status": "disabled", "message": _FEEDBACK_DISABLED_MESSAGE}
         domain_id = _require_key(payload, "domain_id", "admin", tenant)
         spec = domain_loader.load_domain(domain_id)
-        if not _feedback_effective(spec):
-            return {"status": "disabled", "message": _FEEDBACK_DISABLED_MESSAGE}
         # Read recent outcomes from Neo4j
         outcome_cypher = """
         MATCH (o:TransactionOutcome)

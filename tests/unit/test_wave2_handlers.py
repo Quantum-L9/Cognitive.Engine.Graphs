@@ -33,12 +33,12 @@ def _make_domain_loader(spec: MagicMock | None = None, *, domain_feedback: bool 
     loader = MagicMock()
     if spec is None:
         spec = MagicMock()
-        spec.domain.id = "test_domain"
-        spec.calibration = None
-        spec.sync = None
         # FEEDBACK-01: the domain opt-in is half of the effective predicate, so
         # the fixture states it explicitly instead of relying on a truthy mock.
         spec.feedbackloop.enabled = domain_feedback
+        spec.domain.id = "test_domain"
+        spec.calibration = None
+        spec.sync = None
     loader.load_domain.return_value = spec
     loader.list_domains.return_value = ["test_domain"]
     return loader
