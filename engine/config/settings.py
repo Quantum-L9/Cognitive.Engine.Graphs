@@ -168,6 +168,24 @@ class Settings(BaseSettings):
     packet_store_pool_min: int = 2
     packet_store_pool_max: int = 10
 
+    # --- HEALTH-02 / COMM-01 / COMM-02: health commercial model ---
+    # The health surface carries a Seed -> Enrich -> Discover -> Autonomous
+    # commercial model (TIER_FEATURES, upgrade prompts, conversion events) that
+    # nothing in this deployment bills or entitles. The request's self-declared
+    # `tier` must never grant capabilities. Off (the default): every call runs
+    # with the engine's full health capabilities, and upgrade prompts and
+    # conversion-event tracking are suppressed. On: the server-owned
+    # `health_entitled_tier` decides the capability set and the conversion
+    # funnel is active. See docs/FEATURE_GATES.md §22.
+    health_commercial_mode_enabled: bool = False
+    # Used only while health_commercial_mode_enabled is True. Must be a key of
+    # engine.health.health_schemas.TIER_FEATURES; anything else resolves to seed.
+    health_entitled_tier: str = "seed"
+    # BATCH-01 / BATCH-02: server-owned ceilings for health_batch_assess. A
+    # request may lower either value; it can never raise it above these.
+    health_batch_max_entities: int = 100
+    health_batch_cost_ceiling_usd: float = 10.0
+
     # CEG-008: `match` and `sync` route queries to a Neo4j database named after
     # the domain id, and nothing ever created it — Neo4j does not create
     # databases implicitly, so on a fresh instance every sync and match failed
@@ -183,22 +201,6 @@ class Settings(BaseSettings):
     # request, not assessment, reporting or conversion tracking, so the surface
     # itself needs its own gate. Mechanism ships dormant; operator activates.
     health_api_enabled: bool = False
-    # HEALTH-02 / COMM-01 / COMM-02: the health surface carries a Seed -> Enrich
-    # -> Discover -> Autonomous commercial model (TIER_FEATURES, upgrade prompts,
-    # conversion events) that nothing in this deployment bills or entitles. The
-    # request's self-declared `tier` must never grant capabilities. Off (the
-    # default): every call runs with the engine's full health capabilities, and
-    # upgrade prompts and conversion-event tracking are suppressed. On: the
-    # server-owned `health_entitled_tier` decides the capability set and the
-    # conversion funnel is active. See docs/FEATURE_GATES.md §18.
-    health_commercial_mode_enabled: bool = False
-    # Used only while health_commercial_mode_enabled is True. Must be a key of
-    # engine.health.health_schemas.TIER_FEATURES; anything else resolves to seed.
-    health_entitled_tier: str = "seed"
-    # BATCH-01 / BATCH-02: server-owned ceilings for health_batch_assess. A
-    # request may lower either value; it can never raise it above these.
-    health_batch_max_entities: int = 100
-    health_batch_cost_ceiling_usd: float = 10.0
     # CEG-009: five migrated domain packs compile to Cypher that cannot execute
     # (a `RELATES_TO` fallback for gates written with `pattern`/`condition`, and
     # scalar `queryparam` values emitted as parameter names such as `$85.0`).

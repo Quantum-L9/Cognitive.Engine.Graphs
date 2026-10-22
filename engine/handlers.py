@@ -1219,6 +1219,13 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 "score_clamp_enabled": _fs.score_clamp_enabled,
                 "strict_null_gates": _fs.strict_null_gates,
                 "param_strict_mode": _fs.param_strict_mode,
+                # --- Wave 7: Explicit Tenant Database Binding (DB-STRICT-01) ---
+                "strict_tenant_database": _fs.strict_tenant_database,
+                # --- Persistence (PERSIST-01) ---
+                "packet_store_enabled": _fs.packet_store_enabled,
+                # --- Health commercial model (HEALTH-02 / COMM-01 / COMM-02) ---
+                "health_commercial_mode_enabled": _fs.health_commercial_mode_enabled,
+                "health_entitled_tier": _fs.health_entitled_tier,
                 # --- Wave 2: Refinement Scoring ---
                 "feedback_enabled": _fs.feedback_enabled,
                 "confidence_check_enabled": _fs.confidence_check_enabled,
@@ -1233,13 +1240,6 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 "health_api_enabled": _fs.health_api_enabled,
                 "auto_create_domain_database": _fs.auto_create_domain_database,
                 "idea_portfolio_enabled": _fs.idea_portfolio_enabled,
-                # --- Health commercial model (HEALTH-02 / COMM-01 / COMM-02) ---
-                "health_commercial_mode_enabled": _fs.health_commercial_mode_enabled,
-                "health_entitled_tier": _fs.health_entitled_tier,
-                # --- Persistence (PERSIST-01) ---
-                "packet_store_enabled": _fs.packet_store_enabled,
-                # --- Wave 7: Explicit Tenant Database Binding (DB-STRICT-01) ---
-                "strict_tenant_database": _fs.strict_tenant_database,
             },
         }
 
