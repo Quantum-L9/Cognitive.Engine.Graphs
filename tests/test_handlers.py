@@ -360,3 +360,81 @@ async def test_health_neo4j_connection_failed() -> None:
 
     assert result["status"] == "degraded"
     assert result["checks"]["neo4j"] == "error: connection_failed"
+
+
+def _loaded_spec_for_results() -> MagicMock:
+    """The autouse spec, with the MagicMock-only branches handle_match would trip on pinned off."""
+    from engine.state import get_state
+
+    spec = get_state().domain_loader.load_domain.return_value
+    spec.decision_arbitration.enabled = False
+    spec.causal.enabled = False
+    return spec
+
+
+@pytest.mark.asyncio
+async def test_match_null_scores_are_coerced_before_normalization(monkeypatch) -> None:
+    """A null `score` (clamp off, unscored property) is stored as 0.0, so normalization
+    neither subtracts from None nor promotes a lone null to 1.0."""
+    from engine.config.settings import settings
+    from engine.state import get_state
+
+    _loaded_spec_for_results()
+    monkeypatch.setattr(settings, "score_normalize", True)
+    get_state().graph_driver.execute_query = AsyncMock(
+        return_value=[
+            {"candidate": {"facility_id": "F-1"}, "score": None, "structural": 0.2},
+            {"candidate": {"facility_id": "F-2"}, "score": 0.4, "structural": 0.8},
+        ]
+    )
+
+    result = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
+
+    scores = [c["score"] for c in result["candidates"]]
+    assert scores == [0.0, 1.0]
+    assert result["scoring_meta"]["raw_min"] == 0.0
+    assert result["scoring_meta"]["raw_max"] == 0.4
+    assert result["scoring_meta"]["normalization_applied"] is True
+
+
+@pytest.mark.asyncio
+async def test_match_lone_null_score_normalizes_to_zero(monkeypatch) -> None:
+    from engine.config.settings import settings
+    from engine.state import get_state
+
+    _loaded_spec_for_results()
+    monkeypatch.setattr(settings, "score_normalize", True)
+    get_state().graph_driver.execute_query = AsyncMock(
+        return_value=[{"candidate": {"facility_id": "F-1"}, "score": None, "structural": 0.2}]
+    )
+
+    result = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
+
+    # Range is zero, so the singleton branch runs — on a real 0.0, not on None.
+    assert result["candidates"][0]["score"] == 1.0
+    assert result["scoring_meta"]["raw_max"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_match_arbitration_front_uses_declared_candidate_id() -> None:
+    """`pareto.arbitration.nondominated_ids` carries the same declared ids as `pareto.non_dominated_ids`."""
+    from engine.state import get_state
+
+    spec = _loaded_spec_for_results()
+    spec.decision_arbitration.enabled = True
+    spec.decision_arbitration.constraints = []
+    objective = MagicMock()
+    objective.dimension = "structural"
+    spec.decision_arbitration.pareto_config.objectives = [objective]
+    get_state().graph_driver.execute_query = AsyncMock(
+        return_value=[
+            {"candidate": {"facility_id": "F-1"}, "score": 0.9, "structural": 0.9},
+            {"candidate": {"facility_id": "F-2"}, "score": 0.5, "structural": 0.5},
+        ]
+    )
+
+    result = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
+
+    pareto = result["pareto"]
+    assert pareto["arbitration"]["nondominated_ids"] == ["F-1"]
+    assert pareto["non_dominated_ids"] == ["F-1"]
