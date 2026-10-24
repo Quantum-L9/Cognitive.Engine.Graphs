@@ -818,9 +818,11 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             return {"status": "disabled", "message": "Feedback loop is disabled. Set FEEDBACK_ENABLED=True."}
         domain_id = _require_key(payload, "domain_id", "admin", tenant)
         spec = domain_loader.load_domain(domain_id)
-        # Read recent outcomes from Neo4j
-        outcome_cypher = """
-        MATCH (o:TransactionOutcome)
+        # Read recent outcomes from Neo4j. The outcome node label is the domain's
+        # (feedbackloop.outcome_node_label), not a fixed engine vocabulary.
+        outcome_label = sanitize_label(spec.feedbackloop.outcome_node_label)
+        outcome_cypher = f"""
+        MATCH (o:{outcome_label})
         WHERE o.tenant = $tenant
         RETURN o.outcome AS outcome, o.candidate_id AS candidate_id,
                o.match_id AS match_id, o.value AS value
@@ -1202,7 +1204,9 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 "graph_inference_feedback_enabled": _fs.graph_inference_feedback_enabled,
                 "health_api_enabled": _fs.health_api_enabled,
                 "auto_create_domain_database": _fs.auto_create_domain_database,
-                "idea_portfolio_enabled": _fs.idea_portfolio_enabled,
+                # --- Domain pack admission (generic; the engine names no domain) ---
+                "unvalidated_domain_packs_enabled": _fs.unvalidated_domain_packs_enabled,
+                "dormant_domain_packs_enabled": _fs.dormant_domain_packs_enabled,
             },
         }
 
@@ -1215,9 +1219,10 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         domain_id = _require_key(payload, "domain_id", "admin", tenant)
         spec = domain_loader.load_domain(domain_id)
 
-        # Read recent outcomes with scores
-        outcome_cypher = """
-        MATCH (o:TransactionOutcome)
+        # Read recent outcomes with scores (outcome node label is the domain's)
+        outcome_label = sanitize_label(spec.feedbackloop.outcome_node_label)
+        outcome_cypher = f"""
+        MATCH (o:{outcome_label})
         WHERE o.tenant = $tenant AND o.outcome IN ['success', 'failure']
         RETURN o.match_id AS match_id, o.candidate_id AS candidate_id,
                o.outcome AS outcome, o.value AS score
@@ -1356,9 +1361,10 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 tenant=tenant,
             )
 
-        # Read outcome history from Neo4j
-        outcome_cypher = """
-        MATCH (o:TransactionOutcome)
+        # Read outcome history from Neo4j (outcome node label is the domain's)
+        outcome_label = sanitize_label(spec.feedbackloop.outcome_node_label)
+        outcome_cypher = f"""
+        MATCH (o:{outcome_label})
         WHERE o.tenant = $tenant AND o.dimension_scores IS NOT NULL
         RETURN o.dimension_scores AS dimension_scores,
                o.was_selected AS was_selected
@@ -1475,18 +1481,21 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         from engine.gate_egress import emit_graph_inference_result
         from engine.inference_rule_registry import (
             InferenceContext,
+            authorized_rules,
             execute_rule,
-            list_registered_rules,
         )
 
         entity = _require_key(payload, "entity", "admin", tenant)
         entity_id = _require_key(payload, "entity_id", "admin", tenant)
         domain_id = payload.get("domain_id", tenant)
 
-        # `rules` absent means "every registered rule"; `rules: []` means "none"
-        # and must not silently become "all". A non-list is rejected rather than
-        # iterated — a bare string would otherwise be walked character by
-        # character and every char looked up as a rule name.
+        # The domain owns which inference may run for it (plugins.inference_rules).
+        # `rules` absent means "every rule the domain authorizes"; `rules: []`
+        # means "none" and must not silently become "all"; a rule the domain did
+        # not authorize is rejected rather than executed. A non-list is rejected
+        # rather than iterated — a bare string would otherwise be walked
+        # character by character and every char looked up as a rule name.
+        authorized = authorized_rules(domain_loader.load_domain(domain_id))
         if "rules" in payload:
             requested = payload["rules"]
             if not isinstance(requested, list) or not all(isinstance(r, str) for r in requested):
@@ -1495,8 +1504,16 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                     action="admin",
                     tenant=tenant,
                 )
+            unauthorized = sorted(set(requested) - set(authorized))
+            if unauthorized:
+                raise ValidationError(
+                    f"admin.rules {unauthorized} are not authorized by domain {domain_id!r} "
+                    "(declare them under plugins.inference_rules in the domain spec)",
+                    action="admin",
+                    tenant=tenant,
+                )
         else:
-            requested = list_registered_rules()
+            requested = list(authorized)
 
         context = InferenceContext(
             tenant_id=tenant,
@@ -1742,8 +1759,12 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
     match_direction = fingerprint.get("match_direction")
     candidate_count = fingerprint.get("candidate_count", 0)
 
-    cypher = """
-    CREATE (o:TransactionOutcome {
+    # The outcome node label is the domain's (feedbackloop.outcome_node_label);
+    # the engine's system graph schema documents the default, not a fixed name.
+    outcome_label = sanitize_label(domain_spec.feedbackloop.outcome_node_label)
+    cypher = (
+        f"\n    CREATE (o:{outcome_label} {{"
+        """
         outcome_id: $outcome_id, match_id: $match_id,
         candidate_id: $candidate_id, outcome: $outcome,
         value: $value, created_at: datetime(), tenant: $tenant,
@@ -1761,6 +1782,7 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
     )
     RETURN o.outcome_id AS outcome_id
     """
+    )
     try:
         await graph_driver.execute_query(
             cypher=cypher,

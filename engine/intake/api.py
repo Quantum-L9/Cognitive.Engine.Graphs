@@ -51,6 +51,29 @@ def _require_key(payload: dict[str, Any], key: str, action: str) -> Any:
     return payload[key]
 
 
+def _optional_str_map(payload: dict[str, Any], key: str, action: str) -> dict[str, str] | None:
+    """Optional ``{str: str}`` table, validated before it reaches the compiler."""
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in value.items()):
+        raise ValueError(f"Field '{key}' in {action} payload must be an object of string → string")
+    return value
+
+
+def _optional_str_list_map(payload: dict[str, Any], key: str, action: str) -> dict[str, list[str]] | None:
+    """Optional ``{str: [str, ...]}`` table, validated before it reaches the compiler."""
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not all(
+        isinstance(k, str) and isinstance(v, list) and all(isinstance(item, str) for item in v)
+        for k, v in value.items()
+    ):
+        raise ValueError(f"Field '{key}' in {action} payload must be an object of string → list of strings")
+    return value
+
+
 async def handle_intake_scan(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     """
     Scan CRM fields against graph spec ontology.
@@ -81,6 +104,12 @@ async def handle_intake_compile(tenant: str, payload: dict[str, Any]) -> dict[st
       - crm_fields: dict[str, str] | list[str]  — CRM field export
       - business_profile: str                    — company description
       - domain: str (optional)                   — domain ID override
+      - vertical_keywords: dict[str, str] (optional)      — keyword → domain id, caller-supplied example data
+      - derivation_graph: dict[str, list[str]] (optional) — target → source fields, caller-supplied
+      - ambiguity_patterns: dict[str, list[str]] (optional) — ambiguous name → candidates, caller-supplied
+
+    The engine ships none of the three tables (Stage 2 R06): the sales
+    demonstration passes its own example data explicitly.
 
     Returns:
       IntakeResult as dict.
@@ -91,7 +120,14 @@ async def handle_intake_compile(tenant: str, payload: dict[str, Any]) -> dict[st
     domain_id = payload.get("domain", tenant)
 
     spec: DomainSpec = loader.load_domain(domain_id)
-    result = compile_intake(crm_fields, business_profile, spec)
+    result = compile_intake(
+        crm_fields,
+        business_profile,
+        spec,
+        vertical_keywords=_optional_str_map(payload, "vertical_keywords", "intake_compile"),
+        derivation_graph=_optional_str_list_map(payload, "derivation_graph", "intake_compile"),
+        ambiguity_patterns=_optional_str_list_map(payload, "ambiguity_patterns", "intake_compile"),
+    )
 
     logger.info("intake_compile complete: tier=%s", result.delivery_tier)
     return result.model_dump(mode="json")

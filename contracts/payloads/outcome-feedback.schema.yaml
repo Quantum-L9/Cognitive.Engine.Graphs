@@ -1,6 +1,6 @@
 $schema: https://json-schema.org/draft/2020-12/schema
 $id: urn:l9:plasticos:contracts:payload:outcome-feedback:1.0.0-draft
-title: PlasticOS CEG Outcome Feedback
+title: CEG Outcome Feedback
 description: Idempotent observed business outcomes used by CEG calibration and reinforcement.
 x-publication-status: draft-unpublished
 type: object
@@ -33,17 +33,8 @@ properties:
         candidate_ref:
           $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/entity_ref
         outcome_type:
-          type: string
-          enum:
-          - reviewed
-          - contacted
-          - quoted
-          - accepted
-          - rejected
-          - completed
-          - claim_raised
-          - paid
-          - repeat_business
+          $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/identifier
+          description: Must be one of the domain spec's outcome_signals[].signal.
         occurred_at:
           type: string
           format: date-time

@@ -1,6 +1,6 @@
 $schema: https://json-schema.org/draft/2020-12/schema
 $id: urn:l9:plasticos:contracts:payload:match-request:1.0.0-draft
-title: PlasticOS CEG Match Request
+title: CEG Match Request
 description: Payload carried by TransportPacket action=match. No transport fields
   and no ungoverned weight override.
 x-publication-status: draft-unpublished
@@ -25,10 +25,8 @@ properties:
     type: string
     minLength: 1
   direction:
-    type: string
-    enum:
-    - supply_opportunity_to_buyer_facility
-    - buyer_demand_to_supply_opportunity
+    $ref: ./common.schema.yaml#/$defs/identifier
+    description: Must be one of the domain spec's queryschema.matchdirections.
   query_entity_ref:
     $ref: ./common.schema.yaml#/$defs/entity_ref
   query:

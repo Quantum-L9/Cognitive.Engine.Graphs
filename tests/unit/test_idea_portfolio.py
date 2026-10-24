@@ -66,14 +66,21 @@ def _envelope(expected: str | None = None) -> dict[str, Any]:
 
 @pytest.mark.unit
 def test_domain_is_dormant_until_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The pack declares `domain.activation: dormant`; the generic loader policy withholds it.
+
+    No engine code names this domain: the posture is the pack's own, and the
+    operator override is the generic `dormant_domain_packs_enabled`.
+    """
     loader = DomainPackLoader(config_path=str(ROOT / "domains"))
-    monkeypatch.setattr(settings, "idea_portfolio_enabled", False)
+    monkeypatch.setattr(settings, "dormant_domain_packs_enabled", False)
     assert "idea-portfolio" not in loader.list_domains()
-    with pytest.raises(DomainNotFoundError, match="disabled"):
+    with pytest.raises(DomainNotFoundError, match="dormant"):
         loader.load_domain("idea-portfolio")
 
-    monkeypatch.setattr(settings, "idea_portfolio_enabled", True)
+    monkeypatch.setattr(settings, "dormant_domain_packs_enabled", True)
+    loader.invalidate()
     spec = loader.load_domain("idea-portfolio")
+    assert spec.domain.activation.value == "dormant"
     assert spec.domain.id == "idea-portfolio"
     assert spec.sync.endpoints == []
     assert sum(d.defaultweight for d in spec.scoring.dimensions) == pytest.approx(1.0)

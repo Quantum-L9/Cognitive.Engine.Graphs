@@ -69,7 +69,7 @@ class GateCompiler:
 
     Usage:
         compiler = GateCompiler(domain_spec)
-        where_clause = compiler.compile_all_gates("buyer_to_seller")
+        where_clause = compiler.compile_all_gates(domain_spec.queryschema.matchdirections[0])
         single = compiler.compile(gate_spec)
     """
 
@@ -159,8 +159,8 @@ class GateCompiler:
         Compile all gates into a combined WHERE clause.
 
         Args:
-            match_direction: Current match direction (e.g., "buyer_to_seller")
-            role: Facility role for exemption checking
+            match_direction: Current match direction (one of the domain's queryschema.matchdirections)
+            role: Candidate role for gate exemption checking (roleexempt)
 
         Returns:
             Combined Cypher WHERE clause (without the WHERE keyword)

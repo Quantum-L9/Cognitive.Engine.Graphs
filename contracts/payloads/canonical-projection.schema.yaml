@@ -1,7 +1,7 @@
 $schema: https://json-schema.org/draft/2020-12/schema
 $id: urn:l9:plasticos:contracts:payload:canonical-projection:1.0.0-draft
-title: PlasticOS Canonical Projection
-description: Rebuildable provider-neutral projection of approved Odoo facts. It is never the business system of record.
+title: CEG Canonical Projection
+description: Rebuildable provider-neutral projection of approved facts from the domain's business system of record. CEG is never that system of record.
 x-publication-status: draft-unpublished
 type: object
 additionalProperties: false
@@ -24,14 +24,8 @@ properties:
   entity_ref:
     $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/entity_ref
   entity_type:
-    type: string
-    enum:
-    - material_specification
-    - material_observation
-    - supply_opportunity
-    - buyer_demand
-    - facility_material_rule
-    - capacity_observation
+    $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/identifier
+    description: Must be a node label the domain spec declares (ontology.nodes or sync.endpoints targetnode).
   revision:
     $ref: urn:l9:plasticos:contracts:common:1.0.0-draft#/$defs/revision
   source_record:

@@ -83,22 +83,16 @@ class Settings(BaseSettings):
     w_geo: float = 0.25
     w_reinforcement: float = 0.20
     w_freshness: float = 0.10
-    geo_decay_km: float = 800.0
-    community_cross_bias: float = 0.92
     max_results: int = 25
 
     # --- Temporal Decay ---
+    # Half-life for causal attribution temporal decay (engine/causal/attribution.py).
+    # Stage 2 R10: the former facility/structural half-lives, geo_decay_km,
+    # community_cross_bias, outcome_ema_alpha and the melt-flow-index / density
+    # resolution tolerances were industry-specific global defaults with no
+    # caller anywhere under engine/ or chassis/; they were removed rather than
+    # kept as dead configuration. Per-domain tuning belongs in the domain spec.
     decay_transaction_halflife: float = 180.0  # days
-    decay_facility_halflife: float = 90.0
-    decay_structural_halflife: float = 365.0
-
-    # --- Feedback Loop ---
-    outcome_ema_alpha: float = 0.1
-
-    # --- Entity Resolution ---
-    resolution_density_tolerance: float = 0.05
-    resolution_mfi_tolerance: float = 5.0
-    resolution_min_confidence: float = 0.6
 
     # --- KGE (Phase 4) ---
     kge_enabled: bool = False
@@ -180,13 +174,19 @@ class Settings(BaseSettings):
     # request, not assessment, reporting or conversion tracking, so the surface
     # itself needs its own gate. Mechanism ships dormant; operator activates.
     health_api_enabled: bool = False
-    # CEG-009: five migrated domain packs compile to Cypher that cannot execute
-    # (a `RELATES_TO` fallback for gates written with `pattern`/`condition`, and
-    # scalar `queryparam` values emitted as parameter names such as `$85.0`).
-    # They are readable now but not correct, so they stay undiscoverable until
-    # the compiler or the query schema grows the support they assume. Turning
-    # this on serves packs whose gates are known not to execute.
+    # CEG-009: some domain packs compile to Cypher that cannot execute (a
+    # `RELATES_TO` fallback for gates written with `pattern`/`condition`, scalar
+    # `queryparam` values emitted as parameter names such as `$85.0`, or a
+    # `strictwhen` no compiler consumes). The loader detects this generically
+    # for every pack (engine.config.loader.admission_defects) and withholds the
+    # pack. Turning this on serves packs whose gates are known not to execute.
     unvalidated_domain_packs_enabled: bool = False
+    # A pack may declare `domain.activation: dormant` to stay withheld until an
+    # operator decides otherwise (e.g. a new behavioral surface whose owner has
+    # not cleared it for traffic). This is the generic replacement for the
+    # per-domain flags the loader used to carry; the engine itself names no
+    # domain. Default off: dormant packs are not served.
+    dormant_domain_packs_enabled: bool = False
 
     # --- Wave 7: Explicit Tenant Database Binding ---
     strict_tenant_database: bool = (
@@ -224,9 +224,6 @@ class Settings(BaseSettings):
     # for the same reason as auto_enrich_via_gate — each emission queues
     # re-enrichment targets and so spends EIE budget.
     graph_inference_feedback_enabled: bool = False
-    # IdeaOS portfolio graph is a new behavioral surface. Keep both corpus writes
-    # and portfolio-context reads dormant until explicitly activated by an operator.
-    idea_portfolio_enabled: bool = False
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
