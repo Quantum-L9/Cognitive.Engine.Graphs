@@ -216,8 +216,8 @@ class TestGateCompiler:
             name="network",
             gate_type=GateType.TRAVERSAL,
             edge_type="ACCEPTS",
-            target_label="Insurance",
-            target_prop="planid",
+            to_node="Insurance",
+            candidate_prop="planid",  # the TARGET node's property for a traversal gate
             query_param="insuranceplan",
         )
         domain_spec = make_mock_domain_spec(gates=[gate])
@@ -225,7 +225,67 @@ class TestGateCompiler:
 
         cypher = compiler.compile(gate)
 
-        assert "exists" in cypher.lower()
+        # Stage 2 (Stage 4 proof P4): Neo4j 5 rejects `exists((candidate)-[..]->(t:L {p: $x}))`
+        # ("PatternExpressions are not allowed to introduce new variables"); the gate must
+        # compile to an EXISTS subquery that filters the TARGET node's property.
+        assert "EXISTS { MATCH (candidate)-[:ACCEPTS]->(t:Insurance) WHERE t.planid = $insuranceplan }" in cypher
+        assert "exists((" not in cypher
+        # candidateprop names the target node's property; the null wrapper must not
+        # turn it into a requirement on the candidate's own shape.
+        assert "candidate.planid" not in cypher
+        # Traversal gates default to nullbehavior=fail: only the query parameter is required.
+        assert cypher.startswith("($insuranceplan IS NOT NULL AND (EXISTS {")
+
+    def test_compile_traversal_gate_null_fail_requires_param_only(self) -> None:
+        """nullbehavior=fail on a traversal gate requires the parameter, not a candidate property."""
+        gate = make_mock_gate_spec(
+            name="route_match",
+            gate_type=GateType.TRAVERSAL,
+            edge_type="SERVES_ROUTE",
+            to_node="Route",
+            candidate_prop="route_code",
+            query_param="route_code",
+            null_behavior=NullBehavior.FAIL,
+        )
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+
+        cypher = compiler.compile(gate)
+
+        assert cypher == (
+            "($route_code IS NOT NULL AND "
+            "(EXISTS { MATCH (candidate)-[:SERVES_ROUTE]->(t:Route) WHERE t.route_code = $route_code }))"
+        )
+
+    def test_compile_traversal_gate_legacy_path_behind_flag(self, monkeypatch) -> None:
+        """C-21: traversal_gate_exists_subquery=False restores the pre-Stage-2 predicate and null wrap."""
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "traversal_gate_exists_subquery", False)
+        gate = make_mock_gate_spec(
+            name="route_match",
+            gate_type=GateType.TRAVERSAL,
+            edge_type="SERVES_ROUTE",
+            to_node="Route",
+            candidate_prop="route_code",
+            query_param="route_code",
+            null_behavior=NullBehavior.FAIL,
+        )
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+
+        cypher = compiler.compile(gate)
+
+        assert "exists((candidate)-[:SERVES_ROUTE]->(t:Route {route_code: $route_code}))" in cypher
+        assert "candidate.route_code IS NOT NULL" in cypher
+        assert "EXISTS {" not in cypher
+
+    def test_compile_traversal_gate_without_target_filter(self) -> None:
+        """No candidateprop/queryparam: the gate only requires that some edge exists."""
+        gate = make_mock_gate_spec(
+            name="has_route", gate_type=GateType.TRAVERSAL, edge_type="SERVES_ROUTE", to_node="Route"
+        )
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+
+        assert compiler.compile(gate) == "EXISTS { MATCH (candidate)-[:SERVES_ROUTE]->(t:Route) }"
 
     def test_compile_all_gates_combines_with_and(self) -> None:
         """compile_all_gates combines gates with AND."""

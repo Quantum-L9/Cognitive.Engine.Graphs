@@ -196,6 +196,25 @@ class Settings(BaseSettings):
     # provenance, api-key auth) is a direct-ingress side door. Default ON: startup
     # fails unless L9_CHASSIS=sdk outside dev/local/test.
     require_sdk_chassis_in_prod: bool = True
+
+    # --- Stage 2: domain-neutral Cypher (CEG Stage 4 real-Neo4j proof) ---
+    # P4: the `type: traversal` gate compiled to
+    # `exists((candidate)-[:E]->(t:Label {prop: $param}))`, which Neo4j 5
+    # rejects ("PatternExpressions are not allowed to introduce new variables"),
+    # and its null wrapper tested `candidate.<prop>` although `candidateprop`
+    # names the TARGET node's property. On: the gate compiles to
+    # `EXISTS { MATCH (candidate)-[:E]->(t:Label) WHERE t.prop = $param }` and
+    # null handling checks the query parameter only. Off: the legacy predicate.
+    # Ships on — the legacy form cannot execute on any supported Neo4j.
+    traversal_gate_exists_subquery: bool = True
+    # P3: a `childsync` endpoint copied the child collection onto the parent via
+    # `SET n += row` (Neo4j rejects a list of maps as a property) and
+    # `childtoparent` emitted `(n)-[:T]<-(c)`, which is not Cypher. On: the
+    # parent SET null-overrides child fields, children are created inside
+    # FOREACH, and childtoparent emits `(n)<-[:T]-(c)`. Off: the legacy
+    # UNWIND-based path. Ships on — the legacy path cannot execute.
+    childsync_foreach_projection: bool = True
+
     # Seam audit / PR remediation: paid-tier enrich_now Gate dispatch is opt-in.
     # Default off so deploy does not immediately spend EIE budget until enabled.
     auto_enrich_via_gate: bool = False

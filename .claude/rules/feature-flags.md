@@ -64,3 +64,9 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | w_reinforcement | 0.20 | boot.py _assert_default_weight_sum() |
 | w_freshness | 0.10 | boot.py _assert_default_weight_sum() |
 | **Sum** | **0.85** | Must be ≤ 1.0 |
+
+## Stage 2 — Domain-neutral Cypher (CEG Stage 4 proof)
+| Flag | Default | Purpose |
+|------|---------|---------|
+| traversal_gate_exists_subquery | True | Traversal gate compiles to `EXISTS { MATCH … WHERE t.prop = $param }` with query-param-only null handling; off restores the `exists((…{prop: $param}))` predicate Neo4j 5 rejects |
+| childsync_foreach_projection | True | childsync null-overrides child fields in the parent SET, creates children in FOREACH, emits a valid childtoparent arrow; off restores the UNWIND path Neo4j rejects |

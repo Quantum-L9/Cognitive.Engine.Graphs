@@ -71,6 +71,8 @@ independently of the code default.
 | Causal Rejection Enforcement | `CAUSAL_REJECTION_ENFORCEMENT_ENABLED` (`causal_rejection_enforcement_enabled`) | `True` | unset | active; an R3-rejected RESULTED_IN edge is not written — see §18 |
 | Ingress Packet Audit | `INGRESS_PACKET_AUDIT_ENABLED` (`ingress_packet_audit_enabled`) | `True` | unset | active; SDK audit pairs record Gate's ingress packet — see §19 |
 | Constellation Orchestration | — | — | — | accepted architectural gap — see §9 |
+| Traversal Gate EXISTS Subquery | `TRAVERSAL_GATE_EXISTS_SUBQUERY` (`traversal_gate_exists_subquery`) | `True` | unset | active; traversal gates compile to an `EXISTS { … }` subquery Neo4j 5 accepts — see §20 |
+| Childsync FOREACH Projection | `CHILDSYNC_FOREACH_PROJECTION` (`childsync_foreach_projection`) | `True` | unset | active; childsync writes children in `FOREACH` without copying them onto the parent — see §20 |
 
 ---
 
@@ -572,3 +574,53 @@ Use the `feature_status` admin subaction to get current state of all gates:
 ```
 
 Returns all feature flags with their current boolean/integer values.
+
+---
+
+## 20. Domain-neutral Cypher: Traversal Gate and Childsync (Stage 2)
+
+**State**: Active (hardening)
+**Flags**: `TRAVERSAL_GATE_EXISTS_SUBQUERY=True`, `CHILDSYNC_FOREACH_PROJECTION=True` (default on)
+
+The CEG Stage 4 real-Neo4j proof ran two unrelated synthetic domain packs
+through `handle_sync` and `handle_match` against `neo4j:5.18-enterprise` and
+found three spec-driven paths that could not execute at all:
+
+| Path | Emitted on baseline `7925c790` | Neo4j 5 response |
+|---|---|---|
+| `type: traversal` gate | `exists((candidate)-[:E]->(t:Label {prop: $param}))` | `PatternExpressions are not allowed to introduce new variables: 't'` |
+| `childsync` endpoint | `SET n += row` with the child list still in `row` | `Property values can only be of primitive types or arrays thereof` |
+| `childsync` with `edgedirection: childtoparent` | `MERGE (n)-[:T]<-(c)` | `Invalid input '<'` |
+
+The traversal gate is the only spec-level way to constrain candidates by a
+related taxonomy node's property, so without it a query field such as
+`route_code` cannot constrain a match.
+
+`traversal_gate_exists_subquery` (on): the gate compiles to
+`EXISTS { MATCH (candidate)-[:E]->(t:Label) WHERE t.prop = $param }` — the form
+the exclusion gate already uses — and its null handling checks the query
+parameter only, because `candidateprop` on this gate type names the target
+node's property, not the candidate's. Off: the legacy predicate and the legacy
+`candidate.<prop>` null wrap.
+
+`childsync_foreach_projection` (on): the parent `SET` becomes
+`SET n += row{.*, <childfield>: null, …}`, children are created inside
+`FOREACH (child_row IN coalesce(row.<field>, []) | …)`, `childtoparent` emits
+`(n)<-[:T]-(c)`, and an undeclared direction raises. Off: the legacy
+`UNWIND`-based path.
+
+Both ship on because the legacy output cannot execute on any supported Neo4j;
+the flags exist for C-21 staging and rollback, not because the legacy path is
+a working alternative. Endpoints without `childsync` keep the exact previous
+`SET n += row` regardless of the flag.
+
+### Validation
+
+Stage 4 harness (two synthetic domains, 27 proofs): 23/27 on baseline, 27/27
+with both flags on. Unit coverage: `tests/unit/test_gates_all_types.py`
+(`test_compile_traversal_gate*`) and `tests/unit/test_sync.py`
+(`test_child_entity_sync*`) assert both the new and the flag-off shapes.
+
+### Rollback
+
+Set either flag to `false`. The legacy Cypher is emitted again verbatim.
