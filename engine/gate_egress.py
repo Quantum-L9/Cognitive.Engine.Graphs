@@ -71,12 +71,20 @@ def build_enrichment_request(
     target_fields: Sequence[str],
     entity: dict[str, Any] | None = None,
     objective: str | None = None,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     """Shape the payload EIE's `enrich` handler validates (EIE ``EnrichRequest``).
 
     Keys: ``entity`` (record fields), ``object_type`` (source object name),
     ``schema`` ({field: type}), ``objective`` (natural-language instruction),
     ``kb_context`` (KB profile selector). EIE owns that model; CEG adapts to it.
+
+    SEAM-02 (producer side): the body also carries the identity EIE's consumer
+    reads at the top level — ``entity_id`` and ``domain`` — and ``entity.id``
+    beside ``entity.entity_id``, plus ``idempotency_key`` so the key the SDK
+    puts on the packet is visible in the body EIE persists. Before this the
+    identity lived only inside ``entity`` and the key only on the envelope, and
+    the consumer had to reconstruct both.
     """
     fields = [f for f in dict.fromkeys(target_fields) if f]
     if not entity_id or not domain:
@@ -85,8 +93,11 @@ def build_enrichment_request(
     if not fields:
         msg = "at least one target field is required for an enrichment request"
         raise ValueError(msg)
-    record = {**(entity or {}), "entity_id": entity_id, "domain": domain}
+    record = {**(entity or {}), "id": entity_id, "entity_id": entity_id, "domain": domain}
     return {
+        "entity_id": entity_id,
+        "domain": domain,
+        "idempotency_key": idempotency_key,
         "entity": record,
         "object_type": domain,
         "schema": dict.fromkeys(fields, "string"),
@@ -131,6 +142,7 @@ async def request_enrichment(
         target_fields=target_fields,
         entity=entity,
         objective=objective,
+        idempotency_key=key,
     )
 
     try:
