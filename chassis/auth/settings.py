@@ -77,22 +77,12 @@ class Settings(BaseSettings):
     w_geo: float = 0.25
     w_reinforcement: float = 0.20
     w_freshness: float = 0.10
-    geo_decay_km: float = 800.0
-    community_cross_bias: float = 0.92
     max_results: int = 25
 
     # --- Temporal Decay ---
+    # Mirrors engine/config/settings.py (Stage 2 R10): industry-specific global
+    # defaults with no caller were removed there and here.
     decay_transaction_halflife: float = 180.0  # days
-    decay_facility_halflife: float = 90.0
-    decay_structural_halflife: float = 365.0
-
-    # --- Feedback Loop ---
-    outcome_ema_alpha: float = 0.1
-
-    # --- Entity Resolution ---
-    resolution_density_tolerance: float = 0.05
-    resolution_mfi_tolerance: float = 5.0
-    resolution_min_confidence: float = 0.6
 
     # --- KGE (Phase 4) ---
     kge_enabled: bool = False

@@ -1,6 +1,6 @@
 $schema: https://json-schema.org/draft/2020-12/schema
 $id: urn:l9:plasticos:contracts:payload:improvement-proposal:1.0.0-draft
-title: PlasticOS Improvement Proposal
+title: CEG Improvement Proposal
 description: Review-only proposal derived from evidence. It cannot mutate production
   directly.
 x-publication-status: draft-unpublished

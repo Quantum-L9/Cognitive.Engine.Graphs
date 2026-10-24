@@ -39,6 +39,7 @@ def _make_domain_loader(spec: MagicMock | None = None, *, domain_feedback: bool 
         spec.domain.id = "test_domain"
         spec.calibration = None
         spec.sync = None
+        spec.feedbackloop.outcome_node_label = "TransactionOutcome"
     loader.load_domain.return_value = spec
     loader.list_domains.return_value = ["test_domain"]
     return loader

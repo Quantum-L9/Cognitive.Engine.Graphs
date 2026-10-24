@@ -28,6 +28,43 @@ from engine.config.loader import (
     DomainSpecError,
 )
 
+
+def _minimal_spec_yaml(domain_id: str) -> str:
+    """Smallest spec the loader admits: validates and declares no gates."""
+    return f"""
+domain:
+  id: {domain_id}
+  name: {domain_id}
+  version: 0.0.1
+ontology:
+  nodes:
+    - label: Thing
+      managedby: sync
+      candidate: true
+      matchdirection: d1
+      properties:
+        - {{name: thing_id, type: string, required: true}}
+    - label: Ask
+      managedby: api
+      queryentity: true
+      matchdirection: d1
+      properties:
+        - {{name: ask_id, type: string, required: true}}
+  edges: []
+matchentities:
+  candidate: [{{label: Thing, matchdirection: d1}}]
+  queryentity: [{{label: Ask, matchdirection: d1}}]
+queryschema:
+  matchdirections: [d1]
+  fields: []
+traversal:
+  steps: []
+gates: []
+scoring:
+  dimensions: []
+"""
+
+
 # ============================================================================
 # TEST CLASSES
 # ============================================================================
@@ -202,17 +239,37 @@ class TestListDomains:
     """Test list_domains discovery."""
 
     def test_discovers_domain_dirs(self, tmp_path: Path) -> None:
-        """list_domains finds directories with spec.yaml."""
+        """list_domains finds directories holding an admissible spec.yaml."""
         for name in ["alpha", "beta"]:
             d = tmp_path / name
             d.mkdir()
-            (d / "spec.yaml").write_text("placeholder")
+            (d / "spec.yaml").write_text(_minimal_spec_yaml(name))
         (tmp_path / "no_spec_dir").mkdir()
         loader = DomainPackLoader(config_path=str(tmp_path))
         domains = loader.list_domains()
         assert "alpha" in domains
         assert "beta" in domains
         assert "no_spec_dir" not in domains
+
+    def test_unadmitted_packs_are_not_listed(self, tmp_path: Path) -> None:
+        """A pack that fails validation, or declares itself dormant, is never listed as servable."""
+        good = tmp_path / "good"
+        good.mkdir()
+        (good / "spec.yaml").write_text(_minimal_spec_yaml("good"))
+        broken = tmp_path / "broken"
+        broken.mkdir()
+        (broken / "spec.yaml").write_text("placeholder")
+        dormant = tmp_path / "dormant"
+        dormant.mkdir()
+        (dormant / "spec.yaml").write_text(
+            _minimal_spec_yaml("dormant").replace("version: 0.0.1", "version: 0.0.1\n  activation: dormant")
+        )
+        loader = DomainPackLoader(config_path=str(tmp_path))
+        assert loader.list_domains() == ["good"]
+        with pytest.raises(DomainSpecError):
+            loader.load_domain("broken")
+        with pytest.raises(DomainNotFoundError, match="dormant"):
+            loader.load_domain("dormant")
 
     def test_returns_empty_for_nonexistent_path(self) -> None:
         """list_domains returns [] for non-existent base path."""

@@ -1,6 +1,9 @@
 # ADR-103: Single Executable CEG PlasticOS Spec
 
-**Status:** Accepted
+**Status:** Accepted — superseded in part by [ADR-112](ADR-112-ceg-domain-neutral-core.md)
+(2026-10-11): `domains/plasticos/spec.yaml` remains the only executable *PlasticOS* source, but
+PlasticOS is an optional example pack, not CEG's domain authority; the loader admits every
+pack through one generic policy and names no domain.
 **Task:** TASK-015
 **Date:** 2026-08-02
 

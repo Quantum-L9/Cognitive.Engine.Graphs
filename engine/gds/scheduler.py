@@ -15,6 +15,13 @@ Manages Louvain community detection, co-occurrence, reinforcement
 learning edge weights, and temporal recency pruning.
 
 All algorithms execute real Cypher against Neo4j — no stubs.
+
+Domain neutrality (Stage 2, R01): every node label, relationship type and
+property name an algorithm touches comes from the job spec (``projection``,
+``sourceedge``, ``writeedge``, ``writeto``, ``writeproperties``) or the domain
+ontology. There is no built-in vocabulary. A job that needs a value its spec
+does not declare fails explicitly with a ``ValueError`` naming the job and the
+missing key; it never falls back to a built-in recipe.
 """
 
 from __future__ import annotations
@@ -59,10 +66,13 @@ class GDSScheduler:
     Supported algorithms:
         - louvain: Community detection via GDS Louvain
         - cooccurrence: Bipartite projection → co-occurrence edges
-        - reinforcement: Outcome-weighted edge scoring (ACCEPTED/REJECTED)
-        - temporalrecency: Recency-decay edge creation + pruning
-        - geoproximity: Haversine distance-based COLOCATED_WITH edges
-        - equipmentsync: Boolean prop → HASEQUIPMENT edge materialization
+        - reinforcement: Outcome-weighted positive/negative edge scoring over a
+          declared interaction edge
+        - temporalrecency: Recency-decay overlay edge creation + pruning over a
+          declared interaction edge
+        - geoproximity: Haversine distance-based proximity edges
+        - equipmentsync: Boolean property → edge to a declared type node
+          (the algorithm id is historical; the vocabulary is the job spec's)
     """
 
     def __init__(self, domain_spec: DomainSpec, graph_driver: GraphDriver):
@@ -86,28 +96,65 @@ class GDSScheduler:
                     return default
         return default
 
+    @staticmethod
+    def _get_job_setting(job_spec: GDSJobSpec, key: str) -> Any | None:
+        """Return a named entry from ``job_spec.writeproperties``, or None."""
+        for prop in job_spec.writeproperties or []:
+            if key in prop:
+                return prop[key]
+        return None
+
+    @staticmethod
+    def _require_job_setting(job_spec: GDSJobSpec, key: str) -> Any:
+        """Return a named ``writeproperties`` entry or fail explicitly.
+
+        The domain owns the vocabulary an algorithm runs over. When a job does
+        not declare a value the algorithm needs, that is a configuration error
+        the pack author must fix — not a cue to guess.
+        """
+        value = GDSScheduler._get_job_setting(job_spec, key)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            raise ValueError(
+                f"Job {job_spec.name}: algorithm {job_spec.algorithm!r} requires writeproperties entry {key!r}; "
+                "the domain spec must declare it (no built-in default)"
+            )
+        return value
+
+    @staticmethod
+    def _require_edge(job_spec: GDSJobSpec, field: str) -> str:
+        """Return a sanitized relationship type from a job-spec field or fail explicitly."""
+        value = getattr(job_spec, field, None)
+        if not value:
+            raise ValueError(
+                f"Job {job_spec.name}: algorithm {job_spec.algorithm!r} requires {field!r}; "
+                "the domain spec must declare the relationship type (no built-in default)"
+            )
+        return sanitize_label(str(value))
+
     def _get_candidate_label(self, job_spec: GDSJobSpec) -> str:
         """
-        Get candidate node label from job spec or domain ontology.
-        Falls back to first candidate node in match_entities.
+        Get the node label a job operates over.
+
+        Resolution order: the job's own ``projection.nodelabels``, then the
+        domain's declared candidate match entity, then an ontology node marked
+        ``candidate``. There is no further fallback: a domain that declares none
+        of these has not told the engine what to compute over, and the job fails
+        explicitly rather than running against a label the engine invented.
         """
-        # Check if job spec has explicit node labels in projection
         if job_spec.projection and job_spec.projection.nodelabels:
-            label = job_spec.projection.nodelabels[0]
-            return sanitize_label(label)
+            return sanitize_label(job_spec.projection.nodelabels[0])
 
-        # Fall back to first candidate from match_entities
         if self.domain_spec.matchentities and self.domain_spec.matchentities.candidate:
-            label = self.domain_spec.matchentities.candidate[0].label
-            return sanitize_label(label)
+            return sanitize_label(self.domain_spec.matchentities.candidate[0].label)
 
-        # Last resort: check ontology nodes marked as candidate
         for node in self.domain_spec.ontology.nodes:
             if getattr(node, "candidate", False):
                 return sanitize_label(node.label)
 
-        # Default fallback
-        return "Facility"
+        raise ValueError(
+            f"Job {job_spec.name}: no node label declared — set projection.nodelabels on the job "
+            "or declare a candidate match entity in the domain spec"
+        )
 
     def resolve_aggregation_strategy(self, job_spec: GDSJobSpec) -> str:
         """S2-03: Auto-select aggregation strategy based on edge category and node role.
@@ -403,89 +450,132 @@ class GDSScheduler:
 
     async def _run_reinforcement(self, job_spec: GDSJobSpec) -> dict[str, Any]:
         """
-        Weight edges by transaction outcome feedback.
+        Weight edges by outcome feedback recorded on a declared interaction edge.
 
-        Aggregates transaction outcomes into:
-        - ACCEPTED_MATERIAL_FROM edges (positive reinforcement)
-        - REJECTED_MATERIAL_FROM edges (negative signal)
+        Aggregates per (source, target) pair over ``sourceedge`` relationships:
+        - a positive edge (``writeedge``) where at least one interaction carried
+          ``success_value`` in ``outcome_property``;
+        - a negative edge (``negative_writeedge``) where at least one carried
+          ``failure_value``.
 
-        Each edge gets:
-        - count: total accepted/rejected shipments
-        - success_rate: accepted / total
-        - recency_score: exp(-age_days / 180.0) on most recent event
-        - last_event_date: timestamp of most recent outcome
+        Each edge gets ``count``, ``success_rate`` (positive edge only),
+        ``last_event_date`` and ``recency_score = exp(-age_days / half_life)``.
+        Optional aggregates are written only when the job names the property:
+        ``value_property`` → ``aggregate_value``, ``quality_property`` →
+        ``avg_quality``, ``reason_property`` → ``primary_reason``.
 
-        Decay: exp(-age_days / half_life_days) per spec v1.1
-        Half-life: 180 days for acceptance, 90 days for rejection (shorter = faster decay)
+        Required job spec: ``sourceedge``, ``writeedge``, and the
+        ``writeproperties`` entry ``negative_writeedge``. Optional entries with
+        generic defaults: ``outcome_property`` (``outcome``), ``success_value``
+        (``success``), ``failure_value`` (``failure``), ``timestamp_property``
+        (``created_at``), ``positive_half_life_days`` (180), ``negative_half_life_days``
+        (90), ``prune_below`` (0.1).
         """
         db = self.domain_spec.domain.id
         node_label = self._get_candidate_label(job_spec)
+        source_edge = self._require_edge(job_spec, "sourceedge")
+        positive_edge = self._require_edge(job_spec, "writeedge")
+        negative_edge = sanitize_label(str(self._require_job_setting(job_spec, "negative_writeedge")))
+        outcome_prop = sanitize_label(str(self._get_job_setting(job_spec, "outcome_property") or "outcome"))
+        ts_prop = sanitize_label(str(self._get_job_setting(job_spec, "timestamp_property") or "created_at"))
+        positive_half_life = self._get_job_parameter(job_spec, "positive_half_life_days", 180.0)
+        negative_half_life = self._get_job_parameter(job_spec, "negative_half_life_days", 90.0)
+        prune_below = self._get_job_parameter(job_spec, "prune_below", 0.1)
 
-        # Phase 1: Build ACCEPTED_MATERIAL_FROM edges
-        accepted_cypher = f"""
-        MATCH (buyer:{node_label})-[t:TRANSACTED_WITH]->(seller:{node_label})
-        WHERE t.outcome IS NOT NULL
-        WITH buyer, seller,
-             sum(CASE WHEN t.outcome = 'success' THEN 1 ELSE 0 END) AS accepted,
-             sum(CASE WHEN t.outcome = 'failure' THEN 1 ELSE 0 END) AS rejected,
-             max(CASE WHEN t.outcome = 'success' THEN t.created_at ELSE null END) AS last_accept,
-             sum(CASE WHEN t.outcome = 'success' THEN coalesce(t.value_usd, 0) ELSE 0 END) AS total_value,
-             avg(CASE WHEN t.outcome = 'success' THEN t.quality_grade ELSE null END) AS avg_quality
+        # Outcome values are data and travel as $parameters, never as literals (C-009).
+        params: dict[str, Any] = {
+            "success_value": self._get_job_setting(job_spec, "success_value") or "success",
+            "failure_value": self._get_job_setting(job_spec, "failure_value") or "failure",
+            "positive_half_life": positive_half_life,
+            "negative_half_life": negative_half_life,
+            "prune_below": prune_below,
+        }
+
+        optional_sets: list[str] = []
+        optional_with: list[str] = []
+        value_prop = self._get_job_setting(job_spec, "value_property")
+        if value_prop:
+            safe = sanitize_label(str(value_prop))
+            optional_with.append(
+                f"sum(CASE WHEN t.{outcome_prop} = $success_value THEN coalesce(t.{safe}, 0) ELSE 0 END) AS total_value"
+            )
+            optional_sets.append("r.aggregate_value = total_value")
+        quality_prop = self._get_job_setting(job_spec, "quality_property")
+        if quality_prop:
+            safe = sanitize_label(str(quality_prop))
+            optional_with.append(
+                f"avg(CASE WHEN t.{outcome_prop} = $success_value THEN t.{safe} ELSE null END) AS avg_quality"
+            )
+            optional_sets.append("r.avg_quality = avg_quality")
+        extra_with = "".join(f",\n             {clause}" for clause in optional_with)
+        extra_set = "".join(f",\n            {clause}" for clause in optional_sets)
+
+        # Phase 1: positive reinforcement edges
+        positive_cypher = f"""
+        MATCH (src:{node_label})-[t:{source_edge}]->(dst:{node_label})
+        WHERE t.{outcome_prop} IS NOT NULL
+        WITH src, dst,
+             sum(CASE WHEN t.{outcome_prop} = $success_value THEN 1 ELSE 0 END) AS accepted,
+             sum(CASE WHEN t.{outcome_prop} = $failure_value THEN 1 ELSE 0 END) AS rejected,
+             max(CASE WHEN t.{outcome_prop} = $success_value THEN t.{ts_prop} ELSE null END) AS last_accept{extra_with}
         WHERE accepted > 0
-        MERGE (buyer)-[r:ACCEPTED_MATERIAL_FROM]->(seller)
+        MERGE (src)-[r:{positive_edge}]->(dst)
         SET r.count = accepted,
             r.success_rate = toFloat(accepted) / (accepted + rejected),
             r.last_event_date = last_accept,
             r.recency_score = CASE
                 WHEN last_accept IS NOT NULL
-                THEN exp(-1.0 * duration.inDays(last_accept, datetime()).days / 180.0)
+                THEN exp(-1.0 * duration.inDays(last_accept, datetime()).days / $positive_half_life)
                 ELSE 0.0
-            END,
-            r.aggregate_value_usd = total_value,
-            r.avg_quality_grade = avg_quality
+            END{extra_set}
         RETURN count(r) AS accepted_edges
         """
 
-        # Phase 2: Build REJECTED_MATERIAL_FROM edges
-        rejected_cypher = f"""
-        MATCH (buyer:{node_label})-[t:TRANSACTED_WITH]->(seller:{node_label})
-        WHERE t.outcome = 'failure'
-        WITH buyer, seller,
+        # Phase 2: negative signal edges
+        reason_prop = self._get_job_setting(job_spec, "reason_property")
+        reason_with = (
+            f",\n             head(collect(t.{sanitize_label(str(reason_prop))})) AS primary_reason"
+            if reason_prop
+            else ""
+        )
+        reason_set = ",\n            r.primary_reason = primary_reason" if reason_prop else ""
+        negative_cypher = f"""
+        MATCH (src:{node_label})-[t:{source_edge}]->(dst:{node_label})
+        WHERE t.{outcome_prop} = $failure_value
+        WITH src, dst,
              count(t) AS rejected,
-             max(t.created_at) AS last_reject,
-             head(collect(t.reason_code)) AS primary_reason
-        MERGE (buyer)-[r:REJECTED_MATERIAL_FROM]->(seller)
+             max(t.{ts_prop}) AS last_reject{reason_with}
+        MERGE (src)-[r:{negative_edge}]->(dst)
         SET r.count = rejected,
-            r.last_rejection_date = last_reject,
-            r.primary_reason_code = primary_reason,
+            r.last_event_date = last_reject,
             r.recency_score = CASE
                 WHEN last_reject IS NOT NULL
-                THEN exp(-1.0 * duration.inDays(last_reject, datetime()).days / 90.0)
+                THEN exp(-1.0 * duration.inDays(last_reject, datetime()).days / $negative_half_life)
                 ELSE 0.0
-            END
+            END{reason_set}
         RETURN count(r) AS rejected_edges
         """
 
-        # Phase 3: Prune stale reinforcement edges (recency < 0.1) - split into separate queries
-        prune_accepted_cypher = """
-        MATCH ()-[r:ACCEPTED_MATERIAL_FROM]-()
-        WHERE r.recency_score < 0.1
+        # Phase 3: prune stale reinforcement edges — split into separate queries
+        prune_positive_cypher = f"""
+        MATCH ()-[r:{positive_edge}]-()
+        WHERE r.recency_score < $prune_below
         DELETE r
         RETURN count(r) AS pruned
         """
-        prune_rejected_cypher = """
-        MATCH ()-[r:REJECTED_MATERIAL_FROM]-()
-        WHERE r.recency_score < 0.1
+        prune_negative_cypher = f"""
+        MATCH ()-[r:{negative_edge}]-()
+        WHERE r.recency_score < $prune_below
         DELETE r
         RETURN count(r) AS pruned
         """
 
-        accepted_result = await self.graph_driver.execute_query(accepted_cypher, database=db)
-        rejected_result = await self.graph_driver.execute_query(rejected_cypher, database=db)
+        accepted_result = await self.graph_driver.execute_query(positive_cypher, parameters=params, database=db)
+        rejected_result = await self.graph_driver.execute_query(negative_cypher, parameters=params, database=db)
 
         try:
-            await self.graph_driver.execute_query(prune_accepted_cypher, database=db)
-            await self.graph_driver.execute_query(prune_rejected_cypher, database=db)
+            await self.graph_driver.execute_query(prune_positive_cypher, parameters=params, database=db)
+            await self.graph_driver.execute_query(prune_negative_cypher, parameters=params, database=db)
         except Exception as e:
             logger.warning(f"Prune step skipped: {e}")
 
@@ -500,44 +590,57 @@ class GDSScheduler:
 
     async def _run_temporal_recency(self, job_spec: GDSJobSpec) -> dict[str, Any]:
         """
-        Create/update RECENTLY_TRANSACTED_WITH edges with recency decay.
+        Create/update a recency overlay edge over a declared interaction edge.
 
-        Formula: recency_score = exp(-age_days / 90.0)
-        Prune threshold: recency_score < 0.1 (≈207 days old)
-        Half-life: 62 days
+        For each ``sourceedge`` whose ``timestamp_property`` is within
+        ``max_age_days``, MERGE a ``writeedge`` carrying ``last_event_date`` and
+        ``recency_score = exp(-age_days / half_life_days)``; overlay edges whose
+        score fell below ``prune_below`` are deleted. ``count_property`` (optional)
+        names an interaction-count property to carry over as ``recent_count``.
 
-        Per spec v0.4.0: TRANSACTED_WITH is permanent historical record.
-        RECENTLY_TRANSACTED_WITH is the hot temporal overlay.
+        Required job spec: ``sourceedge``, ``writeedge`` and the
+        ``writeproperties`` entry ``timestamp_property``. Optional entries with
+        generic defaults: ``half_life_days`` (90), ``max_age_days`` (207),
+        ``prune_below`` (0.1).
         """
         db = self.domain_spec.domain.id
         node_label = self._get_candidate_label(job_spec)
+        source_edge = self._require_edge(job_spec, "sourceedge")
+        overlay_edge = self._require_edge(job_spec, "writeedge")
+        ts_prop = sanitize_label(str(self._require_job_setting(job_spec, "timestamp_property")))
+        params: dict[str, Any] = {
+            "half_life": self._get_job_parameter(job_spec, "half_life_days", 90.0),
+            "max_age_days": self._get_job_parameter(job_spec, "max_age_days", 207.0),
+            "prune_below": self._get_job_parameter(job_spec, "prune_below", 0.1),
+        }
+        count_prop = self._get_job_setting(job_spec, "count_property")
+        count_set = (
+            f",\n            r.recent_count = CASE WHEN age_days <= $half_life THEN coalesce(t.{sanitize_label(str(count_prop))}, 1) ELSE 0 END"
+            if count_prop
+            else ""
+        )
 
-        # Create/update recency edges
         create_cypher = f"""
-        MATCH (buyer:{node_label})-[t:TRANSACTED_WITH]->(seller:{node_label})
-        WHERE t.last_date IS NOT NULL
-        WITH buyer, seller, t,
-             duration.inDays(t.last_date, datetime()).days AS age_days
-        WHERE age_days <= 207
-        MERGE (buyer)-[r:RECENTLY_TRANSACTED_WITH]->(seller)
-        SET r.last_txn_date = t.last_date,
-            r.txn_count_90d = CASE WHEN age_days <= 90
-                THEN coalesce(t.count_90d, 1) ELSE 0 END,
-            r.recency_score = exp(-1.0 * age_days / 90.0),
-            r.total_volume_lbs_90d = coalesce(t.volume_90d, 0)
+        MATCH (src:{node_label})-[t:{source_edge}]->(dst:{node_label})
+        WHERE t.{ts_prop} IS NOT NULL
+        WITH src, dst, t,
+             duration.inDays(t.{ts_prop}, datetime()).days AS age_days
+        WHERE age_days <= $max_age_days
+        MERGE (src)-[r:{overlay_edge}]->(dst)
+        SET r.last_event_date = t.{ts_prop},
+            r.recency_score = exp(-1.0 * age_days / $half_life){count_set}
         RETURN count(r) AS edges_created
         """
 
-        # Prune stale edges
-        prune_cypher = """
-        MATCH ()-[r:RECENTLY_TRANSACTED_WITH]-()
-        WHERE r.recency_score < 0.1
+        prune_cypher = f"""
+        MATCH ()-[r:{overlay_edge}]-()
+        WHERE r.recency_score < $prune_below
         DELETE r
         RETURN count(r) AS edges_pruned
         """
 
-        create_result = await self.graph_driver.execute_query(create_cypher, database=db)
-        prune_result = await self.graph_driver.execute_query(prune_cypher, database=db)
+        create_result = await self.graph_driver.execute_query(create_cypher, parameters=params, database=db)
+        prune_result = await self.graph_driver.execute_query(prune_cypher, parameters=params, database=db)
 
         created = create_result[0]["edges_created"] if create_result else 0
         pruned = prune_result[0]["edges_pruned"] if prune_result else 0
@@ -546,28 +649,35 @@ class GDSScheduler:
         return {"edges_created": created, "edges_pruned": pruned}
 
     async def _run_geoproximity(self, job_spec: GDSJobSpec) -> dict[str, Any]:
-        """Build COLOCATED_WITH edges based on haversine distance."""
+        """Build proximity edges based on haversine distance.
+
+        Generic graph algorithm: the only vocabulary it needs is the node label,
+        the output edge (``writeedge``, default ``COLOCATED_WITH``) and the
+        coordinate properties (``lat_property``/``lon_property``, default
+        ``lat``/``lon``). Nodes are paired by ``id_property`` (default ``entity_id``).
+        """
         db = self.domain_spec.domain.id
 
-        # Get configurable parameters from job_spec.writeproperties
         max_km = self._get_job_parameter(job_spec, "max_km", 500.0)
         decay_km = self._get_job_parameter(job_spec, "decay_km", 200.0)
-
-        # Get node label from ontology (first candidate node) or job spec
         node_label = self._get_candidate_label(job_spec)
+        edge = sanitize_label(job_spec.writeedge or "COLOCATED_WITH")
+        lat = sanitize_label(str(self._get_job_setting(job_spec, "lat_property") or "lat"))
+        lon = sanitize_label(str(self._get_job_setting(job_spec, "lon_property") or "lon"))
+        id_prop = sanitize_label(str(self._get_job_setting(job_spec, "id_property") or "entity_id"))
 
         # Use directional MERGE to avoid duplicate edges
         cypher = f"""
         MATCH (a:{node_label}), (b:{node_label})
-        WHERE a.entity_id < b.entity_id
-          AND a.lat IS NOT NULL AND b.lat IS NOT NULL
+        WHERE a.{id_prop} < b.{id_prop}
+          AND a.{lat} IS NOT NULL AND b.{lat} IS NOT NULL
         WITH a, b,
              point.distance(
-                 point({{latitude: a.lat, longitude: a.lon}}),
-                 point({{latitude: b.lat, longitude: b.lon}})
+                 point({{latitude: a.{lat}, longitude: a.{lon}}}),
+                 point({{latitude: b.{lat}, longitude: b.{lon}}})
              ) / 1000.0 AS dist_km
         WHERE dist_km <= $max_km
-        MERGE (a)-[r:COLOCATED_WITH]->(b)
+        MERGE (a)-[r:{edge}]->(b)
         SET r.distance_km = dist_km,
             r.proximity_score = 1.0 / (1.0 + dist_km / $decay_km)
         RETURN count(r) AS edges_created
@@ -578,27 +688,35 @@ class GDSScheduler:
             database=db,
         )
         edges = result[0]["edges_created"] if result else 0
-        logger.info(f"Geo-proximity: {edges} COLOCATED_WITH edges for {node_label}")
+        logger.info(f"Geo-proximity: {edges} {edge} edges for {node_label}")
         return {"edges_created": edges}
 
     async def _run_equipment_sync(self, job_spec: GDSJobSpec) -> dict[str, Any]:
-        """Materialize boolean entity props as HAS_EQUIPMENT edges."""
+        """Materialize boolean entity properties as edges to a declared type node.
+
+        For every ``(property, type_name)`` pair in the ``property_mappings``
+        entry, an entity whose boolean ``property`` is true gets a ``writeedge``
+        to the ``writeto`` node whose ``type_key_property`` (default ``name``)
+        equals ``type_name``. Required job spec: ``writeedge``, ``writeto`` and the
+        ``writeproperties`` entry ``property_mappings`` — there is no built-in
+        mapping table.
+        """
         db = self.domain_spec.domain.id
         node_label = self._get_candidate_label(job_spec)
+        edge = self._require_edge(job_spec, "writeedge")
+        type_label = self._require_edge(job_spec, "writeto")
+        type_key = sanitize_label(str(self._get_job_setting(job_spec, "type_key_property") or "name"))
+        mappings = self._get_property_mappings(job_spec)
 
-        # Get equipment properties from ontology or use defaults
-        equipment_props = self._get_equipment_properties(job_spec)
-
-        # Build dynamic CASE statements for equipment detection. Property names
-        # are structural and pass sanitize_label; equipment type names are data
-        # (they may legitimately contain spaces or dashes) and travel as
+        # Property names are structural and pass sanitize_label; type names are
+        # data (they may legitimately contain spaces or dashes) and travel as
         # $parameters, never as quoted literals (C-009).
-        equipment_params: dict[str, Any] = {}
+        type_params: dict[str, Any] = {}
         case_statements = []
-        for index, (prop, name) in enumerate(equipment_props):
+        for index, (prop, name) in enumerate(mappings):
             safe_prop = sanitize_label(prop)
-            param_key = sanitize_label(f"equipment_name_{index}")
-            equipment_params[param_key] = name
+            param_key = sanitize_label(f"type_name_{index}")
+            type_params[param_key] = name
             case_statements.append(f"CASE WHEN f.{safe_prop} = true THEN ${param_key} END")
         case_list = ",\n            ".join(case_statements)
 
@@ -606,40 +724,32 @@ class GDSScheduler:
         MATCH (f:{node_label})
         WITH f, [
             {case_list}
-        ] AS equipment_names
-        UNWIND equipment_names AS eq_name
-        WITH f, eq_name WHERE eq_name IS NOT NULL
-        MATCH (e:EquipmentType {{name: eq_name}})
-        MERGE (f)-[:HAS_EQUIPMENT]->(e)
+        ] AS type_names
+        UNWIND type_names AS type_name
+        WITH f, type_name WHERE type_name IS NOT NULL
+        MATCH (e:{type_label} {{{type_key}: type_name}})
+        MERGE (f)-[:{edge}]->(e)
         RETURN count(*) AS edges_created
         """
-        result = await self.graph_driver.execute_query(cypher, parameters=equipment_params, database=db)
+        result = await self.graph_driver.execute_query(cypher, parameters=type_params, database=db)
         edges = result[0]["edges_created"] if result else 0
-        logger.info(f"Equipment sync: {edges} HAS_EQUIPMENT edges for {node_label}")
+        logger.info(f"Property edge sync: {edges} {edge} edges for {node_label}")
         return {"edges_created": edges}
 
-    def _get_equipment_properties(self, job_spec: GDSJobSpec) -> list[tuple[str, str]]:
-        """
-        Get equipment boolean properties from job spec or ontology.
-        Returns list of (property_name, equipment_type_name) tuples.
-        """
-        # Check if job spec has explicit equipment mappings
-        if job_spec.writeproperties:
-            for prop in job_spec.writeproperties:
-                if "equipment_mappings" in prop:
-                    return [(k, v) for k, v in prop["equipment_mappings"].items()]
+    def _get_property_mappings(self, job_spec: GDSJobSpec) -> list[tuple[str, str]]:
+        """Return the declared ``(boolean_property, type_name)`` pairs for a job.
 
-        # Default equipment mappings (plastics domain)
-        return [
-            ("has_shredder", "shredder"),
-            ("has_granulator", "granulator"),
-            ("has_wash_line", "washline"),
-            ("has_extruder", "extruder"),
-            ("has_sorting_line", "sortingline"),
-            ("handles_regrind", "regrindhandler"),
-            ("handles_flake", "flakehandler"),
-            ("handles_rollstock", "rollstockhandler"),
-        ]
+        Declared under ``writeproperties`` as ``property_mappings: {prop: type}``.
+        Fails explicitly when absent or empty — the engine carries no default
+        table for any industry.
+        """
+        raw = self._require_job_setting(job_spec, "property_mappings")
+        if not isinstance(raw, dict) or not raw:
+            raise ValueError(
+                f"Job {job_spec.name}: writeproperties entry 'property_mappings' must be a non-empty mapping "
+                "of boolean property name to type name"
+            )
+        return [(str(k), str(v)) for k, v in raw.items()]
 
     async def _run_feedback_recalculation(self, job_spec: GDSJobSpec) -> dict[str, Any]:
         """Recalculate dimension weights based on accumulated outcomes."""

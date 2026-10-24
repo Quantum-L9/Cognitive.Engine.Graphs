@@ -213,25 +213,6 @@ variables:
     sensitive: false
     validation: "range: [0.0, 1.0]"
 
-  - name: GEO_DECAY_KM
-    type: number
-    required: false
-    default: 800.0
-    description: Geographic decay half-distance in kilometers.
-    source: env
-    sensitive: false
-
-  - name: COMMUNITY_CROSS_BIAS
-    type: number
-    required: false
-    default: 0.92
-    description: |
-      Penalty multiplier applied to cross-community matches.
-      Values < 1.0 down-weight inter-community candidates.
-    source: env
-    sensitive: false
-    validation: "range: [0.0, 1.0]"
-
   - name: MAX_RESULTS
     type: integer
     required: false

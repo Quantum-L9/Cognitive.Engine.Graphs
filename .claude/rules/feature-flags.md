@@ -47,14 +47,16 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | graph_inference_feedback_enabled | False | Emit `graph-inference-result` to EIE through Gate (EIE-008 / CEG-006) |
 | auto_create_domain_database | False | Provision the tenant domain database on first use (CEG-008; Enterprise-only CREATE DATABASE) |
 | health_api_enabled | False | Expose engine/health/api.py via admin health_* subactions (CEG-006) |
-| unvalidated_domain_packs_enabled | False | Serve the 5 migrated packs whose gates do not compile to executable Cypher (CEG-009) |
 
-## Entity Resolution
+## Domain Pack Admission (generic; the engine names no domain)
 | Flag | Default | Purpose |
 |------|---------|---------|
-| resolution_min_confidence | 0.6 | Minimum similarity for dedup merge |
-| resolution_density_tolerance | 0.05 | Density tolerance |
-| resolution_mfi_tolerance | 5.0 | MFI tolerance |
+| unvalidated_domain_packs_enabled | False | Serve packs whose gates do not compile to executable Cypher (`engine.config.loader.admission_defects`, CEG-009) |
+| dormant_domain_packs_enabled | False | Serve packs that declare `domain.activation: dormant` (replaced the per-domain `idea_portfolio_enabled`) |
+
+Entity resolution is tuned per domain in `DomainSpec.semantic_registry`; there are no
+engine-wide resolution tolerances (the former melt-flow-index / density tolerances
+were industry-specific and had no caller).
 
 ## Scoring Weights (Contract 22: sum ≤ 1.0)
 | Weight | Default | Enforced by |
@@ -64,3 +66,11 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | w_reinforcement | 0.20 | boot.py _assert_default_weight_sum() |
 | w_freshness | 0.10 | boot.py _assert_default_weight_sum() |
 | **Sum** | **0.85** | Must be ≤ 1.0 |
+
+## Stage 2 — Domain-neutral Cypher (CEG Stage 4 proof)
+| Flag | Default | Purpose |
+|------|---------|---------|
+| traversal_gate_exists_subquery | True | Traversal gate compiles to `EXISTS { MATCH … WHERE t.prop = $param }` with query-param-only null handling; off restores the `exists((…{prop: $param}))` predicate Neo4j 5 rejects |
+| childsync_foreach_projection | True | childsync null-overrides child fields in the parent SET, creates children in FOREACH, emits a valid childtoparent arrow; off restores the UNWIND path Neo4j rejects |
+| gate_explicit_nullbehavior | True | A gate's explicitly declared `nullbehavior` wins over the per-type default (C-14); off restores the override of an explicit `pass` on boolean/freshness/traversal gates |
+| spec_declared_candidate_id | True | `handle_match` identifies candidates by the domain's declared id property (sync `idproperty`, else first required property) instead of a hardcoded `entity_id`; off restores `entity_id` only |

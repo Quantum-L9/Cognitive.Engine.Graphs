@@ -1,0 +1,116 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: engine-specific
+# engine: graph
+# layer: [test]
+# tags: [test, fixtures, domain-neutrality, synthetic]
+# owner: engine-team
+# status: active
+# --- /L9_META ---
+#
+# Second synthetic verification domain for the CEG domain-neutrality acceptance
+# tests, unrelated to the first so no shared vocabulary can be mistaken for a
+# convention. Verification input only, not a canonical domain product.
+domain:
+  id: cheese-aging
+  name: Cheese Aging (synthetic verification domain)
+  version: 0.2.0
+  description: Wheel batches seeking aging caves with compatible humidity and rind programmes.
+ontology:
+  nodes:
+  - label: AgingCave
+    managedby: sync
+    candidate: true
+    matchdirection: batch_to_cave
+    properties:
+    - name: cave_id
+      type: string
+      required: true
+    - name: humidity_pct
+      type: float
+    - name: washed_rind_programme
+      type: bool
+    - name: turnover_days
+      type: int
+  - label: WheelBatch
+    managedby: api
+    queryentity: true
+    matchdirection: batch_to_cave
+    properties:
+    - name: batch_id
+      type: string
+      required: true
+    - name: milk_type
+      type: string
+  - label: Affineur
+    managedby: sync
+    properties:
+    - name: affineur_id
+      type: string
+      required: true
+  edges:
+  - type: TENDED_BY
+    from: AgingCave
+    to: Affineur
+    direction: DIRECTED
+    category: capability
+    managedby: sync
+  - type: SHARES_CULTURE_WITH
+    from: AgingCave
+    to: AgingCave
+    direction: UNDIRECTED
+    category: market
+    managedby: gds
+matchentities:
+  candidate:
+  - label: AgingCave
+    matchdirection: batch_to_cave
+  queryentity:
+  - label: WheelBatch
+    matchdirection: batch_to_cave
+queryschema:
+  matchdirections:
+  - batch_to_cave
+  fields:
+  - name: max_turnover_days
+    type: int
+    required: false
+    default: 90
+traversal:
+  steps: []
+gates:
+- name: washed_rind_only
+  type: boolean
+  candidateprop: washed_rind_programme
+  nullbehavior: pass
+- name: turnover_window
+  type: threshold
+  candidateprop: turnover_days
+  queryparam: max_turnover_days
+  operator: '<='
+  nullbehavior: fail
+scoring:
+  dimensions:
+  - name: humidity_fit
+    source: candidateproperty
+    candidateprop: humidity_pct
+    computation: candidateproperty
+    weightkey: w_humidity
+    defaultweight: 0.5
+sync:
+  endpoints:
+  - path: /v1/sync/aging-caves
+    method: POST
+    targetnode: AgingCave
+    idproperty: cave_id
+    batchstrategy: UNWINDMERGE
+feature_catalog:
+- feature_id: humidity_fit
+  owner: creamery_books
+  scoring_dimension: humidity_fit
+  evidence_required: false
+outcome_signals:
+- signal: tasted
+  calibration_label: true
+- signal: sold
+  calibration_label: true

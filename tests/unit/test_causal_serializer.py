@@ -185,3 +185,47 @@ class TestCausalSubgraphSerializer:
         result = await serializer.serialize_neighborhood("F-1", "Facility", max_depth=2)
         assert result["nodes_visited"] >= 2
         assert result["depth_reached"] == 1
+
+
+class TestDeclaredIdProperty:
+    """The BFS keys on the domain's declared id, not a fixed ``entity_id``."""
+
+    @pytest.mark.asyncio
+    async def test_declared_id_property_drives_the_query(self) -> None:
+        spec = _spec_with_causal()
+        driver = AsyncMock()
+        driver.execute_query = AsyncMock(return_value=[])
+        serializer = CausalSubgraphSerializer(driver, spec)
+
+        await serializer.serialize_neighborhood("D-1", "Depot", id_property="depot_code")
+
+        cypher = driver.execute_query.call_args.args[0]
+        assert "MATCH (start:Depot)" in cypher
+        assert "WHERE start.depot_code = $node_id" in cypher
+        assert "id: n.depot_code" in cypher
+        assert "coalesce(n.name, n.depot_code)" in cypher
+        assert "entity_id" not in cypher
+        assert driver.execute_query.call_args.kwargs["parameters"]["node_id"] == "D-1"
+
+    @pytest.mark.asyncio
+    async def test_default_id_property_is_entity_id(self) -> None:
+        spec = _spec_with_causal()
+        driver = AsyncMock()
+        driver.execute_query = AsyncMock(return_value=[])
+        serializer = CausalSubgraphSerializer(driver, spec)
+
+        await serializer.serialize_neighborhood("F-1", "Facility")
+
+        cypher = driver.execute_query.call_args.args[0]
+        assert "WHERE start.entity_id = $node_id" in cypher
+        assert "id: n.entity_id" in cypher
+
+    @pytest.mark.asyncio
+    async def test_unsafe_id_property_is_refused_before_execution(self) -> None:
+        spec = _spec_with_causal()
+        driver = AsyncMock()
+        serializer = CausalSubgraphSerializer(driver, spec)
+
+        with pytest.raises(ValueError, match="Invalid label"):
+            await serializer.serialize_neighborhood("F-1", "Facility", id_property="id} RETURN 1 //")
+        driver.execute_query.assert_not_called()

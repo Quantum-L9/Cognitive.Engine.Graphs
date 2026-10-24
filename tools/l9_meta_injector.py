@@ -226,6 +226,28 @@ FILE_REGISTRY: list[FileMeta] = [
     # --- Test Harness ---
     FileMeta("tests/conftest.py", "l9-template", ["test"], ["L9_TEMPLATE", "test", "fixtures"], "platform"),
     FileMeta("tests/README.md", "l9-template", ["test"], ["L9_TEMPLATE", "test", "docs"], "platform"),
+    # --- Tests: domain-neutrality verification inputs (Stage 2) ---
+    FileMeta(
+        "tests/fixtures/domain_contracts.py",
+        "engine-specific",
+        ["test"],
+        ["test", "fixtures", "domain-neutrality", "payload-contracts"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/fixtures/domains/orbital-logistics/spec.yaml",
+        "engine-specific",
+        ["test"],
+        ["test", "fixtures", "domain-neutrality", "synthetic"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/fixtures/domains/cheese-aging/spec.yaml",
+        "engine-specific",
+        ["test"],
+        ["test", "fixtures", "domain-neutrality", "synthetic"],
+        "engine-team",
+    ),
     # --- Tests: Compliance ---
     FileMeta(
         "tests/compliance/test_audit.py", "engine-specific", ["test"], ["test", "compliance", "audit"], "engine-team"
@@ -295,6 +317,13 @@ FILE_REGISTRY: list[FileMeta] = [
         "tests/unit/test_gates_all_types.py", "engine-specific", ["test"], ["test", "unit", "gates"], "engine-team"
     ),
     FileMeta("tests/unit/test_gds_scheduler.py", "engine-specific", ["test"], ["test", "unit", "gds"], "engine-team"),
+    FileMeta(
+        "tests/unit/test_domain_neutrality_acceptance.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "domain-neutrality", "acceptance"],
+        "engine-team",
+    ),
     FileMeta(
         "tests/unit/test_handlers_enrich_health.py",
         "engine-specific",

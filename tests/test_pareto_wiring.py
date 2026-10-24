@@ -363,3 +363,20 @@ class TestAdaptiveWeightDiscovery:
         assert len(r1) == len(r2)
         for a, b in zip(r1, r2, strict=True):
             assert a.weights == b.weights
+
+
+class TestApplyParetoFilterDeclaredId:
+    def test_candidate_id_key_names_the_front(self):
+        """Stage 2 P4: the arbitration filter reports the domain's declared ids."""
+        from engine.scoring.pareto_integrator import apply_pareto_filter
+
+        candidates = [
+            {"candidate": {"depot_code": "D-NORTH"}, "structural": 0.9, "geo": 0.9},
+            {"candidate": {"depot_code": "D-SOUTH"}, "structural": 0.5, "geo": 0.5},
+        ]
+        result = apply_pareto_filter(candidates, ["structural", "geo"], candidate_id_key="depot_code")
+        assert result["nondominated"] == ["D-NORTH"]
+        assert result["dominated"] == ["D-SOUTH"]
+        # Without the key the same rows fall back to positional ids.
+        positional = apply_pareto_filter(candidates, ["structural", "geo"])
+        assert positional["nondominated"] == ["0"]

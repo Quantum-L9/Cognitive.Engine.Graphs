@@ -5,7 +5,7 @@
   "records": [
     {
       "entity_ref": "res.partner:102",
-      "entity_type": "facility",
+      "entity_type": "Facility",
       "revision": 9,
       "operation": "tombstone",
       "properties": {},
