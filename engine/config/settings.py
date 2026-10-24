@@ -129,6 +129,15 @@ class Settings(BaseSettings):
     ensemble_max_divergence: float = 0.30  # W2-03: GDS/KGE divergence cap (Wave 6)
     score_normalize: bool = False  # W2-04: post-query min-max normalization (opt-in)
     outcome_persistence_enabled: bool = False  # W2-02b: persist outcomes to PacketStore (opt-in)
+    # CEG-FIX-001: a RESULTED_IN edge that CausalEdgeRuntimeValidator (R3) rejects
+    # is not written; the outcome node still is. Hardening that restores the R3
+    # invariant, so it ships on. See docs/FEATURE_GATES.md §18.
+    causal_rejection_enforcement_enabled: bool = True
+    # CEG-FIX-002: the SDK audit wrapper audits the ingress TransportPacket
+    # (Gate's packet_id, trace, correlation, lineage root) instead of a
+    # reconstruction. Hardening; read at handler registration. See
+    # docs/FEATURE_GATES.md §19.
+    ingress_packet_audit_enabled: bool = True
 
     # --- Wave 3: Capability & Access Control (seL4-inspired) ---
     tenant_auth_enabled: bool = True  # W3-01: JWT allowed_tenants enforcement

@@ -126,15 +126,48 @@ def test_registered_actions_match_action_handlers() -> None:
     assert set(registered_actions()) == set(ACTION_HANDLERS)
 
 
-def test_audit_wrapper_keeps_two_parameter_signature() -> None:
-    """SDK _invoke_handler dispatches on parameter count — *args would misroute."""
+def test_audit_wrapper_takes_explicit_packet_aware_signature() -> None:
+    """SDK _invoke_handler dispatches on parameter count — *args would misroute.
+
+    Three explicit parameters select the SDK's ``(org_id, payload, packet)`` form,
+    which hands the wrapper the ingress packet it audits (CEG-FIX-002).
+    """
     import inspect
 
     async def handler(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {}
 
-    wrapped = _with_packet_audit("match", handler)
-    assert len(inspect.signature(wrapped).parameters) == 2
+    parameters = list(inspect.signature(_with_packet_audit("match", handler)).parameters.values())
+    assert [p.name for p in parameters] == ["tenant", "payload", "packet"]
+    assert all(p.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD for p in parameters)
+
+
+def test_audit_wrapper_flag_off_restores_reconstructed_request(
+    monkeypatch: pytest.MonkeyPatch,
+    persisted_packets: list[tuple[Any, Any]],
+) -> None:
+    """INGRESS_PACKET_AUDIT_ENABLED=false is the operator rollback for CEG-FIX-002."""
+    import inspect
+
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "ingress_packet_audit_enabled", False)
+
+    async def spy(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return {"ok": True}
+
+    wrapped = _with_packet_audit("match", spy)
+    assert [p.name for p in inspect.signature(wrapped).parameters.values()] == ["tenant", "payload"]
+
+    register_handler("match", wrapped)
+    ingress = _identified_gate_packet()
+    with TestClient(_app()) as client:
+        response = client.post("/v1/execute", json=ingress.model_dump_json_dict())
+
+    assert response.status_code == 200
+    ((request, _response),) = persisted_packets
+    assert request.header.packet_id != ingress.header.packet_id
+    assert request.header.trace_id != "trace-ceg-fix-002"
 
 
 # ── Routing and tenant invariant ────────────────────────────────────────────
@@ -203,6 +236,90 @@ def test_failing_handler_persists_pair_and_returns_failure_packet(
     assert response.status_code == 200
     assert response.json()["header"]["packet_type"] == "failure"
     assert len(persisted_packets) == 1
+
+
+# ── Ingress provenance (CEG-FIX-002) ────────────────────────────────────────
+
+
+def _identified_gate_packet() -> Any:
+    """A Gate-authored ingress packet with a known trace and correlation."""
+    return create_transport_packet(
+        action="match",
+        payload={"query": {}},
+        tenant="plasticos",
+        source_node=GATE_NODE,
+        destination_node=NODE_NAME,
+        reply_to=GATE_NODE,
+        trace_id="trace-ceg-fix-002",
+        correlation_id="corr-ceg-fix-002",
+        provenance=RoutingProvenance(
+            origin_kind="gate",
+            requested_action="match",
+            resolved_by_gate=True,
+        ),
+    )
+
+
+@pytest.mark.finding("CEG-FIX-002")
+def test_audited_request_is_the_ingress_packet(
+    persisted_packets: list[tuple[Any, Any]],
+) -> None:
+    """The persisted request carries the ingress identity, not a reconstruction.
+
+    Gate_SDK holds one trace_id, one correlation_id and one root_id across every
+    generation of the rail (tests/integration/test_canonical_round_trip_specimen.py
+    @ 7ec6cdf); a freshly created packet starts a new root and a new trace.
+    """
+
+    async def spy(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return {"ok": True}
+
+    register_handler("match", _with_packet_audit("match", spy))
+    ingress = _identified_gate_packet()
+
+    with TestClient(_app()) as client:
+        client.post("/v1/execute", json=ingress.model_dump_json_dict())
+
+    ((request, _response),) = persisted_packets
+    assert request.header.packet_id == ingress.header.packet_id
+    assert request.header.trace_id == "trace-ceg-fix-002"
+    assert request.header.correlation_id == "corr-ceg-fix-002"
+    assert request.lineage.root_id == ingress.lineage.root_id
+    assert request.tenant == ingress.tenant
+    assert request.provenance == ingress.provenance
+
+
+@pytest.mark.finding("CEG-FIX-002")
+@pytest.mark.parametrize("fails", [False, True])
+def test_audited_response_derives_from_ingress(
+    persisted_packets: list[tuple[Any, Any]],
+    fails: bool,
+) -> None:
+    """Success and failure audit responses stay on the ingress lineage and trace."""
+
+    async def handler(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if fails:
+            msg = "handler exploded"
+            raise RuntimeError(msg)
+        return {"ok": True}
+
+    register_handler("match", _with_packet_audit("match", handler))
+    ingress = _identified_gate_packet()
+
+    with TestClient(_app()) as client:
+        wire = client.post("/v1/execute", json=ingress.model_dump_json_dict()).json()
+
+    ((_request, response),) = persisted_packets
+    assert response.lineage.parent_id == ingress.header.packet_id
+    assert response.lineage.root_id == ingress.lineage.root_id
+    assert response.header.causation_id == ingress.header.packet_id
+    assert response.header.trace_id == "trace-ceg-fix-002"
+    assert response.header.correlation_id == "corr-ceg-fix-002"
+    assert response.payload["meta"]["trace_id"] == "trace-ceg-fix-002"
+    # The audit pair and the SDK's own wire response describe one request.
+    assert wire["header"]["trace_id"] == response.header.trace_id
+    assert wire["header"]["correlation_id"] == response.header.correlation_id
+    assert wire["lineage"]["root_id"] == str(response.lineage.root_id)
 
 
 # ── Gate-only ingress ───────────────────────────────────────────────────────

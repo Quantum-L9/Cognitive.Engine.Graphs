@@ -12,6 +12,11 @@ chassis/handler_registration.py
 Registers engine.handlers.ACTION_HANDLERS with the constellation-node-sdk
 handler registry, wrapping each handler with the PacketEnvelope audit side
 effect that chassis/actions.py performs on the legacy path.
+
+The audited request is the ingress TransportPacket the SDK hands the handler,
+never a reconstruction: Gate owns its packet_id, trace_id, correlation_id and
+lineage root, and the audited response derives from it (CEG-FIX-002).
+``ingress_packet_audit_enabled=False`` restores the reconstructed request.
 """
 
 from __future__ import annotations
@@ -23,12 +28,15 @@ from typing import TYPE_CHECKING, Any
 
 from constellation_node_sdk import register_handler
 
+from engine.config.settings import settings
 from engine.handlers import ACTION_HANDLERS
 from engine.packet.chassis_contract import deflate_egress, inflate_ingress
 from engine.packet.packet_store import get_packet_store
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
+
+    from constellation_node_sdk import TransportPacket
 
 logger = logging.getLogger(__name__)
 
@@ -39,26 +47,20 @@ _RESPONDING_NODE = "graph-engine"
 def _with_packet_audit(
     action: str,
     fn: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]],
-) -> Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]:
+) -> Callable[..., Awaitable[dict[str, Any]]]:
     """Wrap an engine handler so each call emits a request/response packet pair.
 
-    The wrapper keeps an explicit two-parameter signature: the SDK's
-    ``_invoke_handler`` dispatches on ``len(inspect.signature(handler).parameters)``,
-    so ``*args`` would silently reroute the call to the one-arg (packet) form.
+    With ``ingress_packet_audit_enabled`` the wrapper takes the SDK's
+    packet-aware ``(tenant, payload, packet)`` form so the ingress packet itself
+    is audited. Off, it keeps the two-parameter form and reconstructs the
+    request. Parameters stay explicit either way: the SDK's ``_invoke_handler``
+    dispatches on ``len(inspect.signature(handler).parameters)``, so ``*args``
+    would silently reroute the call to the one-arg (packet) form. The engine
+    handler keeps its ``(tenant, payload)`` contract.
     """
 
-    async def wrapped(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
-        trace_id = str(uuid.uuid4())
+    async def audited(tenant: str, payload: dict[str, Any], request_packet: TransportPacket) -> dict[str, Any]:
         start = time.time()
-
-        request_packet = inflate_ingress(
-            action=action,
-            payload=payload,
-            tenant=tenant,
-            trace_id=trace_id,
-            source_node="gate",
-        )
-
         try:
             engine_data = await fn(tenant, payload)
             status = "success"
@@ -87,8 +89,26 @@ def _with_packet_audit(
         await _persist(request_packet, response_packet)
         return engine_data
 
-    wrapped.__name__ = f"{action}_with_packet_audit"
-    return wrapped
+    if settings.ingress_packet_audit_enabled:
+
+        async def wrapped(tenant: str, payload: dict[str, Any], packet: TransportPacket) -> dict[str, Any]:
+            return await audited(tenant, payload, packet)
+
+        wrapped.__name__ = f"{action}_with_packet_audit"
+        return wrapped
+
+    async def reconstructed(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
+        request_packet = inflate_ingress(
+            action=action,
+            payload=payload,
+            tenant=tenant,
+            trace_id=str(uuid.uuid4()),
+            source_node="gate",
+        )
+        return await audited(tenant, payload, request_packet)
+
+    reconstructed.__name__ = f"{action}_with_packet_audit"
+    return reconstructed
 
 
 async def _persist(request: Any, response: Any) -> None:
