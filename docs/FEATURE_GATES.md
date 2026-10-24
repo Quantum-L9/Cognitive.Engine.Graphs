@@ -52,7 +52,7 @@ independently of the code default.
 | Pareto Ensemble | `PARETO_ENABLED` | `True` | `True` | active |
 | Pareto Weight Discovery | `PARETO_WEIGHT_DISCOVERY_ENABLED` | `False` | `True` | active (opt-in) |
 | Domain Strict Validation | `DOMAIN_STRICT_VALIDATION` | `True` | `True` | active |
-| Score Clamping | `SCORE_CLAMP_ENABLED` | `True` | `True` | active |
+| Score Clamping | `SCORE_CLAMP_ENABLED` | `True` | `True` | active; a null dimension clamps to `0.0` as well (Stage 2, see §20) |
 | Strict Null Gates | `STRICT_NULL_GATES` | `True` | `True` | active |
 | Param Strict Mode | `PARAM_STRICT_MODE` | `True` | `True` | active |
 | LLM Security (ValidatedLLMClient) | `LLM_PROVIDER` | `openai` (implicit) | `openai` | active — fully implemented, requires `OPENAI_API_KEY` |
@@ -68,7 +68,13 @@ independently of the code default.
 | Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; seven packs whose gates do not compile to executable, faithful Cypher — see §16 |
 | SDK Participation | `SDK_PARTICIPATION_ENABLED` (`sdk_participation_enabled`) | `True` | unset | active; Gate_SDK owns registration and readiness; off restores CEG's loop — see §17 |
 | Gate Re-registration | `GATE_REREGISTRATION_ENABLED` (`gate_reregistration_enabled`), `GATE_REREGISTRATION_INTERVAL_SECONDS` | `True`, `300` | unset | active only while SDK participation is off — see §17 |
+| Causal Rejection Enforcement | `CAUSAL_REJECTION_ENFORCEMENT_ENABLED` (`causal_rejection_enforcement_enabled`) | `True` | unset | active; an R3-rejected RESULTED_IN edge is not written — see §18 |
+| Ingress Packet Audit | `INGRESS_PACKET_AUDIT_ENABLED` (`ingress_packet_audit_enabled`) | `True` | unset | active; SDK audit pairs record Gate's ingress packet — see §19 |
 | Constellation Orchestration | — | — | — | accepted architectural gap — see §9 |
+| Gate Explicit Null Behavior | `GATE_EXPLICIT_NULLBEHAVIOR` (`gate_explicit_nullbehavior`) | `True` | unset | active; a gate's declared `nullbehavior` wins over the per-type default (C-14) — see §20 |
+| Spec-declared Candidate Id | `SPEC_DECLARED_CANDIDATE_ID` (`spec_declared_candidate_id`) | `True` | unset | active; `handle_match` identifies candidates by the domain's declared id property, not `entity_id` — see §20 |
+| Traversal Gate EXISTS Subquery | `TRAVERSAL_GATE_EXISTS_SUBQUERY` (`traversal_gate_exists_subquery`) | `True` | unset | active; traversal gates compile to an `EXISTS { … }` subquery Neo4j 5 accepts — see §20 |
+| Childsync FOREACH Projection | `CHILDSYNC_FOREACH_PROJECTION` (`childsync_foreach_projection`) | `True` | unset | active; childsync writes children in `FOREACH` without copying them onto the parent — see §20 |
 
 ---
 
@@ -526,6 +532,56 @@ loops do not both register.
 
 ---
 
+## 18. Causal Rejection Enforcement (CEG-FIX-001)
+
+When a domain sets `causal.enabled`, `handle_outcomes` runs
+`CausalEdgeRuntimeValidator` (R3) over the outcome's RESULTED_IN edge record
+(`source_ts`, `target_ts`, `confidence`, judged against the domain's
+`RESULTED_IN` `CausalEdgeSpec`). Before CEG-FIX-001 a rejection was only
+logged, and both write paths still created the edge.
+
+`causal_rejection_enforcement_enabled` (default `True`, hardening) makes the
+rejection binding. A rejected edge is not created by either write path, the
+`TransactionOutcome` node is still recorded — the validator judges the edge,
+not the outcome observation (`docs/contracts/data/graph-schema.yaml`) — and
+the response carries `rejected_count`, matching `handle_sync`.
+
+Two consequences follow from the domain's causal configuration:
+
+- the edge record names `RESULTED_IN`, so `CausalEdgeSpec.temporal_validation`
+  is applied: `source_ts` must strictly precede `target_ts` when both are given;
+- with `causal.enabled` and no `RESULTED_IN` entry in `causal.causal_edges`,
+  every outcome edge is rejected as `invalid_edge_type`.
+
+Domains with `causal.enabled=false` are unaffected: the validator is not
+consulted and the edge is written as before.
+
+`CAUSAL_REJECTION_ENFORCEMENT_ENABLED=false` restores the log-only behaviour.
+
+---
+
+## 19. Ingress Packet Audit (CEG-FIX-002)
+
+On the SDK chassis (`L9_CHASSIS=sdk`), `chassis/handler_registration.py` wraps
+every engine handler so each call persists a request/response packet pair to
+PacketStore. Before CEG-FIX-002 the wrapper minted a new trace id and rebuilt
+the request with `inflate_ingress`, so the audited pair carried a `packet_id`,
+`trace_id`, `correlation_id` and lineage `root_id` unrelated to the packet Gate
+sent. Gate_SDK holds one trace, one correlation and one root across every
+generation of a request.
+
+`ingress_packet_audit_enabled` (default `True`, hardening) registers the
+wrapper in the SDK's packet-aware `(tenant, payload, packet)` form: the audited
+request is the ingress packet itself and the audited response derives from it.
+Engine handlers keep their `(tenant, payload)` signature, and the wire
+response is unchanged.
+
+The flag is read when handlers are registered (node app startup), because the
+SDK dispatches on the wrapper's parameter count.
+`INGRESS_PACKET_AUDIT_ENABLED=false` restores the reconstructed request.
+
+---
+
 ## Querying Feature Status
 
 Use the `feature_status` admin subaction to get current state of all gates:
@@ -537,3 +593,81 @@ Use the `feature_status` admin subaction to get current state of all gates:
 ```
 
 Returns all feature flags with their current boolean/integer values.
+
+---
+
+## 20. Domain-neutral Cypher: Traversal Gate and Childsync (Stage 2)
+
+**State**: Active (hardening)
+**Flags**: `TRAVERSAL_GATE_EXISTS_SUBQUERY=True`, `CHILDSYNC_FOREACH_PROJECTION=True` (default on)
+
+The CEG Stage 4 real-Neo4j proof ran two unrelated synthetic domain packs
+through `handle_sync` and `handle_match` against `neo4j:5.18-enterprise` and
+found three spec-driven paths that could not execute at all:
+
+| Path | Emitted on baseline `7925c790` | Neo4j 5 response |
+|---|---|---|
+| `type: traversal` gate | `exists((candidate)-[:E]->(t:Label {prop: $param}))` | `PatternExpressions are not allowed to introduce new variables: 't'` |
+| `childsync` endpoint | `SET n += row` with the child list still in `row` | `Property values can only be of primitive types or arrays thereof` |
+| `childsync` with `edgedirection: childtoparent` | `MERGE (n)-[:T]<-(c)` | `Invalid input '<'` |
+
+The traversal gate is the only spec-level way to constrain candidates by a
+related taxonomy node's property, so without it a query field such as
+`route_code` cannot constrain a match.
+
+`traversal_gate_exists_subquery` (on): the gate compiles to
+`EXISTS { MATCH (candidate)-[:E]->(t:Label) WHERE t.prop = $param }` — the form
+the exclusion gate already uses — and its null handling checks the query
+parameter only, because `candidateprop` on this gate type names the target
+node's property, not the candidate's. Off: the legacy predicate and the legacy
+`candidate.<prop>` null wrap.
+
+`childsync_foreach_projection` (on): the parent `SET` becomes
+`SET n += row{.*, <childfield>: null, …}`, children are created inside
+`FOREACH (child_row IN coalesce(row.<field>, []) | …)`, `childtoparent` emits
+`(n)<-[:T]-(c)`, and an undeclared direction raises. Off: the legacy
+`UNWIND`-based path.
+
+Both ship on because the legacy output cannot execute on any supported Neo4j;
+the flags exist for C-21 staging and rollback, not because the legacy path is
+a working alternative. Endpoints without `childsync` keep the exact previous
+`SET n += row` regardless of the flag.
+
+Two further hidden vertical assumptions surfaced by the same proof:
+
+`gate_explicit_nullbehavior` (on): C-14 says every gate declares its null
+behavior and the compiler honours it, but `GateSpec.nullbehavior` defaults to
+`pass`, so an explicit `nullbehavior: pass` was indistinguishable from
+"undeclared" and was overridden by the per-type default (`fail` for boolean,
+freshness and traversal gates). Pydantic records which fields a spec actually
+set; a declared value now wins, an undeclared one keeps the type default. This
+changes ranking for packs that declared `pass` on a boolean gate and relied on
+the override — PlasticOS `food_grade_check` is one. Off: the legacy override.
+
+`spec_declared_candidate_id` (on): `handle_match` read a hardcoded `entity_id`
+off every candidate for Pareto-front ids and causal explanations, a PlasticOS
+convention. The id property is now the one the domain declares — the sync
+endpoint's `idproperty` for the candidate label (the key the engine MERGEs on),
+else the node's first `required` property — with `entity_id` as the final
+fallback so existing packs are unaffected. Off: `entity_id` only.
+
+Honouring a declared `pass` admitted PlasticOS candidates that the override had
+hidden, and they exposed a third defect under the existing `score_clamp_enabled`
+flag: the `[0, 1]` clamp passed a null dimension through untouched, so a
+candidate missing a scored property (`point.distance` on a null `lat`, a
+freshness date never synced) produced a null weighted `score` that
+`handle_match` crashed ranking. Null is outside `[0, 1]`; the clamp now maps it
+to `0.0`, which is the `NullStrategy.ZERO` contract the dimension strategies
+already assume. The handler also ranks a null score as `0.0` when the clamp is
+off. No new flag: this is the clamp doing what its flag already promises.
+
+### Validation
+
+Stage 4 harness (two synthetic domains, 27 proofs): 23/27 on baseline, 27/27
+with both flags on. Unit coverage: `tests/unit/test_gates_all_types.py`
+(`test_compile_traversal_gate*`) and `tests/unit/test_sync.py`
+(`test_child_entity_sync*`) assert both the new and the flag-off shapes.
+
+### Rollback
+
+Set either flag to `false`. The legacy Cypher is emitted again verbatim.

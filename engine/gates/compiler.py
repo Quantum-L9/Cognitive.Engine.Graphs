@@ -65,7 +65,7 @@ class GateCompiler:
         self_range→ candidate.min_prop <= $param AND $param <= candidate.max_prop
         freshness → candidate.prop >= datetime() - duration({days: $days})
         temporal_range → candidate.prop >= $start AND candidate.prop <= $end
-        traversal → (candidate)-[:EDGE]->(target {prop: $param})
+        traversal → EXISTS { MATCH (candidate)-[:EDGE]->(t:Target) WHERE t.prop = $param }
 
     Usage:
         compiler = GateCompiler(domain_spec)
@@ -377,19 +377,43 @@ class GateCompiler:
     def _compile_traversal(self, gate: GateSpec) -> str:
         """
         Traversal gate: requires an edge path to exist.
-        Pattern: exists((candidate)-[:EDGE_TYPE]->(target {prop: $param}))
+        Pattern: EXISTS { MATCH (candidate)-[:EDGE_TYPE]->(t:Target) WHERE t.prop = $param }
+
+        Stage 2 (CEG Stage 4 proof, P4): the previous shape,
+        ``exists((candidate)-[:EDGE]->(t:Label {prop: $param}))``, is rejected
+        by Neo4j 5 ("PatternExpressions are not allowed to introduce new
+        variables: 't'"), so every match in a direction carrying a traversal
+        gate failed with a syntax error. This gate is the only spec-level way
+        to constrain candidates by a related taxonomy node's property, which is
+        what makes a domain pack self-sufficient. The EXISTS subquery is the
+        same form the exclusion gate already uses.
         """
+        from engine.config.settings import settings
+
         edge_type = sanitize_label(gate.edgetype) if gate.edgetype else "RELATES_TO"
         target_label = sanitize_label(gate.tonode) if gate.tonode else ""
+        label_clause = f":{target_label}" if target_label else ""
         target_filter = ""
 
+        if not settings.traversal_gate_exists_subquery:
+            # Legacy predicate (C-21 rollback path). Not executable on Neo4j 5.
+            if gate.candidateprop and gate.queryparam:
+                prop = sanitize_label(gate.candidateprop)
+                param = _param_name(gate.queryparam)
+                target_filter = f" {{{prop}: ${param}}}"
+            return f"exists((candidate)-[:{edge_type}]->(t{label_clause}{target_filter}))"
+
         if gate.candidateprop and gate.queryparam:
+            # candidateprop names the TARGET node's property here (the related
+            # taxonomy node), not a property of the candidate.
             prop = sanitize_label(gate.candidateprop)
             param = _param_name(gate.queryparam)
-            target_filter = f" {{{prop}: ${param}}}"
+            target_filter = f" WHERE t.{prop} = ${param}"
 
-        label_clause = f":{target_label}" if target_label else ""
-        return f"exists((candidate)-[:{edge_type}]->(t{label_clause}{target_filter}))"
+        # Concatenated like the exclusion gate above: edge_type / target_label /
+        # prop are sanitize_label()-validated and values only ever flow through
+        # $ parameters (C-009; tools/contract_scanner.py SEC-001).
+        return "EXISTS { MATCH (candidate)-[:" + edge_type + "]->(t" + label_clause + ")" + target_filter + " }"
 
     # ── Null Semantics ─────────────────────────────────────
 
@@ -400,14 +424,37 @@ class GateCompiler:
         NullBehavior.PASS   → (candidate.prop IS NULL OR <predicate>)
         NullBehavior.FAIL   → (candidate.prop IS NOT NULL AND <predicate>)
         """
+        from engine.config.settings import settings
+
         null_behavior = gate.nullbehavior
-        if null_behavior is None or null_behavior == NullBehavior.PASS:
+        # C-14 says every gate declares its null behavior and the compiler
+        # honours it. GateSpec defaults `nullbehavior` to PASS, so an explicit
+        # `nullbehavior: pass` used to be indistinguishable from "not declared"
+        # and was overridden by the per-type default (FAIL for boolean,
+        # freshness and traversal gates). Pydantic records which fields the
+        # spec actually set; an explicit declaration now wins (Stage 2 P4).
+        declared = "nullbehavior" in getattr(gate, "model_fields_set", frozenset())
+        if settings.gate_explicit_nullbehavior and declared and null_behavior is not None:
+            pass  # spec-declared, keep as written
+        elif null_behavior is None or null_behavior == NullBehavior.PASS:
             null_behavior = NullHandler.DEFAULT_BEHAVIORS.get(gate.type, NullBehavior.PASS)
+
+        # For a traversal gate, candidateprop names the related TARGET node's
+        # property, which the EXISTS subquery already tests. Wrapping it as
+        # `candidate.<prop>` would make the gate pass or fail on whether the
+        # candidate happens to carry a same-named property — a hidden coupling
+        # between the candidate's shape and its taxonomy (Stage 2, P4). The
+        # legacy wrap is kept behind the same flag as the legacy predicate.
+
+        skip_candidate_prop = gate.type == GateType.TRAVERSAL and settings.traversal_gate_exists_subquery
+        candidate_prop: str | None = None
+        if gate.candidateprop and not skip_candidate_prop:
+            candidate_prop = f"candidate.{sanitize_label(gate.candidateprop)}"
 
         return NullHandler.wrap_gate_with_null_logic(
             gate_type=gate.type,
             null_behavior=null_behavior,
             gate_cypher=predicate,
-            candidate_prop=f"candidate.{sanitize_label(gate.candidateprop)}" if gate.candidateprop else None,
+            candidate_prop=candidate_prop,
             query_param=f"${_param_name(gate.queryparam)}" if gate.queryparam else None,
         )

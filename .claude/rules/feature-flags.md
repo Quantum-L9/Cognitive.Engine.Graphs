@@ -66,3 +66,11 @@ were industry-specific and had no caller).
 | w_reinforcement | 0.20 | boot.py _assert_default_weight_sum() |
 | w_freshness | 0.10 | boot.py _assert_default_weight_sum() |
 | **Sum** | **0.85** | Must be ≤ 1.0 |
+
+## Stage 2 — Domain-neutral Cypher (CEG Stage 4 proof)
+| Flag | Default | Purpose |
+|------|---------|---------|
+| traversal_gate_exists_subquery | True | Traversal gate compiles to `EXISTS { MATCH … WHERE t.prop = $param }` with query-param-only null handling; off restores the `exists((…{prop: $param}))` predicate Neo4j 5 rejects |
+| childsync_foreach_projection | True | childsync null-overrides child fields in the parent SET, creates children in FOREACH, emits a valid childtoparent arrow; off restores the UNWIND path Neo4j rejects |
+| gate_explicit_nullbehavior | True | A gate's explicitly declared `nullbehavior` wins over the per-type default (C-14); off restores the override of an explicit `pass` on boolean/freshness/traversal gates |
+| spec_declared_candidate_id | True | `handle_match` identifies candidates by the domain's declared id property (sync `idproperty`, else first required property) instead of a hardcoded `entity_id`; off restores `entity_id` only |
