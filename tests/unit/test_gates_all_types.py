@@ -278,6 +278,47 @@ class TestGateCompiler:
         assert "candidate.route_code IS NOT NULL" in cypher
         assert "EXISTS {" not in cypher
 
+    def test_declared_nullbehavior_pass_is_honoured(self) -> None:
+        """C-14 (Stage 2 P4): an explicit `nullbehavior: pass` on a boolean gate is kept, not overridden to FAIL."""
+        gate = GateSpec(
+            name="hazmat_gate",
+            type=GateType.BOOLEAN,
+            candidateprop="hazmat_certified",
+            queryparam="hazmat_required",
+            nullbehavior=NullBehavior.PASS,
+        )
+        domain_spec = make_mock_domain_spec(gates=[gate])
+
+        cypher = GateCompiler(domain_spec).compile(gate)
+
+        assert cypher == (
+            "(candidate.hazmat_certified IS NULL OR $hazmat_required IS NULL OR "
+            "(candidate.hazmat_certified = $hazmat_required))"
+        )
+
+    def test_undeclared_nullbehavior_keeps_type_default(self) -> None:
+        """No `nullbehavior` in the spec: boolean gates still default to FAIL."""
+        gate = GateSpec(name="active", type=GateType.BOOLEAN, candidateprop="active", queryparam="wants_active")
+        cypher = GateCompiler(make_mock_domain_spec(gates=[gate])).compile(gate)
+
+        assert cypher.startswith("(candidate.active IS NOT NULL AND $wants_active IS NOT NULL AND")
+
+    def test_declared_nullbehavior_legacy_override_behind_flag(self, monkeypatch) -> None:
+        """C-21: gate_explicit_nullbehavior=False restores the override of an explicit PASS."""
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gate_explicit_nullbehavior", False)
+        gate = GateSpec(
+            name="hazmat_gate",
+            type=GateType.BOOLEAN,
+            candidateprop="hazmat_certified",
+            queryparam="hazmat_required",
+            nullbehavior=NullBehavior.PASS,
+        )
+        cypher = GateCompiler(make_mock_domain_spec(gates=[gate])).compile(gate)
+
+        assert cypher.startswith("(candidate.hazmat_certified IS NOT NULL AND")
+
     def test_compile_traversal_gate_without_target_filter(self) -> None:
         """No candidateprop/queryparam: the gate only requires that some edge exists."""
         gate = make_mock_gate_spec(

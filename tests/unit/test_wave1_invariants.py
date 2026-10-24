@@ -258,6 +258,20 @@ class TestW102ScoreRange:
         assert "> 1.0 THEN 1.0" in result
         assert "candidate.score" in result
 
+    def test_clamp_expression_maps_null_to_zero(self) -> None:
+        """A null dimension (unscored property) clamps to 0.0, not to null.
+
+        Before this branch a candidate with a null scored property produced a
+        null weighted ``score`` and ``handle_match`` crashed ranking it
+        (``'>' not supported between instances of 'NoneType'``). The CASE shape
+        is kept so the structural assertions in tests/property still hold.
+        """
+        from engine.scoring.assembler import ScoringAssembler
+
+        result = ScoringAssembler._clamp_expression("candidate.score")
+        assert result.startswith("CASE WHEN (candidate.score) IS NULL THEN 0.0 ")
+        assert result.endswith("ELSE (candidate.score) END")
+
     def test_scoring_assembler_clamps_when_enabled(self) -> None:
         """Dimension expressions are clamped when SCORE_CLAMP_ENABLED=True."""
         raw = _minimal_spec_raw()

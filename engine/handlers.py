@@ -390,6 +390,44 @@ def _validate_match_weights(weights: dict[str, float], tenant: str) -> None:
         raise ValidationError(msg, action="match", tenant=tenant)
 
 
+_FALLBACK_CANDIDATE_ID_PROPERTY = "entity_id"
+
+
+def _candidate_id_property(domain_spec: DomainSpec, label: str) -> str:
+    """The property that identifies a candidate node, as the domain declares it.
+
+    Stage 2 (P4): `handle_match` read a hardcoded `entity_id` off every
+    candidate for Pareto ids and causal explanations — a PlasticOS convention
+    no other pack is obliged to share. Resolution order: the sync endpoint's
+    `idproperty` for this label (the key the engine itself MERGEs on), else the
+    node's first `required` property, else `entity_id`.
+    """
+    from engine.config.settings import settings as _id_settings
+
+    if not _id_settings.spec_declared_candidate_id:
+        return _FALLBACK_CANDIDATE_ID_PROPERTY
+    if domain_spec.sync:
+        for endpoint in domain_spec.sync.endpoints:
+            if endpoint.targetnode == label and endpoint.idproperty:
+                return endpoint.idproperty
+    for node in domain_spec.ontology.nodes:
+        if node.label == label:
+            for prop in node.properties:
+                if prop.required:
+                    return prop.name
+    return _FALLBACK_CANDIDATE_ID_PROPERTY
+
+
+def _candidate_id(candidate: Any, id_property: str, fallback: Any) -> str:
+    """Read the declared id off a returned candidate node, falling back to `entity_id`, then `fallback`."""
+    if not isinstance(candidate, dict):
+        return str(fallback)
+    value = candidate.get(id_property)
+    if value is None and id_property != _FALLBACK_CANDIDATE_ID_PROPERTY:
+        value = candidate.get(_FALLBACK_CANDIDATE_ID_PROPERTY)
+    return str(fallback if value is None else value)
+
+
 async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Gate-then-score graph traversal."""
     graph_driver, domain_loader = _require_deps()
@@ -501,12 +539,16 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     if results:
         from engine.config.settings import settings as _settings
 
+        # One declared id for every consumer of candidate identity below: the
+        # Pareto front, the arbitration filter and the causal explanations.
+        id_property = _candidate_id_property(domain_spec, candidate_labels[0])
+
         if _settings.pareto_enabled:
             from engine.scoring.pareto import ParetoCandidate
 
             pareto_candidates_input = [
                 ParetoCandidate(
-                    candidate_id=str(r.get("candidate", {}).get("entity_id", i)),
+                    candidate_id=_candidate_id(r.get("candidate", {}), id_property, i),
                     dimension_scores={
                         k: float(v)
                         for k, v in r.items()
@@ -543,7 +585,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             # Spec-driven Pareto filter using declared objectives
             arb_dims = [obj.dimension for obj in domain_spec.decision_arbitration.pareto_config.objectives]
             if arb_dims and len(results) > 1:
-                arb_pareto = apply_pareto_filter(results, arb_dims)
+                arb_pareto = apply_pareto_filter(results, arb_dims, candidate_id_key=id_property)
                 if pareto_metadata is None:
                     pareto_metadata = {}
                 pareto_metadata["arbitration"] = {
@@ -564,7 +606,14 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     }
 
     if candidates_out:
-        raw_scores = [c.get("score", 0.0) if isinstance(c, dict) else 0.0 for c in candidates_out]
+        # A null Cypher score (clamp disabled, unscored property) ranks as 0.0
+        # instead of crashing max()/min() on None. Coerce the stored score, not
+        # a copy, so normalization below never subtracts from None and a
+        # singleton null is not promoted to 1.0.
+        for c in candidates_out:
+            if isinstance(c, dict) and not isinstance(c.get("score"), (int, float)):
+                c["score"] = 0.0
+        raw_scores = [c["score"] if isinstance(c, dict) else 0.0 for c in candidates_out]
         scoring_meta["raw_max"] = max(raw_scores) if raw_scores else 0.0
         scoring_meta["raw_min"] = min(raw_scores) if raw_scores else 0.0
 
@@ -610,15 +659,17 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
         serializer = CausalSubgraphSerializer(graph_driver, domain_spec)
         candidate_label = candidate_labels[0]
+        id_property = _candidate_id_property(domain_spec, candidate_label)
         for c in candidates_out:
             if isinstance(c, dict):
                 cand = c.get("candidate", {})
-                entity_id = str(cand.get("entity_id", "")) if isinstance(cand, dict) else ""
+                entity_id = _candidate_id(cand, id_property, "") if isinstance(cand, dict) else ""
                 if entity_id:
                     explanation = await serializer.serialize_neighborhood(
                         node_id=entity_id,
                         node_label=candidate_label,
                         max_depth=min(domain_spec.causal.chain_depth_limit, 2),
+                        id_property=id_property,
                     )
                     c["match_explanation"] = explanation
 

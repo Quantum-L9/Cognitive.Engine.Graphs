@@ -424,8 +424,19 @@ class GateCompiler:
         NullBehavior.PASS   → (candidate.prop IS NULL OR <predicate>)
         NullBehavior.FAIL   → (candidate.prop IS NOT NULL AND <predicate>)
         """
+        from engine.config.settings import settings
+
         null_behavior = gate.nullbehavior
-        if null_behavior is None or null_behavior == NullBehavior.PASS:
+        # C-14 says every gate declares its null behavior and the compiler
+        # honours it. GateSpec defaults `nullbehavior` to PASS, so an explicit
+        # `nullbehavior: pass` used to be indistinguishable from "not declared"
+        # and was overridden by the per-type default (FAIL for boolean,
+        # freshness and traversal gates). Pydantic records which fields the
+        # spec actually set; an explicit declaration now wins (Stage 2 P4).
+        declared = "nullbehavior" in getattr(gate, "model_fields_set", frozenset())
+        if settings.gate_explicit_nullbehavior and declared and null_behavior is not None:
+            pass  # spec-declared, keep as written
+        elif null_behavior is None or null_behavior == NullBehavior.PASS:
             null_behavior = NullHandler.DEFAULT_BEHAVIORS.get(gate.type, NullBehavior.PASS)
 
         # For a traversal gate, candidateprop names the related TARGET node's
@@ -434,7 +445,6 @@ class GateCompiler:
         # candidate happens to carry a same-named property — a hidden coupling
         # between the candidate's shape and its taxonomy (Stage 2, P4). The
         # legacy wrap is kept behind the same flag as the legacy predicate.
-        from engine.config.settings import settings
 
         skip_candidate_prop = gate.type == GateType.TRAVERSAL and settings.traversal_gate_exists_subquery
         candidate_prop: str | None = None

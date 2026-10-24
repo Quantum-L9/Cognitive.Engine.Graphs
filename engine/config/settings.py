@@ -198,6 +198,18 @@ class Settings(BaseSettings):
     require_sdk_chassis_in_prod: bool = True
 
     # --- Stage 2: domain-neutral Cypher (CEG Stage 4 real-Neo4j proof) ---
+    # P4 / C-14: a gate's explicitly declared `nullbehavior: pass` was overridden
+    # by the per-type default (FAIL for boolean, freshness, traversal) because
+    # the schema default is also PASS. On: a declared value wins; undeclared
+    # keeps the per-type default. Off: the legacy override. Ships on — the spec
+    # is the source of truth (C-12); flip off to reproduce pre-Stage-2 ranking.
+    gate_explicit_nullbehavior: bool = True
+    # P4: handle_match identified candidates by a hardcoded `entity_id`
+    # property (Pareto front ids, causal explanations), a PlasticOS convention.
+    # On: the id property is the one the domain declares — the sync endpoint's
+    # `idproperty` for the candidate label, else the node's first required
+    # property — with `entity_id` as the final fallback. Off: `entity_id` only.
+    spec_declared_candidate_id: bool = True
     # P4: the `type: traversal` gate compiled to
     # `exists((candidate)-[:E]->(t:Label {prop: $param}))`, which Neo4j 5
     # rejects ("PatternExpressions are not allowed to introduce new variables"),

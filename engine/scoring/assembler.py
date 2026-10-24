@@ -548,8 +548,16 @@ class ScoringAssembler:
 
         Prevents unbounded scores from propagating through the scoring pipeline.
         Mirrors seL4's invariant enforcement on all capability-transfer outputs.
+
+        A null dimension is outside [0.0, 1.0] too: a candidate missing a scored
+        property (``point.distance`` on a null ``lat``, a freshness date never
+        synced) made the whole weighted ``score`` null, which the handler then
+        tried to rank. Null clamps to 0.0, the ``NullStrategy.ZERO`` contract.
         """
-        return f"CASE WHEN ({expr}) < 0.0 THEN 0.0 WHEN ({expr}) > 1.0 THEN 1.0 ELSE ({expr}) END"
+        return (
+            f"CASE WHEN ({expr}) IS NULL THEN 0.0 WHEN ({expr}) < 0.0 THEN 0.0 "
+            f"WHEN ({expr}) > 1.0 THEN 1.0 ELSE ({expr}) END"
+        )
 
     def _apply_null_strategy(self, dim: ScoringDimensionSpec, base_expr: str) -> str:
         """S2-01: Apply null inheritance strategy to dimension expression.
