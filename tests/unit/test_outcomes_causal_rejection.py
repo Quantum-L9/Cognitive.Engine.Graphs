@@ -39,6 +39,11 @@ def _spec(*, causal_edges: list[CausalEdgeSpec] | None = None) -> MagicMock:
     spec = MagicMock()
     spec.domain.id = "test_db"
     spec.feedbackloop.enabled = False
+    # #318 made the outcome node label the domain's (`feedbackloop.outcome_node_label`,
+    # schema default "TransactionOutcome") and passes it through sanitize_label(); a
+    # bare MagicMock attribute is not a str and fails that regex. Same convention as
+    # tests/unit/test_wave2_handlers.py.
+    spec.feedbackloop.outcome_node_label = "TransactionOutcome"
     spec.counterfactual.enabled = False
     spec.compliance = None
     spec.causal = CausalSubgraphSpec(
