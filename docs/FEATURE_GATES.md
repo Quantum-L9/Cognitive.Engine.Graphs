@@ -52,7 +52,7 @@ independently of the code default.
 | Pareto Ensemble | `PARETO_ENABLED` | `True` | `True` | active |
 | Pareto Weight Discovery | `PARETO_WEIGHT_DISCOVERY_ENABLED` | `False` | `True` | active (opt-in) |
 | Domain Strict Validation | `DOMAIN_STRICT_VALIDATION` | `True` | `True` | active |
-| Score Clamping | `SCORE_CLAMP_ENABLED` | `True` | `True` | active |
+| Score Clamping | `SCORE_CLAMP_ENABLED` | `True` | `True` | active; a null dimension clamps to `0.0` as well (Stage 2, see §20) |
 | Strict Null Gates | `STRICT_NULL_GATES` | `True` | `True` | active |
 | Param Strict Mode | `PARAM_STRICT_MODE` | `True` | `True` | active |
 | LLM Security (ValidatedLLMClient) | `LLM_PROVIDER` | `openai` (implicit) | `openai` | active — fully implemented, requires `OPENAI_API_KEY` |
@@ -71,6 +71,8 @@ independently of the code default.
 | Causal Rejection Enforcement | `CAUSAL_REJECTION_ENFORCEMENT_ENABLED` (`causal_rejection_enforcement_enabled`) | `True` | unset | active; an R3-rejected RESULTED_IN edge is not written — see §18 |
 | Ingress Packet Audit | `INGRESS_PACKET_AUDIT_ENABLED` (`ingress_packet_audit_enabled`) | `True` | unset | active; SDK audit pairs record Gate's ingress packet — see §19 |
 | Constellation Orchestration | — | — | — | accepted architectural gap — see §9 |
+| Gate Explicit Null Behavior | `GATE_EXPLICIT_NULLBEHAVIOR` (`gate_explicit_nullbehavior`) | `True` | unset | active; a gate's declared `nullbehavior` wins over the per-type default (C-14) — see §20 |
+| Spec-declared Candidate Id | `SPEC_DECLARED_CANDIDATE_ID` (`spec_declared_candidate_id`) | `True` | unset | active; `handle_match` identifies candidates by the domain's declared id property, not `entity_id` — see §20 |
 | Traversal Gate EXISTS Subquery | `TRAVERSAL_GATE_EXISTS_SUBQUERY` (`traversal_gate_exists_subquery`) | `True` | unset | active; traversal gates compile to an `EXISTS { … }` subquery Neo4j 5 accepts — see §20 |
 | Childsync FOREACH Projection | `CHILDSYNC_FOREACH_PROJECTION` (`childsync_foreach_projection`) | `True` | unset | active; childsync writes children in `FOREACH` without copying them onto the parent — see §20 |
 
@@ -630,6 +632,34 @@ Both ship on because the legacy output cannot execute on any supported Neo4j;
 the flags exist for C-21 staging and rollback, not because the legacy path is
 a working alternative. Endpoints without `childsync` keep the exact previous
 `SET n += row` regardless of the flag.
+
+Two further hidden vertical assumptions surfaced by the same proof:
+
+`gate_explicit_nullbehavior` (on): C-14 says every gate declares its null
+behavior and the compiler honours it, but `GateSpec.nullbehavior` defaults to
+`pass`, so an explicit `nullbehavior: pass` was indistinguishable from
+"undeclared" and was overridden by the per-type default (`fail` for boolean,
+freshness and traversal gates). Pydantic records which fields a spec actually
+set; a declared value now wins, an undeclared one keeps the type default. This
+changes ranking for packs that declared `pass` on a boolean gate and relied on
+the override — PlasticOS `food_grade_check` is one. Off: the legacy override.
+
+`spec_declared_candidate_id` (on): `handle_match` read a hardcoded `entity_id`
+off every candidate for Pareto-front ids and causal explanations, a PlasticOS
+convention. The id property is now the one the domain declares — the sync
+endpoint's `idproperty` for the candidate label (the key the engine MERGEs on),
+else the node's first `required` property — with `entity_id` as the final
+fallback so existing packs are unaffected. Off: `entity_id` only.
+
+Honouring a declared `pass` admitted PlasticOS candidates that the override had
+hidden, and they exposed a third defect under the existing `score_clamp_enabled`
+flag: the `[0, 1]` clamp passed a null dimension through untouched, so a
+candidate missing a scored property (`point.distance` on a null `lat`, a
+freshness date never synced) produced a null weighted `score` that
+`handle_match` crashed ranking. Null is outside `[0, 1]`; the clamp now maps it
+to `0.0`, which is the `NullStrategy.ZERO` contract the dimension strategies
+already assume. The handler also ranks a null score as `0.0` when the clamp is
+off. No new flag: this is the clamp doing what its flag already promises.
 
 ### Validation
 

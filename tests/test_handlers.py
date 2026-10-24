@@ -28,6 +28,68 @@ from engine.handlers import (
     init_dependencies,
 )
 
+# ── Stage 2 P4: candidate identity comes from the domain, not a hardcoded entity_id ──
+
+
+def _spec_with_sync(label: str, idproperty: str | None, required_props: list[str]) -> MagicMock:
+    spec = MagicMock()
+    node = MagicMock()
+    node.label = label
+    node.properties = []
+    for name in required_props:
+        prop = MagicMock()
+        prop.name = name
+        prop.required = True
+        node.properties.append(prop)
+    spec.ontology.nodes = [node]
+    if idproperty is None:
+        spec.sync = None
+    else:
+        endpoint = MagicMock()
+        endpoint.targetnode = label
+        endpoint.idproperty = idproperty
+        spec.sync.endpoints = [endpoint]
+    return spec
+
+
+def test_candidate_id_property_prefers_sync_idproperty() -> None:
+    from engine.handlers import _candidate_id_property
+
+    spec = _spec_with_sync("Depot", "depot_code", ["depot_code", "depot_name"])
+    assert _candidate_id_property(spec, "Depot") == "depot_code"
+
+
+def test_candidate_id_property_falls_back_to_first_required_property() -> None:
+    from engine.handlers import _candidate_id_property
+
+    spec = _spec_with_sync("Laboratory", None, ["lab_id", "lab_name"])
+    assert _candidate_id_property(spec, "Laboratory") == "lab_id"
+
+
+def test_candidate_id_property_falls_back_to_entity_id() -> None:
+    from engine.handlers import _candidate_id_property
+
+    spec = _spec_with_sync("Thing", None, [])
+    assert _candidate_id_property(spec, "Thing") == "entity_id"
+
+
+def test_candidate_id_property_legacy_behind_flag(monkeypatch) -> None:
+    from engine.config.settings import settings
+    from engine.handlers import _candidate_id_property
+
+    monkeypatch.setattr(settings, "spec_declared_candidate_id", False)
+    spec = _spec_with_sync("Depot", "depot_code", ["depot_code"])
+    assert _candidate_id_property(spec, "Depot") == "entity_id"
+
+
+def test_candidate_id_reads_declared_then_entity_id_then_fallback() -> None:
+    from engine.handlers import _candidate_id
+
+    assert _candidate_id({"depot_code": "D-1"}, "depot_code", 7) == "D-1"
+    assert _candidate_id({"entity_id": "e-9"}, "depot_code", 7) == "e-9"  # legacy nodes still resolve
+    assert _candidate_id({}, "depot_code", 7) == "7"
+    assert _candidate_id("not-a-node", "depot_code", 3) == "3"
+
 
 def _make_domain_spec() -> MagicMock:
     spec = MagicMock()
