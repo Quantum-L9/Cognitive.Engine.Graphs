@@ -581,7 +581,14 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     )
 
     try:
-        parameters = {**resolved_query, "top_n": top_n, **scoring_assembler.last_query_params}
+        # CEG-009b: gate literals (`queryparam: 85.0`, strictwhen constants) are
+        # bound by the compiler under generated names; merge them like scoring's.
+        parameters = {
+            **resolved_query,
+            "top_n": top_n,
+            **gate_compiler.last_query_params,
+            **scoring_assembler.last_query_params,
+        }
         results = await graph_driver.execute_query(
             cypher=cypher,
             parameters=parameters,

@@ -15,7 +15,7 @@ domain:
   description: >
     Match borrower profiles to optimal wholesale lender loan products with
     ECOA-compliant scoring and outcome feedback loops.
-  version: 1.0.0
+  version: 1.0.1
   alternatedomains: []
 
 ontology:
@@ -144,10 +144,16 @@ gates:
     operator: ">="
     nullbehavior: pass
   - name: loanamount_range
+    description: >
+      The borrower's requested loan amount falls inside the product's own
+      [minloanamountusd, maxloanamountusd] window. The bounds live on the
+      LoanProduct candidate and the amount on the query, so this is the
+      candidate-window form; the earlier query-window spelling named two
+      query parameters no queryschema field supplies (CEG-009d).
     type: range
-    candidateprop: loanamountusd
-    queryparam_min: minloanamountusd
-    queryparam_max: maxloanamountusd
+    candidateprop_min: minloanamountusd
+    candidateprop_max: maxloanamountusd
+    queryparam: loanamountusd
     nullbehavior: pass
   - name: va_eligibility
     type: boolean
