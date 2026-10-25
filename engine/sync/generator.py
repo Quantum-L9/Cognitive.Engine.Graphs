@@ -414,6 +414,23 @@ def relationship_merge_query(declaration: RelationshipDeclaration) -> str:
     )
 
 
+def relationship_uniqueness_constraint_query(declaration: RelationshipDeclaration) -> str:
+    """Schema statement enforcing one edge per ``(_tenant, evidence_ref)`` for the declared type.
+
+    A transaction alone cannot stop two concurrent writers recording one
+    ``evidence_ref`` on different endpoint pairs: each MERGE matches only its own
+    pair. The relationship property uniqueness constraint makes the database
+    refuse the second commit. Idempotent (``IF NOT EXISTS``); it is a schema
+    statement and must run in its own transaction, never inside a data write.
+    """
+    edge_type = sanitize_label(declaration.edge_type)
+    # The name is built only from the sanitised type, so it is a plain identifier.
+    return (
+        f"CREATE CONSTRAINT ceg_relationship_evidence_{edge_type} IF NOT EXISTS "
+        f"FOR ()-[r:{edge_type}]-() REQUIRE (r._tenant, r.evidence_ref) IS UNIQUE"
+    )
+
+
 def stored_evidence(stored: dict[str, Any]) -> dict[str, Any]:
     """The row-supplied part of a stored evidence edge's properties."""
     return {key: value for key, value in stored.items() if key not in RELATIONSHIP_INTERNAL_PROPERTIES}

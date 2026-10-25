@@ -19,8 +19,10 @@ The scored entity is the relationship's source node, identified by its declared
 stable id (``_subject_ref``).
 
 Reads go through ``GraphDriver.execute_read``: a managed READ transaction that
-never provisions a database. A missing database or an unconnected driver raises
-``EvidenceUnavailableError`` so the local handler answers ``blocked``.
+never provisions a database. A missing database, an unconnected driver or a
+graph outage (connection loss, session expiry, timeout, open circuit) raises
+``EvidenceUnavailableError`` so the local handler answers ``blocked``; a wrong
+query or a programming error is not an outage and propagates.
 
 CEG admission of a raw assertion: only ``assertion_status == "observed"`` is
 ``admitted``; ``reported`` and ``inferred`` stay ``inferred_unverified`` and never
@@ -35,8 +37,10 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal
 
+from neo4j.exceptions import ClientError, ServiceUnavailable, SessionExpired, TransientError
 from pydantic import ValidationError as PydanticValidationError
 
+from engine.graph.circuit_breaker import CircuitOpenError
 from engine.graph.driver import DatabaseNotProvisionedError, GraphDriver
 from engine.scoring.evidence_priority import (
     MAX_COHORT_SIZE,
@@ -59,6 +63,30 @@ RETURN r._subject_ref AS entity_ref, type(r) AS relationship_type, properties(r)
 ORDER BY entity_ref, props.evidence_ref
 LIMIT $limit
 """
+
+
+# Two timeouts arrive as ``ClientError``: the server's transaction timeout (by
+# code) and the driver's connection-pool acquisition timeout (by message; the
+# 5.x driver raises it without a code).
+_TRANSACTION_TIMEOUT_CODE_PREFIX = "Neo.ClientError.Transaction.TransactionTimedOut"
+_POOL_ACQUISITION_TIMEOUT_PREFIX = "failed to obtain a connection from the pool"
+
+
+def _is_graph_outage(exc: Exception) -> bool:
+    """Whether ``exc`` means the graph could not answer, as opposed to a wrong question.
+
+    Connection loss, session expiry, transient server errors (which include an
+    unavailable database), timeouts and an open circuit are outages: the score
+    is ``blocked``. Malformed Cypher, type errors, authorization failures and
+    programming errors are not, and propagate so they stay visible.
+    """
+    if isinstance(exc, CircuitOpenError | ServiceUnavailable | SessionExpired | TransientError | TimeoutError):
+        return True
+    if not isinstance(exc, ClientError):
+        return False
+    return (exc.code or "").startswith(_TRANSACTION_TIMEOUT_CODE_PREFIX) or str(exc).startswith(
+        _POOL_ACQUISITION_TIMEOUT_PREFIX
+    )
 
 
 def _admission(status: Any) -> Literal["admitted", "inferred_unverified"]:
@@ -131,6 +159,11 @@ class GraphEvidenceBinding:
             rows = await self._driver.execute_read(_READ_EVIDENCE, params, database=database)
         except DatabaseNotProvisionedError as exc:
             msg = f"tenant database {database!r} does not exist; a score read never creates it"
+            raise EvidenceUnavailableError(msg) from exc
+        except Exception as exc:
+            if not _is_graph_outage(exc):
+                raise
+            msg = f"graph evidence for tenant database {database!r} is unavailable ({type(exc).__name__})"
             raise EvidenceUnavailableError(msg) from exc
         if len(rows) > MAX_EVIDENCE_EDGES:
             msg = f"more than {MAX_EVIDENCE_EDGES} evidence edges for this cohort; refusing a truncated read"
