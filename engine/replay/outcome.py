@@ -9,7 +9,16 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
-Offline outcome replay compatible with Odoo TASK-057 input schema.
+Offline, deterministic outcome replay over recorded transport events.
+
+The replay core is generic: it accepts a document of recorded events
+(``tenant``, ``action``, ``packet_id`` plus optional provenance fields),
+normalizes them and derives deterministic outcome hashes without network or
+Gate mutation. Which producers may feed it is a registry of accepted input
+schema ids. The Odoo exporter's ``l9.odoo.outcome_replay_input.v1``
+(IB-Odoo_19 ADR-126, ``scripts/outcome_replay/schema.py``) is the one
+registered producer today; it is an adapter entry, not the engine's identity
+(Stage 2, R10).
 """
 
 from __future__ import annotations
@@ -19,6 +28,9 @@ import json
 from typing import Any
 
 ODOO_INPUT_SCHEMA = "l9.odoo.outcome_replay_input.v1"
+# Input schema ids this replay accepts. Each is a producer-owned contract
+# verified against the producer repository before registration.
+ACCEPTED_INPUT_SCHEMAS: frozenset[str] = frozenset({ODOO_INPUT_SCHEMA})
 REPLAY_OUTCOME_SCHEMA = "l9.ceg.outcome_replay.v1"
 REQUIRED_EVENT_FIELDS = ("tenant", "action", "packet_id")
 
@@ -35,12 +47,13 @@ def _digest(value: Any) -> str:
     return "sha256:" + hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
 
 
-def load_odoo_replay_input(document: dict[str, Any]) -> dict[str, Any]:
-    """Validate Odoo replay input; never mutates Gate or opens network."""
+def load_replay_input(document: dict[str, Any]) -> dict[str, Any]:
+    """Validate a recorded-event replay document; never mutates Gate or opens network."""
     if not isinstance(document, dict):
         raise ReplayError("replay input must be an object")
-    if document.get("schema") != ODOO_INPUT_SCHEMA:
-        raise ReplayError(f"unsupported schema: {document.get('schema')!r}")
+    schema_id = document.get("schema")
+    if schema_id not in ACCEPTED_INPUT_SCHEMAS:
+        raise ReplayError(f"unsupported schema: {schema_id!r} (accepted: {sorted(ACCEPTED_INPUT_SCHEMAS)})")
     if document.get("gate_mutation") is True:
         raise ReplayError("gate_mutation=true is forbidden in replay mode")
     events = document.get("events")
@@ -66,7 +79,7 @@ def load_odoo_replay_input(document: dict[str, Any]) -> dict[str, Any]:
         normalized.append(event)
     normalized.sort(key=lambda e: (e["packet_id"], e["action"], e["tenant"]))
     return {
-        "schema": ODOO_INPUT_SCHEMA,
+        "schema": schema_id,
         "schema_version": str(document.get("schema_version") or ""),
         "producer": document.get("producer"),
         "producer_task": document.get("producer_task"),
@@ -79,7 +92,7 @@ def load_odoo_replay_input(document: dict[str, Any]) -> dict[str, Any]:
 
 def replay_outcomes(document: dict[str, Any]) -> dict[str, Any]:
     """Derive deterministic outcome hashes from recorded events (no I/O)."""
-    loaded = load_odoo_replay_input(document)
+    loaded = load_replay_input(document)
     outcomes: list[dict[str, Any]] = []
     for event in loaded["events"]:
         body = {
@@ -103,7 +116,7 @@ def replay_outcomes(document: dict[str, Any]) -> dict[str, Any]:
         "event_count": len(outcomes),
         "gate_calls": 0,
         "input_content_hash": loaded.get("content_hash"),
-        "input_schema": ODOO_INPUT_SCHEMA,
+        "input_schema": loaded["schema"],
         "network": False,
         "outcomes": outcomes,
         "replay_mode": True,

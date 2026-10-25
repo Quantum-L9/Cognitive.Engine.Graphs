@@ -28,6 +28,68 @@ from engine.handlers import (
     init_dependencies,
 )
 
+# ── Stage 2 P4: candidate identity comes from the domain, not a hardcoded entity_id ──
+
+
+def _spec_with_sync(label: str, idproperty: str | None, required_props: list[str]) -> MagicMock:
+    spec = MagicMock()
+    node = MagicMock()
+    node.label = label
+    node.properties = []
+    for name in required_props:
+        prop = MagicMock()
+        prop.name = name
+        prop.required = True
+        node.properties.append(prop)
+    spec.ontology.nodes = [node]
+    if idproperty is None:
+        spec.sync = None
+    else:
+        endpoint = MagicMock()
+        endpoint.targetnode = label
+        endpoint.idproperty = idproperty
+        spec.sync.endpoints = [endpoint]
+    return spec
+
+
+def test_candidate_id_property_prefers_sync_idproperty() -> None:
+    from engine.handlers import _candidate_id_property
+
+    spec = _spec_with_sync("Depot", "depot_code", ["depot_code", "depot_name"])
+    assert _candidate_id_property(spec, "Depot") == "depot_code"
+
+
+def test_candidate_id_property_falls_back_to_first_required_property() -> None:
+    from engine.handlers import _candidate_id_property
+
+    spec = _spec_with_sync("Laboratory", None, ["lab_id", "lab_name"])
+    assert _candidate_id_property(spec, "Laboratory") == "lab_id"
+
+
+def test_candidate_id_property_falls_back_to_entity_id() -> None:
+    from engine.handlers import _candidate_id_property
+
+    spec = _spec_with_sync("Thing", None, [])
+    assert _candidate_id_property(spec, "Thing") == "entity_id"
+
+
+def test_candidate_id_property_legacy_behind_flag(monkeypatch) -> None:
+    from engine.config.settings import settings
+    from engine.handlers import _candidate_id_property
+
+    monkeypatch.setattr(settings, "spec_declared_candidate_id", False)
+    spec = _spec_with_sync("Depot", "depot_code", ["depot_code"])
+    assert _candidate_id_property(spec, "Depot") == "entity_id"
+
+
+def test_candidate_id_reads_declared_then_entity_id_then_fallback() -> None:
+    from engine.handlers import _candidate_id
+
+    assert _candidate_id({"depot_code": "D-1"}, "depot_code", 7) == "D-1"
+    assert _candidate_id({"entity_id": "e-9"}, "depot_code", 7) == "e-9"  # legacy nodes still resolve
+    assert _candidate_id({}, "depot_code", 7) == "7"
+    assert _candidate_id("not-a-node", "depot_code", 3) == "3"
+
 
 def _make_domain_spec() -> MagicMock:
     spec = MagicMock()
@@ -298,3 +360,81 @@ async def test_health_neo4j_connection_failed() -> None:
 
     assert result["status"] == "degraded"
     assert result["checks"]["neo4j"] == "error: connection_failed"
+
+
+def _loaded_spec_for_results() -> MagicMock:
+    """The autouse spec, with the MagicMock-only branches handle_match would trip on pinned off."""
+    from engine.state import get_state
+
+    spec = get_state().domain_loader.load_domain.return_value
+    spec.decision_arbitration.enabled = False
+    spec.causal.enabled = False
+    return spec
+
+
+@pytest.mark.asyncio
+async def test_match_null_scores_are_coerced_before_normalization(monkeypatch) -> None:
+    """A null `score` (clamp off, unscored property) is stored as 0.0, so normalization
+    neither subtracts from None nor promotes a lone null to 1.0."""
+    from engine.config.settings import settings
+    from engine.state import get_state
+
+    _loaded_spec_for_results()
+    monkeypatch.setattr(settings, "score_normalize", True)
+    get_state().graph_driver.execute_query = AsyncMock(
+        return_value=[
+            {"candidate": {"facility_id": "F-1"}, "score": None, "structural": 0.2},
+            {"candidate": {"facility_id": "F-2"}, "score": 0.4, "structural": 0.8},
+        ]
+    )
+
+    result = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
+
+    scores = [c["score"] for c in result["candidates"]]
+    assert scores == [0.0, 1.0]
+    assert result["scoring_meta"]["raw_min"] == 0.0
+    assert result["scoring_meta"]["raw_max"] == 0.4
+    assert result["scoring_meta"]["normalization_applied"] is True
+
+
+@pytest.mark.asyncio
+async def test_match_lone_null_score_normalizes_to_zero(monkeypatch) -> None:
+    from engine.config.settings import settings
+    from engine.state import get_state
+
+    _loaded_spec_for_results()
+    monkeypatch.setattr(settings, "score_normalize", True)
+    get_state().graph_driver.execute_query = AsyncMock(
+        return_value=[{"candidate": {"facility_id": "F-1"}, "score": None, "structural": 0.2}]
+    )
+
+    result = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
+
+    # Range is zero, so the singleton branch runs — on a real 0.0, not on None.
+    assert result["candidates"][0]["score"] == 1.0
+    assert result["scoring_meta"]["raw_max"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_match_arbitration_front_uses_declared_candidate_id() -> None:
+    """`pareto.arbitration.nondominated_ids` carries the same declared ids as `pareto.non_dominated_ids`."""
+    from engine.state import get_state
+
+    spec = _loaded_spec_for_results()
+    spec.decision_arbitration.enabled = True
+    spec.decision_arbitration.constraints = []
+    objective = MagicMock()
+    objective.dimension = "structural"
+    spec.decision_arbitration.pareto_config.objectives = [objective]
+    get_state().graph_driver.execute_query = AsyncMock(
+        return_value=[
+            {"candidate": {"facility_id": "F-1"}, "score": 0.9, "structural": 0.9},
+            {"candidate": {"facility_id": "F-2"}, "score": 0.5, "structural": 0.5},
+        ]
+    )
+
+    result = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
+
+    pareto = result["pareto"]
+    assert pareto["arbitration"]["nondominated_ids"] == ["F-1"]
+    assert pareto["non_dominated_ids"] == ["F-1"]

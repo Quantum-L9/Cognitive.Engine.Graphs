@@ -1,12 +1,12 @@
 {
   "contract_version": "1.0.0-draft",
   "domain": "plasticos",
-  "entity_ref": "plasticos.material.specification:9",
-  "entity_type": "material_specification",
+  "entity_ref": "plasticos.supply.opportunity:42",
+  "entity_type": "SupplyOpportunity",
   "revision": 3,
   "source_record": {
     "system": "odoo",
-    "record_ref": "plasticos.material.specification:9",
+    "record_ref": "plasticos.supply.opportunity:42",
     "revision": 3
   },
   "projection_version": "1.0.0",

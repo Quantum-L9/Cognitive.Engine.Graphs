@@ -34,7 +34,10 @@ Before building any of these, check if it already exists. Use the existing imple
 | Database-name validation for DDL | engine/utils/security.py | `sanitize_database_name()` — `sanitize_label()` forbids the dashes domain ids use |
 | Gate run-time values as `$params` | engine/gates/types/all_gates.py | `BaseGate._bind_param()` / `BaseGate.query_params` |
 | Cypher injection scanner (C-009) | tools/cypher_lint.py | `scan_tree()` — AST f-string role classifier |
-| Inference rule execution | engine/inference_rule_registry.py | `execute_rule()`, `list_registered_rules()` |
+| Inference rule execution | engine/inference_rule_registry.py | `execute_rule()`, `list_registered_rules()`, `authorized_rules()` (domain's `plugins.inference_rules`) |
+| Domain pack admission (generic, fail-closed) | engine/config/loader.py | `withholding_reason()`, `admission_defects()` — no per-domain flags |
+| Payload admission against the domain contract | engine/models/payloads.py | `DomainContract.from_spec()`, `admit_payload()` — domain, direction, entity type, outcome type, source system |
+| Semantic registry from the domain spec | engine/config/semantic_registry.py | `SemanticRegistry.from_spec()` |
 
 Do not add a second outbound client. `engine/gate_egress.py` is the only
 CEG → peer egress; Gate resolves the destination from the action.

@@ -28,6 +28,43 @@ from engine.config.loader import (
     DomainSpecError,
 )
 
+
+def _minimal_spec_yaml(domain_id: str) -> str:
+    """Smallest spec the loader admits: validates and declares no gates."""
+    return f"""
+domain:
+  id: {domain_id}
+  name: {domain_id}
+  version: 0.0.1
+ontology:
+  nodes:
+    - label: Thing
+      managedby: sync
+      candidate: true
+      matchdirection: d1
+      properties:
+        - {{name: thing_id, type: string, required: true}}
+    - label: Ask
+      managedby: api
+      queryentity: true
+      matchdirection: d1
+      properties:
+        - {{name: ask_id, type: string, required: true}}
+  edges: []
+matchentities:
+  candidate: [{{label: Thing, matchdirection: d1}}]
+  queryentity: [{{label: Ask, matchdirection: d1}}]
+queryschema:
+  matchdirections: [d1]
+  fields: []
+traversal:
+  steps: []
+gates: []
+scoring:
+  dimensions: []
+"""
+
+
 # ============================================================================
 # TEST CLASSES
 # ============================================================================
@@ -85,7 +122,8 @@ class TestResolveSpecPath:
 
     def test_blocks_symlinks(self, tmp_path: Path) -> None:
         """Symlinked spec.yaml raises DomainNotFoundError."""
-        domain_dir = tmp_path / "evil_domain"
+        # A legal tenant id, so the symlink check (not the grammar) refuses it.
+        domain_dir = tmp_path / "evil-domain"
         domain_dir.mkdir()
         target = tmp_path / "real_spec.yaml"
         target.write_text("domain: {id: evil}")
@@ -93,7 +131,33 @@ class TestResolveSpecPath:
         symlink.symlink_to(target)
         loader = DomainPackLoader(config_path=str(tmp_path))
         with pytest.raises(DomainNotFoundError, match="symlink"):
-            loader._resolve_spec_path("evil_domain")
+            loader._resolve_spec_path("evil-domain")
+
+    @pytest.mark.parametrize(
+        ("domain_id", "why"),
+        [
+            ("Acme", "uppercase"),
+            ("acme_tenant", "underscore"),
+            ("systemdb", "reserved prefix"),
+            ("ab", "too short"),
+            ("1acme", "leading digit"),
+        ],
+    )
+    def test_blocks_ids_outside_the_tenant_grammar_before_touching_disk(
+        self, tmp_path: Path, domain_id: str, why: str
+    ) -> None:
+        """tenant id == domain.id == directory == database (CEG-IDENT-01).
+
+        A directory with that name and a spec inside exists, and is still never
+        opened: the grammar is checked before path resolution.
+        """
+        domain_dir = tmp_path / domain_id
+        domain_dir.mkdir()
+        (domain_dir / "spec.yaml").write_text(f"domain: {{id: {domain_id}}}")
+        loader = DomainPackLoader(config_path=str(tmp_path))
+        with pytest.raises(DomainNotFoundError, match="not a legal tenant id|reserved prefix") as excinfo:
+            loader._resolve_spec_path(domain_id)
+        assert "spec.yaml" not in str(excinfo.value), why
 
     def test_missing_spec_file_raises(self, tmp_path: Path) -> None:
         """Non-existent spec.yaml raises DomainNotFoundError."""
@@ -202,17 +266,37 @@ class TestListDomains:
     """Test list_domains discovery."""
 
     def test_discovers_domain_dirs(self, tmp_path: Path) -> None:
-        """list_domains finds directories with spec.yaml."""
+        """list_domains finds directories holding an admissible spec.yaml."""
         for name in ["alpha", "beta"]:
             d = tmp_path / name
             d.mkdir()
-            (d / "spec.yaml").write_text("placeholder")
+            (d / "spec.yaml").write_text(_minimal_spec_yaml(name))
         (tmp_path / "no_spec_dir").mkdir()
         loader = DomainPackLoader(config_path=str(tmp_path))
         domains = loader.list_domains()
         assert "alpha" in domains
         assert "beta" in domains
         assert "no_spec_dir" not in domains
+
+    def test_unadmitted_packs_are_not_listed(self, tmp_path: Path) -> None:
+        """A pack that fails validation, or declares itself dormant, is never listed as servable."""
+        good = tmp_path / "good"
+        good.mkdir()
+        (good / "spec.yaml").write_text(_minimal_spec_yaml("good"))
+        broken = tmp_path / "broken"
+        broken.mkdir()
+        (broken / "spec.yaml").write_text("placeholder")
+        dormant = tmp_path / "dormant"
+        dormant.mkdir()
+        (dormant / "spec.yaml").write_text(
+            _minimal_spec_yaml("dormant").replace("version: 0.0.1", "version: 0.0.1\n  activation: dormant")
+        )
+        loader = DomainPackLoader(config_path=str(tmp_path))
+        assert loader.list_domains() == ["good"]
+        with pytest.raises(DomainSpecError):
+            loader.load_domain("broken")
+        with pytest.raises(DomainNotFoundError, match="dormant"):
+            loader.load_domain("dormant")
 
     def test_returns_empty_for_nonexistent_path(self) -> None:
         """list_domains returns [] for non-existent base path."""

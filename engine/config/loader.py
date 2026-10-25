@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -25,55 +26,118 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError as PydanticValidationError
 
-from engine.config.schema import DomainSpec
+from engine.config.schema import DomainActivation, DomainSpec
 from engine.config.settings import settings
+from engine.utils.security import tenant_id_defect
 
 logger = logging.getLogger(__name__)
 
 MAX_SPEC_BYTES = 5 * 1024 * 1024
 SPEC_FILENAME = "spec.yaml"
-_DOMAIN_FEATURE_FLAGS = {
-    "idea-portfolio": "idea_portfolio_enabled",
-    # CEG-009 moved nine packs into the shape this loader reads. Five of them
-    # carry gates that compile to Cypher that cannot execute, which was
-    # invisible while the loader never opened them:
-    #
-    #   * `type: traversal` gates written with `pattern` + `condition`, which
-    #     GateCompiler does not consume. With no `edgetype` they fall back to
-    #     `RELATES_TO`, an edge no ontology here declares, so the gate rejects
-    #     every candidate.
-    #   * a scalar `queryparam` (85.0, 5, 1) — GateSpec coerces it to a string
-    #     and the compiler refuses it as a parameter NAME (C-009).
-    #   * `strictwhen` conditions — declared by the schema, consumed by no
-    #     compiler, so a gate meant to be conditional runs as an unconditional
-    #     hard filter and rejects candidates the pack author meant to keep.
-    #
-    # Making a pack readable is not the same as making it correct. Reaching
-    # these needs either compiler support for pattern/condition, literal
-    # operands and strictwhen, or a query-schema parameter per constant — a
-    # schema decision, not a file move. Dormant until then, guarded by
-    # tests/unit/test_domain_pack_shape.py so the set cannot grow silently.
-    "executive-assistant": "unvalidated_domain_packs_enabled",
-    "aios-god-agent": "unvalidated_domain_packs_enabled",
-    "repo-as-agent": "unvalidated_domain_packs_enabled",
-    "roofing-company": "unvalidated_domain_packs_enabled",
-    "healthcare-referral": "unvalidated_domain_packs_enabled",
-    "legal-discovery": "unvalidated_domain_packs_enabled",
-    "research-agent": "unvalidated_domain_packs_enabled",
-}
+
+# Cypher parameter names the compiler may emit. Anything else (`$85.0`, `$5`)
+# is a scalar `queryparam` that GateSpec coerced to a string and the compiler
+# would hand to Neo4j as a parameter *name*.
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# A `$` reference in compiled Cypher, captured up to the next whitespace or
+# closing punctuation. The capture must stop at `}` / `]` / `,` / `;` as well as
+# `)`: the traversal-gate target filter form `{prop: $param}` would otherwise
+# yield `param}` and withhold a valid pack for a misreported reason (PR #318
+# review, verified on Neo4j 5 in the Stage 4 proof).
+_PARAM_REF = re.compile(r"\$([^\s)}\],;]+)")
 
 
 class DomainNotFoundError(Exception):
-    """Raised when a requested domain spec does not exist or is disabled."""
+    """Raised when a requested domain spec does not exist or is withheld."""
 
 
 class DomainSpecError(Exception):
     """Raised when a domain spec fails validation."""
 
 
-def _domain_enabled(domain_id: str) -> bool:
-    flag = _DOMAIN_FEATURE_FLAGS.get(domain_id)
-    return flag is None or bool(getattr(settings, flag, False))
+def admission_defects(spec: DomainSpec) -> list[str]:
+    """Gate compilations that would fail or silently reject every candidate.
+
+    This is the generic, domain-neutral admission check that replaced the
+    former per-domain feature-flag allowlist (CEG domain-neutrality Stage 2,
+    R07). The loader admits a pack only when it validates against ``DomainSpec``
+    *and* every gate compiles to Cypher that can execute. Three defect shapes,
+    all found when CEG-009 first made the migrated packs readable:
+
+    * ``RELATES_TO`` — the compiler's fallback when a ``type: traversal`` gate
+      declares no ``edgetype``. Packs written with ``pattern``/``condition`` hit
+      it, and no ontology declares ``RELATES_TO``, so the gate is a hard filter
+      that matches nothing.
+    * ``strictwhen`` — declared by ``GateSpec`` and consumed by no compiler, so
+      a gate meant to be conditional runs as an unconditional hard filter.
+    * ``$<non-identifier>`` — a scalar ``queryparam``; since C-009 validates
+      parameter names like labels the compiler refuses the gate outright, and
+      that refusal is the same defect reported at compile time.
+
+    Making a pack readable is not the same as making it correct. Reaching these
+    packs needs either compiler support for pattern/condition, literal operands
+    and strictwhen, or a query-schema parameter per constant — a schema
+    decision, not a file move. Until then they are withheld, and
+    ``settings.unvalidated_domain_packs_enabled`` is the operator's explicit,
+    documented override (docs/FEATURE_GATES.md §16).
+    """
+    from engine.gates.compiler import GateCompiler
+
+    compiler = GateCompiler(spec)
+    defects: list[str] = []
+    for gate in spec.gates:
+        if gate.strictwhen:
+            defects.append(f"{gate.name}: strictwhen {gate.strictwhen!r} is not consumed by any compiler")
+        try:
+            cypher = compiler.compile(gate)
+        except (ValueError, KeyError) as exc:
+            defects.append(f"{gate.name}: refused by the compiler — {exc}")
+            continue
+        if "RELATES_TO" in cypher and not gate.edgetype:
+            defects.append(f"{gate.name}: RELATES_TO fallback — {cypher}")
+        for param in _PARAM_REF.findall(cypher):
+            if not _IDENTIFIER.fullmatch(param):
+                defects.append(f"{gate.name}: parameter {param!r} is not an identifier — {cypher}")
+    # plugins.inference_rules authorizes registered rules by name; a name the
+    # registry does not know would surface only when emit_inference_feedback
+    # runs it (KeyError), so it is an admission defect, not a runtime surprise.
+    if spec.plugins and spec.plugins.inference_rules:
+        from engine.inference_rule_registry import list_registered_rules
+
+        registered = set(list_registered_rules())
+        for rule_name in spec.plugins.inference_rules:
+            if rule_name not in registered:
+                defects.append(f"plugins.inference_rules: {rule_name!r} is not a registered inference rule")
+    return defects
+
+
+def withholding_reason(spec: DomainSpec) -> str | None:
+    """Why a validated pack is not served, or ``None`` when it is admitted.
+
+    Two generic, fail-closed conditions, each with one explicit operator
+    override in ``engine/config/settings.py`` and no knowledge of any
+    particular domain:
+
+    1. The pack declares itself dormant (``domain.activation: dormant``). The
+       authorized domain owner decides when a pack is ready to serve traffic;
+       ``dormant_domain_packs_enabled`` lets an operator serve it anyway.
+    2. The pack's gates do not compile to executable Cypher
+       (``admission_defects``); ``unvalidated_domain_packs_enabled`` serves it
+       anyway, knowing the gates will not execute faithfully.
+    """
+    if spec.domain.activation is DomainActivation.DORMANT and not settings.dormant_domain_packs_enabled:
+        return (
+            f"Domain '{spec.domain.id}' is declared dormant by its pack (domain.activation: dormant); "
+            "set DORMANT_DOMAIN_PACKS_ENABLED=true to serve it"
+        )
+    if not settings.unvalidated_domain_packs_enabled:
+        defects = admission_defects(spec)
+        if defects:
+            return (
+                f"Domain '{spec.domain.id}' is withheld: {len(defects)} gate(s) do not compile to executable "
+                f"Cypher ({defects[0]}); set UNVALIDATED_DOMAIN_PACKS_ENABLED=true to serve it anyway"
+            )
+    return None
 
 
 class DomainPackLoader:
@@ -88,9 +152,12 @@ class DomainPackLoader:
         self._ttl_seconds = float(os.getenv("DOMAIN_CACHE_TTL_SECONDS", "30"))
 
     def load_domain(self, domain_id: str) -> DomainSpec:
-        """Load a domain only when its optional feature gate admits it."""
-        if not _domain_enabled(domain_id):
-            raise DomainNotFoundError(f"Domain '{domain_id}' is disabled by configuration")
+        """Load a domain only when the generic admission policy admits it.
+
+        Admission is decided by ``withholding_reason`` inside
+        ``_load_and_validate``, so a withheld pack is never cached as servable
+        and the same verdict applies to ``list_domains``.
+        """
         spec_path = self._resolve_spec_path(domain_id)
 
         with self._lock:
@@ -125,8 +192,6 @@ class DomainPackLoader:
 
     async def load_domain_async(self, domain_id: str) -> DomainSpec:
         """Async domain loading with per-domain stampede prevention."""
-        if not _domain_enabled(domain_id):
-            raise DomainNotFoundError(f"Domain '{domain_id}' is disabled by configuration")
         with self._lock:
             if domain_id in self._cache:
                 cached_spec, _cached_mtime, cached_at = self._cache[domain_id]
@@ -147,23 +212,44 @@ class DomainPackLoader:
             return await asyncio.to_thread(self.load_domain, domain_id)
 
     def list_domains(self) -> list[str]:
-        """Discover enabled domain directories containing spec.yaml."""
+        """Discover admitted domain directories containing spec.yaml.
+
+        A directory is listed only when its pack loads under the same
+        fail-closed admission policy ``load_domain`` applies, so nothing this
+        method names can later be refused as unadmitted. Packs that fail
+        validation or are withheld are logged and omitted — never served.
+        """
         if not self._base_path.is_dir():
             return []
-        return [
-            d.name
-            for d in sorted(self._base_path.iterdir())
-            if d.is_dir() and (d / SPEC_FILENAME).exists() and _domain_enabled(d.name)
-        ]
+        admitted: list[str] = []
+        for d in sorted(self._base_path.iterdir()):
+            if not (d.is_dir() and (d / SPEC_FILENAME).exists()):
+                continue
+            try:
+                self.load_domain(d.name)
+            except (DomainNotFoundError, DomainSpecError) as exc:
+                logger.info("Domain pack %s not admitted: %s", d.name, exc)
+                continue
+            admitted.append(d.name)
+        return admitted
 
     def _resolve_spec_path(self, domain_id: str) -> Path:
-        """Resolve and validate spec file path, preventing traversal and symlinks."""
+        """Resolve and validate spec file path, preventing traversal and symlinks.
+
+        The id is checked against the tenant-id grammar before any path is built
+        (CEG-IDENT-01 / CEG-DBNAME-01): tenant id == domain.id == directory ==
+        Neo4j database name, so an id the database could not be named by is
+        refused here, fail closed, and never reaches the filesystem.
+        """
         if not domain_id or not domain_id.strip():
             raise DomainNotFoundError("Domain ID cannot be empty")
         if "\x00" in domain_id:
             raise DomainNotFoundError(f"Invalid domain ID: {domain_id!r} contains null byte")
         if Path(domain_id).is_absolute():
             raise DomainNotFoundError(f"Invalid domain ID: {domain_id!r} must be a relative path")
+        defect = tenant_id_defect(domain_id)
+        if defect is not None:
+            raise DomainNotFoundError(f"Invalid domain ID: {defect}")
 
         candidate = (self._base_path / domain_id / SPEC_FILENAME).resolve()
         raw_path = self._base_path / domain_id / SPEC_FILENAME
@@ -191,6 +277,14 @@ class DomainPackLoader:
         if not isinstance(raw, dict):
             raise DomainSpecError(f"Domain spec must be a YAML mapping, got {type(raw).__name__}")
         try:
-            return DomainSpec.model_validate(raw)
+            spec = DomainSpec.model_validate(raw)
         except PydanticValidationError as exc:
             raise DomainSpecError(f"Domain '{domain_id}' validation failed:\n{exc}") from exc
+        if spec.domain.id != domain_id:
+            raise DomainSpecError(
+                f"Domain '{domain_id}' declares domain.id {spec.domain.id!r}; the directory name is the lookup key"
+            )
+        reason = withholding_reason(spec)
+        if reason is not None:
+            raise DomainNotFoundError(reason)
+        return spec

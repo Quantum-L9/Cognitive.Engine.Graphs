@@ -24,6 +24,7 @@ Compilation rules (adapted from L9 Spec Compiler):
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping, Sequence
 
 import structlog
 import yaml
@@ -45,36 +46,26 @@ from engine.intake.vertical_discovery import discover_vertical_fields
 
 logger: structlog.stdlib.BoundLogger = structlog.get_logger(__name__)
 
-# ── Derivation graph ───────────────────────────────────────
+# ── Derivation graph & ambiguity patterns ─────────────────────────────────
+#
+# Domain neutrality (Stage 2, R06): the engine carries no built-in derivation
+# recipes ("contamination_tolerance derives from process_type + facility_role")
+# and no industry field-name disambiguation table. Both are vertical knowledge
+# the caller supplies explicitly — the sales demonstration passes its example
+# data; a generic caller passes nothing and gets no derivation or ambiguity
+# flags. Real derivation is EIE's.
 
-# Known inference chains: target field → list of source fields it can be
-# derived from. This is a static registry; real derivation uses EIE.
-_DERIVATION_GRAPH: dict[str, list[str]] = {
-    "credit_score": ["annual_revenue", "years_in_business"],
-    "contamination_tolerance": ["process_type", "facility_role"],
-    "food_grade_certified": ["certifications", "process_type"],
-    "community_id": ["lat", "lon"],
-    "transaction_success_rate": ["transaction_count", "success_count"],
-    "recency_score": ["last_transaction_date"],
-}
-
-
-# ── Ambiguity detection ───────────────────────────────────
-
-_AMBIGUOUS_PATTERNS: dict[str, list[str]] = {
-    "name": ["facility_name", "contact_name", "material_name"],
-    "type": ["process_type", "material_type", "facility_type"],
-    "id": ["facility_id", "entity_id", "material_id"],
-    "status": ["facility_status", "order_status"],
-    "date": ["created_date", "last_transaction_date"],
-    "score": ["credit_score", "recency_score"],
-}
+DerivationGraph = Mapping[str, Sequence[str]]
+AmbiguityPatterns = Mapping[str, Sequence[str]]
 
 
-def _check_ambiguous(field_name: str) -> list[str] | None:
-    """Return possible resolutions if field name is ambiguous."""
+def _check_ambiguous(field_name: str, patterns: AmbiguityPatterns | None) -> list[str] | None:
+    """Return possible resolutions if the caller declared the field name ambiguous."""
+    if not patterns:
+        return None
     lower = field_name.lower().strip()
-    return _AMBIGUOUS_PATTERNS.get(lower)
+    resolutions = patterns.get(lower)
+    return list(resolutions) if resolutions else None
 
 
 # ── Gate/scoring auto-proposal ─────────────────────────────
@@ -106,6 +97,9 @@ def compile_intake(
     *,
     domains_dir: str = "domains",
     fuzzy_threshold: float = 0.6,
+    vertical_keywords: Mapping[str, str] | None = None,
+    derivation_graph: DerivationGraph | None = None,
+    ambiguity_patterns: AmbiguityPatterns | None = None,
 ) -> IntakeResult:
     """
     Compile CRM fields + business profile into domain_spec.yaml.
@@ -127,6 +121,15 @@ def compile_intake(
         Path to domains directory for vertical lookups.
     fuzzy_threshold:
         Minimum score for fuzzy field matching.
+    vertical_keywords:
+        Caller-supplied ``keyword → domain id`` pairs for vertical detection.
+        The engine ships none; absent, no vertical is detected.
+    derivation_graph:
+        Caller-supplied ``target field → source fields`` chains that may be
+        proposed as ``l9_enrichable``. The engine ships none.
+    ambiguity_patterns:
+        Caller-supplied ``ambiguous CRM name → candidate canonical names``.
+        The engine ships none.
 
     Returns
     -------
@@ -142,8 +145,10 @@ def compile_intake(
 
     matched_names = {m.canonical_name for m in scan.matched}
 
-    # Phase 2: Vertical discovery (vertical_standard)
-    vertical = discover_vertical_fields(business_profile, spec=spec, domains_dir=domains_dir)
+    # Phase 2: Vertical discovery (vertical_standard) — keyword table is the caller's
+    vertical = discover_vertical_fields(
+        business_profile, spec=spec, domains_dir=domains_dir, vertical_keywords=vertical_keywords
+    )
     vertical_additions: list[FieldMapping] = []
     for field_name in vertical.vertical_fields:
         if field_name not in matched_names:
@@ -162,9 +167,9 @@ def compile_intake(
 
     all_mappings.extend(vertical_additions)
 
-    # Phase 3: Inference derivation (l9_enrichable)
+    # Phase 3: Inference derivation (l9_enrichable) — derivation graph is the caller's
     enrichable_additions: list[FieldMapping] = []
-    for target, sources in _DERIVATION_GRAPH.items():
+    for target, sources in (derivation_graph or {}).items():
         if target not in matched_names:
             # Check if all source fields are available
             if all(s in matched_names for s in sources):
@@ -175,7 +180,7 @@ def compile_intake(
                         canonical_name=target,
                         origin=FieldOrigin.L9_ENRICHABLE,
                         node_label=node_label,
-                        derived_from=sources,
+                        derived_from=list(sources),
                     )
                     enrichable_additions.append(mapping)
                     field_origins[target] = FieldOrigin.L9_ENRICHABLE
@@ -186,7 +191,7 @@ def compile_intake(
     # Check for ambiguous CRM fields
     ambiguous_flags: list[str] = []
     for crm_name in crm_fields if isinstance(crm_fields, list) else crm_fields.keys():
-        resolutions = _check_ambiguous(crm_name)
+        resolutions = _check_ambiguous(crm_name, ambiguity_patterns)
         if resolutions:
             ambiguous_flags.append(f"{crm_name} → {resolutions}")
             logger.warning(

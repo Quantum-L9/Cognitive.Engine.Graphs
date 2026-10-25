@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""CLI: deterministic CEG outcome replay from Odoo fixtures (TASK-033).
+"""CLI: deterministic CEG outcome replay from recorded-event fixtures (TASK-033).
+
+Accepts any input schema registered in engine.replay.outcome.ACCEPTED_INPUT_SCHEMAS
+(today the Odoo exporter's l9.odoo.outcome_replay_input.v1).
 
 No Gate / Neo4j / network calls.
 """
@@ -19,7 +22,7 @@ from engine.replay.outcome import ReplayError, replay_outcomes
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="CEG offline outcome replay")
-    parser.add_argument("--input", required=True, help="Odoo replay input JSON")
+    parser.add_argument("--input", required=True, help="Recorded-event replay input JSON (registered producer schema)")
     parser.add_argument("--output", required=True, help="Write replay outcome JSON")
     args = parser.parse_args(argv)
     try:

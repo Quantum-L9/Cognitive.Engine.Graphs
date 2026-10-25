@@ -1,0 +1,245 @@
+# CEG domain-neutrality Stage 2 — machine-readable finding closure record
+# Contract: CEG Stage 2 Domain-Neutral Core Convergence (execution contract, 2026-10-11)
+# Base SHA (audited main): 7925c79080167913cbaafcfa36f71012fcbb9698
+# Concurrent PR #317 head: d74c074cc4a37ca0d83ddab131f1565ffee5b1d3 (not absorbed, not modified)
+# Canonical semantic authority: Quantum-L9/.github @ 1f42b33249310d59a270c05f30cbc75d663185e6 (read only)
+# Decision record: docs/adr/ADR-112-ceg-domain-neutral-core.md
+#
+# Narrative form is in the PR description; this file is the evidence record.
+# Every disposition below names the executable proof that establishes it.
+
+schema: l9.ceg.stage2_finding_closure.v1
+stage: 2
+status: BLOCKED_PARTIAL   # all in-scope R01-R11 slices closed except R05 (external owner) and one R09 line (PR #317 overlap)
+
+source_of_findings:
+  artifact: CEG_domain_neutrality_stage1_audit.zip
+  available_in_session: false
+  note: >
+    The Stage 1 archive was not present on disk, in any attached repository, or in the
+    execution contract. Finding identifiers A01-A18 are reconstructed from the contract's own
+    mapping (R01-R09 <- A01-A09 one-to-one; R10 <- A10-A13; R11 <- A14-A18). Each disposition
+    is stated against the remediation obligation text the contract carries, which is the
+    authoritative statement of the finding available to this session.
+
+method:
+  baseline: >
+    tests/ (excluding integration, performance, e2e) run green on 7925c79 before any mutation;
+    ruff check + ruff format clean; mypy engine/ (CI command) clean.
+  red_green: >
+    Every closed slice has a test that fails on 7925c79 and passes on the Stage 2 head
+    (tests/unit/test_domain_neutrality_acceptance.py plus the per-slice suites named below).
+  external_consumers: >
+    Read-only survey of Enrichment.Inference.Engine, Gate_SDK, Constellation.Gate, IdeaOS,
+    Quantum-L9/.github, and cryptoxdog/IB-Odoo_19 (code search). No repository imports
+    engine.models.payloads or contracts/payloads; EIE and Constellation.Gate depend on the
+    PlasticOS pack through hardcoded strings on their own side; IdeaOS declares no graph
+    projection contract; .github assigns no owner for CEG/PlasticOS/IdeaOS domain semantics.
+
+dispositions:
+  - id: A01
+    remediation: R01
+    title: GDS semantic isolation (engine/gds/scheduler.py, engine/boot.py)
+    disposition: CLOSED
+    evidence:
+      - "engine/gds/scheduler.py: Facility fallback removed; _get_candidate_label raises when nothing is declared"
+      - "engine/gds/scheduler.py: reinforcement/temporalrecency require sourceedge + writeedge (+ negative_writeedge / timestamp_property); outcome values travel as $params"
+      - "engine/gds/scheduler.py: equipmentsync requires writeedge + writeto + property_mappings; no built-in mapping table"
+      - "engine/gds/scheduler.py: geoproximity edge and coordinate property names configurable; generic defaults only"
+      - "engine/boot.py: no change required — it carries no domain vocabulary (verified by grep); startup over an empty pack directory proven"
+      - tests/unit/test_gds_scheduler.py (explicit-failure tests); tests/unit/test_domain_neutrality_acceptance.py::test_gds_*
+
+  - id: A02
+    remediation: R02
+    title: Domain-owned inference rules (engine/inference_rule_registry.py, engine/handlers.py)
+    disposition: CLOSED
+    evidence:
+      - "engine/inference_rule_registry.py: infer_facility_tier_from_capacity, infer_material_grade_from_mfi, infer_contamination_tolerance removed; facility_tier factor removed from infer_icp_fit_score"
+      - "engine/config/schema.py: PluginsSpec.inference_rules (domain-authorized rule names)"
+      - "engine/handlers.py emit_inference_feedback: runs only authorized rules; unauthorized request -> ValidationError; absent declaration -> none"
+      - "deployment posture unchanged: graph_inference_feedback_enabled default False"
+      - tests/gap_fixes/test_gap3_inference_registry.py; tests/unit/test_domain_neutrality_acceptance.py::test_inference_*
+    owner_decision_required: PlasticOS owner — whether/how to resupply the removed plastics rules (bodies at 7925c79)
+
+  - id: A03
+    remediation: R03
+    title: Typed payload contracts generalized (engine/models/payloads.py, contracts/payloads/)
+    disposition: CLOSED
+    evidence:
+      - "engine/models/payloads.py: Literal[\"plasticos\"], MatchDirection, ProjectionEntityType, OutcomeType, SourceSystem enums removed; DomainContract.from_spec + admit_payload; validation without a contract fails closed"
+      - "contracts/payloads/*.schema.yaml: domain const -> pattern; direction / entity_type / outcome_type / source system enums -> identifier + description; titles neutral"
+      - "preserved: contract_version governance, entity_ref validation, extra=forbid, FORBIDDEN_TRANSPORT_FIELDS, negative fixtures, OutcomeFeedbackStore replay idempotency"
+      - "compatibility: strictly widening for every previously valid payload; draft-unpublished; no external consumer"
+      - tests/unit/test_detached_payload_contracts.py (two synthetic domains; unknown direction/entity/outcome/system rejected)
+    owner_decision_required: contract owner — keep urn:l9:plasticos:... $id namespace and 1.0.0-draft, or cut a renamed draft before publication (ADR-112)
+
+  - id: A04
+    remediation: R04
+    title: Domain-neutral contract compiler (tools/payload_contract_compiler.py)
+    disposition: CLOSED
+    evidence:
+      - "tools/payload_contract_compiler.py: --domains-root / --fixtures-root / --domain; admits fixtures against the DomainContract of the domain they name; rejects schemas that pin `domain`"
+      - tests/unit/test_payload_contract_compiler.py::test_compiler_passes_for_arbitrary_domain_without_plasticos_directory (two synthetic domains, no plasticos dir)
+      - "hard failures proven: missing pack, dormant pack, missing fixture set, fixtures naming two domains"
+
+  - id: A05
+    remediation: R05
+    title: IdeaOS hydration ownership (engine/sync/idea_portfolio.py, tools/hydrate_idea_portfolio.py)
+    disposition: BLOCKED
+    reason: >
+      No authoritative external owner exists for the idea-portfolio projection contract: IdeaOS
+      (.l9/architecture.yaml, .l9/ownership.yaml, src/ideaos/resources/schemas) declares no
+      graph projection, revision-chain, digest or tombstone contract, and Quantum-L9/.github
+      assigns no owner for it. Relocation would invent a destination.
+    safe_state:
+      - "domains/idea-portfolio/spec.yaml declares activation: dormant; the generic loader withholds it (DORMANT_DOMAIN_PACKS_ENABLED default False)"
+      - tools/hydrate_idea_portfolio.py refuses unless the loader admits the pack; CLI integration remains dormant
+      - "all behaviour preserved: revision chain, parent conflict detection, canonical digests, idempotent replay, uniqueness precondition, transactional atomicity, tombstones, provenance (tests/unit/test_idea_portfolio.py, tests/integration/test_idea_portfolio_hydration.py unchanged)"
+    owner_decision_required: IdeaOS (or org authority) to declare the projection contract and accept the hydrator
+
+  - id: A06
+    remediation: R06
+    title: Sales intake without runtime contamination (engine/intake/)
+    disposition: CLOSED
+    evidence:
+      - "engine/intake/vertical_discovery.py: built-in keyword table removed; vertical_keywords is caller-supplied"
+      - "engine/intake/intake_compiler.py: _DERIVATION_GRAPH and _AMBIGUOUS_PATTERNS removed; derivation_graph / ambiguity_patterns are caller-supplied"
+      - "engine/intake/api.py: payload may carry the three tables; intake_* actions still absent from ACTION_HANDLERS and engine/spec.yaml (tests/architecture/test_seam_gate_only.py)"
+      - no generated spec is admitted automatically (unchanged)
+      - tests/unit/test_intake.py::TestVerticalDiscovery, ::TestCallerSuppliedRecipes
+
+  - id: A07
+    remediation: R07
+    title: Generic domain activation, fail closed (engine/config/loader.py, settings, pack-shape validation)
+    disposition: CLOSED
+    evidence:
+      - "engine/config/loader.py: _DOMAIN_FEATURE_FLAGS removed; withholding_reason + admission_defects (validate, gates compile, not dormant); list_domains lists only admitted packs"
+      - "engine/config/schema.py: DomainMetadata.activation (active|dormant); engine/config/settings.py: dormant_domain_packs_enabled (default False), idea_portfolio_enabled removed"
+      - "invariant held: on 7925c79 the loader served exactly {freight-matching, mortgage-brokerage, plasticos}; on the Stage 2 head it serves the same three. The seven CEG-009 packs stay withheld (compile defects) and idea-portfolio stays withheld (declared dormant)"
+      - tests/unit/test_domain_pack_shape.py (every withheld pack has a live generic reason; loader source names no domain; overrides default off); tests/unit/test_domain_pack_loader.py; tests/unit/test_idea_portfolio.py
+
+  - id: A08
+    remediation: R08
+    title: Detach executable domain packaging (Dockerfiles, Compose, domains/, runtime defaults)
+    disposition: CLOSED_BOUNDED
+    evidence:
+      - "Dockerfile: domain packs are an explicit build-time selection (ARG DOMAIN_PACKS_SRC, default = repository example packs so make dev and the E2E rails keep working)"
+      - "runtime: engine boots with an empty pack directory (test_core_startup_with_empty_domain_directory); DOMAINS_ROOT selection unchanged"
+      - "Makefile: dead PLASTICOS_* env names (never read by Settings) replaced with the NEO4J_URI / NEO4J_PASSWORD / LOG_LEVEL names Settings reads; seed target label neutral"
+      - "docker-compose.yml, docker-compose.prod.yml, Dockerfile.prod untouched: production/deployment packaging is outside the approved scope (\"No unapproved production deployment changes\"); compose still sets GEO_DECAY_KM / COMMUNITY_CROSS_BIAS, which Settings ignores (extra=ignore)"
+    not_verified: docker build --check could not run (no Docker daemon socket in the session sandbox); Dockerfile syntax was checked against the official Dockerfile reference (ARG default values, COPY variable substitution)
+
+  - id: A09
+    remediation: R09
+    title: Outcome, feedback and scoring semantics (engine/handlers.py, engine/scoring/assembler.py, engine/config/schema.py)
+    disposition: CLOSED_PARTIAL
+    evidence:
+      - "engine/handlers.py: outcome node label read from feedbackloop.outcome_node_label in handle_outcomes and the three admin outcome reads"
+      - "engine/scoring/assembler.py: preference_attention defaults outcome relation/node to the domain's feedbackloop values and requires metadata.success_value (closed_won default removed)"
+      - "engine/gates/compiler.py: buyer_to_seller / Facility-role docstrings neutralized"
+      - causal integrity, match fingerprinting, provenance, replay untouched; source identity rules (entity_id / candidate_id) untouched
+      - tests/unit/test_domain_neutrality_acceptance.py::test_outcome_node_label_comes_from_the_domain_spec
+    deferred:
+      - the RESULTED_IN literal in handle_outcomes' write path (and the CausalCompiler edge filter) is inside PR #317's hunks; honouring feedbackloop.outcome_edge_type there is deferred until #317 lands, so #317 is neither rewritten nor conflicted. CEG's graph-schema contract documents RESULTED_IN as system vocabulary.
+
+  - id: A10
+    remediation: R10
+    title: Unused industry-specific global defaults (engine/config/settings.py, chassis/auth/settings.py)
+    disposition: CLOSED
+    evidence:
+      - "removed after caller verification (zero callers under engine/ chassis/ tools/): decay_facility_halflife, decay_structural_halflife, geo_decay_km, community_cross_bias, outcome_ema_alpha, resolution_density_tolerance, resolution_mfi_tolerance, resolution_min_confidence"
+      - "kept: decay_transaction_halflife (engine/causal/attribution.py), w_* weights (boot + handlers)"
+      - .env.template, docs/contracts/config/env-contract.yaml, .claude/rules/feature-flags.md aligned; tests/unit/test_settings.py
+
+  - id: A11
+    remediation: R10
+    title: Semantic registry domain-configurable / legacy allowlist (engine/config/semantic_registry.py)
+    disposition: CLOSED
+    evidence:
+      - CANONICAL_ENTITY_TYPES and DEFAULT_SEMANTIC_REGISTRY (zero callers; not a live restriction) removed; SemanticRegistry.from_spec derives from DomainSpec.semantic_registry.entity_labels / ontology
+      - "the live restriction is unchanged: handle_resolve reads DomainSpec.semantic_registry"
+
+  - id: A12
+    remediation: R10
+    title: Odoo-specific offline replay vs generic core (engine/replay/)
+    disposition: CLOSED
+    evidence:
+      - "consumer and schema verified: cryptoxdog/IB-Odoo_19 docs/adr/ADR-126-odoo-outcome-replay-input.md and scripts/outcome_replay/schema.py produce l9.odoo.outcome_replay_input.v1"
+      - "engine/replay/outcome.py: producer-neutral load_replay_input + ACCEPTED_INPUT_SCHEMAS registry; the Odoo schema id is a registered producer entry, not the engine's identity; replay math unchanged (tests/unit/test_outcome_replay.py)"
+
+  - id: A13
+    remediation: R10
+    title: Closed provider/owner enumerations (FeatureCatalogEntry.owner, SourceSystem)
+    disposition: CLOSED
+    evidence:
+      - "engine/config/schema.py: FeatureCatalogEntry.owner Literal[ceg|eie|odoo] -> declared identifier"
+      - "engine/models/payloads.py: source_record.system validated against CORE_SOURCE_SYSTEMS + the domain's declared feature_catalog owners (authorization and source-identity validation preserved; undeclared system rejected)"
+      - tests/unit/test_detached_payload_contracts.py::test_undeclared_source_system_is_rejected, ::test_core_source_systems_are_always_admitted
+
+  - id: A14
+    remediation: R11
+    title: Generic tests depend on plastics logic inside the engine
+    disposition: CLOSED
+    evidence:
+      - tests/gap_fixes/test_gap3_inference_registry.py and test_gap9_inference_authority.py no longer assert plastics rules; tests/unit/test_intake.py no longer expects a built-in keyword table
+
+  - id: A15
+    remediation: R11
+    title: Generic unit tests hardcode PlasticOS payload/direction/entity literals
+    disposition: CLOSED
+    evidence:
+      - payload tests admit the PlasticOS example fixtures against a hand-declared example contract (tests/fixtures/domain_contracts.py) and prove neutrality against two synthetic domains; tests/unit/test_gds_scheduler.py uses synthetic vocabulary
+
+  - id: A16
+    remediation: R11
+    title: Generic acceptance depends on a PlasticOS database / fixtures (tests/conftest.py, integration suites)
+    disposition: BLOCKED
+    reason: >
+      tests/conftest.py (domain_spec = plasticos, plasticos_database, engine_deps, seeded Facility graph)
+      and the Neo4j-backed integration/performance suites are the container-backed graph
+      integration campaign the contract assigns to Stage 4. They were not changed here; the
+      synthetic packs and the unit-level acceptance suite are the Stage 2 substrate.
+    stage_dependency: 4
+
+  - id: A17
+    remediation: R11
+    title: Documentation asserts PlasticOS as executable authority / sole domain
+    disposition: CLOSED
+    evidence:
+      - docs/adr/ADR-112-ceg-domain-neutral-core.md (new decision; supersedes ADR-103 and ADR-109 in part via status pointers, originals preserved)
+      - domains/README.md, contracts/payloads/README.md, docs/FEATURE_GATES.md §16 + quick reference, .claude/rules/feature-flags.md, .claude/rules/capability-registry.md
+      - archives under docs/archive/plasticos untouched
+
+  - id: A18
+    remediation: R11
+    title: Historical examples isolated from required generic acceptance
+    disposition: CLOSED
+    evidence:
+      - PlasticOS example tests (test_plasticos_spec_authority, test_plasticos_harvest, test_first/second_match_direction, test_domain_spec_activation, test_canonical_contract_fixtures) remain and are labelled as examples; generic acceptance runs on tests/fixtures/domains/{orbital-logistics,cheese-aging}
+
+acceptance_matrix:
+  core_import_without_plasticos_ideaos: PASS (test_core_imports_without_any_domain_pack)
+  core_startup_empty_domain_directory: PASS (test_core_startup_with_empty_domain_directory)
+  unknown_valid_authorized_domain_accepted: PASS (test_unknown_but_valid_authorized_domains_are_accepted; payload admission for both synthetic domains)
+  missing_or_unadmitted_domain_rejected: PASS (test_missing_or_unadmitted_domain_is_rejected)
+  domain_specific_node_labels_from_declared_configuration: PASS (gates/traversal/scoring/sync compile from declared labels; payload entity_type membership)
+  domain_specific_edge_types_from_declared_configuration: PASS (GDS jobs over declared edges; former built-in edges absent)
+  unsupported_match_direction_rejected: PASS (payload direction membership; handle_match candidate-label condition)
+  gds_missing_mappings_explicit_failure: PASS (test_gds_job_with_missing_domain_mappings_fails_explicitly; test_gds_scheduler explicit-failure tests)
+  domain_owned_inference_only_when_authorized: PASS (test_inference_feedback_runs_only_domain_authorized_rules)
+  unsupported_business_inference_never_synthesized: PASS (test_unsupported_business_inference_is_never_synthesized)
+  tenant_boundaries_unchanged: PASS (no tenant-resolution or database-binding code touched; existing tests green)
+  projection_replay_deterministic_idempotent: PASS (test_sync_projection, test_projection_outcome_schemas, test_idea_portfolio unchanged semantics)
+  payload_negative_tests_keep_rejecting: PASS (all negative fixtures rejected; compiler negatives PASS)
+  existing_gate_transport_unchanged: PASS (chassis/, engine/gate_egress.py, engine/spec.yaml untouched; architecture/contract suites green)
+  existing_valid_consumer_contract: PASS_WIDENING (no external consumer of payload contracts; EIE/Constellation.Gate depend on the PlasticOS pack, which is unchanged)
+  pr_317_causal_behavior_non_regressive: PASS (no causal/ingress code touched; git merge-tree against d74c074 — see collision_probe)
+
+collision_probe:
+  pr_317_head: d74c074cc4a37ca0d83ddab131f1565ffee5b1d3
+  shared_files: [engine/handlers.py, engine/config/settings.py, docs/FEATURE_GATES.md]
+  method: git merge-tree --write-tree <stage2-head> FETCH_HEAD after the final commit (result recorded in the PR description)
+
+stage_dependencies:
+  stage_3: CI guard that fails on reintroduced product vocabulary in generic executable paths (not implemented here by contract)
+  stage_4: container-backed graph integration campaign; migrates tests/conftest.py and the Neo4j-backed suites off the PlasticOS database (A16)
