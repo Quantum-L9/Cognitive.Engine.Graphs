@@ -48,11 +48,13 @@ def test_sanitize_label_rejects_too_long():
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("name", ["plasticos", "healthcare-referral", "acme.tenant_01", "abc"])
+@pytest.mark.parametrize("name", ["plasticos", "healthcare-referral", "acme.tenant-01", "abc", "a" * 63])
 def test_sanitize_database_name_accepts_neo4j_database_names(name: str) -> None:
-    from engine.utils.security import sanitize_database_name
+    from engine.utils.security import sanitize_database_name, validate_tenant_id
 
     assert sanitize_database_name(name) == name
+    # One identifier, one grammar: tenant id == database name (CEG-DBNAME-01).
+    assert validate_tenant_id(name) == name
 
 
 @pytest.mark.unit
@@ -65,10 +67,16 @@ def test_sanitize_database_name_accepts_neo4j_database_names(name: str) -> None:
         "has space",
         "",
         "a" * 64,  # over the 63-character maximum
+        "Plasticos",  # Neo4j would lowercase it; the contract refuses instead of normalising
+        "acme.tenant_01",  # underscore: legal for Neo4j, refused by the tenant grammar
+        "system-of-record",  # reserved prefix
+        "systemx",  # reserved prefix with no separator
     ],
 )
 def test_sanitize_database_name_rejects_unsafe_names(name: str) -> None:
-    from engine.utils.security import sanitize_database_name
+    from engine.utils.security import sanitize_database_name, validate_tenant_id
 
     with pytest.raises(ValueError, match="refusing to provision"):
         sanitize_database_name(name)
+    with pytest.raises(ValueError):
+        validate_tenant_id(name)

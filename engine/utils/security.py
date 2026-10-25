@@ -57,11 +57,48 @@ def cypher_number(value: object) -> float:
         raise ValueError(msg) from exc
 
 
-# Neo4j database naming rules: begins with an ASCII letter, then letters,
-# digits, dots, dashes or underscores, 3-63 characters. Domain ids legitimately
-# contain dashes ("healthcare-referral"), which is why sanitize_label does not
-# apply here: its label grammar forbids them.
-_DATABASE_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{2,62}$")
+# Tenant identity contract (CEG-IDENT-01 / CEG-DBNAME-01, decided 2026-10-22):
+# tenant id == domain spec id == spec directory == Neo4j database name, with no
+# mapping layer between them. The grammar is therefore the Neo4j 5 database-name
+# grammar, lowercase only: begins with an ASCII letter, then lowercase letters,
+# digits, dots or dashes, 3-63 characters. Neo4j normalises database names to
+# lowercase and accepts underscores; this contract refuses both rather than
+# normalising, so the id a packet carries, the directory the loader opens and
+# the database the driver binds are byte-identical on every node. Domain ids
+# legitimately contain dashes ("healthcare-referral"), which is why
+# sanitize_label does not apply here: its label grammar forbids them.
+_TENANT_ID_RE = re.compile(r"^[a-z][a-z0-9.-]{2,62}$")
+# Reserved by Neo4j: no user database may begin with this prefix.
+_RESERVED_DATABASE_PREFIX = "system"
+TENANT_ID_GRAMMAR = (
+    "lowercase, 3-63 characters, starts with a letter, then only letters, digits, "
+    "dots or dashes, and never starting with 'system'"
+)
+
+
+def tenant_id_defect(name: str) -> str | None:
+    """Return why ``name`` is not a legal tenant id, or None when it is legal."""
+    if not _TENANT_ID_RE.fullmatch(name):
+        return f"{name!r} is not a legal tenant id ({TENANT_ID_GRAMMAR})"
+    if name.startswith(_RESERVED_DATABASE_PREFIX):
+        return f"{name!r} starts with the Neo4j-reserved prefix {_RESERVED_DATABASE_PREFIX!r}"
+    return None
+
+
+def validate_tenant_id(name: str) -> str:
+    """Validate a tenant id against the identity contract; return it unchanged.
+
+    The tenant id is the spec id and the database name, so this is the single
+    grammar every identity surface applies: the loader before it touches the
+    filesystem, the driver before it provisions a database. Fails closed: an
+    illegal id is refused, never lowercased or otherwise repaired.
+
+    Raises ValueError if invalid.
+    """
+    defect = tenant_id_defect(name)
+    if defect is not None:
+        raise ValueError(defect)
+    return name
 
 
 def sanitize_database_name(name: str) -> str:
@@ -76,12 +113,12 @@ def sanitize_database_name(name: str) -> str:
 
     Raises ValueError if invalid.
     """
-    if not _DATABASE_NAME_RE.fullmatch(name):
+    defect = tenant_id_defect(name)
+    if defect is not None:
         msg = (
-            f"refusing to provision Neo4j database {name!r}: a database name must begin "
-            f"with a letter and contain only letters, digits, dots, dashes or underscores "
-            f"(3-63 characters). CREATE DATABASE takes no query parameter, so an "
-            f"unvalidated name would be interpolated into an administrative command."
+            f"refusing to provision Neo4j database {name!r}: {defect}. CREATE DATABASE "
+            f"takes no query parameter, so an unvalidated name would be interpolated "
+            f"into an administrative command."
         )
         raise ValueError(msg)
     return name

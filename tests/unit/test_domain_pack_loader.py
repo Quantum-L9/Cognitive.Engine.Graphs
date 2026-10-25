@@ -122,7 +122,8 @@ class TestResolveSpecPath:
 
     def test_blocks_symlinks(self, tmp_path: Path) -> None:
         """Symlinked spec.yaml raises DomainNotFoundError."""
-        domain_dir = tmp_path / "evil_domain"
+        # A legal tenant id, so the symlink check (not the grammar) refuses it.
+        domain_dir = tmp_path / "evil-domain"
         domain_dir.mkdir()
         target = tmp_path / "real_spec.yaml"
         target.write_text("domain: {id: evil}")
@@ -130,7 +131,33 @@ class TestResolveSpecPath:
         symlink.symlink_to(target)
         loader = DomainPackLoader(config_path=str(tmp_path))
         with pytest.raises(DomainNotFoundError, match="symlink"):
-            loader._resolve_spec_path("evil_domain")
+            loader._resolve_spec_path("evil-domain")
+
+    @pytest.mark.parametrize(
+        ("domain_id", "why"),
+        [
+            ("Acme", "uppercase"),
+            ("acme_tenant", "underscore"),
+            ("systemdb", "reserved prefix"),
+            ("ab", "too short"),
+            ("1acme", "leading digit"),
+        ],
+    )
+    def test_blocks_ids_outside_the_tenant_grammar_before_touching_disk(
+        self, tmp_path: Path, domain_id: str, why: str
+    ) -> None:
+        """tenant id == domain.id == directory == database (CEG-IDENT-01).
+
+        A directory with that name and a spec inside exists, and is still never
+        opened: the grammar is checked before path resolution.
+        """
+        domain_dir = tmp_path / domain_id
+        domain_dir.mkdir()
+        (domain_dir / "spec.yaml").write_text(f"domain: {{id: {domain_id}}}")
+        loader = DomainPackLoader(config_path=str(tmp_path))
+        with pytest.raises(DomainNotFoundError, match="not a legal tenant id|reserved prefix") as excinfo:
+            loader._resolve_spec_path(domain_id)
+        assert "spec.yaml" not in str(excinfo.value), why
 
     def test_missing_spec_file_raises(self, tmp_path: Path) -> None:
         """Non-existent spec.yaml raises DomainNotFoundError."""
