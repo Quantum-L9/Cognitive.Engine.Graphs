@@ -57,6 +57,7 @@ independently of the code default.
 | Param Strict Mode | `PARAM_STRICT_MODE` | `True` | `True` | active |
 | LLM Security (ValidatedLLMClient) | `LLM_PROVIDER` | `openai` (implicit) | `openai` | active — fully implemented, requires `OPENAI_API_KEY` |
 | PacketStore Persistence | `PACKET_STORE_ENABLED` (`packet_store_enabled`), `PACKET_STORE_DSN` (`packet_store_dsn`) | `False` | `True` | active (opt-in; read through `Settings` since PERSIST-01 — see §7) |
+| Tenant Allowlist Required in Prod | `TENANT_ALLOWLIST_REQUIRED_IN_PROD` (`tenant_allowlist_required_in_prod`) | `True` | unset | active (hardening); an unset `TENANT_ALLOWLIST` denies every tenant under `L9_ENV=prod` — see §11 |
 | Strict Tenant Database | `STRICT_TENANT_DATABASE` (`strict_tenant_database`) | `True` | unset | active (hardening); an omitted `database=` on `GraphDriver` raises — see §23 |
 | Outcome Persistence | `OUTCOME_PERSISTENCE_ENABLED` | `False` | `True` | active (opt-in; requires PacketStore — see §5) |
 | Tenant Auth (JWT allowed_tenants) | `TENANT_AUTH_ENABLED` | `True` | `True` | active in the chassis only — claim decoded, not enforced; `TENANT_ALLOWLIST` is the enforced control — see §11 |
@@ -379,6 +380,10 @@ The control that is enforced on every action is `TENANT_ALLOWLIST`
 Before CEG-AUTH-01 the last row admitted every tenant with only a warning. A
 production deployment that forgot the allowlist now refuses requests instead of
 running open.
+
+**Flag**: `TENANT_ALLOWLIST_REQUIRED_IN_PROD` (`tenant_allowlist_required_in_prod`),
+default `True`. **Rollback**: set it to `false` to restore the pre-CEG-AUTH-01
+last row (admit every tenant, WARNING at startup) without inventing an allowlist.
 
 ---
 

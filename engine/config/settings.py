@@ -136,6 +136,10 @@ class Settings(BaseSettings):
     # --- Wave 3: Capability & Access Control (seL4-inspired) ---
     tenant_auth_enabled: bool = True  # W3-01: JWT allowed_tenants enforcement
     tenant_auth_bypass_key: str = ""  # W3-01: service-to-service bypass key
+    # CEG-AUTH-01: under L9_ENV=prod an unset TENANT_ALLOWLIST denies every tenant
+    # instead of admitting every tenant. False restores the pre-CEG-AUTH-01
+    # behaviour (admit, with a WARNING) for staging or rollback.
+    tenant_allowlist_required_in_prod: bool = True
     capability_auth_enabled: bool = True  # W3-02/W3-03: domain-spec capability model
 
     # --- Wave 4: State Management & Resilience (seL4-inspired) ---

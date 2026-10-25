@@ -96,7 +96,7 @@ def init_dependencies(
         logger.info("Tenant allowlist configured: %s", state._tenant_allowlist)
     else:
         state._tenant_allowlist = None
-        if _is_production():
+        if _allowlist_fails_closed():
             # CEG-AUTH-01: in production an absent allowlist denies every tenant
             # (see _validate_tenant_access) rather than admitting every tenant.
             logger.error(
@@ -120,6 +120,18 @@ def _is_production() -> bool:
     return _env_settings.l9_env == "prod"
 
 
+def _allowlist_fails_closed() -> bool:
+    """True when an unset TENANT_ALLOWLIST must deny every tenant (CEG-AUTH-01).
+
+    Production only, and only while ``tenant_allowlist_required_in_prod`` is on.
+    The flag is compared with ``is False`` so a MagicMock-patched ``settings``
+    keeps the fail-closed default.
+    """
+    from engine.config.settings import settings as _env_settings
+
+    return _is_production() and _env_settings.tenant_allowlist_required_in_prod is not False
+
+
 def _validate_tenant_access(tenant: str, action: str) -> None:
     """Reject requests for unauthorized tenants.
 
@@ -138,7 +150,7 @@ def _validate_tenant_access(tenant: str, action: str) -> None:
     state = get_state()
     allowlist = state.tenant_allowlist
     if allowlist is None:
-        if _is_production():
+        if _allowlist_fails_closed():
             raise ValidationError(
                 f"Tenant '{tenant}' rejected: TENANT_ALLOWLIST is not configured and L9_ENV=prod "
                 "fails closed (CEG-AUTH-01)",
@@ -1274,6 +1286,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 "param_strict_mode": _fs.param_strict_mode,
                 # --- Wave 7: Explicit Tenant Database Binding (DB-STRICT-01) ---
                 "strict_tenant_database": _fs.strict_tenant_database,
+                "tenant_allowlist_required_in_prod": _fs.tenant_allowlist_required_in_prod,
                 # --- Persistence (PERSIST-01) ---
                 "packet_store_enabled": _fs.packet_store_enabled,
                 # --- Wave 2: Refinement Scoring ---
