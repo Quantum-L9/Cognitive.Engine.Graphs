@@ -39,7 +39,7 @@ from engine.auth.capabilities import (
 )
 from engine.compliance.engine import ComplianceEngine
 from engine.config.loader import DomainPackLoader
-from engine.config.schema import DomainSpec
+from engine.config.schema import DomainSpec, SyncEndpointSpec
 from engine.gates.compiler import GateCompiler
 from engine.gds.scheduler import GDSScheduler
 from engine.graph.driver import GraphDriver
@@ -53,7 +53,15 @@ from engine.scoring.evidence_priority import (
     score_cohort,
 )
 from engine.state import get_state
-from engine.sync.generator import SyncGenerator
+from engine.sync.generator import (
+    RELATIONSHIP_EVIDENCE_SCHEMA,
+    SyncGenerator,
+    normalize_relationship_rows,
+    relationship_merge_query,
+    relationship_precheck_query,
+    resolve_relationship_declaration,
+    stored_evidence,
+)
 from engine.traversal.assembler import TraversalAssembler
 from engine.traversal.resolver import ParameterResolutionError, ParameterResolver
 from engine.utils.security import sanitize_label, tenant_id_defect
@@ -856,6 +864,13 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             endpoint_spec=endpoint_spec,
         )
 
+    if endpoint_spec.targetedge:
+        relationship_result = await _sync_relationships(
+            graph_driver, domain_spec, endpoint_spec, entity_type=entity_type, batch=batch, tenant=tenant
+        )
+        await compliance.flush_audit()
+        return relationship_result
+
     # R3: Causal edge validation when domain has causal edges enabled
     rejected_count = 0
     if domain_spec.causal.enabled and payload.get("edge_type"):
@@ -898,6 +913,104 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     if rejected_count > 0:
         result["rejected_count"] = rejected_count
     return result
+
+
+def _relationship_row_defect(check: dict[str, Any], row: dict[str, Any]) -> str | None:
+    """Why one relationship row cannot be written, from its precheck result, else None."""
+    if check["from_any"] > check["from_count"] or check["to_any"] > check["to_count"]:
+        return "an endpoint id resolves to a node outside this tenant"
+    if check["from_count"] != 1 or check["to_count"] != 1:
+        return (
+            f"endpoints must each resolve to exactly one existing node "
+            f"(from: {check['from_count']}, to: {check['to_count']})"
+        )
+    for existing in check["existing"]:
+        same = (
+            existing["from_id"] == row["from_id"]
+            and existing["to_id"] == row["to_id"]
+            and stored_evidence(existing["props"]) == row["props"]
+        )
+        if not same:
+            return (
+                "evidence_ref is already recorded with different endpoints or evidence; provenance is not overwritten"
+            )
+    return None
+
+
+async def _sync_relationships(
+    graph_driver: GraphDriver,
+    domain_spec: DomainSpec,
+    endpoint_spec: SyncEndpointSpec,
+    *,
+    entity_type: str,
+    batch: list[Any],
+    tenant: str,
+) -> dict[str, Any]:
+    """Relationship evidence sync for a `targetedge` endpoint (QM.POC0.CEG.GRAPH_EVIDENCE.002A).
+
+    All-or-nothing: the declaration, every row and every precheck must pass
+    before anything is written, so a refused batch leaves the graph unchanged.
+    Endpoints must already exist under this tenant; no node is created here.
+    """
+    try:
+        declaration = resolve_relationship_declaration(domain_spec, endpoint_spec)
+        rows = normalize_relationship_rows(batch)
+    except ValueError as exc:
+        raise ValidationError(str(exc), action="sync", tenant=tenant) from exc
+
+    database = domain_spec.domain.id
+    params = {"batch": rows, "tenant": tenant, "schema": RELATIONSHIP_EVIDENCE_SCHEMA}
+    try:
+        checks = await graph_driver.execute_query(
+            cypher=relationship_precheck_query(declaration), parameters=params, database=database
+        )
+    except Exception as exc:
+        raise ExecutionError(
+            "Relationship sync precheck failed", action="sync", tenant=tenant, detail=str(exc)
+        ) from exc
+
+    by_ref = {row["evidence_ref"]: row for row in rows}
+    defects = []
+    replayed = 0
+    for check in checks:
+        row = by_ref[check["evidence_ref"]]
+        defect = _relationship_row_defect(check, row)
+        if defect is not None:
+            defects.append(f"{check['evidence_ref']}: {defect}")
+        elif check["existing"]:
+            replayed += 1
+    if defects:
+        raise ValidationError(
+            f"Relationship sync refused, nothing written: {'; '.join(sorted(defects))}",
+            action="sync",
+            tenant=tenant,
+        )
+
+    try:
+        written = await graph_driver.execute_query(
+            cypher=relationship_merge_query(declaration), parameters=params, database=database
+        )
+    except Exception as exc:
+        raise ExecutionError("Relationship sync failed", action="sync", tenant=tenant, detail=str(exc)) from exc
+    mismatched = sorted(
+        entry["evidence_ref"]
+        for entry in written
+        if stored_evidence(entry["stored"]) != by_ref[entry["evidence_ref"]]["props"]
+    )
+    if mismatched or len(written) != len(rows):
+        raise ExecutionError(
+            "Relationship sync did not record the submitted evidence",
+            action="sync",
+            tenant=tenant,
+            detail=f"mismatched={mismatched} written={len(written)} expected={len(rows)}",
+        )
+    return {
+        "status": "success",
+        "entity_type": entity_type,
+        "synced_count": len(batch),
+        "created_count": len(rows) - replayed,
+        "replayed_count": replayed,
+    }
 
 
 async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:

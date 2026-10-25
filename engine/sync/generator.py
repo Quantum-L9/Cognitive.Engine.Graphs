@@ -16,9 +16,12 @@ Generates batch sync queries from domain sync endpoint specs.
 from __future__ import annotations
 
 import logging
+import math
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
-from engine.config.schema import DomainSpec, SyncEndpointSpec, SyncStrategy
+from engine.config.schema import DomainSpec, EdgeDirection, ManagedByType, SyncEndpointSpec, SyncStrategy
 from engine.utils.security import sanitize_label
 
 logger = logging.getLogger(__name__)
@@ -156,6 +159,261 @@ class SyncGenerator:
         return "\n".join(cypher_parts)
 
 
-# Relationship evidence edges carry this stamp (QM.POC0.CEG.GRAPH_EVIDENCE.002A);
-# engine/scoring/graph_evidence.py reads only edges that carry it.
+# ── Relationship evidence sync (QM.POC0.CEG.GRAPH_EVIDENCE.002A) ──────────────
+#
+# A sync endpoint that declares `targetedge` + `fromnode` + `tonode` (fields the
+# schema always had, which no generator read) materialises one typed, evidenced
+# relationship per batch row between two nodes that already exist. Everything
+# structural comes from the tenant's own spec: the edge must be declared in
+# `ontology.edges` with exactly that type, source label, target label,
+# `direction: DIRECTED` and `managedby: sync`. A row names only the endpoints'
+# declared ids and the evidence; it can never choose a label, a relationship
+# type, a database or a tenant.
+#
+# Identity rule: one edge per evidence assertion, keyed by
+# (relationship type, `evidence_ref`) within the tenant. Replaying the same row
+# is a no-op; a row that reuses an `evidence_ref` with different endpoints or
+# evidence is a conflict and is refused — stored provenance is never
+# overwritten (`ON CREATE SET` only).
+
 RELATIONSHIP_EVIDENCE_SCHEMA = "ceg.relationship_evidence.v1"
+MAX_RELATIONSHIP_BATCH = 500
+MAX_EVIDENCE_REF_LENGTH = 256
+MAX_SOURCE_REF_LENGTH = 512
+
+ASSERTION_STATUSES = frozenset({"observed", "reported", "inferred"})
+POLARITIES = frozenset({"positive", "negative"})
+_REQUIRED_ROW_KEYS = frozenset(
+    {"from_id", "to_id", "evidence_ref", "source_ref", "confidence", "assertion_status", "polarity"}
+)
+_OPTIONAL_ROW_KEYS = frozenset({"source_revision", "expires_at"})
+# Properties the engine stamps on an evidence edge; never row-supplied.
+RELATIONSHIP_INTERNAL_PROPERTIES = frozenset({"_tenant", "_evidence_schema", "_subject_ref", "_object_ref"})
+
+
+@dataclass(frozen=True)
+class RelationshipDeclaration:
+    """A relationship sync endpoint resolved against the tenant's ontology."""
+
+    edge_type: str
+    from_label: str
+    from_id_property: str
+    to_label: str
+    to_id_property: str
+
+
+def _declared_id_property(domain_spec: DomainSpec, label: str, path: str) -> str:
+    """The stable id property the tenant declares for ``label``; never a default.
+
+    The node sync endpoint's `idproperty` (the key node sync MERGEs on), else the
+    node's first required property. Disagreeing node endpoints, or none, refuse.
+    """
+    declared = {
+        endpoint.idproperty
+        for endpoint in (domain_spec.sync.endpoints if domain_spec.sync else [])
+        if endpoint.targetnode == label and endpoint.idproperty
+    }
+    if len(declared) > 1:
+        msg = f"Endpoint '{path}': node {label!r} has conflicting sync idproperty declarations {sorted(declared)}"
+        raise ValueError(msg)
+    if declared:
+        return declared.pop()
+    for node in domain_spec.ontology.nodes:
+        if node.label == label:
+            for prop in node.properties:
+                if prop.required:
+                    return prop.name
+    msg = f"Endpoint '{path}': node {label!r} declares no stable id (no sync idproperty, no required property)"
+    raise ValueError(msg)
+
+
+def _row_text(row: dict[str, Any], key: str, index: int, max_length: int) -> str:
+    value = row.get(key)
+    if not isinstance(value, str) or not value.strip() or len(value) > max_length:
+        msg = f"relationship row {index}: {key} must be a non-empty string of at most {max_length} characters"
+        raise ValueError(msg)
+    return value
+
+
+def _row_node_id(row: dict[str, Any], key: str, index: int) -> str | int:
+    value = row.get(key)
+    if isinstance(value, bool) or not isinstance(value, str | int) or (isinstance(value, str) and not value.strip()):
+        msg = f"relationship row {index}: {key} must be a non-empty string or an integer node id"
+        raise ValueError(msg)
+    return value
+
+
+def _row_confidence(row: dict[str, Any], index: int) -> float:
+    value = row.get("confidence")
+    not_a_confidence = f"relationship row {index}: confidence must be an explicit number in [0, 1]"
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(not_a_confidence)
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(not_a_confidence) from exc
+    if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+        raise ValueError(not_a_confidence)
+    return confidence
+
+
+def _row_expiry(row: dict[str, Any], index: int) -> str | None:
+    value = row.get("expires_at")
+    if value is None:
+        return None
+    invalid = f"relationship row {index}: expires_at must be an ISO-8601 timestamp with a UTC offset"
+    if not isinstance(value, str):
+        raise ValueError(invalid)
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(invalid) from exc
+    if parsed.tzinfo is None:
+        raise ValueError(invalid)
+    return value
+
+
+def normalize_relationship_rows(batch: list[Any]) -> list[dict[str, Any]]:
+    """Validate relationship rows and return them in write shape, deduplicated.
+
+    Each result is ``{from_id, to_id, evidence_ref, props}`` where ``props`` is
+    exactly what is stored on the edge. Unknown keys, missing evidence, a
+    confidence outside [0, 1], an unknown assertion status or polarity, and two
+    rows that reuse one ``evidence_ref`` with different content are refused.
+    """
+    if not 1 <= len(batch) <= MAX_RELATIONSHIP_BATCH:
+        msg = f"relationship batch must hold 1..{MAX_RELATIONSHIP_BATCH} rows, got {len(batch)}"
+        raise ValueError(msg)
+    by_evidence: dict[str, dict[str, Any]] = {}
+    for index, row in enumerate(batch):
+        if not isinstance(row, dict):
+            msg = f"relationship row {index}: must be an object"
+            raise ValueError(msg)
+        unknown = sorted(set(row) - _REQUIRED_ROW_KEYS - _OPTIONAL_ROW_KEYS)
+        if unknown:
+            msg = f"relationship row {index}: unsupported keys {unknown}; labels, types and tenancy are spec-owned"
+            raise ValueError(msg)
+        missing = sorted(_REQUIRED_ROW_KEYS - set(row))
+        if missing:
+            msg = f"relationship row {index}: missing {missing}"
+            raise ValueError(msg)
+        status = row["assertion_status"]
+        if status not in ASSERTION_STATUSES:
+            msg = f"relationship row {index}: assertion_status must be one of {sorted(ASSERTION_STATUSES)}"
+            raise ValueError(msg)
+        polarity = row["polarity"]
+        if polarity not in POLARITIES:
+            msg = f"relationship row {index}: polarity must be one of {sorted(POLARITIES)}"
+            raise ValueError(msg)
+        evidence_ref = _row_text(row, "evidence_ref", index, MAX_EVIDENCE_REF_LENGTH)
+        props: dict[str, Any] = {
+            "evidence_ref": evidence_ref,
+            "source_ref": _row_text(row, "source_ref", index, MAX_SOURCE_REF_LENGTH),
+            "confidence": _row_confidence(row, index),
+            "assertion_status": status,
+            "polarity": polarity,
+        }
+        if row.get("source_revision") is not None:
+            props["source_revision"] = _row_text(row, "source_revision", index, MAX_SOURCE_REF_LENGTH)
+        expiry = _row_expiry(row, index)
+        if expiry is not None:
+            props["expires_at"] = expiry
+        normalized = {
+            "from_id": _row_node_id(row, "from_id", index),
+            "to_id": _row_node_id(row, "to_id", index),
+            "evidence_ref": evidence_ref,
+            "props": props,
+        }
+        seen = by_evidence.get(evidence_ref)
+        if seen is not None and seen != normalized:
+            msg = f"relationship row {index}: evidence_ref {evidence_ref!r} repeated with different content"
+            raise ValueError(msg)
+        by_evidence[evidence_ref] = normalized
+    return list(by_evidence.values())
+
+
+def resolve_relationship_declaration(domain_spec: DomainSpec, spec: SyncEndpointSpec) -> RelationshipDeclaration:
+    """Resolve a `targetedge` endpoint against the tenant's declared ontology, or refuse."""
+    if not (spec.targetedge and spec.fromnode and spec.tonode):
+        msg = f"Endpoint '{spec.path}': a relationship endpoint declares targetedge, fromnode and tonode"
+        raise ValueError(msg)
+    if spec.targetnode:
+        msg = f"Endpoint '{spec.path}': declares both targetnode and targetedge; one endpoint syncs one kind"
+        raise ValueError(msg)
+    if spec.batchstrategy != SyncStrategy.UNWINDMERGE:
+        msg = f"Endpoint '{spec.path}': relationship sync requires batchstrategy UNWINDMERGE"
+        raise ValueError(msg)
+    matches = [
+        edge
+        for edge in domain_spec.ontology.edges
+        if edge.type == spec.targetedge and edge.from_ == spec.fromnode and edge.to == spec.tonode
+    ]
+    if len(matches) != 1:
+        msg = (
+            f"Endpoint '{spec.path}': ontology must declare exactly one edge "
+            f"({spec.fromnode})-[:{spec.targetedge}]->({spec.tonode}), found {len(matches)}"
+        )
+        raise ValueError(msg)
+    edge = matches[0]
+    if edge.direction != EdgeDirection.DIRECTED or edge.managedby != ManagedByType.SYNC:
+        msg = f"Endpoint '{spec.path}': edge {spec.targetedge!r} must be declared DIRECTED and managedby sync"
+        raise ValueError(msg)
+    return RelationshipDeclaration(
+        edge_type=sanitize_label(spec.targetedge),
+        from_label=sanitize_label(spec.fromnode),
+        from_id_property=sanitize_label(_declared_id_property(domain_spec, spec.fromnode, spec.path)),
+        to_label=sanitize_label(spec.tonode),
+        to_id_property=sanitize_label(_declared_id_property(domain_spec, spec.tonode, spec.path)),
+    )
+
+
+def relationship_precheck_query(declaration: RelationshipDeclaration) -> str:
+    """Per row: how many tenant / any-tenant endpoints match, and edges already holding its evidence_ref."""
+    edge_type = sanitize_label(declaration.edge_type)
+    from_label = sanitize_label(declaration.from_label)
+    from_id = sanitize_label(declaration.from_id_property)
+    to_label = sanitize_label(declaration.to_label)
+    to_id = sanitize_label(declaration.to_id_property)
+    return "\n".join(
+        [
+            "UNWIND $batch AS row",
+            f"OPTIONAL MATCH (a:{from_label} {{{from_id}: row.from_id}})",
+            "WITH row, collect(a) AS sources",
+            f"OPTIONAL MATCH (b:{to_label} {{{to_id}: row.to_id}})",
+            "WITH row, sources, collect(b) AS targets",
+            f"OPTIONAL MATCH (x:{from_label})-[r:{edge_type} {{evidence_ref: row.evidence_ref}}]->(y:{to_label})",
+            "WHERE r._tenant = $tenant",
+            "WITH row, sources, targets, collect(",
+            f"  CASE WHEN r IS NULL THEN null ELSE {{from_id: x.{from_id},",
+            f"  to_id: y.{to_id}, props: properties(r)}} END) AS existing",
+            "RETURN row.evidence_ref AS evidence_ref,",
+            "  size([s IN sources WHERE s._tenant = $tenant]) AS from_count, size(sources) AS from_any,",
+            "  size([t IN targets WHERE t._tenant = $tenant]) AS to_count, size(targets) AS to_any,",
+            "  existing",
+        ]
+    )
+
+
+def relationship_merge_query(declaration: RelationshipDeclaration) -> str:
+    """Create each evidence edge once; an existing edge is returned untouched."""
+    edge_type = sanitize_label(declaration.edge_type)
+    from_label = sanitize_label(declaration.from_label)
+    from_id = sanitize_label(declaration.from_id_property)
+    to_label = sanitize_label(declaration.to_label)
+    to_id = sanitize_label(declaration.to_id_property)
+    return "\n".join(
+        [
+            "UNWIND $batch AS row",
+            f"MATCH (a:{from_label} {{{from_id}: row.from_id}}) WHERE a._tenant = $tenant",
+            f"MATCH (b:{to_label} {{{to_id}: row.to_id}}) WHERE b._tenant = $tenant",
+            f"MERGE (a)-[r:{edge_type} {{evidence_ref: row.evidence_ref}}]->(b)",
+            "ON CREATE SET r += row.props, r._tenant = $tenant, r._evidence_schema = $schema,",
+            f"  r._subject_ref = toString(a.{from_id}), r._object_ref = toString(b.{to_id})",
+            "RETURN row.evidence_ref AS evidence_ref, properties(r) AS stored",
+        ]
+    )
+
+
+def stored_evidence(stored: dict[str, Any]) -> dict[str, Any]:
+    """The row-supplied part of a stored evidence edge's properties."""
+    return {key: value for key, value in stored.items() if key not in RELATIONSHIP_INTERNAL_PROPERTIES}
