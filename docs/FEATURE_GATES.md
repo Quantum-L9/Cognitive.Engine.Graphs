@@ -57,6 +57,8 @@ independently of the code default.
 | Param Strict Mode | `PARAM_STRICT_MODE` | `True` | `True` | active |
 | LLM Security (ValidatedLLMClient) | `LLM_PROVIDER` | `openai` (implicit) | `openai` | active — fully implemented, requires `OPENAI_API_KEY` |
 | PacketStore Persistence | `PACKET_STORE_ENABLED` (`packet_store_enabled`), `PACKET_STORE_DSN` (`packet_store_dsn`) | `False` | `True` | active (opt-in; read through `Settings` since PERSIST-01 — see §7) |
+| Health Commercial Mode | `HEALTH_COMMERCIAL_MODE_ENABLED` (`health_commercial_mode_enabled`), `HEALTH_ENTITLED_TIER` | `False`, `seed` | unset | dormant; tier entitlements, upgrade prompts and conversion events — see §22 |
+| Health Batch Ceilings | `HEALTH_BATCH_MAX_ENTITIES`, `HEALTH_BATCH_COST_CEILING_USD` | `100`, `10.0` | unset | active; server-owned caps a request may lower but not raise — see §22 |
 | Tenant Allowlist Required in Prod | `TENANT_ALLOWLIST_REQUIRED_IN_PROD` (`tenant_allowlist_required_in_prod`) | `True` | unset | active (hardening); an unset `TENANT_ALLOWLIST` denies every tenant under `L9_ENV=prod` — see §11 |
 | Strict Tenant Database | `STRICT_TENANT_DATABASE` (`strict_tenant_database`) | `True` | unset | active (hardening); an omitted `database=` on `GraphDriver` raises — see §23 |
 | Outcome Persistence | `OUTCOME_PERSISTENCE_ENABLED` | `False` | `True` | active (opt-in; requires PacketStore — see §5) |
@@ -478,6 +480,62 @@ whether or not the flag is on.
 
 ---
 
+## 22. Health Commercial Mode (HEALTH-02 / COMM-01 / COMM-02) and batch ceilings (BATCH-01 / BATCH-02)
+
+**State**: Dormant
+**Flags**: `HEALTH_COMMERCIAL_MODE_ENABLED=False` (default off),
+`HEALTH_ENTITLED_TIER=seed`, `HEALTH_BATCH_MAX_ENTITIES=100`,
+`HEALTH_BATCH_COST_CEILING_USD=10.0`
+
+The health surface (§15) carries a Seed → Enrich → Discover → Autonomous
+commercial model: `TIER_FEATURES` in `engine/health/health_schemas.py`, upgrade
+prompts, and a Seed → Enrich conversion funnel. Nothing in this deployment
+bills or entitles a tenant, and the tier used to be whatever the request
+declared — so any caller could claim `autonomous` and receive auto-enrichment
+(an EIE spend), while Seed callers were upsold and recorded in a funnel for a
+product that cannot be bought.
+
+One resolver, `resolve_effective_capabilities()` in `health_schemas.py`, now
+decides every health call's capabilities. The request's `tier` is echoed back
+as `requested_tier` and grants nothing, in either mode.
+
+| Mode | Effective tier | Upgrade prompts | Conversion events |
+|---|---|---|---|
+| off (default) | full capability set (`autonomous` row, with `conversion_tracking` forced off) | never | never |
+| on | `HEALTH_ENTITLED_TIER` (server-owned; unknown value → `seed`, logged) | yes | per the entitled tier's `TIER_FEATURES` row |
+
+The enum, `TIER_FEATURES` and the report helpers are retained; only who
+selects the row changed. Auto-enrichment is still separately gated by
+`AUTO_ENRICH_VIA_GATE` (the outbound Gate request), and every assess response
+now carries `enrichment_dispatch` — the full `trigger_reenrichment_v2` result —
+with `reason` equal to `dispatch.error` on every non-dispatched path
+(HEALTH-03).
+
+### Batch ceilings
+
+`health_batch_assess` accepts `max_entities` and `cost_ceiling_usd` as
+*requests*. Each is bounded above by `HEALTH_BATCH_MAX_ENTITIES` /
+`HEALTH_BATCH_COST_CEILING_USD`; a request may lower a ceiling and never raise
+it, and a negative or non-numeric value is rejected (422). The report's buckets
+partition the request: `total_scanned` + `total_skipped` + `total_truncated`
+= `total_candidates`; `estimated_eligible` replaces `total_enriched` (a batch
+scan enriches nothing) and `dispatched` is `0` until a dispatch path exists.
+
+### Activation Steps
+
+1. Decide the entitlement source. `HEALTH_ENTITLED_TIER` is a deployment-wide
+   value; per-tenant entitlement needs a lookup that does not exist yet.
+2. Set `HEALTH_COMMERCIAL_MODE_ENABLED=true` and `HEALTH_ENTITLED_TIER`.
+3. The conversion-event store is in-memory and bounded; a persistent funnel
+   store is a prerequisite for reading the metrics in anger.
+
+### Rollback
+
+Set the flag back to `False`. Prompts stop, events stop, and every call runs
+with the full capability set again.
+
+---
+
 ## 23. Strict Tenant Database (W7-01 / DB-STRICT-01)
 
 **State**: Active (hardening; default flipped to on 2026-10-22)
@@ -523,11 +581,19 @@ surface needs a gate of its own, which is what this is.
 With the flag off the subactions return `{"status": "disabled"}` rather than
 404-ing, so an operator can tell "switched off" from "not a subaction".
 
+### Identity (HEALTH-05)
+
+Tenant id, domain spec id and Neo4j database name are one identity — there is
+no mapping layer (operator decision 2026-10-22). `payload.domain` may be absent
+or equal to the packet tenant; any other value is rejected by `handle_admin`
+before a domain pack is loaded, and again by `engine/health/api.py` for direct
+callers. A health call cannot read another tenant's spec.
+
 ### Rollback
 
 Set back to `False`. Note that assess/report append to the conversion-event
-store in `engine/health/health_report.py`, which is bounded
-(`CONVERSION_EVENT_MAX`) and discards oldest-first.
+store in `engine/health/health_report.py` only while commercial mode (§22) is
+on; that store is bounded (`CONVERSION_EVENT_MAX`) and discards oldest-first.
 
 ---
 

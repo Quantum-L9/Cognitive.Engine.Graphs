@@ -44,6 +44,9 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 ## Constellation Seam (EIE ↔ Gate ↔ CEG)
 | Flag | Default | Purpose |
 |------|---------|---------|
+| health_commercial_mode_enabled | False | Tier entitlements, upgrade prompts and conversion events on the health surface; off = full capabilities, no funnel. The request's `tier` never grants (HEALTH-02 / COMM-01 / COMM-02) |
+| health_entitled_tier | `seed` | Server-owned tier used only while commercial mode is on |
+| health_batch_max_entities / health_batch_cost_ceiling_usd | 100 / 10.0 | Server-owned ceilings for `health_batch_assess`; a request may lower, never raise (BATCH-01) |
 | packet_store_enabled / packet_store_dsn | False / unset | PacketStore persistence, read through Settings (PERSIST-01; env names unchanged) |
 | auto_enrich_via_gate | False | Dispatch `enrich` to EIE through Gate (spends EIE budget) |
 | graph_inference_feedback_enabled | False | Emit `graph-inference-result` to EIE through Gate (EIE-008 / CEG-006) |

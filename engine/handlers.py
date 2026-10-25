@@ -1312,6 +1312,9 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 "tenant_allowlist_required_in_prod": _fs.tenant_allowlist_required_in_prod,
                 # --- Persistence (PERSIST-01) ---
                 "packet_store_enabled": _fs.packet_store_enabled,
+                # --- Health commercial model (HEALTH-02 / COMM-01 / COMM-02) ---
+                "health_commercial_mode_enabled": _fs.health_commercial_mode_enabled,
+                "health_entitled_tier": _fs.health_entitled_tier,
                 # --- Wave 2: Refinement Scoring ---
                 "feedback_enabled": _fs.feedback_enabled,
                 "confidence_check_enabled": _fs.confidence_check_enabled,
@@ -1576,6 +1579,19 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 "subaction": subaction,
                 "message": "Health API is disabled. Set HEALTH_API_ENABLED=True.",
             }
+
+        # HEALTH-05: tenant id == domain spec id == Neo4j database name, with no
+        # mapping layer. A payload.domain naming any other spec is a cross-tenant
+        # read; reject it here, before any domain pack is loaded.
+        requested_domain = payload.get("domain")
+        if requested_domain is not None and requested_domain != tenant:
+            raise ValidationError(
+                f"payload.domain {requested_domain!r} does not match packet tenant {tenant!r} "
+                f"for {subaction}; health subactions read only the tenant's own domain",
+                action="admin",
+                tenant=tenant,
+            )
+
         from engine.health import api as health_api
 
         health_handlers = {
