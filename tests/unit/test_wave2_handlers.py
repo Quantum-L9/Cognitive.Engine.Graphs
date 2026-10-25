@@ -29,10 +29,13 @@ def _make_graph_driver() -> MagicMock:
     return driver
 
 
-def _make_domain_loader(spec: MagicMock | None = None) -> MagicMock:
+def _make_domain_loader(spec: MagicMock | None = None, *, domain_feedback: bool = True) -> MagicMock:
     loader = MagicMock()
     if spec is None:
         spec = MagicMock()
+        # FEEDBACK-01: the domain opt-in is half of the effective predicate, so
+        # the fixture states it explicitly instead of relying on a truthy mock.
+        spec.feedbackloop.enabled = domain_feedback
         spec.domain.id = "test_domain"
         spec.calibration = None
         spec.sync = None
@@ -246,3 +249,89 @@ class TestOutcomeSyncType:
             )
 
             assert result["synced_count"] == 1  # only the valid one
+
+
+@pytest.mark.unit
+class TestFeedbackPredicate:
+    """FEEDBACK-01: one effective predicate — global flag AND domain opt-in.
+
+    Before this, ``handle_sync`` and the admin subactions read only the global
+    flag while ``handle_match`` and ``handle_outcomes`` read only the domain
+    flag, so the same policy had two answers. Every site now reads
+    ``_feedback_effective``; these tests pin the truth table at the seams.
+    """
+
+    @pytest.mark.parametrize(
+        ("global_flag", "domain_flag", "expected"),
+        [(False, False, False), (False, True, False), (True, False, False), (True, True, True)],
+    )
+    def test_truth_table(self, global_flag: bool, domain_flag: bool, expected: bool) -> None:
+        from engine.handlers import _feedback_effective
+
+        spec = MagicMock()
+        spec.feedbackloop.enabled = domain_flag
+        with patch("engine.config.settings.settings") as mock_settings:
+            mock_settings.feedback_enabled = global_flag
+            assert _feedback_effective(spec) is expected
+
+    @pytest.mark.asyncio
+    async def test_global_on_domain_off_keeps_admin_feedback_disabled(self) -> None:
+        init_dependencies(_make_graph_driver(), _make_domain_loader(domain_feedback=False))
+        with patch("engine.config.settings.settings") as mock_settings:
+            mock_settings.feedback_enabled = True
+            feedback = await handle_admin("test_tenant", {"subaction": "score_feedback", "domain_id": "test_domain"})
+            applied = await handle_admin(
+                "test_tenant",
+                {
+                    "subaction": "apply_weight_proposal",
+                    "proposed_weights": {"geo": 0.02},
+                    "current_weights": {"geo": 0.25},
+                },
+            )
+        assert feedback["status"] == "disabled"
+        assert applied["status"] == "disabled"
+        assert "feedbackloop.enabled" in applied["message"]
+
+    @pytest.mark.asyncio
+    async def test_global_on_domain_off_sends_outcome_to_the_ordinary_sync_path(self) -> None:
+        from engine.handlers import ValidationError
+
+        init_dependencies(_make_graph_driver(), _make_domain_loader(domain_feedback=False))
+        with patch("engine.config.settings.settings") as mock_settings:
+            mock_settings.feedback_enabled = True
+            with pytest.raises(ValidationError, match="No sync endpoints configured"):
+                await handle_sync(
+                    "test_tenant",
+                    {
+                        "entity_type": "outcome",
+                        "batch": [{"match_id": "m1", "chosen_candidate_id": "c1", "outcome": "positive"}],
+                    },
+                )
+
+    @pytest.mark.asyncio
+    async def test_global_off_domain_on_is_still_disabled(self) -> None:
+        """The domain pack cannot switch the loop on by itself; the operator flag stays authoritative."""
+        init_dependencies(_make_graph_driver(), _make_domain_loader(domain_feedback=True))
+        result = await handle_admin("test_tenant", {"subaction": "score_feedback", "domain_id": "test_domain"})
+        assert result["status"] == "disabled"
+
+    def test_no_feedback_site_reads_a_flag_on_its_own(self) -> None:
+        """Static guard: the only reader of either flag inside a handler body is the predicate."""
+        import inspect
+
+        from engine import handlers
+
+        source = inspect.getsource(handlers)
+        predicate_src = inspect.getsource(handlers._feedback_effective)
+        rest = source.replace(predicate_src, "")
+        # Prose (docstrings, the disabled message) may name the flags; a status
+        # report may *report* the global flag; no handler body may *gate* on
+        # either flag directly. ``graph_inference_feedback_enabled`` is a
+        # different flag for a different loop and is not covered by FEEDBACK-01.
+        gating = [
+            line.strip()
+            for line in rest.splitlines()
+            if line.strip().startswith(("if ", "elif ", "return "))
+            and ("feedbackloop.enabled" in line or ".feedback_enabled" in line)
+        ]
+        assert gating == [], gating
