@@ -37,7 +37,7 @@ channels:
             packet_type: {type: string, const: REQUEST}
             action:
               type: string
-              enum: [match, sync, admin, outcomes, resolve, health, healthcheck, enrich]
+              enum: [match, sync, admin, outcomes, resolve, health, healthcheck, health-assess, enrich]
             tenant: {type: string}
             payload: {type: object, additionalProperties: true}
             trace_id: {type: string}

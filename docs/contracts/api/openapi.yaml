@@ -66,7 +66,7 @@ components:
       properties:
         action:
           type: string
-          enum: [match, sync, admin, outcomes, resolve, health, healthcheck, enrich]
+          enum: [match, sync, admin, outcomes, resolve, health, healthcheck, health-assess, enrich]
           description: Engine action. Routes to handler in engine/handlers.py via register_all().
         tenant:
           type: string
@@ -132,7 +132,7 @@ paths:
       summary: Execute a named engine action
       description: |
         Universal single-ingress endpoint for all engine operations.
-        Routes to: match, sync, admin, outcomes, resolve, health, healthcheck, enrich.
+        Routes to: match, sync, admin, outcomes, resolve, health, healthcheck, health-assess, enrich.
 
         HTTP status code mapping (source: chassis/chassis_app.py:_raise_for_failed_result):
           200 — success, failed, or circuit_open (check body .status)

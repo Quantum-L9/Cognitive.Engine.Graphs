@@ -16,6 +16,7 @@ All handlers: `async def handle_*(tenant: str, payload: dict) -> dict`
 | resolve | handle_resolve | Entity resolution / deduplication |
 | health | handle_health | Field-level health assessment + readiness |
 | healthcheck | handle_healthcheck | Alias for health |
+| health-assess | handle_health_assess | Canonical Gate health route (HEALTH-01): only `health_assess` / `health_batch_assess` / `health_report`, never the rest of admin |
 | enrich | handle_enrich | ROI-based re-enrichment triggering |
 
 ## Admin Subactions (payload["subaction"])
@@ -36,11 +37,13 @@ All handlers: `async def handle_*(tenant: str, payload: dict) -> dict`
 CEG-006: the three `health_*` subactions are what makes `engine/health/api.py`
 reachable. It was imported by nothing, so `trigger_reenrichment_v2` — and with
 it the whole CEG → Gate → EIE enrichment request — had no trigger any inbound
-packet could reach.
+packet could reach. HEALTH-01: Gate reaches them through the advertised
+`health-assess` action (`handle_health_assess`), never through `admin`; the
+admin subactions remain a direct operator surface. Both share `_dispatch_health`.
 
 ## Dependency Map
 ```
-handlers.py (registers all 8 actions)
+handlers.py (registers all 9 actions)
   ├── config/ → schema.py → settings.py
   ├── gates/compiler.py → gates/types/ → null_semantics.py
   ├── scoring/assembler.py → calibration.py, confidence.py, pareto.py

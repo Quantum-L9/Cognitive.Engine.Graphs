@@ -38,6 +38,7 @@ EXPECTED_ACTIONS = {
     "resolve",
     "health",
     "healthcheck",
+    "health-assess",
     "enrich",
 }
 

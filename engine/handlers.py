@@ -1567,46 +1567,15 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             "outcome_history_size": len(outcome_history),
         }
 
-    # ── CEG-006: AI-readiness health, reachable from an inbound packet ───────
+    # ── CEG-006 / HEALTH-01: AI-readiness health, reachable from an inbound packet
     # engine/health/api.py implemented three handlers and was imported by
     # nothing, so `request_enrichment` — the whole CEG -> Gate -> EIE direction
-    # — had no trigger any packet could reach. It hangs off `admin` rather than
-    # a new advertised action for the same reason `trigger_gds` does: these are
-    # operator surfaces, not collaboration routes Gate load-balances.
-    if subaction in {"health_assess", "health_batch_assess", "health_report"}:
-        from engine.config.settings import settings as _health_settings
-
-        # Mechanism ships dormant, operator activates — the same contract every
-        # other behavioural surface here follows. auto_enrich_via_gate gates only
-        # the eventual outbound request, not assessment, reporting or conversion
-        # tracking, so making these reachable needs a gate of their own.
-        if not _health_settings.health_api_enabled:
-            return {
-                "status": "disabled",
-                "subaction": subaction,
-                "message": "Health API is disabled. Set HEALTH_API_ENABLED=True.",
-            }
-
-        # HEALTH-05: tenant id == domain spec id == Neo4j database name, with no
-        # mapping layer. A payload.domain naming any other spec is a cross-tenant
-        # read; reject it here, before any domain pack is loaded.
-        requested_domain = payload.get("domain")
-        if requested_domain is not None and requested_domain != tenant:
-            raise ValidationError(
-                f"payload.domain {requested_domain!r} does not match packet tenant {tenant!r} "
-                f"for {subaction}; health subactions read only the tenant's own domain",
-                action="admin",
-                tenant=tenant,
-            )
-
-        from engine.health import api as health_api
-
-        health_handlers = {
-            "health_assess": health_api.handle_health_assess,
-            "health_batch_assess": health_api.handle_health_batch_assess,
-            "health_report": health_api.handle_health_report,
-        }
-        return await health_handlers[subaction](tenant, payload)
+    # — had no trigger any packet could reach. The canonical route is the
+    # advertised `health-assess` action (handle_health_assess; operator decision
+    # 2026-10-22). The subactions stay on `admin` as the operator surface so a
+    # direct dev call keeps working; both routes share _dispatch_health.
+    if subaction in _HEALTH_SUBACTIONS:
+        return await _dispatch_health(tenant, payload, subaction, action="admin")
 
     # ── EIE-008: hand graph-derived field values back to EIE through Gate ────
     # EIE advertises and implements `graph-inference-result` end to end and no
@@ -2213,6 +2182,85 @@ async def handle_healthcheck(tenant: str, payload: dict[str, Any]) -> dict[str, 
     return await handle_health(tenant, payload)
 
 
+# ── HEALTH-01: canonical `health-assess` action ──────────────────────────────
+# Gate's action-ownership map gives `health-assess` to `ceg` (Constellation.Gate
+# lane G3): consumer and operator keys may call it, worker keys are refused it.
+# `admin` is never advertised and never routed by Gate, so the health subactions
+# need a route of their own. The subaction names are kept so a payload that
+# works through `admin` in dev works unchanged through Gate.
+HEALTH_ASSESS_ACTION = "health-assess"
+_HEALTH_SUBACTIONS: frozenset[str] = frozenset({"health_assess", "health_batch_assess", "health_report"})
+
+
+async def _dispatch_health(tenant: str, payload: dict[str, Any], subaction: str, *, action: str) -> dict[str, Any]:
+    """Shared body of the three health subactions (CEG-006, HEALTH-05).
+
+    Reached from ``health-assess`` (the canonical Gate route) and from ``admin``
+    (operator surface); ``action`` only labels the errors. Both callers have
+    already confined ``subaction`` to ``_HEALTH_SUBACTIONS``. Order matters: the
+    feature flag answers before any tenant-bound check so a disabled API reads
+    as disabled, and the HEALTH-05 check runs before any domain pack is loaded.
+    """
+    from engine.config.settings import settings as _health_settings
+
+    # Mechanism ships dormant, operator activates — the same contract every
+    # other behavioural surface here follows. auto_enrich_via_gate gates only
+    # the eventual outbound request, not assessment, reporting or conversion
+    # tracking, so making these reachable needs a gate of their own.
+    if not _health_settings.health_api_enabled:
+        return {
+            "status": "disabled",
+            "subaction": subaction,
+            "message": "Health API is disabled. Set HEALTH_API_ENABLED=True.",
+        }
+
+    # HEALTH-05: tenant id == domain spec id == Neo4j database name, with no
+    # mapping layer. A payload.domain naming any other spec is a cross-tenant
+    # read; reject it here, before any domain pack is loaded.
+    requested_domain = payload.get("domain")
+    if requested_domain is not None and requested_domain != tenant:
+        raise ValidationError(
+            f"payload.domain {requested_domain!r} does not match packet tenant {tenant!r} "
+            f"for {subaction}; health subactions read only the tenant's own domain",
+            action=action,
+            tenant=tenant,
+        )
+
+    from engine.health import api as health_api
+
+    # Resolved per call, not bound at import: tests patch these on the module.
+    health_handlers = {
+        "health_assess": health_api.handle_health_assess,
+        "health_batch_assess": health_api.handle_health_batch_assess,
+        "health_report": health_api.handle_health_report,
+    }
+    return await health_handlers[subaction](tenant, payload)
+
+
+async def handle_health_assess(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Canonical health route (HEALTH-01): Gate action ``health-assess``.
+
+    Dispatches exactly ``payload.subaction`` in {``health_assess``,
+    ``health_batch_assess``, ``health_report``} to ``engine/health/api.py``.
+    Any other subaction is refused with ``ValidationError``, so nothing else
+    ``handle_admin`` offers is reachable from a Gate-routed packet: Gate routes
+    ``health-assess`` and never ``admin``. Same preconditions as the admin path:
+    initialised engine, tenant allowlist (CEG-AUTH-01), HEALTH-05 tenant-bound
+    domain.
+    """
+    _require_deps()
+    _validate_tenant_access(tenant, HEALTH_ASSESS_ACTION)
+    subaction = _require_key(payload, "subaction", HEALTH_ASSESS_ACTION, tenant)
+    if subaction not in _HEALTH_SUBACTIONS:
+        raise ValidationError(
+            f"subaction {subaction!r} is not a health subaction; {HEALTH_ASSESS_ACTION} dispatches only "
+            f"{sorted(_HEALTH_SUBACTIONS)} and never the rest of admin",
+            action=HEALTH_ASSESS_ACTION,
+            tenant=tenant,
+        )
+    return await _dispatch_health(tenant, payload, subaction, action=HEALTH_ASSESS_ACTION)
+
+
 async def handle_enrich(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     """
     Enrich action: add computed properties to graph entities.
@@ -2296,6 +2344,7 @@ ACTION_HANDLERS: dict[str, ActionHandler] = {
     "resolve": handle_resolve,
     "health": handle_health,
     "healthcheck": handle_healthcheck,
+    "health-assess": handle_health_assess,
     "enrich": handle_enrich,
 }
 

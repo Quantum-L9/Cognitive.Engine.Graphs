@@ -21,7 +21,7 @@
         },
         "action": {
           "type": "string",
-          "enum": ["match", "sync", "admin", "outcomes", "resolve", "health", "healthcheck", "enrich"],
+          "enum": ["match", "sync", "admin", "outcomes", "resolve", "health", "healthcheck", "health-assess", "enrich"],
           "description": "Engine action routed by chassis."
         },
         "trace_id": {
