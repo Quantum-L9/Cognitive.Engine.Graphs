@@ -44,11 +44,18 @@ from engine.gates.compiler import GateCompiler
 from engine.gds.scheduler import GDSScheduler
 from engine.graph.driver import GraphDriver
 from engine.scoring.assembler import ScoringAssembler
+from engine.scoring.evidence_priority import (
+    EvidenceBinding,
+    ScoreRequestError,
+    blocked_result,
+    parse_score_request,
+    score_cohort,
+)
 from engine.state import get_state
 from engine.sync.generator import SyncGenerator
 from engine.traversal.assembler import TraversalAssembler
 from engine.traversal.resolver import ParameterResolutionError, ParameterResolver
-from engine.utils.security import sanitize_label
+from engine.utils.security import sanitize_label, tenant_id_defect
 
 __all_chassis_reexports__ = ["FeatureNotEnabled"]
 
@@ -2328,6 +2335,53 @@ async def handle_enrich(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     count = result[0]["enriched_count"] if result else 0
     return {"enriched_count": count, "entity_type": entity_type, "tenant": tenant}
+
+
+SCORE_ACTION = "score"
+_SCORE_READER_BLOCKED = (
+    "no evidence binding: the relationship vocabulary, relevance map and evidence/confidence "
+    "materialisation are not yet proven from a real EIE -> Gate -> CEG projection"
+)
+
+
+async def handle_score(
+    tenant: str,
+    payload: dict[str, Any],
+    *,
+    binding: EvidenceBinding | None = None,
+) -> dict[str, Any]:
+    """Local ``graph_evidence_priority_v1`` cohort scoring (QM.POC0.CEG.SCORE.001).
+
+    Deliberately NOT in ``ACTION_HANDLERS`` and not advertised in
+    ``engine/spec.yaml``: no chassis or Gate route reaches it until Gate owns
+    ``score`` and a CEG capability binds it. It loads no domain pack and calls
+    nothing on the match path. ``tenant`` comes from the caller's context only;
+    by HEALTH-05 it is also the Neo4j database the binding may read. The request
+    is validated in full before any read. With no ``binding`` — the only state
+    in production today — nothing is read and the result is ``blocked``.
+    """
+    _validate_tenant_access(tenant, SCORE_ACTION)
+    try:
+        request = parse_score_request(payload)
+    except ScoreRequestError as exc:
+        raise ValidationError(str(exc), action=SCORE_ACTION, tenant=tenant) from exc
+    defect = tenant_id_defect(tenant)
+    if defect is not None:
+        raise ValidationError(
+            f"tenant {defect}; it names the database a score read is confined to",
+            action=SCORE_ACTION,
+            tenant=tenant,
+        )
+    if binding is None:
+        return blocked_result(request, _SCORE_READER_BLOCKED)
+    read = await binding.read(database=tenant, entity_refs=request.entity_refs)
+    if read.database != tenant:
+        raise ExecutionError(
+            f"evidence binding read database {read.database!r}, not the tenant database {tenant!r}",
+            action=SCORE_ACTION,
+            tenant=tenant,
+        )
+    return score_cohort(request, read, binding.approved_relevance)
 
 
 # CONTRACT-02: single source of truth for the engine's action surface.
