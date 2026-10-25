@@ -1,6 +1,9 @@
 # ADR-109: CEG payload contract compiler validator
 
-**Status:** Accepted
+**Status:** Accepted — superseded in part by [ADR-112](ADR-112-ceg-domain-neutral-core.md)
+(2026-10-11): the compiler no longer confirms `load_domain("plasticos")` as the sole domain
+authority; it admits fixtures against the `DomainContract` of whichever domain they name,
+loaded through `DomainPackLoader` from a configurable domains root.
 **Task:** TASK-034
 **Date:** 2026-08-02
 

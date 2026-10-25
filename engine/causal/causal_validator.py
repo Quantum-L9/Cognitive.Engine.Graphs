@@ -116,13 +116,15 @@ class CausalEdgeRuntimeValidator:
     ) -> bool:
         """Returns True if source timestamp strictly precedes target timestamp.
 
-        If either timestamp is None, validation passes (lenient mode).
+        If either timestamp is None, unparsable, or not comparable with the other
+        (one offset-aware, one naive), validation passes (lenient mode).
         """
         if source_ts is None or target_ts is None:
             return True
         try:
             src = datetime.fromisoformat(str(source_ts))
             tgt = datetime.fromisoformat(str(target_ts))
+            precedes = src < tgt
         except (ValueError, TypeError):
             return True
-        return src < tgt
+        return precedes

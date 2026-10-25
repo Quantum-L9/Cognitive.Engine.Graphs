@@ -1,0 +1,162 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: engine-specific
+# engine: graph
+# layer: [test]
+# tags: [test, fixtures, domain-neutrality, synthetic]
+# owner: engine-team
+# status: active
+# --- /L9_META ---
+#
+# Synthetic verification domain for the CEG domain-neutrality acceptance tests.
+# Deliberately unfamiliar vocabulary (no node, relationship, direction, outcome
+# or source-system name shared with any shipped pack) so a test that passes
+# here proves the engine executed the domain's declared contract rather than a
+# built-in recipe. This is a verification input, not a canonical domain product.
+domain:
+  id: orbital-logistics
+  name: Orbital Logistics (synthetic verification domain)
+  version: 0.1.0
+  description: Launch windows seeking orbital depots that can receive their payload.
+ontology:
+  nodes:
+  - label: OrbitalDepot
+    managedby: sync
+    candidate: true
+    matchdirection: window_to_depot
+    properties:
+    - name: depot_id
+      type: string
+      required: true
+    - name: docking_ports
+      type: int
+    - name: reliability
+      type: float
+    - name: accepts_hazmat
+      type: bool
+    - name: lat
+      type: float
+    - name: lon
+      type: float
+  - label: LaunchWindow
+    managedby: api
+    queryentity: true
+    matchdirection: window_to_depot
+    properties:
+    - name: window_id
+      type: string
+      required: true
+    - name: payload_mass_kg
+      type: float
+  - label: PropellantGrade
+    managedby: sync
+    properties:
+    - name: grade_code
+      type: string
+      required: true
+  edges:
+  - type: STOCKS
+    from: OrbitalDepot
+    to: PropellantGrade
+    direction: DIRECTED
+    category: capability
+    managedby: sync
+  - type: RESUPPLIED_BY
+    from: OrbitalDepot
+    to: OrbitalDepot
+    direction: DIRECTED
+    category: transaction
+    managedby: sync
+    properties:
+    - name: outcome
+      type: string
+    - name: docked_at
+      type: string
+matchentities:
+  candidate:
+  - label: OrbitalDepot
+    matchdirection: window_to_depot
+  queryentity:
+  - label: LaunchWindow
+    matchdirection: window_to_depot
+queryschema:
+  matchdirections:
+  - window_to_depot
+  fields:
+  - name: min_ports
+    type: int
+    required: false
+    default: 1
+traversal:
+  steps: []
+gates:
+- name: hazmat_capable
+  type: boolean
+  candidateprop: accepts_hazmat
+  nullbehavior: fail
+- name: enough_ports
+  type: threshold
+  candidateprop: docking_ports
+  queryparam: min_ports
+  operator: '>='
+  nullbehavior: fail
+scoring:
+  dimensions:
+  - name: depot_reliability
+    source: candidateproperty
+    candidateprop: reliability
+    computation: candidateproperty
+    weightkey: w_reliability
+    defaultweight: 0.6
+  - name: port_capacity
+    source: candidateproperty
+    candidateprop: docking_ports
+    computation: lognormalized
+    weightkey: w_ports
+    defaultweight: 0.3
+sync:
+  endpoints:
+  - path: /v1/sync/orbital-depots
+    method: POST
+    targetnode: OrbitalDepot
+    idproperty: depot_id
+    batchstrategy: UNWINDMERGE
+  - path: /v1/sync/propellant-grades
+    method: POST
+    targetnode: PropellantGrade
+    idproperty: grade_code
+    batchstrategy: UNWINDMERGE
+gdsjobs:
+- name: depot_reinforcement
+  algorithm: reinforcement
+  schedule:
+    type: manual
+  projection:
+    nodelabels: [OrbitalDepot]
+    edgetypes: [RESUPPLIED_BY]
+  sourceedge: RESUPPLIED_BY
+  writeedge: TRUSTED_SUPPLIER
+  writeproperties:
+  - negative_writeedge: UNRELIABLE_SUPPLIER
+    timestamp_property: docked_at
+- name: depot_recency
+  algorithm: temporalrecency
+  schedule:
+    type: manual
+  projection:
+    nodelabels: [OrbitalDepot]
+    edgetypes: [RESUPPLIED_BY]
+  sourceedge: RESUPPLIED_BY
+  writeedge: RECENTLY_RESUPPLIED_BY
+  writeproperties:
+  - timestamp_property: docked_at
+feature_catalog:
+- feature_id: depot_reliability
+  owner: station_ledger
+  scoring_dimension: depot_reliability
+  evidence_required: true
+outcome_signals:
+- signal: docked
+  calibration_label: true
+- signal: aborted
+  calibration_label: false

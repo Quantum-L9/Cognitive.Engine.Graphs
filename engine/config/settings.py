@@ -83,22 +83,16 @@ class Settings(BaseSettings):
     w_geo: float = 0.25
     w_reinforcement: float = 0.20
     w_freshness: float = 0.10
-    geo_decay_km: float = 800.0
-    community_cross_bias: float = 0.92
     max_results: int = 25
 
     # --- Temporal Decay ---
+    # Half-life for causal attribution temporal decay (engine/causal/attribution.py).
+    # Stage 2 R10: the former facility/structural half-lives, geo_decay_km,
+    # community_cross_bias, outcome_ema_alpha and the melt-flow-index / density
+    # resolution tolerances were industry-specific global defaults with no
+    # caller anywhere under engine/ or chassis/; they were removed rather than
+    # kept as dead configuration. Per-domain tuning belongs in the domain spec.
     decay_transaction_halflife: float = 180.0  # days
-    decay_facility_halflife: float = 90.0
-    decay_structural_halflife: float = 365.0
-
-    # --- Feedback Loop ---
-    outcome_ema_alpha: float = 0.1
-
-    # --- Entity Resolution ---
-    resolution_density_tolerance: float = 0.05
-    resolution_mfi_tolerance: float = 5.0
-    resolution_min_confidence: float = 0.6
 
     # --- KGE (Phase 4) ---
     kge_enabled: bool = False
@@ -129,10 +123,23 @@ class Settings(BaseSettings):
     ensemble_max_divergence: float = 0.30  # W2-03: GDS/KGE divergence cap (Wave 6)
     score_normalize: bool = False  # W2-04: post-query min-max normalization (opt-in)
     outcome_persistence_enabled: bool = False  # W2-02b: persist outcomes to PacketStore (opt-in)
+    # CEG-FIX-001: a RESULTED_IN edge that CausalEdgeRuntimeValidator (R3) rejects
+    # is not written; the outcome node still is. Hardening that restores the R3
+    # invariant, so it ships on. See docs/FEATURE_GATES.md §18.
+    causal_rejection_enforcement_enabled: bool = True
+    # CEG-FIX-002: the SDK audit wrapper audits the ingress TransportPacket
+    # (Gate's packet_id, trace, correlation, lineage root) instead of a
+    # reconstruction. Hardening; read at handler registration. See
+    # docs/FEATURE_GATES.md §19.
+    ingress_packet_audit_enabled: bool = True
 
     # --- Wave 3: Capability & Access Control (seL4-inspired) ---
     tenant_auth_enabled: bool = True  # W3-01: JWT allowed_tenants enforcement
     tenant_auth_bypass_key: str = ""  # W3-01: service-to-service bypass key
+    # CEG-AUTH-01: under L9_ENV=prod an unset TENANT_ALLOWLIST denies every tenant
+    # instead of admitting every tenant. False restores the pre-CEG-AUTH-01
+    # behaviour (admit, with a WARNING) for staging or rollback.
+    tenant_allowlist_required_in_prod: bool = True
     capability_auth_enabled: bool = True  # W3-02/W3-03: domain-spec capability model
 
     # --- Wave 4: State Management & Resilience (seL4-inspired) ---
@@ -201,13 +208,19 @@ class Settings(BaseSettings):
     # request, not assessment, reporting or conversion tracking, so the surface
     # itself needs its own gate. Mechanism ships dormant; operator activates.
     health_api_enabled: bool = False
-    # CEG-009: five migrated domain packs compile to Cypher that cannot execute
-    # (a `RELATES_TO` fallback for gates written with `pattern`/`condition`, and
-    # scalar `queryparam` values emitted as parameter names such as `$85.0`).
-    # They are readable now but not correct, so they stay undiscoverable until
-    # the compiler or the query schema grows the support they assume. Turning
-    # this on serves packs whose gates are known not to execute.
+    # CEG-009: some domain packs compile to Cypher that cannot execute (a
+    # `RELATES_TO` fallback for gates written with `pattern`/`condition`, scalar
+    # `queryparam` values emitted as parameter names such as `$85.0`, or a
+    # `strictwhen` no compiler consumes). The loader detects this generically
+    # for every pack (engine.config.loader.admission_defects) and withholds the
+    # pack. Turning this on serves packs whose gates are known not to execute.
     unvalidated_domain_packs_enabled: bool = False
+    # A pack may declare `domain.activation: dormant` to stay withheld until an
+    # operator decides otherwise (e.g. a new behavioral surface whose owner has
+    # not cleared it for traffic). This is the generic replacement for the
+    # per-domain flags the loader used to carry; the engine itself names no
+    # domain. Default off: dormant packs are not served.
+    dormant_domain_packs_enabled: bool = False
 
     # --- Wave 7: Explicit Tenant Database Binding ---
     # W7-01 / DB-STRICT-01: GraphDriver.execute_query / execute_write require an
@@ -220,6 +233,37 @@ class Settings(BaseSettings):
     # provenance, api-key auth) is a direct-ingress side door. Default ON: startup
     # fails unless L9_CHASSIS=sdk outside dev/local/test.
     require_sdk_chassis_in_prod: bool = True
+
+    # --- Stage 2: domain-neutral Cypher (CEG Stage 4 real-Neo4j proof) ---
+    # P4 / C-14: a gate's explicitly declared `nullbehavior: pass` was overridden
+    # by the per-type default (FAIL for boolean, freshness, traversal) because
+    # the schema default is also PASS. On: a declared value wins; undeclared
+    # keeps the per-type default. Off: the legacy override. Ships on — the spec
+    # is the source of truth (C-12); flip off to reproduce pre-Stage-2 ranking.
+    gate_explicit_nullbehavior: bool = True
+    # P4: handle_match identified candidates by a hardcoded `entity_id`
+    # property (Pareto front ids, causal explanations), a PlasticOS convention.
+    # On: the id property is the one the domain declares — the sync endpoint's
+    # `idproperty` for the candidate label, else the node's first required
+    # property — with `entity_id` as the final fallback. Off: `entity_id` only.
+    spec_declared_candidate_id: bool = True
+    # P4: the `type: traversal` gate compiled to
+    # `exists((candidate)-[:E]->(t:Label {prop: $param}))`, which Neo4j 5
+    # rejects ("PatternExpressions are not allowed to introduce new variables"),
+    # and its null wrapper tested `candidate.<prop>` although `candidateprop`
+    # names the TARGET node's property. On: the gate compiles to
+    # `EXISTS { MATCH (candidate)-[:E]->(t:Label) WHERE t.prop = $param }` and
+    # null handling checks the query parameter only. Off: the legacy predicate.
+    # Ships on — the legacy form cannot execute on any supported Neo4j.
+    traversal_gate_exists_subquery: bool = True
+    # P3: a `childsync` endpoint copied the child collection onto the parent via
+    # `SET n += row` (Neo4j rejects a list of maps as a property) and
+    # `childtoparent` emitted `(n)-[:T]<-(c)`, which is not Cypher. On: the
+    # parent SET null-overrides child fields, children are created inside
+    # FOREACH, and childtoparent emits `(n)<-[:T]-(c)`. Off: the legacy
+    # UNWIND-based path. Ships on — the legacy path cannot execute.
+    childsync_foreach_projection: bool = True
+
     # Seam audit / PR remediation: paid-tier enrich_now Gate dispatch is opt-in.
     # Default off so deploy does not immediately spend EIE budget until enabled.
     auto_enrich_via_gate: bool = False
@@ -229,9 +273,6 @@ class Settings(BaseSettings):
     # for the same reason as auto_enrich_via_gate — each emission queues
     # re-enrichment targets and so spends EIE budget.
     graph_inference_feedback_enabled: bool = False
-    # IdeaOS portfolio graph is a new behavioral surface. Keep both corpus writes
-    # and portfolio-context reads dormant until explicitly activated by an operator.
-    idea_portfolio_enabled: bool = False
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

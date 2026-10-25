@@ -1,6 +1,6 @@
 $schema: https://json-schema.org/draft/2020-12/schema
 $id: urn:l9:plasticos:contracts:payload:match-response:1.0.0-draft
-title: PlasticOS CEG Match Response
+title: CEG Match Response
 description: CEG-owned candidate eligibility, ranking, explanation, and missing-evidence
   result.
 x-publication-status: draft-unpublished
@@ -24,10 +24,8 @@ properties:
     type: string
     minLength: 1
   direction:
-    type: string
-    enum:
-    - supply_opportunity_to_buyer_facility
-    - buyer_demand_to_supply_opportunity
+    $ref: ./common.schema.yaml#/$defs/identifier
+    description: Must be one of the domain spec's queryschema.matchdirections.
   candidates:
     type: array
     items:
@@ -119,5 +117,5 @@ properties:
   projection_version:
     type: string
     minLength: 1
-x-plasticos-cross-field-rules:
+x-ceg-cross-field-rules:
 - eligible=false candidates must not receive an eligible rank

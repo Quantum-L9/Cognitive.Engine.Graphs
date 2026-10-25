@@ -79,17 +79,17 @@ local-api:Run API locally against Dockerized DBs (SDK chassis; alias of local-ap
 	$(MAKE) local-api-sdk
 
 local-api-legacy:Run the legacy dict chassis locally (permitted in L9_ENV=dev|local|test)
-	PLASTICOS_NEO4J_URI=bolt://localhost:7687 \
-	PLASTICOS_NEO4J_PASSWORD=l9-dev-password \
-	PLASTICOS_LOG_LEVEL=debug \
+	NEO4J_URI=bolt://localhost:7687 \
+	NEO4J_PASSWORD=l9-dev-password \
+	LOG_LEVEL=debug \
 	L9_LIFECYCLE_HOOK=engine.boot:GraphLifecycle \
 	L9_CHASSIS=legacy \
 	uvicorn chassis.entrypoint:create_app --factory --reload --port 8000
 
 local-api-sdk:Run API locally on the SDK chassis (L9_CHASSIS=sdk)
-	PLASTICOS_NEO4J_URI=bolt://localhost:7687 \
-	PLASTICOS_NEO4J_PASSWORD=l9-dev-password \
-	PLASTICOS_LOG_LEVEL=debug \
+	NEO4J_URI=bolt://localhost:7687 \
+	NEO4J_PASSWORD=l9-dev-password \
+	LOG_LEVEL=debug \
 	L9_LIFECYCLE_HOOK=engine.boot:GraphLifecycle \
 	L9_CHASSIS=sdk \
 	L9_ENVIRONMENT=local \

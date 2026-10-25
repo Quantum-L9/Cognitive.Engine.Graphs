@@ -13,8 +13,10 @@ from engine.models.payloads import (
     OutcomeFeedback,
     OutcomeFeedbackStore,
 )
+from tests.fixtures.domain_contracts import PLASTICOS_EXAMPLE_CONTRACT
 
 ROOT = Path(__file__).resolve().parents[2]
+CTX = PLASTICOS_EXAMPLE_CONTRACT.context()
 PAYLOADS = ROOT / "contracts" / "payloads"
 EXAMPLES = PAYLOADS / "examples"
 NEGATIVES = PAYLOADS / "negative_examples"
@@ -39,31 +41,31 @@ def test_schema_files_exist() -> None:
 
 @pytest.mark.unit
 def test_canonical_projection_fixture_validates() -> None:
-    CanonicalProjection.model_validate(_load(EXAMPLES / "canonical-projection.json"))
+    CanonicalProjection.model_validate(_load(EXAMPLES / "canonical-projection.json"), context=CTX)
 
 
 @pytest.mark.unit
 def test_outcome_feedback_fixture_validates() -> None:
-    OutcomeFeedback.model_validate(_load(EXAMPLES / "outcome-feedback.json"))
+    OutcomeFeedback.model_validate(_load(EXAMPLES / "outcome-feedback.json"), context=CTX)
 
 
 @pytest.mark.unit
 def test_canonical_rejects_transport_field() -> None:
     data = _load(NEGATIVES / "canonical-projection-transport-field.json")
     with pytest.raises(ValidationError):
-        CanonicalProjection.model_validate(data)
+        CanonicalProjection.model_validate(data, context=CTX)
 
 
 @pytest.mark.unit
 def test_outcome_rejects_unknown_type() -> None:
     data = _load(NEGATIVES / "outcome-feedback-unknown-type.json")
     with pytest.raises(ValidationError):
-        OutcomeFeedback.model_validate(data)
+        OutcomeFeedback.model_validate(data, context=CTX)
 
 
 @pytest.mark.unit
 def test_outcome_feedback_idempotent_replay() -> None:
-    feedback = OutcomeFeedback.model_validate(_load(EXAMPLES / "outcome-feedback.json"))
+    feedback = OutcomeFeedback.model_validate(_load(EXAMPLES / "outcome-feedback.json"), context=CTX)
     store = OutcomeFeedbackStore()
     first = store.apply(feedback)
     assert first.accepted == ["match-501-accepted-20260802"]
