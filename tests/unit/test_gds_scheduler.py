@@ -51,19 +51,45 @@ def _job(
     writeproperty: str | None = None,
     sourceedge: str | None = None,
     writeedge: str | None = None,
+    writeto: str | None = None,
+    writeproperties: list[dict] | None = None,
 ) -> GDSJobSpec:
     return GDSJobSpec(
         name=name,
         algorithm=algorithm,
         schedule=GDSJobScheduleSpec(type=schedule_type, cron=cron if schedule_type == "cron" else None),
         projection=GDSProjectionSpec(
-            nodelabels=node_labels or ["Facility"],
-            edgetypes=edge_types or ["TRANSACTED_WITH"],
+            nodelabels=node_labels or ["Site"],
+            edgetypes=edge_types or ["INTERACTED_WITH"],
         ),
         writeproperty=writeproperty,
         sourceedge=sourceedge,
         writeedge=writeedge,
+        writeto=writeto,
+        writeproperties=writeproperties,
     )
+
+
+# Synthetic vocabulary: these names belong to the test domain, not to the engine.
+_REINFORCEMENT_JOB = {
+    "sourceedge": "INTERACTED_WITH",
+    "writeedge": "REINFORCED_BY",
+    "writeproperties": [{"negative_writeedge": "DISCOURAGED_BY"}],
+}
+_TEMPORAL_JOB = {
+    "sourceedge": "INTERACTED_WITH",
+    "writeedge": "RECENTLY_INTERACTED_WITH",
+    "writeproperties": [{"timestamp_property": "last_seen_at"}],
+}
+_PROPERTY_EDGE_JOB = {
+    "writeedge": "OFFERS",
+    "writeto": "ServiceType",
+    "writeproperties": [{"property_mappings": {"has_dock": "dock", "has_crane": "crane"}}],
+}
+
+
+def _cypher_sent(driver: AsyncMock) -> str:
+    return "\n".join(str(call.args[0]) for call in driver.execute_query.call_args_list)
 
 
 def _minimal_spec(jobs: list[GDSJobSpec]) -> DomainSpec:
@@ -72,11 +98,11 @@ def _minimal_spec(jobs: list[GDSJobSpec]) -> DomainSpec:
         "ontology": {
             "nodes": [
                 {
-                    "label": "Facility",
+                    "label": "Site",
                     "managedby": "sync",
                     "candidate": True,
                     "matchdirection": "d1",
-                    "properties": [{"name": "facility_id", "type": "int", "required": True}],
+                    "properties": [{"name": "site_id", "type": "int", "required": True}],
                 },
                 {
                     "label": "Query",
@@ -88,9 +114,9 @@ def _minimal_spec(jobs: list[GDSJobSpec]) -> DomainSpec:
             ],
             "edges": [
                 {
-                    "type": "TRANSACTED_WITH",
-                    "from": "Facility",
-                    "to": "Facility",
+                    "type": "INTERACTED_WITH",
+                    "from": "Site",
+                    "to": "Site",
                     "direction": "DIRECTED",
                     "category": "transaction",
                     "managedby": "sync",
@@ -98,7 +124,7 @@ def _minimal_spec(jobs: list[GDSJobSpec]) -> DomainSpec:
             ],
         },
         "matchentities": {
-            "candidate": [{"label": "Facility", "matchdirection": "d1"}],
+            "candidate": [{"label": "Site", "matchdirection": "d1"}],
             "queryentity": [{"label": "Query", "matchdirection": "d1"}],
         },
         "queryschema": {"matchdirections": ["d1"], "fields": []},
@@ -203,7 +229,7 @@ class TestAlgorithmDispatch:
                 [],  # prune rejected
             ]
         )
-        job = _job("test_reinf", "reinforcement")
+        job = _job("test_reinf", "reinforcement", **_REINFORCEMENT_JOB)
         spec = _minimal_spec([job])
         scheduler = GDSScheduler(spec, driver)
 
@@ -211,6 +237,56 @@ class TestAlgorithmDispatch:
         assert result["status"] == "success"
         assert result["accepted_edges"] == 10
         assert result["rejected_edges"] == 3
+        sent = _cypher_sent(driver)
+        assert ":INTERACTED_WITH" in sent
+        assert ":REINFORCED_BY" in sent
+        assert ":DISCOURAGED_BY" in sent
+        # Outcome values travel as parameters, never as quoted literals (C-009).
+        assert "'success'" not in sent
+        assert driver.execute_query.call_args_list[0].kwargs["parameters"]["success_value"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_reinforcement_optional_aggregates_follow_declared_properties(self):
+        driver = _mock_driver([{"accepted_edges": 1}])
+        job = _job(
+            "test_reinf_agg",
+            "reinforcement",
+            sourceedge="INTERACTED_WITH",
+            writeedge="REINFORCED_BY",
+            writeproperties=[
+                {"negative_writeedge": "DISCOURAGED_BY"},
+                {"value_property": "amount", "quality_property": "rating", "reason_property": "why"},
+            ],
+        )
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+        await scheduler.execute_job(job)
+        sent = _cypher_sent(driver)
+        assert "t.amount" in sent
+        assert "t.rating" in sent
+        assert "t.why" in sent
+
+    @pytest.mark.asyncio
+    async def test_reinforcement_without_declared_edges_fails_explicitly(self):
+        """No declared vocabulary means an explicit failure — never a built-in recipe."""
+        driver = _mock_driver()
+        job = _job("bare_reinf", "reinforcement")
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+
+        result = await scheduler.execute_job(job)
+        assert result["status"] == "failed"
+        assert "requires 'sourceedge'" in result["error"]
+        driver.execute_query.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_reinforcement_requires_negative_edge(self):
+        driver = _mock_driver()
+        job = _job("half_reinf", "reinforcement", sourceedge="INTERACTED_WITH", writeedge="REINFORCED_BY")
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+
+        result = await scheduler.execute_job(job)
+        assert result["status"] == "failed"
+        assert "negative_writeedge" in result["error"]
+        driver.execute_query.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_temporal_recency_creates_and_prunes(self):
@@ -221,7 +297,7 @@ class TestAlgorithmDispatch:
                 [{"edges_pruned": 5}],
             ]
         )
-        job = _job("test_temporal", "temporalrecency")
+        job = _job("test_temporal", "temporalrecency", **_TEMPORAL_JOB)
         spec = _minimal_spec([job])
         scheduler = GDSScheduler(spec, driver)
 
@@ -229,9 +305,23 @@ class TestAlgorithmDispatch:
         assert result["status"] == "success"
         assert result["edges_created"] == 20
         assert result["edges_pruned"] == 5
+        sent = _cypher_sent(driver)
+        assert ":RECENTLY_INTERACTED_WITH" in sent
+        assert "t.last_seen_at" in sent
 
     @pytest.mark.asyncio
-    async def test_geoproximity_creates_colocated_edges(self):
+    async def test_temporal_recency_requires_timestamp_property(self):
+        driver = _mock_driver()
+        job = _job("bare_temporal", "temporalrecency", sourceedge="INTERACTED_WITH", writeedge="RECENT")
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+
+        result = await scheduler.execute_job(job)
+        assert result["status"] == "failed"
+        assert "timestamp_property" in result["error"]
+        driver.execute_query.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_geoproximity_creates_proximity_edges(self):
         driver = _mock_driver([{"edges_created": 8}])
         job = _job("test_geo", "geoproximity")
         spec = _minimal_spec([job])
@@ -239,16 +329,68 @@ class TestAlgorithmDispatch:
 
         result = await scheduler.execute_job(job)
         assert result["status"] == "success"
+        assert ":COLOCATED_WITH" in _cypher_sent(driver)
 
     @pytest.mark.asyncio
-    async def test_equipment_sync_materializes_edges(self):
+    async def test_geoproximity_honours_declared_edge_and_coordinates(self):
+        driver = _mock_driver([{"edges_created": 2}])
+        job = _job(
+            "test_geo_cfg",
+            "geoproximity",
+            writeedge="NEAR",
+            writeproperties=[{"lat_property": "latitude", "lon_property": "longitude", "id_property": "site_id"}],
+        )
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+        await scheduler.execute_job(job)
+        sent = _cypher_sent(driver)
+        assert ":NEAR" in sent
+        assert "a.latitude" in sent
+        assert "a.site_id < b.site_id" in sent
+
+    @pytest.mark.asyncio
+    async def test_property_edge_sync_materializes_declared_edges(self):
         driver = _mock_driver([{"edges_created": 24}])
-        job = _job("test_equip", "equipmentsync")
+        job = _job("test_prop_edges", "equipmentsync", **_PROPERTY_EDGE_JOB)
         spec = _minimal_spec([job])
         scheduler = GDSScheduler(spec, driver)
 
         result = await scheduler.execute_job(job)
         assert result["status"] == "success"
+        sent = _cypher_sent(driver)
+        assert "(e:ServiceType {name:" in sent
+        assert ":OFFERS" in sent
+        assert "f.has_dock" in sent
+        params = driver.execute_query.call_args.kwargs["parameters"]
+        assert set(params.values()) == {"dock", "crane"}
+
+    @pytest.mark.asyncio
+    async def test_property_edge_sync_has_no_built_in_mapping_table(self):
+        driver = _mock_driver()
+        job = _job("bare_prop_edges", "equipmentsync", writeedge="OFFERS", writeto="ServiceType")
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+
+        result = await scheduler.execute_job(job)
+        assert result["status"] == "failed"
+        assert "property_mappings" in result["error"]
+        driver.execute_query.assert_not_called()
+
+    def test_candidate_label_requires_a_declaration(self):
+        """No projection label, no candidate entity, no candidate node: explicit failure."""
+        from unittest.mock import MagicMock
+
+        domain_spec = MagicMock()
+        domain_spec.matchentities.candidate = []
+        domain_spec.ontology.nodes = []
+        job = GDSJobSpec(
+            name="unlabelled",
+            algorithm="geoproximity",
+            schedule=GDSJobScheduleSpec(type="manual"),
+            projection=GDSProjectionSpec(nodelabels=[], edgetypes=[]),
+        )
+        scheduler = GDSScheduler(domain_spec, _mock_driver())
+
+        with pytest.raises(ValueError, match="no node label declared"):
+            scheduler._get_candidate_label(job)
 
     @pytest.mark.asyncio
     async def test_unknown_algorithm_skipped(self):
@@ -294,7 +436,7 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_job_history_records_successes(self):
         driver = _mock_driver([{"edges_created": 1}])
-        job = _job("ok_job", "equipmentsync")
+        job = _job("ok_job", "equipmentsync", **_PROPERTY_EDGE_JOB)
         spec = _minimal_spec([job])
         scheduler = GDSScheduler(spec, driver)
 
@@ -310,7 +452,7 @@ class TestManualTrigger:
     @pytest.mark.asyncio
     async def test_trigger_existing_job(self):
         driver = _mock_driver([{"edges_created": 5}])
-        job = _job("my_job", "equipmentsync", schedule_type="manual")
+        job = _job("my_job", "equipmentsync", schedule_type="manual", **_PROPERTY_EDGE_JOB)
         spec = _minimal_spec([job])
         scheduler = GDSScheduler(spec, driver)
 

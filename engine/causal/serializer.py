@@ -48,9 +48,14 @@ class CausalSubgraphSerializer:
         node_label: str,
         max_depth: int = 2,
         max_nodes: int = 20,
+        id_property: str = "entity_id",
     ) -> dict[str, Any]:
         """
         BFS from node_id, collecting edges and properties.
+
+        ``id_property`` is the property that identifies the start node and
+        names the nodes on each path — the domain's declared id (sync
+        ``idproperty`` / first required property), not a fixed ``entity_id``.
 
         Returns:
         - serialized: human-readable path string
@@ -59,6 +64,7 @@ class CausalSubgraphSerializer:
         - depth_reached: actual BFS depth
         """
         safe_label = sanitize_label(node_label)
+        safe_id = sanitize_label(id_property)
 
         # Build causal edge pattern from domain spec
         causal_spec = self._spec.causal
@@ -70,7 +76,8 @@ class CausalSubgraphSerializer:
             rel_pattern = "[r]"
 
         cypher = f"""
-        MATCH (start:{safe_label} {{entity_id: $node_id}})
+        MATCH (start:{safe_label})
+        WHERE start.{safe_id} = $node_id
         CALL {{
             WITH start
             MATCH path = (start)-{rel_pattern}->(neighbor)
@@ -81,7 +88,7 @@ class CausalSubgraphSerializer:
             LIMIT $max_nodes
         }}
         WITH path, depth,
-             [n IN nodes(path) | {{id: n.entity_id, label: labels(n)[0], name: coalesce(n.name, n.entity_id)}}] AS path_nodes,
+             [n IN nodes(path) | {{id: n.{safe_id}, label: labels(n)[0], name: coalesce(n.name, n.{safe_id})}}] AS path_nodes,
              [r IN relationships(path) | {{type: type(r), confidence: coalesce(r.confidence, 0.0)}}] AS path_rels
         RETURN path_nodes, path_rels, depth
         ORDER BY depth ASC

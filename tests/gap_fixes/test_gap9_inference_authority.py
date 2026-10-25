@@ -42,15 +42,15 @@ def test_registry_exposes_only_supported_in_code_rule_surface() -> None:
 
 
 def test_supported_registry_still_returns_canonical_result_type() -> None:
-    context = registry.InferenceContext(tenant_id="test", domain_id="plasticos", pass_number=1)
+    context = registry.InferenceContext(tenant_id="test", domain_id="orbital-logistics", pass_number=1)
     result = registry.execute_rule(
-        "infer_material_grade_from_mfi",
-        {"melt_flow_index": 5.0, "material_type": "HDPE"},
+        "infer_email_domain_from_website",
+        {"website": "https://www.example.org/"},
         context,
     )
     assert isinstance(result, registry.InferenceResult)
-    assert result.field_name == "material_grade"
-    assert result.value == "HD_injection"
+    assert result.field_name == "email_domain"
+    assert result.value == "example.org"
 
 
 def test_runtime_surface_contains_no_ghost_successor_reference() -> None:

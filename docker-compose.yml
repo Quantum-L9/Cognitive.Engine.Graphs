@@ -32,9 +32,10 @@ services:
       # SDK chassis config. NodeRuntimeConfig is frozen with extra="forbid",
       # so names must match the SDK exactly.
       # Gate is the only peer transport: registration + all egress go to GATE_URL.
-      # This compose file does not start Gate — attach an external Gate on :8080
-      # (or override GATE_URL) before make dev / docker compose up api.
-      GATE_URL: ${GATE_URL:-http://gate:8080}
+      # This compose file does not start Gate — attach an external Gate on :9000
+      # (Gate's shipped port, ENV-SIG-01 parity 2026-10-22; or override GATE_URL)
+      # before make dev / docker compose up api.
+      GATE_URL: ${GATE_URL:-http://gate:9000}
       GATE_ADMIN_TOKEN: ${GATE_ADMIN_TOKEN:-dev-gate-admin-token-not-for-production}
       GATE_REGISTRATION_ENABLED: "true"
       L9_NODE_NAME: graph

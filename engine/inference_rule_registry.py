@@ -132,11 +132,33 @@ def execute_rule(
 
 
 # ===========================================================================
-# PRODUCTION INFERENCE RULES
-# Register supported in-code inference rules here. Domain configuration remains
-# owned by the typed DomainSpec/DomainPackLoader boundary; raw rule dictionaries
-# are not loaded into this registry.
+# GENERIC INFERENCE RULES
+# Register domain-neutral in-code inference rules here. Domain configuration
+# remains owned by the typed DomainSpec/DomainPackLoader boundary; raw rule
+# dictionaries are not loaded into this registry.
+#
+# Domain neutrality (Stage 2, R02): this registry carries no business-vertical
+# rule. The former plastics rules (facility tier from processing capacity,
+# material grade from melt-flow index, contamination tolerance) were PlasticOS
+# semantics that CEG does not own; they were removed, not relocated, because no
+# authorized domain mechanism supplies executable rules to CEG yet. A domain
+# authorizes which registered rules may run for it through
+# ``DomainSpec.plugins.inference_rules`` (see ``authorized_rules``); the admin
+# ``emit_inference_feedback`` pathway executes nothing a domain did not declare.
 # ===========================================================================
+
+
+def authorized_rules(domain_spec: Any) -> list[str]:
+    """Rule names the domain spec authorizes for inference-feedback execution.
+
+    Reads ``DomainSpec.plugins.inference_rules`` — the existing plugin extension
+    point — and returns an empty list when the domain declares nothing. The
+    generic engine never substitutes "every registered rule" for an absent
+    declaration.
+    """
+    plugins = getattr(domain_spec, "plugins", None)
+    declared = getattr(plugins, "inference_rules", None) if plugins is not None else None
+    return [str(name) for name in (declared or [])]
 
 
 @register_inference_rule("infer_company_size_tier")
@@ -240,105 +262,6 @@ def infer_geography_from_postal_code(entity: dict, ctx: InferenceContext) -> Inf
     return None
 
 
-@register_inference_rule("infer_facility_tier_from_capacity")
-def infer_facility_tier_from_capacity(entity: dict, ctx: InferenceContext) -> InferenceResult | None:
-    """
-    Plastics vertical: infer facility_tier from processing_capacity_tons_per_year.
-    Uses domain_kb thresholds if available, else defaults.
-    """
-    capacity = entity.get("processing_capacity_tons_per_year") or entity.get("annual_capacity_tons")
-    if capacity is None:
-        return None
-    try:
-        cap_n = float(capacity)
-    except (TypeError, ValueError):
-        return None
-    kb = ctx.domain_kb.get("facility_tier_thresholds", {})
-    micro_max = kb.get("micro_max", 500)
-    small_max = kb.get("small_max", 5_000)
-    mid_max = kb.get("mid_max", 25_000)
-    if cap_n <= micro_max:
-        tier, conf = "micro", 0.87
-    elif cap_n <= small_max:
-        tier, conf = "small", 0.85
-    elif cap_n <= mid_max:
-        tier, conf = "mid", 0.83
-    else:
-        tier, conf = "large", 0.88
-    return InferenceResult(
-        field_name="facility_tier",
-        value=tier,
-        confidence=conf,
-        rule_name="infer_facility_tier_from_capacity",
-        rationale=f"capacity={cap_n} tons/year",
-    )
-
-
-@register_inference_rule("infer_material_grade_from_mfi")
-def infer_material_grade_from_mfi(entity: dict, ctx: InferenceContext) -> InferenceResult | None:
-    """
-    Plastics vertical: infer material_grade from melt_flow_index (MFI g/10min).
-    Uses domain_kb mfi_grade_map if available.
-    """
-    mfi = entity.get("melt_flow_index") or entity.get("mfi")
-    material = entity.get("material_type", "HDPE").upper()
-    if mfi is None:
-        return None
-    try:
-        mfi_n = float(mfi)
-    except (TypeError, ValueError):
-        return None
-    kb = ctx.domain_kb.get("mfi_grade_map", {})
-    # Default HDPE thresholds — can be overridden by KB
-    if material in ("HDPE", "PE"):
-        grade_map = kb.get(
-            "HDPE",
-            [
-                (0.5, "HD_pipe", 0.88),
-                (2.0, "HD_blow", 0.85),
-                (8.0, "HD_injection", 0.83),
-                (float("inf"), "HD_fiber", 0.80),
-            ],
-        )
-    else:
-        grade_map = kb.get(material, [(float("inf"), "generic", 0.60)])
-    for threshold, grade, conf in grade_map:
-        if mfi_n <= threshold:
-            return InferenceResult(
-                field_name="material_grade",
-                value=grade,
-                confidence=conf,
-                rule_name="infer_material_grade_from_mfi",
-                rationale=f"MFI={mfi_n} material={material}",
-            )
-    return None
-
-
-@register_inference_rule("infer_contamination_tolerance")
-def infer_contamination_tolerance(entity: dict, ctx: InferenceContext) -> InferenceResult | None:
-    """
-    Plastics vertical: infer contamination_tolerance from facility_tier and material_grade.
-    Only fires if both fields are known.
-    """
-    tier = entity.get("facility_tier")
-    grade = entity.get("material_grade")
-    if not tier or not grade:
-        return None
-    high_tolerance_tiers = {"micro", "small"}
-    low_grade_patterns = {"fiber", "generic"}
-    tolerance = (
-        "high" if (tier in high_tolerance_tiers or any(p in str(grade).lower() for p in low_grade_patterns)) else "low"
-    )
-    conf = 0.78 if tolerance == "high" else 0.72
-    return InferenceResult(
-        field_name="contamination_tolerance",
-        value=tolerance,
-        confidence=conf,
-        rule_name="infer_contamination_tolerance",
-        rationale=f"facility_tier={tier} material_grade={grade}",
-    )
-
-
 @register_inference_rule("infer_icp_fit_score")
 def infer_icp_fit_score(entity: dict, ctx: InferenceContext) -> InferenceResult | None:
     """
@@ -365,9 +288,6 @@ def infer_icp_fit_score(entity: dict, ctx: InferenceContext) -> InferenceResult 
         factors += 1
     if entity.get("region"):
         score += 0.10
-        factors += 1
-    if entity.get("facility_tier") in ("mid", "large"):
-        score += 0.25
         factors += 1
     if factors == 0:
         return None

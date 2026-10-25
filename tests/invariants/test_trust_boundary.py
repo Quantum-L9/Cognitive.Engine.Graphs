@@ -118,10 +118,25 @@ class TestCEGAuth01TenantAllowlistFailsClosedInProd:
     """
 
     @staticmethod
-    def _settings(env: str):
+    def _settings(env: str, **overrides):
         from engine.config.settings import Settings
 
-        return Settings(l9_env=env, neo4j_password="real-pass", api_secret_key="real-key")
+        return Settings(l9_env=env, neo4j_password="real-pass", api_secret_key="real-key", **overrides)
+
+    def test_flag_off_restores_admit_in_prod(self):
+        """TENANT_ALLOWLIST_REQUIRED_IN_PROD=false is the rollback: prod admits again."""
+        from engine.handlers import _validate_tenant_access
+        from engine.state import get_state
+
+        state = get_state()
+        original = state._tenant_allowlist
+        try:
+            state._tenant_allowlist = None
+            settings = self._settings("prod", tenant_allowlist_required_in_prod=False)
+            with patch("engine.config.settings.settings", settings):
+                _validate_tenant_access("any_tenant", "match")
+        finally:
+            state._tenant_allowlist = original
 
     def test_prod_without_allowlist_rejects_every_tenant(self):
         from engine.handlers import ValidationError, _validate_tenant_access

@@ -34,7 +34,14 @@ COPY --from=deps /install /usr/local
 
 # Copy application code
 COPY engine/ /app/engine/
-COPY domains/ /app/domains/
+# Domain packs are an explicit build-time selection, not an implicit part of
+# the core image (Stage 2 R08). The default bundles this repository's example
+# packs (PlasticOS among them) so `make dev` and the E2E rails keep working;
+# a consumer deploying its own authorized packs points DOMAIN_PACKS_SRC at
+# them, and DOMAINS_ROOT at runtime selects what the engine serves. The engine
+# boots with an empty pack directory — no named domain is required.
+ARG DOMAIN_PACKS_SRC=domains
+COPY ${DOMAIN_PACKS_SRC}/ /app/domains/
 COPY chassis/ /app/chassis/
 
 # Copy entrypoint

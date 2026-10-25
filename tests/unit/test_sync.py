@@ -141,6 +141,100 @@ class TestSyncGenerator:
 
         assert "HAS_CERTIFICATION" in cypher
         assert "Certification" in cypher
+        # Stage 2 (Stage 4 proof P3): the child collection must not be copied onto the
+        # parent — Neo4j rejects a list of maps as a property value — and children are
+        # created inside FOREACH so a parent with no children keeps its row.
+        assert "SET n += row{.*, certifications: null}, n._tenant = $tenant" in cypher
+        assert "FOREACH (child_row IN coalesce(row.certifications, []) |" in cypher
+        assert "MERGE (c:Certification {certid: child_row.certid})" in cypher
+        assert "MERGE (n)-[:HAS_CERTIFICATION]->(c)" in cypher
+        assert "UNWIND coalesce" not in cypher
+
+    def test_child_entity_sync_childtoparent_direction(self) -> None:
+        """childtoparent emits a valid reverse pattern, not `(n)-[:T]<-(c)`."""
+        domain_spec = make_mock_domain_spec()
+        generator = SyncGenerator(domain_spec)
+
+        child = MagicMock()
+        child.targetnode = "Instrument"
+        child.targetid = "instrument_id"
+        child.field = "instruments"
+        child.edgetype = "INSTALLED_IN"
+        child.edgedirection = "childtoparent"
+
+        endpoint = make_mock_sync_endpoint(
+            path="/sync/laboratories",
+            strategy=SyncStrategy.UNWINDMERGE,
+            target_node="Laboratory",
+            id_property="lab_id",
+            child_sync=[child],
+        )
+
+        cypher = generator.generate_sync_query(endpoint, batch_data=[])
+
+        assert "MERGE (n)<-[:INSTALLED_IN]-(c)" in cypher
+        assert "]<-(c)" not in cypher
+
+    def test_child_entity_sync_unknown_direction_is_refused(self) -> None:
+        """An undeclared edgedirection is a spec defect, not a silent default."""
+        child = MagicMock()
+        child.targetnode = "Instrument"
+        child.targetid = "instrument_id"
+        child.field = "instruments"
+        child.edgetype = "INSTALLED_IN"
+        child.edgedirection = "sideways"
+
+        endpoint = make_mock_sync_endpoint(
+            path="/sync/laboratories",
+            strategy=SyncStrategy.UNWINDMERGE,
+            target_node="Laboratory",
+            id_property="lab_id",
+            child_sync=[child],
+        )
+
+        with pytest.raises(ValueError, match="edgedirection must be"):
+            SyncGenerator(make_mock_domain_spec()).generate_sync_query(endpoint, batch_data=[])
+
+    def test_child_entity_sync_legacy_path_behind_flag(self, monkeypatch) -> None:
+        """C-21: childsync_foreach_projection=False restores the pre-Stage-2 UNWIND path."""
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "childsync_foreach_projection", False)
+        child = MagicMock()
+        child.targetnode = "Instrument"
+        child.targetid = "instrument_id"
+        child.field = "instruments"
+        child.edgetype = "INSTALLED_IN"
+        child.edgedirection = "childtoparent"
+
+        endpoint = make_mock_sync_endpoint(
+            path="/sync/laboratories",
+            strategy=SyncStrategy.UNWINDMERGE,
+            target_node="Laboratory",
+            id_property="lab_id",
+            child_sync=[child],
+        )
+
+        cypher = SyncGenerator(make_mock_domain_spec()).generate_sync_query(endpoint, batch_data=[])
+
+        assert "SET n += row, n._tenant = $tenant" in cypher
+        assert "UNWIND coalesce(row.instruments, []) AS child_row" in cypher
+        assert "MERGE (n)-[:INSTALLED_IN]<-(c)" in cypher
+        assert "FOREACH" not in cypher
+
+    def test_parent_without_childsync_keeps_plain_set(self) -> None:
+        """Endpoints without childsync keep `SET n += row` unchanged."""
+        endpoint = make_mock_sync_endpoint(
+            path="/sync/routes",
+            strategy=SyncStrategy.UNWINDMERGE,
+            target_node="Route",
+            id_property="route_code",
+        )
+
+        cypher = SyncGenerator(make_mock_domain_spec()).generate_sync_query(endpoint, batch_data=[])
+
+        assert "SET n += row, n._tenant = $tenant" in cypher
+        assert "FOREACH" not in cypher
 
     def test_unwind_match_set_updates_all_when_no_fields_specified(self) -> None:
         """UNWINDMATCHSET with no fields_updated uses SET n += row."""

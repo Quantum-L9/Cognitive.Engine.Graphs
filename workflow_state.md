@@ -37,11 +37,13 @@ status: active
 - Pre-commit hooks pass ✅
 
 ## Recent Changes
+- [2026-10-11] [Stage 2 domain-neutral core, ADR-112] Files: `engine/config/loader.py`, `engine/config/schema.py`, `engine/config/settings.py`, `engine/gds/scheduler.py`, `engine/inference_rule_registry.py`, `engine/models/payloads.py`, `engine/intake/*`, `engine/handlers.py`, `engine/scoring/assembler.py`, `engine/replay/*`, `tools/payload_contract_compiler.py`, `contracts/payloads/*`, `Dockerfile`, `Makefile`, tests + synthetic fixtures | Action: generic fail-closed pack admission, GDS/inference/payload/intake/outcome vocabulary moved to the domain contract, PlasticOS kept as example, IdeaOS hydration BLOCKED (no owner) | Tests: unit/contract suites ✅, ruff ✅, mypy engine ✅ — evidence `docs/audits/2026-10-11-ceg-domain-neutrality-stage2/STAGE2_FINDING_CLOSURE.yaml`
 - [2026-04-26] [W2-02b] Files: `engine/packet/packet_store.py`, `engine/handlers.py`, `engine/config/settings.py`, `tests/unit/test_packet_store_outcome.py`, `.env`, `.env.template` | Action: Integrated outcome persistence via /harvest — record_outcome() method, handler wiring, feature flag, 16 unit tests | Tests: py_compile ✅, ruff ✅, mypy ✅
 - [2026-03-01] [GMP-130] Files: `tools/contract_scanner.py`, `tools/verify_contracts.py`, `.pre-commit-config.yaml`, `.github/workflows/contracts.yml`, `.coderabbit.yaml`, `CLAUDE.md` | Action: L9 Contract Enforcement System — 20 contracts enforced via pre-commit + CI + CodeRabbit | Tests: verify_contracts ✅, contract_scanner ✅, py_compile ✅
 - [2026-03-01] [PHASE 2->6] Files: `tools/l9_template_manifest.yaml`, `tools/audit_rules.yaml`, `tools/audit_engine.py`, `scripts/audit.sh`, `.github/workflows/audit.yml` | Action: Harvested new template-tagged audit harness files via sed-only workflow; no rewrites | Tests: syntax and YAML parse pass
 
 ## Decision Log
+- ADR-112 (2026-10-11): CEG is domain-agnostic; domain semantics arrive only through `DomainSpec` / `DomainContract`. ADR-103 and ADR-109 superseded in part; IdeaOS hydration stays in CEG dormant until an owner exists.
 - Template identification is canonicalized in `tools/l9_template_manifest.yaml` via `tag: "L9_TEMPLATE"` and per-file `tags` metadata.
 - Audit metadata includes `meta.L9_TEMPLATE: true` in `tools/audit_rules.yaml`.
 

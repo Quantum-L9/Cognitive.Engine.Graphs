@@ -136,6 +136,21 @@ class TestCausalEdgeRuntimeValidator:
         assert len(valid) == 3
         assert len(rejected) == 0
 
+    def test_mixed_offset_awareness_is_lenient(self) -> None:
+        """One offset-aware and one naive timestamp cannot be ordered — lenient pass, no TypeError."""
+        spec = _make_causal_spec()
+        validator = CausalEdgeRuntimeValidator(spec)
+
+        batch = [
+            {"source_ts": "2026-03-01T00:00:00+00:00", "target_ts": "2026-01-01T00:00:00", "confidence": 0.8},
+            {"source_ts": "2026-03-01T00:00:00", "target_ts": "2026-01-01T00:00:00+00:00", "confidence": 0.8},
+        ]
+
+        valid, rejected = validator.validate_batch(batch, "RESULTED_IN")
+
+        assert len(valid) == 2
+        assert len(rejected) == 0
+
     def test_temporal_precedence_disabled(self) -> None:
         """Temporal check skipped when enforce_temporal_precedence=False."""
         spec = _make_causal_spec(enforce_temporal=False)

@@ -26,8 +26,11 @@ import pytest
 from pydantic import ValidationError
 
 from engine.models.payloads import MatchRequest, MatchResponse
+from tests.fixtures.domain_contracts import PLASTICOS_EXAMPLE_CONTRACT
 
 _CONTRACTS_ROOT = Path(__file__).resolve().parents[2] / "contracts"
+# These campaign fixtures are the PlasticOS example; they admit against the example contract.
+CTX = PLASTICOS_EXAMPLE_CONTRACT.context()
 
 
 def _load(name: str) -> dict:
@@ -35,13 +38,13 @@ def _load(name: str) -> dict:
 
 
 def test_match_request_fixture_validates() -> None:
-    model = MatchRequest.model_validate(_load("match_request.json"))
+    model = MatchRequest.model_validate(_load("match_request.json"), context=CTX)
     assert model.query_id == "odoo-match-71-1"
     assert model.query_entity_ref == "res.partner:71"
 
 
 def test_match_response_fixture_validates() -> None:
-    model = MatchResponse.model_validate(_load("match_response.json"))
+    model = MatchResponse.model_validate(_load("match_response.json"), context=CTX)
     assert model.query_id == "odoo-match-71-1"
     assert model.candidates[0].entity_ref == "res.partner:102"
 
@@ -50,18 +53,18 @@ def test_response_rejects_candidate_missing_entity_ref() -> None:
     payload = _load("match_response.json")
     del payload["candidates"][0]["entity_ref"]
     with pytest.raises(ValidationError):
-        MatchResponse.model_validate(payload)
+        MatchResponse.model_validate(payload, context=CTX)
 
 
 def test_response_rejects_missing_query_id() -> None:
     payload = _load("match_response.json")
     del payload["query_id"]
     with pytest.raises(ValidationError):
-        MatchResponse.model_validate(payload)
+        MatchResponse.model_validate(payload, context=CTX)
 
 
 def test_request_rejects_missing_query_entity_ref() -> None:
     payload = _load("match_request.json")
     del payload["query_entity_ref"]
     with pytest.raises(ValidationError):
-        MatchRequest.model_validate(payload)
+        MatchRequest.model_validate(payload, context=CTX)

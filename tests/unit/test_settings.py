@@ -52,14 +52,13 @@ class TestSettingsDefaults:
         assert s.w_geo == 0.25
         assert s.w_reinforcement == 0.20
         assert s.w_freshness == 0.10
-        assert s.geo_decay_km == 800.0
 
     def test_default_temporal_decay(self) -> None:
-        """Default temporal decay halflives are set."""
+        """Default causal-attribution half-life is set; industry-specific decays are gone (Stage 2 R10)."""
         s = Settings()
         assert s.decay_transaction_halflife == 180.0
-        assert s.decay_facility_halflife == 90.0
-        assert s.decay_structural_halflife == 365.0
+        for removed in ("decay_facility_halflife", "decay_structural_halflife", "geo_decay_km", "community_cross_bias"):
+            assert not hasattr(s, removed), removed
 
     def test_default_kge_config(self) -> None:
         """Default KGE config is disabled."""
@@ -76,17 +75,20 @@ class TestSettingsDefaults:
         # cors_origins may be [] (default) or set via .env for local dev
         assert isinstance(s.cors_origins, list)
 
-    def test_default_entity_resolution(self) -> None:
-        """Default entity resolution config is set."""
-        s = Settings()
-        assert s.resolution_density_tolerance == 0.05
-        assert s.resolution_mfi_tolerance == 5.0
-        assert s.resolution_min_confidence == 0.6
+    def test_no_industry_specific_global_defaults(self) -> None:
+        """Stage 2 R10: melt-flow-index / density tolerances and the EMA alpha had no caller and are gone.
 
-    def test_default_feedback_loop(self) -> None:
-        """Default outcome EMA alpha is set."""
+        Per-domain tuning belongs in the domain spec (semantic_registry, feedbackloop), not in
+        engine-wide settings that encode one vertical's vocabulary.
+        """
         s = Settings()
-        assert s.outcome_ema_alpha == 0.1
+        for removed in (
+            "resolution_density_tolerance",
+            "resolution_mfi_tolerance",
+            "resolution_min_confidence",
+            "outcome_ema_alpha",
+        ):
+            assert not hasattr(s, removed), removed
 
 
 @pytest.mark.unit

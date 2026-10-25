@@ -29,7 +29,7 @@ hypothesis>=6.100,<7
 httpx>=0.27.0
 
 # ── Security scanning ─────────────────────────────────────────────────────────
-bandit==1.9.1
+bandit==1.9.4
 pip-audit==2.9.0
 safety>=3.8.1
 

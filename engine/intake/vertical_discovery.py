@@ -18,6 +18,7 @@ API calls — actual Sonar discovery happens in EIE.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 import structlog
@@ -50,27 +51,20 @@ class VerticalDiscoveryResult:
         )
 
 
-_VERTICAL_KEYWORDS: dict[str, str] = {
-    "plastic": "plasticos",
-    "recycl": "plasticos",
-    "polymer": "plasticos",
-    "mortgage": "mortgage_brokerage",
-    "lending": "mortgage_brokerage",
-    "healthcare": "healthcare_referral",
-    "medical": "healthcare_referral",
-    "freight": "freight_matching",
-    "logistics": "freight_matching",
-    "shipping": "freight_matching",
-    "legal": "legal_discovery",
-    "roofing": "roofing_company",
-}
+# Domain neutrality (Stage 2, R06): the engine carries no industry keyword
+# table. A caller that wants keyword → domain detection (the sales
+# demonstration) supplies its own mapping explicitly; with none supplied, no
+# vertical is detected and discovery is suggested instead.
+VerticalKeywords = Mapping[str, str]
 
 
-def _detect_vertical(business_profile: str) -> str | None:
-    """Match business profile text to a known vertical keyword."""
+def _detect_vertical(business_profile: str, vertical_keywords: VerticalKeywords | None) -> str | None:
+    """Match business profile text against caller-supplied keyword → domain-id pairs."""
+    if not vertical_keywords:
+        return None
     profile_lower = business_profile.lower()
-    for keyword, vertical in _VERTICAL_KEYWORDS.items():
-        if keyword in profile_lower:
+    for keyword, vertical in vertical_keywords.items():
+        if keyword.lower() in profile_lower:
             return vertical
     return None
 
@@ -119,6 +113,7 @@ def discover_vertical_fields(
     spec: DomainSpec | None = None,
     *,
     domains_dir: str = "domains",
+    vertical_keywords: VerticalKeywords | None = None,
 ) -> VerticalDiscoveryResult:
     """
     Discover vertical-standard fields from business profile.
@@ -131,12 +126,16 @@ def discover_vertical_fields(
         Optional pre-loaded DomainSpec (takes priority over YAML lookup).
     domains_dir:
         Path to the domains directory for YAML lookups.
+    vertical_keywords:
+        Caller-supplied ``keyword → domain id`` pairs used to detect the
+        vertical. The engine ships no table of its own; without one, the
+        vertical is ``"unknown"`` and discovery is suggested.
 
     Returns
     -------
     VerticalDiscoveryResult with field names and discovery suggestion flag.
     """
-    vertical = _detect_vertical(business_profile)
+    vertical = _detect_vertical(business_profile, vertical_keywords)
 
     if vertical is None:
         logger.info("vertical_not_detected", profile_snippet=business_profile[:80])
