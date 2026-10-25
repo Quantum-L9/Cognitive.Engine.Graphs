@@ -1,0 +1,152 @@
+"""
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [scoring]
+tags: [scoring, evidence, graph, reader, poc]
+owner: engine-team
+status: active
+--- /L9_META ---
+
+Neo4j-backed ``EvidenceBinding`` for ``graph_evidence_priority_v1`` (QM.POC0.CEG.GRAPH_EVIDENCE.002A).
+
+Reads, for the requested entity refs, the relationship evidence that relationship
+sync (``engine/sync/generator.py``) recorded: only edges stamped with
+``RELATIONSHIP_EVIDENCE_SCHEMA`` and the tenant, so a link that merely exists
+(taxonomy, child sync, GDS, anything written another way) is never evidence.
+The scored entity is the relationship's source node, identified by its declared
+stable id (``_subject_ref``).
+
+Reads go through ``GraphDriver.execute_read``: a managed READ transaction that
+never provisions a database. A missing database or an unconnected driver raises
+``EvidenceUnavailableError`` so the local handler answers ``blocked``.
+
+CEG admission of a raw assertion: only ``assertion_status == "observed"`` is
+``admitted``; ``reported`` and ``inferred`` stay ``inferred_unverified`` and never
+qualify. An edge whose ``expires_at`` has passed is stale. Commercial relevance
+is the server-owned map this binding is constructed with, never the source's.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
+from typing import Any, Literal
+
+from pydantic import ValidationError as PydanticValidationError
+
+from engine.graph.driver import DatabaseNotProvisionedError, GraphDriver
+from engine.scoring.evidence_priority import (
+    MAX_COHORT_SIZE,
+    EvidenceObservation,
+    EvidenceRead,
+    EvidenceUnavailableError,
+)
+from engine.sync.generator import RELATIONSHIP_EVIDENCE_SCHEMA
+
+logger = logging.getLogger(__name__)
+
+# Bounded read: more evidence edges than this for one cohort is refused rather
+# than silently truncated into a different score.
+MAX_EVIDENCE_EDGES = 1000
+
+_READ_EVIDENCE = """
+MATCH ()-[r]->()
+WHERE r._evidence_schema = $schema AND r._tenant = $tenant AND r._subject_ref IN $refs
+RETURN r._subject_ref AS entity_ref, type(r) AS relationship_type, properties(r) AS props
+ORDER BY entity_ref, props.evidence_ref
+LIMIT $limit
+"""
+
+
+def _admission(status: Any) -> Literal["admitted", "inferred_unverified"]:
+    return "admitted" if status == "observed" else "inferred_unverified"
+
+
+def _is_stale(expires_at: Any, now: datetime) -> bool:
+    if expires_at is None:
+        return False
+    try:
+        expiry = datetime.fromisoformat(str(expires_at))
+    except ValueError:
+        return True
+    return expiry.tzinfo is None or expiry <= now
+
+
+def _observation(row: dict[str, Any], now: datetime) -> EvidenceObservation | None:
+    props = row["props"]
+    try:
+        return EvidenceObservation(
+            entity_ref=row["entity_ref"],
+            evidence_ref=props.get("evidence_ref", ""),
+            relationship_type=row["relationship_type"],
+            source_ref=props.get("source_ref"),
+            confidence=props.get("confidence"),
+            admission=_admission(props.get("assertion_status")),
+            polarity=props.get("polarity"),
+            stale=_is_stale(props.get("expires_at"), now),
+        )
+    except PydanticValidationError:
+        return None
+
+
+def _single_revision(rows: Sequence[dict[str, Any]]) -> str | None:
+    """The source revision when every read edge reports the same one; never invented."""
+    revisions = {row["props"].get("source_revision") for row in rows}
+    if len(revisions) == 1:
+        revision = revisions.pop()
+        return revision if isinstance(revision, str) else None
+    return None
+
+
+class GraphEvidenceBinding:
+    """``EvidenceBinding`` over the tenant's Neo4j database, read-only and non-provisioning."""
+
+    def __init__(self, driver: GraphDriver, approved_relevance: Mapping[str, float]) -> None:
+        self._driver = driver
+        self._approved_relevance = approved_relevance
+
+    @property
+    def approved_relevance(self) -> Mapping[str, float]:
+        return self._approved_relevance
+
+    async def read(self, *, database: str, entity_refs: Sequence[str]) -> EvidenceRead:
+        if len(entity_refs) > MAX_COHORT_SIZE:
+            msg = f"evidence read accepts at most {MAX_COHORT_SIZE} refs"
+            raise ValueError(msg)
+        try:
+            self._driver.get_driver()
+        except RuntimeError as exc:
+            msg = "graph driver is not connected"
+            raise EvidenceUnavailableError(msg) from exc
+        params = {
+            "schema": RELATIONSHIP_EVIDENCE_SCHEMA,
+            "tenant": database,
+            "refs": list(entity_refs),
+            "limit": MAX_EVIDENCE_EDGES + 1,
+        }
+        try:
+            rows = await self._driver.execute_read(_READ_EVIDENCE, params, database=database)
+        except DatabaseNotProvisionedError as exc:
+            msg = f"tenant database {database!r} does not exist; a score read never creates it"
+            raise EvidenceUnavailableError(msg) from exc
+        if len(rows) > MAX_EVIDENCE_EDGES:
+            msg = f"more than {MAX_EVIDENCE_EDGES} evidence edges for this cohort; refusing a truncated read"
+            raise EvidenceUnavailableError(msg)
+
+        now = datetime.now(tz=UTC)
+        observations = []
+        for row in rows:
+            observation = _observation(row, now)
+            if observation is None:
+                logger.warning("Skipping malformed evidence edge in tenant database %s", database)
+                continue
+            observations.append(observation)
+        return EvidenceRead(
+            connected=True,
+            database=database,
+            source_revision=_single_revision(rows),
+            observations=tuple(observations),
+        )

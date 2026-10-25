@@ -19,7 +19,7 @@ import logging
 import os
 from typing import Any
 
-from neo4j import AsyncDriver, AsyncGraphDatabase
+from neo4j import READ_ACCESS, AsyncDriver, AsyncGraphDatabase
 
 from engine.graph.circuit_breaker import CircuitBreaker
 from engine.utils.security import sanitize_database_name
@@ -162,6 +162,45 @@ class GraphDriver:
         await self._provision_on_first_use(database)
         try:
             return await self._circuit_breaker.call(self._raw_execute_query, cypher, parameters, database)
+        except Exception as exc:
+            raise self._translate_absent_database(exc, database) from exc
+
+    async def _raw_execute_read(
+        self,
+        cypher: str,
+        parameters: dict[str, Any] | None,
+        database: str,
+    ) -> list[Any]:
+        """Run ``cypher`` in a managed READ transaction (internal, no circuit breaker)."""
+        driver = self.get_driver()
+
+        async def _read(tx: Any) -> list[Any]:
+            result = await tx.run(cypher, parameters or {})
+            records: list[Any] = await result.data()
+            return records
+
+        async with driver.session(database=database, default_access_mode=READ_ACCESS) as session:
+            records: list[Any] = await session.execute_read(_read)
+            return records
+
+    async def execute_read(
+        self,
+        cypher: str,
+        parameters: dict[str, Any] | None = None,
+        database: str | None = None,
+    ) -> list[Any]:
+        """Read-only query that never provisions a database (QM.POC0.CEG.GRAPH_EVIDENCE.002A).
+
+        Unlike ``execute_query`` this skips ``_provision_on_first_use`` even
+        under ``auto_create_domain_database``, so a read can never CREATE a
+        tenant database, and runs in a managed READ transaction, so the server
+        refuses any write the statement attempts. An absent database surfaces
+        as ``DatabaseNotProvisionedError``. Same explicit-database rule and
+        circuit breaker as ``execute_query``.
+        """
+        database = self._resolve_database(database, "execute_read")
+        try:
+            return await self._circuit_breaker.call(self._raw_execute_read, cypher, parameters, database)
         except Exception as exc:
             raise self._translate_absent_database(exc, database) from exc
 
