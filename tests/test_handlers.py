@@ -438,3 +438,37 @@ async def test_match_arbitration_front_uses_declared_candidate_id() -> None:
     pareto = result["pareto"]
     assert pareto["arbitration"]["nondominated_ids"] == ["F-1"]
     assert pareto["non_dominated_ids"] == ["F-1"]
+
+
+@pytest.mark.asyncio
+async def test_match_binds_compiler_literals_into_query_parameters() -> None:
+    """CEG-009b: a literal-operand gate reaches execute_query bound.
+
+    `GateCompiler` binds `queryparam: 85.0` under `$gate_<name>_value`;
+    handle_match must merge `gate_compiler.last_query_params` into the
+    parameters or Neo4j answers ParameterMissing for every such gate.
+    """
+    from engine.config.schema import GateType, NullBehavior
+    from engine.state import get_state
+
+    spec = _make_domain_spec()
+    gate = spec.gates[0]
+    gate.type = GateType.THRESHOLD
+    gate.candidateprop = "utilization"
+    gate.queryparam = 85.0
+    gate.operator = "<="
+    gate.nullbehavior = NullBehavior.PASS
+    gate.roleexempt = None
+    get_state().domain_loader.load_domain = MagicMock(return_value=spec)
+    driver = get_state().graph_driver
+
+    await handle_match("t", {"query": {"urgency": "routine"}, "match_direction": "buyer_to_seller"})
+
+    call = driver.execute_query.call_args
+    cypher = call.kwargs["cypher"]
+    parameters = call.kwargs["parameters"]
+    assert "candidate.utilization <= $gate_grade_gate_value" in cypher
+    assert "$85" not in cypher
+    assert parameters["gate_grade_gate_value"] == 85.0
+    assert parameters["urgency"] == "routine"
+    assert "top_n" in parameters

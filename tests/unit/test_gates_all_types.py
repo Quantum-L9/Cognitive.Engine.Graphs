@@ -61,6 +61,11 @@ def make_mock_gate_spec(**kwargs) -> MagicMock:
     spec.cypheroverride = kwargs.get("cypher_override") or kwargs.get("cypheroverride")
     spec.pattern = kwargs.get("pattern")
     spec.condition = kwargs.get("condition")
+    spec.strictwhen = kwargs.get("strictwhen")
+    spec.queryparam_min = kwargs.get("queryparam_min")
+    spec.queryparam_max = kwargs.get("queryparam_max")
+    spec.candidateprop_start = kwargs.get("candidateprop_start")
+    spec.candidateprop_end = kwargs.get("candidateprop_end")
     return spec
 
 
@@ -547,7 +552,7 @@ class TestGateValueParameterization:
     @staticmethod
     def _enum_gate(mapping: dict) -> EnumMapGate:
         spec = MagicMock()
-        spec.name = "polymer-map"
+        spec.name = "polymer_map"
         spec.candidateprop = "polymertype"
         spec.queryparam = "polymertype"
         spec.mapping = mapping
@@ -727,3 +732,386 @@ class TestGateIdentifierValidation:
         compiler = GateCompiler(make_mock_domain_spec(gates=[threshold, composite]))
         with pytest.raises(KeyError):
             compiler.compile(composite)
+
+
+# ============================================================================
+# CEG-009b: LITERAL OPERANDS BIND THROUGH GENERATED PARAMETERS
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestLiteralOperands:
+    """A scalar `queryparam` is a value, not a parameter name."""
+
+    def test_boolean_literal_binds_instead_of_emitting_dollar_true(self) -> None:
+        gate = make_mock_gate_spec(
+            name="accepts_new_patients",
+            gate_type=GateType.BOOLEAN,
+            candidate_prop="acceptsnewpatients",
+            query_param=True,
+            null_behavior=NullBehavior.FAIL,
+        )
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+
+        cypher = compiler.compile(gate)
+
+        assert cypher == (
+            "(candidate.acceptsnewpatients IS NOT NULL AND "
+            "(candidate.acceptsnewpatients = $gate_accepts_new_patients_value))"
+        )
+        assert "$True" not in cypher
+        assert compiler.last_query_params == {"gate_accepts_new_patients_value": True}
+
+    def test_false_literal_is_an_operand_not_an_absent_parameter(self) -> None:
+        gate = make_mock_gate_spec(name="privilege_filter", gate_type=GateType.BOOLEAN, candidate_prop="privileged")
+        gate.queryparam = False
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+
+        cypher = compiler.compile(gate)
+
+        assert "candidate.privileged = $gate_privilege_filter_value" in cypher
+        assert "= true" not in cypher
+        assert compiler.last_query_params["gate_privilege_filter_value"] is False
+
+    def test_numeric_literal_binds_with_its_type(self) -> None:
+        gate = make_mock_gate_spec(
+            name="utilization_gate",
+            gate_type=GateType.THRESHOLD,
+            candidate_prop="currentutilizationpct",
+            query_param=85.0,
+            operator="<=",
+        )
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+
+        cypher = compiler.compile(gate)
+
+        assert "candidate.currentutilizationpct <= $gate_utilization_gate_value" in cypher
+        assert "$85" not in cypher
+        assert compiler.last_query_params == {"gate_utilization_gate_value": 85.0}
+        # A literal is never NULL, so the null wrapper mentions only the candidate property.
+        assert "$gate_utilization_gate_value IS NULL" not in cypher
+
+    def test_selfrange_literal(self) -> None:
+        gate = make_mock_gate_spec(
+            name="panel_capacity",
+            gate_type=GateType.SELFRANGE,
+            candidate_prop_min="currentpanelsize",
+            candidate_prop_max="maxpanelsize",
+            query_param=1,
+        )
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+
+        cypher = compiler.compile(gate)
+
+        assert "candidate.currentpanelsize <= $gate_panel_capacity_value" in cypher
+        assert compiler.last_query_params == {"gate_panel_capacity_value": 1}
+
+    def test_named_parameter_is_still_a_name(self) -> None:
+        gate = make_mock_gate_spec(
+            name="t", gate_type=GateType.THRESHOLD, candidate_prop="score", query_param="min_score", operator=">="
+        )
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+
+        assert "candidate.score >= $min_score" in compiler.compile(gate)
+        assert compiler.last_query_params == {}
+
+    def test_threshold_without_queryparam_is_refused_not_defaulted(self) -> None:
+        """The compiler used to fall back to `$value`, a parameter nothing supplies."""
+        gate = make_mock_gate_spec(name="t", gate_type=GateType.THRESHOLD, candidate_prop="score", operator=">=")
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+
+        with pytest.raises(ValueError, match="requires queryparam"):
+            compiler.compile(gate)
+
+    def test_compile_all_gates_resets_then_collects_every_bound_literal(self) -> None:
+        g1 = make_mock_gate_spec(name="a", gate_type=GateType.BOOLEAN, candidate_prop="p", query_param=True)
+        g2 = make_mock_gate_spec(name="b", gate_type=GateType.THRESHOLD, candidate_prop="q", query_param=5)
+        compiler = GateCompiler(make_mock_domain_spec(gates=[g1, g2]))
+        compiler.compile(g1)
+
+        compiler.compile_all_gates("any")
+
+        assert compiler.last_query_params == {"gate_a_value": True, "gate_b_value": 5}
+        compiler.compile_all_gates("nowhere-matches-nothing")  # both gates have no direction filter
+        assert compiler.last_query_params == {"gate_a_value": True, "gate_b_value": 5}
+
+    def test_real_gatespec_keeps_scalar_types(self) -> None:
+        """GateSpec no longer stringifies YAML scalars."""
+        assert GateSpec(name="g", type=GateType.BOOLEAN, queryparam=True).queryparam is True
+        assert GateSpec(name="g", type=GateType.THRESHOLD, queryparam=85.0).queryparam == 85.0
+        assert GateSpec(name="g", type=GateType.THRESHOLD, queryparam=5).queryparam == 5
+        assert GateSpec(name="g", type=GateType.THRESHOLD, queryparam="85.0").queryparam == "85.0"
+
+    def test_real_gatespec_refuses_non_scalar_queryparam(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            GateSpec(name="g", type=GateType.THRESHOLD, queryparam=[1, 2])
+
+    def test_quoted_scalar_string_is_a_name_and_is_refused_as_one(self) -> None:
+        gate = GateSpec(name="g", type=GateType.THRESHOLD, candidateprop="x", queryparam="85.0")
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+        with pytest.raises(ValueError):
+            compiler.compile(gate)
+
+    def test_all_gates_classes_bind_literals_too(self) -> None:
+        spec = MagicMock()
+        spec.name = "cap"
+        spec.candidateprop = "activeprs"
+        spec.queryparam = 5
+        spec.operator = "<="
+        gate = ThresholdGate(spec, MagicMock())
+
+        assert gate.compile() == "candidate.activeprs <= $gate_cap_value"
+        assert gate.query_params == {"gate_cap_value": 5}
+
+
+# ============================================================================
+# CEG-009b: DECLARED BOUNDS FIELDS ARE HONOURED
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestDeclaredBounds:
+    def test_range_query_window_uses_declared_min_max_parameters(self) -> None:
+        gate = make_mock_gate_spec(
+            name="loanamount_range",
+            gate_type=GateType.RANGE,
+            candidate_prop="loanamountusd",
+            queryparam_min="minloanamountusd",
+            queryparam_max="maxloanamountusd",
+        )
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+
+        cypher = compiler.compile(gate)
+
+        assert "candidate.loanamountusd >= $minloanamountusd AND candidate.loanamountusd <= $maxloanamountusd" in cypher
+        assert "$value" not in cypher
+
+    def test_range_query_window_legacy_behind_flag(self, monkeypatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gate_declared_bounds_enabled", False)
+        gate = make_mock_gate_spec(
+            name="loanamount_range",
+            gate_type=GateType.RANGE,
+            candidate_prop="loanamountusd",
+            query_param="loanamountusd",
+            queryparam_min="minloanamountusd",
+            queryparam_max="maxloanamountusd",
+        )
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+
+        cypher = compiler.compile(gate)
+
+        assert "candidate.min_loanamountusd <= $loanamountusd" in cypher
+        assert "$minloanamountusd" not in cypher
+
+    def test_range_candidate_window_unchanged(self) -> None:
+        gate = make_mock_gate_spec(
+            name="density_range",
+            gate_type=GateType.RANGE,
+            candidate_prop_min="min_density",
+            candidate_prop_max="max_density",
+            query_param="density",
+        )
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+
+        assert compiler.compile(gate) == (
+            "($density IS NULL OR ((candidate.min_density IS NULL OR candidate.min_density <= $density) AND "
+            "(candidate.max_density IS NULL OR $density <= candidate.max_density)))"
+        )
+
+    def test_temporalrange_candidate_window_overlaps_query_window(self) -> None:
+        gate = make_mock_gate_spec(
+            name="availability_window",
+            gate_type=GateType.TEMPORALRANGE,
+            candidateprop_start="availabledate",
+            candidateprop_end="availabledate",
+            query_param_start="pickupdate",
+            query_param_end="pickupdate",
+        )
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+
+        assert (
+            compiler.compile(gate)
+            == "candidate.availabledate <= $pickupdate AND candidate.availabledate >= $pickupdate"
+        )
+
+    def test_temporalrange_legacy_behind_flag(self, monkeypatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gate_declared_bounds_enabled", False)
+        gate = make_mock_gate_spec(
+            name="availability_window",
+            gate_type=GateType.TEMPORALRANGE,
+            candidateprop_start="availabledate",
+            candidateprop_end="availabledate",
+            query_param_start="pickupdate",
+            query_param_end="pickupdate",
+        )
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+
+        assert compiler.compile(gate) == "candidate.timestamp >= $pickupdate AND candidate.timestamp <= $pickupdate"
+
+    def test_temporalrange_without_any_bounds_is_refused(self) -> None:
+        gate = make_mock_gate_spec(name="w", gate_type=GateType.TEMPORALRANGE, candidate_prop="ts")
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+        with pytest.raises(ValueError, match="queryparam_start and queryparam_end"):
+            compiler.compile(gate)
+
+
+# ============================================================================
+# CEG-009c: COMPOSITE GATES FAIL CLOSED
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestCompositeIntegrity:
+    def test_missing_subgate_is_an_error_not_a_warning(self) -> None:
+        composite = make_mock_gate_spec(name="c", gate_type=GateType.COMPOSITE, sub_gates=["ghost"], combinator="AND")
+        compiler = GateCompiler(make_mock_domain_spec(gates=[composite]))
+        with pytest.raises(ValueError, match="subgate 'ghost' is not declared"):
+            compiler.compile(composite)
+
+    def test_empty_subgates_is_an_error(self) -> None:
+        composite = make_mock_gate_spec(name="c", gate_type=GateType.COMPOSITE, sub_gates=[], combinator="AND")
+        compiler = GateCompiler(make_mock_domain_spec(gates=[composite]))
+        with pytest.raises(ValueError, match="declares no subgates"):
+            compiler.compile(composite)
+
+    def test_self_reference_is_a_cycle(self) -> None:
+        composite = make_mock_gate_spec(name="c", gate_type=GateType.COMPOSITE, sub_gates=["c"], combinator="AND")
+        compiler = GateCompiler(make_mock_domain_spec(gates=[composite]))
+        with pytest.raises(ValueError, match="cycle"):
+            compiler.compile(composite)
+
+    def test_mutual_reference_is_a_cycle_and_names_the_chain(self) -> None:
+        leaf = make_mock_gate_spec(name="leaf", gate_type=GateType.BOOLEAN, candidate_prop="p", query_param="q")
+        a = make_mock_gate_spec(name="a", gate_type=GateType.COMPOSITE, sub_gates=["leaf", "b"], combinator="AND")
+        b = make_mock_gate_spec(name="b", gate_type=GateType.COMPOSITE, sub_gates=["a"], combinator="OR")
+        compiler = GateCompiler(make_mock_domain_spec(gates=[leaf, a, b]))
+        with pytest.raises(ValueError, match="a -> b -> a"):
+            compiler.compile(a)
+        # The guard unwinds: an acyclic composite compiles afterwards.
+        ok = make_mock_gate_spec(name="ok", gate_type=GateType.COMPOSITE, sub_gates=["leaf"], combinator="AND")
+        compiler = GateCompiler(make_mock_domain_spec(gates=[leaf, ok]))
+        assert "candidate.p = $q" in compiler.compile(ok)
+
+    def test_composite_collects_subgate_literals(self) -> None:
+        leaf = make_mock_gate_spec(name="leaf", gate_type=GateType.BOOLEAN, candidate_prop="p", query_param=True)
+        composite = make_mock_gate_spec(name="c", gate_type=GateType.COMPOSITE, sub_gates=["leaf"], combinator="AND")
+        compiler = GateCompiler(make_mock_domain_spec(gates=[leaf, composite]))
+
+        cypher = compiler.compile(composite)
+
+        assert "$gate_leaf_value" in cypher
+        assert compiler.last_query_params == {"gate_leaf_value": True}
+
+
+# ============================================================================
+# CEG-009a: TRAVERSAL GATES — NO FALLBACK EDGE, A GRAMMAR FOR pattern/condition
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestBoundKeyCollisions:
+    """`bind_param_key` normalises names into identifiers; normalisation must not merge gates."""
+
+    def test_unchanged_name_keeps_the_readable_key(self) -> None:
+        from engine.gates.compiler import bind_param_key
+
+        assert bind_param_key("risk_a", "value") == "gate_risk_a_value"
+
+    def test_normalised_name_is_keyed_by_a_digest_of_the_original(self) -> None:
+        from engine.gates.compiler import bind_param_key
+
+        hyphen = bind_param_key("risk-a", "value")
+        underscore = bind_param_key("risk_a", "value")
+        assert hyphen != underscore
+        assert hyphen != "gate_risk_a_value"
+        assert hyphen.replace("_", "a").isalnum()
+        assert hyphen.endswith("_value")
+        assert bind_param_key("risk-a", "value") == hyphen  # deterministic
+        assert bind_param_key("risk.a", "value") not in {hyphen, underscore}
+
+    def test_distinct_gates_with_colliding_normalised_names_both_survive(self) -> None:
+        from engine.gates.compiler import bind_param_key
+
+        hyphen = make_mock_gate_spec(
+            name="risk-a", gate_type=GateType.BOOLEAN, candidate_prop="flagged", query_param=True
+        )
+        underscore = make_mock_gate_spec(name="risk_a", gate_type=GateType.BOOLEAN, candidate_prop="reviewed")
+        underscore.queryparam = False  # the helper's `or` chain drops a falsy literal
+        compiler = GateCompiler(make_mock_domain_spec(gates=[hyphen, underscore]))
+
+        where = compiler.compile_all_gates("any")
+
+        key_hyphen = bind_param_key("risk-a", "value")
+        key_underscore = bind_param_key("risk_a", "value")
+        assert compiler.last_query_params == {key_hyphen: True, key_underscore: False}
+        assert f"candidate.flagged = ${key_hyphen}" in where
+        assert f"candidate.reviewed = ${key_underscore}" in where
+
+    def test_duplicate_bound_key_is_refused(self, monkeypatch) -> None:
+        """Defence in depth: if the key function ever collides, the compiler says so."""
+        import engine.gates.compiler as compiler_module
+
+        monkeypatch.setattr(compiler_module, "bind_param_key", lambda name, suffix: "gate_same_value")
+        a = make_mock_gate_spec(name="a", gate_type=GateType.BOOLEAN, candidate_prop="p", query_param=True)
+        b = make_mock_gate_spec(name="b", gate_type=GateType.THRESHOLD, candidate_prop="q", query_param=5)
+        compiler = GateCompiler(make_mock_domain_spec(gates=[a, b]))
+
+        with pytest.raises(ValueError, match="both bind the Cypher parameter '\\$gate_same_value'"):
+            compiler.compile_all_gates("any")
+
+    def test_same_gate_rebinding_is_idempotent(self) -> None:
+        gate = make_mock_gate_spec(name="a", gate_type=GateType.BOOLEAN, candidate_prop="p", query_param=True)
+        compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
+
+        compiler.compile(gate)
+        compiler.compile(gate)
+
+        assert compiler.last_query_params == {"gate_a_value": True}
+
+    def test_all_gates_bind_param_is_in_lockstep(self) -> None:
+        from engine.gates.compiler import bind_param_key
+
+        spec = MagicMock()
+        spec.name = "polymer-map"
+        spec.candidateprop = "polymertype"
+        spec.queryparam = "polymertype"
+        spec.mapping = {"PET": ["PET"]}
+        gate = EnumMapGate(spec, MagicMock())
+
+        gate.compile()
+
+        assert set(gate.query_params) == {
+            bind_param_key("polymer-map", "key_0"),
+            bind_param_key("polymer-map", "values_0"),
+        }
+        assert "gate_polymer_map_key_0" not in gate.query_params
+
+    def test_composite_refuses_subgates_whose_keys_collide(self, monkeypatch) -> None:
+        import engine.gates.types.all_gates as all_gates_module
+        from engine.gates.types.all_gates import CompositeGate
+
+        monkeypatch.setattr(all_gates_module, "bind_param_key", lambda name, suffix: "gate_same_key")
+        subs = []
+        for name, mapping in (("x", {"a": ["b"]}), ("y", {"c": ["d"]})):
+            sub = MagicMock()
+            sub.name = name
+            sub.type = GateType.ENUMMAP
+            sub.candidateprop = "p"
+            sub.queryparam = "q"
+            sub.mapping = mapping
+            subs.append(sub)
+        composite = MagicMock()
+        composite.name = "both"
+        composite.subgates = ["x", "y"]
+        composite.logic = "AND"
+        domain_spec = MagicMock()
+        domain_spec.gates = subs
+
+        with pytest.raises(ValueError, match="already bound by an earlier subgate"):
+            CompositeGate(composite, domain_spec).compile()

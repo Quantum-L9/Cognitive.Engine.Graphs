@@ -13,19 +13,15 @@ All 10 gate type implementations in one file.
 Production-grade, enterprise-quality, frontier AI lab standard.
 """
 
-import hashlib
 import logging
-import re
 from abc import ABC, abstractmethod
 from typing import Any
 
 from engine.config.schema import DomainSpec, GateSpec
+from engine.gates.compiler import bind_param_key
 from engine.utils.security import sanitize_label
 
 logger = logging.getLogger(__name__)
-
-_PARAM_KEY_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_]")
-_MAX_PARAM_KEY_LEN = 64
 
 # C-009: spec tokens interpolated verbatim pass through a literal allow-list —
 # a lookup raises on anything else — so an operator or combinator read from
@@ -79,18 +75,23 @@ class BaseGate(ABC):
 
         The name is derived from the gate name so fragments from different gates
         never collide; both parts are reduced to ``[A-Za-z0-9_]`` so the name is
-        always a valid Cypher parameter identifier.
+        always a valid Cypher parameter identifier. The derivation is shared
+        with ``GateCompiler`` (``bind_param_key``) so the two never collide.
         """
-        safe_gate = _PARAM_KEY_UNSAFE_RE.sub("_", self.spec.name)
-        safe_suffix = _PARAM_KEY_UNSAFE_RE.sub("_", suffix)
-        raw_key = f"gate_{safe_gate}_{safe_suffix}"
-        if len(raw_key) > _MAX_PARAM_KEY_LEN:
-            # Keep the key an identifier of bounded length; the digest keeps it unique per gate.
-            digest = hashlib.sha256(safe_gate.encode()).hexdigest()[:16]
-            raw_key = f"gate_{digest}_{safe_suffix}"[:_MAX_PARAM_KEY_LEN]
-        key = sanitize_label(raw_key)
+        # bind_param_key already validates; sanitize_label here keeps the
+        # C-009 provenance visible to tools/cypher_lint.py in this module.
+        key = sanitize_label(bind_param_key(self.spec.name, suffix))
         self._query_params[key] = value
         return f"${key}"
+
+    def _query_operand(self) -> str:
+        """``$`` reference for the gate's `queryparam`: a name, or a bound literal (CEG-009b)."""
+        value = self.spec.queryparam
+        if value is None:
+            raise ValueError(f"Gate '{self.spec.name}': queryparam required")
+        if isinstance(value, str):
+            return self._param_ref(value)
+        return self._bind_param("value", value)
 
     def _prop_ref(self, prop: str) -> str:
         """Format property reference (property name validated as an identifier)."""
@@ -144,13 +145,13 @@ class ThresholdGate(BaseGate):
         """
         if not self.spec.candidateprop:
             raise ValueError(f"Gate '{self.spec.name}': candidateprop required")
-        if not self.spec.queryparam:
+        if self.spec.queryparam is None:
             raise ValueError(f"Gate '{self.spec.name}': queryparam required")
         if not self.spec.operator:
             raise ValueError(f"Gate '{self.spec.name}': operator required (>=, <=, >, <, =)")
 
         prop = self._prop_ref(self.spec.candidateprop)
-        param = self._param_ref(self.spec.queryparam)
+        param = self._query_operand()
         operator = _OPERATORS[self.spec.operator]
 
         return f"{prop} {operator} {param}"
@@ -170,11 +171,11 @@ class BooleanGate(BaseGate):
         """
         if not self.spec.candidateprop:
             raise ValueError(f"Gate '{self.spec.name}': candidateprop required")
-        if not self.spec.queryparam:
+        if self.spec.queryparam is None:
             raise ValueError(f"Gate '{self.spec.name}': queryparam required")
 
         prop = self._prop_ref(self.spec.candidateprop)
-        param = self._param_ref(self.spec.queryparam)
+        param = self._query_operand()
 
         return f"{prop} = {param}"
 
@@ -210,7 +211,16 @@ class CompositeGate(BaseGate):
             gate_class = GateRegistry.get_gate_class(subgate_spec.type)
             gate_instance = gate_class(subgate_spec, self.domain_spec)
             subgate_clauses.append(f"({gate_instance.compile()})")
-            self._query_params.update(gate_instance.query_params)
+            # Lockstep with GateCompiler._bind: a key another subgate already
+            # bound to a different value is a collision, never an overwrite.
+            sub_params = gate_instance.query_params
+            for key, value in sub_params.items():
+                if key in self._query_params and self._query_params[key] != value:
+                    raise ValueError(
+                        f"Gate '{self.spec.name}': subgate '{subgate_name}' binds the Cypher parameter "
+                        f"'${key}' already bound by an earlier subgate with a different value"
+                    )
+            self._query_params.update(sub_params)
 
         logic_op = f" {_LOGIC[self.spec.logic.upper()]} "
         return logic_op.join(subgate_clauses)
@@ -230,11 +240,11 @@ class EnumMapGate(BaseGate):
         """
         if not self.spec.candidateprop:
             raise ValueError(f"Gate '{self.spec.name}': candidateprop required")
-        if not self.spec.queryparam:
+        if self.spec.queryparam is None:
             raise ValueError(f"Gate '{self.spec.name}': queryparam required")
 
         prop = self._prop_ref(self.spec.candidateprop)
-        param = self._param_ref(self.spec.queryparam)
+        param = self._query_operand()
         self._query_params = {}
 
         # Check if mapping is provided (query value → candidate values)
@@ -294,12 +304,12 @@ class SelfRangeGate(BaseGate):
         """
         if not self.spec.candidateprop_min or not self.spec.candidateprop_max:
             raise ValueError(f"Gate '{self.spec.name}': candidateprop_min and candidateprop_max required")
-        if not self.spec.queryparam:
+        if self.spec.queryparam is None:
             raise ValueError(f"Gate '{self.spec.name}': queryparam required")
 
         min_prop = self._prop_ref(self.spec.candidateprop_min)
         max_prop = self._prop_ref(self.spec.candidateprop_max)
-        param = self._param_ref(self.spec.queryparam)
+        param = self._query_operand()
 
         return f"{param} >= {min_prop} AND {param} <= {max_prop}"
 

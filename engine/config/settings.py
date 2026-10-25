@@ -263,6 +263,15 @@ class Settings(BaseSettings):
     # FOREACH, and childtoparent emits `(n)<-[:T]-(c)`. Off: the legacy
     # UNWIND-based path. Ships on — the legacy path cannot execute.
     childsync_foreach_projection: bool = True
+    # CEG-009b: GateSpec declares `queryparam_min` / `queryparam_max` (range,
+    # query-window form) and `candidateprop_start` / `candidateprop_end`
+    # (temporalrange, candidate-window form), and GateCompiler ignored all
+    # four: a query-window range compiled against the placeholder `$value`
+    # and a candidate-window temporalrange against `candidate.timestamp`,
+    # which no such candidate carries. On: the declared fields are honoured.
+    # Off: the legacy fragments, kept for C-21 rollback only; neither executes
+    # faithfully. See docs/FEATURE_GATES.md §21.
+    gate_declared_bounds_enabled: bool = True
 
     # Seam audit / PR remediation: paid-tier enrich_now Gate dispatch is opt-in.
     # Default off so deploy does not immediately spend EIE budget until enabled.

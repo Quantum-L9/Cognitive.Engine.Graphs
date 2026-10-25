@@ -60,6 +60,7 @@ independently of the code default.
 | Health Commercial Mode | `HEALTH_COMMERCIAL_MODE_ENABLED` (`health_commercial_mode_enabled`), `HEALTH_ENTITLED_TIER` | `False`, `seed` | unset | dormant; tier entitlements, upgrade prompts and conversion events — see §22 |
 | Health Batch Ceilings | `HEALTH_BATCH_MAX_ENTITIES`, `HEALTH_BATCH_COST_CEILING_USD` | `100`, `10.0` | unset | active; server-owned caps a request may lower but not raise — see §22 |
 | Tenant Allowlist Required in Prod | `TENANT_ALLOWLIST_REQUIRED_IN_PROD` (`tenant_allowlist_required_in_prod`) | `True` | unset | active (hardening); an unset `TENANT_ALLOWLIST` denies every tenant under `L9_ENV=prod` — see §11 |
+| Gate Declared Bounds | `GATE_DECLARED_BOUNDS_ENABLED` (`gate_declared_bounds_enabled`) | `True` | unset | active; range honours `queryparam_min`/`queryparam_max`, temporalrange honours `candidateprop_start`/`candidateprop_end` — see §21 |
 | Strict Tenant Database | `STRICT_TENANT_DATABASE` (`strict_tenant_database`) | `True` | unset | active (hardening); an omitted `database=` on `GraphDriver` raises — see §23 |
 | Outcome Persistence | `OUTCOME_PERSISTENCE_ENABLED` | `False` | `True` | active (opt-in; requires PacketStore — see §5) |
 | Tenant Auth (JWT allowed_tenants) | `TENANT_AUTH_ENABLED` | `True` | `True` | active in the chassis only — claim decoded, not enforced; `TENANT_ALLOWLIST` is the enforced control — see §11 |
@@ -844,3 +845,41 @@ with both flags on. Unit coverage: `tests/unit/test_gates_all_types.py`
 ### Rollback
 
 Set either flag to `false`. The legacy Cypher is emitted again verbatim.
+
+---
+
+## 21. Gate Declared Bounds (CEG-009b)
+
+**State**: Active (hardening)
+**Flag**: `GATE_DECLARED_BOUNDS_ENABLED=True` (default on)
+
+`GateSpec` declares `queryparam_min` / `queryparam_max` (a range gate whose
+candidate property must fall inside a query window) and `candidateprop_start`
+/ `candidateprop_end` (a temporalrange gate whose candidate window must overlap
+the query window). `GateCompiler` ignored all four, so:
+
+| Gate as written | Emitted before | Emitted now |
+|---|---|---|
+| `range` with `queryparam_min: a`, `queryparam_max: b` | `candidate.min_<prop> <= $value AND $value <= candidate.max_<prop>` | `candidate.<prop> >= $a AND candidate.<prop> <= $b` |
+| `temporalrange` with `candidateprop_start: s`, `candidateprop_end: e` | `candidate.timestamp >= $start AND candidate.timestamp <= $end` | `candidate.s <= $end AND candidate.e >= $start` |
+
+`$value` is a parameter nothing supplies and `candidate.timestamp` a property
+no such candidate carries, so neither legacy fragment ever matched what the
+spec author wrote. `freight-matching`'s `availability_window` is the live case:
+it compared `candidate.timestamp` and therefore rejected every candidate.
+
+Off: the legacy fragments, for C-21 rollback only. The surrounding CEG-009b
+change — a scalar `queryparam` (`85.0`, `true`) is bound as a generated
+parameter (`$gate_<name>_value`, exposed on `GateCompiler.last_query_params`)
+instead of being emitted as a parameter *name* — has no flag: the previous
+output (`$85.0`, `$True`) could not execute, so there is no legacy behaviour
+to return to.
+
+### Validation
+
+`tests/unit/test_gates_all_types.py` (`TestLiteralOperands`,
+`TestDeclaredBounds`) assert both shapes and the flag-off fragments.
+
+### Rollback
+
+Set the flag to `false`. The placeholder fragments are emitted again verbatim.

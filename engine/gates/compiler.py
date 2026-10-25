@@ -13,14 +13,17 @@ engine/gates/compiler.py
 Compile gate definitions from domain spec YAML into executable Cypher WHERE clauses.
 Handles all 10 gate types, null semantics, role exemptions, and direction filtering.
 
-Exports: GateCompiler
+Exports: GateCompiler, bind_param_key
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
+import re
 from collections.abc import Callable
+from typing import Any
 
 from engine.config.schema import (
     DomainSpec,
@@ -45,10 +48,61 @@ _OPERATORS: dict[str, str] = {
 }
 _LOGIC: dict[str, str] = {"AND": "AND", "OR": "OR"}
 
+# ── Generated parameter names (C-009) ─────────────────────
+#
+# A value a gate needs at run time never appears in the compiled fragment as a
+# literal. The compiler registers it under a generated, validated parameter
+# name and the caller merges `last_query_params` into the execute_query
+# parameters. `engine/gates/types/all_gates.py` binds through the same key
+# derivation so the two compilers can never collide on a name.
+_PARAM_KEY_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_]")
+_MAX_PARAM_KEY_LEN = 64
+
+# CEG-009b: a spec-authored scalar operand (`queryparam: 85.0`, `queryparam:
+# true`). Anything else that is not a declared parameter name is refused.
+LiteralOperand = bool | int | float
+
+
+def bind_param_key(gate_name: str, suffix: str) -> str:
+    """Validated Cypher parameter identifier for a value a gate binds itself.
+
+    The name is derived from the gate name so fragments from different gates
+    never collide; both parts are reduced to ``[A-Za-z0-9_]`` so the name is
+    always a valid Cypher parameter identifier, and ``sanitize_label`` is the
+    final word (C-009).
+    """
+    safe_gate = _PARAM_KEY_UNSAFE_RE.sub("_", gate_name)
+    safe_suffix = _PARAM_KEY_UNSAFE_RE.sub("_", suffix)
+    raw_key = f"gate_{safe_gate}_{safe_suffix}"
+    if safe_gate != gate_name or len(raw_key) > _MAX_PARAM_KEY_LEN:
+        # Normalisation is lossy — "risk-a" and "risk_a" both become "risk_a" —
+        # so a name it changed, or one too long to keep whole, is identified by
+        # a digest of the ORIGINAL name instead. Distinct names therefore never
+        # share a key (hashing the normalised form would collide the same way).
+        digest = hashlib.sha256(gate_name.encode()).hexdigest()[:16]
+        raw_key = f"gate_{digest}_{safe_suffix}"
+        if len(raw_key) > _MAX_PARAM_KEY_LEN:
+            suffix_digest = hashlib.sha256(suffix.encode()).hexdigest()[:16]
+            raw_key = f"gate_{digest}_{suffix_digest}"
+    return sanitize_label(raw_key)
+
 
 def _param_name(name: str | None, fallback: str = "value") -> str:
     """Validated Cypher parameter identifier for a gate's query parameter."""
     return sanitize_label(name or fallback)
+
+
+def _declared(gate: GateSpec, field: str) -> str | None:
+    """A gate field that is a non-empty string; anything else counts as absent.
+
+    Read with a default so a partially specified gate (a test double built from
+    the model's public surface) compiles the same as a real `GateSpec` whose
+    optional field is None.
+    """
+    value = getattr(gate, field, None)
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
 
 
 class GateCompiler:
@@ -67,9 +121,15 @@ class GateCompiler:
         temporal_range → candidate.prop >= $start AND candidate.prop <= $end
         traversal → EXISTS { MATCH (candidate)-[:EDGE]->(t:Target) WHERE t.prop = $param }
 
+    A gate whose `queryparam` is a scalar (`85.0`, `true`) compiles against a
+    generated parameter instead of a parameter *name*; the value is exposed on
+    `last_query_params` and must be merged into the execute_query parameters
+    together with the resolved query (CEG-009b).
+
     Usage:
         compiler = GateCompiler(domain_spec)
         where_clause = compiler.compile_all_gates(domain_spec.queryschema.matchdirections[0])
+        parameters = {**resolved_query, **compiler.last_query_params}
         single = compiler.compile(gate_spec)
     """
 
@@ -77,6 +137,12 @@ class GateCompiler:
         self.domain_spec = domain_spec
         self._gates: list[GateSpec] = domain_spec.gates if domain_spec.gates else []
         self._compliance = getattr(domain_spec, "compliance", None)
+        # C-009: literal operands bound during compilation, keyed by generated name,
+        # and which (gate, suffix) owns each key so two gates can never share one.
+        self._query_params: dict[str, Any] = {}
+        self._bound_by: dict[str, tuple[str, str]] = {}
+        # CEG-009c: composite gates currently being expanded (cycle guard).
+        self._composite_stack: list[str] = []
 
     # ── W1-03: Gate validation (seL4-inspired) ──────────────
 
@@ -91,6 +157,9 @@ class GateCompiler:
         (b) No gate uses an operator incompatible with the field's declared type.
         (c) Post-compilation: if a resolved parameter is None, log WARNING and
             reject if STRICT_NULL_GATES is enabled.
+
+        A literal `queryparam` is bound by the compiler itself and therefore
+        never looked up in the resolved set.
 
         Returns list of warning messages (empty = all clear).
         """
@@ -108,10 +177,12 @@ class GateCompiler:
         numeric_types = frozenset({"int", "float", "datetime", "date", "duration"})
 
         for gate in self._gates:
+            named_param = gate.queryparam if isinstance(gate.queryparam, str) else None
+
             # (a) Check that required gate params exist in resolved set
-            if resolved_params is not None and gate.queryparam:
-                if gate.queryparam not in resolved_params:
-                    msg = f"Gate '{gate.name}': parameter '${gate.queryparam}' not in resolved parameters"
+            if resolved_params is not None and named_param:
+                if named_param not in resolved_params:
+                    msg = f"Gate '{gate.name}': parameter '${named_param}' not in resolved parameters"
                     warnings.append(msg)
                     if settings.strict_null_gates:
                         logger.warning(msg)
@@ -127,10 +198,10 @@ class GateCompiler:
                     logger.warning(msg)
 
             # (c) Null-param post-check
-            if resolved_params is not None and gate.queryparam:
-                val = resolved_params.get(gate.queryparam)
+            if resolved_params is not None and named_param:
+                val = resolved_params.get(named_param)
                 if val is None:
-                    msg = f"Gate '{gate.name}': parameter '${gate.queryparam}' resolved to null"
+                    msg = f"Gate '{gate.name}': parameter '${named_param}' resolved to null"
                     if settings.strict_null_gates:
                         warnings.append(msg)
                         logger.warning(msg)
@@ -139,12 +210,26 @@ class GateCompiler:
 
     # ── Public API ─────────────────────────────────────────
 
+    @property
+    def last_query_params(self) -> dict[str, Any]:
+        """Parameters the compiler bound itself during the most recent compilation.
+
+        Reset by `compile_all_gates` / `compile_relaxed`; `compile` accumulates so a
+        composite's subgates land in the same map. Merge into the execute_query
+        parameters alongside the resolved query (C-009).
+        """
+        return dict(self._query_params)
+
     def compile(self, gate: GateSpec) -> str:
         """
         Compile a single GateSpec into a Cypher WHERE fragment.
 
         Returns a string like:
             "candidate.min_density <= $density AND $density <= candidate.max_density"
+
+        The fragment carries the gate's null semantics. Composite gates
+        compile their subgates through this method, so it applies to a
+        subgate exactly as it would to the gate on its own.
         """
         handler = self._get_handler(gate.type)
         raw_predicate = handler(gate)
@@ -165,6 +250,8 @@ class GateCompiler:
         Returns:
             Combined Cypher WHERE clause (without the WHERE keyword)
         """
+        self._query_params = {}
+        self._bound_by = {}
         fragments: list[str] = []
 
         for gate in self._gates:
@@ -196,6 +283,8 @@ class GateCompiler:
         Non-critical gates become score penalties instead of hard filters.
         Only gates with relaxedpenalty == 0.0 are included as hard WHERE.
         """
+        self._query_params = {}
+        self._bound_by = {}
         hard_fragments: list[str] = []
 
         for gate in self._gates:
@@ -213,6 +302,50 @@ class GateCompiler:
             return "true"
 
         return AND_JOINER.join(hard_fragments)
+
+    # ── Parameter binding (C-009 / CEG-009b) ────────────────
+
+    def _bind(self, gate: GateSpec, suffix: str, value: LiteralOperand | str | list[Any]) -> str:
+        """Register ``value`` under a generated name and return its ``$`` reference.
+
+        Defence in depth behind ``bind_param_key``: a key already owned by a
+        different (gate, suffix) is refused rather than silently overwritten,
+        which would make one predicate evaluate against another gate's operand.
+        The same gate re-binding the same suffix (a gate compiled twice in one
+        accumulation) is idempotent.
+        """
+        key = bind_param_key(gate.name, suffix)
+        owner = (gate.name, suffix)
+        previous = self._bound_by.get(key)
+        if previous is not None and previous != owner:
+            msg = (
+                f"Gate '{gate.name}' and gate '{previous[0]}' both bind the Cypher parameter '${key}' "
+                f"(suffixes {suffix!r} / {previous[1]!r}); rename one gate so their operands cannot collide"
+            )
+            raise ValueError(msg)
+        self._bound_by[key] = owner
+        self._query_params[key] = value
+        return f"${key}"
+
+    def _operand(self, gate: GateSpec) -> str:
+        """``$`` reference for the gate's `queryparam`.
+
+        A string is a declared parameter *name* and is validated like a label.
+        A scalar is a literal operand (`queryparam: 85.0`): it is bound under a
+        generated name so the fragment references `$gate_<name>_value`, never
+        `$85.0` or `$True`.
+        """
+        value = gate.queryparam
+        if value is None:
+            msg = f"Gate '{gate.name}': a {gate.type.value} gate requires queryparam"
+            raise ValueError(msg)
+        if isinstance(value, str):
+            return f"${sanitize_label(value)}"
+        return self._bind(gate, "value", value)
+
+    def _named_param(self, gate: GateSpec) -> str | None:
+        """The declared parameter name behind `queryparam`, or None for a literal / absent one."""
+        return gate.queryparam if isinstance(gate.queryparam, str) else None
 
     # ── Gate Type Handlers ─────────────────────────────────
 
@@ -239,9 +372,8 @@ class GateCompiler:
     def _compile_boolean(self, gate: GateSpec) -> str:
         """Boolean gate: candidate.prop = $param OR candidate.prop = true."""
         prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "prop"
-        if gate.queryparam:
-            param = _param_name(gate.queryparam)
-            return f"candidate.{prop} = ${param}"
+        if gate.queryparam is not None:
+            return f"candidate.{prop} = {self._operand(gate)}"
         return f"candidate.{prop} = true"
 
     def _compile_threshold(self, gate: GateSpec) -> str:
@@ -251,22 +383,41 @@ class GateCompiler:
         """
         prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "prop"
         op = _OPERATORS[gate.operator or ">="]
-        param = _param_name(gate.queryparam)
-        return f"candidate.{prop} {op} ${param}"
+        return f"candidate.{prop} {op} {self._operand(gate)}"
 
     def _compile_range(self, gate: GateSpec) -> str:
         """
-        Range gate: query value falls within candidate's min/max range.
-        Pattern: candidate.min_prop <= $param AND $param <= candidate.max_prop
+        Range gate, in one of two declared shapes:
+
+        * query window — `queryparam_min` / `queryparam_max` name two parameters
+          and the candidate's single property must fall between them:
+          candidate.prop >= $min AND candidate.prop <= $max
+        * candidate window — the query value falls within the candidate's own
+          min/max properties (`candidateprop_min` / `candidateprop_max`, or
+          `min_<prop>` / `max_<prop>`):
+          candidate.min_prop <= $param AND $param <= candidate.max_prop
+
+        Before `gate_declared_bounds_enabled`, `queryparam_min` / `queryparam_max`
+        were declared by the schema and ignored here, so a query-window gate
+        compiled against the placeholder parameter `$value`.
         """
+        from engine.config.settings import settings
+
         base_prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "prop"
+        lower = _declared(gate, "queryparam_min")
+        upper = _declared(gate, "queryparam_max")
+        if settings.gate_declared_bounds_enabled and lower and upper:
+            lo = sanitize_label(lower)
+            hi = sanitize_label(upper)
+            return f"candidate.{base_prop} >= ${lo} AND candidate.{base_prop} <= ${hi}"
+
         min_prop = sanitize_label(gate.candidateprop_min) if gate.candidateprop_min else f"min_{base_prop}"
         max_prop = sanitize_label(gate.candidateprop_max) if gate.candidateprop_max else f"max_{base_prop}"
-        param = _param_name(gate.queryparam)
+        param = self._operand(gate)
 
         parts = []
-        parts.append(f"(candidate.{min_prop} IS NULL OR candidate.{min_prop} <= ${param})")
-        parts.append(f"(candidate.{max_prop} IS NULL OR ${param} <= candidate.{max_prop})")
+        parts.append(f"(candidate.{min_prop} IS NULL OR candidate.{min_prop} <= {param})")
+        parts.append(f"(candidate.{max_prop} IS NULL OR {param} <= candidate.{max_prop})")
         return AND_JOINER.join(parts)
 
     def _compile_enum(self, gate: GateSpec) -> str:
@@ -275,10 +426,10 @@ class GateCompiler:
         Or inverse: $param IN candidate.prop_list
         """
         prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "prop"
-        param = _param_name(gate.queryparam)
+        param = self._operand(gate)
         if gate.invertible:
-            return f"${param} IN candidate.{prop}"
-        return f"candidate.{prop} IN ${param}"
+            return f"{param} IN candidate.{prop}"
+        return f"candidate.{prop} IN {param}"
 
     def _compile_exclusion(self, gate: GateSpec) -> str:
         """
@@ -303,14 +454,14 @@ class GateCompiler:
         # edge_type and target_prop are sanitized via sanitize_label() above;
         # values only ever flow through $ parameters.
         exclusion_edge = "(candidate)-[:" + edge_type + "]->"
-        if gate.queryparam:
-            param = _param_name(gate.queryparam)
+        if gate.queryparam is not None:
+            param = self._operand(gate)
             return (
                 "NOT EXISTS { MATCH "
                 + exclusion_edge
                 + "(excluded) WHERE excluded."
                 + target_prop
-                + f" = ${param} "
+                + f" = {param} "
                 + "}"
             )
         return "NOT EXISTS { MATCH " + exclusion_edge + "() }"
@@ -319,23 +470,32 @@ class GateCompiler:
         """
         Composite gate: combines sub-gates with AND/OR.
         gate.subgates is a list of gate names (strings), gate.logic is 'AND' or 'OR'.
+
+        A subgate that is not declared, an empty subgate list, and a composite
+        that reaches itself through its subgates are all spec defects and raise
+        (CEG-009c); the previous behaviour — warn and compile what is left —
+        silently widened the gate.
         """
-        if not gate.subgates:
-            return "true"
-
         combinator = f" {_LOGIC[(gate.logic or 'AND').upper()]} "
-        sub_fragments = []
-        for sub_gate_name in gate.subgates:
-            sub_gate_spec = next((g for g in self._gates if g.name == sub_gate_name), None)
-            if sub_gate_spec is None:
-                logger.warning(f"Subgate '{sub_gate_name}' not found, skipping")
-                continue
-            fragment = self.compile(sub_gate_spec)
-            if fragment:
-                sub_fragments.append(f"({fragment})")
+        if not gate.subgates:
+            msg = f"Gate '{gate.name}': composite gate declares no subgates"
+            raise ValueError(msg)
+        if gate.name in self._composite_stack:
+            chain = " -> ".join([*self._composite_stack, gate.name])
+            msg = f"Gate '{gate.name}': composite gates form a cycle ({chain})"
+            raise ValueError(msg)
 
-        if not sub_fragments:
-            return "true"
+        self._composite_stack.append(gate.name)
+        try:
+            sub_fragments: list[str] = []
+            for sub_gate_name in gate.subgates:
+                sub_gate_spec = next((g for g in self._gates if g.name == sub_gate_name), None)
+                if sub_gate_spec is None:
+                    msg = f"Gate '{gate.name}': subgate '{sub_gate_name}' is not declared in this domain spec"
+                    raise ValueError(msg)
+                sub_fragments.append(f"({self.compile(sub_gate_spec)})")
+        finally:
+            self._composite_stack.pop()
 
         return combinator.join(sub_fragments)
 
@@ -348,11 +508,11 @@ class GateCompiler:
         base_prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "prop"
         min_prop = sanitize_label(gate.candidateprop_min) if gate.candidateprop_min else f"min_{base_prop}"
         max_prop = sanitize_label(gate.candidateprop_max) if gate.candidateprop_max else f"max_{base_prop}"
-        param = _param_name(gate.queryparam)
+        param = self._operand(gate)
 
         return (
-            f"(candidate.{min_prop} IS NULL OR candidate.{min_prop} <= ${param}) AND "
-            f"(candidate.{max_prop} IS NULL OR ${param} <= candidate.{max_prop})"
+            f"(candidate.{min_prop} IS NULL OR candidate.{min_prop} <= {param}) AND "
+            f"(candidate.{max_prop} IS NULL OR {param} <= candidate.{max_prop})"
         )
 
     def _compile_freshness(self, gate: GateSpec) -> str:
@@ -367,11 +527,40 @@ class GateCompiler:
 
     def _compile_temporal_range(self, gate: GateSpec) -> str:
         """
-        Temporal range gate: candidate.prop between two datetime parameters.
+        Temporal range gate.
+
+        * With `candidateprop_start` / `candidateprop_end` the candidate's window
+          must overlap the query window:
+          candidate.start <= $end AND candidate.end >= $start
+        * Otherwise the candidate's single `candidateprop` (default `timestamp`)
+          must fall between the two datetime parameters.
+
+        Before `gate_declared_bounds_enabled` the candidate window fields were
+        declared by the schema and ignored here, so such a gate compared
+        `candidate.timestamp` — a property no such candidate carries.
         """
+        from engine.config.settings import settings
+
+        named = self._named_param(gate)
+        start_name = _declared(gate, "queryparam_start") or (f"{named}_start" if named else None)
+        end_name = _declared(gate, "queryparam_end") or (f"{named}_end" if named else None)
+        if not start_name or not end_name:
+            msg = (
+                f"Gate '{gate.name}': temporalrange needs queryparam_start and queryparam_end "
+                "(or a named queryparam to derive them from)"
+            )
+            raise ValueError(msg)
+        start_param = sanitize_label(start_name)
+        end_param = sanitize_label(end_name)
+
+        prop_start = _declared(gate, "candidateprop_start")
+        prop_end = _declared(gate, "candidateprop_end")
+        if settings.gate_declared_bounds_enabled and prop_start and prop_end:
+            cand_start = sanitize_label(prop_start)
+            cand_end = sanitize_label(prop_end)
+            return f"candidate.{cand_start} <= ${end_param} AND candidate.{cand_end} >= ${start_param}"
+
         prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "timestamp"
-        start_param = sanitize_label(gate.queryparam_start or f"{gate.queryparam}_start")
-        end_param = sanitize_label(gate.queryparam_end or f"{gate.queryparam}_end")
         return f"candidate.{prop} >= ${start_param} AND candidate.{prop} <= ${end_param}"
 
     def _compile_traversal(self, gate: GateSpec) -> str:
@@ -397,18 +586,18 @@ class GateCompiler:
 
         if not settings.traversal_gate_exists_subquery:
             # Legacy predicate (C-21 rollback path). Not executable on Neo4j 5.
-            if gate.candidateprop and gate.queryparam:
+            if gate.candidateprop and gate.queryparam is not None:
                 prop = sanitize_label(gate.candidateprop)
-                param = _param_name(gate.queryparam)
-                target_filter = f" {{{prop}: ${param}}}"
+                param = self._operand(gate)
+                target_filter = f" {{{prop}: {param}}}"
             return f"exists((candidate)-[:{edge_type}]->(t{label_clause}{target_filter}))"
 
-        if gate.candidateprop and gate.queryparam:
+        if gate.candidateprop and gate.queryparam is not None:
             # candidateprop names the TARGET node's property here (the related
             # taxonomy node), not a property of the candidate.
             prop = sanitize_label(gate.candidateprop)
-            param = _param_name(gate.queryparam)
-            target_filter = f" WHERE t.{prop} = ${param}"
+            param = self._operand(gate)
+            target_filter = f" WHERE t.{prop} = {param}"
 
         # Concatenated like the exclusion gate above: edge_type / target_label /
         # prop are sanitize_label()-validated and values only ever flow through
@@ -423,6 +612,9 @@ class GateCompiler:
 
         NullBehavior.PASS   → (candidate.prop IS NULL OR <predicate>)
         NullBehavior.FAIL   → (candidate.prop IS NOT NULL AND <predicate>)
+
+        A literal `queryparam` is never NULL, so only a declared parameter name
+        takes part in the null check.
         """
         from engine.config.settings import settings
 
@@ -446,15 +638,18 @@ class GateCompiler:
         # between the candidate's shape and its taxonomy (Stage 2, P4). The
         # legacy wrap is kept behind the same flag as the legacy predicate.
 
-        skip_candidate_prop = gate.type == GateType.TRAVERSAL and settings.traversal_gate_exists_subquery
+        is_traversal = gate.type == GateType.TRAVERSAL
+        skip_candidate_prop = is_traversal and settings.traversal_gate_exists_subquery
         candidate_prop: str | None = None
         if gate.candidateprop and not skip_candidate_prop:
             candidate_prop = f"candidate.{sanitize_label(gate.candidateprop)}"
+
+        named = self._named_param(gate)
 
         return NullHandler.wrap_gate_with_null_logic(
             gate_type=gate.type,
             null_behavior=null_behavior,
             gate_cypher=predicate,
             candidate_prop=candidate_prop,
-            query_param=f"${_param_name(gate.queryparam)}" if gate.queryparam else None,
+            query_param=f"${_param_name(named)}" if named else None,
         )
