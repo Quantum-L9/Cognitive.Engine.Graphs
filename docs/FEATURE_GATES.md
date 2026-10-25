@@ -56,9 +56,11 @@ independently of the code default.
 | Strict Null Gates | `STRICT_NULL_GATES` | `True` | `True` | active |
 | Param Strict Mode | `PARAM_STRICT_MODE` | `True` | `True` | active |
 | LLM Security (ValidatedLLMClient) | `LLM_PROVIDER` | `openai` (implicit) | `openai` | active — fully implemented, requires `OPENAI_API_KEY` |
-| PacketStore Persistence | `PACKET_STORE_ENABLED` | `False` | `True` | active (opt-in, needs `PACKET_STORE_DSN`) |
+| PacketStore Persistence | `PACKET_STORE_ENABLED` (`packet_store_enabled`), `PACKET_STORE_DSN` (`packet_store_dsn`) | `False` | `True` | active (opt-in; read through `Settings` since PERSIST-01 — see §7) |
+| Tenant Allowlist Required in Prod | `TENANT_ALLOWLIST_REQUIRED_IN_PROD` (`tenant_allowlist_required_in_prod`) | `True` | unset | active (hardening); an unset `TENANT_ALLOWLIST` denies every tenant under `L9_ENV=prod` — see §11 |
+| Strict Tenant Database | `STRICT_TENANT_DATABASE` (`strict_tenant_database`) | `True` | unset | active (hardening); an omitted `database=` on `GraphDriver` raises — see §23 |
 | Outcome Persistence | `OUTCOME_PERSISTENCE_ENABLED` | `False` | `True` | active (opt-in; requires PacketStore — see §5) |
-| Tenant Auth (JWT allowed_tenants) | `TENANT_AUTH_ENABLED` | `True` | `True` | active |
+| Tenant Auth (JWT allowed_tenants) | `TENANT_AUTH_ENABLED` | `True` | `True` | active in the chassis only — claim decoded, not enforced; `TENANT_ALLOWLIST` is the enforced control — see §11 |
 | Capability Auth (domain-spec model) | `CAPABILITY_AUTH_ENABLED` | `True` | `True` | active |
 | PostgreSQL Audit Pool | `POSTGRES_DSN` | unset (`None`) | set | active (opt-in, soft dependency — see §7) |
 | Dormant Domain Packs | `DORMANT_DOMAIN_PACKS_ENABLED` (`dormant_domain_packs_enabled`) | `False` | unset | dormant; serve packs that declare `domain.activation: dormant` (replaces the per-domain `idea_portfolio_enabled`) — see §16 |
@@ -202,7 +204,42 @@ by design they are not merged, even though they may target the same instance:
 | Pool | Config | Consumer | Behavior when unset |
 |---|---|---|---|
 | ComplianceEngine audit-flush | `POSTGRES_DSN` (`settings.postgres_dsn`) | `engine/compliance/audit.py: AuditLogger.flush_to_store()` | `flush_audit()` no-ops with a warning log — never blocks startup |
-| PacketStore | `PACKET_STORE_ENABLED` + `PACKET_STORE_DSN` | `engine/packet/packet_store.py` | `PacketStore` disabled — persistence calls no-op |
+| PacketStore | `PACKET_STORE_ENABLED` (`settings.packet_store_enabled`) + `PACKET_STORE_DSN` (`settings.packet_store_dsn`); pool size `PACKET_STORE_POOL_MIN` / `PACKET_STORE_POOL_MAX` (`settings.packet_store_pool_min` / `_max`, defaults 2 / 10) | `engine/packet/packet_store.py` | `PacketStore` disabled — persistence calls no-op |
+
+### PacketStore configuration (PERSIST-01)
+
+`engine/packet/packet_store.py` used to read its four variables with
+`os.environ.get`, so the only module that persists packets was configured
+outside the settings SSOT and invisible to `feature_status`, `.env` loading and
+the production-secret validator. They are now `Settings` fields with the same
+environment variable names (pydantic-settings matches field names to env vars
+case-insensitively, so nothing an operator has set changes). `.env.template`
+already carries `PACKET_STORE_ENABLED` and `PACKET_STORE_DSN`; the two pool-size
+variables are documented here rather than added to that protected file.
+
+### Production activation prerequisites (PacketStore)
+
+Enabling persistence in production requires, in this order:
+
+1. A PostgreSQL instance reachable from the engine with
+   `engine/packet/packet_store.sql` applied (the docker-compose `postgres`
+   service applies it on first init only; a managed instance needs it run by
+   hand), including migration `0001_outcome_jsonb` for `record_outcome()`.
+2. `PACKET_STORE_DSN` set to that instance with a role that can `INSERT` into
+   `packet_store`, `lineage_graph`, `hop_trace`, `delegation_chain` and
+   `UPDATE packet_store.outcome_jsonb`. The DSN is a secret: provide it from the
+   deployment's secret store, never from a committed file.
+3. `asyncpg` installed in the image (`PacketStore` raises `RuntimeError`
+   naming the package otherwise).
+4. `PACKET_STORE_ENABLED=true`. With it on and the DSN unset, the first persist
+   raises `RuntimeError("PACKET_STORE_DSN ... is required")` — the store does
+   not degrade silently to disabled.
+5. Only then `OUTCOME_PERSISTENCE_ENABLED=true` (§10), which depends on this
+   store.
+
+Compose changes that provision or wire the store are infrastructure and belong
+to a separately approved change (`CONTRACT-05`); this section documents the
+contract they must satisfy.
 
 ### Wiring
 
@@ -316,13 +353,37 @@ without a reachable PacketStore degrades to logged warnings rather than hard fai
 
 ---
 
-## 11. Tenant Auth (W3-01)
+## 11. Tenant Auth (W3-01) and the tenant allowlist (CEG-AUTH-01)
 
-**State**: Active
+**State**: `TENANT_AUTH_ENABLED` active in the chassis; `TENANT_ALLOWLIST` is the
+enforced control
 **Flag**: `TENANT_AUTH_ENABLED=True` (default on)
 
-Enforces the JWT `allowed_tenants` claim against the resolved tenant. Setting this to
-`False` disables that check — acceptable only for single-tenant local development.
+What `TENANT_AUTH_ENABLED` does today: `chassis/auth/auth.py` decodes the JWT
+`allowed_tenants` claim onto `request.state` and honours the service-to-service
+bypass key. It does **not** compare the claim against the request tenant — the
+middleware defers that "to the handler layer", and no caller ever forwarded the
+claim into the engine. The engine-side branch of `_validate_tenant_access` that
+would have compared it was therefore unreachable; CEG-AUTH-01 removed it rather
+than keep code that documented an enforcement which did not exist. Wiring the
+claim through the execute route is a chassis change and is not done here.
+
+The control that is enforced on every action is `TENANT_ALLOWLIST`
+(comma-separated tenant ids, resolved into `EngineState` at startup):
+
+| `TENANT_ALLOWLIST` | `L9_ENV` | Behaviour |
+|---|---|---|
+| set | any | tenants not listed are rejected (`ValidationError`, 422) |
+| unset | `dev` / `local` / `test` / `staging` | every tenant admitted, with a WARNING at startup |
+| unset | `prod` | **every tenant rejected** (fail closed) and an ERROR at startup naming the fix |
+
+Before CEG-AUTH-01 the last row admitted every tenant with only a warning. A
+production deployment that forgot the allowlist now refuses requests instead of
+running open.
+
+**Flag**: `TENANT_ALLOWLIST_REQUIRED_IN_PROD` (`tenant_allowlist_required_in_prod`),
+default `True`. **Rollback**: set it to `false` to restore the pre-CEG-AUTH-01
+last row (admit every tenant, WARNING at startup) without inventing an allowlist.
 
 ---
 
@@ -414,6 +475,32 @@ Set the flag back to `False`. Provisioning stops; a query against an absent
 database then raises `DatabaseNotProvisionedError`, which names the missing
 database and the exact `CREATE DATABASE` command. That message is present
 whether or not the flag is on.
+
+---
+
+## 23. Strict Tenant Database (W7-01 / DB-STRICT-01)
+
+**State**: Active (hardening; default flipped to on 2026-10-22)
+**Flag**: `STRICT_TENANT_DATABASE=True` (default on)
+
+Every tenant's data lives in a Neo4j database named after its domain id, so a
+`GraphDriver.execute_query` / `execute_write` call that names no `database=`
+can only mean the caller forgot — and the old silent fallback put that caller's
+reads and writes on the shared `neo4j` database. The flag shipped `False` while
+callers were audited; the audit found every engine caller names its database
+(handlers, GDS scheduler, feedback, resolution, causal, scoring, sync), so the
+default is now `True` and an omitted `database=` raises a `ValueError` that
+names the method and this flag.
+
+`handle_health`'s liveness probe passes `database="neo4j"` explicitly and is
+unaffected. Live GDPR erasure (`erase_subject` admin subaction with
+`GDPR_DRY_RUN=false`) passes the subject's domain database — the caller's
+`domain_id`, the same value its dry-run count queries — so it runs under the
+strict default without an opt-out.
+
+### Rollback
+
+`STRICT_TENANT_DATABASE=false` restores the `neo4j` fallback.
 
 ---
 

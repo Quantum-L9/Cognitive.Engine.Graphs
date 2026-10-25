@@ -25,28 +25,33 @@ New in this version:
        PACKET_STORE_ENABLED=true and settings.outcome_persistence_enabled=True.
     -- Non-fatal: degrades gracefully on any DB error (log warning, return False).
 
-Configuration via environment variables:
-  - PACKET_STORE_ENABLED: "true" to enable persistence (default: "false")
-  - PACKET_STORE_DSN: PostgreSQL connection string
-    e.g. "postgresql://user:pass@host:5432/dbname"
-  - PACKET_STORE_POOL_MIN: Minimum pool connections (default: 2)
-  - PACKET_STORE_POOL_MAX: Maximum pool connections (default: 10)
+Configuration (PERSIST-01: read through ``engine.config.settings.Settings``,
+the settings SSOT, under the same environment variable names as before):
+  - PACKET_STORE_ENABLED  -> settings.packet_store_enabled   (default False)
+  - PACKET_STORE_DSN      -> settings.packet_store_dsn       (PostgreSQL DSN,
+    shape "postgresql://<user>:<password>@<host>:5432/<db>"; required when enabled)
+  - PACKET_STORE_POOL_MIN -> settings.packet_store_pool_min  (default 2)
+  - PACKET_STORE_POOL_MAX -> settings.packet_store_pool_max  (default 10)
+Production activation prerequisites are in docs/FEATURE_GATES.md §7.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+
+from engine.config.settings import settings
 
 if TYPE_CHECKING:
     from constellation_node_sdk import TransportPacket
 
 logger = logging.getLogger(__name__)
 
-_PACKET_STORE_ENABLED = os.environ.get("PACKET_STORE_ENABLED", "false").lower() == "true"
+# Resolved once at import, as the os.environ read before it was. Kept as a
+# module attribute because it is the seam tests use to enable the store.
+_PACKET_STORE_ENABLED: bool = settings.packet_store_enabled
 
 # ── SQL ──────────────────────────────────────────────────────
 
@@ -125,14 +130,15 @@ class _PoolManager:
                 "asyncpg is required for PacketStore persistence. Install with: pip install asyncpg"
             ) from exc
 
-        dsn = os.environ.get("PACKET_STORE_DSN")
+        dsn = settings.packet_store_dsn
         if not dsn:
             raise RuntimeError(
-                "PACKET_STORE_DSN environment variable is required. Set it to your PostgreSQL connection string."
+                "PACKET_STORE_DSN (settings.packet_store_dsn) is required when the PacketStore is enabled. "
+                "Set it to your PostgreSQL connection string."
             )
 
-        min_size = int(os.environ.get("PACKET_STORE_POOL_MIN", "2"))
-        max_size = int(os.environ.get("PACKET_STORE_POOL_MAX", "10"))
+        min_size = settings.packet_store_pool_min
+        max_size = settings.packet_store_pool_max
 
         self._pool = await asyncpg.create_pool(
             dsn=dsn,

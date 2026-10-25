@@ -45,15 +45,49 @@ def _response_packet(packet_type: str = "response") -> Any:
 
 
 def test_build_enrichment_request_matches_eie_enrich_request_shape():
+    """SEAM-02 producer contract — the exact body EIE's `enrich` consumer receives.
+
+    Top level: ``entity_id``, ``domain`` and ``idempotency_key`` (identity and the
+    retry key, readable without descending into ``entity``), plus the EIE
+    ``EnrichRequest`` fields ``entity``, ``object_type``, ``schema``, ``objective``,
+    ``kb_context``. Inside ``entity``: the caller's record, ``id`` and
+    ``entity_id`` (both the same value) and ``domain``.
+    """
     payload = build_enrichment_request(
-        entity_id="ent-1", domain="plasticos", target_fields=["polymer", "capacity", "polymer"], entity={"name": "Acme"}
+        entity_id="ent-1",
+        domain="plasticos",
+        target_fields=["polymer", "capacity", "polymer"],
+        entity={"name": "Acme"},
+        idempotency_key="ceg:enrich:acme:ent-1:abc",
     )
-    assert set(payload) == {"entity", "object_type", "schema", "objective", "kb_context"}
-    assert payload["entity"] == {"entity_id": "ent-1", "domain": "plasticos", "name": "Acme"}
+    assert set(payload) == {
+        "entity_id",
+        "domain",
+        "idempotency_key",
+        "entity",
+        "object_type",
+        "schema",
+        "objective",
+        "kb_context",
+    }
+    assert payload["entity_id"] == "ent-1"
+    assert payload["domain"] == "plasticos"
+    assert payload["idempotency_key"] == "ceg:enrich:acme:ent-1:abc"
+    assert payload["entity"] == {"id": "ent-1", "entity_id": "ent-1", "domain": "plasticos", "name": "Acme"}
     assert payload["object_type"] == "plasticos"
     assert payload["schema"] == {"polymer": "string", "capacity": "string"}
     assert payload["kb_context"] == "plasticos"
     assert "ent-1" in payload["objective"]
+
+
+def test_build_enrichment_request_caller_record_cannot_override_identity():
+    payload = build_enrichment_request(
+        entity_id="ent-1", domain="plasticos", target_fields=["polymer"], entity={"id": "spoof", "domain": "other"}
+    )
+    assert payload["entity"]["id"] == "ent-1"
+    assert payload["entity"]["entity_id"] == "ent-1"
+    assert payload["entity"]["domain"] == "plasticos"
+    assert payload["idempotency_key"] is None, "no key unless the sender supplies the one it put on the packet"
 
 
 @pytest.mark.parametrize(
@@ -107,6 +141,11 @@ async def test_request_enrichment_sends_enrich_action_through_gate(monkeypatch: 
     assert call["timeout_ms"] == 5_000
     assert call["idempotency_key"] == enrichment_idempotency_key("acme", "ent-1", ["polymer"])
     assert call["payload"]["object_type"] == "plasticos"
+    # SEAM-02: the key on the packet is also in the body EIE persists, with the identity beside it.
+    assert call["payload"]["idempotency_key"] == call["idempotency_key"]
+    assert call["payload"]["entity_id"] == "ent-1"
+    assert call["payload"]["domain"] == "plasticos"
+    assert call["payload"]["entity"]["id"] == "ent-1"
     assert result["status"] == "ok"
     assert result["payload"]["state"] == "completed"
     assert result["idempotency_key"] == call["idempotency_key"]

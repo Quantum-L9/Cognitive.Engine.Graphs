@@ -532,16 +532,18 @@ class TestGraphDriverCircuitBreaker:
         driver._driver.session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
         driver._driver.session.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        # First 2 failures trip the breaker
+        # First 2 failures trip the breaker. database= is explicit: DB-STRICT-01
+        # made the implicit 'neo4j' fallback an error, and this test is about
+        # the breaker, not the binding (tests/unit/test_graph_driver_database_binding.py).
         for _ in range(2):
             with pytest.raises(RuntimeError, match="Neo4j down"):
-                await driver.execute_query("RETURN 1")
+                await driver.execute_query("RETURN 1", database="neo4j")
 
         assert driver.circuit_breaker.state == BreakerState.OPEN
 
         # Next call should be rejected by circuit breaker
         with pytest.raises(CircuitOpenError):
-            await driver.execute_query("RETURN 1")
+            await driver.execute_query("RETURN 1", database="neo4j")
 
 
 # ---------------------------------------------------------------------------

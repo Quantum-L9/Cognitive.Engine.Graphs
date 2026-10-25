@@ -96,35 +96,74 @@ def init_dependencies(
         logger.info("Tenant allowlist configured: %s", state._tenant_allowlist)
     else:
         state._tenant_allowlist = None
-        logger.warning("No TENANT_ALLOWLIST configured — all tenants accessible")
+        if _allowlist_fails_closed():
+            # CEG-AUTH-01: in production an absent allowlist denies every tenant
+            # (see _validate_tenant_access) rather than admitting every tenant.
+            logger.error(
+                "No TENANT_ALLOWLIST configured and L9_ENV=prod — every tenant request will be rejected "
+                "until TENANT_ALLOWLIST is set"
+            )
+        else:
+            logger.warning("No TENANT_ALLOWLIST configured — all tenants accessible")
     state._initialized = True
 
 
-def _validate_tenant_access(tenant: str, action: str, *, allowed_tenants: list[str] | None = None) -> None:
+def _is_production() -> bool:
+    """True when the engine runs with ``L9_ENV=prod``.
+
+    Compares ``l9_env`` directly rather than reading ``settings.is_production``
+    so a test that patches ``settings`` with a MagicMock does not read a truthy
+    attribute as "production".
+    """
+    from engine.config.settings import settings as _env_settings
+
+    return _env_settings.l9_env == "prod"
+
+
+def _allowlist_fails_closed() -> bool:
+    """True when an unset TENANT_ALLOWLIST must deny every tenant (CEG-AUTH-01).
+
+    Production only, and only while ``tenant_allowlist_required_in_prod`` is on.
+    The flag is compared with ``is False`` so a MagicMock-patched ``settings``
+    keeps the fail-closed default.
+    """
+    from engine.config.settings import settings as _env_settings
+
+    return _is_production() and _env_settings.tenant_allowlist_required_in_prod is not False
+
+
+def _validate_tenant_access(tenant: str, action: str) -> None:
     """Reject requests for unauthorized tenants.
 
-    Checks both the legacy TENANT_ALLOWLIST env var and, when W3-01 is active,
-    the JWT ``allowed_tenants`` claim forwarded from the auth middleware.
+    The enforced control is ``TENANT_ALLOWLIST`` (resolved into EngineState at
+    ``init_dependencies``). An unset allowlist admits every tenant outside
+    production and denies every tenant in production (CEG-AUTH-01): an
+    operator who forgot the allowlist on a prod deployment gets refusals and a
+    log line naming the fix, not an open multi-tenant engine.
+
+    CEG-AUTH-01 also removed a JWT ``allowed_tenants`` branch from here. The
+    chassis auth middleware (``chassis/auth/auth.py``) decodes that claim onto
+    ``request.state`` and defers the check "to the handler layer", but no
+    caller ever forwarded the claim into the engine — the branch was
+    unreachable, and keeping it documented an enforcement that did not exist.
     """
     state = get_state()
     allowlist = state.tenant_allowlist
-    if allowlist is not None and tenant not in allowlist:
+    if allowlist is None:
+        if _allowlist_fails_closed():
+            raise ValidationError(
+                f"Tenant '{tenant}' rejected: TENANT_ALLOWLIST is not configured and L9_ENV=prod "
+                "fails closed (CEG-AUTH-01)",
+                action=action,
+                tenant=tenant,
+            )
+        return
+    if tenant not in allowlist:
         raise ValidationError(
             f"Tenant '{tenant}' not in authorized allowlist",
             action=action,
             tenant=tenant,
         )
-
-    # W3-01: JWT-based tenant authorization
-    from engine.config.settings import settings as _w3_settings
-
-    if _w3_settings.tenant_auth_enabled and allowed_tenants is not None:
-        if tenant not in allowed_tenants and "*" not in allowed_tenants:
-            raise ValidationError(
-                f"Tenant '{tenant}' not in JWT allowed_tenants",
-                action=action,
-                tenant=tenant,
-            )
 
 
 def _require_deps() -> tuple[GraphDriver, DomainPackLoader]:
@@ -1135,6 +1174,9 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             result = await pii_handler.erase_subject(
                 data_subject_id=data_subject_id,
                 graph_driver=graph_driver,
+                # DB-STRICT-01: the same domain database the dry-run count above
+                # queries; the driver no longer falls back to 'neo4j'.
+                database=domain_id,
             )
         except Exception as exc:
             raise ExecutionError(
@@ -1265,6 +1307,11 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 "score_clamp_enabled": _fs.score_clamp_enabled,
                 "strict_null_gates": _fs.strict_null_gates,
                 "param_strict_mode": _fs.param_strict_mode,
+                # --- Wave 7: Explicit Tenant Database Binding (DB-STRICT-01) ---
+                "strict_tenant_database": _fs.strict_tenant_database,
+                "tenant_allowlist_required_in_prod": _fs.tenant_allowlist_required_in_prod,
+                # --- Persistence (PERSIST-01) ---
+                "packet_store_enabled": _fs.packet_store_enabled,
                 # --- Wave 2: Refinement Scoring ---
                 "feedback_enabled": _fs.feedback_enabled,
                 "confidence_check_enabled": _fs.confidence_check_enabled,
@@ -1529,7 +1576,6 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 "subaction": subaction,
                 "message": "Health API is disabled. Set HEALTH_API_ENABLED=True.",
             }
-
         from engine.health import api as health_api
 
         health_handlers = {

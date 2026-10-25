@@ -37,12 +37,14 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 ## Wave 7 — Explicit Tenant Database Binding
 | Flag | Default | Purpose |
 |------|---------|---------|
-| strict_tenant_database | False | Require explicit `database=` on GraphDriver calls; no implicit 'neo4j' fallback (W7-01) |
+| strict_tenant_database | True | Require explicit `database=` on GraphDriver calls; no implicit 'neo4j' fallback (W7-01; default flipped on by DB-STRICT-01 after the 2026-10-22 caller audit — `STRICT_TENANT_DATABASE=false` restores the fallback) |
+| tenant_allowlist_required_in_prod | True | Under `l9_env == prod` an unset `TENANT_ALLOWLIST` denies every tenant (CEG-AUTH-01); `TENANT_ALLOWLIST_REQUIRED_IN_PROD=false` restores admit-with-warning |
 | require_sdk_chassis_in_prod | False | Fail startup if `L9_CHASSIS != sdk` when `l9_env == prod` (W7-02) |
 
 ## Constellation Seam (EIE ↔ Gate ↔ CEG)
 | Flag | Default | Purpose |
 |------|---------|---------|
+| packet_store_enabled / packet_store_dsn | False / unset | PacketStore persistence, read through Settings (PERSIST-01; env names unchanged) |
 | auto_enrich_via_gate | False | Dispatch `enrich` to EIE through Gate (spends EIE budget) |
 | graph_inference_feedback_enabled | False | Emit `graph-inference-result` to EIE through Gate (EIE-008 / CEG-006) |
 | auto_create_domain_database | False | Provision the tenant domain database on first use (CEG-008; Enterprise-only CREATE DATABASE) |

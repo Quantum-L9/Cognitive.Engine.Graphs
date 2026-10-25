@@ -136,6 +136,10 @@ class Settings(BaseSettings):
     # --- Wave 3: Capability & Access Control (seL4-inspired) ---
     tenant_auth_enabled: bool = True  # W3-01: JWT allowed_tenants enforcement
     tenant_auth_bypass_key: str = ""  # W3-01: service-to-service bypass key
+    # CEG-AUTH-01: under L9_ENV=prod an unset TENANT_ALLOWLIST denies every tenant
+    # instead of admitting every tenant. False restores the pre-CEG-AUTH-01
+    # behaviour (admit, with a WARNING) for staging or rollback.
+    tenant_allowlist_required_in_prod: bool = True
     capability_auth_enabled: bool = True  # W3-02/W3-03: domain-spec capability model
 
     # --- Wave 4: State Management & Resilience (seL4-inspired) ---
@@ -156,8 +160,20 @@ class Settings(BaseSettings):
     gate_reregistration_interval_seconds: float = 300.0
     postgres_dsn: str | None = None  # W4-04: asyncpg DSN for ComplianceEngine audit-flush pool.
     # None = compliance audit flush is disabled (flush_audit() no-ops with a warning).
-    # Distinct from PACKET_STORE_DSN (engine/packet/packet_store.py), which manages
-    # its own lazy pool — both may point at the same Postgres instance.
+    # Distinct from packet_store_dsn below, which feeds PacketStore's own lazy
+    # pool — both may point at the same Postgres instance.
+
+    # --- PERSIST-01: PacketStore persistence (engine/packet/packet_store.py) ---
+    # These were read with os.environ.get inside packet_store.py, so the only
+    # module that persists packets was configured outside the settings SSOT.
+    # The env var names are unchanged (PACKET_STORE_ENABLED, PACKET_STORE_DSN,
+    # PACKET_STORE_POOL_MIN, PACKET_STORE_POOL_MAX): pydantic-settings matches
+    # field names to env vars case-insensitively. Activation prerequisites for
+    # production are in docs/FEATURE_GATES.md §7.
+    packet_store_enabled: bool = False
+    packet_store_dsn: str | None = None
+    packet_store_pool_min: int = 2
+    packet_store_pool_max: int = 10
 
     # CEG-008: `match` and `sync` route queries to a Neo4j database named after
     # the domain id, and nothing ever created it — Neo4j does not create
@@ -189,9 +205,12 @@ class Settings(BaseSettings):
     dormant_domain_packs_enabled: bool = False
 
     # --- Wave 7: Explicit Tenant Database Binding ---
-    strict_tenant_database: bool = (
-        False  # W7-01: require explicit database= on GraphDriver calls; no implicit 'neo4j' fallback
-    )
+    # W7-01 / DB-STRICT-01: GraphDriver.execute_query / execute_write require an
+    # explicit database=. Shipped False while callers were audited; the audit
+    # (2026-10-22) found every engine caller names its database, so the default
+    # is now True and an omitted database= is a programming error, not a silent
+    # landing on the shared 'neo4j' database. False restores the fallback.
+    strict_tenant_database: bool = True
     # W7-02 / seam audit 2026-09-02: the legacy chassis (dict ExecuteRequest, no Gate
     # provenance, api-key auth) is a direct-ingress side door. Default ON: startup
     # fails unless L9_CHASSIS=sdk outside dev/local/test.

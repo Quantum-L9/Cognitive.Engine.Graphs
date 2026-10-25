@@ -338,6 +338,8 @@ class PIIHandler:
         data_subject_id: str,
         graph_driver: Any = None,
         db_pool: Any = None,
+        *,
+        database: str | None = None,
     ) -> dict[str, Any]:
         """
         GDPR right-to-erasure: delete all data for a data subject.
@@ -348,6 +350,12 @@ class PIIHandler:
         3. Delete from Neo4j WHERE entity.data_subject_id = ?
         4. Delete from memory_embeddings via FK cascade
         5. Return summary of what was deleted
+
+        ``database`` is the tenant's Neo4j database (tenant id == domain spec
+        id == database name). DB-STRICT-01: ``GraphDriver.execute_query`` no
+        longer falls back to the shared ``neo4j`` database when it is omitted,
+        so the caller names the subject's domain database explicitly — the same
+        ``domain_id`` the dry-run count in ``handle_admin`` already uses.
 
         NOTE: Actual DB calls depend on injected drivers. This method
         provides the orchestration contract.
@@ -373,6 +381,7 @@ class PIIHandler:
                 result = await graph_driver.execute_query(
                     "MATCH (n {data_subject_id: $dsid}) DETACH DELETE n RETURN count(n) AS deleted",
                     parameters={"dsid": data_subject_id},
+                    database=database,
                 )
                 if result:
                     summary["graph_nodes_deleted"] = result[0].get("deleted", 0)

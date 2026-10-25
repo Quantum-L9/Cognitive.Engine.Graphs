@@ -158,21 +158,36 @@ class GraphDriver:
 
         Raises CircuitOpenError (maps to 503) if breaker is OPEN.
         """
-        if database is None:
-            from engine.config.settings import settings
-
-            if settings.strict_tenant_database:
-                msg = (
-                    "GraphDriver.execute_query requires an explicit database (W7-01); implicit 'neo4j' fallback removed"
-                )
-                raise ValueError(msg)
-            database = "neo4j"
-
+        database = self._resolve_database(database, "execute_query")
         await self._provision_on_first_use(database)
         try:
             return await self._circuit_breaker.call(self._raw_execute_query, cypher, parameters, database)
         except Exception as exc:
             raise self._translate_absent_database(exc, database) from exc
+
+    @staticmethod
+    def _resolve_database(database: str | None, method: str) -> str:
+        """W7-01 / DB-STRICT-01: an omitted ``database=`` is an error by default.
+
+        Every tenant's data lives in a database named after its domain id, so a
+        call that names no database can only mean the caller forgot — and the
+        old silent fallback put that caller's reads and writes on the shared
+        ``neo4j`` database. ``strict_tenant_database`` ships True since the
+        2026-10-22 caller audit; ``STRICT_TENANT_DATABASE=false`` restores the
+        fallback for a deployment that still has an unaudited caller.
+        """
+        if database is not None:
+            return database
+        from engine.config.settings import settings
+
+        if settings.strict_tenant_database:
+            msg = (
+                f"GraphDriver.{method} requires an explicit database= (W7-01): tenant data lives in a "
+                "database named after the domain id and there is no implicit 'neo4j' fallback. "
+                "Pass database=<domain id>, or set STRICT_TENANT_DATABASE=false to restore the fallback."
+            )
+            raise ValueError(msg)
+        return "neo4j"
 
     async def _provision_on_first_use(self, database: str) -> None:
         """CEG-008: a tenant domain database has to exist before it can be used.
@@ -323,15 +338,7 @@ class GraphDriver:
         ``cypher=``/``parameters=`` keyword form returning a counters summary
         dict. Raises CircuitOpenError (maps to 503) if breaker is OPEN.
         """
-        if database is None:
-            from engine.config.settings import settings
-
-            if settings.strict_tenant_database:
-                msg = (
-                    "GraphDriver.execute_write requires an explicit database (W7-01); implicit 'neo4j' fallback removed"
-                )
-                raise ValueError(msg)
-            database = "neo4j"
+        database = self._resolve_database(database, "execute_write")
         await self._provision_on_first_use(database)
         try:
             return await self._circuit_breaker.call(
