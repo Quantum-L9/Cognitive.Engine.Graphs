@@ -132,13 +132,17 @@ def approved_relevance_map(entries: Mapping[str, float]) -> Mapping[str, float]:
         if not isinstance(relationship_type, str) or not relationship_type:
             msg = f"relevance key {relationship_type!r} must be a non-empty relationship type"
             raise ValueError(msg)
-        if isinstance(coefficient, bool) or not isinstance(coefficient, int | float):
-            msg = f"relevance for {relationship_type!r} must be a number, got {type(coefficient).__name__}"
-            raise ValueError(msg)
-        if not math.isfinite(coefficient) or not 0.0 <= coefficient <= 1.0:
+        not_a_number = f"relevance for {relationship_type!r} must be a number, got {type(coefficient).__name__}"
+        if isinstance(coefficient, bool | str | bytes):
+            raise ValueError(not_a_number)
+        try:
+            value = float(coefficient)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(not_a_number) from exc
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
             msg = f"relevance for {relationship_type!r} must be in [0, 1], got {coefficient!r}"
             raise ValueError(msg)
-        frozen[relationship_type] = float(coefficient)
+        frozen[relationship_type] = value
     return MappingProxyType(frozen)
 
 

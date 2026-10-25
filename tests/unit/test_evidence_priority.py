@@ -189,7 +189,17 @@ def test_result_reports_reader_connection_and_revision_honestly() -> None:
 
 
 @pytest.mark.parametrize(
-    "bad", [{POSITIVE: 1.2}, {POSITIVE: -0.1}, {POSITIVE: float("inf")}, {"": 1.0}, {POSITIVE: True}]
+    "bad",
+    [
+        {POSITIVE: 1.2},
+        {POSITIVE: -0.1},
+        {POSITIVE: float("inf")},
+        {"": 1.0},
+        {POSITIVE: True},
+        {POSITIVE: "0.5"},
+        {POSITIVE: None},
+        {POSITIVE: object()},
+    ],
 )
 def test_relevance_map_rejects_out_of_range_coefficients(bad: dict[str, Any]) -> None:
     with pytest.raises(ValueError):
