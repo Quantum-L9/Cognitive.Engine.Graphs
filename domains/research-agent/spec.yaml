@@ -16,6 +16,13 @@ domain:
     AI-first research agent matching queries to optimal papers, datasets, and
     code repositories with citation networks and reproducibility tracking.
   version: 1.0.0
+  # Legacy matching pack, retired from serving (operator decision 2026-10-25:
+  # domain-specific runtime architecture is retired). Withheld by the generic
+  # loader admission policy whatever its gates compile to.
+  # DORMANT_DOMAIN_PACKS_ENABLED=true lifts only this hold: the pack is then
+  # served only if every gate also compiles (UNVALIDATED_DOMAIN_PACKS_ENABLED
+  # overrides that second check).
+  activation: dormant
 
 ontology:
   nodes:
