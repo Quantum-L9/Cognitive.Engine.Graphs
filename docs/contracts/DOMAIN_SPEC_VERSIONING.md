@@ -72,6 +72,56 @@ domain:
 ```
 
 
+## Identity (CEG-IDENT-01 / CEG-DBNAME-01, decided 2026-10-22)
+
+One customer, one directory, one versioned spec, one database:
+
+```
+tenant_id == domain.id == domains/<tenant_id>/spec.yaml == Neo4j database name
+```
+
+- The **tenant id** carried by a packet (`packet.tenant.org_id`) is the spec id
+  the loader resolves (`domains/<tenant_id>/spec.yaml`, directory name is the
+  lookup key) and the database the driver binds. There is no mapping layer,
+  table or alias between the three; a payload `domain` that differs from the
+  packet tenant is rejected, not translated.
+- **Grammar** (`engine.utils.security.validate_tenant_id`, applied by the loader
+  before any path is built and by the driver before `CREATE DATABASE`): the
+  Neo4j 5 database-name grammar, lowercase only — 3 to 63 characters, starts
+  with a letter, then only letters, digits, dots (`.`) and dashes (`-`), and
+  never starting with `system`. Regex after the lowercase requirement:
+  `^[a-z][a-z0-9.-]{2,62}$`. Neo4j would lowercase a mixed-case name and accept
+  an underscore; this contract refuses both so the identifier is byte-identical
+  on every node.
+- **Vertical templates are provenance, not tenants.** A shipped pack such as
+  `roofing-company` is the template it is named after. A customer spec derived
+  from it records that origin and nothing else:
+
+```yaml
+domain:
+  id: acme.roofing          # the tenant id, the directory, the database
+  name: Acme Roofing
+  version: 1.0.0-reviewed
+  template:                 # REQUIRED on customer specs; absent on shipped verticals
+    id: roofing-company
+    version: 1.2.0-production
+    source: crm-scan        # optional: what produced the first revision
+```
+
+### Identity BANNED
+
+```yaml
+# ❌ tenant ids outside the grammar (refused by the loader before disk is touched)
+domain:
+  id: Acme_Roofing          # uppercase and underscore
+  id: systemacme            # reserved prefix
+  id: ab                    # under 3 characters
+
+# ❌ a vertical name reused as a tenant id for a second customer
+#    (two customers, one directory, one database — the contract forbids it)
+# ❌ any tenant→domain or tenant→database mapping in code, config or payload
+```
+
 ## Migration Rules
 
 - `seed` → `discovered`: ADD columns only. Never drop.

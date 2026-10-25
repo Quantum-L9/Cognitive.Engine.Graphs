@@ -28,6 +28,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from engine.config.schema import DomainActivation, DomainSpec
 from engine.config.settings import settings
+from engine.utils.security import tenant_id_defect
 
 logger = logging.getLogger(__name__)
 
@@ -233,13 +234,22 @@ class DomainPackLoader:
         return admitted
 
     def _resolve_spec_path(self, domain_id: str) -> Path:
-        """Resolve and validate spec file path, preventing traversal and symlinks."""
+        """Resolve and validate spec file path, preventing traversal and symlinks.
+
+        The id is checked against the tenant-id grammar before any path is built
+        (CEG-IDENT-01 / CEG-DBNAME-01): tenant id == domain.id == directory ==
+        Neo4j database name, so an id the database could not be named by is
+        refused here, fail closed, and never reaches the filesystem.
+        """
         if not domain_id or not domain_id.strip():
             raise DomainNotFoundError("Domain ID cannot be empty")
         if "\x00" in domain_id:
             raise DomainNotFoundError(f"Invalid domain ID: {domain_id!r} contains null byte")
         if Path(domain_id).is_absolute():
             raise DomainNotFoundError(f"Invalid domain ID: {domain_id!r} must be a relative path")
+        defect = tenant_id_defect(domain_id)
+        if defect is not None:
+            raise DomainNotFoundError(f"Invalid domain ID: {defect}")
 
         candidate = (self._base_path / domain_id / SPEC_FILENAME).resolve()
         raw_path = self._base_path / domain_id / SPEC_FILENAME
