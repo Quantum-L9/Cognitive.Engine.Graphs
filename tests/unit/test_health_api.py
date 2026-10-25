@@ -529,8 +529,10 @@ class TestHealthAssessAction:
         # health_report stamps `generated_at` from the wall clock on every call;
         # it is the one field two sequential calls legitimately differ on.
         if subaction == "health_report":
-            assert via_action.pop("generated_at")
-            assert via_admin.pop("generated_at")
+            action_generated_at = via_action.pop("generated_at", None)
+            admin_generated_at = via_admin.pop("generated_at", None)
+            assert action_generated_at
+            assert admin_generated_at
         assert via_action == via_admin
         assert via_action.get("status") != "disabled"
         assert pipeline.loaded_domains == [TENANT, TENANT]
