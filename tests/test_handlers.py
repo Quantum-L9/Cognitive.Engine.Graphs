@@ -128,7 +128,6 @@ def _make_domain_spec() -> MagicMock:
 
     endpoint = MagicMock()
     endpoint.path = "/v1/sync/facility"
-    endpoint.targetedge = None  # a node endpoint, as SyncEndpointSpec defaults it
     endpoint.batchstrategy = "UNWINDMERGE"
     endpoint.targetnode = "Facility"
     endpoint.idproperty = "facility_id"

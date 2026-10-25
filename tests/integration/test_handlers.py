@@ -91,7 +91,6 @@ def test_handle_sync_returns_success_shape() -> None:
     spec = _make_mock_spec()
     endpoint = MagicMock()
     endpoint.path = "/sync/Buyer"
-    endpoint.targetedge = None  # a node endpoint, as SyncEndpointSpec defaults it
     spec.sync = MagicMock()
     spec.sync.endpoints = [endpoint]
 
