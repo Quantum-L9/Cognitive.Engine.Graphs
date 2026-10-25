@@ -567,7 +567,7 @@ strict default without an opt-out.
 **State**: Dormant
 **Flag**: `HEALTH_API_ENABLED=False` (default off)
 
-Exposes `engine/health/api.py` through the `admin` subactions `health_assess`,
+Exposes `engine/health/api.py` through the subactions `health_assess`,
 `health_batch_assess` and `health_report`. That module implemented three
 handlers and was imported by nothing, so `request_enrichment` — the whole
 CEG → Gate → EIE direction — had no trigger an inbound packet could reach.
@@ -575,6 +575,26 @@ CEG → Gate → EIE direction — had no trigger an inbound packet could reach.
 `AUTO_ENRICH_VIA_GATE` is not a substitute: it gates only the eventual outbound
 Gate request, not assessment, reporting, or conversion-event tracking. The
 surface needs a gate of its own, which is what this is.
+
+### Route (HEALTH-01)
+
+Health is **not** routed through `admin` (operator decision 2026-10-22). The
+canonical route is the advertised action `health-assess`, owned by `ceg` in
+Gate's action-ownership map (Constellation.Gate lane G3: consumer and operator
+keys call it, worker keys are refused it). `engine/handlers.py::handle_health_assess`
+dispatches exactly the three subactions above and refuses every other
+`subaction` with `ValidationError`, so nothing else `admin` offers is reachable
+from a Gate-routed packet. `admin`, `health` and `healthcheck` are never
+advertised (`engine/spec.yaml`, `tests/architecture/test_seam_gate_only.py`);
+the same subactions stay on `admin` only so a direct operator call in dev keeps
+working. Both routes share one dispatcher (`_dispatch_health`), so the flag,
+the HEALTH-05 check and the results are identical.
+
+The SDK runtime admits inbound actions from `L9_ALLOWED_ACTIONS`
+(`constellation_node_sdk.runtime.inbound_policy`). `make dev` derives that list
+from `ACTION_HANDLERS`; the deployment surfaces (`docker-compose.yml`,
+`docker-compose.prod.yml`, `.env.template`) enumerate it by hand and must list
+`health-assess` for a Gate-routed health packet to be admitted.
 
 ### Validation
 

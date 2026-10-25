@@ -26,7 +26,7 @@ chassis/      ← Thin HTTP adapter. Calls engine. Owns request/response lifecyc
 
 ```
 engine/
-  handlers.py          8 action handlers: match, sync, admin, outcomes, resolve, health, healthcheck, enrich
+  handlers.py          9 action handlers: match, sync, admin, outcomes, resolve, health, healthcheck, health-assess, enrich
   boot.py              Startup/shutdown lifecycle, weight-sum assertion
   config/              DomainSpec YAML schema, Settings singleton, loader
   gates/               Gate → WHERE clause compiler (10 gate types)

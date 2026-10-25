@@ -11,7 +11,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 CONTRACTS_ROOT = REPO_ROOT / "docs" / "contracts"
 
-KNOWN_ACTIONS = {"match", "sync", "admin", "outcomes", "resolve", "health", "healthcheck", "enrich"}
+KNOWN_ACTIONS = {"match", "sync", "admin", "outcomes", "resolve", "health", "healthcheck", "health-assess", "enrich"}
 
 OUTCOME_VALUES = {"success", "failure", "partial"}
 
