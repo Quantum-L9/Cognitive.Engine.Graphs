@@ -67,7 +67,10 @@ services:
         {"gate-v1": "dev-shared-hmac-secret-not-for-production",
          "graph-engine-v1": "dev-shared-hmac-secret-not-for-production"}
       # `enrich` deliberately absent: Gate owns that action name for EIE.
-      L9_ALLOWED_ACTIONS: match,sync,admin,outcomes,resolve,health,healthcheck
+      # `health-assess` is the canonical Gate route for health (HEALTH-01); the
+      # SDK inbound policy refuses any action missing here, so parity with
+      # engine/spec.yaml is asserted by tests/architecture/test_seam_gate_only.py.
+      L9_ALLOWED_ACTIONS: match,sync,admin,outcomes,resolve,health,healthcheck,health-assess
       L9_MAX_ATTACHMENTS: "0"
       # Attachments intentionally disabled (0/0); bare NodeRuntimeConfig is valid with
       # these zeros — not a workaround for mutually invalid SDK defaults.
