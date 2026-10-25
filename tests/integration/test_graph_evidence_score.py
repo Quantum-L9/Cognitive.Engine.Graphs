@@ -22,6 +22,7 @@ code serves both; no named product domain is involved.
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -30,10 +31,13 @@ from typing import Any
 import pytest
 import pytest_asyncio
 import yaml
+from neo4j.exceptions import ConstraintError
 
+import engine.handlers as handlers_module
 from engine.config.loader import DomainPackLoader
+from engine.config.settings import settings
 from engine.graph.driver import GraphDriver
-from engine.handlers import ValidationError, handle_score, handle_sync, init_dependencies
+from engine.handlers import ExecutionError, ValidationError, handle_score, handle_sync, init_dependencies
 from engine.scoring.evidence_priority import approved_relevance_map
 from engine.scoring.graph_evidence import GraphEvidenceBinding
 from engine.state import get_state
@@ -107,7 +111,10 @@ async def _wipe(driver: GraphDriver, database: str) -> None:
 
 
 @pytest_asyncio.fixture
-async def graph(graph_driver: GraphDriver, domains_root: Path) -> AsyncGenerator[GraphDriver, None]:
+async def graph(
+    graph_driver: GraphDriver, domains_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> AsyncGenerator[GraphDriver, None]:
+    monkeypatch.setattr(settings, "relationship_sync_enabled", True)
     for tenant in VOCABULARIES:
         await graph_driver.execute_query(f"CREATE DATABASE `{tenant}` IF NOT EXISTS WAIT", database="system")
         await _wipe(graph_driver, tenant)
@@ -281,6 +288,61 @@ async def test_invalid_relationship_rows_write_nothing(
             TENANT_A, _edge_row(TENANT_A, evidence_ref="evidence:ok"), _edge_row(TENANT_A, **row_overrides)
         )
     assert await _edges(graph, TENANT_A) == []
+
+
+# ── E. Transactional integrity and evidence identity ───────────────────────────
+
+
+async def test_a_failed_postcheck_rolls_back_every_write(graph: GraphDriver, monkeypatch: pytest.MonkeyPatch) -> None:
+    await _seed_nodes(TENANT_A)
+    # The post-write comparison sees evidence that differs from what was sent.
+    monkeypatch.setattr(handlers_module, "stored_evidence", lambda stored: {"tampered": True})
+    rows = [_edge_row(TENANT_A, evidence_ref=f"evidence:rollback:{i}") for i in range(3)]
+    with pytest.raises(ExecutionError, match="rolled back"):
+        await _sync_edges(TENANT_A, *rows)
+    assert await _edges(graph, TENANT_A) == []
+
+
+async def test_the_database_refuses_a_second_edge_for_one_evidence_ref(graph: GraphDriver) -> None:
+    await _seed_nodes(TENANT_A)
+    await _sync_edges(TENANT_A, _edge_row(TENANT_A))
+    v = VOCABULARIES[TENANT_A]
+    # Bypass every engine check: write the same (tenant, evidence_ref) on another endpoint pair.
+    with pytest.raises(ConstraintError):
+        await graph.execute_write(
+            cypher=(
+                f"MATCH (a:{v['from_label']} {{{v['from_id']}: $other}}), (b:{v['to_label']}) "
+                f"CREATE (a)-[:{v['edge_type']} {{_tenant: $tenant, evidence_ref: $ref}}]->(b)"
+            ),
+            parameters={"other": v["subjects"][1], "tenant": TENANT_A, "ref": f"evidence:{TENANT_A}:1"},
+            database=TENANT_A,
+        )
+    assert len(await _edges(graph, TENANT_A)) == 1
+
+
+async def test_concurrent_conflicting_writers_never_commit_two_assertions(graph: GraphDriver) -> None:
+    await _seed_nodes(TENANT_A)
+    v = VOCABULARIES[TENANT_A]
+    for round_ in range(5):
+        ref = f"evidence:race:{round_}"
+        outcomes = await asyncio.gather(
+            _sync_edges(TENANT_A, _edge_row(TENANT_A, evidence_ref=ref, from_id=v["subjects"][0])),
+            _sync_edges(TENANT_A, _edge_row(TENANT_A, evidence_ref=ref, from_id=v["subjects"][1])),
+            return_exceptions=True,
+        )
+        successes = [o for o in outcomes if isinstance(o, dict)]
+        refusals = [o for o in outcomes if isinstance(o, ValidationError)]
+        assert (len(successes), len(refusals)) == (1, 1), outcomes
+    edges = await _edges(graph, TENANT_A)
+    assert sorted(e["props"]["evidence_ref"] for e in edges) == [f"evidence:race:{i}" for i in range(5)]
+
+
+async def test_concurrent_identical_replays_record_one_edge(graph: GraphDriver) -> None:
+    await _seed_nodes(TENANT_A)
+    outcomes = await asyncio.gather(*(_sync_edges(TENANT_A, _edge_row(TENANT_A)) for _ in range(4)))
+    assert all(o["status"] == "success" for o in outcomes)
+    [edge] = await _edges(graph, TENANT_A)
+    assert edge["props"]["source_revision"] == "rev-2026-10-25"
 
 
 # ── C. Isolation ───────────────────────────────────────────

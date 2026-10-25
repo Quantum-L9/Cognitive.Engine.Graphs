@@ -25,15 +25,19 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import yaml
+from neo4j.exceptions import ConstraintError
 
+from chassis.errors import FeatureNotEnabled
 from engine.config.schema import DomainSpec, SyncEndpointSpec
-from engine.handlers import ValidationError, handle_sync, init_dependencies
+from engine.config.settings import Settings, settings
+from engine.handlers import ExecutionError, ValidationError, handle_sync, init_dependencies
 from engine.state import get_state
 from engine.sync.generator import (
     MAX_RELATIONSHIP_BATCH,
     normalize_relationship_rows,
     relationship_merge_query,
     relationship_precheck_query,
+    relationship_uniqueness_constraint_query,
     resolve_relationship_declaration,
 )
 from tests.fixtures.domain_contracts import SYNTHETIC_DOMAINS_ROOT
@@ -239,6 +243,15 @@ def test_queries_take_structure_from_the_declaration_and_values_only_as_paramete
 # ── Handler seams ──────────────────────────────────────────────────────────────
 
 
+def test_identity_constraint_is_tenant_scoped_per_declared_type() -> None:
+    spec = _spec("orbital-logistics")
+    d = resolve_relationship_declaration(spec, _endpoint(spec, "/v1/sync/stocks"))
+    assert relationship_uniqueness_constraint_query(d) == (
+        "CREATE CONSTRAINT ceg_relationship_evidence_STOCKS IF NOT EXISTS "
+        "FOR ()-[r:STOCKS]-() REQUIRE (r._tenant, r.evidence_ref) IS UNIQUE"
+    )
+
+
 @pytest.fixture
 def _clean_state() -> Iterator[None]:
     get_state().reset()
@@ -246,33 +259,161 @@ def _clean_state() -> Iterator[None]:
     get_state().reset()
 
 
-@pytest.mark.usefixtures("_clean_state")
-async def test_refused_relationship_batch_never_reaches_the_graph() -> None:
-    spec = _spec("cheese-aging")
-    loader = MagicMock()
-    loader.load_domain.return_value = spec
+@pytest.fixture
+def _relationship_sync_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "relationship_sync_enabled", True)
+
+
+class _Tx:
+    """A managed transaction double: each ``run`` answers the next queued result."""
+
+    def __init__(self, *results: list[dict[str, Any]]) -> None:
+        self.statements: list[str] = []
+        self._results = list(results)
+
+    async def run(self, cypher: str, _params: dict[str, Any]) -> MagicMock:
+        self.statements.append(cypher)
+        result = MagicMock()
+        result.data = AsyncMock(return_value=self._results.pop(0))
+        return result
+
+
+def _graph(*attempts: _Tx | Exception) -> MagicMock:
+    """A GraphDriver double whose ``execute_write`` runs the handler's transaction function."""
+    queue = list(attempts)
+
+    async def execute_write(write: Any, *, database: str) -> Any:
+        attempt = queue.pop(0)
+        if isinstance(attempt, Exception):
+            raise attempt
+        return await write(attempt)
+
     driver = MagicMock()
-    driver.execute_query = AsyncMock()
+    driver.execute_query = AsyncMock(return_value=[])
+    driver.execute_write = AsyncMock(side_effect=execute_write)
+    return driver
+
+
+def _check(ref: str, *, to_count: int = 1, existing: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    return {
+        "evidence_ref": ref,
+        "from_count": 1,
+        "from_any": 1,
+        "to_count": to_count,
+        "to_any": to_count,
+        "existing": existing or [],
+    }
+
+
+def _stored(row: dict[str, Any]) -> dict[str, Any]:
+    props = {k: v for k, v in row.items() if k not in ("from_id", "to_id")}
+    return {"evidence_ref": row["evidence_ref"], "stored": {**props, "_tenant": "cheese-aging"}}
+
+
+def _install(driver: MagicMock) -> None:
+    loader = MagicMock()
+    loader.load_domain.return_value = _spec("cheese-aging")
     init_dependencies(driver, loader)
+
+
+@pytest.mark.usefixtures("_clean_state", "_relationship_sync_on")
+async def test_refused_relationship_batch_never_reaches_the_graph() -> None:
+    driver = _graph()
+    _install(driver)
     with pytest.raises(ValidationError, match="unsupported keys"):
         await handle_sync("cheese-aging", {"entity_type": "tended-by", "batch": [_row(cypher="MATCH (n) DELETE n")]})
     driver.execute_query.assert_not_awaited()
+    driver.execute_write.assert_not_awaited()
 
 
-@pytest.mark.usefixtures("_clean_state")
+@pytest.mark.usefixtures("_clean_state", "_relationship_sync_on")
 async def test_missing_endpoint_refuses_the_whole_batch_before_any_write() -> None:
-    spec = _spec("cheese-aging")
-    loader = MagicMock()
-    loader.load_domain.return_value = spec
-    precheck = [
-        {"evidence_ref": "evidence:1", "from_count": 1, "from_any": 1, "to_count": 1, "to_any": 1, "existing": []},
-        {"evidence_ref": "evidence:2", "from_count": 1, "from_any": 1, "to_count": 0, "to_any": 0, "existing": []},
-    ]
-    driver = MagicMock()
-    driver.execute_query = AsyncMock(return_value=precheck)
-    init_dependencies(driver, loader)
+    tx = _Tx([_check("evidence:1"), _check("evidence:2", to_count=0)])
+    driver = _graph(tx)
+    _install(driver)
     with pytest.raises(ValidationError, match="nothing written"):
         await handle_sync(
             "cheese-aging", {"entity_type": "tended-by", "batch": [_row(), _row(evidence_ref="evidence:2")]}
         )
-    assert driver.execute_query.await_count == 1  # the precheck only; no MERGE
+    assert len(tx.statements) == 1  # the precheck only; no MERGE
+    assert "CREATE CONSTRAINT" in driver.execute_query.await_args.kwargs["cypher"]
+
+
+@pytest.mark.usefixtures("_clean_state", "_relationship_sync_on")
+async def test_precheck_write_and_postcheck_share_one_transaction() -> None:
+    tx = _Tx([_check("evidence:1")], [_stored(_row())])
+    driver = _graph(tx)
+    _install(driver)
+    result = await handle_sync("cheese-aging", {"entity_type": "tended-by", "batch": [_row()]})
+    assert result == {
+        "status": "success",
+        "entity_type": "tended-by",
+        "synced_count": 1,
+        "created_count": 1,
+        "replayed_count": 0,
+    }
+    assert driver.execute_write.await_count == 1
+    assert len(tx.statements) == 2
+    assert "OPTIONAL MATCH" in tx.statements[0]
+    assert "MERGE" in tx.statements[1]
+
+
+@pytest.mark.usefixtures("_clean_state", "_relationship_sync_on")
+async def test_an_unrecorded_write_raises_inside_the_transaction() -> None:
+    tampered = _stored(_row())
+    tampered["stored"]["confidence"] = 0.1
+    driver = _graph(_Tx([_check("evidence:1")], [tampered]))
+    _install(driver)
+    with pytest.raises(ExecutionError, match="rolled back"):
+        await handle_sync("cheese-aging", {"entity_type": "tended-by", "batch": [_row()]})
+
+
+@pytest.mark.usefixtures("_clean_state", "_relationship_sync_on")
+async def test_a_lost_identity_race_retries_once_and_answers_replay() -> None:
+    race = ConstraintError("Neo.ClientError.Schema.ConstraintValidationFailed")
+    winner = {"from_id": _row()["from_id"], "to_id": _row()["to_id"], "props": _stored(_row())["stored"]}
+    retry = _Tx([_check("evidence:1", existing=[winner])], [_stored(_row())])
+    driver = _graph(race, retry)
+    _install(driver)
+    result = await handle_sync("cheese-aging", {"entity_type": "tended-by", "batch": [_row()]})
+    assert (result["created_count"], result["replayed_count"]) == (0, 1)
+    assert driver.execute_write.await_count == 2
+
+
+@pytest.mark.usefixtures("_clean_state", "_relationship_sync_on")
+async def test_a_second_identity_conflict_is_a_refusal() -> None:
+    race = ConstraintError("Neo.ClientError.Schema.ConstraintValidationFailed")
+    driver = _graph(race, ConstraintError("Neo.ClientError.Schema.ConstraintValidationFailed"))
+    _install(driver)
+    with pytest.raises(ValidationError, match="already recorded"):
+        await handle_sync("cheese-aging", {"entity_type": "tended-by", "batch": [_row()]})
+
+
+# ── Activation flag (RELATIONSHIP_SYNC_ENABLED) ────────────────────────────────
+
+
+def test_relationship_sync_ships_disabled() -> None:
+    assert Settings.model_fields["relationship_sync_enabled"].default is False
+
+
+@pytest.mark.usefixtures("_clean_state")
+async def test_flag_off_writes_no_evidence_edge_even_when_the_spec_declares_one() -> None:
+    assert settings.relationship_sync_enabled is False
+    driver = _graph()
+    _install(driver)
+    with pytest.raises(FeatureNotEnabled, match="RELATIONSHIP_SYNC_ENABLED"):
+        await handle_sync("cheese-aging", {"entity_type": "tended-by", "batch": [_row()]})
+    driver.execute_query.assert_not_awaited()
+    driver.execute_write.assert_not_awaited()
+
+
+@pytest.mark.parametrize("enabled", [False, True], ids=["flag-off", "flag-on"])
+@pytest.mark.usefixtures("_clean_state")
+async def test_node_sync_is_unchanged_by_the_flag(monkeypatch: pytest.MonkeyPatch, enabled: bool) -> None:
+    monkeypatch.setattr(settings, "relationship_sync_enabled", enabled)
+    driver = _graph()
+    _install(driver)
+    result = await handle_sync("cheese-aging", {"entity_type": "affineurs", "batch": [{"affineur_id": "a:7"}]})
+    assert result == {"status": "success", "entity_type": "affineurs", "synced_count": 1}
+    assert "MERGE" in driver.execute_query.await_args.kwargs["cypher"]
+    driver.execute_write.assert_not_awaited()

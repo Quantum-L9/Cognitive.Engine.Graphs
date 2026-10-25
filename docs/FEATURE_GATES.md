@@ -68,6 +68,7 @@ independently of the code default.
 | PostgreSQL Audit Pool | `POSTGRES_DSN` | unset (`None`) | set | active (opt-in, soft dependency — see §7) |
 | Dormant Domain Packs | `DORMANT_DOMAIN_PACKS_ENABLED` (`dormant_domain_packs_enabled`) | `False` | unset | dormant; serve packs that declare `domain.activation: dormant` (replaces the per-domain `idea_portfolio_enabled`) — see §16 |
 | Graph Inference Feedback | `GRAPH_INFERENCE_FEEDBACK_ENABLED` (`graph_inference_feedback_enabled`) | `False` | unset | dormant; CEG → Gate → EIE `graph-inference-result` — see §13 |
+| Relationship Evidence Sync | `RELATIONSHIP_SYNC_ENABLED` (`relationship_sync_enabled`) | `False` | unset | dormant; `sync` to a `targetedge` endpoint writes typed evidence edges — see §22 |
 | Domain Database Provisioning | `AUTO_CREATE_DOMAIN_DATABASE` (`auto_create_domain_database`) | `False` | unset | dormant; create the tenant domain database on first use — see §14 |
 | Health API (admin health_* subactions) | `HEALTH_API_ENABLED` (`health_api_enabled`) | `False` | unset | dormant; AI-readiness assess/report surface — see §15 |
 | Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; seven packs whose gates do not compile to executable, faithful Cypher — see §16 |
@@ -883,3 +884,30 @@ to return to.
 ### Rollback
 
 Set the flag to `false`. The placeholder fragments are emitted again verbatim.
+
+---
+
+## 22. Relationship Evidence Sync (QM.POC0.CEG.GRAPH_EVIDENCE.002A)
+
+**State**: Dormant
+**Flag**: `RELATIONSHIP_SYNC_ENABLED=False` (`relationship_sync_enabled`, default off)
+
+`sync` to an endpoint that declares `targetedge` / `fromnode` / `tonode` writes
+typed evidence edges (`ceg.relationship_evidence.v1`) that the local
+`graph_evidence_priority_v1` scorer reads. Off: such a request is refused with
+`FeatureNotEnabled` and no edge is written, whatever the tenant spec declares.
+On: the declaration, tenant and evidence guards all still apply, the batch is
+written in one transaction, and a per-type uniqueness constraint on
+`(_tenant, evidence_ref)` is created on first use. Node sync is unaffected in
+both states.
+
+### Validation
+
+`tests/unit/test_relationship_sync.py` (flag off/on, node sync unchanged) and
+`tests/integration/test_graph_evidence_score.py` (rollback, concurrent
+identity, replay).
+
+### Rollback
+
+Set the flag to `false`. Edges already written keep their stamp and stay
+readable by the scorer; the constraint is left in place.

@@ -282,6 +282,12 @@ class Settings(BaseSettings):
     # for the same reason as auto_enrich_via_gate — each emission queues
     # re-enrichment targets and so spends EIE budget.
     graph_inference_feedback_enabled: bool = False
+    # QM.POC0.CEG.GRAPH_EVIDENCE.002A: relationship evidence sync for `targetedge`
+    # endpoints. Off: such an endpoint is refused and no evidence edge is written,
+    # whatever the tenant spec declares; node sync is unaffected either way. On:
+    # every declaration, tenant and evidence guard still applies.
+    # See docs/FEATURE_GATES.md §22.
+    relationship_sync_enabled: bool = False
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

@@ -20,7 +20,7 @@ import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, cast
 
 from neo4j.exceptions import ConstraintError
 
@@ -868,6 +868,18 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         )
 
     if endpoint_spec.targetedge:
+        from chassis.errors import FeatureNotEnabled
+
+        # Imported at call time: tests patch ``engine.config.settings.settings``.
+        from engine.config.settings import settings as _relationship_settings
+
+        if not _relationship_settings.relationship_sync_enabled:
+            raise FeatureNotEnabled(
+                "Relationship evidence sync",
+                flag="RELATIONSHIP_SYNC_ENABLED",
+                action="sync",
+                tenant=tenant,
+            )
         relationship_result = await _sync_relationships(
             graph_driver, domain_spec, endpoint_spec, entity_type=entity_type, batch=batch, tenant=tenant
         )
@@ -974,7 +986,8 @@ async def _run_relationship_write(
 ) -> tuple[list[str], int]:
     """One managed write transaction; a constraint failure propagates for the caller to classify."""
     try:
-        result: tuple[list[str], int] = await graph_driver.execute_write(write, database=database)
+        # The callable form returns whatever the transaction function returns.
+        result = cast("tuple[list[str], int]", await graph_driver.execute_write(write, database=database))
     except ConstraintError:
         raise
     except _RelationshipNotRecordedError as exc:
