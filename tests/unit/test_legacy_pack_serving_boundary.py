@@ -28,7 +28,6 @@ import pytest
 import yaml
 
 import engine.config.loader as loader_module
-from engine.config.loader import DomainNotFoundError, DomainPackLoader
 from engine.config.schema import DomainActivation
 from engine.config.settings import Settings
 
@@ -48,11 +47,11 @@ SERVED_PACKS = ("freight-matching", "mortgage-brokerage", "plasticos")
 
 
 @pytest.fixture
-def default_admission(monkeypatch: pytest.MonkeyPatch) -> DomainPackLoader:
+def default_admission(monkeypatch: pytest.MonkeyPatch) -> loader_module.DomainPackLoader:
     """A loader over the repository's domains/ with both admission overrides at their defaults."""
     monkeypatch.setattr(loader_module.settings, "dormant_domain_packs_enabled", False)
     monkeypatch.setattr(loader_module.settings, "unvalidated_domain_packs_enabled", False)
-    return DomainPackLoader(config_path=str(DOMAINS))
+    return loader_module.DomainPackLoader(config_path=str(DOMAINS))
 
 
 def test_admission_overrides_default_off() -> None:
@@ -69,22 +68,22 @@ def test_retired_pack_declares_dormant(pack: str) -> None:
 
 
 @pytest.mark.parametrize("pack", RETIRED_LEGACY_PACKS)
-def test_retired_pack_is_not_listed(pack: str, default_admission: DomainPackLoader) -> None:
+def test_retired_pack_is_not_listed(pack: str, default_admission: loader_module.DomainPackLoader) -> None:
     assert pack not in default_admission.list_domains()
 
 
 @pytest.mark.parametrize("pack", RETIRED_LEGACY_PACKS)
-def test_retired_pack_is_refused_as_dormant(pack: str, default_admission: DomainPackLoader) -> None:
-    with pytest.raises(DomainNotFoundError, match=r"declared dormant by its pack"):
+def test_retired_pack_is_refused_as_dormant(pack: str, default_admission: loader_module.DomainPackLoader) -> None:
+    with pytest.raises(loader_module.DomainNotFoundError, match=r"declared dormant by its pack"):
         default_admission.load_domain(pack)
 
 
 @pytest.mark.parametrize("pack", SERVED_PACKS)
-def test_previously_served_pack_is_unaffected(pack: str, default_admission: DomainPackLoader) -> None:
+def test_previously_served_pack_is_unaffected(pack: str, default_admission: loader_module.DomainPackLoader) -> None:
     assert pack in default_admission.list_domains()
     assert default_admission.load_domain(pack).domain.id == pack
 
 
-def test_served_set_is_exactly_the_previously_served_packs(default_admission: DomainPackLoader) -> None:
+def test_served_set_is_exactly_the_previously_served_packs(default_admission: loader_module.DomainPackLoader) -> None:
     """No compiler or pack change may silently add a pack to the default serving surface."""
     assert set(default_admission.list_domains()) == set(SERVED_PACKS)
