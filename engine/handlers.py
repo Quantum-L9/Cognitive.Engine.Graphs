@@ -490,6 +490,49 @@ def _candidate_id(candidate: Any, id_property: str, fallback: Any) -> str:
     return str(fallback if value is None else value)
 
 
+def _annotate_weighted_confidence(
+    checker: Any,
+    candidates: list[Any],
+    effective_weights: dict[str, float],
+) -> None:
+    """RU-032 / CEG-COR-167: run the W2-03 confidence checks with weighted monoculture.
+
+    The monoculture check measures one dimension's share of the *score*, so it
+    is fed ``weight * value`` per dimension (the coefficients the assembler
+    emitted). Dimensional agreement compares the raw values and keeps reading
+    them, and each row's ``dimension_scores`` stays the raw projection. The
+    annotation shape matches ``ConfidenceChecker.annotate_candidates``.
+    """
+    contribution_views: list[dict[str, Any]] = []
+    for cand in candidates:
+        raw = cand.get("dimension_scores") if isinstance(cand, dict) else None
+        contributions: dict[str, float] = {}
+        if isinstance(raw, dict):
+            for name, value in raw.items():
+                if isinstance(value, (int, float)):
+                    contributions[name] = float(value) * effective_weights.get(name, 1.0)
+        contribution_views.append({"dimension_scores": contributions})
+
+    mono = {f["candidate_index"]: f for f in checker.check_monoculture(contribution_views)}
+    agreement = {f["candidate_index"]: f for f in checker.check_dimensional_agreement(candidates)}
+
+    for idx, cand in enumerate(candidates):
+        if not isinstance(cand, dict):
+            continue
+        flags: list[str] = []
+        detail: dict[str, Any] = {}
+        if idx in mono:
+            flags.append(mono[idx]["flag"])
+            detail["dominant_dimension"] = mono[idx]["dominant_dimension"]
+            detail["contribution"] = mono[idx]["contribution"]
+        if idx in agreement:
+            flags.append(agreement[idx]["flag"])
+            detail["dimensional_agreement"] = agreement[idx]["confidence"]
+        if flags:
+            cand["confidence_flag"] = flags[0] if len(flags) == 1 else flags
+            cand["confidence_detail"] = detail
+
+
 async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Gate-then-score graph traversal."""
     graph_driver, domain_loader = _require_deps()
@@ -762,7 +805,10 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             monoculture_threshold=_w2_settings.monoculture_threshold,
             ensemble_max_divergence=_w2_settings.ensemble_max_divergence,
         )
-        candidates_out = checker.annotate_candidates(candidates_out)
+        if _w2_settings.monoculture_weighted_contribution:
+            _annotate_weighted_confidence(checker, candidates_out, scoring_assembler.last_effective_weights)
+        else:
+            candidates_out = checker.annotate_candidates(candidates_out)
 
     # BFS causal explanations when causal subgraph is enabled
     if domain_spec.causal.enabled and candidates_out:

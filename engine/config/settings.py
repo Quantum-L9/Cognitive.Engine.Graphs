@@ -299,6 +299,10 @@ class Settings(BaseSettings):
     # highest-scoring row (`head(collect(...))` over score-ordered rows) before
     # ORDER BY / LIMIT. Off: one row per path.
     match_collapse_traversal_rows: bool = True
+    # RU-032 / CEG-COR-167: the W2-03 monoculture check reads weight x value per
+    # dimension (ScoringAssembler.last_effective_weights), its share of the score,
+    # instead of raw dimension values. Off: raw values (annotate_candidates).
+    monoculture_weighted_contribution: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
