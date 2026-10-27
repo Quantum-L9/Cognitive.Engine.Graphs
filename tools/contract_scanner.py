@@ -417,7 +417,6 @@ RULES: list[dict] = [
         r'packet_type\s*[=:]\s*["\'][A-Z]',
         "Uppercase packet_type - must be lowercase snake_case",
         remediation="Check PACKET_TYPE_REGISTRY.md",
-        exclude_dirs=["agents/cursor/"],
     ),
     # -- CONTRACT 17: zero-stub protocol (TEST_PATTERNS.md / BANNED_PATTERNS.md) --
     # Scoped to engine/: abstract-base-class methods in chassis/ legitimately raise

@@ -35,7 +35,7 @@ repos:
       - id: mypy
         args: [--ignore-missing-imports, --follow-imports=silent]
         additional_dependencies: [pydantic, pydantic-settings, types-PyYAML, neo4j, structlog]
-        exclude: ^(tests/|tools/|domains/|current work/|harvest_staging/|docs/|engine/security/|engine/auth/|agents/cursor/)
+        exclude: ^(tests/|tools/|domains/|current work/|harvest_staging/|docs/|engine/security/|engine/auth/)
 
   # Unit tests covering staged Python only. Full catalog: make test / CI pytest.
   # pre-commit run --all-files (≥40 .py files) keeps the historical unit subset.
