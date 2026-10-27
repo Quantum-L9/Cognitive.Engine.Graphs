@@ -528,6 +528,12 @@ class Settings(BaseSettings):
     # infer_email_domain_from_website kept the port ('acme.com:8443'). On:
     # is-None fallback, per-field parsing, and the URL hostname. Off: legacy.
     inference_input_parsing_strict_enabled: bool = True
+    # RU-086 / CEG-COR-093: the SDK audit wrapper (chassis/handler_registration
+    # .py) recorded a failed pair for a raising handler but not for one the SDK
+    # cancelled on timeout (CancelledError bypasses `except Exception`). On:
+    # the cancelled call persists one ('<action>', 'failed') pair under
+    # asyncio.shield, then the cancellation is re-raised. Off: no pair.
+    packet_audit_on_cancel_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

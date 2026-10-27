@@ -57,6 +57,7 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | inference_geo_usps_zones_enabled | True | Postal-code region follows USPS first-digit zones; declared non-US `country` yields no region (RU-084) |
 | inference_persona_token_match_enabled | True | Buyer-persona keywords match whole job-title tokens, not substrings (RU-088) |
 | inference_input_parsing_strict_enabled | True | Company-size per-field parsing with is-None fallback; email domain from the URL hostname (RU-089) |
+| packet_audit_on_cancel_enabled | True | SDK audit wrapper persists a failed pair for a timeout-cancelled handler, then re-raises (RU-086) |
 
 ## Domain Pack Admission (generic; the engine names no domain)
 | Flag | Default | Purpose |
