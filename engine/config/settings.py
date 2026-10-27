@@ -363,6 +363,11 @@ class Settings(BaseSettings):
     # the penalty branch) and the non-penalised coefficients are rescaled to
     # their pre-learning sum. Off: multiply-only, truthiness filter.
     learned_weight_renormalization: bool = True
+    # RU-027 / CEG-COR-116: SignalWeightCalculator computed the CI as
+    # 1.96*sqrt(lift*(1-min(lift,1))/n), which is 0.0 for every lift >= 1, so a
+    # single winning outcome got confidence 1.0. On: the CI of the win-rate
+    # proportion (Agresti-Coull), divided by the base win rate. Off: legacy.
+    signal_weight_proportion_ci: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
