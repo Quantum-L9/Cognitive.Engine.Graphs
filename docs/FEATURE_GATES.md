@@ -274,10 +274,22 @@ Enabling persistence in production requires, in this order:
 1. A PostgreSQL instance reachable from the engine with
    `engine/packet/packet_store.sql` applied (the docker-compose `postgres`
    service applies it on first init only; a managed instance needs it run by
-   hand), including migration `0001_outcome_jsonb` for `record_outcome()`.
+   hand). `record_outcome()` needs the `packet_store.outcome_jsonb` column,
+   which the file declares (`ADD COLUMN IF NOT EXISTS`, RU-081); a database
+   created from an older version of the file gets it by re-applying
+   `packet_store.sql` (safe since RU-080, see Schema below). There is no
+   separate migration: the `0001_outcome_jsonb` migration this step used to
+   name never existed.
 2. `PACKET_STORE_DSN` set to that instance with a role that can `INSERT` into
    `packet_store`, `lineage_graph`, `hop_trace`, `delegation_chain` and
-   `UPDATE packet_store.outcome_jsonb`. The DSN is a secret: provide it from the
+   `UPDATE packet_store.outcome_jsonb`. A login role that is a member of
+   `l9_product` has exactly that: the file grants `UPDATE (outcome_jsonb)` at
+   column level, so the envelope and every other packet column stay
+   non-updatable, and the `tenant_isolation_update_outcome` RLS policy limits
+   the update to rows whose `actor_tenant` is the transaction's
+   `app.current_tenant` (set by `PacketStore` since RU-079). Before RU-081 the
+   column, the grant and the policy were all absent, so `record_outcome()`
+   always returned `False`. The DSN is a secret: provide it from the
    deployment's secret store, never from a committed file.
 3. `asyncpg` installed in the image (`PacketStore` raises `RuntimeError`
    naming the package otherwise).

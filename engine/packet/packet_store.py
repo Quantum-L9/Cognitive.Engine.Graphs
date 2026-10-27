@@ -11,7 +11,8 @@ status: active
 
 engine/packet/packet_store.py
 PacketStore — async persistence layer for TransportPacket audit trail
-plus outcome_jsonb feedback-loop linkage (migration 0001_outcome_jsonb).
+plus outcome_jsonb feedback-loop linkage (column, column-level UPDATE grant
+and tenant UPDATE policy declared in packet_store.sql; RU-081).
 Writes immutable request/response pairs to the packet_store PostgreSQL
 schema defined in engine/packet/packet_store.sql.
 

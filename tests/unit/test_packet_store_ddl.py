@@ -20,8 +20,13 @@ in one transaction so a failure leaves nothing half-applied. The fresh-database
 object set (tables, indexes, policies, functions) is pinned so the idempotent
 rewrite cannot silently drop or rename an object.
 
-The apply-twice proof against a real PostgreSQL is
-tests/integration/test_packet_store_pg.py (RG-107).
+RG-108 (RU-081 / CEG-COR-041, DEC-31 option 1): the DDL ships the
+``outcome_jsonb`` column PacketStore.record_outcome() writes, a column-level
+UPDATE grant on only that column for l9_product, and a tenant-scoped FOR UPDATE
+policy, so the envelope and every other packet column stay non-updatable.
+
+The apply-twice proof and the record_outcome proof against a real PostgreSQL
+are tests/integration/test_packet_store_pg.py (RG-107, RG-109).
 """
 
 from __future__ import annotations
@@ -74,6 +79,7 @@ _EXPECTED_POLICIES = {
     ("audit_tenant", "packet_audit_log"),
     ("audit_insert", "packet_audit_log"),
     ("lineage_tenant", "lineage_graph"),
+    ("tenant_isolation_update_outcome", "packet_store"),
 }
 _EXPECTED_FUNCTIONS = {
     "insert_packet_idempotent",
@@ -149,3 +155,40 @@ class TestPacketStoreDdlFreshSchemaUnchanged:
         assert grant is not None
         privileges = {p.strip().upper() for p in grant.group(1).split(",")}
         assert privileges == {"INSERT", "SELECT"}
+
+
+class TestPacketStoreDdlOutcomeColumn:
+    """RG-108: the schema record_outcome() needs, and nothing wider."""
+
+    def test_outcome_jsonb_column_is_added_idempotently(self) -> None:
+        assert re.search(
+            r"\bALTER\s+TABLE\s+packet_store\s+ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\s+outcome_jsonb\s+JSONB\b",
+            _SQL,
+            re.IGNORECASE,
+        )
+
+    def test_l9_product_update_grant_is_outcome_column_only(self) -> None:
+        grants = re.findall(r"\bGRANT\s+([^;]*?)\s+ON\s+packet_store\s+TO\s+l9_product\s*;", _SQL, re.IGNORECASE)
+        update_grants = [g for g in grants if re.search(r"\bUPDATE\b", g, re.IGNORECASE)]
+        assert update_grants, "no UPDATE grant on packet_store for l9_product"
+        for grant in update_grants:
+            normalized = re.sub(r"\s+", "", grant).upper()
+            assert normalized == "UPDATE(OUTCOME_JSONB)", (
+                f"UPDATE grant must be column-level on outcome_jsonb: {grant!r}"
+            )
+
+    def test_update_policy_is_tenant_scoped(self) -> None:
+        match = re.search(
+            r"\bCREATE\s+POLICY\s+tenant_isolation_update_outcome\s+ON\s+packet_store\s+FOR\s+UPDATE\s+"
+            r"USING\s*\((?P<using>[^;]*?)\)\s*WITH\s+CHECK\s*\((?P<check>[^;]*?)\)\s*;",
+            _SQL,
+            re.IGNORECASE,
+        )
+        assert match is not None, "no FOR UPDATE policy on packet_store"
+        tenant = "actor_tenant = current_setting('app.current_tenant', true)"
+        assert re.sub(r"\s+", " ", match.group("using")).strip() == tenant
+        assert re.sub(r"\s+", " ", match.group("check")).strip() == tenant
+
+    def test_no_update_on_audit_log(self) -> None:
+        assert not re.search(r"\bON\s+packet_audit_log\s+FOR\s+UPDATE\b", _SQL, re.IGNORECASE)
+        assert not re.search(r"\bGRANT\s+[^;]*UPDATE[^;]*\bON\s+packet_audit_log\b", _SQL, re.IGNORECASE)

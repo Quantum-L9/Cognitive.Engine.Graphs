@@ -28,6 +28,9 @@ Scenarios:
   D. (RG-105) Connected as a login role in l9_product (RLS enforced): persist
      succeeds, and a row whose actor_tenant differs from the session tenant
      is still rejected.
+  C. (RG-109, RU-081) record_outcome() for a persisted match request returns
+     True as the owner and as an l9_product member; the l9_product UPDATE
+     grant covers outcome_jsonb only, and another tenant's row is not updated.
   E. (RG-107, RU-080) packet_store.sql applied a second time to a populated
      database exits cleanly and keeps every row, foreign key and policy.
 """
@@ -285,3 +288,70 @@ async def test_reapplying_ddl_preserves_rows() -> None:
             await conn.close()
     finally:
         await _drop_database(name)
+
+
+async def _record(store: ps_mod.PacketStore, packet_id: str, tenant: str) -> bool:
+    return await store.record_outcome(
+        match_packet_id=packet_id,
+        tenant=tenant,
+        outcome_id=f"out-{uuid.uuid4().hex[:8]}",
+        outcome="success",
+        match_id="m-1",
+        candidate_id="c-1",
+        value=1.0,
+        feedback_metadata=None,
+    )
+
+
+async def _outcome_of(dsn: str, packet_id: str) -> Any:
+    conn = await asyncpg.connect(dsn)
+    try:
+        return await conn.fetchval("SELECT outcome_jsonb FROM packet_store WHERE packet_id = $1::uuid", packet_id)
+    finally:
+        await conn.close()
+
+
+async def test_record_outcome_as_owner(owner_store: ps_mod.PacketStore, packet_db: str) -> None:
+    """Scenario C: before RU-081 the UPDATE failed ('column "outcome_jsonb" ... does not exist')."""
+    tenant = f"tenant-{uuid.uuid4().hex[:8]}"
+    req, resp = _pair({"query": {"x": 5}}, tenant, "tr-c1")
+    await owner_store.persist(req, resp)
+    packet_id = str(req.header.packet_id)
+
+    assert await _record(owner_store, packet_id, tenant) is True
+    assert await _outcome_of(packet_db, packet_id) is not None
+
+
+async def test_record_outcome_as_l9_product_member(product_store: ps_mod.PacketStore, packet_db: str) -> None:
+    """Scenario C as the RLS-enforced role: needs the column grant and the UPDATE policy."""
+    tenant = f"tenant-{uuid.uuid4().hex[:8]}"
+    req, resp = _pair({"query": {"x": 6}}, tenant, "tr-c2")
+    await product_store.persist(req, resp)
+    packet_id = str(req.header.packet_id)
+
+    assert await _record(product_store, packet_id, tenant) is True
+    assert await _outcome_of(packet_db, packet_id) is not None
+    # Another tenant cannot annotate this row (WHERE actor_tenant + RLS).
+    assert await _record(product_store, packet_id, "tenant-other") is False
+
+
+async def test_l9_product_cannot_update_other_packet_columns(product_dsn: str, packet_db: str) -> None:
+    """The column-level grant keeps the envelope and every other column immutable."""
+    tenant = f"tenant-{uuid.uuid4().hex[:8]}"
+    req, _resp = _pair({"query": {"x": 7}}, tenant, "tr-c3")
+    conn = await asyncpg.connect(packet_db)
+    try:
+        await conn.execute(ps_mod._INSERT_PACKET_SQL, *ps_mod._extract_packet_row(req))
+    finally:
+        await conn.close()
+    conn = await asyncpg.connect(product_dsn)
+    try:
+        async with conn.transaction():
+            await conn.fetchval(ps_mod._SET_TENANT_SQL, tenant)
+            with pytest.raises(asyncpg.exceptions.InsufficientPrivilegeError):
+                await conn.execute(
+                    "UPDATE packet_store SET envelope = '{}'::jsonb WHERE packet_id = $1::uuid",
+                    str(req.header.packet_id),
+                )
+    finally:
+        await conn.close()
