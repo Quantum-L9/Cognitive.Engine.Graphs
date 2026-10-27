@@ -83,3 +83,81 @@ def test_run_steps_concurrently_overlaps_wall_clock(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_run_steps_concurrently_empty(tmp_path: Path) -> None:
     assert ah.run_steps_concurrently([], tmp_path) == {}
+
+
+def _harness_root(tmp_path: Path, *, with_contract_wiring: bool) -> Path:
+    """A minimal root holding real copies of the harness's step scripts."""
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for name in ("audit_engine.py", "audit_rules.yaml", "spec_extract.py", "l9_template_manifest.yaml"):
+        (tools / name).write_text((REPO_ROOT / "tools" / name).read_text(encoding="utf-8"), encoding="utf-8")
+    if with_contract_wiring:
+        _write_script(tools, "verify_contracts.py", "import sys; sys.exit(0)")
+    return tmp_path
+
+
+def _run_harness(monkeypatch: pytest.MonkeyPatch, root: Path, *extra: str) -> int:
+    monkeypatch.setattr(sys, "argv", ["audit_harness.py", "--root", str(root), *extra])
+    return ah.main()
+
+
+@pytest.mark.unit
+def test_missing_contract_wiring_script_fails_harness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """RG-168 (RU-133): exit 2 from a required step is an infrastructure error, not a pass."""
+    root = _harness_root(tmp_path, with_contract_wiring=False)
+
+    rc = _run_harness(monkeypatch, root, "--json")
+
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert "safe to merge" not in out
+    wiring = next(
+        s
+        for s in ah.json.loads(out.split("--- JSON Summary ---", 1)[1])["steps"]
+        if s["name"] == ah.CONTRACT_WIRING_STEP
+    )
+    assert wiring == {"name": ah.CONTRACT_WIRING_STEP, "passed": False, "skipped": False, "exit_code": 2}
+    report = (root / "artifacts" / "harness_report.md").read_text(encoding="utf-8")
+    assert "Safe to merge" not in report
+    assert "**Exit code:** 2" in report
+
+
+@pytest.mark.unit
+def test_skip_contracts_keeps_explicit_skip_semantics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _harness_root(tmp_path, with_contract_wiring=False)
+
+    rc = _run_harness(monkeypatch, root, "--skip-contracts")
+
+    assert rc == 0
+    assert "safe to merge" in capsys.readouterr().out
+
+
+@pytest.mark.unit
+def test_present_contract_wiring_script_passes_harness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = _harness_root(tmp_path, with_contract_wiring=True)
+
+    rc = _run_harness(monkeypatch, root)
+
+    assert rc == 0
+    assert "safe to merge" in capsys.readouterr().out
+
+
+@pytest.mark.unit
+def test_overall_exit_code_precedence() -> None:
+    """2 when any required step hit an infrastructure error, else 1 on failure, else 0."""
+    ok = ah.StepResult(name="a", exit_code=0)
+    failed = ah.StepResult(name="b", exit_code=1, passed=False)
+    infra = ah.StepResult(name="c", exit_code=2, passed=False)
+    skipped = ah.StepResult(name="d", exit_code=0, skipped=True)
+    assert ah.overall_exit_code([ok, skipped]) == 0
+    assert ah.overall_exit_code([ok, failed]) == 1
+    assert ah.overall_exit_code([failed, infra]) == 2
+    # An informational step forced to passed (non-strict Spec Coverage) never blocks.
+    informational = ah.StepResult(name="e", exit_code=2, passed=True)
+    assert ah.overall_exit_code([ok, informational]) == 0
