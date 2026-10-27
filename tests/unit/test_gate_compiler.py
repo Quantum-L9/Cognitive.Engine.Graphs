@@ -346,3 +346,76 @@ def test_operand_wrap_off_restores_the_legacy_fragments(monkeypatch: pytest.Monk
     assert fragment == (
         "(candidate.start IS NULL OR $window IS NULL OR (candidate.start >= $window_start AND candidate.start <= $window_end))"
     )
+
+
+# RG-057 (RU-043 / CEG-COR-022): composites compose — subgates contribute only
+# through their composite, and a subgate scoped away from the direction is refused.
+_GA = {"name": "ga", "type": "boolean", "candidateprop": "a", "queryparam": "x", "nullbehavior": "fail"}
+_GB = {"name": "gb", "type": "boolean", "candidateprop": "b", "queryparam": "y", "nullbehavior": "fail"}
+_FIELDS = [{"name": "x", "type": "string"}, {"name": "y", "type": "string"}]
+
+
+@pytest.mark.parametrize("method", ["compile_all_gates", "compile_relaxed"])
+def test_or_composite_is_not_and_ed_with_its_own_subgates(method: str) -> None:  # counterexample [1]
+    from engine.gates.compiler import GateCompiler
+
+    spec = _two_label_spec(
+        [_GA, _GB, {"name": "either", "type": "composite", "logic": "OR", "subgates": ["ga", "gb"]}], _FIELDS
+    )
+    compiler = GateCompiler(spec)
+    ga = compiler.compile(spec.gates[0])
+    gb = compiler.compile(spec.gates[1])
+    assert getattr(GateCompiler(spec), method)("d1") == f"(({ga}) OR ({gb}))"
+
+
+def test_subgate_scoped_away_from_the_direction_is_refused() -> None:  # counterexample [8]
+    from engine.gates.compiler import GateCompiler
+
+    spec = _two_label_spec(
+        [
+            {**_GA, "matchdirections": ["d1"]},
+            {**_GB, "matchdirections": ["d2"]},
+            {"name": "both", "type": "composite", "logic": "AND", "subgates": ["ga", "gb"], "matchdirections": ["d1"]},
+        ],
+        _FIELDS,
+    )
+    with pytest.raises(ValueError, match="gb"):
+        GateCompiler(spec).compile_all_gates("d1")
+    with pytest.raises(ValueError, match="gb"):
+        GateCompiler(spec).compile_relaxed("d1")
+
+
+def test_subgate_still_applies_in_a_direction_where_no_composite_references_it() -> None:
+    from engine.gates.compiler import GateCompiler
+
+    spec = _two_label_spec(
+        [_GA, {"name": "only_a", "type": "composite", "logic": "AND", "subgates": ["ga"], "matchdirections": ["d1"]}],
+        _FIELDS,
+    )
+    ga = GateCompiler(spec).compile(spec.gates[0])
+    assert GateCompiler(spec).compile_all_gates("d2") == f"({ga})"
+    assert GateCompiler(spec).compile_all_gates("d1") == f"(({ga}))"
+
+
+def test_specs_without_composites_compile_identically(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config.settings import settings
+    from engine.gates.compiler import GateCompiler
+
+    spec = _pack("plasticos")
+    on = [GateCompiler(spec).compile_all_gates(d) for d in spec.queryschema.matchdirections]
+    monkeypatch.setattr(settings, "composite_subgate_scoping", False)
+    assert [GateCompiler(spec).compile_all_gates(d) for d in spec.queryschema.matchdirections] == on
+
+
+def test_composite_subgate_scoping_off_restores_the_legacy_and(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config.settings import settings
+    from engine.gates.compiler import GateCompiler
+
+    monkeypatch.setattr(settings, "composite_subgate_scoping", False)
+    spec = _two_label_spec(
+        [_GA, _GB, {"name": "either", "type": "composite", "logic": "OR", "subgates": ["ga", "gb"]}], _FIELDS
+    )
+    compiler = GateCompiler(spec)
+    ga = compiler.compile(spec.gates[0])
+    gb = compiler.compile(spec.gates[1])
+    assert GateCompiler(spec).compile_all_gates("d1") == f"({ga}) AND ({gb}) AND (({ga}) OR ({gb}))"
