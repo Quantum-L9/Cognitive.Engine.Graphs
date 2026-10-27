@@ -7,8 +7,8 @@ Real payload contract (engine/handlers.py::handle_match):
     weights: dict (optional, validated to [0, 1], sum <= 1.0)
 
 The plasticos spec declares candidate=Facility for direction
-'supply_opportunity_to_buyer_facility' and a required traversal step
-(candidate:Facility)-[:PROCESSES]->(polymer:PolymerFamily), so seed data
+'supply_opportunity_to_buyer_facility' and a traversal gate requiring
+(candidate)-[:PROCESSES]->(:PolymerFamily {code: $polymer_type}), so seed data
 must live in the 'plasticos' database and include that edge.
 """
 
@@ -138,3 +138,46 @@ async def test_food_grade_requirement_is_an_implication(
         {"query": query, "match_direction": "supply_opportunity_to_buyer_facility", "top_n": 10},
     )
     assert set(_candidate_ids(result)) == expected
+
+
+MULTI_POLYMER_SEED = """
+UNWIND $batch AS row
+MERGE (n:Facility {entity_id: row.entity_id})
+SET n += row{.*, polymers: null}
+WITH n, row
+UNWIND row.polymers AS code
+MERGE (p:PolymerFamily {code: code})
+MERGE (n)-[:PROCESSES]->(p)
+"""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("polymer_type", "expected"), [("PET", ["multi"]), ("HDPE", ["multi", "hdpe_only"])])
+async def test_match_returns_only_compatible_facilities_once(
+    engine_deps, graph_driver, clean_db, polymer_type, expected
+):
+    """RG-053 (RU-040 / CEG-COR-013): one row per compatible facility, none for incompatible ones."""
+    await graph_driver.execute_write(
+        cypher=MULTI_POLYMER_SEED,
+        parameters={
+            "batch": [
+                {**_facility("multi"), "polymers": ["PET", "HDPE", "PP"]},
+                {**_facility("hdpe_only"), "polymers": ["HDPE"]},
+                {**_facility("ldpe_only"), "polymers": ["LDPE"]},
+            ]
+        },
+        database="plasticos",
+    )
+    from engine.handlers import handle_match
+
+    result = await handle_match(
+        "plasticos",
+        {
+            "query": {"polymer_type": polymer_type, "contamination_pct": 0.04},
+            "match_direction": "supply_opportunity_to_buyer_facility",
+            "top_n": 10,
+        },
+    )
+    ids = _candidate_ids(result)
+    assert sorted(ids) == sorted(expected)
+    assert len(ids) == len(set(ids))

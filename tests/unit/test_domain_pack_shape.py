@@ -297,3 +297,84 @@ def test_food_grade_truth_table_is_an_implication() -> None:
     }
     gate = _gate(_admitted_spec("plasticos"), "food_grade_check")
     assert (gate.type.value, gate.operator, gate.nullbehavior.value) == ("threshold", ">=", "pass")
+
+
+_DIR1 = "supply_opportunity_to_buyer_facility"
+_DIR2 = "buyer_demand_to_supply_opportunity"
+_PARAM_IDENTIFIER_REF = r"\$([A-Za-z_][A-Za-z0-9_]*)"
+
+
+async def _capture_match(domain_id: str, direction: str, query: dict[str, object]) -> tuple[str, dict[str, object]]:
+    """Drive the real handle_match against a recording driver; return the match Cypher and its parameters."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from engine.handlers import handle_match, init_dependencies
+    from engine.state import get_state
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _record(*, cypher: str, parameters: dict[str, object], database: str) -> list[dict[str, object]]:
+        calls.append((cypher, parameters))
+        return []
+
+    driver = MagicMock()
+    driver.execute_query = AsyncMock(side_effect=_record)
+    get_state().reset()
+    init_dependencies(driver, DomainPackLoader(str(DOMAINS_ROOT)))
+    try:
+        await handle_match(domain_id, {"query": query, "match_direction": direction, "top_n": 5})
+    finally:
+        get_state().reset()
+    match_calls = [c for c in calls if "RETURN candidate, score" in c[0]]
+    assert len(match_calls) == 1, calls
+    return match_calls[0]
+
+
+def _missing_params(cypher: str, parameters: dict[str, object]) -> list[str]:
+    import re
+
+    return sorted({p for p in re.findall(_PARAM_IDENTIFIER_REF, cypher) if p not in parameters})
+
+
+_PLASTICOS_QUERIES = {
+    _DIR1: {
+        "polymer_type": "HDPE",
+        "density": 0.95,
+        "mfi": 5.0,
+        "lat": 40.0,
+        "lon": -80.0,
+        "volume_tons": 10.0,
+        "requires_food_grade": False,
+        "target_price": 300.0,
+    },
+    _DIR2: {"polymer_type": "HDPE", "volume_tons": 10.0, "lat": 40.0, "lon": -80.0, "target_price": 300.0},
+}
+
+
+# RG-052 (RU-040 / CEG-COR-013): the polymer constraint is an EXISTS gate bound to
+# $polymer_type, not a row-multiplying traversal MATCH that ignores the polymer.
+@pytest.mark.parametrize(
+    ("direction", "edge", "label"),
+    [(_DIR1, "PROCESSES", "Facility"), (_DIR2, "FULFILLS_POLYMER", "SupplyOpportunity")],
+)
+def test_plasticos_polymer_constraint_is_an_exists_gate(direction: str, edge: str, label: str) -> None:
+    from engine.gates.compiler import GateCompiler
+    from engine.traversal.assembler import TraversalAssembler
+
+    spec = _admitted_spec("plasticos")
+    where = GateCompiler(spec).compile_all_gates(direction)
+    exists = f"EXISTS {{ MATCH (candidate)-[:{edge}]->(t:PolymerFamily) WHERE t.code = $polymer_type }}"
+    assert f"($polymer_type IS NOT NULL AND ({exists}))" in where
+    traversal = "\n".join(TraversalAssembler(spec).assemble_traversal(direction))
+    assert f"MATCH (candidate:{label})-[:{edge}]" not in traversal
+    assert f"[:{edge}]" not in traversal
+    assert admission_defects(spec) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("direction", [_DIR1, _DIR2])
+async def test_plasticos_match_cypher_binds_every_parameter(direction: str) -> None:
+    """Fake-driver capture: every $parameter the served match Cypher references is bound."""
+    cypher, parameters = await _capture_match("plasticos", direction, dict(_PLASTICOS_QUERIES[direction]))
+    assert _missing_params(cypher, parameters) == []
+    assert "$polymer_type" in cypher
