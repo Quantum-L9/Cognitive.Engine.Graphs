@@ -304,6 +304,10 @@ class Settings(BaseSettings):
     # region. On: USPS first-digit zones and a declared non-US `country`
     # yields no inference. Off: the legacy ladder.
     inference_geo_usps_zones_enabled: bool = True
+    # RU-088 / CEG-COR-097: infer_buyer_persona matched keywords as substrings
+    # ('Marketing Coordinator' -> executive via 'coo', 'DevOps Engineer' ->
+    # operations via 'ops'). On: whole title tokens only. Off: substrings.
+    inference_persona_token_match_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

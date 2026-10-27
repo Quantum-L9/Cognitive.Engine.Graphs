@@ -55,6 +55,7 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | packet_store_packet_identity_dedup_enabled | True | PacketStore `content_hash` = SDK `transport_hash`; a duplicate-skipped packet writes no child rows (RU-078) |
 | packet_store_rls_tenant_session_enabled | True | PacketStore sets transaction-local `app.current_tenant` before each write so the RLS policies admit an `l9_product` DSN (RU-079) |
 | inference_geo_usps_zones_enabled | True | Postal-code region follows USPS first-digit zones; declared non-US `country` yields no region (RU-084) |
+| inference_persona_token_match_enabled | True | Buyer-persona keywords match whole job-title tokens, not substrings (RU-088) |
 
 ## Domain Pack Admission (generic; the engine names no domain)
 | Flag | Default | Purpose |
