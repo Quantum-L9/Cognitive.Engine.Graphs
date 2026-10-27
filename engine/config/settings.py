@@ -320,6 +320,12 @@ class Settings(BaseSettings):
     # (hash -> SHA-256 digest, redact -> fixed marker, encrypt/tokenize fail
     # closed to the marker). Off: built-in inference with key deletion only.
     pii_declared_fields_enforced: bool = True
+    # RU-067 / CEG-COR-055: attribution weighted one share per PATH row, so a
+    # touchpoint reached by several paths (diamonds, parallel edges) split or
+    # overwrote credit (linear summed to 0.6, first_touch to 0). On: rows are
+    # collapsed to unique touchpoint ids keeping the minimum-distance row,
+    # whose ages feed temporal decay. Off: per-row weighting.
+    causal_attribution_unique_touchpoints: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

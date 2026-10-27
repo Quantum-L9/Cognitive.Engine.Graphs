@@ -587,3 +587,66 @@ class TestAttributionCalculator:
         assert result["total_touchpoints"] == 2
         assert "tp1" in result["touchpoints"]
         assert "tp2" in result["touchpoints"]
+
+
+# ── RU-067 / CEG-COR-055: weights over unique touchpoints ──
+
+# A diamond: tp1 reaches the outcome directly and via tp2; tp3 via two parallel paths.
+_DIAMOND_ROWS = [
+    {"touchpoint_id": "tp1", "distance": 1, "confidences": [0.9], "ages_days": [1]},
+    {"touchpoint_id": "tp2", "distance": 1, "confidences": [0.8], "ages_days": [2]},
+    {"touchpoint_id": "tp1", "distance": 2, "confidences": [0.9, 0.8], "ages_days": [400, 2]},
+    {"touchpoint_id": "tp3", "distance": 2, "confidences": [0.7, 0.8], "ages_days": [3, 2]},
+    {"touchpoint_id": "tp3", "distance": 3, "confidences": [0.7, 0.6, 0.9], "ages_days": [3, 5, 1]},
+]
+
+
+class TestAttributionUniqueTouchpoints:
+    @pytest.mark.parametrize("model", ["linear", "first_touch", "last_touch", "position_based"])
+    def test_diamond_weights_sum_to_one(self, model: str) -> None:
+        weights = AttributionCalculator._assign_weights(_DIAMOND_ROWS, model)
+        assert set(weights) == {"tp1", "tp2", "tp3"}
+        # Each weight is rounded to 6 decimals (unchanged behaviour), so three
+        # linear shares sum to 0.999999: allow n * 0.5e-6 of rounding.
+        assert sum(weights.values()) == pytest.approx(1.0, abs=1.5e-6)
+        assert all(0.0 <= w <= 1.0 for w in weights.values())
+
+    def test_first_touch_recurring_touchpoint_keeps_credit(self) -> None:
+        rows = [
+            {"touchpoint_id": "tp1", "distance": 1, "confidences": [0.9]},
+            {"touchpoint_id": "tp2", "distance": 2, "confidences": [0.9, 0.8]},
+            {"touchpoint_id": "tp1", "distance": 3, "confidences": [0.9, 0.8, 0.7]},
+        ]
+        weights = AttributionCalculator._assign_weights(rows, "first_touch")
+        assert weights == {"tp1": 1.0, "tp2": 0.0}
+
+    def test_linear_chain_without_duplicates_is_unchanged(self) -> None:
+        rows = [
+            {"touchpoint_id": "tp1", "distance": 1, "confidences": [0.9]},
+            {"touchpoint_id": "tp2", "distance": 2, "confidences": [0.8]},
+            {"touchpoint_id": "tp3", "distance": 3, "confidences": [0.7]},
+        ]
+        assert AttributionCalculator._assign_weights(rows, "position_based") == {"tp1": 0.4, "tp2": 0.2, "tp3": 0.4}
+
+    @pytest.mark.asyncio
+    async def test_compute_attribution_counts_unique_ids_and_ages_from_retained_row(self) -> None:
+        from engine.config.schema import CausalSubgraphSpec
+
+        spec = _spec_with_attribution()
+        causal = spec.causal.model_copy(update={"temporal_decay_enabled": True})
+        spec = spec.model_copy(update={"causal": causal})
+        assert isinstance(spec.causal, CausalSubgraphSpec)
+        driver = AsyncMock()
+        driver.execute_query = AsyncMock(return_value=_DIAMOND_ROWS)
+        result = await AttributionCalculator(driver, spec).compute_attribution("out_1", model="linear")
+        assert result["total_touchpoints"] == 3
+        assert sum(result["touchpoints"].values()) == pytest.approx(1.0, abs=1e-5)
+        # tp1's retained (distance-1) row is 1 day old, so it is not decayed below tp2/tp3.
+        assert result["touchpoints"]["tp1"] >= result["touchpoints"]["tp3"]
+
+    def test_flag_off_restores_per_row_weighting(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "causal_attribution_unique_touchpoints", False)
+        weights = AttributionCalculator._assign_weights(_DIAMOND_ROWS, "linear")
+        assert sum(weights.values()) == pytest.approx(0.6, abs=1e-6)  # legacy: 3 of 5 row shares

@@ -30,6 +30,27 @@ logger = logging.getLogger(__name__)
 VALID_MODELS = frozenset({"first_touch", "last_touch", "linear", "position_based"})
 
 
+def _unique_touchpoint_rows(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """RU-067: one row per touchpoint id, keeping its first (minimum-distance) occurrence.
+
+    The trace query returns one row per PATH ordered by ``distance ASC``; in a
+    diamond or with parallel edges a touchpoint appears once per path. With
+    ``causal_attribution_unique_touchpoints`` on, weights and temporal-decay
+    ages are computed over the retained rows only. Off: rows as returned.
+    """
+    if not settings.causal_attribution_unique_touchpoints:
+        return results
+    seen: set[Any] = set()
+    unique: list[dict[str, Any]] = []
+    for row in results:
+        tp_id = row.get("touchpoint_id")
+        if not tp_id or tp_id in seen:
+            continue
+        seen.add(tp_id)
+        unique.append(row)
+    return unique
+
+
 def _temporal_decay_factor(age_days: float, halflife_days: float) -> float:
     """Exponential recency decay in [0, 1]: exp(-age / halflife).
 
@@ -105,6 +126,7 @@ class AttributionCalculator:
             return {"touchpoints": {}, "model": model, "chain_depth": 0}
 
         touchpoints = self._assign_weights(results, model)
+        retained = _unique_touchpoint_rows(results)
 
         response: dict[str, Any] = {
             "touchpoints": touchpoints,
@@ -119,7 +141,7 @@ class AttributionCalculator:
         if self._spec.causal.temporal_decay_enabled:
             halflife = settings.decay_transaction_halflife
             ages_by_touchpoint: dict[str, float] = {}
-            for r in results:
+            for r in retained:
                 tp_id = r["touchpoint_id"]
                 if not tp_id:
                     continue
@@ -143,7 +165,7 @@ class AttributionCalculator:
         model: str,
     ) -> dict[str, float]:
         """Assign attribution weights based on the selected model."""
-        touchpoint_ids = [r["touchpoint_id"] for r in results if r["touchpoint_id"]]
+        touchpoint_ids = [r["touchpoint_id"] for r in _unique_touchpoint_rows(results) if r["touchpoint_id"]]
         n = len(touchpoint_ids)
 
         if n == 0:
