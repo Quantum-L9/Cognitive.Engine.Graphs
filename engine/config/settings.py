@@ -661,6 +661,13 @@ class Settings(BaseSettings):
     # dimension declaring neither compiles byte-identically. Off: the fields
     # are ignored and `candidate.lon` / `$lon` are emitted as before.
     geodecay_declared_longitude: bool = True
+    # Correctness remediation lane K (plan 0d84ec8, RU-006..RU-025)
+    # RU-007 / CEG-COR-016: boot registers each started GDS scheduler in
+    # EngineState.gds_schedulers (the W6-03 health probe reads it), admin gds_*
+    # reuses that instance instead of starting a duplicate and, with gds_enabled
+    # False, registers jobs without starting APScheduler (manual trigger only);
+    # EngineState.shutdown stops them all. Off: boot-local list, admin duplicate.
+    gds_shared_scheduler_registry: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

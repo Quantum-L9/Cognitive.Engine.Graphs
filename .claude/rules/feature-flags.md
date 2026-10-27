@@ -160,3 +160,7 @@ were industry-specific and had no caller).
 | Flag | Default | Purpose |
 |------|---------|---------|
 | geodecay_declared_longitude | True | A `geodecay` dimension's declared `candidateprop_lon` / `queryprop_lon` name the longitude operands (default `candidate.lon` / `$lon`, byte-identical when undeclared); freight `deadhead_distance` binds Carrier `currentlon` to Load `pickuplon` (RU-037 / CEG-COR-011); off ignores the declarations |
+## Correctness remediation lane K (plan 0d84ec8)
+| Flag | Default | Purpose |
+|------|---------|---------|
+| gds_shared_scheduler_registry | True | Boot registers each started GDS scheduler in `EngineState.gds_schedulers` (the W6-03 health probe reads it); admin `trigger_gds`/`gds_status`/`gds_trigger`/`gds_health` reuse it instead of starting a duplicate, and with `gds_enabled` False register jobs without starting APScheduler (manual trigger only); `EngineState.shutdown` stops every scheduler (RU-007 / CEG-COR-016); off restores the boot-local list and the admin duplicate |

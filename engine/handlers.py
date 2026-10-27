@@ -2101,9 +2101,15 @@ def _get_or_create_scheduler(spec: DomainSpec, driver: GraphDriver) -> GDSSchedu
     state = get_state()
     domain_id = spec.domain.id
     if domain_id not in state.gds_schedulers:
+        from engine.config.settings import settings as _gds_reg_settings
+
         scheduler = GDSScheduler(spec, driver)
         scheduler.register_jobs()
-        scheduler.start()
+        # RU-007 / CEG-COR-016: boot registers its schedulers here too, so this
+        # branch only runs for a domain boot did not start. With GDS disabled the
+        # jobs are registered for manual trigger and no cron scheduler starts.
+        if not _gds_reg_settings.gds_shared_scheduler_registry or _gds_reg_settings.gds_enabled:
+            scheduler.start()
         state.gds_schedulers[domain_id] = scheduler
     result: GDSScheduler = state.gds_schedulers[domain_id]
     return result

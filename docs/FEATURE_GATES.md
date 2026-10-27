@@ -1364,3 +1364,10 @@ violates the rule stops loading (`DomainSpec.model_validate` raises). All defaul
 Set `GEODECAY_DECLARED_LONGITUDE=false` and restart. Domain-spec changes of this
 lane (plasticos 1.3.0, mortgage-brokerage 1.1.0, freight-matching 1.2.0) roll
 back by restoring the previous spec file; the loader hot-reloads on mtime.
+## 25. Correctness remediation lane K (plan 0d84ec8)
+
+Round-2 fixes from the CEG correctness remediation plan. Each ships `True`; set
+the env var to `false` to restore the previous behaviour verbatim.
+
+|---|---|---|---|---|
+| `gds_shared_scheduler_registry` (`GDS_SHARED_SCHEDULER_REGISTRY`) | `true` | RU-007 / CEG-COR-016 | `GraphLifecycle.startup` registers each started scheduler in `get_state().gds_schedulers[domain_id]` (one per domain id); the W6-03 GDS health probe reads that registry at probe time; `_get_or_create_scheduler` (admin `trigger_gds`, `gds_status`, `gds_trigger`, `gds_health`) reuses the registered instance, and for a domain boot did not start it registers the jobs and starts APScheduler only when `gds_enabled` is true, so `GDS_ENABLED=false` runs no cron job anywhere while manual triggers still execute; `EngineState.shutdown` (called by `GraphLifecycle.shutdown`) stops every started scheduler and skips one that never started | Boot keeps its schedulers in `GraphLifecycle._schedulers`, which nothing stops; the first admin `gds_*` call starts a second scheduler for the same domain (cron jobs run twice, `gds_status` reports the duplicate's empty history) and starts it even with `GDS_ENABLED=false` |
