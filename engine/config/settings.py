@@ -310,6 +310,10 @@ class Settings(BaseSettings):
     # endpoints prune and neither keeps it. Off: unordered per-endpoint prune
     # that can leave hubs below their keep count and differs run to run.
     gds_cooccurrence_deterministic_prune: bool = True
+    # RU-100 / CEG-COR-086: GDS job history timestamps (and the job start /
+    # duration clock) are timezone-aware UTC, so staleness is the same under
+    # any process TZ. Off: naive local time, which consumers read as UTC.
+    gds_history_utc_timestamps: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

@@ -30,7 +30,7 @@ import asyncio
 import json
 import logging
 from collections import defaultdict, deque
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -360,7 +360,16 @@ class GDSScheduler:
         """
         resolved_agg = self.resolve_aggregation_strategy(job_spec)
         logger.info(f"Starting GDS job {job_spec.name} — algorithm={job_spec.algorithm}, aggregation={resolved_agg}")
-        start = datetime.now()
+        from engine.config.settings import settings
+
+        # RU-100 / CEG-COR-086: start, duration and the history timestamp share
+        # one clock — timezone-aware UTC unless the flag restores naive local.
+        utc = settings.gds_history_utc_timestamps
+
+        def _now() -> datetime:
+            return datetime.now(tz=UTC) if utc else datetime.now()
+
+        start = _now()
         result = {}
 
         try:
@@ -390,7 +399,7 @@ class GDSScheduler:
                     logger.warning(f"Unknown algorithm: {algo}")
                     result = {"status": "skipped", "reason": f"unknown algorithm: {algo}"}
 
-            duration = (datetime.now() - start).total_seconds()
+            duration = (_now() - start).total_seconds()
             logger.info(f"Completed job {job_spec.name} in {duration:.2f}s")
             result["duration_sec"] = duration
             result["status"] = result.get("status", "success")
@@ -405,7 +414,7 @@ class GDSScheduler:
                 {
                     "job": job_spec.name,
                     "algorithm": job_spec.algorithm,
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": _now().isoformat(),
                     **result,
                 }
             )
