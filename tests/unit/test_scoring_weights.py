@@ -14,6 +14,7 @@ Unit tests for convergence loop: ScoringAssembler consuming DimensionWeight node
 
 from __future__ import annotations
 
+import re as _re
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -255,3 +256,118 @@ class TestScoringAssemblerLearnedWeights:
         weights = await assembler.load_learned_weights()
 
         assert weights == {}
+
+
+# ── RU-022 / CEG-COR-030: reader keys match the writer's DimensionWeight (RG-028) ──
+
+
+class _PropertyLevelDimensionWeightStore:
+    """Fake driver that stores what SignalWeightCalculator._store_weights writes
+    and answers a DimensionWeight reader by evaluating the reader's own predicates.
+
+    Not a blanket ``return_value``: a reader that filters on properties the
+    writer never sets gets zero rows, exactly as Neo4j would return.
+    """
+
+    def __init__(self) -> None:
+        self.nodes: list[dict] = []
+        self.reader_cypher: list[str] = []
+        self.execute_query = AsyncMock(side_effect=self._execute)
+
+    async def _execute(self, cypher: str, parameters: dict | None = None, database: str | None = None, **_kw):
+        parameters = parameters or {}
+        if "MERGE (dw:DimensionWeight" in cypher:
+            key = {"dimension": parameters["dimension"], "tenant": parameters["tenant"]}
+            node = next((n for n in self.nodes if all(n.get(k) == v for k, v in key.items())), None)
+            if node is None:
+                node = dict(key)
+                self.nodes.append(node)
+            node.update(weight=parameters["weight"], confidence=parameters["confidence"])
+            node["ci_width"] = parameters["ci_width"]
+            return [{"dimension": parameters["dimension"]}]
+        self.reader_cypher.append(cypher)
+        rows = list(self.nodes)
+        map_pattern = _re.search(r"\(dw:DimensionWeight\s*\{([^}]*)\}\)", cypher)
+        if map_pattern:
+            for prop, param in _re.findall(r"(\w+)\s*:\s*\$(\w+)", map_pattern.group(1)):
+                rows = [r for r in rows if r.get(prop) == parameters.get(param)]
+        for prop, param in _re.findall(r"dw\.(\w+)\s+IN\s+\$(\w+)", cypher):
+            rows = [r for r in rows if r.get(prop) in parameters.get(param, [])]
+        for prop, param in _re.findall(r"dw\.(\w+)\s*=\s*\$(\w+)", cypher):
+            rows = [r for r in rows if r.get(prop) == parameters.get(param)]
+        returns = _re.findall(r"dw\.(\w+)\s+AS\s+(\w+)", cypher)
+        return [{alias: r.get(prop) for prop, alias in returns} for r in rows]
+
+
+def _plasticos_like_spec(domain_id: str = "plasticos") -> MagicMock:
+    spec = _make_scoring_spec(
+        [
+            {"name": "geo_proximity", "weightkey": "w_geo", "defaultweight": 0.25},
+            {"name": "credit_score", "weightkey": "w_credit", "defaultweight": 0.15},
+        ]
+    )
+    spec.domain.id = domain_id
+    return spec
+
+
+async def _write_weights(store: _PropertyLevelDimensionWeightStore, spec, details: dict[str, float]) -> None:
+    from engine.feedback.signal_weights import SignalWeightCalculator
+
+    calc = SignalWeightCalculator.__new__(SignalWeightCalculator)
+    calc._driver = store
+    calc._spec = spec
+    calc._db = spec.domain.id
+    await calc._store_weights({name: {"weight": w, "confidence": 0.9, "ci_width": 0.1} for name, w in details.items()})
+
+
+@pytest.mark.unit
+class TestLearnedWeightsTenantKeyed:
+    @pytest.mark.asyncio
+    async def test_reader_returns_what_the_writer_stored(self) -> None:
+        spec = _plasticos_like_spec()
+        store = _PropertyLevelDimensionWeightStore()
+        await _write_weights(store, spec, {"geo_proximity": 0.2})
+        assert store.nodes[0]["dimension"] == "geo_proximity"
+        assert store.nodes[0]["tenant"] == "plasticos"
+
+        weights = await ScoringAssembler(spec, graph_driver=store).load_learned_weights()
+
+        assert weights == {"geo_proximity": 0.2}
+
+    @pytest.mark.asyncio
+    async def test_reader_filters_on_dimension_and_tenant_only(self) -> None:
+        spec = _plasticos_like_spec()
+        store = _PropertyLevelDimensionWeightStore()
+        await ScoringAssembler(spec, graph_driver=store).load_learned_weights()
+
+        cypher = store.reader_cypher[-1]
+        assert "{tenant: $tenant}" in cypher
+        assert "dw.dimension IN $names" in cypher
+        assert "dimension_name" not in cypher
+        assert "domain_id" not in cypher
+        _, kwargs = store.execute_query.call_args
+        assert kwargs["parameters"] == {"names": ["geo_proximity", "credit_score"], "tenant": "plasticos"}
+        assert kwargs["database"] == "plasticos"
+
+    @pytest.mark.asyncio
+    async def test_reader_is_tenant_scoped(self) -> None:
+        spec = _plasticos_like_spec()
+        store = _PropertyLevelDimensionWeightStore()
+        await _write_weights(store, _plasticos_like_spec("other_tenant"), {"geo_proximity": 0.2})
+
+        assert await ScoringAssembler(spec, graph_driver=store).load_learned_weights() == {}
+
+    @pytest.mark.asyncio
+    async def test_flag_off_restores_legacy_reader(self, monkeypatch) -> None:
+        """C-21: learned_weights_tenant_keyed=False emits the legacy (inert) reader."""
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "learned_weights_tenant_keyed", False)
+        spec = _plasticos_like_spec()
+        store = _PropertyLevelDimensionWeightStore()
+        await _write_weights(store, spec, {"geo_proximity": 0.2})
+
+        weights = await ScoringAssembler(spec, graph_driver=store).load_learned_weights()
+
+        assert weights == {}
+        assert "dw.dimension_name IN $names AND dw.domain_id = $domain_id" in store.reader_cypher[-1]

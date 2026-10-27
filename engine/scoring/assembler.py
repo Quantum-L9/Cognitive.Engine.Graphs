@@ -102,7 +102,16 @@ class ScoringAssembler:
 
         Returns a mapping of dimension_name -> learned weight adjustment factor.
         Falls back to empty dict if feedback loop is disabled or no weights exist.
+
+        RU-022 / CEG-COR-030: the writer (``SignalWeightCalculator._store_weights``)
+        keys DimensionWeight on ``{dimension, tenant}``. While
+        ``settings.learned_weights_tenant_keyed`` is on (default) the reader
+        filters on exactly those properties, with ``$tenant`` = the domain id;
+        off emits the legacy ``dimension_name`` / ``domain_id`` reader, which
+        matches nothing the writer stores.
         """
+        from engine.config.settings import settings
+
         if not self._graph_driver:
             return {}
 
@@ -115,14 +124,24 @@ class ScoringAssembler:
         if not dim_names:
             return {}
 
-        cypher = """
+        parameters: dict[str, Any]
+        if settings.learned_weights_tenant_keyed:
+            cypher = """
+        MATCH (dw:DimensionWeight {tenant: $tenant})
+        WHERE dw.dimension IN $names
+        RETURN dw.dimension AS name, dw.weight AS weight
+        """
+            parameters = {"names": dim_names, "tenant": domain_id}
+        else:
+            cypher = """
         MATCH (dw:DimensionWeight)
         WHERE dw.dimension_name IN $names AND dw.domain_id = $domain_id
         RETURN dw.dimension_name AS name, dw.weight AS weight
         """
+            parameters = {"names": dim_names, "domain_id": domain_id}
         results = await self._graph_driver.execute_query(
             cypher=cypher,
-            parameters={"names": dim_names, "domain_id": domain_id},
+            parameters=parameters,
             database=domain_id,
         )
         self._learned_weights = {r["name"]: r["weight"] for r in results if r.get("name") and r.get("weight")}

@@ -34,6 +34,7 @@ and rollback procedure.
 ## Quick Reference
 | Arbitration Zero Score Present | `ARBITRATION_ZERO_SCORE_PRESENT` (`arbitration_zero_score_present`) | `True` | unset | active (correctness); a dimension value of 0.0 is evaluated by hard/soft constraints and Pareto dominance instead of being skipped or replaced by `<d>_score`; `false` restores legacy truthiness (RU-018 / CEG-COR-025) |
 | Arbitration Objective Direction | `ARBITRATION_OBJECTIVE_DIRECTION` (`arbitration_objective_direction`) | `True` | unset | active (correctness); the arbitration front honours `direction: minimize` (unknown strings maximise with a warning) and keeps at most `front_size_limit` ids, highest composite `score` first, reporting the rest as `trimmed`; `false` restores maximise-all, unbounded (RU-019 / CEG-COR-026) |
+| Learned Weights Tenant Keyed | `LEARNED_WEIGHTS_TENANT_KEYED` (`learned_weights_tenant_keyed`) | `True` | unset | active (correctness) for feedback-enabled domains only (`FEEDBACK_ENABLED` defaults `False`); learned DimensionWeight multipliers are read by the writer's `{dimension, tenant}` keys; `false` restores the inert legacy reader (RU-022 / CEG-COR-030) |
 
 The **Default** column is the code-level default in `engine/config/settings.py`
 (what ships if no environment variable is set — the seL4 "dormant mechanism"
