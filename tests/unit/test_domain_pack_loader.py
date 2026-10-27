@@ -452,9 +452,18 @@ class TestScoringAdmission:
         from engine.config import loader as loader_module
 
         monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", False)
+        # RU-039's full-match check also compiles scoring; isolate this unit's flag.
+        monkeypatch.setattr(loader_module.settings, "admission_checks_full_match", False)
         for spec in (_spec_with_dimensions([_BRIDGE, _ATTENTION, _POPMEAN, _PRIOR]), _repo_spec("freight-matching")):
             assert loader_module.admission_defects(spec) == []
             assert loader_module.withholding_reason(spec) is None
+
+    @pytest.mark.parametrize("domain_id", ["plasticos", "mortgage-brokerage"])
+    def test_served_packs_have_no_scoring_defect(self, domain_id: str) -> None:
+        """The scoring check alone withholds neither served pack (p_param_binding.py: unbound={})."""
+        from engine.config.loader import admission_defects
+
+        assert [d for d in admission_defects(_repo_spec(domain_id)) if d.startswith("scoring")] == []
 
     def test_unvalidated_override_still_serves(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from engine.config import loader as loader_module

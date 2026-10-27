@@ -81,6 +81,7 @@ independently of the code default.
 | Traversal Gate EXISTS Subquery | `TRAVERSAL_GATE_EXISTS_SUBQUERY` (`traversal_gate_exists_subquery`) | `True` | unset | active; traversal gates compile to an `EXISTS { … }` subquery Neo4j 5 accepts — see §20 |
 | Childsync FOREACH Projection | `CHILDSYNC_FOREACH_PROJECTION` (`childsync_foreach_projection`) | `True` | unset | active; childsync writes children in `FOREACH` without copying them onto the parent — see §20 |
 | Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `True` | unset | active (hardening); admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
+| Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `True` | unset | active (hardening); admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
 
 ---
 
@@ -701,6 +702,22 @@ scoring binds `$lat` / `$lon` / `$target_price` (CEG-COR-011).
 Rollback: `SCORING_ADMISSION_CHECK_ENABLED=false` (gate-only admission, the
 previous wording of the withholding reason), or
 `UNVALIDATED_DOMAIN_PACKS_ENABLED=true` to serve every validated pack.
+
+### Full-match admission (RU-039)
+
+`ADMISSION_CHECKS_FULL_MATCH` (default `True`) makes admission keep the promise
+that an admitted pack executes for every declared match direction. For each
+direction `TraversalAssembler.assemble_traversal` must not raise,
+`GateCompiler.compile_all_gates` must not raise, and every `$parameter` in the
+gate WHERE, the traversal and the scoring clause must be a queryschema field, a
+derived parameter, a scoring `queryprop` (backfilled by `handle_match`), `top_n`
+or a value a compiler binds itself; otherwise the defect names the direction
+and the parameter or step. No Neo4j access. `mortgage-brokerage` is withheld by
+it until its `lenderresolve` step is in the assembler's
+`(alias:Label)-[:TYPE]->(alias:Label)` grammar (CEG-COR-012); it failed every
+match before. Rollback: `ADMISSION_CHECKS_FULL_MATCH=false` (with
+`SCORING_ADMISSION_CHECK_ENABLED=false` for the pre-remediation verdicts) or
+`UNVALIDATED_DOMAIN_PACKS_ENABLED=true`.
 
 ---
 

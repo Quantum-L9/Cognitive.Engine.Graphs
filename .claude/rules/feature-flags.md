@@ -84,3 +84,4 @@ were industry-specific and had no caller).
 | Flag | Default | Purpose |
 |------|---------|---------|
 | scoring_admission_check_enabled | True | Admission compiles each direction's scoring and withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer (RU-020); off = gate-only admission |
+| admission_checks_full_match | True | Admission requires each direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound by `handle_match` (RU-039) |

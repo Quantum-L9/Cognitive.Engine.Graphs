@@ -108,8 +108,45 @@ def admission_defects(spec: DomainSpec) -> list[str]:
         for rule_name in spec.plugins.inference_rules:
             if rule_name not in registered:
                 defects.append(f"plugins.inference_rules: {rule_name!r} is not a registered inference rule")
-    if settings.scoring_admission_check_enabled:
-        defects.extend(_scoring_defects(spec, check_producers=True))
+    if settings.scoring_admission_check_enabled or settings.admission_checks_full_match:
+        defects.extend(_scoring_defects(spec, check_producers=settings.scoring_admission_check_enabled))
+    if settings.admission_checks_full_match:
+        defects.extend(_match_defects(spec))
+    return list(dict.fromkeys(defects))
+
+
+def _match_defects(spec: DomainSpec) -> list[str]:
+    """Per declared match direction: the traversal assembles and the gate WHERE binds.
+
+    ``handle_match`` assembles ``TraversalAssembler.assemble_traversal`` and
+    ``GateCompiler.compile_all_gates`` for the requested direction and sends
+    the result with the parameters it binds; a step the assembler refuses or a
+    ``$parameter`` nothing binds fails every match in that direction. Scoring
+    is covered by ``_scoring_defects``. No Neo4j access.
+    """
+    from engine.gates.compiler import GateCompiler
+    from engine.traversal.assembler import TraversalAssembler
+
+    defects: list[str] = []
+    bindable = _bindable_parameters(spec)
+    for direction in spec.queryschema.matchdirections:
+        cypher_parts: list[str] = []
+        try:
+            cypher_parts.extend(TraversalAssembler(spec).assemble_traversal(direction))
+        except (ValueError, KeyError) as exc:
+            defects.append(f"traversal[{direction}]: refused by the traversal assembler — {exc}")
+        compiler = GateCompiler(spec)
+        try:
+            cypher_parts.append(compiler.compile_all_gates(direction))
+        except (ValueError, KeyError) as exc:
+            defects.append(f"match[{direction}]: gates refused by the compiler — {exc}")
+        bound = bindable | set(compiler.last_query_params)
+        unbound = sorted({p for part in cypher_parts for p in _PARAM_IDENTIFIER_REF.findall(part) if p not in bound})
+        if unbound:
+            names = ", ".join(repr(p) for p in unbound)
+            defects.append(
+                f"match[{direction}]: gates or traversal reference parameter(s) {names}, which nothing binds"
+            )
     return defects
 
 
@@ -234,7 +271,7 @@ def withholding_reason(spec: DomainSpec) -> str | None:
 
 def _match_admission_checks_enabled() -> bool:
     """Whether admission checks more than gates (the pre-remediation wording applies otherwise)."""
-    return settings.scoring_admission_check_enabled
+    return settings.scoring_admission_check_enabled or settings.admission_checks_full_match
 
 
 class DomainPackLoader:

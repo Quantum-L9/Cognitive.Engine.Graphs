@@ -475,3 +475,115 @@ def test_template_validates_and_assembles_for_every_direction() -> None:
         ScoringAssembler(spec).assemble_scoring_clause(direction, {})
     exclusion = next(g for g in spec.gates if g.type.value == "exclusion")
     assert (exclusion.fromnode, exclusion.tonode) == (None, None)
+
+
+# RG-051 (RU-039): a pack the loader admits is executable for every declared match
+# direction — its traversal assembles and every $parameter in gates, traversal and
+# scoring is one handle_match binds.
+def _synthetic_raw() -> dict[str, object]:
+    return yaml.safe_load(
+        """
+domain: {id: synthetic-check, name: Synthetic, version: 0.1.0}
+ontology:
+  nodes:
+    - label: Widget
+      managedby: sync
+      candidate: true
+      matchdirection: d1
+      properties: [{name: widget_id, type: string, required: true}, {name: size, type: float}]
+    - label: Ask
+      managedby: api
+      queryentity: true
+      matchdirection: d1
+      properties: [{name: ask_id, type: string, required: true}]
+    - label: Maker
+      managedby: sync
+      properties: [{name: maker_id, type: string, required: true}]
+  edges:
+    - {type: MADE_BY, from: Widget, to: Maker, direction: DIRECTED, category: capability, managedby: sync}
+matchentities:
+  candidate: [{label: Widget, matchdirection: d1}]
+  queryentity: [{label: Ask, matchdirection: d1}]
+queryschema:
+  matchdirections: [d1]
+  fields: [{name: size, type: float}]
+traversal:
+  steps: []
+gates:
+  - {name: size_floor, type: threshold, candidateprop: size, queryparam: size, operator: '>=', nullbehavior: pass}
+scoring:
+  dimensions: []
+"""
+    )
+
+
+def test_synthetic_baseline_pack_is_admitted() -> None:
+    assert admission_defects(DomainSpec.model_validate(_synthetic_raw())) == []
+
+
+def test_pack_with_an_off_grammar_traversal_step_is_withheld() -> None:
+    raw = _synthetic_raw()
+    raw["traversal"] = {"steps": [{"name": "maker_hop", "pattern": "candidate-[:MADE_BY]->m:Maker", "required": True}]}
+    spec = DomainSpec.model_validate(raw)
+    defects = admission_defects(spec)
+    assert any("traversal[d1]" in d and "maker_hop" in d for d in defects), defects
+    assert withholding_reason(spec) is not None
+
+
+def test_pack_with_an_unbound_scoring_default_is_withheld_by_the_full_match_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """pricealignment defaults its query parameter to $target_price, which this pack does not declare."""
+    from engine.config import loader as loader_module
+
+    monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", False)
+    raw = _synthetic_raw()
+    raw["scoring"] = {
+        "dimensions": [
+            {
+                "name": "price",
+                "source": "candidateproperty",
+                "candidateprop": "size",
+                "computation": "pricealignment",
+                "weightkey": "wp",
+                "defaultweight": 0.5,
+            }
+        ]
+    }
+    spec = DomainSpec.model_validate(raw)
+    defects = admission_defects(spec)
+    assert any("d1" in d and "'target_price'" in d for d in defects), defects
+    assert withholding_reason(spec) is not None
+
+
+def test_pack_whose_gate_references_an_undeclared_parameter_is_withheld() -> None:
+    raw = _synthetic_raw()
+    raw["gates"].append(
+        {"name": "size_cap", "type": "threshold", "candidateprop": "size", "queryparam": "max_size", "operator": "<="}
+    )
+    defects = admission_defects(DomainSpec.model_validate(raw))
+    assert any("match[d1]" in d and "'max_size'" in d for d in defects), defects
+
+
+def test_current_mortgage_pack_is_withheld_naming_its_unassemblable_step() -> None:
+    defects = admission_defects(_spec(DOMAINS_ROOT / "mortgage-brokerage"))
+    assert any("traversal[borrowertoproduct]" in d and "lenderresolve" in d for d in defects), defects
+
+
+def test_current_freight_pack_is_withheld_naming_its_unbound_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config import loader as loader_module
+
+    monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", False)
+    defects = "\n".join(admission_defects(_spec(DOMAINS_ROOT / "freight-matching")))
+    for param in ("'lat'", "'lon'", "'target_price'"):
+        assert param in defects
+
+
+def test_full_match_check_off_restores_previous_admission(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config import loader as loader_module
+
+    monkeypatch.setattr(loader_module.settings, "admission_checks_full_match", False)
+    monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", False)
+    raw = _synthetic_raw()
+    raw["traversal"] = {"steps": [{"name": "maker_hop", "pattern": "candidate-[:MADE_BY]->m:Maker", "required": True}]}
+    assert admission_defects(DomainSpec.model_validate(raw)) == []
