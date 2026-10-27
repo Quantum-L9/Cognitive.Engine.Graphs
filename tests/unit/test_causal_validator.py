@@ -221,3 +221,58 @@ class TestCausalEdgeRuntimeValidator:
         valid, _rejected = validator.validate_batch(batch, "RESULTED_IN")
 
         assert len(valid) == 1
+
+
+# ── RU-069 / CEG-COR-058: temporal validation resolved from the batch edge_type ──
+
+
+def _subgraph_spec(temporal_validation: bool = True):
+    from engine.config.schema import CausalEdgeSpec, CausalSubgraphSpec
+
+    return CausalSubgraphSpec(
+        enabled=True,
+        causal_edges=[
+            CausalEdgeSpec(
+                edge_type="RESULTED_IN",
+                source_label="Facility",
+                target_label="TransactionOutcome",
+                temporal_validation=temporal_validation,
+            )
+        ],
+    )
+
+
+_INVERTED_SYNC_RECORD = {"source_ts": "2026-03-02T00:00:00", "target_ts": "2026-03-01T00:00:00", "confidence": 0.9}
+
+
+@pytest.mark.unit
+class TestBatchEdgeTypeTemporalValidation:
+    def test_sync_shaped_record_without_edge_type_is_rejected(self) -> None:
+        valid, rejected = CausalEdgeRuntimeValidator(_subgraph_spec()).validate_batch(
+            [dict(_INVERTED_SYNC_RECORD)], "RESULTED_IN"
+        )
+        assert valid == []
+        assert [r["rejection_reason"] for r in rejected] == [_REJECTION_TEMPORAL]
+
+    def test_edge_spec_without_temporal_validation_accepts_inverted_record(self) -> None:
+        valid, rejected = CausalEdgeRuntimeValidator(_subgraph_spec(temporal_validation=False)).validate_batch(
+            [dict(_INVERTED_SYNC_RECORD)], "RESULTED_IN"
+        )
+        assert len(valid) == 1
+        assert rejected == []
+
+    def test_causal_spec_behaviour_unchanged(self) -> None:
+        valid, rejected = CausalEdgeRuntimeValidator(_make_causal_spec(enforce_temporal=False)).validate_batch(
+            [dict(_INVERTED_SYNC_RECORD)], "RESULTED_IN"
+        )
+        assert len(valid) == 1
+        assert rejected == []
+
+    def test_flag_off_restores_record_edge_type_lookup(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "causal_validator_batch_edge_type", False)
+        valid, _rejected = CausalEdgeRuntimeValidator(_subgraph_spec()).validate_batch(
+            [dict(_INVERTED_SYNC_RECORD)], "RESULTED_IN"
+        )
+        assert len(valid) == 1

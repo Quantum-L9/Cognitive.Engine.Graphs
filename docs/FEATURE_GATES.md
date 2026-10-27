@@ -87,6 +87,7 @@ independently of the code default.
 | PII Declared Fields Enforced | `PII_DECLARED_FIELDS_ENFORCED` (`pii_declared_fields_enforced`) | `True` | unset | active; the domain's declared `compliance.pii` fields and `handling` mode apply on the response path — see lane D |
 | Causal Attribution Unique Touchpoints | `CAUSAL_ATTRIBUTION_UNIQUE_TOUCHPOINTS` (`causal_attribution_unique_touchpoints`) | `True` | unset | active; attribution weights are computed over unique touchpoints and sum to 1.0 — see lane D |
 | Causal Edge Declared Identity | `CAUSAL_EDGE_DECLARED_IDENTITY` (`causal_edge_declared_identity`) | `True` | unset | active; causal edges match declared node identities, anchor predicates in one WHERE with a bound threshold, MERGE on a stable key — see lane D |
+| Causal Validator Batch Edge Type | `CAUSAL_VALIDATOR_BATCH_EDGE_TYPE` (`causal_validator_batch_edge_type`) | `True` | unset | active; declared per-edge temporal validation applies to sync batches — see lane D |
 
 ---
 
@@ -1042,5 +1043,19 @@ parallel edge. On:
   over the causal-edge source labels instead of `touchpoint.entity_id`.
 
 Off: the legacy Cypher, kept for rollback although it cannot match outcome nodes.
+
+Rollback: set the flag to `false`.
+
+### Causal Validator Batch Edge Type (RU-069 / CEG-COR-058)
+
+**Flag**: `CAUSAL_VALIDATOR_BATCH_EDGE_TYPE=True` (default on)
+
+With a `CausalSubgraphSpec` (the production type), `CausalEdgeRuntimeValidator` found
+the edge spec via `record["edge_type"]`; `handle_sync` records carry no such key, so a
+declared `temporal_validation: true` was never enforced on sync batches. On:
+`validate_batch` passes its `edge_type` to `_validate_record`, and enforcement is
+`CausalSpec.enforce_temporal_precedence` when present, else the matching
+`CausalEdgeSpec.temporal_validation`. Tenants syncing inverted timestamps now see
+`rejected_count` / `all_rejected`. Off: the record-key lookup.
 
 Rollback: set the flag to `false`.
