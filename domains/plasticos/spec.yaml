@@ -478,10 +478,22 @@ scoring:
     - buyer_demand_to_supply_opportunity
 sync:
   endpoints:
+  # Polymer edges are ingested with the nodes (CEG-COR-071): the polymer gates
+  # require PROCESSES / FULFILLS_POLYMER, so engine-synced nodes without them
+  # could never match.
+  # facilities: `processed_polymers` is a list of {code: <PolymerFamily.code>}
+  # maps. childsync SETs each map onto the PolymerFamily node (c += child_row),
+  # so the maps must carry the code only.
   - path: /v1/sync/facilities
     targetnode: Facility
     idproperty: facility_id
     batchstrategy: UNWINDMERGE
+    childsync:
+    - field: processed_polymers
+      targetnode: PolymerFamily
+      targetid: code
+      edgetype: PROCESSES
+      edgedirection: parenttochild
   - path: /v1/sync/polymerfamilies
     targetnode: PolymerFamily
     idproperty: code
@@ -490,10 +502,17 @@ sync:
     targetnode: MaterialForm
     idproperty: form_id
     batchstrategy: UNWINDMERGE
+  # supply-opportunities: the scalar polymer_type links to an existing
+  # PolymerFamily by code (sync the polymerfamilies taxonomy first).
   - path: /v1/sync/supply-opportunities
     targetnode: SupplyOpportunity
     idproperty: opportunity_id
     batchstrategy: UNWINDMERGE
+    taxonomyedges:
+    - field: polymer_type
+      edgetype: FULFILLS_POLYMER
+      targetlabel: PolymerFamily
+      targetid: code
   - path: /v1/sync/buyer-demands
     targetnode: BuyerDemand
     idproperty: demand_id
