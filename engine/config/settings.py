@@ -297,6 +297,11 @@ class Settings(BaseSettings):
     # every bound scored 95/A. On: all five declared keys are gate-critical.
     # Off: candidateprop only.
     health_range_gate_fields_enabled: bool = True
+    # RU-110 / CEG-COR-046: a blocked readiness (gate completeness < 0.50)
+    # reported gate_score * 100, so gc=0.49 scored 49.0 while gc=0.50 could
+    # score 40.0. On: the blocked score is the 60% gate component
+    # round(gate_score * 60, 2), always < 30. Off: gate_score * 100.
+    health_blocked_score_scale_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

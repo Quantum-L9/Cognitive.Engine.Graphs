@@ -237,6 +237,49 @@ class TestReadinessScorer:
         assert result.blocking_reason == "gate_critical_fields_missing"
         assert result.blocking_fields == []
 
+    # -- RU-110 / CEG-COR-046: the blocked score sits on the same 60% gate scale --
+
+    @staticmethod
+    def _score_at(gate_completeness: float) -> float:
+        """Readiness with 100 gate fields, ``round(gc*100)`` of them counted; all else fixed.
+
+        One unpopulated scoring field keeps scoring coverage at 0, so the unblocked
+        score at gc=0.50 is 40.0 — below the legacy blocked 49.0 at gc=0.49.
+        """
+        populated = round(gate_completeness * 100)
+        fields = [
+            _make_field_health(f"g{i}", populated=i < populated, confidence=0.9, gate_critical=True) for i in range(100)
+        ]
+        fields.append(_make_field_health("s1", populated=False, scoring_weight=0.5))
+        return compute_readiness_score_v2(fields, _make_domain_spec()).overall_score
+
+    def test_readiness_is_monotonic_across_the_block_threshold(self):
+        scores = [self._score_at(gc) for gc in (0.40, 0.49, 0.50, 0.60)]
+        assert scores == sorted(scores), scores
+        assert self._score_at(0.49) <= self._score_at(0.50)
+
+    def test_blocked_score_is_the_60_percent_gate_component(self):
+        fields = [
+            _make_field_health("g1", populated=True, confidence=0.9, gate_critical=True),
+            _make_field_health("g2", populated=False, gate_critical=True),
+            _make_field_health("g3", populated=False, gate_critical=True),
+        ]
+        result = compute_readiness_score_v2(fields, _make_domain_spec())
+
+        assert result.overall_score == round((1 / 3) * 60, 2)
+        assert result.overall_score <= 30
+        assert result.grade == "F"
+        assert result.blocking_reason == "gate_critical_fields_missing"
+        assert result.recommended_action == "enrich_gates_first"
+        assert self._score_at(0.49) == 29.4
+
+    def test_blocked_score_scale_flag_off_restores_gate_score_times_100(self, monkeypatch):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "health_blocked_score_scale_enabled", False)
+        assert self._score_at(0.49) == 49.0
+        assert self._score_at(0.50) == 40.0
+
     def test_get_grade_boundaries(self):
         assert get_grade(0.95) == "A"
         assert get_grade(0.85) == "B"

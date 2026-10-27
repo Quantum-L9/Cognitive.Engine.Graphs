@@ -29,6 +29,9 @@ _CONFIDENCE_THRESHOLD = 0.70
 # Gate blocking threshold — below this, score caps at F
 _GATE_BLOCK_THRESHOLD = 0.50
 
+# Weight of the gate-critical completeness component (the "60" of 60/25/10/5)
+_GATE_WEIGHT = 0.60
+
 
 def compute_readiness_score_v2(
     field_health: list[FieldHealth],
@@ -57,8 +60,16 @@ def compute_readiness_score_v2(
     blocking_fields = _blocking_fields(gate_fields, absent_counts=absent_counts)
 
     if gate_score < _GATE_BLOCK_THRESHOLD:
+        # CEG-COR-046: with health_blocked_score_scale_enabled the blocked score
+        # is the 60% gate component (< 30 below the threshold), so readiness is
+        # monotonic in gate completeness; the legacy gate_score * 100 put
+        # gc=0.49 (49.0) above the unblocked minimum at gc=0.50.
+        if settings.health_blocked_score_scale_enabled:
+            blocked_score = round(gate_score * _GATE_WEIGHT * 100, 2)
+        else:
+            blocked_score = gate_score * 100
         return ReadinessScore(
-            overall_score=gate_score * 100,
+            overall_score=blocked_score,
             grade="F",
             gate_completeness=gate_score,
             scoring_dimension_coverage=0.0,
@@ -83,7 +94,10 @@ def compute_readiness_score_v2(
 
     # FINAL SCORE
     final_score = (
-        gate_score * 0.60 + scoring_coverage * 0.25 + inference_unlock_score * 0.10 + (1 - staleness_penalty) * 0.05
+        gate_score * _GATE_WEIGHT
+        + scoring_coverage * 0.25
+        + inference_unlock_score * 0.10
+        + (1 - staleness_penalty) * 0.05
     )
 
     return ReadinessScore(
