@@ -183,3 +183,68 @@ def test_strict_clean_run_without_import_failure_exits_zero(monkeypatch: pytest.
     monkeypatch.setattr(dispatch, "_resolve_auditors", lambda _args: [_CleanAuditor()])
     monkeypatch.setattr(dispatch, "_save_report", lambda _results, _root: None)
     assert _run_dispatch(monkeypatch, "--strict") == 0
+
+
+# ── api_regression (RU-140 / RG-176) ────────────────────────────────────────
+
+
+def _git(root: Path, *args: str) -> str:
+    import shutil
+    import subprocess
+
+    git = shutil.which("git")
+    assert git is not None
+    cmd = [git, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", *args]
+    # Fixed git argv built from test literals inside tmp_path; no untrusted input.
+    proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True, check=True)  # noqa: S603
+    return proc.stdout
+
+
+@pytest.fixture
+def branched_repo(tmp_path: Path) -> Path:
+    """main: engine/gone.py (class Gone) + engine/shared.py (class Shared).
+
+    feature (HEAD) deletes gone.py and edits shared.py; after the branch point
+    main adds class AddedOnMain to shared.py.
+    """
+    import shutil
+
+    if shutil.which("git") is None:
+        pytest.skip("git binary not available")  # environment condition: RG-176 requires git
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _write(root, "engine/gone.py", "class Gone:\n    def run(self):\n        return 1\n")
+    _write(root, "engine/shared.py", "class Shared:\n    def a(self):\n        return 1\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "base")
+    _git(root, "checkout", "-q", "-b", "feature")
+    (root / "engine" / "gone.py").unlink()
+    _write(root, "engine/shared.py", "class Shared:\n    def a(self):\n        return 2\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "feature work")
+    _git(root, "checkout", "-q", "main")
+    _write(
+        root,
+        "engine/shared.py",
+        "class Shared:\n    def a(self):\n        return 1\n\n\nclass AddedOnMain:\n    pass\n",
+    )
+    _git(root, "commit", "-q", "-am", "main moves on")
+    _git(root, "checkout", "-q", "feature")
+    return root
+
+
+def test_deleted_module_reports_class_removed(branched_repo: Path) -> None:
+    from tools.auditors import api_regression as ar
+
+    result = ar.APIRegressionAuditor().scan([], branched_repo)
+    removed = [(f.category, f.file, f.message) for f in result.findings if f.category == "CLASS_REMOVED"]
+    assert ("CLASS_REMOVED", "engine/gone.py", "Public class 'Gone' was removed") in removed
+
+
+def test_class_added_on_main_after_branching_is_not_reported(branched_repo: Path) -> None:
+    from tools.auditors import api_regression as ar
+
+    result = ar.APIRegressionAuditor().scan([], branched_repo)
+    assert not [f for f in result.findings if "AddedOnMain" in f.message]
+    assert [f.file for f in result.findings] == ["engine/gone.py"]
