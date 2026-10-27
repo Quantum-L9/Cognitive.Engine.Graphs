@@ -129,3 +129,4 @@ were industry-specific and had no caller).
 
 ## Correctness remediation lane F (plan 0d84ec8)
 | neo4j_circuit_release_cancelled_probes | True | A HALF_OPEN probe cancelled before producing a result (SDK `wait_for` timeout) returns its slot, so the breaker re-probes instead of wedging until restart (RU-094 / CEG-COR-035); off restores the leaking slot accounting |
+| neo4j_circuit_ignore_client_errors | True | `neo4j.exceptions.ClientError` (syntax, constraint, missing database, null MERGE key) re-raises unchanged without counting toward the process-wide Neo4j breaker; infrastructure errors still count (RU-093 / CEG-COR-034); off counts every exception |

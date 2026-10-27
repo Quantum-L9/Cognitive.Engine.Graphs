@@ -1237,6 +1237,7 @@ invariant the code already claimed, so each ships `True`; set the env var to
 
 | Flag (env var) | Default | Unit | On | Off |
 | `neo4j_circuit_release_cancelled_probes` (`NEO4J_CIRCUIT_RELEASE_CANCELLED_PROBES`) | `true` | RU-094 / CEG-COR-035 | A HALF_OPEN probe that ends in `asyncio.CancelledError` returns its probe slot (only within the HALF_OPEN cycle it was taken in) and records neither success nor failure | The slot leaks; `half_open_max_calls` cancelled probes leave the breaker rejecting every call until process restart |
+| `neo4j_circuit_ignore_client_errors` (`NEO4J_CIRCUIT_IGNORE_CLIENT_ERRORS`) | `true` | RU-093 / CEG-COR-034 | `neo4j.exceptions.ClientError` and subclasses are a neutral breaker outcome: re-raised unchanged (absent-database translation still applies), not counted, streak not reset, HALF_OPEN probe slot returned; counted in `BreakerMetrics.total_neutral_errors`. ServiceUnavailable, SessionExpired, TransientError, DatabaseError, OSError and everything else still count. Note `AuthError` is a `ClientError`: bad credentials no longer open the breaker (calls still fail immediately) | Every exception counts; five consecutive client errors from one tenant open the breaker for all tenants |
 
 ### Rollback
 

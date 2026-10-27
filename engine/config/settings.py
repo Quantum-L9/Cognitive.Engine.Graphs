@@ -547,6 +547,10 @@ class Settings(BaseSettings):
     # result (the SDK runtime's wait_for timeout) returns its probe slot. Off:
     # the slot leaks and three cancelled probes wedge the breaker until restart.
     neo4j_circuit_release_cancelled_probes: bool = True
+    # RU-093 / CEG-COR-034: neo4j ClientError (syntax, constraint, missing
+    # database, null MERGE key) is a per-request fault and no longer counts
+    # toward opening the process-wide Neo4j breaker. Off: every exception counts.
+    neo4j_circuit_ignore_client_errors: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
