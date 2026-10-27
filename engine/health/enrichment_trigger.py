@@ -21,6 +21,7 @@ from engine.config.schema import DomainSpec
 from engine.config.settings import settings
 from engine.gate_egress import request_enrichment
 from engine.health.field_health import EnrichmentPriority, EntityHealth, MatchQualityDelta
+from engine.health.readiness_scorer import compute_staleness_penalty
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,15 @@ def compute_enrichment_priority(
         len([o for o in (historical_outcomes or []) if getattr(o, "outcome", "") == "rejected"]) / 5,
         1.0,
     )
-    staleness_score: float = getattr(entity_health, "staleness_penalty", 0.0)
+    # CEG-COR-047: EntityHealth carries no staleness_penalty attribute, so the
+    # getattr fallback made this term 0.0 for every entity. With
+    # health_priority_staleness_enabled it is computed from the entity's
+    # field health (0.0 fresh .. 1.0 stale), worth up to 10 points.
+    staleness_score: float
+    if settings.health_priority_staleness_enabled:
+        staleness_score = compute_staleness_penalty(entity_health.field_health)
+    else:
+        staleness_score = getattr(entity_health, "staleness_penalty", 0.0)
 
     priority_score = (roi_score * 0.40 + gate_gap_score * 0.30 + failure_score * 0.20 + staleness_score * 0.10) * 100
 

@@ -603,6 +603,11 @@ class Settings(BaseSettings):
     # score 40.0. On: the blocked score is the 60% gate component
     # round(gate_score * 60, 2), always < 30. Off: gate_score * 100.
     health_blocked_score_scale_enabled: bool = True
+    # RU-111 / CEG-COR-047: compute_enrichment_priority's documented 10%
+    # staleness term read a staleness_penalty attribute EntityHealth does not
+    # have, so it was always 0. On: the term is
+    # compute_staleness_penalty(entity_health.field_health). Off: the zero term.
+    health_priority_staleness_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

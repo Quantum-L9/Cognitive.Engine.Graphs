@@ -444,6 +444,44 @@ class TestEnrichmentPriority:
 
         assert priority.recommendation in ("enrich_low_priority", "skip")
 
+    # -- RU-111 / CEG-COR-047: the 10% staleness term is computed from field health --
+
+    @staticmethod
+    def _entity(staleness_days: int | None) -> EntityHealth:
+        return EntityHealth(
+            entity_id="e1",
+            domain="test",
+            readiness_score=60.0,
+            grade="D",
+            field_health=[
+                _make_field_health("g1", populated=True, gate_critical=True, staleness_days=staleness_days),
+                _make_field_health("g2", populated=False, gate_critical=True, staleness_days=staleness_days),
+                _make_field_health("s1", populated=True, scoring_weight=0.3, staleness_days=staleness_days),
+            ],
+            critical_gaps=["g2"],
+            gate_completeness=0.5,
+            scoring_dimension_coverage=1.0,
+        )
+
+    def test_stale_entity_priority_is_ten_points_higher(self):
+        spec = _make_domain_spec()
+        fresh = compute_enrichment_priority(self._entity(0), spec)
+        stale = compute_enrichment_priority(self._entity(365), spec)
+
+        assert stale.priority_score == pytest.approx(fresh.priority_score + 10.0, abs=0.01)
+        assert stale.roi == fresh.roi
+        assert stale.estimated_cost_usd == fresh.estimated_cost_usd
+
+    def test_staleness_flag_off_restores_zero_term(self, monkeypatch):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "health_priority_staleness_enabled", False)
+        spec = _make_domain_spec()
+        fresh = compute_enrichment_priority(self._entity(0), spec)
+        stale = compute_enrichment_priority(self._entity(365), spec)
+
+        assert stale.priority_score == fresh.priority_score
+
     def test_estimate_match_probability_sigmoid(self):
         """Sigmoid approximation should increase with readiness score."""
         low = estimate_match_probability(30.0)
