@@ -109,14 +109,28 @@ class TestNegativePenalty:
         # The weight expression should contain the negative penalty factor
         assert "-0.3" in clause
 
-    def test_normal_weight_when_above_threshold(self) -> None:
+    def test_normal_weight_when_above_threshold(self, monkeypatch) -> None:
+        """RU-023 / CEG-COR-083: above the threshold the multiplier applies (no penalty).
+
+        With learned_weight_renormalization on (default) the non-penalised
+        coefficients are rescaled to their pre-learning sum, so a lone
+        dimension keeps 0.5; the multiply-only 0.5 * 1.5 = 0.75 is the legacy
+        result, asserted with the flag off.
+        """
+        from engine.config.settings import settings
+
         spec = _spec_with_penalty(penalty_threshold=0.5, penalty_factor=0.3)
         assembler = ScoringAssembler(spec)
         # Simulate learned weight above threshold
         assembler._learned_weights = {"geo_score": 1.5}
 
         clause, _ = assembler.assemble_scoring_clause("d1", {})
-        # Weight = defaultweight (0.5) * learned (1.5) = 0.75
+        assert "(0.5 * geo_score)" in clause
+        assert "-0.3" not in clause
+
+        monkeypatch.setattr(settings, "learned_weight_renormalization", False)
+        clause, _ = assembler.assemble_scoring_clause("d1", {})
+        # Legacy: weight = defaultweight (0.5) * learned (1.5) = 0.75
         assert "0.75" in clause
         assert "-0.3" not in clause
 

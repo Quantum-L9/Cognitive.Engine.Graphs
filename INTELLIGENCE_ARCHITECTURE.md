@@ -54,7 +54,9 @@ Match Request → Gate-then-Score → Results Returned
                              DimensionWeight Nodes in Neo4j
                                        ↓
                              ScoringAssembler.load_learned_weights()
-                             (spec_weight × learned_weight = final)
+                             (spec_weight × learned_weight, then the non-penalised
+                              weights rescaled to their pre-learning sum (C-22);
+                              learned < penalty_threshold → −penalty_factor)
                                        ↓
                              Next Match → Improved Scoring ↺
 ```

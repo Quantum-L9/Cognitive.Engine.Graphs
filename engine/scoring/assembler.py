@@ -144,7 +144,13 @@ class ScoringAssembler:
             parameters=parameters,
             database=domain_id,
         )
-        self._learned_weights = {r["name"]: r["weight"] for r in results if r.get("name") and r.get("weight")}
+        if settings.learned_weight_renormalization:
+            # RU-023: a learned 0.0 is a weight (it takes the penalty branch), not absence.
+            self._learned_weights = {
+                r["name"]: r["weight"] for r in results if r.get("name") and r.get("weight") is not None
+            }
+        else:
+            self._learned_weights = {r["name"]: r["weight"] for r in results if r.get("name") and r.get("weight")}
         logger.info(
             "Loaded %d learned dimension weights for domain %s",
             len(self._learned_weights),
@@ -193,8 +199,11 @@ class ScoringAssembler:
             }
 
         dimension_exprs: list[str] = []
-        weight_exprs: list[str] = []
+        weight_entries: list[tuple[float, str]] = []  # (coefficient, alias)
         active_dim_names: list[str] = []
+        # RU-023: indices of non-penalised dimensions and their pre-learning weights.
+        rescalable: dict[int, float] = {}
+        learned_multiplier_applied = False
 
         learned = self._learned_weights or {}
         sw_spec = self.domain_spec.feedbackloop.signal_weights if learned else None
@@ -209,15 +218,33 @@ class ScoringAssembler:
             alias = sanitize_label(dim.name)
             dimension_exprs.append(f"{expr} AS {alias}")
             weight = weights.get(dim.weightkey, dim.defaultweight)
+            pre_learning = weight
+            penalised = False
             # Convergence loop: multiply spec weight by learned adjustment factor
             if dim.name in learned and sw_spec is not None:
                 learned_w = learned[dim.name]
                 # Negative penalty: when learned weight < penalty_threshold,
                 # apply negative penalty instead of just reduced weight.
                 # Implements "primitive subtraction" from Lippl et al.
-                weight = -abs(sw_spec.penalty_factor) if learned_w < sw_spec.penalty_threshold else weight * learned_w
-            weight_exprs.append(f"({cypher_number(weight)} * {alias})")
+                penalised = learned_w < sw_spec.penalty_threshold
+                weight = -abs(sw_spec.penalty_factor) if penalised else weight * learned_w
+                learned_multiplier_applied = learned_multiplier_applied or not penalised
+            if not penalised:
+                rescalable[len(weight_entries)] = pre_learning
+            weight_entries.append((weight, alias))
             active_dim_names.append(dim.name)
+
+        # RU-023 / CEG-COR-083 (C-22): learned multipliers redistribute weight
+        # among the non-penalised dimensions; their sum is rescaled back to its
+        # pre-learning value so learning never raises the positive weight sum.
+        if settings.learned_weight_renormalization and learned_multiplier_applied:
+            pre_sum = sum(rescalable.values())
+            post_sum = sum(weight_entries[i][0] for i in rescalable)
+            if post_sum > 0:
+                scale = pre_sum / post_sum
+                for i in rescalable:
+                    weight_entries[i] = (weight_entries[i][0] * scale, weight_entries[i][1])
+        weight_exprs = [f"({cypher_number(w)} * {a})" for w, a in weight_entries]
 
         self._last_active_dims = list(active_dim_names)
         all_exprs = ", ".join(dimension_exprs)

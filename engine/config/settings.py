@@ -307,6 +307,12 @@ class Settings(BaseSettings):
     # dw.dimension. Off: the legacy (inert) reader. FEEDBACK_ENABLED stays the
     # global gate (default False).
     learned_weights_tenant_keyed: bool = True
+    # RU-023 / CEG-COR-083: learned multipliers (up to signal_weights.max_weight)
+    # pushed the positive weight sum past the C-22 ceiling, and a learned 0.0
+    # was dropped by a truthiness filter. On: a 0.0 row is loaded (and takes
+    # the penalty branch) and the non-penalised coefficients are rescaled to
+    # their pre-learning sum. Off: multiply-only, truthiness filter.
+    learned_weight_renormalization: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
