@@ -55,6 +55,7 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | health_absent_confidence_counts_enabled | True | Readiness counts a populated field unless an explicit confidence < 0.70 discounts it; batch/report forward `field_confidences`; blocking_fields = uncounted gate fields (RU-108 / CEG-COR-044); off restores None→0 coercion |
 | health_range_gate_fields_enabled | True | Health marks every candidate property a gate reads (candidateprop, candidateprop_min/max/start/end) gate-critical (RU-109 / CEG-COR-045); off restores candidateprop only |
 | health_blocked_score_scale_enabled | True | A blocked readiness (gate completeness < 0.50) scores the 60% gate component `round(gc*60, 2)`, keeping readiness monotonic (RU-110 / CEG-COR-046); off restores `gc*100` |
+| health_priority_staleness_enabled | True | compute_enrichment_priority's 10% staleness term is computed from the entity's field health (RU-111 / CEG-COR-047); off restores the always-zero term |
 
 ## Domain Pack Admission (generic; the engine names no domain)
 | Flag | Default | Purpose |

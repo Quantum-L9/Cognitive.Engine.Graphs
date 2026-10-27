@@ -83,6 +83,7 @@ independently of the code default.
 | Health Absent Confidence Counts | `HEALTH_ABSENT_CONFIDENCE_COUNTS_ENABLED` (`health_absent_confidence_counts_enabled`) | `True` | unset | active (hardening); an absent field confidence is "no signal", only an explicit confidence < 0.70 discounts a populated field; batch/report forward `field_confidences` (RU-108 / CEG-COR-044) — see §15 |
 | Health Range Gate Fields | `HEALTH_RANGE_GATE_FIELDS_ENABLED` (`health_range_gate_fields_enabled`) | `True` | unset | active (hardening); range/window bound properties (`candidateprop_min/max/start/end`) are gate-critical in health readiness (RU-109 / CEG-COR-045) — see §15 |
 | Health Blocked Score Scale | `HEALTH_BLOCKED_SCORE_SCALE_ENABLED` (`health_blocked_score_scale_enabled`) | `True` | unset | active (hardening); a blocked readiness reports the 60% gate component `round(gc*60, 2)` so the score is monotonic in gate completeness (RU-110 / CEG-COR-046) — see §15 |
+| Health Priority Staleness | `HEALTH_PRIORITY_STALENESS_ENABLED` (`health_priority_staleness_enabled`) | `True` | unset | active (hardening); the 10% staleness term of the enrichment priority is computed from field staleness instead of always 0 (RU-111 / CEG-COR-047) — see §15 |
 
 ---
 
