@@ -132,6 +132,7 @@ async def run_nightly_health_scan(
     total_cost = 0.0
     total_enriched = 0
     total_skipped = 0
+    ceiling_reached = False
 
     for entity_health, priority_score in assessments[:MAX_ENRICHMENT_QUEUE]:
         priority = compute_enrichment_priority(entity_health, domain_spec)
@@ -142,6 +143,7 @@ async def run_nightly_health_scan(
 
         if total_cost + priority.estimated_cost_usd > cost_ceiling_usd:
             total_skipped += len(assessments) - total_enriched - total_skipped
+            ceiling_reached = True
             logger.info(
                 "Cost ceiling reached: $%.2f / $%.2f",
                 total_cost,
@@ -165,6 +167,12 @@ async def run_nightly_health_scan(
 
         total_cost += priority.estimated_cost_usd
         total_enriched += 1
+
+    # Entities beyond MAX_ENRICHMENT_QUEUE were assessed but never queued: count
+    # them as skipped, as the ceiling branch already does, so enriched +
+    # skipped == assessed (CEG-COR-102, R6-DEC-06).
+    if not ceiling_reached:
+        total_skipped += max(0, len(assessments) - MAX_ENRICHMENT_QUEUE)
 
     scan_result = {
         "domain": domain,

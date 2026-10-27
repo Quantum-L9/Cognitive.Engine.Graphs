@@ -15,6 +15,8 @@ Unit tests for engine/health/nightly_health_scan.run_nightly_health_scan.
 Findings covered:
   CEG-COR-101  de-dup state is local to each run (C-24); a concurrent run
                must not see another run's entity ids
+  CEG-COR-102  total_enriched + total_skipped == total_assessed, entities beyond
+               MAX_ENRICHMENT_QUEUE counted as skipped
 
 Candidate entities come from ``entity_loader`` callbacks; the checked-in
 plasticos pack supplies the spec. No Neo4j.
@@ -27,6 +29,7 @@ from typing import Any
 
 import pytest
 
+from engine.health import nightly_health_scan
 from engine.health.health_schemas import HealthScanProfile
 from engine.health.nightly_health_scan import run_nightly_health_scan
 
@@ -82,3 +85,26 @@ class TestDedupIsLocalToEachRun:
         first = await run_nightly_health_scan(DOMAIN, entity_loader=loader)
         second = await run_nightly_health_scan(DOMAIN, entity_loader=loader)
         assert first["total_assessed"] == second["total_assessed"] == 2
+
+
+@pytest.mark.finding("CEG-COR-102")
+class TestCountersPartitionTheAssessedSet:
+    async def test_entities_beyond_the_queue_are_skipped(self) -> None:
+        async def loader(domain: str, profile: HealthScanProfile) -> list[dict[str, Any]]:
+            return [_entity(f"e{i}") for i in range(150)]
+
+        result = await run_nightly_health_scan(DOMAIN, cost_ceiling_usd=1e9, entity_loader=loader)
+
+        assert result["total_assessed"] == 150
+        assert result["total_enriched"] + result["total_skipped"] == 150
+        assert len(result["enrichment_queue"]) <= nightly_health_scan.MAX_ENRICHMENT_QUEUE
+
+    async def test_ceiling_branch_arithmetic_unchanged(self) -> None:
+        async def loader(domain: str, profile: HealthScanProfile) -> list[dict[str, Any]]:
+            return [_entity(f"e{i}") for i in range(150)]
+
+        result = await run_nightly_health_scan(DOMAIN, cost_ceiling_usd=0.0, entity_loader=loader)
+
+        assert result["total_assessed"] == 150
+        assert result["total_enriched"] == 0
+        assert result["total_skipped"] == 150
