@@ -436,6 +436,44 @@ class TestImpactReporter:
         impact = analyse_impact(mappings, intake_spec)
         assert impact.tier_recommendation == "autonomous"
 
+    # -- RU-117 / CEG-COR-104: coverage counts unique property names on both sides --
+
+    @pytest.mark.finding("CEG-COR-104")
+    def test_shared_property_name_full_coverage(self, intake_spec: DomainSpec) -> None:
+        nodes = list(intake_spec.ontology.nodes)
+        intake_node = nodes[1]
+        nodes[1] = intake_node.model_copy(
+            update={"properties": [*intake_node.properties, PropertySpec(name="lat", type=PropertyType.FLOAT)]}
+        )
+        spec = intake_spec.model_copy(update={"ontology": intake_spec.ontology.model_copy(update={"nodes": nodes})})
+        names = sorted({p.name for n in spec.ontology.nodes for p in n.properties})
+        mappings = [
+            FieldMapping(
+                crm_field_name=f, canonical_name=f, origin=FieldOrigin.CUSTOMER_PROVIDED, node_label="Facility"
+            )
+            for f in names
+        ]
+        impact = analyse_impact(mappings, spec)
+        assert impact.total_spec_fields == len(names)
+        assert impact.coverage_before == 100.0
+        assert impact.tier_recommendation == "autonomous"
+
+    @pytest.mark.finding("CEG-COR-104")
+    def test_every_plasticos_property_name_is_full_coverage(self) -> None:
+        from engine.config.loader import DomainPackLoader
+
+        spec = DomainPackLoader().load_domain("plasticos")
+        names = sorted({p.name for n in spec.ontology.nodes for p in n.properties})
+        mappings = [
+            FieldMapping(
+                crm_field_name=f, canonical_name=f, origin=FieldOrigin.CUSTOMER_PROVIDED, node_label="Facility"
+            )
+            for f in names
+        ]
+        impact = analyse_impact(mappings, spec)
+        assert impact.coverage_before == 100.0
+        assert impact.tier_recommendation == "autonomous"
+
     def test_format_summary(self, intake_spec: DomainSpec) -> None:
         """Summary format should contain key metrics."""
         impact = analyse_impact([], intake_spec)
