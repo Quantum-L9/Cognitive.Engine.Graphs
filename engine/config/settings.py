@@ -619,6 +619,10 @@ class Settings(BaseSettings):
     # upper bound (checked against max_hop_hard_cap) and the assembler grammar
     # requires `*N` or `*[M]..N`. Off: legacy parse and grammar.
     traversal_open_range_rejected: bool = True
+    # RU-049 / CEG-COR-076: a spec with two gates of the same name loaded and
+    # the second literal overwrote the first. On: ValueError naming the
+    # duplicated name(s). Off: accepted.
+    gate_name_uniqueness: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

@@ -15,6 +15,9 @@ Target Coverage: 85%+
 
 from __future__ import annotations
 
+from typing import Any
+from unittest.mock import patch
+
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
@@ -46,6 +49,18 @@ from engine.config.schema import (
     SyncEndpointSpec,
     SyncStrategy,
 )
+from engine.config.settings import Settings
+
+# Validators read the module-level singleton; patch it at its source.
+_SETTINGS_TARGET = "engine.config.settings.settings"
+
+
+def _settings(**overrides: Any) -> Settings:
+    """A Settings instance with overrides (avoids .env side effects)."""
+    base: dict[str, Any] = {"neo4j_password": "test-pw", "api_secret_key": "test-key", "l9_env": "dev"}
+    base.update(overrides)
+    return Settings(**base)
+
 
 # ============================================================================
 # HELPERS
@@ -341,6 +356,32 @@ class TestDomainSpec:
         ]
         with pytest.raises(PydanticValidationError, match="unknown node label"):
             DomainSpec.model_validate(raw)
+
+    @staticmethod
+    def _cap_gate(name: str) -> dict[str, Any]:
+        return {"name": name, "type": "threshold", "candidateprop": "fid", "operator": ">=", "queryparam": 1}
+
+    def test_duplicate_gate_names_raise(self) -> None:
+        """RU-049 / CEG-COR-076: two gates named 'cap' fail validation, naming the duplicate."""
+        raw = _minimal_domain_raw()
+        raw["gates"] = [self._cap_gate("cap"), self._cap_gate("cap"), self._cap_gate("other")]
+        with pytest.raises(PydanticValidationError, match=r"Duplicate gate name\(s\): \['cap'\]"):
+            DomainSpec.model_validate(raw)
+
+    def test_distinct_gate_names_pass(self) -> None:
+        """RU-049: distinct gate names validate."""
+        raw = _minimal_domain_raw()
+        raw["gates"] = [self._cap_gate("cap"), self._cap_gate("other")]
+        spec = DomainSpec.model_validate(raw)
+        assert [g.name for g in spec.gates] == ["cap", "other"]
+
+    def test_duplicate_gate_names_flag_off_load(self) -> None:
+        """RU-049 flag off: duplicates load as before."""
+        raw = _minimal_domain_raw()
+        raw["gates"] = [self._cap_gate("cap"), self._cap_gate("cap")]
+        with patch(_SETTINGS_TARGET, _settings(gate_name_uniqueness=False)):
+            spec = DomainSpec.model_validate(raw)
+        assert [g.name for g in spec.gates] == ["cap", "cap"]
 
 
 @pytest.mark.unit

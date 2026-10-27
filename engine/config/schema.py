@@ -1173,6 +1173,19 @@ class DomainSpec(BaseModel):
                     msg = f"Edge '{edge.type}' target '{edge.to}' not found in ontology nodes"
                     raise ValueError(msg)
 
+        # RU-049 / CEG-COR-076: gate names are identities (compiled gate params,
+        # composite subgate references); a second literal must not overwrite the first.
+        if settings.gate_name_uniqueness:
+            seen_gate_names: set[str] = set()
+            duplicate_gate_names: set[str] = set()
+            for gate in self.gates:
+                if gate.name in seen_gate_names:
+                    duplicate_gate_names.add(gate.name)
+                seen_gate_names.add(gate.name)
+            if duplicate_gate_names:
+                msg = f"Duplicate gate name(s): {sorted(duplicate_gate_names)}"
+                raise ValueError(msg)
+
         # Validate gate property references
         for gate in self.gates:
             if gate.candidateprop and "." not in gate.candidateprop:
