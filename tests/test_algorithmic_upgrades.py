@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -20,6 +22,7 @@ from chassis.audit import (
     AuditAction,
     AuditEntry,
     AuditLogger,
+    AuditSink,
     LogSink,
     PostgresSink,
 )
@@ -340,3 +343,102 @@ class TestAuditLoggerWithSink:
         count = asyncio.run(audit_logger.flush())
         assert count == 2
         assert audit_logger.buffer_count == 0
+
+
+class _RecordingSink(AuditSink):
+    def __init__(self) -> None:
+        self.ids: list[str] = []
+
+    async def write_batch(self, entries: list[AuditEntry]) -> int:
+        self.ids.extend(e.audit_id for e in entries)
+        return len(entries)
+
+
+class _FailOnceSink(_RecordingSink):
+    def __init__(self) -> None:
+        super().__init__()
+        self.failed = False
+
+    async def write_batch(self, entries: list[AuditEntry]) -> int:
+        if not self.failed:
+            self.failed = True
+            msg = "sink unavailable"
+            raise RuntimeError(msg)
+        return await super().write_batch(entries)
+
+
+class TestAuditLoggerDelivery:
+    """RU-085 / RG-114: per-sink retry, bounded buffer, no lost concurrent entry."""
+
+    def test_retry_goes_only_to_the_failed_sink(self):
+        healthy, flaky = _RecordingSink(), _FailOnceSink()
+        audit_logger = AuditLogger(sinks=[healthy, flaky])
+        entry = audit_logger.log(AuditAction.ACCESS, actor="user1", tenant="t1")
+
+        with pytest.raises(RuntimeError, match="sink unavailable"):
+            asyncio.run(audit_logger.flush())
+        assert audit_logger.buffer_count == 1  # still owed to the failed sink
+        asyncio.run(audit_logger.flush())
+
+        assert healthy.ids == [entry.audit_id]  # exactly once across both flushes
+        assert flaky.ids == [entry.audit_id]
+        assert audit_logger.buffer_count == 0
+
+    def test_failed_sink_does_not_starve_later_sinks(self):
+        flaky, healthy = _FailOnceSink(), _RecordingSink()
+        audit_logger = AuditLogger(sinks=[flaky, healthy])
+        entry = audit_logger.log(AuditAction.QUERY, actor="user1", tenant="t1")
+
+        with pytest.raises(RuntimeError):
+            asyncio.run(audit_logger.flush())
+        assert healthy.ids == [entry.audit_id]
+        asyncio.run(audit_logger.flush())
+        assert healthy.ids == [entry.audit_id]
+        assert flaky.ids == [entry.audit_id]
+
+    def test_buffer_size_is_enforced_drop_oldest(self, caplog: pytest.LogCaptureFixture):
+        sink = _RecordingSink()
+        audit_logger = AuditLogger(buffer_size=3, sinks=[sink])
+        entries = [audit_logger.log(AuditAction.ACCESS, actor=f"u{i}", tenant="t1") for i in range(10)]
+
+        assert audit_logger.buffer_count <= 3
+        assert audit_logger.dropped_count == 7
+        assert "dropped" in caplog.text
+        asyncio.run(audit_logger.flush())
+        assert sink.ids == [e.audit_id for e in entries[-3:]]  # the newest survive
+
+    def test_entry_logged_during_flush_is_not_lost(self):
+        """Port of r2_audit.py scenario C: a worker-thread log() races flush()."""
+        sink = _RecordingSink()
+        audit_logger = AuditLogger(sinks=[sink])
+        audit_logger.log(AuditAction.ACCESS, actor="first", tenant="t1")
+        raced: list[AuditEntry] = []
+        workers: list[threading.Thread] = []
+
+        class _RacingList(list):
+            """Logs from another thread right after flush finishes reading the buffer.
+
+            That is the window between the snapshot and the reset. A log()
+            that lands there must end up in the next batch, not be discarded.
+            """
+
+            def __iter__(self) -> Any:
+                yield from list.__iter__(self)
+                if not workers:
+                    worker = threading.Thread(
+                        target=lambda: raced.append(audit_logger.log(AuditAction.SYNC, actor="racer", tenant="t1"))
+                    )
+                    workers.append(worker)
+                    worker.start()
+                    worker.join(timeout=0.2)  # blocks while flush holds the buffer lock
+
+        audit_logger._buffer = _RacingList(audit_logger._buffer)
+        asyncio.run(audit_logger.flush())
+        workers[0].join(timeout=5)
+        assert raced, "worker never logged"
+
+        racer_id = raced[0].audit_id
+        buffered = {e.audit_id for e in audit_logger._buffer}
+        assert racer_id in sink.ids or racer_id in buffered
+        asyncio.run(audit_logger.flush())
+        assert sink.ids.count(racer_id) == 1
