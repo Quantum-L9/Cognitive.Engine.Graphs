@@ -469,6 +469,14 @@ class Settings(BaseSettings):
     # collapsed to unique touchpoint ids keeping the minimum-distance row,
     # whose ages feed temporal decay. Off: per-row weighting.
     causal_attribution_unique_touchpoints: bool = True
+    # RU-068 / CEG-COR-057: CausalCompiler matched source and target
+    # by a hardcoded `entity_id` (an outcome node has only `outcome_id`),
+    # emitted `AND $confidence >= <literal>` without a WHERE when temporal
+    # validation was off, and MERGEd on `created_at: datetime()` so every
+    # repeat created a parallel edge. On: declared identities (`outcome_id`
+    # for the outcome label), one WHERE with `$confidence_threshold`, MERGE on
+    # the type with ON CREATE / ON MATCH SET. Off: the legacy Cypher.
+    causal_edge_declared_identity: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

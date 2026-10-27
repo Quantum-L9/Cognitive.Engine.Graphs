@@ -111,6 +111,7 @@ independently of the code default.
 | Prohibited Factor Violation Audit | `PROHIBITED_FACTOR_VIOLATION_AUDIT` (`prohibited_factor_violation_audit`) | `True` | unset | active; a blocked attempt leaves one `denied` audit entry before the error propagates (domain `auditonviolation`) — see lane D |
 | PII Declared Fields Enforced | `PII_DECLARED_FIELDS_ENFORCED` (`pii_declared_fields_enforced`) | `True` | unset | active; the domain's declared `compliance.pii` fields and `handling` mode apply on the response path — see lane D |
 | Causal Attribution Unique Touchpoints | `CAUSAL_ATTRIBUTION_UNIQUE_TOUCHPOINTS` (`causal_attribution_unique_touchpoints`) | `True` | unset | active; attribution weights are computed over unique touchpoints and sum to 1.0 — see lane D |
+| Causal Edge Declared Identity | `CAUSAL_EDGE_DECLARED_IDENTITY` (`causal_edge_declared_identity`) | `True` | unset | active; causal edges match declared node identities, anchor predicates in one WHERE with a bound threshold, MERGE on a stable key — see lane D |
 
 ---
 
@@ -1134,5 +1135,29 @@ overwritten (diamond: linear summed to 0.6, first_touch to 0). On: rows are coll
 unique touchpoint ids keeping the first (minimum-distance) occurrence before weighting,
 and that row's link ages feed temporal decay; `total_touchpoints` counts unique ids.
 Model ordering semantics are unchanged (DEC-27 pending). Off: per-row weighting.
+
+Rollback: set the flag to `false`.
+
+### Causal Edge Declared Identity (RU-068 / CEG-COR-057, PO-04)
+
+**Flag**: `CAUSAL_EDGE_DECLARED_IDENTITY=True` (default on)
+
+`CausalCompiler.compile_causal_edge_create` matched both ends by `entity_id` (an outcome
+node carries only `outcome_id`, so the edge never matched), emitted
+`AND $confidence >= <literal>` with no `WHERE` when `temporal_validation` was false, and
+MERGEd on `{confidence, mechanism, created_at: datetime()}` so every repeat created a
+parallel edge. On:
+
+- identity per label from `engine/causal/identity.py`: `outcome_id` for
+  `feedbackloop.outcome_node_label`, else the sync endpoint `idproperty`, else the node's
+  first required property, else `entity_id` (same rule as `handle_match`, honouring
+  `SPEC_DECLARED_CANDIDATE_ID`); `handle_outcomes` passes the candidate's id property
+  explicitly;
+- one `WHERE` (only when non-empty) joining `source.created_at < target.created_at` and
+  `$confidence >= $confidence_threshold` (bound by `handle_outcomes`);
+- `MERGE (source)-[r:TYPE]->(target)` with `ON CREATE SET` created_at / confidence /
+  mechanism and `ON MATCH SET` confidence / mechanism.
+
+Off: the legacy Cypher, kept for rollback although it cannot match outcome nodes.
 
 Rollback: set the flag to `false`.
