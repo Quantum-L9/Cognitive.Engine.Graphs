@@ -323,6 +323,12 @@ class Settings(BaseSettings):
     # subgate scoped away from the direction being compiled is refused.
     # Off: the legacy compilation. Specs without composites are unaffected.
     composite_subgate_scoping: bool = True
+    # RU-052 / CEG-COR-079: freshness `maxagedays` defaulted to 1 for any
+    # falsy value (0 -> 1 day) and a negative age compiled to a cutoff in the
+    # future. On: the default applies only when maxagedays is absent, and a
+    # value < 1 is refused at compile, so admission withholds the pack. Off:
+    # the legacy coercion.
+    freshness_maxagedays_validated: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

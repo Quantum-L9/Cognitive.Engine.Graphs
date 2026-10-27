@@ -85,6 +85,7 @@ independently of the code default.
 | Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `True` | unset | active (hardening); an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
 | Gate Null Operands From Predicate | `GATE_NULL_OPERANDS_FROM_PREDICATE` (`gate_null_operands_from_predicate`) | `True` | unset | active; a gate's `nullbehavior` applies to exactly the operands its predicate tests (range FAIL rejects NULL bounds; temporalrange null-handles its window per side) — see §21 |
 | Composite Subgate Scoping | `COMPOSITE_SUBGATE_SCOPING` (`composite_subgate_scoping`) | `True` | unset | active; a composite's subgates contribute only through the composite (an OR composite is no longer AND-ed with its own subgates) and a subgate scoped to another direction is refused — see §21 |
+| Freshness Max-age Validated | `FRESHNESS_MAXAGEDAYS_VALIDATED` (`freshness_maxagedays_validated`) | `True` | unset | active (hardening); a freshness gate defaults `maxagedays` to 1 only when absent and refuses a value < 1 (0 became 1 day, a negative age a future cutoff) — see §21 |
 
 ---
 
@@ -975,4 +976,12 @@ whose `matchdirections` exclude the direction being compiled is refused (it was
 silently compiled inside the composite). Cycle and missing-subgate refusal
 (CEG-009c) are unchanged; specs without composites compile byte-identically
 (no shipped pack declares one). Rollback: `COMPOSITE_SUBGATE_SCOPING=false`.
+
+### Freshness max-age validation (RU-052 / CEG-COR-079)
+
+`FRESHNESS_MAXAGEDAYS_VALIDATED` (default `True`): a freshness gate without
+`maxagedays` still compiles as 1 day; `maxagedays: 0` (formerly coerced to 1)
+and negative values (formerly a cutoff in the future) raise at compile, so
+admission withholds the pack naming the gate. No shipped pack is affected
+(the template declares 90). Rollback: `FRESHNESS_MAXAGEDAYS_VALIDATED=false`.
 
