@@ -227,3 +227,52 @@ class TestCompoundE3DScores:
         assert "beta_compounding" in scores
         assert "gamma_mrf" in scores
         assert all(0.0 <= s <= 1.0 for s in scores.values())
+
+
+# ============================================================================
+# CORRECTNESS REMEDIATION (lane G)
+# ============================================================================
+
+DISJOINT_TRIPLES = [(f"h{i}", "R", f"t{i}") for i in range(20)]
+
+
+def _seeded_rng(monkeypatch: pytest.MonkeyPatch, seed: int = 1234) -> None:
+    """train() draws from an unseeded default_rng(); pin it for a deterministic test."""
+    real = np.random.default_rng
+    monkeypatch.setattr(np.random, "default_rng", lambda *_a, **_k: real(seed))
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-049")
+class TestCompoundE3DTrainingDescendsMarginLoss:
+    """RU-113: train() follows the TransE margin-loss gradient instead of collapsing."""
+
+    def _train(self, monkeypatch: pytest.MonkeyPatch) -> CompoundE3D:
+        _seeded_rng(monkeypatch)
+        model = CompoundE3D(CompoundE3DConfig(embedding_dim=16, learning_rate=0.05, margin=1.0))
+        with patch("engine.kge.compound_e3d.settings") as mock_settings:
+            mock_settings.kge_enabled = True
+            model.train(list(DISJOINT_TRIPLES), epochs=200)
+        return model
+
+    def test_true_tails_outscore_corrupted_tails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        model = self._train(monkeypatch)
+        wins = total = 0
+        for i in range(20):
+            true_score = model.score_triple(f"h{i}", "R", f"t{i}")
+            for j in range(20):
+                if i == j:
+                    continue
+                total += 1
+                wins += true_score > model.score_triple(f"h{i}", "R", f"t{j}")
+        assert wins / total >= 0.90, f"{wins}/{total}"
+
+    def test_entities_do_not_collapse(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        model = self._train(monkeypatch)
+        vecs = np.stack([model._entity_embeddings[f"t{i}"] for i in range(20)])
+        dists = [np.linalg.norm(vecs[a] - vecs[b]) for a in range(20) for b in range(a + 1, 20)]
+        assert float(np.mean(dists)) > 0.5
+        for i in range(20):
+            score = model.score_triple(f"h{i}", "R", f"t{i}")
+            assert 0.0 <= score <= 1.0
+            assert model._entity_embeddings[f"h{i}"].shape == (16,)
