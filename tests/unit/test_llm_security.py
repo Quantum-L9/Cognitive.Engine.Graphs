@@ -44,3 +44,33 @@ class TestSanitizeNormalizesBeforeMatching:
 
     def test_empty_input(self) -> None:
         assert sanitize_llm_input("") == ""
+
+
+class TestStrictOutputValidation:
+    """RU-073 / CEG-COR-120: strict=True rejects undeclared fields."""
+
+    def _schema(self):
+        from pydantic import BaseModel
+
+        class QueryResult(BaseModel):
+            nodes: list[str]
+            count: int
+
+        return QueryResult
+
+    def test_strict_rejects_extra_field(self) -> None:
+        from engine.security.llm import validate_llm_output
+
+        with pytest.raises(ValueError, match="unexpected field"):
+            validate_llm_output('{"nodes": ["a"], "count": 1, "admin": true}', self._schema(), strict=True)
+
+    def test_non_strict_allows_extra_field(self) -> None:
+        from engine.security.llm import validate_llm_output
+
+        result = validate_llm_output('{"nodes": ["a"], "count": 1, "admin": true}', self._schema(), strict=False)
+        assert result.count == 1
+
+    def test_strict_accepts_exact_fields(self) -> None:
+        from engine.security.llm import validate_llm_output
+
+        assert validate_llm_output('{"nodes": ["a"], "count": 1}', self._schema()).nodes == ["a"]

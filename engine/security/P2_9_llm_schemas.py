@@ -44,6 +44,12 @@ T = TypeVar("T", bound=BaseModel)
 # ── Output Schemas ───────────────────────────────────────────
 
 
+_WRITE_CLAUSE_RE = re.compile(
+    r"\b(?:DETACH\s+DELETE|LOAD\s+CSV|CREATE|MERGE|SET|DELETE|REMOVE|DROP|FOREACH|CALL)\b",
+    re.IGNORECASE,
+)
+
+
 class CypherQueryOutput(BaseModel):
     """Expected shape for LLM-generated Cypher."""
 
@@ -55,11 +61,14 @@ class CypherQueryOutput(BaseModel):
     @field_validator("cypher_query")
     @classmethod
     def block_destructive_ops(cls, v: str) -> str:
-        dangerous = {"DROP", "DELETE", "DETACH DELETE", "REMOVE"}
-        upper = v.upper()
-        for kw in dangerous:
-            if kw in upper:
-                raise ValueError(f"Destructive keyword rejected: {kw}")
+        # RU-073 / CEG-COR-120: read-only policy. Write and administrative
+        # clauses are rejected as whole keywords (word boundaries), so
+        # identifiers such as `n.deleted_at` pass; CALL is rejected entirely
+        # (DEC-28 recommended (a): procedures and CALL {} IN TRANSACTIONS can write).
+        match = _WRITE_CLAUSE_RE.search(v)
+        if match:
+            kw = " ".join(match.group(0).upper().split())
+            raise ValueError(f"Destructive keyword rejected: {kw}")
         return v
 
     @field_validator("parameters")
