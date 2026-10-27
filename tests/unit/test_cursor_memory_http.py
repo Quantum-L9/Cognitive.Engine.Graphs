@@ -59,11 +59,56 @@ def test_require_http_url_rejects_unsigned_remote_http() -> None:
         cmc._require_http_url("http://example.com/memory")
 
 
+# The C1 public IP the client used to default to over plain http (CEG-COR-073).
+_C1_HTTP_MEMORY_URL = "http://46.62.243.82/memory"
+
+
 @pytest.mark.unit
-def test_require_http_url_accepts_c1_and_loopback() -> None:
-    assert cmc._require_http_url("http://46.62.243.82/memory").startswith("http://")
+def test_require_http_url_refuses_c1_cleartext() -> None:
+    """RG-187: a bearer must never travel in cleartext to a public host."""
+    with pytest.raises(ValueError, match="refusing non-allowlisted http memory URL: http://46.62.243.82$"):
+        cmc._require_http_url(_C1_HTTP_MEMORY_URL)
+    with pytest.raises(ValueError, match="non-allowlisted"):
+        cmc._require_http_url("http://46.62.243.82:9002/mcp/call")
+    assert frozenset({"127.0.0.1", "localhost", "::1"}) == cmc._ALLOWED_HTTP_HOSTS
+    assert cmc._ALLOWED_HTTP_HOSTS == cnq._NEO4J_HTTP_HOSTS
+    # Loopback (SSH tunnel / local Docker) and https stay accepted.
     assert cmc._require_http_url("http://127.0.0.1:8000/health").startswith("http://")
+    assert cmc._require_http_url("http://localhost:9002/memory").startswith("http://")
     assert cmc._require_http_url("https://memory.example/mcp").startswith("https://")
+    assert cmc._require_http_url("https://46.62.243.82/memory").startswith("https://")
+
+
+@pytest.mark.unit
+def test_memory_ssl_context_verifies_peer() -> None:
+    """RG-188: https memory calls authenticate the server (no CERT_NONE)."""
+    assert cmc.ssl_context.verify_mode == ssl.CERT_REQUIRED
+    assert cmc.ssl_context.check_hostname is True
+    assert "CERT_NONE" not in _CLIENT.read_text(encoding="utf-8")
+
+
+@pytest.mark.unit
+def test_mcp_call_tool_default_url_sends_no_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """RG-189: the refused default fails before any socket is opened."""
+
+    def _no_socket(*_args: object, **_kwargs: object) -> socket.socket:
+        pytest.fail("socket.create_connection must not be called for a refused URL")
+
+    monkeypatch.setattr(_safe_http.socket, "create_connection", _no_socket)
+    monkeypatch.setattr(cmc, "L9_EXECUTOR_API_KEY", "k")
+    monkeypatch.setattr(cmc, "MCP_URL", _C1_HTTP_MEMORY_URL)
+    result = cmc.mcp_call_tool("get_memory_stats", {"user_id": "l9-shared"})
+    assert result == {"error": "refusing non-allowlisted http memory URL: http://46.62.243.82"}
+
+
+@pytest.mark.unit
+def test_module_default_memory_urls_are_the_refused_c1_values() -> None:
+    """The shipped defaults stay put (no replacement endpoint); they now fail closed."""
+    src = _CLIENT.read_text(encoding="utf-8")
+    assert 'os.getenv("MCP_URL", "http://46.62.243.82/memory")' in src
+    for url in ("http://46.62.243.82/memory", "http://46.62.243.82"):
+        with pytest.raises(ValueError, match="non-allowlisted"):
+            cmc._require_http_url(url)
 
 
 @pytest.mark.unit
