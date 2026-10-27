@@ -283,6 +283,13 @@ class Settings(BaseSettings):
     # re-enrichment targets and so spends EIE budget.
     graph_inference_feedback_enabled: bool = False
 
+    # Correctness remediation lane A (plan 0d84ec8, RU-001..RU-060)
+    # Each flag ships on (a correctness fix); off restores the pre-fix behaviour.
+    # RU-001 / CEG-COR-001: handle_match RETURNs the active dimension scores as a
+    # `dimension_scores` map so Pareto, arbitration and confidence checks see
+    # real values. Off: `RETURN candidate, score`.
+    match_dimension_projection: bool = True
+
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
         """Raise if default secrets are used in production environment."""

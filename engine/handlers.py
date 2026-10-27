@@ -569,13 +569,25 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             action="match",
             tenant=tenant,
         )
+    from engine.config.settings import settings as _match_settings
+
+    # RU-001 / CEG-COR-001: project the active dimension scores as one map so
+    # Pareto, arbitration and confidence read real values. Aliases are the
+    # sanitized names the scoring WITH binds; zero active dimensions -> `{}`.
+    project_dimensions = bool(_match_settings.match_dimension_projection)
+    if project_dimensions:
+        dim_aliases = [sanitize_label(name) for name in scoring_assembler.last_active_dimension_names]
+        dim_map = ", ".join(f"{alias}: {alias}" for alias in dim_aliases)
+        return_line = f"RETURN candidate, score, {{{dim_map}}} AS dimension_scores\n"
+    else:
+        return_line = "RETURN candidate, score\n"
     cypher = (
         f"MATCH (candidate:{sanitize_label(candidate_labels[0])})\n"
         + "\n".join(traversal_clauses)
         + "\n"
         + f"WHERE {where_clause}\n"
         + f"{scoring_clause}\n"
-        + "RETURN candidate, score\n"
+        + return_line
         + "ORDER BY score DESC\n"
         + "LIMIT $top_n"
     )
@@ -615,14 +627,19 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         if _settings.pareto_enabled:
             from engine.scoring.pareto import ParetoCandidate
 
+            def _pareto_dims(row: dict[str, Any]) -> dict[str, float]:
+                projected = row.get("dimension_scores") if project_dimensions else None
+                source = projected if isinstance(projected, dict) else row
+                return {
+                    k: float(v)
+                    for k, v in source.items()
+                    if k not in ("candidate", "score") and isinstance(v, (int, float))
+                }
+
             pareto_candidates_input = [
                 ParetoCandidate(
                     candidate_id=_candidate_id(r.get("candidate", {}), id_property, i),
-                    dimension_scores={
-                        k: float(v)
-                        for k, v in r.items()
-                        if k not in ("candidate", "score") and isinstance(v, (int, float))
-                    },
+                    dimension_scores=_pareto_dims(r),
                 )
                 for i, r in enumerate(results)
             ]
