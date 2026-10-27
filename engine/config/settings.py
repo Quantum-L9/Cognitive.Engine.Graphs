@@ -296,6 +296,10 @@ class Settings(BaseSettings):
     # admission happens before first-use provisioning, so an OPEN breaker
     # rejects without attempting CREATE DATABASE. Off: provision, then admit.
     neo4j_provision_inside_breaker: bool = True
+    # RU-096 / CEG-COR-036: the GDS execution DAG is keyed by job name, so two
+    # jobs sharing an algorithm both schedule. Off: algorithm-keyed DAG (the
+    # last same-algorithm job declared silently replaces the others).
+    gds_dag_job_identity_by_name: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
