@@ -77,7 +77,7 @@ independently of the code default.
 | Ingress Packet Audit | `INGRESS_PACKET_AUDIT_ENABLED` (`ingress_packet_audit_enabled`) | `True` | unset | active; SDK audit pairs record Gate's ingress packet — see §19 |
 | Constellation Orchestration | — | — | — | accepted architectural gap — see §9 |
 | Gate Explicit Null Behavior | `GATE_EXPLICIT_NULLBEHAVIOR` (`gate_explicit_nullbehavior`) | `True` | unset | active; a gate's declared `nullbehavior` wins over the per-type default (C-14) — see §20 |
-| Spec-declared Candidate Id | `SPEC_DECLARED_CANDIDATE_ID` (`spec_declared_candidate_id`) | `True` | unset | active; `handle_match` identifies candidates by the domain's declared id property, not `entity_id` — see §20 |
+| Spec-declared Candidate Id | `SPEC_DECLARED_CANDIDATE_ID` (`spec_declared_candidate_id`) | `True` | unset | active; `handle_match` identifies candidates by the domain's declared id property, not `entity_id`; since RU-002 the outcome edges, legacy `resolve`, `enrich` by ids and admin `evaluate` do too — see §20 |
 | Traversal Gate EXISTS Subquery | `TRAVERSAL_GATE_EXISTS_SUBQUERY` (`traversal_gate_exists_subquery`) | `True` | unset | active; traversal gates compile to an `EXISTS { … }` subquery Neo4j 5 accepts — see §20 |
 | Childsync FOREACH Projection | `CHILDSYNC_FOREACH_PROJECTION` (`childsync_foreach_projection`) | `True` | unset | active; childsync writes children in `FOREACH` without copying them onto the parent — see §20 |
 | Match Dimension Projection | `MATCH_DIMENSION_PROJECTION` (`match_dimension_projection`) | `True` | unset | active (correctness, RU-001); match RETURNs the active dimension scores as `dimension_scores` so Pareto, arbitration and confidence checks see real values; off restores `RETURN candidate, score` |
