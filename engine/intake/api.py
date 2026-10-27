@@ -74,20 +74,37 @@ def _optional_str_list_map(payload: dict[str, Any], key: str, action: str) -> di
     return value
 
 
+def _resolve_domain(tenant: str, requested_domain: object) -> str:
+    """The domain an intake call may read is the packet tenant (CEG-COR-105).
+
+    The HEALTH-05 rule (``engine.health.api.resolve_domain``) applied to intake:
+    tenant id and domain spec id are one identity, so a ``payload.domain``
+    naming anything else is a cross-tenant read and is rejected before any
+    domain pack is loaded. Absent means the tenant.
+    """
+    if requested_domain is None or requested_domain == tenant:
+        return tenant
+    msg = (
+        f"payload.domain {requested_domain!r} does not match the packet tenant {tenant!r}; "
+        "intake actions read only the tenant's own domain (tenant id == spec id)"
+    )
+    raise ValueError(msg)
+
+
 async def handle_intake_scan(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     """
     Scan CRM fields against graph spec ontology.
 
     Payload:
       - crm_fields: dict[str, str] | list[str]  — CRM field export
-      - domain: str (optional)                   — domain ID override
+      - domain: str (optional)                   — must equal the packet tenant when present
 
     Returns:
       ScanResult as dict.
     """
     loader = _require_loader()
     crm_fields = _require_key(payload, "crm_fields", "intake_scan")
-    domain_id = payload.get("domain", tenant)
+    domain_id = _resolve_domain(tenant, payload.get("domain"))
 
     spec: DomainSpec = loader.load_domain(domain_id)
     result = scan_crm_fields(crm_fields, spec)
@@ -103,7 +120,7 @@ async def handle_intake_compile(tenant: str, payload: dict[str, Any]) -> dict[st
     Payload:
       - crm_fields: dict[str, str] | list[str]  — CRM field export
       - business_profile: str                    — company description
-      - domain: str (optional)                   — domain ID override
+      - domain: str (optional)                   — must equal the packet tenant when present
       - vertical_keywords: dict[str, str] (optional)      — keyword → domain id, caller-supplied example data
       - derivation_graph: dict[str, list[str]] (optional) — target → source fields, caller-supplied
       - ambiguity_patterns: dict[str, list[str]] (optional) — ambiguous name → candidates, caller-supplied
@@ -117,7 +134,7 @@ async def handle_intake_compile(tenant: str, payload: dict[str, Any]) -> dict[st
     loader = _require_loader()
     crm_fields = _require_key(payload, "crm_fields", "intake_compile")
     business_profile = _require_key(payload, "business_profile", "intake_compile")
-    domain_id = payload.get("domain", tenant)
+    domain_id = _resolve_domain(tenant, payload.get("domain"))
 
     spec: DomainSpec = loader.load_domain(domain_id)
     result = compile_intake(
@@ -139,14 +156,14 @@ async def handle_intake_report(tenant: str, payload: dict[str, Any]) -> dict[str
 
     Payload:
       - entity_id: str    — entity to analyse
-      - domain: str        — domain ID
+      - domain: str (optional) — must equal the packet tenant when present
       - crm_fields: dict[str, str] | list[str] (optional) — for ad-hoc analysis
 
     Returns:
       ImpactAnalysis as dict + formatted summary.
     """
     loader = _require_loader()
-    domain_id = _require_key(payload, "domain", "intake_report")
+    domain_id = _resolve_domain(tenant, payload.get("domain"))
     spec: DomainSpec = loader.load_domain(domain_id)
 
     # If crm_fields provided, scan and analyse

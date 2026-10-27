@@ -14,6 +14,8 @@ Unit tests for engine/intake — CRM-to-YAML pipeline + impact reporter.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from engine.config.schema import (
@@ -614,3 +616,45 @@ class TestIntakeCompileHandlerValidation:
         }
         result = await handle_intake_compile("test-intake", payload)
         assert result["delivery_tier"]
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-105")
+class TestIntakeHandlersBindDomainToTenant:
+    """RU-118: payload.domain must equal the packet tenant on every intake handler (HEALTH-05 rule)."""
+
+    @pytest.fixture
+    def loader(self, intake_spec: DomainSpec) -> MagicMock:
+        from engine.intake import api
+
+        loader = MagicMock()
+        loader.load_domain.return_value = intake_spec
+        api.init_intake(loader)
+        return loader
+
+    @staticmethod
+    def _payloads() -> dict[str, dict[str, object]]:
+        return {
+            "handle_intake_scan": {"crm_fields": ["name"]},
+            "handle_intake_compile": {"crm_fields": ["name"], "business_profile": "a company"},
+            "handle_intake_report": {"entity_id": "e1", "crm_fields": ["name"]},
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("handler", ["handle_intake_scan", "handle_intake_compile", "handle_intake_report"])
+    async def test_foreign_domain_rejected_before_any_load(self, loader: MagicMock, handler: str) -> None:
+        from engine.intake import api
+
+        payload = {**self._payloads()[handler], "domain": "other"}
+        with pytest.raises(ValueError, match="does not match the packet tenant"):
+            await getattr(api, handler)("plasticos", payload)
+        assert loader.load_domain.call_count == 0
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("handler", ["handle_intake_scan", "handle_intake_compile", "handle_intake_report"])
+    async def test_absent_or_matching_domain_reads_the_tenant(self, loader: MagicMock, handler: str) -> None:
+        from engine.intake import api
+
+        await getattr(api, handler)("plasticos", self._payloads()[handler])
+        await getattr(api, handler)("plasticos", {**self._payloads()[handler], "domain": "plasticos"})
+        assert [c.args[0] for c in loader.load_domain.call_args_list] == ["plasticos", "plasticos"]
