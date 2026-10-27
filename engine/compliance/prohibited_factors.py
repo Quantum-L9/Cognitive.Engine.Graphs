@@ -67,8 +67,6 @@ class ProhibitedFactorValidator:
             pf_config = domain_spec.compliance.prohibitedfactors
             if pf_config.enabled:
                 self.blocked_fields = set(pf_config.blockedfields)
-        # Casefolded view used by the full-coverage comparison.
-        self._blocked_casefold: frozenset[str] = frozenset(f.casefold() for f in self.blocked_fields)
 
     def is_blocked(self, name: object) -> bool:
         """True when ``name`` is a field name that matches a blocked field.
@@ -79,7 +77,9 @@ class ProhibitedFactorValidator:
         if not isinstance(name, str) or not name:
             return False
         if _full_coverage():
-            return name.casefold() in self._blocked_casefold
+            # Derived from `blocked_fields` on each call: the set is a public
+            # attribute callers may replace after construction.
+            return name.casefold() in {field.casefold() for field in self.blocked_fields}
         return name in self.blocked_fields
 
     def validate_gate(self, gate_spec: GateSpec) -> None:
