@@ -569,6 +569,18 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             match_direction=match_direction,
         )
 
+    from engine.config.settings import settings as _param_settings
+
+    # RU-016 / CEG-COR-171: declared queryschema defaults are part of the query
+    # the derived expressions evaluate over; backfill them (caller values win)
+    # on the post-compliance query before resolving. Compliance saw the
+    # caller's query above.
+    if _param_settings.query_defaults_before_derived:
+        query = {
+            **{f.name: f.default for f in domain_spec.queryschema.fields if f.name not in query},
+            **query,
+        }
+
     resolver = ParameterResolver(domain_spec)
     try:
         resolved_query = resolver.resolve_parameters(query)

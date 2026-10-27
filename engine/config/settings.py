@@ -303,6 +303,10 @@ class Settings(BaseSettings):
     # dimension (ScoringAssembler.last_effective_weights), its share of the score,
     # instead of raw dimension values. Off: raw values (annotate_candidates).
     monoculture_weighted_contribution: bool = True
+    # RU-016 / CEG-COR-171: handle_match backfills queryschema defaults before
+    # resolving derived parameters, so a derivation over an omitted defaulted
+    # field sees its default. Off: resolve first, backfill after.
+    query_defaults_before_derived: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

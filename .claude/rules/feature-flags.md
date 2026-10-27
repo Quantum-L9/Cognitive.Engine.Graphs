@@ -83,3 +83,4 @@ were industry-specific and had no caller).
 | gate_where_row_scope | True | `handle_match` emits `WITH *` between traversal clauses and the gate `WHERE`, so a trailing `OPTIONAL MATCH` cannot swallow the gates (RU-011 / CEG-COR-033); off restores the bare `WHERE` |
 | match_collapse_traversal_rows | True | `handle_match` collapses to one row per candidate (highest score, `head(collect(...))`) before `ORDER BY`/`LIMIT` (RU-036 / CEG-COR-007); off restores one row per traversal path |
 | monoculture_weighted_contribution | True | Monoculture flag uses `weight × value` contributions from `ScoringAssembler.last_effective_weights` (RU-032 / CEG-COR-167); off restores raw dimension values |
+| query_defaults_before_derived | True | `handle_match` backfills declared queryschema defaults before derived-parameter resolution (RU-016 / CEG-COR-171); off restores resolve-then-backfill |
