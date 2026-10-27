@@ -30,7 +30,7 @@ import asyncio
 import json
 import logging
 from collections import defaultdict, deque
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -38,7 +38,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from engine.config.schema import AggregationStrategy, DomainSpec, EdgeCategory, GDSJobSpec
 from engine.graph.driver import GraphDriver
-from engine.utils.security import sanitize_label
+from engine.utils.security import cypher_number, sanitize_label
 
 # S2-10: EdgeCategory → recommended GDS configuration mapping.
 # Paper: different relation types benefit from different algorithms/aggregation.
@@ -190,14 +190,18 @@ class GDSScheduler:
         Jobs without depends_on are placed in wave 0 (backward compatible).
         """
         waves = self._build_execution_dag(self.domain_spec.gdsjobs)
+        registered = 0
         for wave_idx, wave in enumerate(waves):
             for job_spec in wave:
                 if job_spec.schedule.type == "cron":
                     self._register_cron_job(job_spec)
+                    registered += 1
                 elif job_spec.schedule.type == "manual":
                     logger.info("Job %s (wave %d) is manual-trigger only", job_spec.name, wave_idx)
+        # RU-096: report what was registered, not how many jobs the spec declares.
         logger.info(
-            "Registered %d GDS jobs across %d execution waves",
+            "Registered %d GDS cron jobs (of %d declared) across %d execution waves",
+            registered,
             len(self.domain_spec.gdsjobs),
             len(waves),
         )
@@ -223,6 +227,11 @@ class GDSScheduler:
         """
         if not jobs:
             return []
+
+        from engine.config.settings import settings
+
+        if settings.gds_dag_job_identity_by_name:
+            return GDSScheduler._build_execution_dag_by_job(jobs)
 
         job_map: dict[str, GDSJobSpec] = {j.algorithm: j for j in jobs}
         in_degree: dict[str, int] = {j.algorithm: 0 for j in jobs}
@@ -269,6 +278,66 @@ class GDSScheduler:
 
         return waves
 
+    @staticmethod
+    def _build_execution_dag_by_job(jobs: list[GDSJobSpec]) -> list[list[GDSJobSpec]]:
+        """RU-096 / CEG-COR-036: Kahn's sort with jobs (keyed by name) as nodes.
+
+        Keying by algorithm collapsed every same-algorithm job into the last
+        one declared, so only one of two ``louvain`` cron jobs was scheduled.
+        ``depends_on`` keeps its schema meaning — algorithm names — and resolves
+        to every job whose algorithm matches. Waves preserve declaration order;
+        an unknown dependency is ignored with a warning and cycle members go to
+        a final fallback wave, exactly as before.
+        """
+        job_map: dict[str, GDSJobSpec] = {}
+        for job in jobs:
+            job_map[job.name] = job
+        names = list(job_map)
+        by_algorithm: dict[str, list[str]] = defaultdict(list)
+        for name in names:
+            by_algorithm[job_map[name].algorithm].append(name)
+
+        in_degree: dict[str, int] = dict.fromkeys(names, 0)
+        dependents: dict[str, list[str]] = defaultdict(list)
+        for name in names:
+            job = job_map[name]
+            for dep in job.depends_on or []:
+                providers = by_algorithm.get(dep)
+                if not providers:
+                    logger.warning(
+                        "Job '%s' depends on unknown algorithm '%s'; ignoring dependency",
+                        job.name,
+                        dep,
+                    )
+                    continue
+                for provider in providers:
+                    in_degree[name] += 1
+                    dependents[provider].append(name)
+
+        order = {name: idx for idx, name in enumerate(names)}
+        waves: list[list[GDSJobSpec]] = []
+        queue = [name for name in names if in_degree[name] == 0]
+        while queue:
+            waves.append([job_map[name] for name in queue])
+            next_queue: list[str] = []
+            for name in queue:
+                for dependent in dependents[name]:
+                    in_degree[dependent] -= 1
+                    if in_degree[dependent] == 0:
+                        next_queue.append(dependent)
+            queue = sorted(next_queue, key=order.__getitem__)
+
+        placed = {job.name for wave in waves for job in wave}
+        cycle_members = [name for name in names if name not in placed]
+        if cycle_members:
+            logger.error(
+                "Circular dependency detected among GDS jobs: %s. Placing in fallback wave.",
+                sorted(cycle_members),
+            )
+            waves.append([job_map[name] for name in sorted(cycle_members)])
+
+        return waves
+
     def _register_cron_job(self, job_spec: GDSJobSpec) -> None:
         if not job_spec.schedule.cron:
             raise ValueError(f"Job {job_spec.name}: cron expression required")
@@ -291,7 +360,16 @@ class GDSScheduler:
         """
         resolved_agg = self.resolve_aggregation_strategy(job_spec)
         logger.info(f"Starting GDS job {job_spec.name} — algorithm={job_spec.algorithm}, aggregation={resolved_agg}")
-        start = datetime.now()
+        from engine.config.settings import settings
+
+        # RU-100 / CEG-COR-086: start, duration and the history timestamp share
+        # one clock — timezone-aware UTC unless the flag restores naive local.
+        utc = settings.gds_history_utc_timestamps
+
+        def _now() -> datetime:
+            return datetime.now(tz=UTC) if utc else datetime.now()
+
+        start = _now()
         result = {}
 
         try:
@@ -321,7 +399,7 @@ class GDSScheduler:
                     logger.warning(f"Unknown algorithm: {algo}")
                     result = {"status": "skipped", "reason": f"unknown algorithm: {algo}"}
 
-            duration = (datetime.now() - start).total_seconds()
+            duration = (_now() - start).total_seconds()
             logger.info(f"Completed job {job_spec.name} in {duration:.2f}s")
             result["duration_sec"] = duration
             result["status"] = result.get("status", "success")
@@ -336,7 +414,7 @@ class GDSScheduler:
                 {
                     "job": job_spec.name,
                     "algorithm": job_spec.algorithm,
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": _now().isoformat(),
                     **result,
                 }
             )
@@ -428,16 +506,12 @@ class GDSScheduler:
 
         # Step 2: Power-law pruning — prune high-degree nodes to d^0.86 edges
         # Only prune nodes with >10 co-occurrence edges to avoid over-pruning
-        prune_cypher = f"""
-        MATCH (n)-[r:{write_edge}]-()
-        WITH n, collect(r) AS edges, count(r) AS degree
-        WHERE degree > 10
-        WITH n, edges, degree, toInteger(degree ^ {pruning_alpha}) AS keep_count
-        WITH n, edges[keep_count..] AS to_prune
-        UNWIND to_prune AS r
-        DELETE r
-        RETURN count(r) AS pruned_edges
-        """
+        from engine.config.settings import settings
+
+        if settings.gds_cooccurrence_deterministic_prune:
+            prune_cypher = self._deterministic_cooccurrence_prune_cypher(write_edge, pruning_alpha)
+        else:
+            prune_cypher = self._legacy_cooccurrence_prune_cypher(write_edge, pruning_alpha)
         try:
             prune_result = await self.graph_driver.execute_query(prune_cypher, database=db)
             pruned = prune_result[0]["pruned_edges"] if prune_result else 0
@@ -447,6 +521,51 @@ class GDSScheduler:
 
         logger.info(f"Co-occurrence: {edges} edges created/updated, {pruned} pruned (alpha={pruning_alpha})")
         return {"edges_created": edges, "edges_pruned": pruned, "pruning_alpha": pruning_alpha}
+
+    @staticmethod
+    def _deterministic_cooccurrence_prune_cypher(write_edge: str, pruning_alpha: float) -> str:
+        """RU-098 / CEG-COR-168: weight-ordered, deterministic power-law pruning.
+
+        Every node with degree > 10 keeps its strongest
+        ``keep_count = floor(degree ^ alpha)`` edges, ordered by ``r.weight``
+        DESC with ``elementId(r)`` as the tie-break. An edge is deleted only
+        when *both* endpoints prune and neither keeps it (two rejection votes),
+        so a node never ends below its keep count and a node with degree <= 10
+        keeps all of its edges. Identical input gives an identical result.
+        ``write_edge`` arrives sanitized and is re-validated here.
+        """
+        edge = sanitize_label(write_edge)
+        alpha = cypher_number(pruning_alpha)
+        return f"""
+        MATCH (n)-[r:{edge}]-()
+        WITH n, r
+        ORDER BY r.weight DESC, elementId(r)
+        WITH n, collect(r) AS edges
+        WITH n, edges, size(edges) AS degree
+        WHERE degree > 10
+        WITH n, edges[toInteger(degree ^ {alpha})..] AS rejected
+        UNWIND rejected AS r
+        WITH r, count(*) AS votes
+        WHERE votes = 2
+        DELETE r
+        RETURN count(r) AS pruned_edges
+        """
+
+    @staticmethod
+    def _legacy_cooccurrence_prune_cypher(write_edge: str, pruning_alpha: float) -> str:
+        """Pre-RU-098 prune: unordered collect, per-endpoint deletion."""
+        edge = sanitize_label(write_edge)
+        alpha = cypher_number(pruning_alpha)
+        return f"""
+        MATCH (n)-[r:{edge}]-()
+        WITH n, collect(r) AS edges, count(r) AS degree
+        WHERE degree > 10
+        WITH n, edges, degree, toInteger(degree ^ {alpha}) AS keep_count
+        WITH n, edges[keep_count..] AS to_prune
+        UNWIND to_prune AS r
+        DELETE r
+        RETURN count(r) AS pruned_edges
+        """
 
     async def _run_reinforcement(self, job_spec: GDSJobSpec) -> dict[str, Any]:
         """
@@ -614,6 +733,18 @@ class GDSScheduler:
             "prune_below": self._get_job_parameter(job_spec, "prune_below", 0.1),
         }
         count_prop = self._get_job_setting(job_spec, "count_property")
+        from engine.config.settings import settings
+
+        if settings.gds_temporal_recency_decay_existing:
+            return await self._run_temporal_recency_decaying(
+                db=db,
+                node_label=node_label,
+                source_edge=source_edge,
+                overlay_edge=overlay_edge,
+                ts_prop=ts_prop,
+                count_prop=count_prop,
+                params=params,
+            )
         count_set = (
             f",\n            r.recent_count = CASE WHEN age_days <= $half_life THEN coalesce(t.{sanitize_label(str(count_prop))}, 1) ELSE 0 END"
             if count_prop
@@ -640,6 +771,87 @@ class GDSScheduler:
         """
 
         create_result = await self.graph_driver.execute_query(create_cypher, parameters=params, database=db)
+        prune_result = await self.graph_driver.execute_query(prune_cypher, parameters=params, database=db)
+
+        created = create_result[0]["edges_created"] if create_result else 0
+        pruned = prune_result[0]["edges_pruned"] if prune_result else 0
+
+        logger.info(f"Temporal recency: {created} edges created, {pruned} pruned")
+        return {"edges_created": created, "edges_pruned": pruned}
+
+    async def _run_temporal_recency_decaying(
+        self,
+        *,
+        db: str,
+        node_label: str,
+        source_edge: str,
+        overlay_edge: str,
+        ts_prop: str,
+        count_prop: Any | None,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """RU-097 / CEG-COR-037: per-pair aggregation and decay of existing edges.
+
+        1. create — one row per (src, dst): the newest interaction within
+           ``max_age_days`` is ``last_event_date`` and its age drives
+           ``recency_score``; ``recent_count`` (only when ``count_property`` is
+           declared) sums ``coalesce(t.<count_property>, 1)`` over the pair's
+           interactions within ``half_life_days``.
+        2. refresh — every existing overlay edge has ``recency_score``
+           recomputed from its own ``last_event_date``, so an edge whose
+           interactions aged out keeps decaying instead of freezing.
+        3. prune — delete edges whose score fell below ``prune_below`` or whose
+           ``last_event_date`` is older than ``max_age_days``.
+
+        Labels and types arrive sanitized and are re-validated here; every
+        value is a ``$param``.
+        """
+        node_label = sanitize_label(node_label)
+        source_edge = sanitize_label(source_edge)
+        overlay_edge = sanitize_label(overlay_edge)
+        ts_prop = sanitize_label(ts_prop)
+        count_agg = (
+            ",\n             sum(CASE WHEN age_days <= $half_life "
+            f"THEN coalesce(t.{sanitize_label(str(count_prop))}, 1) ELSE 0 END) AS recent_count"
+            if count_prop
+            else ""
+        )
+        count_set = ",\n            r.recent_count = recent_count" if count_prop else ""
+
+        create_cypher = f"""
+        MATCH (src:{node_label})-[t:{source_edge}]->(dst:{node_label})
+        WHERE t.{ts_prop} IS NOT NULL
+        WITH src, dst, t,
+             duration.inDays(t.{ts_prop}, datetime()).days AS age_days
+        WHERE age_days <= $max_age_days
+        WITH src, dst,
+             max(t.{ts_prop}) AS last_event_date,
+             min(age_days) AS newest_age_days{count_agg}
+        MERGE (src)-[r:{overlay_edge}]->(dst)
+        SET r.last_event_date = last_event_date,
+            r.recency_score = exp(-1.0 * newest_age_days / $half_life){count_set}
+        RETURN count(r) AS edges_created
+        """
+
+        refresh_cypher = f"""
+        MATCH ()-[r:{overlay_edge}]->()
+        WHERE r.last_event_date IS NOT NULL
+        WITH r, duration.inDays(r.last_event_date, datetime()).days AS age_days
+        SET r.recency_score = exp(-1.0 * age_days / $half_life)
+        RETURN count(r) AS edges_refreshed
+        """
+
+        prune_cypher = f"""
+        MATCH ()-[r:{overlay_edge}]-()
+        WHERE r.recency_score < $prune_below
+           OR (r.last_event_date IS NOT NULL
+               AND duration.inDays(r.last_event_date, datetime()).days > $max_age_days)
+        DELETE r
+        RETURN count(r) AS edges_pruned
+        """
+
+        create_result = await self.graph_driver.execute_query(create_cypher, parameters=params, database=db)
+        await self.graph_driver.execute_query(refresh_cypher, parameters=params, database=db)
         prune_result = await self.graph_driver.execute_query(prune_cypher, parameters=params, database=db)
 
         created = create_result[0]["edges_created"] if create_result else 0

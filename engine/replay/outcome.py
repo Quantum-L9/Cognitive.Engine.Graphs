@@ -77,7 +77,9 @@ def load_replay_input(document: dict[str, Any]) -> dict[str, Any]:
         if isinstance(raw.get("payload"), dict):
             event["payload"] = raw["payload"]
         normalized.append(event)
-    normalized.sort(key=lambda e: (e["packet_id"], e["action"], e["tenant"]))
+    # RU-106 / CEG-COR-129: the event's own digest breaks key ties, so the
+    # order (and outcome_set_hash) does not depend on the input order.
+    normalized.sort(key=lambda e: (e["packet_id"], e["action"], e["tenant"], _digest(e)))
     return {
         "schema": schema_id,
         "schema_version": str(document.get("schema_version") or ""),

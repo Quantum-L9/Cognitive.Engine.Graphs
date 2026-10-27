@@ -542,6 +542,48 @@ class Settings(BaseSettings):
     # admin delegate_capability response therefore shows a new proof_hash).
     # Off: the legacy checks and hash input.
     capability_record_binding_enabled: bool = True
+    # Correctness remediation lane F (plan 0d84ec8, RU-093..RU-103)
+    # RU-094 / CEG-COR-035: a HALF_OPEN probe cancelled before it produced a
+    # result (the SDK runtime's wait_for timeout) returns its probe slot. Off:
+    # the slot leaks and three cancelled probes wedge the breaker until restart.
+    neo4j_circuit_release_cancelled_probes: bool = True
+    # RU-093 / CEG-COR-034: neo4j ClientError (syntax, constraint, missing
+    # database, null MERGE key) is a per-request fault and no longer counts
+    # toward opening the process-wide Neo4j breaker. Off: every exception counts.
+    neo4j_circuit_ignore_client_errors: bool = True
+    # RU-095 / CEG-COR-170: with auto_create_domain_database on, breaker
+    # admission happens before first-use provisioning, so an OPEN breaker
+    # rejects without attempting CREATE DATABASE. Off: provision, then admit.
+    neo4j_provision_inside_breaker: bool = True
+    # RU-096 / CEG-COR-036: the GDS execution DAG is keyed by job name, so two
+    # jobs sharing an algorithm both schedule. Off: algorithm-keyed DAG (the
+    # last same-algorithm job declared silently replaces the others).
+    gds_dag_job_identity_by_name: bool = True
+    # RU-097 / CEG-COR-037: the temporal-recency overlay aggregates per
+    # (src, dst) (newest interaction wins), re-scores every existing overlay
+    # edge each run, and prunes on score OR age > max_age_days. Off: the
+    # per-row create and score-only prune, under which aged edges never decay.
+    gds_temporal_recency_decay_existing: bool = True
+    # RU-098 / CEG-COR-168: co-occurrence power-law pruning orders each node's
+    # edges by weight (elementId tie-break) and deletes an edge only when both
+    # endpoints prune and neither keeps it. Off: unordered per-endpoint prune
+    # that can leave hubs below their keep count and differs run to run.
+    gds_cooccurrence_deterministic_prune: bool = True
+    # RU-100 / CEG-COR-086: GDS job history timestamps (and the job start /
+    # duration clock) are timezone-aware UTC, so staleness is the same under
+    # any process TZ. Off: naive local time, which consumers read as UTC.
+    gds_history_utc_timestamps: bool = True
+    # RU-101 / CEG-COR-059..061: entity resolution threads and validates the
+    # batch threshold, verifies each member against the chosen canonical,
+    # MERGEs RESOLVED_FROM (at most one per pair, no cycles) and skips batch
+    # entities by entity id. Off: the previous merge behaviour. The path is also
+    # gated per domain by semantic_registry.enabled (default False).
+    entity_resolution_merge_integrity: bool = True
+    # RU-103 / CEG-COR-177: behavioral similarity matches both entities with
+    # the entity label and the label's declared id property (PO-04; that part
+    # also follows spec_declared_candidate_id). Off: label-less entity_id match,
+    # which counts outcomes of same-id nodes of other labels.
+    resolution_behavioral_label_scoped: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

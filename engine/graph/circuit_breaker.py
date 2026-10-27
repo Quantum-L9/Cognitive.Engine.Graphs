@@ -80,6 +80,9 @@ class BreakerMetrics:
     consecutive_failures: int
     last_failure_time: float
     last_state_change_time: float
+    # RU-093: exceptions the breaker's classifier ruled not to be failures
+    # (GraphDriver: neo4j ClientError). Re-raised; never counted as failures.
+    total_neutral_errors: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -93,12 +96,20 @@ class BreakerMetrics:
             "consecutive_failures": self.consecutive_failures,
             "last_failure_time": self.last_failure_time,
             "last_state_change_time": self.last_state_change_time,
+            "total_neutral_errors": self.total_neutral_errors,
         }
 
 
 # ---------------------------------------------------------------------------
 # CircuitBreaker
 # ---------------------------------------------------------------------------
+
+
+def _release_cancelled_probes() -> bool:
+    """RU-094 flag: return a cancelled HALF_OPEN probe's slot."""
+    from engine.config.settings import settings
+
+    return settings.neo4j_circuit_release_cancelled_probes
 
 
 class CircuitBreaker:
@@ -114,6 +125,11 @@ class CircuitBreaker:
         Seconds in OPEN before transitioning to HALF_OPEN.
     half_open_max_calls:
         Probe calls allowed in HALF_OPEN per recovery cycle.
+    is_failure:
+        Optional classifier. When given, an ``Exception`` for which it returns
+        False is a neutral outcome: re-raised unchanged, not counted as a
+        failure, does not reset the failure streak, and returns a HALF_OPEN
+        probe slot. ``None`` (the default) counts every ``Exception`` (RU-093).
     """
 
     def __init__(
@@ -122,8 +138,10 @@ class CircuitBreaker:
         failure_threshold: int = 5,
         recovery_timeout: float = 30.0,
         half_open_max_calls: int = 3,
+        is_failure: Callable[[BaseException], bool] | None = None,
     ) -> None:
         self.name = name
+        self._is_failure = is_failure
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self.half_open_max_calls = half_open_max_calls
@@ -132,6 +150,9 @@ class CircuitBreaker:
         self._state: BreakerState = BreakerState.CLOSED
         self._consecutive_failures: int = 0
         self._half_open_calls: int = 0
+        # RU-094: incremented on every transition into HALF_OPEN, so a probe
+        # can tell whether the slot it took still belongs to the current cycle.
+        self._half_open_cycle: int = 0
         self._opened_at: float = 0.0
 
         # Metrics
@@ -139,6 +160,7 @@ class CircuitBreaker:
         self._total_successes: int = 0
         self._total_failures: int = 0
         self._total_rejections: int = 0
+        self._total_neutral_errors: int = 0
         self._state_changes: int = 0
         self._last_failure_time: float = 0.0
         self._last_state_change_time: float = 0.0
@@ -173,6 +195,7 @@ class CircuitBreaker:
             consecutive_failures=self._consecutive_failures,
             last_failure_time=self._last_failure_time,
             last_state_change_time=self._last_state_change_time,
+            total_neutral_errors=self._total_neutral_errors,
         )
 
     # ------------------------------------------------------------------
@@ -191,7 +214,11 @@ class CircuitBreaker:
         When HALF_OPEN, allows limited probe calls.
         On success in HALF_OPEN, transitions to CLOSED.
         On failure, increments counter; trips breaker if threshold reached.
+        A HALF_OPEN probe that ends without a result (``asyncio.CancelledError``,
+        e.g. the SDK runtime's ``wait_for`` timeout) returns its slot and records
+        neither success nor failure (RU-094).
         """
+        probe_cycle: int | None = None
         async with self._lock:
             self._total_calls += 1
 
@@ -216,12 +243,21 @@ class CircuitBreaker:
                         retry_after=self.recovery_timeout,
                     )
                 self._half_open_calls += 1
+                probe_cycle = self._half_open_cycle
 
         # Execute outside lock
         try:
             result = await func(*args, **kwargs)
-        except Exception:
+        except Exception as exc:
+            if self._is_failure is not None and not self._is_failure(exc):
+                self._on_neutral(probe_cycle)
+                raise
             await self._on_failure()
+            raise
+        except BaseException:
+            # Cancellation (or another non-Exception exit): no outcome to record.
+            if probe_cycle is not None and _release_cancelled_probes():
+                self._release_probe_slot(probe_cycle)
             raise
         else:
             await self._on_success()
@@ -248,6 +284,7 @@ class CircuitBreaker:
 
         if new_state == BreakerState.HALF_OPEN:
             self._half_open_calls = 0
+            self._half_open_cycle += 1
 
         logger.warning(
             "CircuitBreaker '%s': %s → %s (failures=%d)",
@@ -256,6 +293,28 @@ class CircuitBreaker:
             new_state.value,
             self._consecutive_failures,
         )
+
+    def _release_probe_slot(self, probe_cycle: int) -> None:
+        """Return a HALF_OPEN probe slot taken in ``probe_cycle`` (RU-094).
+
+        Synchronous on purpose: with no ``await`` between the check and the
+        decrement, a second cancellation cannot interrupt it, and no other
+        coroutine can interleave on the event loop. The slot is returned only
+        while the breaker is still in the HALF_OPEN cycle the probe belongs to;
+        a probe from an older cycle never touches a newer cycle's counter.
+        """
+        if self._state == BreakerState.HALF_OPEN and self._half_open_cycle == probe_cycle and self._half_open_calls > 0:
+            self._half_open_calls -= 1
+
+    def _on_neutral(self, probe_cycle: int | None) -> None:
+        """Record an exception the classifier ruled not a failure (RU-093).
+
+        Neither a failure nor a success: the failure streak is neither
+        incremented nor reset, and a HALF_OPEN probe slot is returned.
+        """
+        self._total_neutral_errors += 1
+        if probe_cycle is not None:
+            self._release_probe_slot(probe_cycle)
 
     async def _on_success(self) -> None:
         async with self._lock:
@@ -295,6 +354,7 @@ class CircuitBreaker:
             self._total_successes = 0
             self._total_failures = 0
             self._total_rejections = 0
+            self._total_neutral_errors = 0
             self._state_changes = 0
             self._consecutive_failures = 0
             self._last_failure_time = 0.0

@@ -178,6 +178,31 @@ class TestRegistration:
         with pytest.raises(ValueError, match="cron expression required"):
             scheduler._register_cron_job(job)
 
+    @pytest.mark.asyncio
+    async def test_same_algorithm_cron_jobs_all_register(self):
+        """RU-096 / CEG-COR-036: two louvain cron jobs are two APScheduler jobs."""
+        jobs = [_job("louvain_by_material", "louvain"), _job("louvain_by_polymer", "louvain")]
+        scheduler = GDSScheduler(_minimal_spec(jobs), _mock_driver())
+        scheduler.register_jobs()
+        scheduler.start()
+        try:
+            ids = sorted(job.id for job in scheduler.scheduler.get_jobs())
+        finally:
+            scheduler.scheduler.shutdown(wait=False)
+        assert ids == ["louvain_by_material", "louvain_by_polymer"]
+
+    def test_register_log_reports_jobs_actually_registered(self, caplog):
+        jobs = [
+            _job("louvain_by_material", "louvain"),
+            _job("louvain_by_polymer", "louvain"),
+            _job("manual_one", "louvain", schedule_type="manual"),
+        ]
+        scheduler = GDSScheduler(_minimal_spec(jobs), _mock_driver())
+        with patch.object(scheduler.scheduler, "add_job") as mock_add, caplog.at_level("INFO"):
+            scheduler.register_jobs()
+        assert mock_add.call_count == 2
+        assert "Registered 2 GDS cron jobs" in caplog.text
+
 
 # ── Algorithm Dispatch ────────────────────────────────────
 
@@ -216,6 +241,34 @@ class TestAlgorithmDispatch:
 
         result = await scheduler.execute_job(job)
         assert result["status"] == "success"
+        # RU-098 / CEG-COR-168: per-node keep sets are ordered by weight (with a
+        # deterministic tie-break) before collect; an edge is deleted only when
+        # both endpoints prune (degree > 10) and neither keeps it.
+        prune = str(driver.execute_query.call_args_list[1].args[0])
+        assert "ORDER BY r.weight DESC, elementId(r)" in prune
+        assert prune.index("ORDER BY r.weight DESC") < prune.index("collect(r)")
+        assert "WHERE degree > 10" in prune
+        assert "WHERE votes = 2" in prune
+        assert ":CO_PROCESSES" in prune
+
+    @pytest.mark.asyncio
+    async def test_cooccurrence_flag_off_restores_legacy_prune(self, monkeypatch):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gds_cooccurrence_deterministic_prune", False)
+        driver = _mock_driver([{"edges_created": 15}])
+        job = _job("test_cooc", "cooccurrence", sourceedge="ACCEPTS_POLYMER", writeedge="CO_PROCESSES")
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+        result = await scheduler.execute_job(job)
+        assert result["pruning_alpha"] == 0.86
+        prune = str(driver.execute_query.call_args_list[1].args[0])
+        assert "ORDER BY" not in prune
+        assert "edges[keep_count..] AS to_prune" in prune
+
+    def test_cooccurrence_flag_default_on(self):
+        from engine.config.settings import Settings
+
+        assert Settings().gds_cooccurrence_deterministic_prune is True
 
     @pytest.mark.asyncio
     async def test_reinforcement_creates_accepted_and_rejected(self):
@@ -291,9 +344,11 @@ class TestAlgorithmDispatch:
     @pytest.mark.asyncio
     async def test_temporal_recency_creates_and_prunes(self):
         driver = _mock_driver()
+        # RU-097: create, refresh (recency of every existing overlay edge), prune.
         driver.execute_query = AsyncMock(
             side_effect=[
                 [{"edges_created": 20}],
+                [{"edges_refreshed": 25}],
                 [{"edges_pruned": 5}],
             ]
         )
@@ -308,6 +363,59 @@ class TestAlgorithmDispatch:
         sent = _cypher_sent(driver)
         assert ":RECENTLY_INTERACTED_WITH" in sent
         assert "t.last_seen_at" in sent
+
+        # RU-097 / CEG-COR-037: aggregate per (src, dst) before MERGE, refresh
+        # existing overlay edges, then prune on score OR age.
+        create, refresh, prune = (str(c.args[0]) for c in driver.execute_query.call_args_list)
+        assert "max(t.last_seen_at)" in create
+        assert create.index("max(t.last_seen_at)") < create.index("MERGE")
+        assert "r.last_event_date" in refresh
+        assert "SET r.recency_score" in refresh
+        assert "MERGE" not in refresh
+        assert "DELETE" not in refresh
+        assert "$prune_below" in prune
+        assert "$max_age_days" in prune
+        assert "DELETE r" in prune
+        for call in driver.execute_query.call_args_list:
+            assert call.kwargs["parameters"] == {"half_life": 90.0, "max_age_days": 207.0, "prune_below": 0.1}
+
+    @pytest.mark.asyncio
+    async def test_temporal_recency_recent_count_aggregates_per_pair(self):
+        driver = _mock_driver()
+        driver.execute_query = AsyncMock(side_effect=[[{"edges_created": 1}], [], [{"edges_pruned": 0}]])
+        job = _job(
+            "test_temporal_count",
+            "temporalrecency",
+            sourceedge="INTERACTED_WITH",
+            writeedge="RECENTLY_INTERACTED_WITH",
+            writeproperties=[{"timestamp_property": "last_seen_at"}, {"count_property": "hits"}],
+        )
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+        await scheduler.execute_job(job)
+        create = str(driver.execute_query.call_args_list[0].args[0])
+        assert "sum(CASE WHEN age_days <= $half_life THEN coalesce(t.hits, 1) ELSE 0 END)" in create
+
+    @pytest.mark.asyncio
+    async def test_temporal_recency_flag_off_restores_legacy_cypher(self, monkeypatch):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gds_temporal_recency_decay_existing", False)
+        driver = _mock_driver()
+        driver.execute_query = AsyncMock(side_effect=[[{"edges_created": 20}], [{"edges_pruned": 5}]])
+        job = _job("test_temporal", "temporalrecency", **_TEMPORAL_JOB)
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+        result = await scheduler.execute_job(job)
+        assert result["edges_created"] == 20
+        assert result["edges_pruned"] == 5
+        create, prune = (str(c.args[0]) for c in driver.execute_query.call_args_list)
+        assert "max(" not in create
+        assert "SET r.last_event_date = t.last_seen_at" in create
+        assert "$max_age_days" not in prune
+
+    def test_temporal_recency_flag_default_on(self):
+        from engine.config.settings import Settings
+
+        assert Settings().gds_temporal_recency_decay_existing is True
 
     @pytest.mark.asyncio
     async def test_temporal_recency_requires_timestamp_property(self):
@@ -486,3 +594,64 @@ class TestLifecycle:
             mock_start.assert_called_once()
             scheduler.shutdown()
             mock_stop.assert_called_once()
+
+
+# ── RU-100 / CEG-COR-086: history timestamps in timezone-aware UTC ────────
+
+
+@pytest.fixture
+def process_tz(monkeypatch):
+    """Set the process timezone for one test and restore it afterwards."""
+    import time
+
+    def _set(tz: str) -> None:
+        monkeypatch.setenv("TZ", tz)
+        time.tzset()
+
+    yield _set
+    monkeypatch.undo()
+    time.tzset()
+
+
+class TestHistoryTimestamps:
+    @staticmethod
+    def _apparent_age_seconds(ts_str: str) -> float:
+        """The consumer conversion of engine/handlers.py gds_health / engine/boot.py."""
+        from datetime import UTC, datetime
+
+        ts = datetime.fromisoformat(ts_str)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        return (datetime.now(tz=UTC) - ts).total_seconds()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tz", ["America/Los_Angeles", "Asia/Tokyo", "UTC"])
+    async def test_history_timestamp_is_utc_aware(self, process_tz, tz):
+        from datetime import UTC, datetime
+
+        process_tz(tz)
+        job = _job("noop", "noop_algo", schedule_type="manual")
+        scheduler = GDSScheduler(_minimal_spec([job]), _mock_driver())
+        await scheduler.execute_job(job)
+        ts_str = scheduler.job_history[-1]["timestamp"]
+        assert datetime.fromisoformat(ts_str).utcoffset() is not None
+        assert datetime.fromisoformat(ts_str).tzinfo == UTC
+        assert abs(self._apparent_age_seconds(ts_str)) < 60
+
+    @pytest.mark.asyncio
+    async def test_flag_off_restores_naive_local_timestamps(self, process_tz, monkeypatch):
+        from datetime import datetime
+
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gds_history_utc_timestamps", False)
+        process_tz("Asia/Tokyo")
+        job = _job("noop", "noop_algo", schedule_type="manual")
+        scheduler = GDSScheduler(_minimal_spec([job]), _mock_driver())
+        await scheduler.execute_job(job)
+        assert datetime.fromisoformat(scheduler.job_history[-1]["timestamp"]).tzinfo is None
+
+    def test_flag_default_on(self):
+        from engine.config.settings import Settings
+
+        assert Settings().gds_history_utc_timestamps is True
