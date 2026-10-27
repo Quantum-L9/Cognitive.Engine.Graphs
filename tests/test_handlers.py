@@ -177,6 +177,7 @@ async def test_match_returns_structure() -> None:
     assert "candidates" in result
     assert "query_id" in result
     assert isinstance(result["execution_time_ms"], float)
+    assert result["status"] == "success"  # RU-014 / CEG-COR-075
 
 
 @pytest.mark.asyncio
