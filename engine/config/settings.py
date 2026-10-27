@@ -380,6 +380,15 @@ class Settings(BaseSettings):
     # scored divergence 1.0 and raised alert=True. On: either window empty is
     # insufficient_data (with both counts). Off: legacy both-empty only.
     drift_requires_both_windows: bool = True
+    # Correctness remediation lane C (plan 0d84ec8, RU-020..)
+    # RU-020 / CEG-COR-027..029: admission_defects also compiles every declared
+    # direction's scoring clause and withholds a pack whose scoring refuses to
+    # compile, references a $parameter nothing binds, or declares an HGKR option
+    # with no producer (inherit_prior / population_mean / structural_similarity).
+    # Such a pack failed every match (ValueError / ParameterMissing) or silently
+    # degraded. Off: admission checks gates only, as before. Ships on — it
+    # withholds only packs whose matches cannot execute.
+    scoring_admission_check_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

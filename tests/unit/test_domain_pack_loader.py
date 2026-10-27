@@ -324,3 +324,140 @@ class TestInvalidate:
         loader._cache["d2"] = (MagicMock(), 200.0)
         loader.invalidate()
         assert len(loader._cache) == 0
+
+
+# ============================================================================
+# RG-026 (RU-020 / CEG-COR-027..029): scoring dimensions that cannot execute
+# withhold the pack at admission instead of failing every match.
+# ============================================================================
+
+_REPO_DOMAINS = Path(__file__).resolve().parents[2] / "domains"
+
+
+def _spec_with_dimensions(dimensions: list[dict[str, object]], fields: list[dict[str, object]] | None = None):  # type: ignore[no-untyped-def]
+    import yaml
+
+    from engine.config.schema import DomainSpec
+
+    raw = yaml.safe_load(_minimal_spec_yaml("scoring-check"))
+    raw["scoring"]["dimensions"] = dimensions
+    raw["queryschema"]["fields"] = fields or []
+    return DomainSpec.model_validate(raw)
+
+
+def _repo_spec(domain_id: str):  # type: ignore[no-untyped-def]
+    import yaml
+
+    from engine.config.schema import DomainSpec
+
+    return DomainSpec.model_validate(yaml.safe_load((_REPO_DOMAINS / domain_id / "spec.yaml").read_text()))
+
+
+_BRIDGE = {
+    "name": "bridge",
+    "source": "computed",
+    "computation": "community_bridge",
+    "weightkey": "wb",
+    "defaultweight": 0.1,
+}
+_ATTENTION = {
+    "name": "attention",
+    "source": "computed",
+    "computation": "preference_attention",
+    "weightkey": "wa",
+    "defaultweight": 0.1,
+}
+_POPMEAN = {
+    "name": "rating",
+    "source": "candidateproperty",
+    "candidateprop": "rating",
+    "computation": "candidateproperty",
+    "null_strategy": "population_mean",
+    "weightkey": "wr",
+    "defaultweight": 0.1,
+}
+_PRIOR = {**_POPMEAN, "name": "prior", "null_strategy": "inherit_prior"}
+_STRUCTURAL = {**_POPMEAN, "name": "cold", "null_strategy": "zero", "cold_start_fallback": "structural_similarity"}
+
+
+@pytest.mark.unit
+class TestScoringAdmission:
+    """admission_defects compiles each direction's scoring and checks its parameters bind."""
+
+    @pytest.fixture(autouse=True)
+    def _default_admission(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config import loader as loader_module
+
+        monkeypatch.setattr(loader_module.settings, "unvalidated_domain_packs_enabled", False)
+        monkeypatch.setattr(loader_module.settings, "dormant_domain_packs_enabled", False)
+
+    def test_community_bridge_without_query_field_names_the_parameter(self) -> None:
+        from engine.config.loader import withholding_reason
+
+        reason = withholding_reason(_spec_with_dimensions([_BRIDGE]))
+        assert reason is not None
+        assert "query_community_id" in reason
+
+    def test_community_bridge_with_its_query_field_is_admitted(self) -> None:
+        from engine.config.loader import admission_defects
+
+        spec = _spec_with_dimensions([_BRIDGE], fields=[{"name": "query_community_id", "type": "int"}])
+        assert admission_defects(spec) == []
+
+    def test_preference_attention_defect_quotes_the_compiler(self) -> None:
+        from engine.config.loader import admission_defects
+
+        defects = admission_defects(_spec_with_dimensions([_ATTENTION]))
+        assert len(defects) == 1
+        assert "attention" in defects[0]
+        assert "requires metadata.success_value" in defects[0]
+
+    def test_population_mean_names_its_unbound_parameter(self) -> None:
+        from engine.config.loader import admission_defects
+
+        defects = admission_defects(_spec_with_dimensions([_POPMEAN]))
+        assert defects
+        assert all("rating" in d for d in defects)
+        assert any("_popmean_rating" in d for d in defects)
+
+    @pytest.mark.parametrize("dim", [_PRIOR, _STRUCTURAL], ids=["inherit_prior", "structural_similarity"])
+    def test_options_without_a_producer_are_defects(self, dim: dict[str, object]) -> None:
+        from engine.config.loader import admission_defects
+
+        defects = admission_defects(_spec_with_dimensions([dim]))
+        assert len(defects) == 1
+        assert dim["name"] in defects[0]
+        assert "no producer" in defects[0]
+
+    def test_one_defect_per_offending_dimension(self) -> None:
+        from engine.config.loader import admission_defects
+
+        ok = {**_POPMEAN, "name": "plain", "null_strategy": "zero"}
+        defects = admission_defects(_spec_with_dimensions([_BRIDGE, _ATTENTION, _PRIOR, ok]))
+        assert sorted(d.split(":", 1)[0] for d in defects) == sorted(
+            ["scoring[d1] bridge", "scoring[d1] attention", "scoring prior"]
+        )
+
+    def test_freight_matching_is_withheld_for_its_unbound_scoring_parameters(self) -> None:
+        """CEG-COR-011 has not landed: geodecay/pricealignment reference $lat, $lon, $target_price."""
+        from engine.config.loader import admission_defects, withholding_reason
+
+        spec = _repo_spec("freight-matching")
+        defects = "\n".join(admission_defects(spec))
+        for param in ("'lat'", "'lon'", "'target_price'"):
+            assert param in defects
+        assert withholding_reason(spec) is not None
+
+    def test_flag_off_restores_gate_only_admission(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config import loader as loader_module
+
+        monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", False)
+        for spec in (_spec_with_dimensions([_BRIDGE, _ATTENTION, _POPMEAN, _PRIOR]), _repo_spec("freight-matching")):
+            assert loader_module.admission_defects(spec) == []
+            assert loader_module.withholding_reason(spec) is None
+
+    def test_unvalidated_override_still_serves(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config import loader as loader_module
+
+        monkeypatch.setattr(loader_module.settings, "unvalidated_domain_packs_enabled", True)
+        assert loader_module.withholding_reason(_spec_with_dimensions([_BRIDGE])) is None

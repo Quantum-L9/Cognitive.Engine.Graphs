@@ -99,6 +99,7 @@ independently of the code default.
 | Sync Count From Write Result | `SYNC_COUNT_FROM_WRITE_RESULT` (`sync_count_from_write_result`) | `True` | unset | active (correctness, RU-060); `UNWINDMATCHSET` sync returns `count(n) AS synced_count` and the response adds `unmatched_count`; `UNWINDMERGE` unchanged; off restores `synced_count = len(batch)` |
 | Admin Tenant-bound Domain | `ADMIN_TENANT_BOUND_DOMAIN` (`admin_tenant_bound_domain`) | `True` | unset | active (hardening, RU-003); every domain-bearing admin subaction rejects a `domain_id` other than the packet tenant before any load or query; `evaluate` matches as the tenant; off restores the caller-chosen `domain_id` |
 | Pricealignment Float Division | `PRICEALIGNMENT_FLOAT_DIVISION` (`pricealignment_float_division`) | `True` | unset | active (correctness); both ratio operands are cast with `toFloat()` so INTEGER-stored prices are not truncated (450/500 scored 0.0); `false` restores the legacy expression (RU-017 / CEG-COR-006) |
+| Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `True` | unset | active (hardening); admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
 
 ---
 
@@ -695,6 +696,30 @@ query-schema parameter per constant — a schema decision, not a file move.
 compile to executable Cypher, and every withheld pack must still have a live
 generic reason (a compile defect or a declared dormant posture). A pack fixed
 later is served automatically — there is no per-domain list to forget it in.
+
+### Scoring admission (RU-020 / CEG-COR-027..029)
+
+`SCORING_ADMISSION_CHECK_ENABLED` (default `True`) extends `admission_defects`
+from gates to scoring. For every declared match direction each applicable
+dimension is compiled as `ScoringAssembler` compiles it, and the pack is
+withheld when:
+
+- the scoring compiler refuses a dimension (`preference_attention` without
+  `metadata.success_value`, which the schema cannot declare);
+- a dimension references a `$parameter` that `handle_match` does not bind —
+  not a queryschema field, derived parameter, scoring `queryprop`, `top_n`, or
+  a value the assembler binds itself (`community_bridge` without a
+  `query_<prop>` field; `geodecay`'s `$lon`);
+- a dimension declares an option nothing produces: `null_strategy:
+  inherit_prior | population_mean` or `cold_start_fallback:
+  structural_similarity | population_mean`.
+
+Each such pack failed every match (`ValueError` / `ParameterMissing`) or
+silently degraded. `freight-matching` is withheld by this check until its
+scoring binds `$lat` / `$lon` / `$target_price` (CEG-COR-011).
+Rollback: `SCORING_ADMISSION_CHECK_ENABLED=false` (gate-only admission, the
+previous wording of the withholding reason), or
+`UNVALIDATED_DOMAIN_PACKS_ENABLED=true` to serve every validated pack.
 
 ---
 
