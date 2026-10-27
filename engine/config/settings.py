@@ -311,6 +311,15 @@ class Settings(BaseSettings):
     # (regimes as compliance_tags, gate/dimension/endpoint/row path and the
     # field name, never a value) when the domain's auditonviolation is true.
     prohibited_factor_violation_audit: bool = True
+    # RU-064 / CEG-COR-051: ComplianceEngine probed a nonexistent
+    # `compliance.pii.additional_fields`, so declared PII fields that no
+    # built-in hint matched survived raw and `handling: hash` became deletion.
+    # On (with pii_redaction_recursive): when compliance.pii.enabled, declared
+    # fields + candidatefields are PII by exact case-insensitive key at any
+    # depth, and every detected field is transformed per PIISpec.handling
+    # (hash -> SHA-256 digest, redact -> fixed marker, encrypt/tokenize fail
+    # closed to the marker). Off: built-in inference with key deletion only.
+    pii_declared_fields_enforced: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

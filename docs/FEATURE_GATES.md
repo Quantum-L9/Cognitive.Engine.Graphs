@@ -84,6 +84,7 @@ independently of the code default.
 | PII Redaction Recursive | `PII_REDACTION_RECURSIVE` (`pii_redaction_recursive`) | `True` | unset | active (hardening); PII detection/redaction/masking reaches list elements (match `candidates`) without mutating the input — see lane D |
 | Compliance Audit Soft Sink | `COMPLIANCE_AUDIT_SOFT_SINK` (`compliance_audit_soft_sink`) | `True` | unset | active (hardening); bounded audit buffer, JSON-encoded JSONB metadata, request never fails on audit persistence — see lane D |
 | Prohibited Factor Violation Audit | `PROHIBITED_FACTOR_VIOLATION_AUDIT` (`prohibited_factor_violation_audit`) | `True` | unset | active; a blocked attempt leaves one `denied` audit entry before the error propagates (domain `auditonviolation`) — see lane D |
+| PII Declared Fields Enforced | `PII_DECLARED_FIELDS_ENFORCED` (`pii_declared_fields_enforced`) | `True` | unset | active; the domain's declared `compliance.pii` fields and `handling` mode apply on the response path — see lane D |
 
 ---
 
@@ -961,5 +962,30 @@ emit one entry through `AuditLogger.log_violation` (severity `critical`,
 `outcome: denied`, regimes as `compliance_tags`, the subject and field name — never a
 value) and re-raise the same error. `handle_match` passes the tenant as the actor. Off:
 no entry. The `enforcement` mode value is still not interpreted (DEC-23 pending).
+
+Rollback: set the flag to `false`.
+
+### PII Declared Fields Enforced (RU-064 / CEG-COR-051)
+
+**Flag**: `PII_DECLARED_FIELDS_ENFORCED=True` (default on; takes effect while
+`PII_REDACTION_RECURSIVE` is also on)
+
+`ComplianceEngine` probed `compliance.pii.additional_fields`, which `PIISpec` does not
+have, so declared fields no built-in hint matched survived raw (healthcare-referral
+`name`, `patientid`; legal-discovery `clientname`), `handling: hash` became deletion, and
+`PIISpec.enabled` was ignored. On, when `compliance.pii` is present and `enabled: true`:
+`PIISpec.fields` + `candidatefields` are PII by exact, case-insensitive key at any depth
+in addition to built-in inference, and `redact_response` transforms every detected field
+per `PIISpec.handling`:
+
+| `handling` | Response value |
+|---|---|
+| `hash` | `PIIHandler.hash_value` SHA-256 hex digest of the value's string form |
+| `redact` | `[REDACTED]` (`engine.compliance.pii.REDACTION_MARKER`) |
+| `encrypt`, `tokenize`, other | fail closed to `[REDACTED]`, with a WARNING naming the mode and field paths (decision DEC-22 (a); no key sourcing or token store exists) |
+
+`compliance.pii.enabled: false` (or no `pii` section): built-in inference with key
+deletion, as before. Ingest-time hashing of stored PII is out of scope. Off: built-in
+inference with key deletion for every domain.
 
 Rollback: set the flag to `false`.
