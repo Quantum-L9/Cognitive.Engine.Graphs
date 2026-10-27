@@ -47,8 +47,15 @@ class SyncPayload(BaseModel):
 class SyncResponse(BaseModel):
     status: Literal["success"]
     entity_type: str
-    synced_count: int
+    synced_count: int  # UNWINDMATCHSET: rows that matched an existing node (RU-060)
+    unmatched_count: int | None = None  # UNWINDMATCHSET only: len(batch) - synced_count
 ```
+
+RU-060 (`SYNC_COUNT_FROM_WRITE_RESULT`, default on): an `UNWINDMATCHSET`
+endpoint updates only rows whose node already exists, so its statement ends
+`RETURN count(n) AS synced_count` and the response reports that count plus
+`unmatched_count`. `UNWINDMERGE` creates missing nodes; its `synced_count`
+stays `len(batch)` and it carries no `unmatched_count`.
 
 
 ## admin

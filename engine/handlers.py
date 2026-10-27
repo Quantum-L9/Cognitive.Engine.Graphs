@@ -1047,7 +1047,7 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     cypher = generator.generate_sync_query(endpoint_spec, batch)
 
     try:
-        await graph_driver.execute_query(
+        write_rows = await graph_driver.execute_query(
             cypher=cypher,
             parameters={"batch": batch, "tenant": tenant},
             database=domain_spec.domain.id,
@@ -1066,6 +1066,17 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         "entity_type": entity_type,
         "synced_count": len(batch),
     }
+    from engine.config.schema import SyncStrategy
+    from engine.config.settings import settings as _sync_settings
+
+    # RU-060 / CEG-COR-169: UNWINDMATCHSET updates only rows that matched an
+    # existing node; the statement RETURNs that count. UNWINDMERGE unchanged.
+    if _sync_settings.sync_count_from_write_result and endpoint_spec.batchstrategy == SyncStrategy.UNWINDMATCHSET:
+        matched = 0
+        if write_rows and isinstance(write_rows[0], dict):
+            matched = int(write_rows[0].get("synced_count") or 0)
+        result["synced_count"] = matched
+        result["unmatched_count"] = len(batch) - matched
     if rejected_count > 0:
         result["rejected_count"] = rejected_count
     return result
