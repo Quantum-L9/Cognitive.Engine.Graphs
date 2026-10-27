@@ -110,6 +110,7 @@ independently of the code default.
 | Compliance Audit Soft Sink | `COMPLIANCE_AUDIT_SOFT_SINK` (`compliance_audit_soft_sink`) | `True` | unset | active (hardening); bounded audit buffer, JSON-encoded JSONB metadata, request never fails on audit persistence — see lane D |
 | Prohibited Factor Violation Audit | `PROHIBITED_FACTOR_VIOLATION_AUDIT` (`prohibited_factor_violation_audit`) | `True` | unset | active; a blocked attempt leaves one `denied` audit entry before the error propagates (domain `auditonviolation`) — see lane D |
 | PII Declared Fields Enforced | `PII_DECLARED_FIELDS_ENFORCED` (`pii_declared_fields_enforced`) | `True` | unset | active; the domain's declared `compliance.pii` fields and `handling` mode apply on the response path — see lane D |
+| Causal Attribution Unique Touchpoints | `CAUSAL_ATTRIBUTION_UNIQUE_TOUCHPOINTS` (`causal_attribution_unique_touchpoints`) | `True` | unset | active; attribution weights are computed over unique touchpoints and sum to 1.0 — see lane D |
 
 ---
 
@@ -1122,3 +1123,16 @@ records the `PII_ERASURE` CRITICAL entry in the domain's `ComplianceEngine` audi
 before any deletion. **Release gate:** do not enable live erasure in any environment
 before the admin tenant-binding fix (RU-003, CEG-COR-003) is deployed with it — until
 then `domain_id` is caller-supplied.
+
+### Causal Attribution Unique Touchpoints (RU-067 / CEG-COR-055)
+
+**Flag**: `CAUSAL_ATTRIBUTION_UNIQUE_TOUCHPOINTS=True` (default on)
+
+`AttributionCalculator` received one row per causal PATH (`ORDER BY distance ASC`) and
+weighted rows, so a touchpoint reached by several paths split mass or had its credit
+overwritten (diamond: linear summed to 0.6, first_touch to 0). On: rows are collapsed to
+unique touchpoint ids keeping the first (minimum-distance) occurrence before weighting,
+and that row's link ages feed temporal decay; `total_touchpoints` counts unique ids.
+Model ordering semantics are unchanged (DEC-27 pending). Off: per-row weighting.
+
+Rollback: set the flag to `false`.
