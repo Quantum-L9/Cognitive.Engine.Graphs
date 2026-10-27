@@ -655,3 +655,46 @@ class TestHistoryTimestamps:
         from engine.config.settings import Settings
 
         assert Settings().gds_history_utc_timestamps is True
+
+
+# ── Stable Louvain (S2-15) contract ───────────────────────
+
+
+class TestStableLouvainContract:
+    """RU-099 / CEG-COR-085 (DEC-39 option A): the multi-run path is honest.
+
+    N runs each write the same property, so the persisted labels are the last
+    successful run's; the result reports averaged metrics and says, through
+    ``consensus=False``, that no per-node consensus was computed.
+    """
+
+    @pytest.mark.asyncio
+    async def test_stability_runs_report_no_consensus(self):
+        driver = _mock_driver([{"communityCount": 4, "modularity": 0.40}])
+        job = _job("stable_louvain", "louvain").model_copy(update={"stability_runs": 3})
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+
+        result = await scheduler.execute_job(job)
+
+        assert result["status"] == "success"
+        assert result["consensus"] is False
+        assert result["stability_runs"] == 3
+        assert result["communities"] == 4
+        assert result["modularity"] == pytest.approx(0.40)
+        assert result["stability_coefficient"] == pytest.approx(1.0)
+
+    @pytest.mark.asyncio
+    async def test_single_run_path_has_no_consensus_key(self):
+        driver = _mock_driver([{"communityCount": 4, "modularity": 0.40}])
+        job = _job("plain_louvain", "louvain")
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+
+        result = await scheduler.execute_job(job)
+
+        assert "consensus" not in result
+        assert "stability_runs" not in result
+
+    def test_docstring_does_not_claim_majority_consensus(self):
+        doc = (GDSScheduler._run_stable_louvain.__doc__ or "").lower()
+        assert "majority" not in doc
+        assert "last successful run" in doc
