@@ -483,6 +483,10 @@ class Settings(BaseSettings):
     # not carry, so declared temporal_validation was skipped for every sync
     # batch. On: the batch edge_type is used. Off: the record key.
     causal_validator_batch_edge_type: bool = True
+    # RU-076 / CEG-COR-125: safe_eval ignored keyword arguments, so
+    # round(2.567, ndigits=2) returned 3 and max(x, key=y) returned x. On: a
+    # call with keywords raises ValueError. Off: keywords silently dropped.
+    safe_eval_reject_keywords: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
