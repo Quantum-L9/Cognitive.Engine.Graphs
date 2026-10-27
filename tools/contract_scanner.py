@@ -10,7 +10,9 @@ status: active
 --- /L9_META ---
 
 L9 Contract Violation Scanner
-Encodes the grep-able subset of the 24 contracts as regex rules. Contracts without a
+Encodes the grep-able subset of the 24 contracts as regex rules; rules whose meaning
+depends on call arguments or import structure (SEC-007, ARCH-001/002, DEL-001/002)
+are evaluated on the module AST instead. Contracts without a
 mechanical signature are verified by tests/contracts/, not here — see contracts/*.yaml
 `verification.scanner_rules` for the authoritative rule-to-contract mapping.
 Exit code 1 = violations found = commit/merge blocked.
@@ -18,8 +20,10 @@ Exit code 1 = violations found = commit/merge blocked.
 
 from __future__ import annotations
 
+import ast
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -51,6 +55,7 @@ def _rule(
     remediation: str,
     include_dirs: list[str] | None = None,
     exclude_dirs: list[str] | None = None,
+    ast_check: AstCheck | None = None,
 ) -> dict:
     r = {
         "id": rule_id,
@@ -64,7 +69,118 @@ def _rule(
         r["include_dirs"] = include_dirs
     if exclude_dirs is not None:
         r["exclude_dirs"] = exclude_dirs
+    if ast_check is not None:
+        r["ast_check"] = ast_check
     return r
+
+
+# =============================================================================
+# AST-evaluated rules
+# =============================================================================
+# An AST check receives the parsed module and returns the 1-based line numbers
+# of its violations. Rules carrying one keep their regex ``pattern`` only as the
+# fallback for a file that does not parse.
+
+AstCheck = Callable[[ast.Module], list[int]]
+
+_HTTP_METHODS = frozenset({"post", "get", "put", "delete", "patch"})
+_SAFE_YAML_LOADERS = frozenset({"SafeLoader", "CSafeLoader"})
+
+
+def _module_aliases(tree: ast.Module, module: str) -> tuple[set[str], dict[str, str]]:
+    """Names bound to *module* itself, and ``{local_name: member}`` for ``from module import member``."""
+    modules: set[str] = set()
+    members: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == module:
+                    modules.add(alias.asname or module)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == module:
+            for alias in node.names:
+                members[alias.asname or alias.name] = alias.name
+    return modules, members
+
+
+def _is_member_ref(node: ast.expr, modules: set[str], members: dict[str, str], wanted: frozenset[str]) -> bool:
+    """``mod.<wanted>`` via a module alias, or a bare name imported from the module as one of *wanted*."""
+    if isinstance(node, ast.Attribute):
+        return isinstance(node.value, ast.Name) and node.value.id in modules and node.attr in wanted
+    if isinstance(node, ast.Name):
+        return members.get(node.id) in wanted
+    return False
+
+
+def _check_yaml_load(tree: ast.Module) -> list[int]:
+    """SEC-007: yaml.load whose Loader is missing or not SafeLoader / CSafeLoader."""
+    modules, members = _module_aliases(tree, "yaml")
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and _is_member_ref(node.func, modules, members, frozenset({"load"}))):
+            continue
+        loader = next((kw.value for kw in node.keywords if kw.arg == "Loader"), None)
+        if loader is None and len(node.args) >= 2:  # yaml.load(stream, Loader)
+            loader = node.args[1]
+        if loader is None or not _is_member_ref(loader, modules, members, _SAFE_YAML_LOADERS):
+            lines.append(node.lineno)
+    return lines
+
+
+def _import_check(top_level: str) -> AstCheck:
+    """Any absolute import whose top-level module is *top_level*."""
+
+    def check(tree: ast.Module) -> list[int]:
+        lines: list[int] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                if any(alias.name.split(".")[0] == top_level for alias in node.names):
+                    lines.append(node.lineno)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                if node.module.split(".")[0] == top_level:
+                    lines.append(node.lineno)
+        return lines
+
+    return check
+
+
+def _http_call_check(module: str, client_factories: frozenset[str]) -> AstCheck:
+    """Raw HTTP via *module*: module-level calls, imported functions, and calls on client objects."""
+
+    def check(tree: ast.Module) -> list[int]:
+        modules, members = _module_aliases(tree, module)
+        if not modules and not members:
+            return []
+
+        def is_client_factory_call(node: ast.expr) -> bool:
+            return isinstance(node, ast.Call) and _is_member_ref(node.func, modules, members, client_factories)
+
+        # Expressions bound to a client object: ``c = httpx.Client()``,
+        # ``self.c = httpx.Client()``, ``with httpx.AsyncClient() as c``.
+        clients: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign | ast.AnnAssign) and node.value is not None:
+                if is_client_factory_call(node.value):
+                    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                    clients.update(ast.unparse(t) for t in targets)
+            elif isinstance(node, ast.With | ast.AsyncWith):
+                for item in node.items:
+                    if item.optional_vars is not None and is_client_factory_call(item.context_expr):
+                        clients.add(ast.unparse(item.optional_vars))
+
+        lines: list[int] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if _is_member_ref(func, modules, members, _HTTP_METHODS):
+                lines.append(node.lineno)
+            elif isinstance(func, ast.Attribute) and func.attr in _HTTP_METHODS:
+                receiver = func.value
+                if is_client_factory_call(receiver) or ast.unparse(receiver) in clients:
+                    lines.append(node.lineno)
+        return lines
+
+    return check
 
 
 RULES: list[dict] = [
@@ -133,6 +249,7 @@ RULES: list[dict] = [
         r"yaml\.load\s*\([^)]*\)\s*$",
         "yaml.load() without SafeLoader",
         remediation="yaml.safe_load()",
+        ast_check=_check_yaml_load,
     ),
     # -- CONTRACT 4: ERROR_HANDLING.md --
     _rule(
@@ -161,6 +278,7 @@ RULES: list[dict] = [
         "FastAPI import in engine/ - chassis owns HTTP",
         remediation="Register handlers in engine/handlers.py",
         include_dirs=[ENGINE_DIR],
+        ast_check=_import_check("fastapi"),
     ),
     _rule(
         "ARCH-002",
@@ -170,6 +288,7 @@ RULES: list[dict] = [
         "Starlette import in engine/ - chassis owns middleware",
         remediation="Remove",
         include_dirs=[ENGINE_DIR],
+        ast_check=_import_check("starlette"),
     ),
     _rule(
         "ARCH-003",
@@ -199,6 +318,7 @@ RULES: list[dict] = [
         "Raw HTTP to another node - use delegate_to_node()",
         remediation="from engine.packet.chassis_contract import delegate_to_node",
         include_dirs=[ENGINE_DIR],
+        ast_check=_http_call_check("httpx", frozenset({"Client", "AsyncClient"})),
     ),
     _rule(
         "DEL-002",
@@ -208,6 +328,7 @@ RULES: list[dict] = [
         "Raw HTTP via requests - use delegate_to_node()",
         remediation="from engine.packet.chassis_contract import delegate_to_node",
         include_dirs=[ENGINE_DIR],
+        ast_check=_http_call_check("requests", frozenset({"Session", "session"})),
     ),
     # -- CONTRACT 19: MEMORY_SUBSTRATE_ACCESS.md --
     _rule(
@@ -364,26 +485,39 @@ def scan_file(file_path: Path, content: str, root: Path) -> list[Violation]:
         rel = file_path
     rel_str = str(rel).replace("\\", "/")
 
+    tree: ast.Module | None = None
+    parsed = False
+
     for rule in RULES:
         if not _path_matches_rule(Path(rel_str), rule):
             continue
-        try:
-            pat = re.compile(rule["pattern"], re.MULTILINE | re.DOTALL)
-        except re.error:
-            continue
-        for i, line in enumerate(content.splitlines(), start=1):
-            if pat.search(line):
-                violations.append(
-                    Violation(
-                        file=rel_str,
-                        line=i,
-                        rule_id=rule["id"],
-                        contract=rule["contract"],
-                        severity=rule["severity"],
-                        message=rule["message"],
-                        remediation=rule["remediation"],
-                    )
-                )
+        ast_check = rule.get("ast_check")
+        if ast_check is not None and not parsed:
+            parsed = True
+            try:
+                tree = ast.parse(content)
+            except (SyntaxError, ValueError):
+                tree = None  # unparsable: AST rules fall back to their line regex
+        if ast_check is not None and tree is not None:
+            hit_lines = sorted(set(ast_check(tree)))
+        else:
+            try:
+                pat = re.compile(rule["pattern"], re.MULTILINE | re.DOTALL)
+            except re.error:
+                continue
+            hit_lines = [i for i, line in enumerate(content.splitlines(), start=1) if pat.search(line)]
+        violations.extend(
+            Violation(
+                file=rel_str,
+                line=i,
+                rule_id=rule["id"],
+                contract=rule["contract"],
+                severity=rule["severity"],
+                message=rule["message"],
+                remediation=rule["remediation"],
+            )
+            for i in hit_lines
+        )
     return violations
 
 
