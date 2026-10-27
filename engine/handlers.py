@@ -508,6 +508,39 @@ def _candidate_id(candidate: Any, id_property: str, fallback: Any) -> str:
     return str(fallback if value is None else value)
 
 
+def _declared_id_predicate(
+    domain_spec: DomainSpec,
+    variable: str,
+    param: str,
+    match_direction: str | None = None,
+) -> str | None:
+    """RU-002 / CEG-COR-002: a label-scoped candidate-id predicate, or None for legacy.
+
+    Scoped to the candidate label(s) of ``match_direction`` when it names a
+    declared direction, else to every declared candidate label, each matched on
+    its own declared id property (``_candidate_id_property``):
+    ``(c:L1 AND c.p1 = $param) OR (c:L2 AND c.p2 = $param)``. Labels and
+    properties pass ``sanitize_label``; the value stays a parameter (C-9).
+    Returns None with ``spec_declared_candidate_id`` off or no declared
+    candidate label, so the caller keeps its ``{entity_id: $param}`` lookup.
+    """
+    from engine.config.settings import settings as _id_settings
+
+    if not _id_settings.spec_declared_candidate_id:
+        return None
+    candidates = domain_spec.matchentities.candidate
+    labels = [c.label for c in candidates if match_direction and c.matchdirection == match_direction]
+    if not labels:
+        labels = [c.label for c in candidates]
+    var = sanitize_label(variable)
+    key = sanitize_label(param)
+    parts: list[str] = []
+    for label in dict.fromkeys(labels):
+        prop = sanitize_label(_candidate_id_property(domain_spec, label))
+        parts.append(f"({var}:{sanitize_label(label)} AND {var}.{prop} = ${key})")
+    return " OR ".join(parts) or None
+
+
 def _annotate_weighted_confidence(
     checker: Any,
     candidates: list[Any],
@@ -916,6 +949,8 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     if entity_type == "outcome" and _feedback_effective(domain_loader.load_domain(tenant)):
         domain_spec = domain_loader.load_domain(tenant)
         _enforce_capability(tenant, "sync", domain_spec)
+        # RU-002: the chosen candidate is found by its declared id property.
+        outcome_candidate_predicate = _declared_id_predicate(domain_spec, "c", "candidate_id")
         synced = 0
         for item in batch:
             if not isinstance(item, dict):
@@ -938,6 +973,11 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 CREATE (c)-[:HAS_OUTCOME]->(o)
             )
             """
+            if outcome_candidate_predicate is not None:
+                cypher = cypher.replace(
+                    "OPTIONAL MATCH (c {entity_id: $candidate_id})",
+                    f"OPTIONAL MATCH (c) WHERE {outcome_candidate_predicate}",
+                )
             try:
                 await graph_driver.execute_query(
                     cypher=cypher,
@@ -1821,6 +1861,18 @@ async def _handle_evaluate(
             tenant=tenant,
         )
 
+    from engine.config.settings import settings as _eval_settings
+
+    # RU-002: read each returned candidate's declared id for the case direction
+    # (`entity_id` only, without loading the spec, while the flag is off).
+    eval_spec = domain_loader.load_domain(domain_id) if _eval_settings.spec_declared_candidate_id else None
+
+    def eval_id_property(direction: str) -> str:
+        if eval_spec is None:
+            return _FALLBACK_CANDIDATE_ID_PROPERTY
+        labels = [c.label for c in eval_spec.matchentities.candidate if c.matchdirection == direction]
+        return _candidate_id_property(eval_spec, labels[0]) if labels else _FALLBACK_CANDIDATE_ID_PROPERTY
+
     per_case_results: list[dict[str, Any]] = []
     total_precision = 0.0
     total_recall = 0.0
@@ -1855,7 +1907,7 @@ async def _handle_evaluate(
             if isinstance(c, dict):
                 cand_node = c.get("candidate", {})
                 if isinstance(cand_node, dict):
-                    returned_ids.append(str(cand_node.get("entity_id", "")))
+                    returned_ids.append(_candidate_id(cand_node, eval_id_property(match_direction), ""))
                 else:
                     returned_ids.append("")
             else:
@@ -2028,6 +2080,14 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
     RETURN o.outcome_id AS outcome_id
     """
     )
+    # RU-002: link the outcome to the candidate by its declared id property,
+    # scoped to the fingerprint's direction when it names a declared one.
+    outcome_candidate_predicate = _declared_id_predicate(domain_spec, "c", "candidate_id", match_direction)
+    if outcome_candidate_predicate is not None:
+        cypher = cypher.replace(
+            "OPTIONAL MATCH (c {entity_id: $candidate_id})",
+            f"OPTIONAL MATCH (c) WHERE {outcome_candidate_predicate}",
+        )
     try:
         await graph_driver.execute_query(
             cypher=cypher,
@@ -2227,10 +2287,12 @@ async def handle_resolve(tenant: str, payload: dict[str, Any]) -> dict[str, Any]
 
     label = sanitize_label(entity_type)
     resolution_id = f"res_{uuid.uuid4().hex[:12]}"
+    # RU-002: the declared id property for this label (entity_id with the flag off).
+    id_prop = sanitize_label(_candidate_id_property(domain_spec, entity_type))
 
     cypher = f"""
-    MATCH (source:{label} {{entity_id: $source_id}})
-    MATCH (target:{label} {{entity_id: $target_id}})
+    MATCH (source:{label} {{{id_prop}: $source_id}})
+    MATCH (target:{label} {{{id_prop}: $target_id}})
     CREATE (source)-[r:RESOLVED_FROM {{
         resolution_id: $resolution_id, confidence: $confidence,
         signal: $signal, created_at: datetime(), tenant: $tenant
@@ -2438,9 +2500,11 @@ async def handle_enrich(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {"enriched_count": 0, "entity_type": entity_type, "tenant": tenant}
 
     if entity_ids:
+        # RU-002: filter on the label's declared id property (entity_id with the flag off).
+        id_prop = sanitize_label(_candidate_id_property(domain_spec, entity_type))
         cypher = f"""
         MATCH (n:{label})
-        WHERE n.entity_id IN $entity_ids
+        WHERE n.{id_prop} IN $entity_ids
         SET {", ".join(set_clauses)}
         RETURN count(n) AS enriched_count
         """
