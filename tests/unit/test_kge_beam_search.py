@@ -284,3 +284,66 @@ class TestSuccessorGeneration:
         """_build_transformation raises on unknown type."""
         with pytest.raises(ValueError, match="Unknown transformation type"):
             engine._build_transformation("warp", {"factor": 1.0})
+
+
+# ============================================================================
+# CORRECTNESS REMEDIATION (lane G)
+# ============================================================================
+
+
+def _model_with_embeddings() -> CompoundE3D:
+    import numpy as np
+
+    model = CompoundE3D(CompoundE3DConfig(embedding_dim=6))
+    rng = np.random.default_rng(3)
+    model._entity_embeddings = {f"e{i}": rng.normal(size=6) for i in range(10)}
+    return model
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-108")
+class TestComposedCascades:
+    """RU-121: a depth-d successor is its parent's cascade plus one new op, scored composed."""
+
+    def test_depth_two_chain_includes_parent_op(self) -> None:
+        engine = BeamSearchEngine(_model_with_embeddings(), BeamSearchConfig())
+        root = BeamCandidate("root", "identity", {}, score=1.0, depth=0)
+        depth1 = engine._generate_successors(root)
+        assert all(len(c.chain) == 1 for c in depth1)
+        parent = next(c for c in depth1 if c.transformation_type == "scale" and c.params == {"factor": 2.0})
+        depth2 = engine._generate_successors(parent)
+        assert all(len(c.chain) == 2 for c in depth2)
+        assert all(c.chain[0] == ("scale", {"factor": 2.0}) for c in depth2)
+        serialised = depth2[0].to_dict()["chain"]
+        assert serialised[0] == {"type": "scale", "params": {"factor": 2.0}}
+        assert serialised[1] == {"type": depth2[0].transformation_type, "params": depth2[0].params}
+
+    def test_depth_two_score_reflects_composition(self) -> None:
+        engine = BeamSearchEngine(_model_with_embeddings(), BeamSearchConfig())
+        root = BeamCandidate("root", "identity", {}, score=1.0, depth=0)
+        depth1 = engine._generate_successors(root)
+        parent = next(c for c in depth1 if c.transformation_type == "scale" and c.params == {"factor": 2.0})
+        depth2 = engine._generate_successors(parent)
+
+        def _score(cands: list[BeamCandidate], tx_type: str, params: dict[str, float]) -> float:
+            return next(c.score for c in cands if c.transformation_type == tx_type and c.params == params)
+
+        new_op = ("translation", {"offset_x": 0.1, "offset_y": 0.0, "offset_z": 0.0})
+        assert _score(depth2, *new_op) != pytest.approx(_score(depth1, *new_op))
+
+    def test_search_depth_levels_differ(self) -> None:
+        engine = BeamSearchEngine(
+            _model_with_embeddings(),
+            BeamSearchConfig(beam_width=3, max_depth=3, prune_strategy=PruneStrategy.SCORE_THRESHOLD),
+        )
+        with patch("engine.kge.beam_search.settings") as mock_settings:
+            mock_settings.kge_enabled = True
+            result = engine.search()
+        levels = result["depth_levels"]
+
+        def _triples(level: list[dict[str, object]]) -> list[tuple[object, object, object]]:
+            return [(c["type"], c["params"], c["score"]) for c in level]
+
+        assert _triples(levels[1]) != _triples(levels[2])
+        assert all(len(c["chain"]) == 2 for c in levels[2])
+        assert all(len(c["chain"]) == 3 for c in levels[3])
