@@ -1156,6 +1156,11 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         data_subject_id = _require_key(payload, "data_subject_id", "admin", tenant)
         domain_id = payload.get("domain_id", tenant)
         spec = domain_loader.load_domain(domain_id)
+        # RU-066: the subject property is the domain's declared field, sanitized
+        # before any query (an invalid name raises ValueError here).
+        from engine.utils.security import sanitize_label as _gdpr_label
+
+        subject_property = _gdpr_label(spec.compliance.gdpr_subject_id_field if spec.compliance else "data_subject_id")
 
         pii_handler = PIIHandler()
 
@@ -1163,7 +1168,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             # Dry-run: compute what WOULD be erased without executing
             try:
                 count_result = await graph_driver.execute_query(
-                    "MATCH (n {data_subject_id: $dsid}) RETURN count(n) AS cnt",
+                    f"MATCH (n {{{subject_property}: $dsid}}) RETURN count(n) AS cnt",
                     parameters={"dsid": data_subject_id},
                     database=domain_id,
                 )
@@ -1177,14 +1182,32 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 "would_affect": {"graph_nodes": node_count},
             }
 
-        # Real erasure
+        # Real erasure. RU-066 / DEC-26: packets live in the PacketStore database,
+        # so its pool is used when PacketStore is enabled; otherwise packets are
+        # reported as not erasable. The erasure is audited in the domain's
+        # ComplianceEngine trail before anything is deleted.
         try:
+            packet_pool = None
+            if _gdpr_s.packet_store_enabled:
+                from engine.packet.packet_store import get_packet_store
+
+                packet_pool = await get_packet_store().get_pool()
+            erasure_audit = _get_compliance_engine(spec)
+            erasure_audit.log_pii_erasure(
+                tenant=tenant,
+                data_subject_id=data_subject_id,
+                detail=f"Erasure requested for subject in domain {domain_id} (property {subject_property})",
+            )
+            await erasure_audit.flush_audit_for_request()
             result = await pii_handler.erase_subject(
                 data_subject_id=data_subject_id,
                 graph_driver=graph_driver,
+                db_pool=packet_pool,
                 # DB-STRICT-01: the same domain database the dry-run count above
                 # queries; the driver no longer falls back to 'neo4j'.
                 database=domain_id,
+                subject_property=subject_property,
+                performed_by=tenant,
             )
         except Exception as exc:
             raise ExecutionError(
@@ -1193,17 +1216,6 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 tenant=tenant,
                 detail=str(exc),
             ) from exc
-
-        # Flush audit trail for erasure event
-        from engine.compliance.audit import AuditLogger
-
-        audit = AuditLogger()
-        audit.log_pii_erasure(
-            actor=tenant,
-            tenant=tenant,
-            data_subject_id=data_subject_id,
-            detail=f"Erased subject {data_subject_id} in domain {domain_id}",
-        )
 
         return {
             "status": "erased",

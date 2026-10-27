@@ -52,6 +52,83 @@ def _make_basic_spec() -> MagicMock:
     return spec
 
 
+class _ErasureRecorder:
+    """Fake driver + pool for erase_subject that record what reaches each store (RU-066)."""
+
+    def __init__(self) -> None:
+        self.cypher: list[str] = []
+        self.sql: list[tuple] = []
+        self.erasure_entries_before_delete = -1
+        self.erasure_entries_before_sql = -1
+
+    def _erasure_entries(self) -> int:
+        from engine.compliance.audit import AuditAction, AuditSeverity
+        from engine.state import get_state
+
+        engine = get_state().compliance_engines.get("test_domain")
+        if engine is None:
+            return 0
+        return sum(
+            1
+            for e in engine._audit._buffer
+            if e.action == AuditAction.PII_ERASURE and e.severity == AuditSeverity.CRITICAL
+        )
+
+    async def run(self, monkeypatch, *, subject_field, subject_id, dry_run=False, packet_store=True):
+        from engine.config.schema import ComplianceSpec
+        from engine.config.settings import settings
+        from engine.state import get_state
+
+        recorder = self
+
+        async def execute_query(cypher, parameters=None, database=None):
+            recorder.cypher.append(cypher)
+            if "DETACH DELETE" in cypher:
+                recorder.erasure_entries_before_delete = recorder._erasure_entries()
+                return [{"deleted": 3}]
+            return [{"cnt": 2}]
+
+        class _Conn:
+            async def fetchval(self, sql, *args):
+                recorder.sql.append((sql, args))
+                recorder.erasure_entries_before_sql = recorder._erasure_entries()
+                return 7
+
+        class _Pool:
+            def acquire(self):
+                class _Ctx:
+                    async def __aenter__(self):
+                        return _Conn()
+
+                    async def __aexit__(self, *exc):
+                        return None
+
+                return _Ctx()
+
+        class _Store:
+            async def get_pool(self):
+                return _Pool()
+
+        monkeypatch.setattr(settings, "gdpr_erasure_enabled", True)
+        monkeypatch.setattr(settings, "gdpr_dry_run", dry_run)
+        monkeypatch.setattr(settings, "packet_store_enabled", packet_store)
+        monkeypatch.setattr("engine.packet.packet_store.get_packet_store", _Store)
+        driver = _make_graph_driver()
+        driver.execute_query = AsyncMock(side_effect=execute_query)
+        spec = _make_basic_spec()
+        spec.compliance = ComplianceSpec(gdpr_subject_id_field=subject_field)
+        init_dependencies(driver, _make_domain_loader(spec))
+        get_state().compliance_engines.pop("test_domain", None)
+        try:
+            return await handle_admin(
+                "test_tenant",
+                {"subaction": "erase_subject", "data_subject_id": subject_id, "domain_id": "test_domain"},
+            )
+        finally:
+            self.final_entries = self._erasure_entries()
+            get_state().compliance_engines.pop("test_domain", None)
+
+
 def _make_kge_spec() -> MagicMock:
     spec = _make_basic_spec()
     kge = MagicMock()
@@ -320,41 +397,65 @@ class TestEraseSubject:
         assert result["would_affect"]["graph_nodes"] == 5
 
     @pytest.mark.asyncio
-    async def test_erase_subject_real_execution(self):
-        """When GDPR_DRY_RUN=False, performs actual erasure."""
-        driver = _make_graph_driver()
-        loader = _make_domain_loader()
-        init_dependencies(driver, loader)
+    async def test_erase_subject_real_execution(self, monkeypatch):
+        """When GDPR_DRY_RUN=False, performs actual erasure through the real PIIHandler.
 
-        mock_erasure_result = {
-            "data_subject_id": "user-123",
-            "packets_deleted": 0,
-            "graph_nodes_deleted": 3,
-            "embeddings_deleted": 0,
-        }
-
-        with (
-            patch("engine.config.settings.settings") as mock_settings,
-            patch("engine.compliance.pii.PIIHandler") as mock_pii_cls,
-            patch("engine.compliance.audit.AuditLogger") as mock_audit_cls,
-        ):
-            mock_settings.gdpr_erasure_enabled = True
-            mock_settings.gdpr_dry_run = False
-            mock_pii = MagicMock()
-            mock_pii.erase_subject = AsyncMock(return_value=mock_erasure_result)
-            mock_pii_cls.return_value = mock_pii
-            mock_audit = MagicMock()
-            mock_audit_cls.return_value = mock_audit
-
-            result = await handle_admin(
-                "test_tenant",
-                {"subaction": "erase_subject", "data_subject_id": "user-123"},
-            )
+        RU-066: this test used to replace PIIHandler and AuditLogger with mocks, which
+        hid the hardcoded subject property, the 1-argument SQL and the discarded
+        AuditLogger. It now drives the real handler with a fake driver and pool.
+        """
+        recorder = _ErasureRecorder()
+        result = await recorder.run(monkeypatch, subject_field="data_subject_id", subject_id="user-123")
 
         assert result["status"] == "erased"
         assert result["dry_run"] is False
         assert result["summary"]["graph_nodes_deleted"] == 3
-        mock_audit.log_pii_erasure.assert_called_once()
+        assert recorder.cypher == ["MATCH (n {data_subject_id: $dsid}) DETACH DELETE n RETURN count(n) AS deleted"]
+        assert recorder.erasure_entries_before_delete == 1
+
+    @pytest.mark.asyncio
+    async def test_erase_subject_uses_configured_subject_field_and_two_arg_sql(self, monkeypatch):
+        recorder = _ErasureRecorder()
+        result = await recorder.run(monkeypatch, subject_field="customer_id", subject_id="cust-42")
+
+        assert recorder.cypher == ["MATCH (n {customer_id: $dsid}) DETACH DELETE n RETURN count(n) AS deleted"]
+        assert recorder.sql == [("SELECT gdpr_erase_subject($1, $2)", ("cust-42", "test_tenant"))]
+        assert result["summary"]["packets_deleted"] == 7
+        assert isinstance(result["summary"]["packets_deleted"], int)
+
+    @pytest.mark.asyncio
+    async def test_erase_subject_audit_entry_precedes_any_delete(self, monkeypatch):
+        recorder = _ErasureRecorder()
+        await recorder.run(monkeypatch, subject_field="customer_id", subject_id="cust-42")
+        # PII_ERASURE CRITICAL entry was in the domain ComplianceEngine buffer when
+        # both the pool and the driver recorded their delete.
+        assert recorder.erasure_entries_before_sql == 1
+        assert recorder.erasure_entries_before_delete == 1
+
+    @pytest.mark.asyncio
+    async def test_erase_subject_packet_store_disabled_reports_not_erasable(self, monkeypatch):
+        recorder = _ErasureRecorder()
+        result = await recorder.run(monkeypatch, subject_field="customer_id", subject_id="c", packet_store=False)
+        assert recorder.sql == []
+        assert result["summary"]["packets_deleted"] is None
+        assert result["summary"]["packets_erasable"] is False
+
+    @pytest.mark.asyncio
+    async def test_erase_subject_dry_run_uses_configured_subject_field(self, monkeypatch):
+        recorder = _ErasureRecorder()
+        result = await recorder.run(monkeypatch, subject_field="customer_id", subject_id="cust-42", dry_run=True)
+        assert result["status"] == "dry_run"
+        assert recorder.cypher == ["MATCH (n {customer_id: $dsid}) RETURN count(n) AS cnt"]
+        assert recorder.sql == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("dry_run", [True, False])
+    async def test_erase_subject_invalid_subject_field_raises_before_any_query(self, monkeypatch, dry_run):
+        recorder = _ErasureRecorder()
+        with pytest.raises(ValueError, match="Invalid label or type"):
+            await recorder.run(monkeypatch, subject_field="a.b", subject_id="x", dry_run=dry_run)
+        assert recorder.cypher == []
+        assert recorder.sql == []
 
     @pytest.mark.asyncio
     async def test_erase_subject_missing_id(self):
