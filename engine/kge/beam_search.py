@@ -41,6 +41,7 @@ from enum import StrEnum
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 from engine.config.schema import KGEBeamSearchSpec
 from engine.config.settings import settings
@@ -102,6 +103,17 @@ class BeamCandidate:
     score: float
     depth: int
     parent_id: str | None = None
+    # Ordered op cascade this candidate represents: its parent's chain plus its
+    # own op (CEG-COR-108). Empty for the identity root.
+    chain: list[tuple[str, dict[str, float]]] = field(default_factory=list)
+
+    def ops(self) -> list[tuple[str, dict[str, float]]]:
+        """The cascade as (type, params) ops; a chain-less candidate is its own op."""
+        if self.chain:
+            return list(self.chain)
+        if self.transformation_type == "identity":
+            return []
+        return [(self.transformation_type, dict(self.params))]
 
     def __lt__(self, other: BeamCandidate) -> bool:
         """Enable min-heap ordering (negated for max-heap)."""
@@ -119,7 +131,27 @@ class BeamCandidate:
             "score": float(self.score),  # nosemgrep: float-requires-try-except
             "depth": self.depth,
             "parent_id": self.parent_id,
+            "chain": [{"type": t, "params": p} for t, p in self.ops()],
         }
+
+
+class _CascadeTransformation(Transformation3D):
+    """Ordered composition of transformations: ops[0] is applied first."""
+
+    def __init__(self, ops: list[Transformation3D]) -> None:
+        self.ops = list(ops)
+
+    def apply(self, embedding: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        out = embedding
+        for op in self.ops:
+            out = op.apply(out)
+        return out
+
+    def inverse(self) -> Transformation3D:
+        return _CascadeTransformation([op.inverse() for op in reversed(self.ops)])
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"type": "cascade", "ops": [op.to_dict() for op in self.ops]}
 
 
 @dataclass
@@ -296,10 +328,16 @@ class BeamSearchEngine:
             ("hyperplane", self._make_hyperplane_variants),
         ]
 
+        # A successor is the parent's cascade plus one new op, and is scored as
+        # that composed cascade (CEG-COR-108); scoring the new op alone made
+        # every depth level repeat depth 1.
+        parent_ops = candidate.ops()
+        parent_txs = [self._build_transformation(t, p) for t, p in parent_ops]
+
         for tx_type, factory in transform_factories:
             for params in factory():
                 tx = self._build_transformation(tx_type, params)
-                score = self._score_candidate(tx)
+                score = self._score_candidate(_CascadeTransformation([*parent_txs, tx]))
                 successor = BeamCandidate(
                     transformation_id=self._gen_id(),
                     transformation_type=tx_type,
@@ -307,6 +345,7 @@ class BeamSearchEngine:
                     score=score,
                     depth=candidate.depth + 1,
                     parent_id=candidate.transformation_id,
+                    chain=[*parent_ops, (tx_type, dict(params))],
                 )
                 successors.append(successor)
 
