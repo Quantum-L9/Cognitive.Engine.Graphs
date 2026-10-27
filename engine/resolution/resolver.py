@@ -46,7 +46,7 @@ def _validate_threshold(threshold: Any) -> float | None:
     if not 0.0 <= threshold <= 1.0:
         msg = f"threshold must be a number in [0, 1], got {threshold!r}"
         raise ValueError(msg)
-    return float(threshold)
+    return float(threshold)  # nosemgrep: float-requires-try-except — validated finite number above
 
 
 class EntityResolver:

@@ -99,8 +99,9 @@ class ScorePropagator:
 
         if settings.propagation_single_application:
             sw_spec = self._spec.feedbackloop.signal_weights
-            parameters["min_weight"] = float(sw_spec.min_weight)
-            parameters["max_weight"] = float(sw_spec.max_weight)
+            # Pydantic-validated spec floats.
+            parameters["min_weight"] = float(sw_spec.min_weight)  # nosemgrep: float-requires-try-except
+            parameters["max_weight"] = float(sw_spec.max_weight)  # nosemgrep: float-requires-try-except
             cypher = f"""
         MATCH (o:{outcome_label} {{candidate_id: $candidate_id, tenant: $tenant}})
         WITH count(o) AS outcomes

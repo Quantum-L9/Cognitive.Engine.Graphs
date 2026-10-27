@@ -307,7 +307,7 @@ class DomainPackLoader:
         # C-24 bounded cache, sized by Settings (contract variables
         # DOMAIN_CACHE_MAXSIZE / DOMAIN_CACHE_TTL_SECONDS, CEG-COR-078).
         self._max_size = _domain_cache_max_size()
-        self._ttl_seconds = float(settings.domain_cache_ttl_seconds)
+        self._ttl_seconds: float = settings.domain_cache_ttl_seconds
 
     def load_domain(self, domain_id: str) -> DomainSpec:
         """Load a domain only when the generic admission policy admits it.

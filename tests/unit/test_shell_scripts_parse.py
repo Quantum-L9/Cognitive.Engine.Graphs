@@ -120,16 +120,16 @@ def test_setup_repo_vars_skips_comments_and_sets_values(tmp_path: Path) -> None:
     assert BASH is not None
     shutil.copy(REPO / ".github" / "scripts" / "setup-repo-vars.sh", tmp_path / "setup-repo-vars.sh")
     (tmp_path / "vars.env").write_text("# COMMENT_ONLY=nope\n\nFOO_BAR=baz\n", encoding="utf-8")
-    log = tmp_path / "gh.log"
+    call_log = tmp_path / "gh.log"
     stubs = tmp_path / "stubs"
     stubs.mkdir()
-    _stub(stubs, "gh", f'echo "$*" >> "{log}"; case "$1" in repo) echo owner/repo;; esac; exit 0')
+    _stub(stubs, "gh", f'echo "$*" >> "{call_log}"; case "$1" in repo) echo owner/repo;; esac; exit 0')
     env = {**os.environ, "PATH": f"{stubs}{os.pathsep}{os.environ.get('PATH', '')}"}
 
     proc = _run([BASH, "setup-repo-vars.sh", "vars.env"], cwd=tmp_path, env=env)
 
     assert "syntax error" not in proc.stderr
-    calls = log.read_text(encoding="utf-8").splitlines()
+    calls = call_log.read_text(encoding="utf-8").splitlines()
     assert "variable set FOO_BAR --body baz" in calls
     assert not [c for c in calls if "COMMENT_ONLY" in c]
 
