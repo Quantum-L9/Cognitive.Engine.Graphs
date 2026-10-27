@@ -422,10 +422,19 @@ class CompoundE3D:
         if not hasattr(self, "_icp_centroid"):
             msg = "score_against_icp: ICP centroid not built. Call build_icp_centroid(account_ids) first."
             raise RuntimeError(msg)
-        # Temporarily register ICP centroid as a named entity for _distance
+        # Register the ICP centroid as a named entity for this one _distance
+        # call only (CEG-COR-112): leaving it in the table put it in
+        # predict_tail's candidate pool. Any prior value under the key returns.
         icp_key = "__ICP_CENTROID__"
+        prior = self._entity_embeddings.get(icp_key)
         self._entity_embeddings[icp_key] = self._icp_centroid
-        raw_dist = self._distance(candidate_id, relation, icp_key)
+        try:
+            raw_dist = self._distance(candidate_id, relation, icp_key)
+        finally:
+            if prior is None:
+                del self._entity_embeddings[icp_key]
+            else:
+                self._entity_embeddings[icp_key] = prior
         # Apply Platt calibration
         logit = -(self._platt_alpha * raw_dist - self._platt_beta)
         prob = 1.0 / (1.0 + np.exp(-logit))
