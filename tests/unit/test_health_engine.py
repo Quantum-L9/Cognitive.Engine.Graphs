@@ -179,6 +179,64 @@ class TestReadinessScorer:
         # Only g2 counts → 50% gate completeness → exactly at threshold
         assert result.gate_completeness == 0.5
 
+    # -- RU-108 / CEG-COR-044: an absent confidence is "no signal", not "unreliable" --
+
+    def test_absent_confidence_counts_populated_gate_fields(self):
+        """confidence=None on populated fields → counted; readiness is not 0.0/F."""
+        fields = [
+            _make_field_health("g1", populated=True, confidence=None, gate_critical=True),
+            _make_field_health("g2", populated=True, confidence=None, gate_critical=True),
+            _make_field_health("s1", populated=True, confidence=None, scoring_weight=0.5),
+        ]
+        result = compute_readiness_score_v2(fields, _make_domain_spec())
+
+        assert result.gate_completeness == 1.0
+        assert result.scoring_dimension_coverage == 1.0
+        assert result.blocking_reason is None
+        assert result.blocking_fields == []
+        assert result.overall_score > 0.0
+        assert result.grade != "F"
+
+    def test_explicit_low_confidence_still_discounts_with_absent_elsewhere(self):
+        """An explicit 0.5 lowers gate_completeness even when other fields carry no confidence."""
+        fields = [
+            _make_field_health("g1", populated=True, confidence=0.5, gate_critical=True),
+            _make_field_health("g2", populated=True, confidence=None, gate_critical=True),
+        ]
+        result = compute_readiness_score_v2(fields, _make_domain_spec())
+
+        assert result.gate_completeness == 0.5
+        assert result.blocking_fields == ["g1"]
+
+    def test_blocked_result_lists_every_uncounted_gate_field(self):
+        """Whenever blocking_reason is set, blocking_fields names the uncounted gate fields."""
+        fields = [
+            _make_field_health("g1", populated=True, confidence=0.5, gate_critical=True),
+            _make_field_health("g2", populated=True, confidence=0.3, gate_critical=True),
+            _make_field_health("g3", populated=False, confidence=None, gate_critical=True),
+        ]
+        result = compute_readiness_score_v2(fields, _make_domain_spec())
+
+        assert result.blocking_reason == "gate_critical_fields_missing"
+        assert sorted(result.blocking_fields) == ["g1", "g2", "g3"]
+
+    def test_absent_confidence_flag_off_restores_legacy(self, monkeypatch):
+        """health_absent_confidence_counts_enabled=False → None coerces to 0 (legacy outputs)."""
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "health_absent_confidence_counts_enabled", False)
+        fields = [
+            _make_field_health("g1", populated=True, confidence=None, gate_critical=True),
+            _make_field_health("g2", populated=True, confidence=None, gate_critical=True),
+        ]
+        result = compute_readiness_score_v2(fields, _make_domain_spec())
+
+        assert result.overall_score == 0.0
+        assert result.grade == "F"
+        assert result.gate_completeness == 0.0
+        assert result.blocking_reason == "gate_critical_fields_missing"
+        assert result.blocking_fields == []
+
     def test_get_grade_boundaries(self):
         assert get_grade(0.95) == "A"
         assert get_grade(0.85) == "B"

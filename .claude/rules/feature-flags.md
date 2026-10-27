@@ -52,6 +52,7 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | graph_inference_feedback_enabled | False | Emit `graph-inference-result` to EIE through Gate (EIE-008 / CEG-006) |
 | auto_create_domain_database | False | Provision the tenant domain database on first use (CEG-008; Enterprise-only CREATE DATABASE) |
 | health_api_enabled | False | Expose engine/health/api.py via admin health_* subactions (CEG-006) |
+| health_absent_confidence_counts_enabled | True | Readiness counts a populated field unless an explicit confidence < 0.70 discounts it; batch/report forward `field_confidences`; blocking_fields = uncounted gate fields (RU-108 / CEG-COR-044); off restores None→0 coercion |
 
 ## Domain Pack Admission (generic; the engine names no domain)
 | Flag | Default | Purpose |

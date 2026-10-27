@@ -42,13 +42,19 @@ def compute_readiness_score_v2(
       10% — Inference Unlock Potential
        5% — Temporal Freshness (1 - staleness_penalty)
     """
+    from engine.config.settings import settings
+
+    absent_counts = settings.health_absent_confidence_counts_enabled
+
     # GATE 1: Gate-Critical Completeness (BLOCKING) — 60%
     gate_fields = [f for f in field_health if f.is_gate_critical]
     if not gate_fields:
         gate_score = 1.0
     else:
-        populated_gates = sum(1 for f in gate_fields if f.is_populated and (f.confidence or 0) >= _CONFIDENCE_THRESHOLD)
+        populated_gates = sum(1 for f in gate_fields if _is_counted(f, absent_counts=absent_counts))
         gate_score = populated_gates / len(gate_fields)
+
+    blocking_fields = _blocking_fields(gate_fields, absent_counts=absent_counts)
 
     if gate_score < _GATE_BLOCK_THRESHOLD:
         return ReadinessScore(
@@ -58,14 +64,13 @@ def compute_readiness_score_v2(
             scoring_dimension_coverage=0.0,
             blocking_reason="gate_critical_fields_missing",
             recommended_action="enrich_gates_first",
-            blocking_fields=[f.field_name for f in gate_fields if not f.is_populated],
+            blocking_fields=blocking_fields,
         )
 
     # COMPONENT 2: Weighted Scoring Dimension Coverage — 25%
     scoring_fields = [f for f in field_health if f.scoring_weight > 0]
     weighted_coverage = sum(
-        f.scoring_weight * (1.0 if f.is_populated and (f.confidence or 0) >= _CONFIDENCE_THRESHOLD else 0.0)
-        for f in scoring_fields
+        f.scoring_weight * (1.0 if _is_counted(f, absent_counts=absent_counts) else 0.0) for f in scoring_fields
     )
     max_possible_weight = sum(f.scoring_weight for f in scoring_fields)
     scoring_coverage = weighted_coverage / max_possible_weight if max_possible_weight > 0 else 0.5
@@ -88,8 +93,35 @@ def compute_readiness_score_v2(
         scoring_dimension_coverage=scoring_coverage,
         inference_unlock_potential=inference_unlock_score,
         staleness_penalty=staleness_penalty,
-        blocking_fields=[f.field_name for f in gate_fields if not f.is_populated],
+        blocking_fields=blocking_fields,
     )
+
+
+def _is_counted(f: FieldHealth, *, absent_counts: bool) -> bool:
+    """Whether a field counts toward gate and scoring coverage.
+
+    With ``health_absent_confidence_counts_enabled`` (CEG-COR-044) an absent
+    confidence is "no signal": a populated field counts unless an explicit
+    confidence below the threshold discounts it. Off restores the legacy
+    coercion of ``None`` to ``0``, under which no populated field without a
+    confidence ever counts.
+    """
+    if not f.is_populated:
+        return False
+    if f.confidence is None:
+        return absent_counts
+    return f.confidence >= _CONFIDENCE_THRESHOLD
+
+
+def _blocking_fields(gate_fields: list[FieldHealth], *, absent_counts: bool) -> list[str]:
+    """Gate fields that do not count — the same predicate the gate score uses.
+
+    Off (legacy), only unpopulated gate fields were listed, so a blocked result
+    whose gate fields were populated but uncounted named none of them.
+    """
+    if not absent_counts:
+        return [f.field_name for f in gate_fields if not f.is_populated]
+    return [f.field_name for f in gate_fields if not _is_counted(f, absent_counts=True)]
 
 
 def compute_inference_potential(

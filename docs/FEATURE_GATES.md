@@ -80,6 +80,7 @@ independently of the code default.
 | Spec-declared Candidate Id | `SPEC_DECLARED_CANDIDATE_ID` (`spec_declared_candidate_id`) | `True` | unset | active; `handle_match` identifies candidates by the domain's declared id property, not `entity_id` — see §20 |
 | Traversal Gate EXISTS Subquery | `TRAVERSAL_GATE_EXISTS_SUBQUERY` (`traversal_gate_exists_subquery`) | `True` | unset | active; traversal gates compile to an `EXISTS { … }` subquery Neo4j 5 accepts — see §20 |
 | Childsync FOREACH Projection | `CHILDSYNC_FOREACH_PROJECTION` (`childsync_foreach_projection`) | `True` | unset | active; childsync writes children in `FOREACH` without copying them onto the parent — see §20 |
+| Health Absent Confidence Counts | `HEALTH_ABSENT_CONFIDENCE_COUNTS_ENABLED` (`health_absent_confidence_counts_enabled`) | `True` | unset | active (hardening); an absent field confidence is "no signal", only an explicit confidence < 0.70 discounts a populated field; batch/report forward `field_confidences` (RU-108 / CEG-COR-044) — see §15 |
 
 ---
 
