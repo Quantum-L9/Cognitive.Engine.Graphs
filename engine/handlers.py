@@ -1945,6 +1945,7 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
                 counterfactual_spec=domain_spec.counterfactual,
                 graph_driver=graph_driver,
                 domain_id=domain_spec.domain.id,
+                outcome_label=domain_spec.feedbackloop.outcome_node_label,  # RU-075
             )
             await generator.generate_for_outcome(outcome_id)
         except Exception:

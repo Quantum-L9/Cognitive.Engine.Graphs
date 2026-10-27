@@ -263,3 +263,53 @@ class TestCounterfactualGenerator:
             assert "key_difference" in scenario
             assert scenario["actual_outcome"] == "out_fail_005"
             assert scenario["counterfactual_outcome"] == "success"
+
+
+# ── RU-075 / CEG-COR-122: one scenario per (intervention, key_difference); spec label ──
+
+
+@pytest.mark.unit
+class TestCounterfactualDedupeAndLabel:
+    def _actual(self) -> dict:
+        return {"active_dimensions": ["price"], "dimension_weights": {"price": 0.1}, "match_direction": "d1"}
+
+    def _positives(self) -> list[dict]:
+        return [
+            {"active_dimensions": ["price"], "dimension_weights": {"price": 0.5}, "outcome_id": "p1"},
+            {"active_dimensions": ["price"], "dimension_weights": {"price": 0.6}, "outcome_id": "p2"},
+        ]
+
+    def test_two_positives_with_higher_weight_yield_one_scenario(self) -> None:
+        generator = CounterfactualGenerator(_make_spec(), _mock_driver(), "test_db")
+        scenarios = generator._diff_fingerprints(self._actual(), self._positives(), "out_1")
+        keys = [(s["intervention_type"], s["key_difference"]) for s in scenarios]
+        assert keys == [("change_weight", "price_weight_increase")]
+
+    def test_flag_off_restores_duplicates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "counterfactual_dedupe_and_spec_label", False)
+        generator = CounterfactualGenerator(_make_spec(), _mock_driver(), "test_db")
+        scenarios = generator._diff_fingerprints(self._actual(), self._positives(), "out_1")
+        assert len(scenarios) == 2
+
+    @pytest.mark.asyncio
+    async def test_queries_use_the_spec_outcome_label(self) -> None:
+        driver = _mock_driver()
+        driver.execute_query.side_effect = [
+            [{"active_dimensions": ["price"], "dimension_weights": {}, "match_direction": "d1"}],
+            [],
+        ]
+        generator = CounterfactualGenerator(_make_spec(), driver, "test_db", outcome_label="Outcome")
+        await generator.generate_for_outcome("out_1")
+        cyphers = [call.kwargs["cypher"] for call in driver.execute_query.call_args_list]
+        assert all("(o:Outcome" in c for c in cyphers)
+        assert not any("TransactionOutcome" in c for c in cyphers)
+
+    def test_default_label_is_transaction_outcome(self) -> None:
+        generator = CounterfactualGenerator(_make_spec(), _mock_driver(), "test_db")
+        assert generator._outcome_label == "TransactionOutcome"
+
+    def test_unsafe_label_is_refused(self) -> None:
+        with pytest.raises(ValueError):
+            CounterfactualGenerator(_make_spec(), _mock_driver(), "test_db", outcome_label="X) DETACH DELETE (n")

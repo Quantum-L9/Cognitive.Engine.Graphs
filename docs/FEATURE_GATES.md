@@ -90,6 +90,7 @@ independently of the code default.
 | Causal Validator Batch Edge Type | `CAUSAL_VALIDATOR_BATCH_EDGE_TYPE` (`causal_validator_batch_edge_type`) | `True` | unset | active; declared per-edge temporal validation applies to sync batches — see lane D |
 | safe_eval Rejects Keywords | `SAFE_EVAL_REJECT_KEYWORDS` (`safe_eval_reject_keywords`) | `True` | unset | active; keyword arguments in derived-parameter / unit expressions raise instead of being dropped — see lane D |
 | Causal Serializer Variable Depth | `CAUSAL_SERIALIZER_VARIABLE_DEPTH` (`causal_serializer_variable_depth`) | `True` | unset | active; causal match explanations follow chains up to the requested depth — see lane D |
+| Counterfactual Dedupe and Spec Label | `COUNTERFACTUAL_DEDUPE_AND_SPEC_LABEL` (`counterfactual_dedupe_and_spec_label`) | `True` | unset | active; no duplicate counterfactual scenarios, fingerprints read from the domain's outcome label — see lane D |
 
 ---
 
@@ -1085,5 +1086,19 @@ integer clamped to `[1, causal.chain_depth_limit]` and interpolated as a literal
 does not accept a parameter as a variable-length bound; `$max_depth` carries N and
 `LIMIT $max_nodes` still bounds the result. `handle_match` keeps its depth policy
 (`min(chain_depth_limit, 2)`). Off: the one-hop pattern.
+
+Rollback: set the flag to `false`.
+
+### Counterfactual Dedupe and Spec Label (RU-075 / CEG-COR-122)
+
+**Flag**: `COUNTERFACTUAL_DEDUPE_AND_SPEC_LABEL=True` (default on)
+
+`CounterfactualGenerator._diff_fingerprints` appended
+`(change_weight, <dim>_weight_increase)` once per qualifying positive outcome, so
+duplicates consumed `max_scenarios_per_outcome` slots, and both fingerprint queries
+hardcoded `:TransactionOutcome`. On: a seen-set on `(intervention_type, key_difference)`
+suppresses duplicates, and `handle_outcomes` passes
+`sanitize_label(feedbackloop.outcome_node_label)` (default `TransactionOutcome`) as the
+queried label. Off: duplicates and the literal label.
 
 Rollback: set the flag to `false`.
