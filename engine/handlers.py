@@ -15,6 +15,7 @@ Handlers receive (tenant: str, payload: dict) and return dict.
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 import time
@@ -915,6 +916,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                     c["match_explanation"] = explanation
 
     response = {
+        "status": "success",  # RU-014 / CEG-COR-075 (RETURN_VALUES.md)
         "candidates": candidates_out,
         "query_id": f"q_{uuid.uuid4().hex[:12]}",
         "match_direction": match_direction,
@@ -1111,6 +1113,27 @@ def _bind_admin_domain(
     return domain_id
 
 
+def _admin_response_contract(
+    handler: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]],
+) -> Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]:
+    """RU-014 / CEG-COR-075: stamp the C-23 response envelope on every admin success.
+
+    Every return carries ``status`` (``success`` where the subaction set none;
+    existing values are kept) and ``subaction`` (the request's). One wrapper at
+    dispatch exit instead of edits at each of the subaction return sites.
+    """
+
+    @functools.wraps(handler)
+    async def _stamped(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
+        result = await handler(tenant, payload)
+        result.setdefault("status", "success")
+        result["subaction"] = payload["subaction"]
+        return result
+
+    return _stamped
+
+
+@_admin_response_contract
 async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Admin: introspection, schema init, GDS trigger, capability delegation."""
     graph_driver, domain_loader = _require_deps()
@@ -2567,7 +2590,7 @@ async def handle_enrich(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     enrichments = payload.get("enrichments", [])
 
     if not enrichments:
-        return {"enriched_count": 0, "entity_type": entity_type, "tenant": tenant}
+        return {"status": "success", "enriched_count": 0, "entity_type": entity_type, "tenant": tenant}
 
     label = sanitize_label(entity_type)
 
@@ -2581,7 +2604,7 @@ async def handle_enrich(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             set_clauses.append(f"n.{safe_prop} = {safe_expr}")
 
     if not set_clauses:
-        return {"enriched_count": 0, "entity_type": entity_type, "tenant": tenant}
+        return {"status": "success", "enriched_count": 0, "entity_type": entity_type, "tenant": tenant}
 
     if entity_ids:
         # RU-002: filter on the label's declared id property (entity_id with the flag off).
@@ -2608,7 +2631,7 @@ async def handle_enrich(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     )
 
     count = result[0]["enriched_count"] if result else 0
-    return {"enriched_count": count, "entity_type": entity_type, "tenant": tenant}
+    return {"status": "success", "enriched_count": count, "entity_type": entity_type, "tenant": tenant}
 
 
 # CONTRACT-02: single source of truth for the engine's action surface.

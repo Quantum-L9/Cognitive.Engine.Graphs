@@ -418,6 +418,9 @@ class TestHandleAdmin:
             result = await handle_admin("t1", {"subaction": "list_domains"})
             assert "domains" in result
             assert result["domains"] == ["plasticos", "mortgage"]
+            # RU-014 / CEG-COR-075 (C-23): status and subaction on every admin return.
+            assert result["status"] == "success"
+            assert result["subaction"] == "list_domains"
         finally:
             _reset_singleton()
 
@@ -433,6 +436,8 @@ class TestHandleAdmin:
         try:
             result = await handle_admin("plasticos", {"subaction": "get_domain", "domain_id": "plasticos"})
             assert "domain" in result
+            assert result["status"] == "success"
+            assert result["subaction"] == "get_domain"
         finally:
             _reset_singleton()
 
@@ -453,6 +458,7 @@ class TestHandleAdmin:
             result = await handle_admin("plasticos", {"subaction": "init_schema", "domain_id": "plasticos"})
             assert result["status"] == "schema_initialized"
             assert "constraints_created" in result
+            assert result["subaction"] == "init_schema"  # existing status value kept
         finally:
             _reset_singleton()
 
@@ -538,3 +544,22 @@ class TestRegisterAll:
             "enrich",
         }
         assert registered == expected
+
+
+@pytest.mark.parametrize("subaction", ["list_domains", "feature_status", "capability_audit", "kge_status"])
+@pytest.mark.asyncio
+async def test_admin_returns_carry_status_and_subaction(subaction: str) -> None:
+    """RU-014 / CEG-COR-075 (C-23): one envelope on every admin success return."""
+    _reset_singleton()
+    driver, loader = _mock_deps()
+    state = get_state()
+    state._graph_driver = driver
+    state._domain_loader = loader
+    state._initialized = True
+    try:
+        result = await handle_admin("plasticos", {"subaction": subaction})
+        assert result["subaction"] == subaction
+        assert isinstance(result["status"], str)
+        assert result["status"]
+    finally:
+        _reset_singleton()
