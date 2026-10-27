@@ -132,3 +132,41 @@ def test_setup_repo_vars_skips_comments_and_sets_values(tmp_path: Path) -> None:
     calls = call_log.read_text(encoding="utf-8").splitlines()
     assert "variable set FOO_BAR --body baz" in calls
     assert not [c for c in calls if "COMMENT_ONLY" in c]
+
+
+# ── RU-150 / RG-186: entrypoint banner reports the effective chassis default ─
+
+_UVICORN_EXEC = """exec uvicorn chassis.entrypoint:create_app \\
+    --factory \\
+    --host 0.0.0.0 \\
+    --port ${API_PORT:-8000} \\
+    --log-level ${LOG_LEVEL:-info} \\
+    --access-log \\
+    --timeout-keep-alive 30 \\
+    "$@"
+"""
+
+
+def test_entrypoint_banner_default_matches_chassis_default() -> None:
+    from chassis.entrypoint import DEFAULT_CHASSIS
+
+    text = (REPO / "scripts" / "entrypoint.sh").read_text(encoding="utf-8")
+    match = re.search(r'^echo "Chassis: \$\{L9_CHASSIS:-(?P<default>[a-z]+)\}"$', text, re.MULTILINE)
+    assert match is not None, "banner line not found"
+    assert match.group("default") == DEFAULT_CHASSIS
+    assert "legacy default" not in text
+
+
+def test_entrypoint_uvicorn_invocation_unchanged() -> None:
+    text = (REPO / "scripts" / "entrypoint.sh").read_text(encoding="utf-8")
+    assert text.endswith(_UVICORN_EXEC)
+
+
+@needs_bash
+def test_entrypoint_banner_prints_sdk_when_unset(tmp_path: Path) -> None:
+    assert BASH is not None
+    text = (REPO / "scripts" / "entrypoint.sh").read_text(encoding="utf-8")
+    banner = next(ln for ln in text.splitlines() if ln.startswith('echo "Chassis: '))
+    env = {k: v for k, v in os.environ.items() if k != "L9_CHASSIS"}
+    proc = _run([BASH, "-c", banner], cwd=tmp_path, env=env)
+    assert proc.stdout == "Chassis: sdk\n"
