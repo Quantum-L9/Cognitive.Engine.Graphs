@@ -300,6 +300,11 @@ class Settings(BaseSettings):
     # jobs sharing an algorithm both schedule. Off: algorithm-keyed DAG (the
     # last same-algorithm job declared silently replaces the others).
     gds_dag_job_identity_by_name: bool = True
+    # RU-097 / CEG-COR-037: the temporal-recency overlay aggregates per
+    # (src, dst) (newest interaction wins), re-scores every existing overlay
+    # edge each run, and prunes on score OR age > max_age_days. Off: the
+    # per-row create and score-only prune, under which aged edges never decay.
+    gds_temporal_recency_decay_existing: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
