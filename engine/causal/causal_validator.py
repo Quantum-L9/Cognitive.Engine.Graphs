@@ -67,7 +67,7 @@ class CausalEdgeRuntimeValidator:
         confidence_threshold = self._valid_types[edge_type]
 
         for record in batch:
-            rejection = self._validate_record(record, confidence_threshold)
+            rejection = self._validate_record(record, confidence_threshold, edge_type)
             if rejection is not None:
                 rejected.append({**record, "rejection_reason": rejection})
             else:
@@ -87,13 +87,21 @@ class CausalEdgeRuntimeValidator:
         self,
         record: dict[str, Any],
         confidence_threshold: float,
+        edge_type: str | None = None,
     ) -> str | None:
-        """Validate a single record. Returns rejection reason or None."""
+        """Validate a single record. Returns rejection reason or None.
+
+        RU-069: with ``causal_validator_batch_edge_type`` on, a
+        ``CausalSubgraphSpec``'s per-edge ``temporal_validation`` is looked up
+        by the batch ``edge_type`` (sync records carry no ``edge_type`` key).
+        Off: the record's own ``edge_type`` key, as before.
+        """
+        from engine.config.settings import settings
+
         enforce_temporal = getattr(self._causal_spec, "enforce_temporal_precedence", False)
         if not enforce_temporal:
-            edge_spec = next(
-                (e for e in self._causal_spec.causal_edges if e.edge_type == record.get("edge_type")), None
-            )
+            lookup = edge_type if settings.causal_validator_batch_edge_type and edge_type else record.get("edge_type")
+            edge_spec = next((e for e in self._causal_spec.causal_edges if e.edge_type == lookup), None)
             enforce_temporal = (
                 edge_spec.temporal_validation if edge_spec and hasattr(edge_spec, "temporal_validation") else False
             )

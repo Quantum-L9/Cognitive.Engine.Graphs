@@ -19,6 +19,7 @@ Exports: AuditLogger
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import threading
 import uuid
@@ -30,6 +31,13 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+
+def _soft_sink() -> bool:
+    """RU-065: bounded retention and a non-failing request-path sink."""
+    from engine.config.settings import settings
+
+    return bool(settings.compliance_audit_soft_sink)
 
 
 # ── Enums ──────────────────────────────────────────────────
@@ -133,6 +141,7 @@ class AuditLogger:
         self._siem_endpoint = siem_endpoint
         self._buffer: list[AuditEntry] = []
         self._buffer_size = buffer_size
+        self._dropped = 0  # RU-065: entries discarded to keep the buffer bounded
         self._buffer_lock = asyncio.Lock()
         self._sync_lock = threading.Lock()
         self._log = logging.getLogger("l9.audit")
@@ -249,6 +258,38 @@ class AuditLogger:
             )
         )
 
+    def log_violation(
+        self,
+        actor: str,
+        tenant: str,
+        resource: str,
+        blocked_field: str,
+        detail: str,
+        *,
+        resource_type: str | None = None,
+        compliance_tags: list[str] | None = None,
+        trace_id: str | None = None,
+    ) -> AuditEntry:
+        """Log a denied prohibited-factor attempt (RU-063). Always CRITICAL, outcome ``denied``.
+
+        ``blocked_field`` is the field NAME; callers never pass a value.
+        """
+        return self._emit(
+            AuditEntry(
+                action=AuditAction.ACCESS,
+                severity=AuditSeverity.CRITICAL,
+                actor=actor,
+                tenant=tenant,
+                resource=resource,
+                resource_type=resource_type,
+                detail=detail,
+                trace_id=trace_id,
+                compliance_tags=compliance_tags or [],
+                outcome="denied",
+                metadata={"blocked_field": blocked_field},
+            )
+        )
+
     def log_delegation(
         self,
         actor: str,
@@ -353,7 +394,9 @@ class AuditLogger:
                 e.pii_fields_accessed,
                 e.data_subject_id,
                 e.outcome,
-                e.metadata,
+                # RU-065: asyncpg binds JSONB from text; a dict fails every flush
+                # (PacketStore already json.dumps its JSONB, packet_store.py).
+                json.dumps(e.metadata) if _soft_sink() else e.metadata,
             )
             for e in entries
         ]
@@ -365,6 +408,8 @@ class AuditLogger:
             logger.exception("Failed to persist audit entries")
             async with self._buffer_lock:
                 self._buffer = entries + self._buffer
+                if _soft_sink():
+                    self._enforce_bound_locked()
             raise
         else:
             persisted = len(entries)
@@ -374,6 +419,34 @@ class AuditLogger:
     @property
     def buffer_count(self) -> int:
         return len(self._buffer)
+
+    @property
+    def dropped_count(self) -> int:
+        """Entries discarded (oldest first) to keep the buffer within ``buffer_size``."""
+        return self._dropped
+
+    def _enforce_bound_locked(self) -> None:
+        """Trim the buffer to ``buffer_size`` keeping the newest entries (caller holds a lock).
+
+        Every dropped entry was already emitted to the ``l9.audit`` logger by
+        ``_emit`` / ``emit_async``; only the copy awaiting persistence is
+        discarded, and the running count is logged.
+        """
+        overflow = len(self._buffer) - self._buffer_size
+        if overflow <= 0:
+            return
+        del self._buffer[:overflow]
+        previous = self._dropped
+        self._dropped += overflow
+        # One WARNING per buffer_size drops keeps sustained overflow observable
+        # without a log line per request.
+        if previous == 0 or previous // self._buffer_size != self._dropped // self._buffer_size:
+            logger.warning(
+                "Audit buffer bound %d reached: %d entries dropped from the persistence buffer so far "
+                "(each was emitted to the l9.audit log)",
+                self._buffer_size,
+                self._dropped,
+            )
 
     # ── Internal ───────────────────────────────────────────
 
@@ -388,6 +461,8 @@ class AuditLogger:
         # For async contexts, use emit_async() instead
         with self._sync_lock:
             self._buffer.append(entry)
+            if _soft_sink():
+                self._enforce_bound_locked()
             buffer_full = len(self._buffer) >= self._buffer_size
         if buffer_full:
             logger.debug(f"Audit buffer full ({self._buffer_size}), ready for flush")
@@ -402,6 +477,8 @@ class AuditLogger:
         )
         async with self._buffer_lock:
             self._buffer.append(entry)
+            if _soft_sink():
+                self._enforce_bound_locked()
             buffer_full = len(self._buffer) >= self._buffer_size
         if buffer_full:
             logger.debug(f"Audit buffer full ({self._buffer_size}), ready for flush")

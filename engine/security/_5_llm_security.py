@@ -86,13 +86,9 @@ def sanitize_llm_input(user_input: str, max_length: int = 2000) -> str:
     if not user_input:
         return ""
 
-    # Check for injection patterns
-    matches = INJECTION_REGEX.findall(user_input.lower())
-    if matches:
-        logger.warning(f"Potential prompt injection detected: {matches[:3]}")
-        raise ValueError(
-            "Input contains potentially malicious patterns. Please rephrase your request without meta-instructions."
-        )
+    # Check the raw input: special tokens that the stripping below removes
+    # (e.g. <|im_start|>) are themselves rejection patterns.
+    _reject_injection(user_input)
 
     # Truncate
     if len(user_input) > max_length:
@@ -114,9 +110,24 @@ def sanitize_llm_input(user_input: str, max_length: int = 2000) -> str:
         user_input = user_input.replace(token, "")
 
     # Normalize whitespace
-    user_input = " ".join(user_input.split())
+    user_input = " ".join(user_input.split()).strip()
 
-    return user_input.strip()
+    # RU-072 / CEG-COR-119: check again on the final string — token stripping and
+    # whitespace normalization can reassemble a blocked phrase
+    # ("ignore  previous", "ignore prev<s>ious") that the raw check missed.
+    _reject_injection(user_input)
+
+    return user_input
+
+
+def _reject_injection(text: str) -> None:
+    """Raise ValueError when ``text`` matches an injection pattern."""
+    matches = INJECTION_REGEX.findall(text.lower())
+    if matches:
+        logger.warning(f"Potential prompt injection detected: {matches[:3]}")
+        raise ValueError(
+            "Input contains potentially malicious patterns. Please rephrase your request without meta-instructions."
+        )
 
 
 # ============================================================
@@ -159,6 +170,15 @@ def validate_llm_output(llm_response: str, expected_schema: type[T], strict: boo
         # ValueError (its superclass) so the JSON-parse failure surfaces cleanly.
         msg = f"LLM output is not valid JSON: {e}"
         raise ValueError(msg) from e
+
+    # RU-073 / CEG-COR-120: model_validate(strict=True) only disables type
+    # coercion; extra keys are ignored unless the model forbids them. strict
+    # promises "reject extra fields", so undeclared keys are refused here.
+    if strict and isinstance(data, dict):
+        extra = sorted(set(data) - set(expected_schema.model_fields))
+        if extra:
+            msg = f"LLM output has unexpected field(s) for {expected_schema.__name__}: {extra}"
+            raise ValueError(msg)
 
     # Validate against schema
     try:

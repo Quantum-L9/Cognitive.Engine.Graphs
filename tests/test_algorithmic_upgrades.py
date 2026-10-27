@@ -256,6 +256,42 @@ class TestValidateLlmJson:
             validate_llm_json(raw, CypherQueryOutput)
 
 
+class TestCypherQueryOutputReadOnly:
+    """RU-073 / CEG-COR-120: generated Cypher is read-only, matched by whole keyword."""
+
+    @staticmethod
+    def _raw(query: str) -> str:
+        return json.dumps({"cypher_query": query, "parameters": {}, "explanation": "generated", "confidence": 0.5})
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "MATCH (n) SET n.flag = true RETURN n",
+            "CREATE (n:Facility {id: 1}) RETURN n",
+            "MERGE (n:Facility {id: 1}) RETURN n",
+            "LOAD CSV FROM 'file:///x.csv' AS row RETURN row",
+            "MATCH (n) FOREACH (x IN [1] | SET n.a = x) RETURN n",
+            "CALL apoc.periodic.iterate('MATCH (n) RETURN n', 'DELETE n', {})",
+            "MATCH (n) REMOVE n.a RETURN n",
+            "match (n) detach  delete n",
+            "MATCH (n) DROP INDEX x",
+        ],
+    )
+    def test_write_and_admin_clauses_rejected(self, query: str) -> None:
+        with pytest.raises(ValidationError, match="Destructive keyword rejected"):
+            validate_llm_json(self._raw(query), CypherQueryOutput)
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "MATCH (n) WHERE n.deleted_at IS NULL RETURN n",
+            "MATCH (n) WHERE n.created_by = $u RETURN n.settings, n.callsign",
+        ],
+    )
+    def test_identifiers_containing_keywords_accepted(self, query: str) -> None:
+        assert validate_llm_json(self._raw(query), CypherQueryOutput).cypher_query == query
+
+
 class TestValidatedLLMClientNoProvider:
     """Test that the client raises FeatureNotEnabled when no API key is set."""
 

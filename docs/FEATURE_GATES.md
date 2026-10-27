@@ -105,6 +105,17 @@ independently of the code default.
 | Gate Null Operands From Predicate | `GATE_NULL_OPERANDS_FROM_PREDICATE` (`gate_null_operands_from_predicate`) | `True` | unset | active; a gate's `nullbehavior` applies to exactly the operands its predicate tests (range FAIL rejects NULL bounds; temporalrange null-handles its window per side) — see §21 |
 | Composite Subgate Scoping | `COMPOSITE_SUBGATE_SCOPING` (`composite_subgate_scoping`) | `True` | unset | active; a composite's subgates contribute only through the composite (an OR composite is no longer AND-ed with its own subgates) and a subgate scoped to another direction is refused — see §21 |
 | Freshness Max-age Validated | `FRESHNESS_MAXAGEDAYS_VALIDATED` (`freshness_maxagedays_validated`) | `True` | unset | active (hardening); a freshness gate defaults `maxagedays` to 1 only when absent and refuses a value < 1 (0 became 1 day, a negative age a future cutoff) — see §21 |
+| Prohibited Factor Full Coverage | `PROHIBITED_FACTOR_FULL_COVERAGE` (`prohibited_factor_full_coverage`) | `True` | unset | active (hardening); every gate property field, scoring dimension and sync-row key at any depth is checked, casefolded — see lane D |
+| PII Redaction Recursive | `PII_REDACTION_RECURSIVE` (`pii_redaction_recursive`) | `True` | unset | active (hardening); PII detection/redaction/masking reaches list elements (match `candidates`) without mutating the input — see lane D |
+| Compliance Audit Soft Sink | `COMPLIANCE_AUDIT_SOFT_SINK` (`compliance_audit_soft_sink`) | `True` | unset | active (hardening); bounded audit buffer, JSON-encoded JSONB metadata, request never fails on audit persistence — see lane D |
+| Prohibited Factor Violation Audit | `PROHIBITED_FACTOR_VIOLATION_AUDIT` (`prohibited_factor_violation_audit`) | `True` | unset | active; a blocked attempt leaves one `denied` audit entry before the error propagates (domain `auditonviolation`) — see lane D |
+| PII Declared Fields Enforced | `PII_DECLARED_FIELDS_ENFORCED` (`pii_declared_fields_enforced`) | `True` | unset | active; the domain's declared `compliance.pii` fields and `handling` mode apply on the response path — see lane D |
+| Causal Attribution Unique Touchpoints | `CAUSAL_ATTRIBUTION_UNIQUE_TOUCHPOINTS` (`causal_attribution_unique_touchpoints`) | `True` | unset | active; attribution weights are computed over unique touchpoints and sum to 1.0 — see lane D |
+| Causal Edge Declared Identity | `CAUSAL_EDGE_DECLARED_IDENTITY` (`causal_edge_declared_identity`) | `True` | unset | active; causal edges match declared node identities, anchor predicates in one WHERE with a bound threshold, MERGE on a stable key — see lane D |
+| Causal Validator Batch Edge Type | `CAUSAL_VALIDATOR_BATCH_EDGE_TYPE` (`causal_validator_batch_edge_type`) | `True` | unset | active; declared per-edge temporal validation applies to sync batches — see lane D |
+| safe_eval Rejects Keywords | `SAFE_EVAL_REJECT_KEYWORDS` (`safe_eval_reject_keywords`) | `True` | unset | active; keyword arguments in derived-parameter / unit expressions raise instead of being dropped — see lane D |
+| Causal Serializer Variable Depth | `CAUSAL_SERIALIZER_VARIABLE_DEPTH` (`causal_serializer_variable_depth`) | `True` | unset | active; causal match explanations follow chains up to the requested depth — see lane D |
+| Counterfactual Dedupe and Spec Label | `COUNTERFACTUAL_DEDUPE_AND_SPEC_LABEL` (`counterfactual_dedupe_and_spec_label`) | `True` | unset | active; no duplicate counterfactual scenarios, fingerprints read from the domain's outcome label — see lane D |
 
 ---
 
@@ -1004,3 +1015,209 @@ and negative values (formerly a cutoff in the future) raise at compile, so
 admission withholds the pack naming the gate. No shipped pack is affected
 (the template declares 90). Rollback: `FRESHNESS_MAXAGEDAYS_VALIDATED=false`.
 
+---
+
+## Correctness remediation — lane D (plan 0d84ec8)
+
+Safety fixes from the correctness remediation plan, lane D (compliance, PII,
+prohibited factors, causal, safe_eval). Each ships on and each flag restores the
+previous behaviour when set to `false`.
+
+### Prohibited Factor Full Coverage (RU-061 / CEG-COR-008)
+
+**Flag**: `PROHIBITED_FACTOR_FULL_COVERAGE=True` (default on)
+
+On: `ProhibitedFactorValidator` compares, casefolded, every gate property field
+(`candidateprop`, `candidateprop_min/_max/_start/_end`, str `queryparam`,
+`queryparam_min/_max/_start/_end`), every scoring dimension `candidateprop` /
+`queryprop` (`ComplianceEngine.validate_scoring`, called by `handle_match` next to
+`validate_gates`) and every key at any depth of a sync row
+(`validate_sync_row`, nested dicts and lists of dicts). Off: the legacy check of
+gate `candidateprop` / `queryparam` and top-level sync keys, exact-case.
+Contract: `docs/contracts/PROHIBITED_FACTORS.md`.
+
+Rollback: set the flag to `false` while a spec is corrected.
+
+### PII Redaction Recursive (RU-062 / CEG-COR-009)
+
+**Flag**: `PII_REDACTION_RECURSIVE=True` (default on)
+
+`engine/compliance/pii.py` `PIIHandler.detect_pii` descended only into dicts, so the
+match response's `candidates` list was opaque and `ComplianceEngine.redact_response`
+returned candidate PII unchanged; `redact()` / `mask_fields()` shallow-copied and then
+edited nested caller dicts in place. On: detection descends into dicts and
+lists/tuples at any depth with index-aware paths (`candidates[0].candidate.contact_email`;
+dict-only payloads keep their dotted paths), and redaction/masking copy every container
+on the edited path, so the input is never mutated. `check_sync_request` records the
+detected field paths (never values) in the access audit entry. Off: the legacy
+dict-only traversal.
+
+Rollback: set the flag to `false`.
+
+### Compliance Audit Soft Sink (RU-065 / CEG-COR-052, CEG-COR-053)
+
+**Flag**: `COMPLIANCE_AUDIT_SOFT_SINK=True` (default on)
+
+The PostgreSQL audit pool (`POSTGRES_DSN`, §7) is a soft dependency, but without it
+`AuditLogger` retained every entry forever, and with it every flush failed (the
+`metadata` dict was bound to the JSONB column) and `handle_match` / `handle_sync`
+re-raised the failure after their Neo4j work had succeeded. On:
+
+- `ComplianceEngine` builds its `AuditLogger` with `buffer_size=COMPLIANCE_BUFFER_MAX`
+  (default 100). `_emit`, `emit_async` and the re-buffer after a failed
+  `flush_to_store` keep the newest `buffer_size` entries; dropped entries are counted
+  (`AuditLogger.dropped_count`) and logged at WARNING once per `buffer_size` drops.
+  Every entry is still emitted to the `l9.audit` logger when it is created.
+- `flush_to_store` binds `metadata` as `json.dumps(...)` text.
+- `handle_match` / `handle_sync` call `ComplianceEngine.flush_audit_for_request()`,
+  which logs a failure and returns 0; the entries stay buffered for the boot periodic
+  flush loop (`engine/boot.py` `_compliance_flush_loop`), which is unchanged.
+
+Off: unbounded retention, dict-bound metadata, and request-path propagation.
+
+Rollback: set the flag to `false`.
+
+### Prohibited Factor Violation Audit (RU-063 / CEG-COR-050)
+
+**Flag**: `PROHIBITED_FACTOR_VIOLATION_AUDIT=True` (default on)
+
+`ProhibitedFactorsSpec.auditonviolation` was read nowhere. On: when the domain's
+`prohibitedfactors.auditonviolation` is true, `ComplianceEngine.validate_gates`,
+`validate_scoring` and `check_sync_request` (endpoint and rows) catch the violation,
+emit one entry through `AuditLogger.log_violation` (severity `critical`,
+`outcome: denied`, regimes as `compliance_tags`, the subject and field name — never a
+value) and re-raise the same error. `handle_match` passes the tenant as the actor. Off:
+no entry. The `enforcement` mode value is still not interpreted (DEC-23 pending).
+
+Rollback: set the flag to `false`.
+
+### PII Declared Fields Enforced (RU-064 / CEG-COR-051)
+
+**Flag**: `PII_DECLARED_FIELDS_ENFORCED=True` (default on; takes effect while
+`PII_REDACTION_RECURSIVE` is also on)
+
+`ComplianceEngine` probed `compliance.pii.additional_fields`, which `PIISpec` does not
+have, so declared fields no built-in hint matched survived raw (healthcare-referral
+`name`, `patientid`; legal-discovery `clientname`), `handling: hash` became deletion, and
+`PIISpec.enabled` was ignored. On, when `compliance.pii` is present and `enabled: true`:
+`PIISpec.fields` + `candidatefields` are PII by exact, case-insensitive key at any depth
+in addition to built-in inference, and `redact_response` transforms every detected field
+per `PIISpec.handling`:
+
+| `handling` | Response value |
+| `hash` | `PIIHandler.hash_value` SHA-256 hex digest of the value's string form |
+| `redact` | `[REDACTED]` (`engine.compliance.pii.REDACTION_MARKER`) |
+| `encrypt`, `tokenize`, other | fail closed to `[REDACTED]`, with a WARNING naming the mode and field paths (decision DEC-22 (a); no key sourcing or token store exists) |
+
+`compliance.pii.enabled: false` (or no `pii` section): built-in inference with key
+deletion, as before. Ingest-time hashing of stored PII is out of scope. Off: built-in
+inference with key deletion for every domain.
+
+Rollback: set the flag to `false`.
+
+### GDPR Erasure correctness (RU-066 / CEG-COR-054) — no new flag
+
+Still gated by `GDPR_ERASURE_ENABLED=False` / `GDPR_DRY_RUN=True` (§2). With erasure
+enabled, `erase_subject` now uses the domain's `compliance.gdpr_subject_id_field`
+(sanitized; default `data_subject_id`) for both the dry-run count and the deletion, calls
+`gdpr_erase_subject($1, $2)` with `performed_by` = tenant on the PacketStore pool
+(`PacketStore.get_pool()`, only while `PACKET_STORE_ENABLED`; otherwise the summary
+reports `packets_deleted: null`, `packets_erasable: false`), stores an integer count, and
+records the `PII_ERASURE` CRITICAL entry in the domain's `ComplianceEngine` audit trail
+before any deletion. **Release gate:** do not enable live erasure in any environment
+before the admin tenant-binding fix (RU-003, CEG-COR-003) is deployed with it — until
+then `domain_id` is caller-supplied.
+
+### Causal Attribution Unique Touchpoints (RU-067 / CEG-COR-055)
+
+**Flag**: `CAUSAL_ATTRIBUTION_UNIQUE_TOUCHPOINTS=True` (default on)
+
+`AttributionCalculator` received one row per causal PATH (`ORDER BY distance ASC`) and
+weighted rows, so a touchpoint reached by several paths split mass or had its credit
+overwritten (diamond: linear summed to 0.6, first_touch to 0). On: rows are collapsed to
+unique touchpoint ids keeping the first (minimum-distance) occurrence before weighting,
+and that row's link ages feed temporal decay; `total_touchpoints` counts unique ids.
+Model ordering semantics are unchanged (DEC-27 pending). Off: per-row weighting.
+
+Rollback: set the flag to `false`.
+
+### Causal Edge Declared Identity (RU-068 / CEG-COR-057, PO-04)
+
+**Flag**: `CAUSAL_EDGE_DECLARED_IDENTITY=True` (default on)
+
+`CausalCompiler.compile_causal_edge_create` matched both ends by `entity_id` (an outcome
+node carries only `outcome_id`, so the edge never matched), emitted
+`AND $confidence >= <literal>` with no `WHERE` when `temporal_validation` was false, and
+MERGEd on `{confidence, mechanism, created_at: datetime()}` so every repeat created a
+parallel edge. On:
+
+- identity per label from `engine/causal/identity.py`: `outcome_id` for
+  `feedbackloop.outcome_node_label`, else the sync endpoint `idproperty`, else the node's
+  first required property, else `entity_id` (same rule as `handle_match`, honouring
+  `SPEC_DECLARED_CANDIDATE_ID`); `handle_outcomes` passes the candidate's id property
+  explicitly;
+- one `WHERE` (only when non-empty) joining `source.created_at < target.created_at` and
+  `$confidence >= $confidence_threshold` (bound by `handle_outcomes`);
+- `MERGE (source)-[r:TYPE]->(target)` with `ON CREATE SET` created_at / confidence /
+  mechanism and `ON MATCH SET` confidence / mechanism;
+- `AttributionCalculator` (PO-04) returns `CASE WHEN touchpoint:<Label> THEN
+  coalesce(touchpoint.<declared id>, touchpoint.entity_id) … ELSE touchpoint.entity_id END`
+  over the causal-edge source labels instead of `touchpoint.entity_id`.
+
+Off: the legacy Cypher, kept for rollback although it cannot match outcome nodes.
+
+Rollback: set the flag to `false`.
+
+### Causal Validator Batch Edge Type (RU-069 / CEG-COR-058)
+
+**Flag**: `CAUSAL_VALIDATOR_BATCH_EDGE_TYPE=True` (default on)
+
+With a `CausalSubgraphSpec` (the production type), `CausalEdgeRuntimeValidator` found
+the edge spec via `record["edge_type"]`; `handle_sync` records carry no such key, so a
+declared `temporal_validation: true` was never enforced on sync batches. On:
+`validate_batch` passes its `edge_type` to `_validate_record`, and enforcement is
+`CausalSpec.enforce_temporal_precedence` when present, else the matching
+`CausalEdgeSpec.temporal_validation`. Tenants syncing inverted timestamps now see
+`rejected_count` / `all_rejected`. Off: the record-key lookup.
+
+Rollback: set the flag to `false`.
+
+### safe_eval Rejects Keyword Arguments (RU-076 / CEG-COR-125)
+
+**Flag**: `SAFE_EVAL_REJECT_KEYWORDS=True` (default on)
+
+`engine/utils/safe_eval.py` evaluated only positional arguments of a whitelisted call,
+so `round(2.567, ndigits=2)` returned `3`. On: any `ast.Call` with keywords raises
+`ValueError("keyword arguments not allowed")`. No shipped expression uses keywords.
+The companion resource bounds (RU-070: `_MAX_INT_BITS`, `_MAX_ROUND_NDIGITS`, overflow
+as `ValueError`) are guard-only and carry no flag. Off: keywords silently dropped.
+
+Rollback: set the flag to `false`.
+
+### Causal Serializer Variable Depth (RU-074 / CEG-COR-121)
+
+**Flag**: `CAUSAL_SERIALIZER_VARIABLE_DEPTH=True` (default on)
+
+`CausalSubgraphSerializer.serialize_neighborhood` matched `(start)-[r:T]->(neighbor)`, a
+single hop, so `match_explanation.depth_reached` never exceeded 1. On: the pattern is
+`[:T1|T2*1..N]` (`[*1..N]` without declared causal edges) where N is `max_depth` as an
+integer clamped to `[1, causal.chain_depth_limit]` and interpolated as a literal — Cypher
+does not accept a parameter as a variable-length bound; `$max_depth` carries N and
+`LIMIT $max_nodes` still bounds the result. `handle_match` keeps its depth policy
+(`min(chain_depth_limit, 2)`). Off: the one-hop pattern.
+
+Rollback: set the flag to `false`.
+
+### Counterfactual Dedupe and Spec Label (RU-075 / CEG-COR-122)
+
+**Flag**: `COUNTERFACTUAL_DEDUPE_AND_SPEC_LABEL=True` (default on)
+
+`CounterfactualGenerator._diff_fingerprints` appended
+`(change_weight, <dim>_weight_increase)` once per qualifying positive outcome, so
+duplicates consumed `max_scenarios_per_outcome` slots, and both fingerprint queries
+hardcoded `:TransactionOutcome`. On: a seen-set on `(intervention_type, key_difference)`
+suppresses duplicates, and `handle_outcomes` passes
+`sanitize_label(feedbackloop.outcome_node_label)` (default `TransactionOutcome`) as the
+queried label. Off: duplicates and the literal label.
+
+Rollback: set the flag to `false`.

@@ -426,6 +426,77 @@ class Settings(BaseSettings):
     # value < 1 is refused at compile, so admission withholds the pack. Off:
     # the legacy coercion.
     freshness_maxagedays_validated: bool = True
+    # Correctness remediation lane D (plan 0d84ec8, RU-061..RU-077)
+    # RU-061 / CEG-COR-008: the prohibited-factor check compared only
+    # GateSpec.candidateprop/queryparam, exact-case. On: every compiled
+    # property reference (gate min/max/start/end fields, scoring dimension
+    # candidateprop/queryprop, sync-row keys at any depth) is compared
+    # casefolded. Off: the legacy two-field exact-case check.
+    prohibited_factor_full_coverage: bool = True
+    # RU-062 / CEG-COR-009: PIIHandler detection descended only into dicts, so
+    # PII inside lists (match `candidates`, childsync rows) was never redacted,
+    # and redact()/mask_fields() mutated the caller's nested dicts. On: lists
+    # and tuples are traversed with index-aware paths (`a[0].b`) and edits copy
+    # every container on the edited path. Off: dict-only, legacy copies.
+    pii_redaction_recursive: bool = True
+    # RU-065 / CEG-COR-052/053: the compliance audit buffer grew without bound
+    # when no Postgres pool was configured, a configured pool failed every
+    # flush (metadata dict bound to JSONB) and handle_match / handle_sync
+    # re-raised that failure after the Neo4j work succeeded. On: the buffer is
+    # bounded by compliance_buffer_max (oldest dropped, count logged; every
+    # entry is still emitted to the l9.audit log), metadata is bound as JSON
+    # text, and a request-path flush failure is logged, not raised. Off:
+    # unbounded retention and propagation.
+    compliance_audit_soft_sink: bool = True
+    # RU-063 / CEG-COR-050: ProhibitedFactorsSpec.auditonviolation was read
+    # nowhere, so a blocked attempt left no audit trail. On: every violation
+    # raised through ComplianceEngine first emits one CRITICAL `denied` entry
+    # (regimes as compliance_tags, gate/dimension/endpoint/row path and the
+    # field name, never a value) when the domain's auditonviolation is true.
+    prohibited_factor_violation_audit: bool = True
+    # RU-064 / CEG-COR-051: ComplianceEngine probed a nonexistent
+    # `compliance.pii.additional_fields`, so declared PII fields that no
+    # built-in hint matched survived raw and `handling: hash` became deletion.
+    # On (with pii_redaction_recursive): when compliance.pii.enabled, declared
+    # fields + candidatefields are PII by exact case-insensitive key at any
+    # depth, and every detected field is transformed per PIISpec.handling
+    # (hash -> SHA-256 digest, redact -> fixed marker, encrypt/tokenize fail
+    # closed to the marker). Off: built-in inference with key deletion only.
+    pii_declared_fields_enforced: bool = True
+    # RU-067 / CEG-COR-055: attribution weighted one share per PATH row, so a
+    # touchpoint reached by several paths (diamonds, parallel edges) split or
+    # overwrote credit (linear summed to 0.6, first_touch to 0). On: rows are
+    # collapsed to unique touchpoint ids keeping the minimum-distance row,
+    # whose ages feed temporal decay. Off: per-row weighting.
+    causal_attribution_unique_touchpoints: bool = True
+    # RU-068 / CEG-COR-057: CausalCompiler matched source and target
+    # by a hardcoded `entity_id` (an outcome node has only `outcome_id`),
+    # emitted `AND $confidence >= <literal>` without a WHERE when temporal
+    # validation was off, and MERGEd on `created_at: datetime()` so every
+    # repeat created a parallel edge. On: declared identities (`outcome_id`
+    # for the outcome label), one WHERE with `$confidence_threshold`, MERGE on
+    # the type with ON CREATE / ON MATCH SET; AttributionCalculator reads each
+    # touchpoint's declared id per label (PO-04). Off: the legacy Cypher.
+    causal_edge_declared_identity: bool = True
+    # RU-069 / CEG-COR-058: CausalEdgeRuntimeValidator looked a
+    # CausalSubgraphSpec edge up by record["edge_type"], which sync records do
+    # not carry, so declared temporal_validation was skipped for every sync
+    # batch. On: the batch edge_type is used. Off: the record key.
+    causal_validator_batch_edge_type: bool = True
+    # RU-076 / CEG-COR-125: safe_eval ignored keyword arguments, so
+    # round(2.567, ndigits=2) returned 3 and max(x, key=y) returned x. On: a
+    # call with keywords raises ValueError. Off: keywords silently dropped.
+    safe_eval_reject_keywords: bool = True
+    # RU-074 / CEG-COR-121: CausalSubgraphSerializer matched `[r:T]` (one
+    # hop), so match explanations never went deeper than 1. On: `[:T*1..N]`
+    # with N = max_depth clamped to [1, causal.chain_depth_limit]. Off: the
+    # fixed one-hop pattern.
+    causal_serializer_variable_depth: bool = True
+    # RU-075 / CEG-COR-122: CounterfactualGenerator emitted the same
+    # (change_weight, <dim>_weight_increase) once per qualifying positive and
+    # queried a hardcoded :TransactionOutcome. On: duplicates suppressed and
+    # the domain's feedbackloop.outcome_node_label used. Off: legacy.
+    counterfactual_dedupe_and_spec_label: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
