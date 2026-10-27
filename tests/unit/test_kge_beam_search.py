@@ -102,14 +102,24 @@ class TestBeamSearchConfig:
     def test_defaults(self) -> None:
         """Default config has sensible values."""
         c = BeamSearchConfig()
-        assert c.beam_width == 5
+        assert c.beam_width == 10  # C-20: KGEBeamSearchSpec().beamwidth (CEG-COR-110; was 5)
         assert c.max_depth == 3
         assert c.prune_strategy == PruneStrategy.COMBINED
 
     def test_from_spec_with_none(self) -> None:
         """from_spec(None) returns defaults."""
         c = BeamSearchConfig.from_spec(None)
-        assert c.beam_width == 5
+        assert c.beam_width == 10  # C-20: KGEBeamSearchSpec().beamwidth (CEG-COR-110; was 5)
+        assert c.max_depth == 3
+
+    @pytest.mark.finding("CEG-COR-110")
+    def test_default_width_agrees_with_schema_default(self) -> None:
+        """RU-123: both constructors agree with KGEBeamSearchSpec (C-20)."""
+        from engine.config.schema import KGEBeamSearchSpec
+
+        spec_default = KGEBeamSearchSpec()
+        assert BeamSearchConfig.from_spec(None).beam_width == BeamSearchConfig().beam_width == spec_default.beamwidth
+        assert BeamSearchConfig.from_spec(None).max_depth == spec_default.maxdepth == 3
 
     def test_from_spec_with_spec(self) -> None:
         """from_spec extracts beamwidth and maxdepth."""
