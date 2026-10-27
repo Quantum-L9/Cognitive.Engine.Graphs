@@ -266,3 +266,34 @@ class TestComplianceEngineSoftSink:
         engine.check_match_request(tenant="t", query={}, match_direction="d")
         assert await engine.flush_audit() == 1
         assert len(pool.calls) == 1
+
+
+@pytest.mark.compliance
+@pytest.mark.unit
+class TestViolationEntryShape:
+    """RU-063 / CEG-COR-050: the denied entry carries regimes and the field name, never a value."""
+
+    def test_denied_entry_shape(self) -> None:
+        from pathlib import Path
+
+        import yaml
+
+        from engine.compliance.engine import ComplianceEngine
+        from engine.config.schema import DomainSpec
+
+        raw = yaml.safe_load(Path("domains/mortgage-brokerage/spec.yaml").read_text(encoding="utf-8"))
+        engine = ComplianceEngine(DomainSpec.model_validate(raw))
+        engine._audit.flush_sync()
+        with pytest.raises(ValueError):
+            engine.check_sync_request(
+                tenant="acme", entity_type="Borrower", batch=[{"entity_id": "b1", "Gender": "value-x"}]
+            )
+        entries = [e for e in engine._audit.flush_sync() if e.outcome == "denied"]
+        assert len(entries) == 1
+        entry = entries[0]
+        assert entry.severity in (AuditSeverity.WARNING, AuditSeverity.CRITICAL)
+        assert entry.outcome == "denied"
+        assert "ECOA" in entry.compliance_tags
+        assert "Borrower" in entry.resource
+        assert "Gender" in entry.resource
+        assert "value-x" not in entry.model_dump_json()

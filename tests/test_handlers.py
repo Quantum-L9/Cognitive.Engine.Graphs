@@ -574,3 +574,22 @@ async def test_match_and_sync_succeed_when_audit_sink_fails(caplog: pytest.LogCa
     assert match["candidates"][0]["candidate"]["facility_id"] == "F-1"
     assert sync["status"] == "success"
     assert any("audit flush failed" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_match_violation_leaves_denied_entry_in_domain_engine() -> None:
+    """RU-063: after the request fails, EngineState's domain ComplianceEngine holds the denied entry."""
+    from engine.state import get_state
+
+    spec = _mortgage_spec_with(dimension_prop="age")
+    state = get_state()
+    state.compliance_engines.pop(spec.domain.id, None)
+    state.domain_loader.load_domain = MagicMock(return_value=spec)
+
+    with pytest.raises(ValueError, match="prohibited field"):
+        await handle_match("acme", {"query": {"creditscore": 700}, "match_direction": "borrowertoproduct"})
+    entries = state.compliance_engines[spec.domain.id]._audit.flush_sync()
+    denied = [e for e in entries if e.outcome == "denied"]
+    assert len(denied) == 1
+    assert denied[0].actor == "acme"
+    state.compliance_engines.pop(spec.domain.id, None)

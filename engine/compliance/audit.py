@@ -258,6 +258,38 @@ class AuditLogger:
             )
         )
 
+    def log_violation(
+        self,
+        actor: str,
+        tenant: str,
+        resource: str,
+        blocked_field: str,
+        detail: str,
+        *,
+        resource_type: str | None = None,
+        compliance_tags: list[str] | None = None,
+        trace_id: str | None = None,
+    ) -> AuditEntry:
+        """Log a denied prohibited-factor attempt (RU-063). Always CRITICAL, outcome ``denied``.
+
+        ``blocked_field`` is the field NAME; callers never pass a value.
+        """
+        return self._emit(
+            AuditEntry(
+                action=AuditAction.ACCESS,
+                severity=AuditSeverity.CRITICAL,
+                actor=actor,
+                tenant=tenant,
+                resource=resource,
+                resource_type=resource_type,
+                detail=detail,
+                trace_id=trace_id,
+                compliance_tags=compliance_tags or [],
+                outcome="denied",
+                metadata={"blocked_field": blocked_field},
+            )
+        )
+
     def log_delegation(
         self,
         actor: str,

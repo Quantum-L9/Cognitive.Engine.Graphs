@@ -83,6 +83,7 @@ independently of the code default.
 | Prohibited Factor Full Coverage | `PROHIBITED_FACTOR_FULL_COVERAGE` (`prohibited_factor_full_coverage`) | `True` | unset | active (hardening); every gate property field, scoring dimension and sync-row key at any depth is checked, casefolded — see lane D |
 | PII Redaction Recursive | `PII_REDACTION_RECURSIVE` (`pii_redaction_recursive`) | `True` | unset | active (hardening); PII detection/redaction/masking reaches list elements (match `candidates`) without mutating the input — see lane D |
 | Compliance Audit Soft Sink | `COMPLIANCE_AUDIT_SOFT_SINK` (`compliance_audit_soft_sink`) | `True` | unset | active (hardening); bounded audit buffer, JSON-encoded JSONB metadata, request never fails on audit persistence — see lane D |
+| Prohibited Factor Violation Audit | `PROHIBITED_FACTOR_VIOLATION_AUDIT` (`prohibited_factor_violation_audit`) | `True` | unset | active; a blocked attempt leaves one `denied` audit entry before the error propagates (domain `auditonviolation`) — see lane D |
 
 ---
 
@@ -946,5 +947,19 @@ re-raised the failure after their Neo4j work had succeeded. On:
   flush loop (`engine/boot.py` `_compliance_flush_loop`), which is unchanged.
 
 Off: unbounded retention, dict-bound metadata, and request-path propagation.
+
+Rollback: set the flag to `false`.
+
+### Prohibited Factor Violation Audit (RU-063 / CEG-COR-050)
+
+**Flag**: `PROHIBITED_FACTOR_VIOLATION_AUDIT=True` (default on)
+
+`ProhibitedFactorsSpec.auditonviolation` was read nowhere. On: when the domain's
+`prohibitedfactors.auditonviolation` is true, `ComplianceEngine.validate_gates`,
+`validate_scoring` and `check_sync_request` (endpoint and rows) catch the violation,
+emit one entry through `AuditLogger.log_violation` (severity `critical`,
+`outcome: denied`, regimes as `compliance_tags`, the subject and field name — never a
+value) and re-raise the same error. `handle_match` passes the tenant as the actor. Off:
+no entry. The `enforcement` mode value is still not interpreted (DEC-23 pending).
 
 Rollback: set the flag to `false`.

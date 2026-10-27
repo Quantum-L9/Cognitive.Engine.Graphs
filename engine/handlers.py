@@ -519,8 +519,8 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     compliance = _get_compliance_engine(domain_spec)
     if compliance.enabled:
-        compliance.validate_gates(domain_spec.gates)
-        compliance.validate_scoring(domain_spec.scoring.dimensions)
+        compliance.validate_gates(domain_spec.gates, tenant=tenant)
+        compliance.validate_scoring(domain_spec.scoring.dimensions, tenant=tenant)
         query = compliance.check_match_request(
             tenant=tenant,
             query=query,
