@@ -312,6 +312,10 @@ class Settings(BaseSettings):
     # after the domain loads; unknown weight keys are rejected (R1a-DEC-06).
     # Off: only the supplied keys are summed, before the domain loads.
     match_effective_weight_validation: bool = True
+    # RU-004 / CEG-COR-014: legacy resolve raises ValidationError when the CREATE
+    # returned no row (source or target not found) instead of reporting
+    # `resolved`. Off: `resolved` regardless of the result.
+    resolve_requires_created_edge: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

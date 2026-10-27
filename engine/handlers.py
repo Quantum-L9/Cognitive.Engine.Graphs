@@ -2300,7 +2300,7 @@ async def handle_resolve(tenant: str, payload: dict[str, Any]) -> dict[str, Any]
     RETURN r.resolution_id AS resolution_id
     """
     try:
-        await graph_driver.execute_query(
+        created = await graph_driver.execute_query(
             cypher=cypher,
             parameters={
                 "source_id": source_id,
@@ -2319,6 +2319,17 @@ async def handle_resolve(tenant: str, payload: dict[str, Any]) -> dict[str, Any]
             tenant=tenant,
             detail=str(exc),
         ) from exc
+
+    from engine.config.settings import settings as _resolve_settings
+
+    # RU-004 / CEG-COR-014: no returned row means a MATCH found nothing and no
+    # RESOLVED_FROM edge exists; report it (RETURN_VALUES.md error propagation).
+    if _resolve_settings.resolve_requires_created_edge and not created:
+        raise ValidationError(
+            f"source or target entity not found for {entity_type}",
+            action="resolve",
+            tenant=tenant,
+        )
 
     return {
         "status": "resolved",

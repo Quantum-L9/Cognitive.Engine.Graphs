@@ -86,6 +86,7 @@ independently of the code default.
 | Monoculture Weighted Contribution | `MONOCULTURE_WEIGHTED_CONTRIBUTION` (`monoculture_weighted_contribution`) | `True` | unset | active (correctness, RU-032); the monoculture confidence check measures `weight × value` per dimension; dimensional agreement and the returned `dimension_scores` stay raw; off restores raw-value monoculture |
 | Query Defaults Before Derived | `QUERY_DEFAULTS_BEFORE_DERIVED` (`query_defaults_before_derived`) | `True` | unset | active (correctness, RU-016); match applies declared `queryschema` defaults before resolving derived parameters (caller values win); off restores resolve-then-backfill |
 | Match Effective Weight Validation | `MATCH_EFFECTIVE_WEIGHT_VALIDATION` (`match_effective_weight_validation`) | `True` | unset | active (correctness, RU-009; requires `SCORE_CLAMP_ENABLED`); the ≤ 1.0 ceiling is checked on the merged per-dimension weights scoring will apply, and unknown weight keys are rejected; off restores the supplied-keys-only sum |
+| Resolve Requires Created Edge | `RESOLVE_REQUIRES_CREATED_EDGE` (`resolve_requires_created_edge`) | `True` | unset | active (correctness, RU-004); legacy `resolve` raises a ValidationError when no `RESOLVED_FROM` edge was created; off restores an unconditional `resolved` |
 
 ---
 
