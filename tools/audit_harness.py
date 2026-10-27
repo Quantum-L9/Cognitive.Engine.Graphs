@@ -288,6 +288,19 @@ def write_harness_report(
     return report_path
 
 
+def overall_exit_code(steps: list[StepResult]) -> int:
+    """Harness exit code per the module docstring.
+
+    2 when any blocking step failed with an infrastructure error (exit 2), else
+    1 when any blocking step failed, else 0. Skipped steps and informational
+    steps (already marked passed, e.g. non-strict Spec Coverage) never block.
+    """
+    failed = [s for s in steps if not s.passed and not s.skipped]
+    if any(s.exit_code == 2 for s in failed):
+        return 2
+    return 1 if failed else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="L9 Audit Harness — orchestrates all static analysis")
     parser.add_argument(
@@ -383,9 +396,10 @@ def main() -> int:
         if step3.passed:
             print("  ✅ All contracts present and wired")
         elif step3.exit_code == 2:
-            # Infrastructure error — don't block on missing tool
-            print(f"  ⚠️  Skipped (tool issue): {step3.stderr.strip()[:100]}")
-            step3.passed = True  # Don't block harness for missing optional tool
+            # Infrastructure error (script missing / command not found): the wiring
+            # was not verified, so the step fails and the harness exits 2. Only an
+            # explicit --skip-contracts skips this step.
+            print(f"  ⚠️  Infrastructure error: {step3.stderr.strip()[:100]}")
         else:
             print("  ❌ Contract wiring issues detected")
             if step3.stderr:
@@ -395,7 +409,7 @@ def main() -> int:
 
     # ── Consolidate ─────────────────────────────────────────
     harness.overall_passed = all(s.passed for s in harness.steps)
-    harness.overall_exit_code = 0 if harness.overall_passed else 1
+    harness.overall_exit_code = overall_exit_code(harness.steps)
 
     audit_counts = parse_audit_report(root)
     coverage = parse_coverage_matrix(root)

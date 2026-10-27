@@ -270,6 +270,153 @@ def test_helper_is_validated_only_by_its_own_returns() -> None:
     assert [f.expression for f in findings] == ["node_label"]
 
 
+# ── RU-138 / RG-174: false negatives closed ─────────────────────────────────
+
+
+def test_raw_overwrite_after_sanitize_is_raw() -> None:
+    """reassigned: a later raw binding wins over an earlier validated one."""
+    src = (
+        "def reassigned(spec):\n"
+        "    label = sanitize_label('Safe')\n"
+        "    label = spec.target_node\n"
+        "    cypher = f'MATCH (n:{label}) RETURN n'\n"
+        "    return cypher\n"
+    )
+    findings = _blocking(src)
+    assert [(f.line_no, f.expression) for f in findings] == [(4, "label")]
+    assert findings[0].kind.startswith("label / relationship type is not validated")
+
+
+def test_sanitize_after_raw_binding_passes() -> None:
+    """The legitimate inverse: raw then sanitized in the same block is validated."""
+    src = (
+        "def q(spec):\n"
+        "    label = spec.target_node\n"
+        "    label = sanitize_label(label)\n"
+        "    return f'MATCH (n:{label}) RETURN n'\n"
+    )
+    assert _blocking(src) == []
+
+
+def test_conditional_raw_binding_wins_on_conflict() -> None:
+    src = (
+        "def q(spec, flag):\n"
+        "    label = sanitize_label(spec.a)\n"
+        "    if flag:\n"
+        "        label = spec.b\n"
+        "    return f'MATCH (n:{label}) RETURN n'\n"
+    )
+    assert [f.expression for f in _blocking(src)] == ["label"]
+
+
+def test_cypher_assigned_to_message_named_variable_is_scanned() -> None:
+    """text_named: a message-like name does not hide a query-shaped f-string."""
+    src = "def text_named(spec):\n    text = f'MATCH (n:{spec.target_node}) RETURN n'\n    return text\n"
+    assert [f.expression for f in _blocking(src)] == ["spec.target_node"]
+
+
+def test_shadowed_method_name_does_not_validate_spec_get() -> None:
+    """shadow: a same-module ``get`` method does not certify ``spec.get(...)``."""
+    src = (
+        "class Helper:\n"
+        "    def get(self, key):\n"
+        "        return 'Literal'\n"
+        "\n"
+        "\n"
+        "def lookup(spec):\n"
+        "    cypher = f\"MATCH (n:{spec.get('target_node')}) RETURN n\"\n"
+        "    return cypher\n"
+    )
+    assert [f.expression for f in _blocking(src)] == ["spec.get('target_node')"]
+
+
+def test_safe_func_still_resolves_for_direct_and_self_calls() -> None:
+    src = (
+        "def _label(x):\n"
+        "    return sanitize_label(x)\n"
+        "class S:\n"
+        "    def _lbl(self, x):\n"
+        "        return sanitize_label(x)\n"
+        "    def q(self, spec):\n"
+        "        a = _label(spec.a)\n"
+        "        b = self._lbl(spec.b)\n"
+        "        return f'MATCH (n:{a})-[:{b}]->(m) RETURN n'\n"
+    )
+    assert _blocking(src) == []
+
+
+def test_string_concatenation_is_scanned() -> None:
+    src = "def concat_case(spec):\n    cypher = 'MATCH (n:' + spec.target_node + ') RETURN n'\n    return cypher\n"
+    findings = _blocking(src)
+    assert [(f.line_no, f.expression) for f in findings] == [(2, "spec.target_node")]
+    assert findings[0].kind.startswith("label / relationship type is not validated")
+
+
+def test_str_format_is_scanned() -> None:
+    src = (
+        "def format_case(spec):\n"
+        "    cypher = 'MATCH (n:{}) RETURN n'.format(spec.target_node)\n"
+        "    other = 'MATCH (n:{lbl}) WHERE n.{0} IS NULL'.format(spec.prop, lbl=spec.label)\n"
+        "    return cypher, other\n"
+    )
+    assert [f.expression for f in _blocking(src)] == ["spec.target_node", "spec.label", "spec.prop"]
+
+
+def test_percent_format_is_scanned() -> None:
+    src = (
+        "def percent_case(spec):\n"
+        "    cypher = 'MATCH (n:%s) RETURN n' % spec.target_node\n"
+        "    pair = 'MATCH (n:%s)-[:%s]->(m)' % (spec.a, spec.b)\n"
+        "    return cypher, pair\n"
+    )
+    assert [f.expression for f in _blocking(src)] == ["spec.target_node", "spec.a", "spec.b"]
+
+
+def test_concat_and_format_with_validated_operands_pass() -> None:
+    src = (
+        "def q(spec):\n"
+        "    label = sanitize_label(spec.label)\n"
+        "    a = 'MATCH (n:' + label + ') RETURN n'\n"
+        "    b = 'MATCH (n:{}) RETURN n'.format(sanitize_label(spec.x))\n"
+        "    c = 'MATCH (n:%s) RETURN n' % label\n"
+        "    d = 'WHERE n.score > $' + 'min_score'\n"
+        "    return a, b, c, d\n"
+    )
+    assert _blocking(src) == []
+
+
+def test_non_cypher_concatenation_and_format_ignored() -> None:
+    src = (
+        "def key(tenant, spec):\n"
+        "    a = 'ceg:' + tenant + ':' + spec.name\n"
+        "    b = '{}/{}'.format(tenant, spec.name)\n"
+        "    c = 'total %d' % spec.count\n"
+        "    return a, b, c, 1 + 2\n"
+    )
+    assert _blocking(src) == []
+
+
+def test_unvalidated_bare_value_stays_out_of_scope() -> None:
+    """Documented design: a bare non-spec value in a fragment position is not reported."""
+    src = (
+        "def unvalidated_value(value):\n    cypher = f'MATCH (n) WHERE n.score > {value} RETURN n'\n    return cypher\n"
+    )
+    assert _blocking(src) == []
+
+
+def test_concat_waiver_applies_on_operand_line() -> None:
+    src = (
+        "def q(spec):\n"
+        "    return ('MATCH (n:' +\n"
+        "        spec.label  # cypher-lint: allow spec-authored label checked upstream\n"
+        "        + ') RETURN n')\n"
+    )
+    findings = scan_source(src, rel_path="engine/x.py")
+    assert len(findings) == 1
+    assert findings[0].line_no == 3
+    assert not findings[0].blocking
+
+
 # ── waivers are explicit and visible ────────────────────────────────────────
 
 

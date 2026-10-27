@@ -278,16 +278,16 @@ echo "8. AUTOMATED TEST SUITE"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 test_info "Running smoke tests via ${API_CONTAINER}..."
-if docker compose exec -T "${API_CONTAINER}" python -m pytest "${SMOKE_TEST_PATH}" -v --tb=short 2>&1 | tee /tmp/smoke_test_output.txt | grep -q "PASSED\|passed"; then
+# The verdict is pytest's exit status (PIPESTATUS[0]), not a grep for "passed":
+# "3 failed, 10 passed" contains "passed" and used to count as a pass.
+docker compose exec -T "${API_CONTAINER}" python -m pytest "${SMOKE_TEST_PATH}" -v --tb=short 2>&1 | tee /tmp/smoke_test_output.txt
+SMOKE_RC=${PIPESTATUS[0]}
+if [[ "$SMOKE_RC" -eq 0 ]]; then
     test_pass "Smoke tests passed"
     grep -E "passed|PASSED" /tmp/smoke_test_output.txt | tail -1
 else
-    SMOKE_FAILED=$(grep -c "FAILED\|failed" /tmp/smoke_test_output.txt 2>/dev/null || echo "0")
-    if [[ "$SMOKE_FAILED" -gt 0 ]] 2>/dev/null; then
-        test_fail "Smoke tests had $SMOKE_FAILED failure(s)"
-    else
-        test_info "Smoke tests completed (check output above)"
-    fi
+    SMOKE_FAILED=$(grep -c "FAILED\|failed" /tmp/smoke_test_output.txt 2>/dev/null || true)
+    test_fail "Smoke tests failed (pytest exit ${SMOKE_RC}, ${SMOKE_FAILED:-0} failure line(s))"
 fi
 
 # =============================================================================

@@ -94,7 +94,11 @@ def select_unit_tests(changed: list[str], repo: Path) -> list[str]:
         if any(path.startswith(prefix) for prefix in NON_UNIT_PREFIXES):
             continue
         if path.startswith("tests/"):
-            selected.append(path)
+            # Only test modules (pytest.ini python_files = test_*.py). A staged
+            # helper such as tests/conftest.py or tests/fixtures/*.py is not a
+            # test module: passing it to pytest collects nothing and exits 5.
+            if Path(path).name.startswith("test_"):
+                selected.append(path)
             continue
         selected.extend(infer_unit_tests(path, repo))
 

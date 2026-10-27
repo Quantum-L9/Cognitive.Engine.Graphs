@@ -50,19 +50,26 @@ Cursor Memory Client — Access L9 Memory Substrate via MCP Tools
         - Value: Set in .env file (NEVER hardcode)
 
     MCP_URL: MCP Memory endpoint
-        - MUST use direct IP: http://46.62.243.82/memory
-        - Domain (l9.quantumaipartners.com) is BLOCKED by Cloudflare for Python
-        - nginx routes /memory/* to l9-mcp-memory:9002/*
+        - MUST be https to a CA-valid endpoint, or plain http to a loopback
+          host (127.0.0.1 / localhost / ::1) reached through an SSH tunnel:
+            ssh -L 8080:127.0.0.1:80 root@46.62.243.82
+            export MCP_URL="http://127.0.0.1:8080/memory"
+        - Plain http to any other host is refused before a socket is opened,
+          so the bearer key is never sent in cleartext. The built-in default
+          (http://46.62.243.82/memory) is therefore refused: set MCP_URL.
+        - https certificates are verified (CERT_REQUIRED, hostname checked).
+        - nginx on C1 routes /memory/* to l9-mcp-memory:9002/*
 
     L9_API_URL: L9 API endpoint (fallback for graph/cache)
-        - Direct IP: http://46.62.243.82
+        - Same rule: https, or loopback http via SSH tunnel
         - Local: http://127.0.0.1:8000 (Docker)
 
 ## QUICK START
 
     # Load from .env or set manually (get value from .env file)
     export MCP_API_KEY_C="${MCP_API_KEY_C}"
-    export MCP_URL="http://46.62.243.82/memory"
+    ssh -N -L 8080:127.0.0.1:80 root@46.62.243.82 &   # loopback tunnel to C1
+    export MCP_URL="http://127.0.0.1:8080/memory"
     python3 agents/cursor/cursor_memory_client.py health
 
 ## SCHEMA
@@ -202,14 +209,15 @@ CONTENT_TYPE_JSON = "application/json"
 # Fallback chain: MCP_API_KEY_C -> L9_EXECUTOR_API_KEY (legacy)
 L9_EXECUTOR_API_KEY = os.getenv("MCP_API_KEY_C") or os.getenv("L9_EXECUTOR_API_KEY", "")
 
-# Skip SSL verification for self-signed certs
+# Verifying TLS context: CERT_REQUIRED, hostname checked, TLS >= 1.2. The bearer
+# key must never go to an unauthenticated peer, so verification is not relaxed.
 ssl_context = secure_ssl_context()
-ssl_context.check_hostname = False
-ssl_context.verify_mode = ssl.CERT_NONE
 
-# http is allowed only for the documented C1 IP and the local Docker/tunnel hosts.
-# Anything else must be https. file:// and userinfo are refused (CWE-939).
-_ALLOWED_HTTP_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "46.62.243.82"})
+# http is allowed only for loopback (SSH tunnel / local Docker), the same policy as
+# cursor_neo4j_query._NEO4J_HTTP_HOSTS. Any remote host must be https, so the
+# bearer key never crosses a network in cleartext. file:// and userinfo are
+# refused (CWE-939).
+_ALLOWED_HTTP_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 def _require_http_url(url: str) -> str:
