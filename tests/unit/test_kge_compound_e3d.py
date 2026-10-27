@@ -276,3 +276,36 @@ class TestCompoundE3DTrainingDescendsMarginLoss:
             score = model.score_triple(f"h{i}", "R", f"t{i}")
             assert 0.0 <= score <= 1.0
             assert model._entity_embeddings[f"h{i}"].shape == (16,)
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-112")
+class TestScoreAgainstIcpDoesNotMutate:
+    """RU-125: the ICP centroid is registered only for the duration of one _distance call."""
+
+    def test_centroid_not_left_in_entity_table(self, trained_model: CompoundE3D) -> None:
+        trained_model.build_icp_centroid(["alpha_recycling", "beta_compounding"])
+        before = set(trained_model._entity_embeddings)
+        trained_model.score_against_icp("gamma_mrf", "SUPPLIES_TO")
+        assert "__ICP_CENTROID__" not in trained_model._entity_embeddings
+        assert set(trained_model._entity_embeddings) == before
+        pool = [eid for eid, _ in trained_model.predict_tail("alpha_recycling", "SUPPLIES_TO", top_k=100)]
+        assert "__ICP_CENTROID__" not in pool
+
+    def test_score_unchanged(self, trained_model: CompoundE3D) -> None:
+        centroid = trained_model.build_icp_centroid(["alpha_recycling", "beta_compounding"])
+        h = trained_model._entity_embeddings["gamma_mrf"]
+        r = trained_model._relation_embeddings["SUPPLIES_TO"]
+        dist = float(np.linalg.norm(h + r - centroid))
+        logit = -(trained_model._platt_alpha * dist - trained_model._platt_beta)
+        expected = 1.0 / (1.0 + np.exp(-logit))
+        score = trained_model.score_against_icp("gamma_mrf", "SUPPLIES_TO")
+        assert score == pytest.approx(float(expected))
+        assert 0.0 <= score <= 1.0
+
+    def test_prior_entity_under_the_key_is_restored(self, trained_model: CompoundE3D) -> None:
+        trained_model.build_icp_centroid(["alpha_recycling"])
+        prior = np.full(trained_model.dim, 7.0)
+        trained_model._entity_embeddings["__ICP_CENTROID__"] = prior
+        trained_model.score_against_icp("gamma_mrf", "SUPPLIES_TO")
+        assert trained_model._entity_embeddings["__ICP_CENTROID__"] is prior
