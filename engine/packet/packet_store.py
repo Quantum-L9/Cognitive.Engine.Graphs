@@ -164,6 +164,20 @@ class _PoolManager:
 _pool_manager = _PoolManager()
 
 
+def _insert_wrote_row(status: Any) -> bool:
+    """Return False only when asyncpg reports the INSERT as skipped (``INSERT 0 0``).
+
+    Uses the ``status.split()[-1]`` row-count convention record_outcome uses.
+    An unrecognised status keeps the child rows (the pre-RU-078 behaviour).
+    """
+    if not isinstance(status, str):
+        return True
+    try:
+        return int(status.split()[-1]) > 0
+    except (IndexError, ValueError):
+        return True
+
+
 # ── Extraction Helpers ───────────────────────────────────────
 
 
@@ -196,8 +210,13 @@ def _extract_packet_row(packet: TransportPacket) -> tuple[Any, ...]:
         getattr(ten, "user_id", None),
         # payload (full packet as JSONB)
         json.dumps(json.loads(packet.model_dump_json()), default=str),
-        # security
-        sec.payload_hash,
+        # security. content_hash is the (content_hash, actor_tenant) dedup key
+        # (C-7): the SDK transport_hash covers the packet's identity (header
+        # incl. packet_id/packet_type/action, address, tenant, payload,
+        # governance, lineage, provenance), so only a re-delivery of the same
+        # packet collides. payload_hash alone made distinct packets that carry
+        # equal payloads collide (RU-078).
+        sec.transport_hash if settings.packet_store_packet_identity_dedup_enabled else sec.payload_hash,
         "sha256",
         sec.signature,
         sec.signing_key_id,
@@ -248,6 +267,11 @@ class PacketStore:
         Writes both packets to packet_store, their lineage to lineage_graph,
         hop entries to hop_trace, and delegation links to delegation_chain.
         All writes are wrapped in a single transaction.
+
+        With ``packet_store_packet_identity_dedup_enabled`` a packet whose INSERT
+        is skipped by ``ON CONFLICT (content_hash, actor_tenant) DO NOTHING`` is
+        a re-delivery of a stored packet, so its hop_trace, delegation_chain and
+        lineage_graph rows are already stored and are not written again.
         """
         if not _PACKET_STORE_ENABLED:
             logger.debug(
@@ -262,7 +286,9 @@ class PacketStore:
             # Insert both packets
             for packet in (request, response):
                 row = _extract_packet_row(packet)
-                await conn.execute(_INSERT_PACKET_SQL, *row)
+                status = await conn.execute(_INSERT_PACKET_SQL, *row)
+                if settings.packet_store_packet_identity_dedup_enabled and not _insert_wrote_row(status):
+                    continue
 
                 # Insert hop trace entries
                 for seq, hop in enumerate(packet.hop_trace):

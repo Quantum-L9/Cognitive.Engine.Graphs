@@ -52,6 +52,7 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | graph_inference_feedback_enabled | False | Emit `graph-inference-result` to EIE through Gate (EIE-008 / CEG-006) |
 | auto_create_domain_database | False | Provision the tenant domain database on first use (CEG-008; Enterprise-only CREATE DATABASE) |
 | health_api_enabled | False | Expose engine/health/api.py via admin health_* subactions (CEG-006) |
+| packet_store_packet_identity_dedup_enabled | True | PacketStore `content_hash` = SDK `transport_hash`; a duplicate-skipped packet writes no child rows (RU-078) |
 
 ## Domain Pack Admission (generic; the engine names no domain)
 | Flag | Default | Purpose |

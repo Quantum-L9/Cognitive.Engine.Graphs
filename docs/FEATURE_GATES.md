@@ -116,6 +116,7 @@ independently of the code default.
 | safe_eval Rejects Keywords | `SAFE_EVAL_REJECT_KEYWORDS` (`safe_eval_reject_keywords`) | `True` | unset | active; keyword arguments in derived-parameter / unit expressions raise instead of being dropped — see lane D |
 | Causal Serializer Variable Depth | `CAUSAL_SERIALIZER_VARIABLE_DEPTH` (`causal_serializer_variable_depth`) | `True` | unset | active; causal match explanations follow chains up to the requested depth — see lane D |
 | Counterfactual Dedupe and Spec Label | `COUNTERFACTUAL_DEDUPE_AND_SPEC_LABEL` (`counterfactual_dedupe_and_spec_label`) | `True` | unset | active; no duplicate counterfactual scenarios, fingerprints read from the domain's outcome label — see lane D |
+| PacketStore Packet-Identity Dedup | `PACKET_STORE_PACKET_IDENTITY_DEDUP_ENABLED` (`packet_store_packet_identity_dedup_enabled`) | `True` | unset | active (hardening, RU-078); `packet_store.content_hash` is the SDK `transport_hash`, so distinct packets with equal payloads are both stored, and a packet whose INSERT is skipped as a duplicate writes no hop/delegation/lineage rows; off restores the `payload_hash` key and unconditional child rows — see §7 |
 
 ---
 
