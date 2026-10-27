@@ -320,6 +320,11 @@ class Settings(BaseSettings):
     # entities by entity id. Off: the previous merge behaviour. The path is also
     # gated per domain by semantic_registry.enabled (default False).
     entity_resolution_merge_integrity: bool = True
+    # RU-103 / CEG-COR-177: behavioral similarity matches both entities with
+    # the entity label and the label's declared id property (PO-04; that part
+    # also follows spec_declared_candidate_id). Off: label-less entity_id match,
+    # which counts outcomes of same-id nodes of other labels.
+    resolution_behavioral_label_scoped: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

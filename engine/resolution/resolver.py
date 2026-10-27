@@ -20,7 +20,7 @@ import math
 import uuid
 from typing import Any
 
-from engine.config.schema import SemanticRegistrySpec
+from engine.config.schema import DomainSpec, SemanticRegistrySpec
 from engine.graph.driver import GraphDriver
 from engine.resolution.similarity import SimilarityScorer
 from engine.utils.security import sanitize_label
@@ -64,11 +64,12 @@ class EntityResolver:
         registry_spec: SemanticRegistrySpec,
         graph_driver: GraphDriver,
         domain_id: str,
+        domain_spec: DomainSpec | None = None,
     ) -> None:
         self._spec = registry_spec
         self._graph_driver = graph_driver
         self._db = domain_id
-        self._scorer = SimilarityScorer(registry_spec, graph_driver, domain_id)
+        self._scorer = SimilarityScorer(registry_spec, graph_driver, domain_id, domain_spec=domain_spec)
 
     async def resolve_entity(
         self,
