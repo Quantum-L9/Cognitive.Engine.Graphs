@@ -677,3 +677,91 @@ class TestWave3Settings:
         assert s.tenant_auth_enabled is False
         assert s.tenant_auth_bypass_key == "super-secret"
         assert s.capability_auth_enabled is False
+
+
+class TestCapabilityRecordBinding:
+    """RU-090 / RG-119: validation is bound to the registered record (repro capability_forgery.py)."""
+
+    def test_forged_object_reusing_registered_id_is_rejected(
+        self, validator: CapabilityValidator, root_capability: Capability
+    ):
+        validator.register(root_capability)
+        forged = Capability(
+            tenant_id="*",
+            domain_id="*",
+            allowed_actions=frozenset(ACTION_PERMISSION_MAP.values()),
+            capability_id=root_capability.capability_id,
+        )
+        assert forged.is_valid_hash()  # self-consistent forgery
+        assert not validator.validate_action(forged, "admin:write", "globex")
+
+    def test_unexpired_copy_of_expired_registered_capability_is_rejected(self, validator: CapabilityValidator):
+        expired = Capability(
+            tenant_id="acme",
+            domain_id="*",
+            allowed_actions=frozenset({"match:read"}),
+            expires_at=time.time() - 10,
+        )
+        validator.register(expired)
+        copy = Capability(
+            tenant_id=expired.tenant_id,
+            domain_id=expired.domain_id,
+            allowed_actions=expired.allowed_actions,
+            capability_id=expired.capability_id,
+            granted_by=expired.granted_by,
+            granted_at=expired.granted_at,
+            expires_at=time.time() + 3600,
+        )
+        assert copy.is_active()
+        assert not validator.validate_action(copy, "match:read", "acme")
+
+    def test_in_place_expiry_edit_fails_integrity(self, validator: CapabilityValidator):
+        cap = Capability(
+            tenant_id="acme",
+            domain_id="*",
+            allowed_actions=frozenset({"match:read"}),
+            expires_at=time.time() - 10,
+        )
+        validator.register(cap)
+        cap.expires_at = 0.0  # "never expires"
+        assert not cap.is_valid_hash()
+        assert not validator.validate_action(cap, "match:read", "acme")
+
+    def test_equal_copy_of_registered_capability_validates(
+        self, validator: CapabilityValidator, root_capability: Capability
+    ):
+        import dataclasses
+
+        validator.register(root_capability)
+        twin = dataclasses.replace(root_capability)
+        assert twin == root_capability
+        assert validator.validate_action(twin, "match:read", "acme")
+
+    def test_delegate_tenant_override_stays_valid(self, validator: CapabilityValidator, root_capability: Capability):
+        """Mirrors handlers.py delegate_capability: tenant override then hash recompute."""
+        validator.register(root_capability)
+        child = validator.derive_capability(
+            root_capability, {"allowed_actions": frozenset({"match:read"})}, expires_in_seconds=600
+        )
+        object.__setattr__(child, "tenant_id", "globex")
+        child.proof_hash = child._compute_proof_hash()
+        assert validator.validate_action(child, "match:read", "globex")
+
+    def test_flag_off_restores_legacy_checks(
+        self, monkeypatch: pytest.MonkeyPatch, validator: CapabilityValidator, root_capability: Capability
+    ):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "capability_record_binding_enabled", False)
+        validator.register(root_capability)
+        forged = Capability(
+            tenant_id="*",
+            domain_id="*",
+            allowed_actions=frozenset(ACTION_PERMISSION_MAP.values()),
+            capability_id=root_capability.capability_id,
+        )
+        assert validator.validate_action(forged, "admin:write", "globex")  # the legacy defect
+        cap = Capability(tenant_id="acme", domain_id="*", allowed_actions=frozenset({"match:read"}), expires_at=1.0)
+        hash_before = cap.proof_hash
+        cap.expires_at = 0.0
+        assert cap._compute_proof_hash() == hash_before  # expires_at not in the legacy hash
