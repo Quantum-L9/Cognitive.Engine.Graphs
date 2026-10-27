@@ -647,3 +647,35 @@ async def test_match_violation_leaves_denied_entry_in_domain_engine() -> None:
     assert len(denied) == 1
     assert denied[0].actor == "acme"
     state.compliance_engines.pop(spec.domain.id, None)
+
+
+@pytest.mark.asyncio
+async def test_declared_pii_id_property_does_not_change_pareto_ids() -> None:
+    """RU-064: Pareto ids are computed before redact_response, so hashing a declared
+    PII field that is also the candidate id property leaves them unaffected."""
+    from engine.compliance.pii import PIIHandler
+    from engine.config.schema import ComplianceSpec, PIISpec
+    from engine.state import get_state
+
+    spec = _loaded_spec_for_results()
+    spec.compliance = ComplianceSpec(pii=PIISpec(enabled=True, fields=["facility_id"], handling="hash"))
+    spec.decision_arbitration.enabled = True
+    spec.decision_arbitration.constraints = []
+    objective = MagicMock()
+    objective.dimension = "structural"
+    spec.decision_arbitration.pareto_config.objectives = [objective]
+    state = get_state()
+    state.compliance_engines.pop("test_domain", None)
+    state.graph_driver.execute_query = AsyncMock(
+        return_value=[
+            {"candidate": {"facility_id": "F-1"}, "score": 0.9, "structural": 0.9},
+            {"candidate": {"facility_id": "F-2"}, "score": 0.5, "structural": 0.5},
+        ]
+    )
+    try:
+        result = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
+    finally:
+        state.compliance_engines.pop("test_domain", None)
+
+    assert result["pareto"]["non_dominated_ids"] == ["F-1"]
+    assert result["candidates"][0]["candidate"]["facility_id"] == PIIHandler.hash_value("F-1")

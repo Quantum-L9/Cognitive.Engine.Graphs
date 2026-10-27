@@ -315,3 +315,81 @@ def test_no_violation_audit_when_flag_off(monkeypatch: pytest.MonkeyPatch) -> No
     with pytest.raises(ValueError):
         engine.validate_gates([GateSpec.model_validate({"name": "g", "type": "threshold", "candidateprop": "age"})])
     assert _denied(engine) == []
+
+
+# ── RU-064 / CEG-COR-051: declared compliance.pii fields and handling are applied ──
+
+
+def _spec_from(path: str, mutate=None):
+    import yaml
+
+    from engine.config.schema import DomainSpec
+
+    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    if mutate:
+        mutate(raw)
+    return DomainSpec.model_validate(raw)
+
+
+def _match_response(candidate: dict) -> dict:
+    return {"candidates": [{"candidate": candidate, "score": 0.8}], "query_id": "q_5c9382647927"}
+
+
+def test_healthcare_declared_fields_are_hashed_not_deleted() -> None:
+    from engine.compliance.pii import PIIHandler
+
+    engine = ComplianceEngine(_spec_from("domains/healthcare-referral/spec.yaml"))
+    out = engine.redact_response(_match_response({"name": "Dr Jane Roe", "patientid": "PT-991", "npi": "N1"}), "t")
+    candidate = out["candidates"][0]["candidate"]
+    assert candidate["name"] == PIIHandler.hash_value("Dr Jane Roe")
+    assert candidate["patientid"] == PIIHandler.hash_value("PT-991")
+    assert len(candidate["name"]) == 64
+    assert candidate["npi"] == "N1"
+    assert out["query_id"] == "q_5c9382647927"
+
+
+def test_declared_field_match_is_case_insensitive_at_any_depth() -> None:
+    engine = ComplianceEngine(_spec_from("domains/healthcare-referral/spec.yaml"))
+    out = engine.redact_response({"rows": [{"nested": {"PatientId": "PT-1"}}]}, "t")
+    assert out["rows"][0]["nested"]["PatientId"] != "PT-1"
+
+
+def test_legal_discovery_declared_redact_uses_fixed_marker() -> None:
+    from engine.compliance.pii import REDACTION_MARKER
+
+    engine = ComplianceEngine(_spec_from("domains/legal-discovery/spec.yaml"))
+    out = engine.redact_response({"clientname": "Acme LLP", "ssn": "123-45-6789", "matter": "M-1"}, "t")
+    assert out == {"clientname": REDACTION_MARKER, "ssn": REDACTION_MARKER, "matter": "M-1"}
+
+
+@pytest.mark.parametrize("handling", ["encrypt", "tokenize"])
+def test_unimplemented_handling_fails_closed_to_redact(handling: str, caplog: pytest.LogCaptureFixture) -> None:
+    from engine.compliance.pii import REDACTION_MARKER
+
+    def mutate(raw: dict) -> None:
+        raw["compliance"]["pii"]["handling"] = handling
+
+    engine = ComplianceEngine(_spec_from("domains/legal-discovery/spec.yaml", mutate))
+    with caplog.at_level("WARNING"):
+        out = engine.redact_response({"clientname": "Acme LLP"}, "t")
+    assert out == {"clientname": REDACTION_MARKER}
+    assert "Acme LLP" not in caplog.text
+    assert handling in caplog.text
+
+
+def test_pii_enabled_false_turns_declared_handling_off() -> None:
+    def mutate(raw: dict) -> None:
+        raw["compliance"]["pii"]["enabled"] = False
+
+    engine = ComplianceEngine(_spec_from("domains/healthcare-referral/spec.yaml", mutate))
+    out = engine.redact_response(_match_response({"name": "Dr Jane Roe", "patientid": "PT-991"}), "t")
+    assert out["candidates"][0]["candidate"] == {"name": "Dr Jane Roe", "patientid": "PT-991"}
+
+
+def test_declared_fields_flag_off_restores_builtin_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "pii_declared_fields_enforced", False)
+    engine = ComplianceEngine(_spec_from("domains/healthcare-referral/spec.yaml"))
+    out = engine.redact_response({"name": "Dr Jane Roe", "ssn": "123-45-6789"}, "t")
+    assert out == {"name": "Dr Jane Roe"}  # built-in inference deletes ssn; name survives

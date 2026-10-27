@@ -43,18 +43,27 @@ class ComplianceEngine:
         self._db_pool = db_pool
         self._prohibited = ProhibitedFactorValidator(domain_spec)
 
-        # Domain-specific PII enrichment (optional)
-        additional_pii: dict[str, tuple[PIICategory, PIISensitivity]] = {}
-        compliance = getattr(domain_spec, "compliance", None)
-        if compliance and getattr(compliance, "pii", None):
-            pii_cfg = compliance.pii
-            # Convention: compliance.pii.additional_fields: dict[name, (category, sensitivity)]
-            if hasattr(pii_cfg, "additional_fields") and isinstance(pii_cfg.additional_fields, dict):
-                additional_pii = pii_cfg.additional_fields
-
-        self._pii = PIIHandler(additional_pii_fields=additional_pii)
         from engine.config.settings import settings
 
+        compliance = getattr(domain_spec, "compliance", None)
+        pii_cfg = getattr(compliance, "pii", None) if compliance else None
+        # RU-064: the declared compliance.pii handling applies when the section is
+        # present and enabled (and list traversal, RU-062, is on so declared
+        # candidate fields inside `candidates[*]` are reachable).
+        self._pii_handling: str | None = None
+        if settings.pii_declared_fields_enforced and settings.pii_redaction_recursive:
+            declared: list[str] = []
+            if pii_cfg is not None and getattr(pii_cfg, "enabled", False) is True:
+                declared = [*getattr(pii_cfg, "fields", []), *getattr(pii_cfg, "candidatefields", [])]
+                self._pii_handling = str(getattr(pii_cfg, "handling", "hash"))
+            self._pii = PIIHandler(declared_fields=declared)
+        else:
+            # Legacy: probe a `compliance.pii.additional_fields` attribute PIISpec never had.
+            additional_pii: dict[str, tuple[PIICategory, PIISensitivity]] = {}
+            if pii_cfg:
+                if hasattr(pii_cfg, "additional_fields") and isinstance(pii_cfg.additional_fields, dict):
+                    additional_pii = pii_cfg.additional_fields
+            self._pii = PIIHandler(additional_pii_fields=additional_pii)
         if settings.compliance_audit_soft_sink:
             # RU-065: retention bounded by the documented W4-04 setting.
             self._audit = AuditLogger(buffer_size=settings.compliance_buffer_max)
@@ -298,6 +307,11 @@ class ComplianceEngine:
         """Redact PII from response before returning to client."""
         if not self._enabled:
             return response
+        if self._pii_handling is not None:
+            # RU-064: declared fields + built-in inference, transformed per the
+            # domain's declared handling mode (hash / redact; encrypt and
+            # tokenize fail closed to redact).
+            return self._pii.apply_handling(response, self._pii_handling)
         if _pii_recursive():
             # RU-062: detection and removal reach list elements (match
             # `candidates[*].candidate`) and never mutate `response`.

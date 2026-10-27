@@ -116,6 +116,12 @@ class PIIDetection(BaseModel):
 # object is never mutated.
 
 PathPart = str | int
+
+# RU-064 / DEC-22 (R3-DEC-01 recommended (a)): the fixed marker PII_HANDLING.md's
+# `redact` mode prescribes. `encrypt` / `tokenize` have no implementation (no key
+# sourcing, no token store) and fail closed to this marker.
+REDACTION_MARKER = "[REDACTED]"
+_IMPLEMENTED_HANDLING = frozenset({"hash", "redact"})
 _PATH_TOKEN = re.compile(r"\[(\d+)\]|([^.\[\]]+)")
 _DELETE = object()
 
@@ -215,7 +221,11 @@ class PIIHandler:
         self,
         additional_pii_fields: dict[str, tuple[PIICategory, PIISensitivity]] | None = None,
         mask_char: str = "*",
+        declared_fields: list[str] | None = None,
     ):
+        # RU-064: domain-declared PII keys (compliance.pii.fields + candidatefields),
+        # matched exactly, case-insensitively, at any depth (structured traversal).
+        self._declared = frozenset(f.casefold() for f in declared_fields or [])
         self._field_hints = dict(_PII_FIELD_HINTS)
         if additional_pii_fields:
             self._field_hints.update(additional_pii_fields)
@@ -289,6 +299,11 @@ class PIIHandler:
         if isinstance(node, dict):
             for key, value in node.items():
                 key_path = (*path, str(key))
+                if self._declared and str(key).casefold() in self._declared:
+                    found.append(
+                        (key_path, self._detection(key_path, PIICategory.CUSTOM, PIISensitivity.HIGH, "declared_field"))
+                    )
+                    continue
                 if isinstance(value, dict):
                     found.extend(self._detect_structured(value, key_path))
                     continue
@@ -511,6 +526,39 @@ class PIIHandler:
         key = path_parts[0]
         if key in data and isinstance(data[key], dict):
             self._redact_field_at_path(data[key], path_parts[1:])
+
+    def apply_handling(self, payload: dict[str, Any], handling: str) -> dict[str, Any]:
+        """Transform every detected PII field per a declared ``PIISpec.handling`` (RU-064).
+
+        ``hash`` -> ``hash_value`` SHA-256 hex digest of the value's string form;
+        ``redact`` -> ``REDACTION_MARKER``; ``encrypt`` / ``tokenize`` / anything
+        else fail closed to ``REDACTION_MARKER`` with a logged handling decision.
+        Copy-on-write: the input is never mutated. Logs field names only.
+        """
+        detections = self.detect_pii_paths(payload)
+        if not detections:
+            return dict(payload)
+        mode = handling.casefold() if isinstance(handling, str) else ""
+        if mode not in _IMPLEMENTED_HANDLING:
+            logger.warning(
+                "PII handling '%s' is not implemented; applying the redact marker to %d field(s): %s",
+                handling,
+                len(detections),
+                [d.field_path for _, d in detections],
+            )
+            mode = "redact"
+
+        def transform(value: Any) -> Any:
+            if mode == "hash":
+                return self.hash_value(str(value))
+            return REDACTION_MARKER
+
+        result: dict[str, Any] = dict(payload)
+        for path, _ in detections:
+            if path:
+                result = _edit_at_path(result, path, transform)
+        logger.debug("pii_fields_handled handling=%s fields=%d", mode, len(detections))
+        return result
 
     # ── Hashing (for pseudonymization) ─────────────────────
 
