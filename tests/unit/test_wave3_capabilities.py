@@ -677,3 +677,64 @@ class TestWave3Settings:
         assert s.tenant_auth_enabled is False
         assert s.tenant_auth_bypass_key == "super-secret"
         assert s.capability_auth_enabled is False
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  RU-008 / CEG-COR-017: handle_admin enforces admin:write
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _admin_wired(capabilities: list[CapabilitySpec]) -> MagicMock:
+    from unittest.mock import AsyncMock
+
+    from engine.handlers import init_dependencies
+    from tests.fixtures.domain_contracts import synthetic_loader
+
+    spec = synthetic_loader().load_domain("orbital-logistics").model_copy(update={"capabilities": capabilities})
+    driver = MagicMock()
+    driver.execute_query = AsyncMock(return_value=[])
+    loader = MagicMock()
+    loader.load_domain.return_value = spec
+    loader.list_domains.return_value = ["orbital-logistics"]
+    init_dependencies(driver, loader)
+    return driver
+
+
+@pytest.mark.finding("CEG-COR-017")
+class TestAdminCapabilityEnforcement:
+    """Mirrors the sync cases: a spec that restricts admin:write denies other subjects."""
+
+    async def test_admin_denied_when_spec_restricts_admin_write(self):
+        from engine.handlers import ValidationError, handle_admin
+
+        driver = _admin_wired(
+            [CapabilitySpec(name="admin_ops", actions=["admin:write"], allowed_subjects=["ops-only"])]
+        )
+        with pytest.raises(ValidationError, match="lacks capability 'admin:write'"):
+            await handle_admin("orbital-logistics", {"subaction": "init_schema", "domain_id": "orbital-logistics"})
+        driver.execute_query.assert_not_called()
+
+    async def test_admin_allowed_for_granted_subject(self):
+        from engine.handlers import handle_admin
+
+        _admin_wired(
+            [CapabilitySpec(name="admin_ops", actions=["admin:write"], allowed_subjects=["orbital-logistics"])]
+        )
+        result = await handle_admin("orbital-logistics", {"subaction": "list_domains"})
+        assert result["domains"] == ["orbital-logistics"]
+
+    async def test_admin_unaffected_without_capabilities(self):
+        from engine.handlers import handle_admin
+
+        _admin_wired([])
+        result = await handle_admin("orbital-logistics", {"subaction": "list_domains"})
+        assert result["domains"] == ["orbital-logistics"]
+
+    async def test_capability_auth_disabled_skips_admin_check(self, monkeypatch):
+        from engine.config.settings import settings
+        from engine.handlers import handle_admin
+
+        monkeypatch.setattr(settings, "capability_auth_enabled", False)
+        _admin_wired([CapabilitySpec(name="admin_ops", actions=["admin:write"], allowed_subjects=["ops-only"])])
+        result = await handle_admin("orbital-logistics", {"subaction": "list_domains"})
+        assert result["domains"] == ["orbital-logistics"]
