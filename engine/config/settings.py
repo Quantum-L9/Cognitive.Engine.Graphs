@@ -333,6 +333,12 @@ class Settings(BaseSettings):
     # value is rejected before any load or query, and evaluate matches as the
     # tenant. Off: the caller-chosen domain_id.
     admin_tenant_bound_domain: bool = True
+    # Correctness remediation lane B (plan 0d84ec8, RU-017..RU-031)
+    # RU-017 / CEG-COR-006: pricealignment divided candidate.<p> / $<q>, which
+    # Cypher evaluates as INTEGER division when both are integer-stored
+    # (450/500 -> 0). On: both operands are wrapped in toFloat(). Off: the
+    # legacy expression, for C-21 rollback only.
+    pricealignment_float_division: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

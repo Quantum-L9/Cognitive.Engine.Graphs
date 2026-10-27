@@ -90,3 +90,4 @@ were industry-specific and had no caller).
 | health_probe_domain_count_only | True | `handle_health` tenant-missing text carries a pack count, not domain ids (RU-013 / CEG-COR-074); off restores the id list |
 | sync_count_from_write_result | True | `UNWINDMATCHSET` sync reports the matched row count (`RETURN count(n) AS synced_count`) and `unmatched_count` (RU-060 / CEG-COR-169); off reports `len(batch)` |
 | admin_tenant_bound_domain | True | `handle_admin` binds `domain_id` to the packet tenant via `_bind_admin_domain` (RU-003 / CEG-COR-003); off restores the caller-chosen domain |
+| pricealignment_float_division | True | pricealignment divides `toFloat(candidate.<p>) / toFloat($<q>)` so INTEGER-stored prices are not truncated (RU-017 / CEG-COR-006); off restores the legacy `candidate.<p> / $<q>` text |
