@@ -152,7 +152,7 @@ class TestTriggerKGE:
 
         with pytest.raises(FeatureNotEnabled, match="KGE"):
             await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "trigger_kge", "domain_id": "test_domain"},
             )
 
@@ -172,7 +172,7 @@ class TestTriggerKGE:
             mock_settings.kge_embedding_dim = 256
             with pytest.raises(ValidationError, match="no 'kge' section"):
                 await handle_admin(
-                    "test_tenant",
+                    "test_domain",
                     {"subaction": "trigger_kge", "domain_id": "test_domain"},
                 )
 
@@ -192,7 +192,7 @@ class TestTriggerKGE:
             mock_settings.kge_embedding_dim = 256
             with pytest.raises(ValidationError, match="differs from"):
                 await handle_admin(
-                    "test_tenant",
+                    "test_domain",
                     {"subaction": "trigger_kge", "domain_id": "test_domain"},
                 )
 
@@ -209,7 +209,7 @@ class TestTriggerKGE:
             mock_settings.kge_embedding_dim = 256
             mock_settings.kge_confidence_threshold = 0.3
             result = await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "trigger_kge", "domain_id": "test_domain"},
             )
 
@@ -233,7 +233,7 @@ class TestTriggerKGE:
             mock_settings.kge_embedding_dim = 256
             mock_settings.kge_confidence_threshold = 0.3
             result = await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "trigger_kge", "domain_id": "test_domain"},
             )
 
@@ -265,7 +265,7 @@ class TestKGEStatus:
         init_dependencies(driver, loader)
 
         result = await handle_admin(
-            "test_tenant",
+            "test_domain",
             {"subaction": "kge_status", "domain_id": "test_domain"},
         )
 
@@ -423,7 +423,7 @@ class TestGDSStatus:
         with patch("engine.handlers._get_or_create_scheduler") as mock_get:
             mock_get.return_value = _make_scheduler_with_history([])
             result = await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "gds_status", "domain_id": "test_domain"},
             )
 
@@ -456,7 +456,7 @@ class TestGDSStatus:
         with patch("engine.handlers._get_or_create_scheduler") as mock_get:
             mock_get.return_value = _make_scheduler_with_history(history)
             result = await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "gds_status", "domain_id": "test_domain"},
             )
 
@@ -480,7 +480,7 @@ class TestGDSTrigger:
         with patch("engine.handlers._get_or_create_scheduler") as mock_get:
             mock_get.return_value = _make_scheduler_with_history()
             result = await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "gds_trigger", "domain_id": "test_domain", "job_name": "louvain_community"},
             )
 
@@ -499,7 +499,7 @@ class TestGDSTrigger:
 
         with pytest.raises(ValidationError, match="not found in domain spec"):
             await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "gds_trigger", "domain_id": "test_domain", "job_name": "nonexistent_job"},
             )
 
@@ -528,7 +528,7 @@ class TestGDSHealth:
         with patch("engine.handlers._get_or_create_scheduler") as mock_get:
             mock_get.return_value = _make_scheduler_with_history(history)
             result = await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "gds_health", "domain_id": "test_domain"},
             )
 
@@ -555,7 +555,7 @@ class TestGDSHealth:
         with patch("engine.handlers._get_or_create_scheduler") as mock_get:
             mock_get.return_value = _make_scheduler_with_history(history)
             result = await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "gds_health", "domain_id": "test_domain"},
             )
 
@@ -573,7 +573,7 @@ class TestGDSHealth:
         with patch("engine.handlers._get_or_create_scheduler") as mock_get:
             mock_get.return_value = _make_scheduler_with_history([])
             result = await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "gds_health", "domain_id": "test_domain"},
             )
 

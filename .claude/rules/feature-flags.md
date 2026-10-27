@@ -89,3 +89,4 @@ were industry-specific and had no caller).
 | outcome_map_json_encoding | True | `handle_outcomes` writes `dimension_weights` via `engine.models.outcomes.encode_outcome_map` (JSON); counterfactual reads via `decode_outcome_map` (RU-005 / CEG-COR-056); off restores `str(dict)` |
 | health_probe_domain_count_only | True | `handle_health` tenant-missing text carries a pack count, not domain ids (RU-013 / CEG-COR-074); off restores the id list |
 | sync_count_from_write_result | True | `UNWINDMATCHSET` sync reports the matched row count (`RETURN count(n) AS synced_count`) and `unmatched_count` (RU-060 / CEG-COR-169); off reports `len(batch)` |
+| admin_tenant_bound_domain | True | `handle_admin` binds `domain_id` to the packet tenant via `_bind_admin_domain` (RU-003 / CEG-COR-003); off restores the caller-chosen domain |

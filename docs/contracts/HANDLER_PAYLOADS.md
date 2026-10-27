@@ -63,7 +63,7 @@ stays `len(batch)` and it carries no `unmatched_count`.
 ```python
 class AdminPayload(BaseModel):
     subaction: Literal["list_domains", "get_domain", "init_schema", "trigger_gds"]
-    domain_id: str | None = None  # Required for get_domain, init_schema, trigger_gds
+    domain_id: str | None = None  # Required for get_domain, init_schema, trigger_gds; must equal the packet tenant (RU-003)
     job_name: str | None = None  # Required for trigger_gds
 
 
@@ -71,6 +71,17 @@ class AdminResponse(BaseModel):
     # Varies by subaction — always a dict
     pass
 ```
+
+RU-003 (`ADMIN_TENANT_BOUND_DOMAIN`, default on): the identity contract binds a
+tenant to the domain pack with the same id, so every domain-bearing admin
+subaction (`get_domain`, `init_schema`, `trigger_gds`, `calibration_run`,
+`score_feedback`, `generate_calibration_pairs`, `domain_density_report`,
+`auto_tune`, `discover_weights`, `trigger_kge`, `kge_status`, `erase_subject`,
+`gds_status`, `gds_trigger`, `gds_health`, `emit_inference_feedback`,
+`evaluate`) takes `domain_id` absent (where optional; it defaults to the
+tenant) or equal to the packet tenant. Anything else raises `ValidationError`
+before any domain load or query. `evaluate` runs its matches as the packet
+tenant. `list_domains` and `delegate_capability` are unchanged.
 
 
 ## health-assess (HEALTH-01)

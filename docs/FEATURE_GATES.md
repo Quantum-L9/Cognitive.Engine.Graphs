@@ -90,6 +90,7 @@ independently of the code default.
 | Outcome Map JSON Encoding | `OUTCOME_MAP_JSON_ENCODING` (`outcome_map_json_encoding`) | `True` | unset | active (correctness, RU-005); `outcomes` stores `fingerprint.dimension_weights` as sorted-key JSON that counterfactual generation decodes (legacy repr strings read as empty, never eval'd); off restores the `str(dict)` writer |
 | Health Probe Domain Count Only | `HEALTH_PROBE_DOMAIN_COUNT_ONLY` (`health_probe_domain_count_only`) | `True` | unset | active (hardening, RU-013); `health` for a tenant without a pack reports `<N> domain packs`, not the loaded domain ids; off restores the id list |
 | Sync Count From Write Result | `SYNC_COUNT_FROM_WRITE_RESULT` (`sync_count_from_write_result`) | `True` | unset | active (correctness, RU-060); `UNWINDMATCHSET` sync returns `count(n) AS synced_count` and the response adds `unmatched_count`; `UNWINDMERGE` unchanged; off restores `synced_count = len(batch)` |
+| Admin Tenant-bound Domain | `ADMIN_TENANT_BOUND_DOMAIN` (`admin_tenant_bound_domain`) | `True` | unset | active (hardening, RU-003); every domain-bearing admin subaction rejects a `domain_id` other than the packet tenant before any load or query; `evaluate` matches as the tenant; off restores the caller-chosen `domain_id` |
 
 ---
 

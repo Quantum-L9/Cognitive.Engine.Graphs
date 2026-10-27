@@ -328,6 +328,11 @@ class Settings(BaseSettings):
     # handle_sync reports that as synced_count plus unmatched_count. Off: no
     # RETURN and synced_count = len(batch).
     sync_count_from_write_result: bool = True
+    # RU-003 / CEG-COR-003: every domain-bearing admin subaction's domain_id must
+    # equal the packet tenant (identity contract; mirrors HEALTH-05); a differing
+    # value is rejected before any load or query, and evaluate matches as the
+    # tenant. Off: the caller-chosen domain_id.
+    admin_tenant_bound_domain: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
