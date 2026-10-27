@@ -103,3 +103,50 @@ async def test_match_unknown_direction_raises(engine_deps):
             "plasticos",
             {"query": {"polymer_type": "PET"}, "match_direction": "nonexistent_direction", "top_n": 5},
         )
+
+
+MULTI_PATH_SEED_CYPHER = """
+MERGE (n:Facility {entity_id: $entity_id})
+SET n += $props
+WITH n
+UNWIND $codes AS code
+MERGE (p:PolymerFamily {code: code})
+MERGE (n)-[:PROCESSES]->(p)
+"""
+
+
+@pytest.mark.asyncio
+async def test_match_returns_multi_path_candidate_once(engine_deps, graph_driver, clean_db):
+    """RU-036 / CEG-COR-007 (RG-048): a Facility with 3 PROCESSES edges is one candidate.
+
+    Before the per-candidate collapse the required traversal step produced one
+    row per edge and the facility appeared three times, consuming top_n slots.
+    """
+    await graph_driver.execute_write(
+        cypher=MULTI_PATH_SEED_CYPHER,
+        parameters={
+            "entity_id": "f_multi",
+            "props": _facility("f_multi", contamination_tolerance=0.10),
+            "codes": ["PET", "HDPE", "PP"],
+        },
+        database="plasticos",
+    )
+    await graph_driver.execute_write(
+        cypher=SEED_CYPHER,
+        parameters={"batch": [_facility("f_single", contamination_tolerance=0.10)]},
+        database="plasticos",
+    )
+    from engine.handlers import handle_match
+
+    result = await handle_match(
+        "plasticos",
+        {
+            "query": {"polymer_type": "PET", "contamination_pct": 0.05},
+            "match_direction": "supply_opportunity_to_buyer_facility",
+            "top_n": 10,
+        },
+    )
+    ids = [c["candidate"].get("entity_id") for c in result["candidates"]]
+    assert ids.count("f_multi") == 1
+    assert sorted(ids) == ["f_multi", "f_single"]
+    assert result["total_candidates"] == len(set(ids))

@@ -92,7 +92,9 @@ async def _match(**payload: Any) -> dict[str, Any]:
 @pytest.mark.unit
 @pytest.mark.finding("CEG-COR-001")
 class TestDimensionProjection:
-    async def test_return_projects_every_active_dimension_alias(self) -> None:
+    async def test_return_projects_every_active_dimension_alias(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The RETURN line in isolation; RU-036's per-candidate collapse is covered below.
+        monkeypatch.setattr(settings, "match_collapse_traversal_rows", False)
         driver = _wire(_spec())
         await _match()
         cypher = driver.calls[0]["cypher"]
@@ -139,7 +141,21 @@ class TestDimensionProjection:
             assert not set(DIMS) & set(cand)
             assert set(cand["dimension_scores"]) == set(DIMS)
 
-    async def test_zero_active_dimensions_emit_an_empty_map(self) -> None:
+    async def test_projection_survives_the_per_candidate_collapse(self) -> None:
+        driver = _wire(_spec())
+        await _match()
+        cypher = driver.calls[0]["cypher"]
+        assert (
+            "WITH candidate, score, {depot_reliability: depot_reliability, "
+            "port_capacity: port_capacity} AS dimension_scores\n" in cypher
+        )
+        assert cypher.endswith(
+            "RETURN candidate, best.score AS score, best.dimension_scores AS dimension_scores\n"
+            "ORDER BY score DESC\nLIMIT $top_n"
+        )
+
+    async def test_zero_active_dimensions_emit_an_empty_map(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(settings, "match_collapse_traversal_rows", False)
         spec = _spec()
         spec = spec.model_copy(update={"scoring": spec.scoring.model_copy(update={"dimensions": []})})
         driver = _wire(spec)
@@ -148,6 +164,7 @@ class TestDimensionProjection:
 
     async def test_flag_off_restores_the_previous_return_line(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings, "match_dimension_projection", False)
+        monkeypatch.setattr(settings, "match_collapse_traversal_rows", False)
         driver = _wire(_spec())
         result = await _match()
         cypher = driver.calls[0]["cypher"]

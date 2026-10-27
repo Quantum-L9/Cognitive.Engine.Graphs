@@ -81,3 +81,4 @@ were industry-specific and had no caller).
 | spec_declared_candidate_id | True | `handle_match` identifies candidates by the domain's declared id property (sync `idproperty`, else first required property) instead of a hardcoded `entity_id`; off restores `entity_id` only |
 | match_dimension_projection | True | `handle_match` RETURNs `{<alias>: <alias>, ...} AS dimension_scores` for the active dimensions (RU-001 / CEG-COR-001); off restores `RETURN candidate, score` |
 | gate_where_row_scope | True | `handle_match` emits `WITH *` between traversal clauses and the gate `WHERE`, so a trailing `OPTIONAL MATCH` cannot swallow the gates (RU-011 / CEG-COR-033); off restores the bare `WHERE` |
+| match_collapse_traversal_rows | True | `handle_match` collapses to one row per candidate (highest score, `head(collect(...))`) before `ORDER BY`/`LIMIT` (RU-036 / CEG-COR-007); off restores one row per traversal path |
