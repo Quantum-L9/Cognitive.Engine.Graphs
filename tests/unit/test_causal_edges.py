@@ -295,7 +295,10 @@ class TestCausalCompiler:
         cypher = compiler.compile_causal_edge_create(edge_spec)
 
         assert "RESULTED_IN" in cypher
-        assert "$confidence >= 0.5" in cypher
+        # RU-068: the threshold is bound as a parameter (C-9); the former literal
+        # `$confidence >= 0.5` assertion encoded the interpolation defect.
+        assert "$confidence >= $confidence_threshold" in cypher
+        assert "0.5" not in cypher
 
     def test_compile_edge_without_temporal_validation(self):
         spec = _spec_with_causal(
@@ -650,3 +653,75 @@ class TestAttributionUniqueTouchpoints:
         monkeypatch.setattr(settings, "causal_attribution_unique_touchpoints", False)
         weights = AttributionCalculator._assign_weights(_DIAMOND_ROWS, "linear")
         assert sum(weights.values()) == pytest.approx(0.6, abs=1e-6)  # legacy: 3 of 5 row shares
+
+
+# ── RU-068 / CEG-COR-057: declared identities, anchored WHERE, stable MERGE ──
+
+
+def _edge(**kw) -> CausalEdgeSpec:
+    base = {"edge_type": "RESULTED_IN", "source_label": "Facility", "target_label": "TransactionOutcome"}
+    return CausalEdgeSpec(**{**base, **kw})
+
+
+class TestCausalCompilerIdentity:
+    @pytest.mark.parametrize(("temporal", "threshold"), [(True, 0.0), (True, 0.5), (False, 0.5), (False, 0.0)])
+    def test_predicates_share_one_where(self, temporal: bool, threshold: float) -> None:
+        spec = _spec_with_causal(causal_edges=[_edge(temporal_validation=temporal, confidence_threshold=threshold)])
+        cypher = CausalCompiler(spec).compile_causal_edge_create(spec.causal.causal_edges[0])
+        expected_where = 1 if (temporal or threshold > 0) else 0
+        assert cypher.count("WHERE") == expected_where
+        assert "\nAND " not in cypher
+        assert ("source.created_at < target.created_at" in cypher) is temporal
+        assert ("$confidence >= $confidence_threshold" in cypher) is (threshold > 0)
+        if expected_where:
+            assert cypher.index("WHERE") < cypher.index("MERGE")
+
+    def test_target_outcome_matched_by_outcome_id_source_by_declared_id(self) -> None:
+        spec = _spec_with_causal(causal_edges=[_edge()])
+        cypher = CausalCompiler(spec).compile_causal_edge_create(spec.causal.causal_edges[0])
+        assert "MATCH (target:TransactionOutcome {outcome_id: $target_id})" in cypher
+        assert "MATCH (source:Facility {facility_id: $source_id})" in cypher
+        assert "entity_id" not in cypher
+
+    def test_explicit_id_properties_win_and_are_sanitized(self) -> None:
+        spec = _spec_with_causal(causal_edges=[_edge()])
+        compiler = CausalCompiler(spec)
+        cypher = compiler.compile_causal_edge_create(spec.causal.causal_edges[0], source_id_property="depot_code")
+        assert "{depot_code: $source_id}" in cypher
+        with pytest.raises(ValueError):
+            compiler.compile_causal_edge_create(spec.causal.causal_edges[0], source_id_property="x}) DETACH DELETE (n")
+
+    def test_merge_has_no_properties_and_sets_on_create_and_match(self) -> None:
+        spec = _spec_with_causal(causal_edges=[_edge()])
+        cypher = CausalCompiler(spec).compile_causal_edge_create(spec.causal.causal_edges[0])
+        assert "MERGE (source)-[r:RESULTED_IN]->(target)" in cypher
+        assert "ON CREATE SET" in cypher
+        assert "ON MATCH SET" in cypher
+        merge_line = next(line for line in cypher.splitlines() if line.startswith("MERGE"))
+        assert "datetime()" not in merge_line
+
+    def test_label_without_declaration_falls_back_to_entity_id(self) -> None:
+        spec = _spec_with_causal(
+            causal_edges=[_edge(edge_type="CAUSED_BY", source_label="Unknown", target_label="Facility")]
+        )
+        cypher = CausalCompiler(spec).compile_causal_edge_create(spec.causal.causal_edges[0])
+        assert "MATCH (source:Unknown {entity_id: $source_id})" in cypher
+        assert "MATCH (target:Facility {facility_id: $target_id})" in cypher
+
+    def test_flag_off_restores_legacy_cypher(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "causal_edge_declared_identity", False)
+        spec = _spec_with_causal(causal_edges=[_edge(temporal_validation=False, confidence_threshold=0.5)])
+        cypher = CausalCompiler(spec).compile_causal_edge_create(spec.causal.causal_edges[0])
+        assert cypher == (
+            "MATCH (source:Facility {entity_id: $source_id})\n"
+            "MATCH (target:TransactionOutcome {entity_id: $target_id})\n"
+            "AND $confidence >= 0.5\n"
+            "MERGE (source)-[r:RESULTED_IN {\n"
+            "    confidence: $confidence,\n"
+            "    mechanism: $mechanism,\n"
+            "    created_at: datetime()\n"
+            "}]->(target)\n"
+            "RETURN r"
+        )

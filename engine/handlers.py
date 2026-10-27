@@ -2012,7 +2012,13 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
         compiler = CausalCompiler(domain_spec)
         for edge_spec in domain_spec.causal.causal_edges:
             if edge_spec.edge_type == "RESULTED_IN" and create_resulted_in:
-                edge_cypher = compiler.compile_causal_edge_create(edge_spec)
+                # RU-068: the source is the candidate, identified like everywhere
+                # else in handlers; the target (outcome) identity is resolved by
+                # the compiler. The threshold is bound, never interpolated.
+                edge_cypher = compiler.compile_causal_edge_create(
+                    edge_spec,
+                    source_id_property=_candidate_id_property(domain_spec, edge_spec.source_label),
+                )
                 try:
                     await graph_driver.execute_query(
                         cypher=edge_cypher,
@@ -2021,6 +2027,7 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
                             "target_id": outcome_id,
                             "confidence": 1.0,
                             "mechanism": f"outcome_{outcome}",
+                            "confidence_threshold": edge_spec.confidence_threshold,
                         },
                         database=domain_spec.domain.id,
                     )
