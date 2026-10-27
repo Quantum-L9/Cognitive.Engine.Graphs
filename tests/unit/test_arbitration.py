@@ -49,3 +49,19 @@ def test_arbitration_input_rejects_out_of_range() -> None:
     """ArbitrationInput rejects values outside [0, 1]."""
     with pytest.raises(ValueError):
         ArbitrationInput(revenue=1.2, margin=0.0, risk=0.0, capacity=0.0, compliance_pass=True)
+
+
+# RU-107 / CEG-COR-130: NaN fails the inclusion test for every metric.
+@pytest.mark.parametrize("metric", ["revenue", "margin", "risk", "capacity"])
+def test_arbitration_input_rejects_nan(metric: str) -> None:
+    from pydantic import ValidationError
+
+    values = {"revenue": 0.5, "margin": 0.5, "risk": 0.5, "capacity": 0.5, metric: float("nan")}
+    with pytest.raises(ValidationError, match=metric):
+        ArbitrationInput(**values, compliance_pass=True)
+
+
+@pytest.mark.parametrize("bound", [0.0, 1.0])
+def test_arbitration_input_accepts_boundaries(bound: float) -> None:
+    payload = ArbitrationInput(revenue=bound, margin=bound, risk=bound, capacity=bound, compliance_pass=True)
+    assert payload.revenue == bound
