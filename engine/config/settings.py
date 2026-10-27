@@ -289,6 +289,11 @@ class Settings(BaseSettings):
     # `dimension_scores` map so Pareto, arbitration and confidence checks see
     # real values. Off: `RETURN candidate, score`.
     match_dimension_projection: bool = True
+    # RU-011 / CEG-COR-033: `WITH *` between the traversal clauses and the gate
+    # WHERE so gates filter candidate rows even after a trailing OPTIONAL MATCH
+    # (whose own WHERE only nulls optional variables). Off: WHERE follows the
+    # traversal clauses directly.
+    gate_where_row_scope: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
