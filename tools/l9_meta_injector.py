@@ -14,6 +14,7 @@ status: active
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 from dataclasses import dataclass
@@ -934,10 +935,25 @@ def _yaml_list(items: list[str]) -> str:
     return "[" + ", ".join(items) + "]"
 
 
+def _meta_field_lines(meta: FileMeta, engine: str) -> list[str]:
+    """The seven header fields, in contract order (docs/contracts/L9_META_HEADERS.md)."""
+    return [
+        f"l9_schema: {L9_SCHEMA_VERSION}",
+        f"origin: {meta.origin}",
+        f"engine: {engine}",
+        f"layer: {_yaml_list(meta.layer)}",
+        f"tags: {_yaml_list(meta.tags)}",
+        f"owner: {meta.owner}",
+        f"status: {meta.status}",
+    ]
+
+
 def format_comment_block(meta: FileMeta, engine: str, prefix: str = "# ") -> str:
     """Format L9_META as comment block for YAML, shell, Makefile, Dockerfile, etc."""
     lines = [
-        f"{prefix}",
+        f"{prefix}--- L9_META ---",
+        *(f"{prefix}{field}" for field in _meta_field_lines(meta, engine)),
+        f"{prefix}--- /L9_META ---",
     ]
     return "\n".join(lines)
 
@@ -961,7 +977,9 @@ def format_html_comment(meta: FileMeta, engine: str) -> str:
 def format_python_docstring_block(meta: FileMeta, engine: str) -> str:
     """Format L9_META for Python docstring insertion."""
     lines = [
-        "",
+        "--- L9_META ---",
+        *_meta_field_lines(meta, engine),
+        "--- /L9_META ---",
     ]
     return "\n".join(lines)
 
@@ -999,8 +1017,12 @@ def format_toml_block(meta: FileMeta, engine: str) -> str:
 # STRIP EXISTING — Regex patterns for idempotent re-injection
 # =============================================================================
 
-# Matches comment-style L9_META blocks (YAML, shell, Makefile, Dockerfile, Python without docstring)
+# Matches comment-style L9_META blocks (YAML, shell, Makefile, Dockerfile, CODEOWNERS)
 # Example:
+#   # --- L9_META ---
+#   # l9_schema: 1
+#   # ...
+#   # --- /L9_META ---
 RE_COMMENT_META = re.compile(
     r"^[ \t]*#[ \t]*---[ \t]*L9_META[ \t]*---.*?#[ \t]*---[ \t]*/L9_META[ \t]*---[ \t]*\n?",
     re.MULTILINE | re.DOTALL,
@@ -1017,8 +1039,17 @@ RE_HTML_META = re.compile(
     re.DOTALL,
 )
 
-# Matches L9_META inside Python docstrings
+# Matches L9_META inside a Python module docstring body. Applied to the body of
+# the module docstring only, never to the rest of the file (code may contain the
+# delimiters in string literals, as this module's own formatters do).
 # Example:
+#   """
+#   --- L9_META ---
+#   l9_schema: 1
+#   ...
+#   --- /L9_META ---
+#
+#   Module description.
 #   """
 RE_PY_DOCSTRING_META = re.compile(
     r"---[ \t]*L9_META[ \t]*---.*?---[ \t]*/L9_META[ \t]*---[ \t]*\n?",
@@ -1071,50 +1102,96 @@ def _detect_filetype(path: str) -> str:
 # =============================================================================
 
 
+# A triple-quoted docstring literal: optional string prefix, quotes, body, quotes.
+_RE_TRIPLE_QUOTED = re.compile(r"^([rRuU]?)(\"{3}|'{3})(.*)\2$", re.DOTALL)
+
+
+def _line_offsets(content: str) -> list[int]:
+    """Character offset of the start of each line (index 0 is line 1)."""
+    offsets = [0]
+    for line in content.splitlines(keepends=True):
+        offsets.append(offsets[-1] + len(line))
+    return offsets
+
+
+def _node_char_span(content: str, node: ast.expr) -> tuple[int, int]:
+    """(start, end) character offsets of *node*; ast columns are UTF-8 byte offsets."""
+    lines = content.splitlines(keepends=True)
+    offsets = _line_offsets(content)
+    end_lineno = node.end_lineno if node.end_lineno is not None else node.lineno
+    end_col = node.end_col_offset if node.end_col_offset is not None else 0
+
+    def _char(lineno: int, byte_col: int) -> int:
+        line = lines[lineno - 1] if lineno - 1 < len(lines) else ""
+        return offsets[lineno - 1] + len(line.encode("utf-8")[:byte_col].decode("utf-8"))
+
+    return _char(node.lineno, node.col_offset), _char(end_lineno, end_col)
+
+
+def _prologue_end(content: str) -> int:
+    """Offset just after the last line of the leading comment prologue.
+
+    The prologue is the run of blank and ``#`` lines before the first statement
+    (shebang, encoding declaration, licence). Blank lines that follow the last
+    comment stay after the insertion point, so spacing before code is kept.
+    """
+    pos = end = 0
+    for line in content.splitlines(keepends=True):
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            break
+        pos += len(line)
+        if stripped:
+            end = pos
+    return end
+
+
 def _inject_python_meta(content: str, meta: FileMeta, engine: str) -> str:
-    """Inject L9_META into Python files using docstring style."""
-    # Strip existing meta from docstring if present
-    content = RE_PY_DOCSTRING_META.sub("", content)
-    # Also strip comment-style meta if someone added it wrong
-    content = RE_COMMENT_META.sub("", content)
+    """Inject L9_META into the module docstring of a Python file.
+
+    Only the module docstring (the module's first statement, as ``ast`` defines
+    it) is ever rewritten. Everything before it (shebang, encoding line, licence
+    comments) and everything after it is kept byte-for-byte. Without a module
+    docstring, a new one is inserted after the comment prologue.
+    """
+    try:
+        tree = ast.parse(content)
+    except SyntaxError as exc:
+        msg = f"cannot parse Python source ({exc.msg} at line {exc.lineno}); refusing to inject"
+        raise ValueError(msg) from exc
 
     meta_block = format_python_docstring_block(meta, engine)
+    first = tree.body[0] if tree.body else None
+    docstring_node = (
+        first.value
+        if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str)
+        else None
+    )
 
-    # Check for existing docstring at start of file (after optional shebang)
-    shebang = ""
-    working_content = content.lstrip("\n")
-    if working_content.startswith("#!"):
-        nl = working_content.index("\n")
-        shebang = working_content[: nl + 1]
-        working_content = working_content[nl + 1 :]
+    if docstring_node is None:
+        pos = _prologue_end(content)
+        # A comment-style header mistakenly placed in the prologue is replaced by
+        # the docstring header; code after the prologue is never searched.
+        prologue = RE_COMMENT_META.sub("", content[:pos])
+        if prologue and not prologue.endswith("\n"):
+            prologue += "\n"
+        return prologue + f'"""\n{meta_block}\n"""\n' + content[pos:]
 
-    # Strip leading whitespace/newlines and any orphaned comments before docstring
-    working_content = working_content.lstrip("\n")
+    start, end = _node_char_span(content, docstring_node)
+    literal = content[start:end]
+    match = _RE_TRIPLE_QUOTED.match(literal)
+    if match is None:
+        msg = "module docstring is not a single triple-quoted literal; refusing to rewrite it"
+        raise ValueError(msg)
+    prefix, quote, body = match.group(1), match.group(2), match.group(3)
 
-    # Match existing docstring (may be preceded by comments we should skip)
-    ds_match = re.search(r'^(""")(.*?)(""")', working_content, re.MULTILINE | re.DOTALL)
-    if ds_match:
-        # Skip any content before the docstring (orphaned comments, stale paths)
-        opening = ds_match.group(1)
-        body = ds_match.group(2)
-        closing = ds_match.group(3)
-        post_docstring = working_content[ds_match.end() :]
-
-        # Strip any existing L9_META from body
-        body = RE_PY_DOCSTRING_META.sub("", body)
-        body_stripped = body.lstrip("\n")
-
-        # Build new docstring with meta at top
-        if body_stripped:
-            new_ds = f"{opening}\n{meta_block}\n\n{body_stripped}{closing}"
-        else:
-            new_ds = f"{opening}\n{meta_block}\n{closing}"
-
-        # Don't preserve orphaned comments before docstring (they're usually stale paths)
-        return shebang + new_ds + post_docstring
-
-    # No existing docstring — create one with just the meta block
-    return shebang + f'"""\n{meta_block}\n"""\n' + working_content
+    # Strip any existing L9_META from the docstring body only.
+    body_stripped = RE_PY_DOCSTRING_META.sub("", body).lstrip("\n")
+    if body_stripped:
+        new_ds = f"{prefix}{quote}\n{meta_block}\n\n{body_stripped}{quote}"
+    else:
+        new_ds = f"{prefix}{quote}\n{meta_block}\n{quote}"
+    return RE_COMMENT_META.sub("", content[:start]) + new_ds + content[end:]
 
 
 def _inject_comment_meta(content: str, meta: FileMeta, engine: str) -> str:
