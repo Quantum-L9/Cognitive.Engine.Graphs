@@ -542,6 +542,11 @@ class Settings(BaseSettings):
     # admin delegate_capability response therefore shows a new proof_hash).
     # Off: the legacy checks and hash input.
     capability_record_binding_enabled: bool = True
+    # Correctness remediation lane F (plan 0d84ec8, RU-093..RU-103)
+    # RU-094 / CEG-COR-035: a HALF_OPEN probe cancelled before it produced a
+    # result (the SDK runtime's wait_for timeout) returns its probe slot. Off:
+    # the slot leaks and three cancelled probes wedge the breaker until restart.
+    neo4j_circuit_release_cancelled_probes: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

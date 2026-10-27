@@ -126,3 +126,6 @@ were industry-specific and had no caller).
 | safe_eval_reject_keywords | True | `safe_eval` raises `ValueError` for a call with keyword arguments instead of silently dropping them (RU-076 / CEG-COR-125); off restores the silent drop |
 | causal_serializer_variable_depth | True | `CausalSubgraphSerializer` uses `[:T1|T2*1..N]` with N = `max_depth` clamped to [1, `causal.chain_depth_limit`] so match explanations reach the requested depth (RU-074 / CEG-COR-121); off restores the one-hop `[r:T]` pattern |
 | counterfactual_dedupe_and_spec_label | True | `CounterfactualGenerator` emits at most one scenario per (intervention, key_difference) and reads fingerprints from the domain's `feedbackloop.outcome_node_label` instead of `:TransactionOutcome` (RU-075 / CEG-COR-122); off restores duplicates and the literal label |
+
+## Correctness remediation lane F (plan 0d84ec8)
+| neo4j_circuit_release_cancelled_probes | True | A HALF_OPEN probe cancelled before producing a result (SDK `wait_for` timeout) returns its slot, so the breaker re-probes instead of wedging until restart (RU-094 / CEG-COR-035); off restores the leaking slot accounting |

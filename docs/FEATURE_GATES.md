@@ -1229,3 +1229,16 @@ suppresses duplicates, and `handle_outcomes` passes
 queried label. Off: duplicates and the literal label.
 
 Rollback: set the flag to `false`.
+## 24. Correctness remediation lane F (plan 0d84ec8)
+
+Hardening fixes from the CEG correctness remediation plan. Each restores an
+invariant the code already claimed, so each ships `True`; set the env var to
+`false` to restore the previous behaviour verbatim.
+
+| Flag (env var) | Default | Unit | On | Off |
+| `neo4j_circuit_release_cancelled_probes` (`NEO4J_CIRCUIT_RELEASE_CANCELLED_PROBES`) | `true` | RU-094 / CEG-COR-035 | A HALF_OPEN probe that ends in `asyncio.CancelledError` returns its probe slot (only within the HALF_OPEN cycle it was taken in) and records neither success nor failure | The slot leaks; `half_open_max_calls` cancelled probes leave the breaker rejecting every call until process restart |
+
+### Rollback
+
+Set the flag's env var to `false` and restart the process. A process already
+wedged by the pre-fix behaviour needs a restart either way.
