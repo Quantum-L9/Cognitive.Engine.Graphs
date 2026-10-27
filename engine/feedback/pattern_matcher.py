@@ -25,6 +25,9 @@ from engine.utils.security import sanitize_label
 
 logger = logging.getLogger(__name__)
 
+# RU-030: the most a configuration's commonness can discount its similarity.
+_MAX_FREQUENCY_DISCOUNT = 0.5
+
 
 def jaccard_similarity(set_a: set[str], set_b: set[str]) -> float:
     """Compute Jaccard similarity between two sets."""
@@ -42,13 +45,19 @@ def corrected_similarity(
 ) -> float:
     """Apply sample probability correction to raw Jaccard similarity.
 
-    Subtracts log(frequency)/log(total) to surface rare-but-predictive
-    configurations over common ones.
+    Discounts common configurations to surface rare-but-predictive ones.
+
+    RU-030 / CEG-COR-123: the correction is a bounded multiplicative discount,
+    ``raw * (1 - _MAX_FREQUENCY_DISCOUNT * log(f) / log(total))`` with the
+    log ratio clamped to [0, 1]. Subtracting ``log(f) / log(total)`` (the
+    previous form) scored an identical configuration shared by every outcome
+    0.0. Now a configuration seen once keeps ``raw``, one shared by all keeps
+    ``raw * (1 - _MAX_FREQUENCY_DISCOUNT)``, and rarer always ranks higher.
     """
     if total_outcomes <= 1 or frequency <= 0:
         return raw_similarity
-    correction = math.log(frequency) / math.log(total_outcomes)
-    return max(0.0, raw_similarity - correction)
+    ratio = min(1.0, max(0.0, math.log(frequency) / math.log(total_outcomes)))
+    return raw_similarity * (1.0 - _MAX_FREQUENCY_DISCOUNT * ratio)
 
 
 class ConfigurationMatcher:
@@ -77,6 +86,11 @@ class ConfigurationMatcher:
         Find historical outcomes matching the current match configuration
         using Jaccard similarity on configuration keys with sample probability
         correction for frequency bias.
+
+        Historical configurations are read from ``o.active_dimensions``, the
+        property ``handle_outcomes`` persists (``o.config_keys`` was written by
+        nothing). ``current_config["active_dimensions"]``, when given, is the
+        caller's set of active dimension names.
         """
         outcome_label = sanitize_label(self._spec.feedbackloop.outcome_node_label)
 
@@ -86,7 +100,7 @@ class ConfigurationMatcher:
         RETURN o.outcome_id AS outcome_id,
                o.match_id AS match_id,
                o.candidate_id AS candidate_id,
-               o.config_keys AS config_keys,
+               o.active_dimensions AS config_keys,
                o.outcome AS outcome,
                o.value AS value
         ORDER BY o.created_at DESC
@@ -103,7 +117,14 @@ class ConfigurationMatcher:
         )
 
         total_outcomes = len(results)
-        current_keys = self._extract_config_keys(current_config)
+        # RU-030: historical keys are the outcome's persisted active_dimensions
+        # (handle_outcomes fingerprint), so a caller that supplies its own
+        # active dimension names is compared name-for-name.
+        caller_dimensions = current_config.get("active_dimensions")
+        if isinstance(caller_dimensions, list):
+            current_keys = {str(d) for d in caller_dimensions}
+        else:
+            current_keys = self._extract_config_keys(current_config)
 
         # Count frequency of each config key set for probability correction
         config_freq: dict[str, int] = {}

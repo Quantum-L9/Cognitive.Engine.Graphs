@@ -233,3 +233,67 @@ class TestDetectNegativePatterns:
 
         assert len(result) == 1
         assert result[0]["outcome"] == "failure"
+
+
+# ── RU-030 / CEG-COR-123: bounded frequency correction, persisted config source (RG-038) ──
+
+
+class TestCorrectedSimilarityBounded:
+    def test_identical_config_shared_by_all_stays_positive(self):
+        from engine.feedback.pattern_matcher import corrected_similarity
+
+        assert corrected_similarity(1.0, 10, 10) > 0.0
+
+    def test_rarer_config_ranks_higher(self):
+        from engine.feedback.pattern_matcher import corrected_similarity
+
+        assert corrected_similarity(1.0, 1, 10) > corrected_similarity(1.0, 10, 10)
+        assert corrected_similarity(1.0, 2, 10) > corrected_similarity(1.0, 5, 10)
+
+    def test_no_correction_without_history(self):
+        from engine.feedback.pattern_matcher import corrected_similarity
+
+        assert corrected_similarity(0.7, 3, 1) == 0.7
+        assert corrected_similarity(0.7, 3, 0) == 0.7
+
+    def test_correction_is_a_bounded_discount(self):
+        from engine.feedback.pattern_matcher import corrected_similarity
+
+        for freq in (1, 3, 10, 50):
+            value = corrected_similarity(0.8, freq, 10)
+            assert 0.0 < value <= 0.8
+
+
+class TestActiveDimensionsSource:
+    @pytest.mark.asyncio
+    async def test_reads_persisted_active_dimensions(self):
+        driver = _mock_driver()
+        await ConfigurationMatcher(driver, _minimal_spec()).find_similar_outcomes(
+            current_config={"active_dimensions": ["geo"]}
+        )
+        cypher = driver.execute_query.call_args.args[0]
+        assert "o.active_dimensions" in cypher
+        assert "o.config_keys" not in cypher
+
+    @pytest.mark.asyncio
+    async def test_identical_active_dimensions_have_raw_similarity_one(self):
+        driver = _mock_driver()
+        driver.execute_query = AsyncMock(
+            return_value=[
+                {
+                    "outcome_id": f"out_{i}",
+                    "match_id": f"m{i}",
+                    "candidate_id": f"c{i}",
+                    "config_keys": ["geo_proximity", "price_alignment"],
+                    "outcome": "success",
+                    "value": 1.0,
+                }
+                for i in (1, 2)
+            ]
+        )
+        result = await ConfigurationMatcher(driver, _minimal_spec()).find_similar_outcomes(
+            current_config={"active_dimensions": ["price_alignment", "geo_proximity"]},
+            similarity_threshold=0.4,
+        )
+        assert [r["raw_similarity"] for r in result] == [1.0, 1.0]
+        assert all(r["similarity"] > 0.0 for r in result)
