@@ -419,3 +419,41 @@ def test_composite_subgate_scoping_off_restores_the_legacy_and(monkeypatch: pyte
     ga = compiler.compile(spec.gates[0])
     gb = compiler.compile(spec.gates[1])
     assert GateCompiler(spec).compile_all_gates("d1") == f"({ga}) AND ({gb}) AND (({ga}) OR ({gb}))"
+
+
+# RG-066 (RU-052 / CEG-COR-079): freshness maxagedays defaults only when absent.
+def _freshness(maxagedays: int | None) -> dict:
+    gate = {"name": "fresh", "type": "freshness", "candidateprop": "updated_at", "matchdirections": ["d1"]}
+    if maxagedays is not None:
+        gate["maxagedays"] = maxagedays
+    return gate
+
+
+@pytest.mark.parametrize("maxagedays", [0, -30])
+def test_freshness_refuses_a_non_positive_age(maxagedays: int) -> None:
+    from engine.config.loader import admission_defects
+    from engine.gates.compiler import GateCompiler
+
+    spec = _two_label_spec([_freshness(maxagedays)])
+    with pytest.raises(ValueError, match="fresh"):
+        GateCompiler(spec).compile(spec.gates[0])
+    assert any(d.startswith("fresh:") for d in admission_defects(spec))
+
+
+@pytest.mark.parametrize(("maxagedays", "days"), [(None, 1), (1, 1), (90, 90)])
+def test_freshness_compiles_absent_as_one_day(maxagedays: int | None, days: int) -> None:
+    from engine.gates.compiler import GateCompiler
+
+    spec = _two_label_spec([_freshness(maxagedays)])
+    assert f"duration({{days: {days}}})" in GateCompiler(spec).compile(spec.gates[0])
+
+
+def test_freshness_validation_off_restores_the_legacy_coercion(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config.settings import settings
+    from engine.gates.compiler import GateCompiler
+
+    monkeypatch.setattr(settings, "freshness_maxagedays_validated", False)
+    zero = _two_label_spec([_freshness(0)])
+    negative = _two_label_spec([_freshness(-30)])
+    assert "duration({days: 1})" in GateCompiler(zero).compile(zero.gates[0])
+    assert "duration({days: -30})" in GateCompiler(negative).compile(negative.gates[0])

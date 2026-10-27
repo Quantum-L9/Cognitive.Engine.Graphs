@@ -678,9 +678,22 @@ class GateCompiler:
         Freshness gate: candidate.prop >= datetime() - duration({days: N})
         Ensures data recency (e.g., rate sheets updated within 24h).
         """
+        from engine.config.settings import settings
+
         prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "updated_at"
         duration_field = "days"
-        duration_value = int(gate.maxagedays or 1)
+        if settings.freshness_maxagedays_validated:
+            # Default only when absent; 0 used to become 1 day and a negative
+            # age a cutoff in the future (CEG-COR-079).
+            if gate.maxagedays is None:
+                duration_value = 1
+            elif int(gate.maxagedays) < 1:
+                msg = f"Gate '{gate.name}': freshness maxagedays must be >= 1 day, got {gate.maxagedays!r}"
+                raise ValueError(msg)
+            else:
+                duration_value = int(gate.maxagedays)
+        else:
+            duration_value = int(gate.maxagedays or 1)
         return _Predicate(
             f"candidate.{prop} >= datetime() - duration({{{duration_field}: {duration_value}}})",
             [_Operand(f"candidate.{prop}")],
