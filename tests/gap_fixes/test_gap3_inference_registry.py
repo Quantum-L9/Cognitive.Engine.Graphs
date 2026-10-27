@@ -217,3 +217,65 @@ def test_buyer_persona_flag_off_restores_substring_match(
     result = execute_rule("infer_buyer_persona", {"job_title": title}, CTX)
     assert result is not None
     assert result.value == persona
+
+
+# -- RU-089 / RG-118: per-field parsing in company-size and email-domain rules --
+
+
+@pytest.mark.parametrize(
+    ("entity", "tier"),
+    [
+        ({"employee_count": "1,200", "annual_revenue_usd": 50e6}, "mid_market"),  # revenue fallback
+        ({"employee_count": 0, "employees": 5000}, "micro"),  # 0 is a value, not absent
+        ({"annual_revenue_usd": 0, "revenue": 5e8}, "micro"),
+        ({"employees": 300}, "enterprise"),
+        ({"employee_count": "abc", "revenue": 2e6}, "small"),
+    ],
+)
+def test_company_size_tier_parses_each_field(entity: dict[str, object], tier: str) -> None:
+    result = execute_rule("infer_company_size_tier", entity, CTX)
+    assert result is not None
+    assert result.value == tier
+
+
+def test_company_size_tier_unparseable_everything_is_none() -> None:
+    assert execute_rule("infer_company_size_tier", {"employee_count": "n/a", "annual_revenue_usd": "?"}, CTX) is None
+
+
+@pytest.mark.parametrize(
+    ("website", "domain"),
+    [
+        ("https://acme.com:8443/x", "acme.com"),
+        ("https://user:pw@www.acme.com/login", "acme.com"),
+        ("acme.com/about", "acme.com"),
+        ("www.Example.ORG?q=1", "example.org"),
+        ("http://www.example.org", "example.org"),
+    ],
+)
+def test_email_domain_uses_url_hostname(website: str, domain: str) -> None:
+    result = execute_rule("infer_email_domain_from_website", {"website": website}, CTX)
+    assert result is not None
+    assert result.value == domain
+
+
+@pytest.mark.parametrize("website", ["localhost", "https://", "http://[::1"])
+def test_email_domain_rejects_hostless_or_dotless(website: str) -> None:
+    assert execute_rule("infer_email_domain_from_website", {"website": website}, CTX) is None
+
+
+@pytest.mark.parametrize(
+    ("rule", "entity", "expected"),
+    [
+        ("infer_company_size_tier", {"employee_count": "1,200", "annual_revenue_usd": 50e6}, None),
+        ("infer_company_size_tier", {"employee_count": 0, "employees": 5000}, "large_enterprise"),
+        ("infer_email_domain_from_website", {"website": "https://acme.com:8443/x"}, "acme.com:8443"),
+    ],
+)
+def test_input_parsing_flag_off_restores_legacy(
+    monkeypatch: pytest.MonkeyPatch, rule: str, entity: dict[str, object], expected: str | None
+) -> None:
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "inference_input_parsing_strict_enabled", False)
+    result = execute_rule(rule, entity, CTX)
+    assert (result.value if result is not None else None) == expected

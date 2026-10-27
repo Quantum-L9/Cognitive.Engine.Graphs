@@ -308,6 +308,12 @@ class Settings(BaseSettings):
     # ('Marketing Coordinator' -> executive via 'coo', 'DevOps Engineer' ->
     # operations via 'ops'). On: whole title tokens only. Off: substrings.
     inference_persona_token_match_enabled: bool = True
+    # RU-089 / CEG-COR-098: infer_company_size_tier used `or` to pick a field
+    # (employee_count=0 fell through to employees) and parsed both values in
+    # one try (an unparseable employee count discarded a valid revenue), and
+    # infer_email_domain_from_website kept the port ('acme.com:8443'). On:
+    # is-None fallback, per-field parsing, and the URL hostname. Off: legacy.
+    inference_input_parsing_strict_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

@@ -31,6 +31,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 from engine.config.settings import settings
 
@@ -163,18 +164,69 @@ def authorized_rules(domain_spec: Any) -> list[str]:
     return [str(name) for name in (declared or [])]
 
 
-@register_inference_rule("infer_company_size_tier")
-def infer_company_size_tier(entity: dict, ctx: InferenceContext) -> InferenceResult | None:
-    """Infer company_size_tier from employee_count and revenue fields."""
-    emp = entity.get("employee_count") or entity.get("employees")
-    revenue = entity.get("annual_revenue_usd") or entity.get("revenue")
-    if emp is None and revenue is None:
+def _first_present(entity: dict, *keys: str) -> Any:
+    """Return the first value among ``keys`` that is not None (RU-089)."""
+    for key in keys:
+        value = entity.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def _parse_number[N: (int, float)](value: Any, kind: type[N]) -> N | None:
+    """Parse ``value`` as ``kind``; None when absent or unparseable (RU-089)."""
+    if value is None:
         return None
     try:
-        emp_n = int(emp) if emp is not None else None
-        rev_n = float(revenue) if revenue is not None else None
+        return kind(value)
     except (TypeError, ValueError):
         return None
+
+
+def _website_host(website: str) -> str | None:
+    """Host of a website URL without port, userinfo or leading ``www.`` (RU-089).
+
+    Scheme-less input is parsed as a network location (``//`` prefix).
+    """
+    text = website.strip()
+    if "://" not in text:
+        text = "//" + text
+    try:
+        host = urlsplit(text).hostname
+    except ValueError:
+        return None
+    if not host:
+        return None
+    return host.removeprefix("www.")
+
+
+@register_inference_rule("infer_company_size_tier")
+def infer_company_size_tier(entity: dict, ctx: InferenceContext) -> InferenceResult | None:
+    """Infer company_size_tier from employee_count and revenue fields.
+
+    With ``inference_input_parsing_strict_enabled`` each field falls back to
+    its alias only when absent (``employee_count=0`` is a value), and each
+    value is parsed on its own, so an unparseable employee count falls back
+    to revenue instead of discarding both. Off: the legacy ``or`` chain and
+    one shared parse.
+    """
+    if settings.inference_input_parsing_strict_enabled:
+        emp = _first_present(entity, "employee_count", "employees")
+        revenue = _first_present(entity, "annual_revenue_usd", "revenue")
+        if emp is None and revenue is None:
+            return None
+        emp_n = _parse_number(emp, int)
+        rev_n = _parse_number(revenue, float)
+    else:
+        emp = entity.get("employee_count") or entity.get("employees")
+        revenue = entity.get("annual_revenue_usd") or entity.get("revenue")
+        if emp is None and revenue is None:
+            return None
+        try:
+            emp_n = int(emp) if emp is not None else None
+            rev_n = float(revenue) if revenue is not None else None
+        except (TypeError, ValueError):
+            return None
     if emp_n is not None:
         if emp_n < 10:
             tier, conf = "micro", 0.90
@@ -219,6 +271,17 @@ def infer_email_domain_from_website(entity: dict, ctx: InferenceContext) -> Infe
     website = entity.get("website") or entity.get("website_url")
     if not website:
         return None
+    if settings.inference_input_parsing_strict_enabled:
+        host = _website_host(str(website))
+        if not host or "." not in host:
+            return None
+        return InferenceResult(
+            field_name="email_domain",
+            value=host,
+            confidence=0.92,
+            rule_name="infer_email_domain_from_website",
+            rationale=f"derived from website={website}",
+        )
     # Strip protocol and www
     domain = re.sub(r"^https?://", "", str(website).strip().lower())
     domain = re.sub(r"^www\.", "", domain)
