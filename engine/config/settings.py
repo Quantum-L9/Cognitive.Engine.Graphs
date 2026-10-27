@@ -283,6 +283,16 @@ class Settings(BaseSettings):
     # re-enrichment targets and so spends EIE budget.
     graph_inference_feedback_enabled: bool = False
 
+    # Correctness remediation lane E (plan 0d84ec8, RU-078..RU-090)
+    # RU-078 / CEG-COR-040, -095: PacketStore keyed packet_store.content_hash
+    # on the payload hash, so two requests with an equal payload collided, the
+    # second pair's lineage insert broke the FK and the whole pair rolled back.
+    # Child rows were also rewritten for a packet whose INSERT was skipped. On:
+    # content_hash is the SDK transport_hash (packet identity) and a skipped
+    # packet writes no hop/delegation/lineage rows. Off: the legacy key and
+    # unconditional child rows (C-21 rollback).
+    packet_store_packet_identity_dedup_enabled: bool = True
+
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
         """Raise if default secrets are used in production environment."""
