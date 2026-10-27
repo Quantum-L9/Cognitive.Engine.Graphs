@@ -163,7 +163,9 @@ class BeamSearchConfig:
         config = BeamSearchConfig.from_spec(domain_spec.kge.beamsearch)
     """
 
-    beam_width: int = 5
+    # C-20 (CEG-COR-110): defaults equal KGEBeamSearchSpec() (beamwidth=10,
+    # maxdepth=3) so BeamSearchConfig() and from_spec(None) agree with the schema.
+    beam_width: int = 10
     max_depth: int = 3
     prune_strategy: PruneStrategy = PruneStrategy.COMBINED
     score_threshold: float = 0.3
@@ -175,7 +177,7 @@ class BeamSearchConfig:
     def from_spec(cls, spec: KGEBeamSearchSpec | None) -> BeamSearchConfig:
         """Construct from domain-pack KGEBeamSearchSpec."""
         if spec is None:
-            return cls()
+            return cls.from_spec(KGEBeamSearchSpec())
         return cls(
             beam_width=spec.beamwidth,
             max_depth=spec.maxdepth,
