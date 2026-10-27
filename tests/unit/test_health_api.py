@@ -533,8 +533,13 @@ class TestHealthAssessAction:
             admin_generated_at = via_admin.pop("generated_at", None)
             assert action_generated_at
             assert admin_generated_at
-        assert via_action == via_admin
         assert via_action.get("status") != "disabled"
+        # RU-014 / CEG-COR-075 (C-23): the admin route stamps its response
+        # envelope (`subaction`, and `status` where the body set none); the body
+        # the shared dispatcher produced is otherwise identical.
+        assert via_admin.pop("subaction") == subaction
+        assert via_admin.pop("status") == via_action.pop("status", "success")
+        assert via_action == via_admin
         assert pipeline.loaded_domains == [TENANT, TENANT]
 
     @pytest.mark.parametrize("subaction", ["health_assess", "health_batch_assess", "health_report"])

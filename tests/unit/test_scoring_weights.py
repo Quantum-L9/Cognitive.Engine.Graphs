@@ -255,3 +255,76 @@ class TestScoringAssemblerLearnedWeights:
         weights = await assembler.load_learned_weights()
 
         assert weights == {}
+
+
+# ── RU-009 / CEG-COR-018: validate the effective (merged) request weights ──
+
+
+class _NoRowsDriver:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def execute_query(self, *, cypher: str, parameters: dict, database: str) -> list[dict]:
+        self.calls += 1
+        return []
+
+
+async def _orbital_match(weights: dict) -> _NoRowsDriver:
+    from engine.handlers import handle_match, init_dependencies
+    from tests.fixtures.domain_contracts import synthetic_loader
+
+    driver = _NoRowsDriver()
+    loader = MagicMock()
+    loader.load_domain.return_value = synthetic_loader().load_domain("orbital-logistics")
+    init_dependencies(driver, loader)  # type: ignore[arg-type]
+    await handle_match("orbital-logistics", {"query": {}, "match_direction": "window_to_depot", "weights": weights})
+    return driver
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-018")
+class TestEffectiveRequestWeightValidation:
+    """orbital-logistics: w_reliability default 0.6, w_ports default 0.3."""
+
+    async def test_partial_override_exceeding_ceiling_is_rejected(self) -> None:
+        from engine.handlers import ValidationError
+
+        with pytest.raises(ValidationError, match=r"Weights sum to 1\.3000"):
+            await _orbital_match({"w_reliability": 1.0})
+
+    async def test_full_override_summing_to_one_is_accepted(self) -> None:
+        driver = await _orbital_match({"w_reliability": 0.7, "w_ports": 0.3})
+        assert driver.calls == 1
+
+    async def test_lowering_override_is_accepted(self) -> None:
+        driver = await _orbital_match({"w_reliability": 0.1})
+        assert driver.calls == 1
+
+    async def test_unknown_weight_key_is_rejected(self) -> None:
+        from engine.handlers import ValidationError
+
+        with pytest.raises(ValidationError, match="w_typo"):
+            await _orbital_match({"w_typo": 0.1})
+
+    async def test_per_key_range_check_unchanged(self) -> None:
+        from engine.handlers import ValidationError
+
+        with pytest.raises(ValidationError, match="outside allowed range"):
+            await _orbital_match({"w_ports": 1.5})
+
+    async def test_flag_off_validates_supplied_keys_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "match_effective_weight_validation", False)
+        driver = await _orbital_match({"w_reliability": 1.0})
+        assert driver.calls == 1  # the pre-fix acceptance
+
+    def test_merged_weights_are_the_scoring_coefficients(self) -> None:
+        from tests.fixtures.domain_contracts import synthetic_loader
+
+        assembler = ScoringAssembler(synthetic_loader().load_domain("orbital-logistics"))
+        merged = assembler.merged_request_weights("window_to_depot", {"w_reliability": 1.0})
+        assert merged == {"depot_reliability": 1.0, "port_capacity": 0.3}
+        clause, _ = assembler.assemble_scoring_clause("window_to_depot", {"w_reliability": 1.0})
+        assert "(1.0 * depot_reliability)" in clause
+        assert "(0.3 * port_capacity)" in clause

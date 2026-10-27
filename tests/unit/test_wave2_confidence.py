@@ -169,3 +169,88 @@ class TestAnnotateCandidates:
 
         # Should be the same list object
         assert result is candidates
+
+
+# ── RU-032 / CEG-COR-167: handler feeds weighted contributions to monoculture ──
+
+
+class _DimensionRowsDriver:
+    """Fake GraphDriver returning rows shaped like handle_match's RETURN."""
+
+    def __init__(self, rows: list[dict]) -> None:
+        self.rows = rows
+        self.cyphers: list[str] = []
+
+    async def execute_query(self, *, cypher: str, parameters: dict, database: str) -> list[dict]:
+        self.cyphers.append(cypher)
+        return [{k: (dict(v) if isinstance(v, dict) else v) for k, v in r.items()} for r in self.rows]
+
+
+def _weighted_spec():
+    from tests.fixtures.domain_contracts import synthetic_loader
+
+    spec = synthetic_loader().load_domain("orbital-logistics")
+    base = spec.scoring.dimensions[0]
+    dims = [
+        base.model_copy(update={"name": "tiny", "weightkey": "w_tiny", "defaultweight": 0.05}),
+        base.model_copy(update={"name": "a", "weightkey": "w_a", "defaultweight": 0.45}),
+        base.model_copy(update={"name": "b", "weightkey": "w_b", "defaultweight": 0.5}),
+    ]
+    return spec.model_copy(update={"scoring": spec.scoring.model_copy(update={"dimensions": dims})})
+
+
+async def _match_one_row(values: dict[str, float]) -> dict:
+    from unittest.mock import MagicMock
+
+    from engine.handlers import handle_match, init_dependencies
+
+    row = {"candidate": {"depot_id": "x1"}, "score": 0.24, "dimension_scores": values}
+    loader = MagicMock()
+    loader.load_domain.return_value = _weighted_spec()
+    init_dependencies(_DimensionRowsDriver([row]), loader)  # type: ignore[arg-type]
+    result = await handle_match("orbital-logistics", {"query": {}, "match_direction": "window_to_depot"})
+    return result["candidates"][0]
+
+
+def _flags(candidate: dict) -> list[str]:
+    flag = candidate.get("confidence_flag")
+    if flag is None:
+        return []
+    return flag if isinstance(flag, list) else [flag]
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-167")
+class TestHandlerMonocultureUsesWeightedContributions:
+    VALUES = {"tiny": 1.0, "a": 0.2, "b": 0.2}
+
+    async def test_low_weight_high_value_dimension_is_not_monoculture(self) -> None:
+        cand = await _match_one_row(dict(self.VALUES))
+        assert FLAG_MONOCULTURE not in _flags(cand)  # weighted share of 'tiny' = 0.208
+
+    async def test_row_dimension_scores_are_not_overwritten(self) -> None:
+        cand = await _match_one_row(dict(self.VALUES))
+        assert cand["dimension_scores"] == self.VALUES
+
+    async def test_dimensional_agreement_still_reads_raw_values(self) -> None:
+        from engine.scoring.confidence import FLAG_LOW_DIMENSIONAL_AGREEMENT
+
+        cand = await _match_one_row(dict(self.VALUES))
+        assert FLAG_LOW_DIMENSIONAL_AGREEMENT in _flags(cand)
+
+    async def test_flag_off_restores_raw_value_monoculture(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "monoculture_weighted_contribution", False)
+        cand = await _match_one_row(dict(self.VALUES))
+        assert FLAG_MONOCULTURE in _flags(cand)
+        assert cand["confidence_detail"]["contribution"] == pytest.approx(0.7143)
+
+    def test_assembler_exposes_the_emitted_coefficients(self) -> None:
+        from engine.scoring.assembler import ScoringAssembler
+
+        assembler = ScoringAssembler(_weighted_spec())
+        clause, _ = assembler.assemble_scoring_clause("window_to_depot", {"w_a": 0.4})
+        assert assembler.last_effective_weights == {"tiny": 0.05, "a": 0.4, "b": 0.5}
+        for name, weight in assembler.last_effective_weights.items():
+            assert f"({weight} * {name})" in clause

@@ -15,6 +15,7 @@ Covers W1-01 through W1-05 feature flags, validators, and error paths.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -685,3 +686,79 @@ class TestFeatureFlags:
         assert s.strict_null_gates is False
         assert s.max_hop_hard_cap == 5
         assert s.param_strict_mode is False
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# RU-036 / CEG-COR-007: one row per candidate before ORDER BY / LIMIT
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+class _MatchCypherCapture:
+    """Fake GraphDriver that records the match Cypher and returns no rows."""
+
+    def __init__(self) -> None:
+        self.cyphers: list[str] = []
+
+    async def execute_query(self, *, cypher: str, parameters: dict[str, Any], database: str) -> list[dict[str, Any]]:
+        self.cyphers.append(cypher)
+        return []
+
+
+_DOMAINS_DIR = Path(__file__).resolve().parents[2] / "domains"
+
+
+async def _plasticos_dir1_match_cypher() -> str:
+    from unittest.mock import MagicMock
+
+    from engine.config.loader import DomainPackLoader
+    from engine.handlers import handle_match, init_dependencies
+
+    spec = DomainPackLoader(config_path=str(_DOMAINS_DIR)).load_domain("plasticos")
+    driver = _MatchCypherCapture()
+    loader = MagicMock()
+    loader.load_domain.return_value = spec
+    init_dependencies(driver, loader)  # type: ignore[arg-type]
+    await handle_match(
+        "plasticos",
+        {"query": {"polymer_type": "PET"}, "match_direction": "supply_opportunity_to_buyer_facility"},
+    )
+    return driver.cyphers[0]
+
+
+@pytest.mark.finding("CEG-COR-007")
+class TestMatchCollapsesTraversalRows:
+    """A Facility with k PROCESSES paths is one candidate, not k rows (RG-047)."""
+
+    async def test_collapse_clause_precedes_order_and_limit(self) -> None:
+        cypher = await _plasticos_dir1_match_cypher()
+        # The required multi-valued step that multiplies rows:
+        assert "MATCH (candidate:Facility)-[:PROCESSES]->(polymer:PolymerFamily)" in cypher
+        collapse = "WITH candidate, head(collect({score: score, dimension_scores: dimension_scores})) AS best\n"
+        assert collapse in cypher
+        tail = "RETURN candidate, best.score AS score, best.dimension_scores AS dimension_scores\nORDER BY score DESC\nLIMIT $top_n"
+        assert cypher.endswith(tail)
+        # Rows are ordered by score before the per-candidate collect keeps the best.
+        assert cypher.index("AS dimension_scores\nORDER BY score DESC\nWITH candidate, head(collect(") > 0
+        assert cypher.index(collapse) < cypher.index("LIMIT $top_n")
+
+    async def test_collapse_without_dimension_projection(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "match_dimension_projection", False)
+        cypher = await _plasticos_dir1_match_cypher()
+        assert "WITH candidate, head(collect({score: score})) AS best\n" in cypher
+        assert cypher.endswith("RETURN candidate, best.score AS score\nORDER BY score DESC\nLIMIT $top_n")
+
+    async def test_flag_off_has_no_aggregation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "match_collapse_traversal_rows", False)
+        cypher = await _plasticos_dir1_match_cypher()
+        assert "collect(" not in cypher
+        assert "best" not in cypher
+        assert cypher.endswith(
+            "AS score\nRETURN candidate, score, {geo_proximity: geo_proximity, credit_score: credit_score, "
+            "contamination_tolerance_score: contamination_tolerance_score, community_match: community_match, "
+            "rate_score: rate_score, price_alignment: price_alignment, recency: recency} AS dimension_scores\n"
+            "ORDER BY score DESC\nLIMIT $top_n"
+        )

@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  Milestone 2.1: Schema Extension
 # ═══════════════════════════════════════════════════════════════════════════
@@ -156,6 +158,29 @@ class TestApplyConstraintPenalties:
         candidates = [{"dimension_scores": {"a": 0.1}, "score": 0.5}]
         result = apply_constraint_penalties(candidates, [])
         assert len(result) == 1
+
+    def test_match_projection_row_shape(self):
+        """RU-001 (CEG-COR-001): rows shaped exactly like handle_match's RETURN.
+
+        `RETURN candidate, score, {<alias>: <alias>, ...} AS dimension_scores`
+        yields {candidate, score, dimension_scores}; constraints must read the map.
+        """
+        from engine.scoring.pareto_integrator import apply_constraint_penalties
+
+        rows = [
+            {"candidate": {"depot_id": "d1"}, "score": 0.9, "dimension_scores": {"reliability": 0.8, "ports": 0.4}},
+            {"candidate": {"depot_id": "d2"}, "score": 0.7, "dimension_scores": {"reliability": 0.2, "ports": 0.9}},
+            {"candidate": {"depot_id": "d3"}, "score": 0.6, "dimension_scores": {"reliability": 0.6, "ports": 0.1}},
+        ]
+        constraints = [
+            {"dimension": "reliability", "threshold": 0.5, "hard": True, "penalty": 0.5},
+            {"dimension": "ports", "threshold": 0.3, "hard": False, "penalty": 0.5},
+        ]
+        result = apply_constraint_penalties(rows, constraints)
+        assert [r["candidate"]["depot_id"] for r in result] == ["d1", "d3"]
+        assert result[0]["score"] == 0.9
+        assert result[1]["score"] == pytest.approx(0.3)  # soft penalty on ports 0.1 < 0.3
+        assert set(result[0]) >= {"candidate", "score", "dimension_scores"}
 
 
 class TestApplyParetoFilter:

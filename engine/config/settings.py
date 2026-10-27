@@ -283,6 +283,57 @@ class Settings(BaseSettings):
     # re-enrichment targets and so spends EIE budget.
     graph_inference_feedback_enabled: bool = False
 
+    # Correctness remediation lane A (plan 0d84ec8, RU-001..RU-060)
+    # Each flag ships on (a correctness fix); off restores the pre-fix behaviour.
+    # RU-001 / CEG-COR-001: handle_match RETURNs the active dimension scores as a
+    # `dimension_scores` map so Pareto, arbitration and confidence checks see
+    # real values. Off: `RETURN candidate, score`.
+    match_dimension_projection: bool = True
+    # RU-011 / CEG-COR-033: `WITH *` between the traversal clauses and the gate
+    # WHERE so gates filter candidate rows even after a trailing OPTIONAL MATCH
+    # (whose own WHERE only nulls optional variables). Off: WHERE follows the
+    # traversal clauses directly.
+    gate_where_row_scope: bool = True
+    # RU-036 / CEG-COR-007: a candidate with k matching traversal paths produced
+    # k rows and LIMIT counted rows. On: after scoring, keep each candidate's
+    # highest-scoring row (`head(collect(...))` over score-ordered rows) before
+    # ORDER BY / LIMIT. Off: one row per path.
+    match_collapse_traversal_rows: bool = True
+    # RU-032 / CEG-COR-167: the W2-03 monoculture check reads weight x value per
+    # dimension (ScoringAssembler.last_effective_weights), its share of the score,
+    # instead of raw dimension values. Off: raw values (annotate_candidates).
+    monoculture_weighted_contribution: bool = True
+    # RU-016 / CEG-COR-171: handle_match backfills queryschema defaults before
+    # resolving derived parameters, so a derivation over an omitted defaulted
+    # field sees its default. Off: resolve first, backfill after.
+    query_defaults_before_derived: bool = True
+    # RU-009 / CEG-COR-018: match `weights` are validated as the per-dimension
+    # weights scoring applies for the direction (override, else spec default),
+    # after the domain loads; unknown weight keys are rejected (R1a-DEC-06).
+    # Off: only the supplied keys are summed, before the domain loads.
+    match_effective_weight_validation: bool = True
+    # RU-004 / CEG-COR-014: legacy resolve raises ValidationError when the CREATE
+    # returned no row (source or target not found) instead of reporting
+    # `resolved`. Off: `resolved` regardless of the result.
+    resolve_requires_created_edge: bool = True
+    # RU-005 / CEG-COR-056: handle_outcomes stores map-valued fingerprint fields
+    # (dimension_weights) as sorted-key JSON the counterfactual reader decodes.
+    # Off: the str(dict) writer (the reader stays tolerant of both).
+    outcome_map_json_encoding: bool = True
+    # RU-013 / CEG-COR-074: when the probed tenant has no pack, handle_health
+    # reports the number of loaded packs instead of listing every domain id.
+    # Off: the id list.
+    health_probe_domain_count_only: bool = True
+    # RU-060 / CEG-COR-169: UNWINDMATCHSET sync statements RETURN count(n) and
+    # handle_sync reports that as synced_count plus unmatched_count. Off: no
+    # RETURN and synced_count = len(batch).
+    sync_count_from_write_result: bool = True
+    # RU-003 / CEG-COR-003: every domain-bearing admin subaction's domain_id must
+    # equal the packet tenant (identity contract; mirrors HEALTH-05); a differing
+    # value is rejected before any load or query, and evaluate matches as the
+    # tenant. Off: the caller-chosen domain_id.
+    admin_tenant_bound_domain: bool = True
+
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
         """Raise if default secrets are used in production environment."""

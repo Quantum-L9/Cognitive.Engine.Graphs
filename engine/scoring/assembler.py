@@ -91,6 +91,7 @@ class ScoringAssembler:
         self.domain_spec = domain_spec
         self.scoring_spec = domain_spec.scoring
         self._last_active_dims: list[str] = []
+        self._last_effective_weights: dict[str, float] = {}
         self._query_params: dict[str, Any] = {}
         self._graph_driver = graph_driver
         self._learned_weights: dict[str, float] | None = None
@@ -176,6 +177,7 @@ class ScoringAssembler:
         dimension_exprs: list[str] = []
         weight_exprs: list[str] = []
         active_dim_names: list[str] = []
+        effective_weights: dict[str, float] = {}
 
         learned = self._learned_weights or {}
         sw_spec = self.domain_spec.feedbackloop.signal_weights if learned else None
@@ -189,7 +191,7 @@ class ScoringAssembler:
                 expr = self._clamp_expression(expr)
             alias = sanitize_label(dim.name)
             dimension_exprs.append(f"{expr} AS {alias}")
-            weight = weights.get(dim.weightkey, dim.defaultweight)
+            weight = self._request_weight(dim, weights)
             # Convergence loop: multiply spec weight by learned adjustment factor
             if dim.name in learned and sw_spec is not None:
                 learned_w = learned[dim.name]
@@ -199,8 +201,10 @@ class ScoringAssembler:
                 weight = -abs(sw_spec.penalty_factor) if learned_w < sw_spec.penalty_threshold else weight * learned_w
             weight_exprs.append(f"({cypher_number(weight)} * {alias})")
             active_dim_names.append(dim.name)
+            effective_weights[dim.name] = float(weight)
 
         self._last_active_dims = list(active_dim_names)
+        self._last_effective_weights = effective_weights
         all_exprs = ", ".join(dimension_exprs)
         score_expr = self._build_score_expression(weight_exprs)
 
@@ -216,6 +220,33 @@ class ScoringAssembler:
     def last_active_dimension_names(self) -> list[str]:
         """Return dimension names from the most recent assemble_scoring_clause call."""
         return list(self._last_active_dims)
+
+    @staticmethod
+    def _request_weight(dim: ScoringDimensionSpec, weights: dict[str, float]) -> Any:
+        """The request override for this dimension's weightkey, else the spec default."""
+        return weights.get(dim.weightkey, dim.defaultweight)
+
+    def merged_request_weights(self, match_direction: str, weights: dict[str, float]) -> dict[str, float]:
+        """RU-009: per active dimension, the request-merged weight scoring will use.
+
+        Same merge (``_request_weight``) and same direction filter as
+        ``assemble_scoring_clause``, before any learned-weight adjustment, so the
+        match weight-ceiling check validates what the score expression applies.
+        """
+        return {
+            dim.name: float(self._request_weight(dim, weights))
+            for dim in self.scoring_spec.dimensions
+            if not (dim.matchdirections and match_direction not in dim.matchdirections)
+        }
+
+    @property
+    def last_effective_weights(self) -> dict[str, float]:
+        """Weight coefficient per active dimension emitted by the most recent assemble call.
+
+        RU-032: request override or spec default, times any learned adjustment —
+        exactly the number written into the score expression.
+        """
+        return dict(self._last_effective_weights)
 
     @property
     def last_query_params(self) -> dict[str, Any]:
