@@ -725,3 +725,28 @@ class TestCausalCompilerIdentity:
             "}]->(target)\n"
             "RETURN r"
         )
+
+
+class TestAttributionTouchpointIdentity:
+    """PO-04 (folded into CEG-COR-002 / RU-068): the trace reads the declared id, not entity_id."""
+
+    @pytest.mark.asyncio
+    async def test_trace_returns_declared_id_per_source_label(self) -> None:
+        driver = AsyncMock()
+        driver.execute_query = AsyncMock(return_value=[])
+        await AttributionCalculator(driver, _spec_with_attribution()).compute_attribution("out_1")
+        cypher = driver.execute_query.call_args.args[0]
+        assert (
+            "RETURN CASE WHEN touchpoint:Facility THEN coalesce(touchpoint.facility_id, touchpoint.entity_id) "
+            "ELSE touchpoint.entity_id END AS touchpoint_id" in cypher
+        )
+
+    @pytest.mark.asyncio
+    async def test_flag_off_reads_entity_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "causal_edge_declared_identity", False)
+        driver = AsyncMock()
+        driver.execute_query = AsyncMock(return_value=[])
+        await AttributionCalculator(driver, _spec_with_attribution()).compute_attribution("out_1")
+        assert "RETURN touchpoint.entity_id AS touchpoint_id" in driver.execute_query.call_args.args[0]

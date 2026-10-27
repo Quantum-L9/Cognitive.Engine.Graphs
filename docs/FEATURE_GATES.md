@@ -1036,7 +1036,10 @@ parallel edge. On:
 - one `WHERE` (only when non-empty) joining `source.created_at < target.created_at` and
   `$confidence >= $confidence_threshold` (bound by `handle_outcomes`);
 - `MERGE (source)-[r:TYPE]->(target)` with `ON CREATE SET` created_at / confidence /
-  mechanism and `ON MATCH SET` confidence / mechanism.
+  mechanism and `ON MATCH SET` confidence / mechanism;
+- `AttributionCalculator` (PO-04) returns `CASE WHEN touchpoint:<Label> THEN
+  coalesce(touchpoint.<declared id>, touchpoint.entity_id) … ELSE touchpoint.entity_id END`
+  over the causal-edge source labels instead of `touchpoint.entity_id`.
 
 Off: the legacy Cypher, kept for rollback although it cannot match outcome nodes.
 

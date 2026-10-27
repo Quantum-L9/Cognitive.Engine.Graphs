@@ -19,6 +19,7 @@ import logging
 import math
 from typing import Any
 
+from engine.causal.identity import FALLBACK_ID_PROPERTY, node_id_property
 from engine.config.schema import DomainSpec
 from engine.config.settings import settings
 from engine.graph.driver import GraphDriver
@@ -109,7 +110,7 @@ class AttributionCalculator:
         cypher = (
             f"MATCH (outcome:{outcome_label} {{outcome_id: $outcome_id}})\n"
             f"MATCH path = (touchpoint)-{rel_pattern}->(outcome)\n"
-            f"RETURN touchpoint.entity_id AS touchpoint_id,\n"
+            f"RETURN {self._touchpoint_id_expression()} AS touchpoint_id,\n"
             f"       length(path) AS distance,\n"
             f"       [r IN relationships(path) | r.confidence] AS confidences,\n"
             f"       [r IN relationships(path) | duration.inDays(coalesce(r.created_at, datetime()), datetime()).days] AS ages_days\n"
@@ -158,6 +159,33 @@ class AttributionCalculator:
             response["temporal_decay"] = {"enabled": True, "halflife_days": halflife}
 
         return response
+
+    def _touchpoint_id_expression(self) -> str:
+        """The touchpoint's identity, per label (PO-04 / RU-068).
+
+        ``touchpoint`` may carry any causal-edge source label; each label's
+        declared id property is read via a CASE over those labels (sanitized,
+        ``engine.causal.identity``), falling back to ``entity_id`` for labels the
+        spec gives no declaration and for nodes that lack the declared property.
+        Flag off: ``entity_id``.
+        """
+        if not settings.causal_edge_declared_identity:
+            return "touchpoint.entity_id"
+        branches: list[str] = []
+        seen: set[str] = set()
+        for edge in self._spec.causal.causal_edges:
+            label = sanitize_label(edge.source_label)
+            if label in seen:
+                continue
+            seen.add(label)
+            prop = sanitize_label(node_id_property(self._spec, edge.source_label))
+            if prop != FALLBACK_ID_PROPERTY:
+                # Legacy nodes carrying only entity_id still resolve (as
+                # handlers._candidate_id does for match candidates).
+                branches.append(f"WHEN touchpoint:{label} THEN coalesce(touchpoint.{prop}, touchpoint.entity_id)")
+        if not branches:
+            return "touchpoint.entity_id"
+        return f"CASE {' '.join(branches)} ELSE touchpoint.entity_id END"
 
     @staticmethod
     def _assign_weights(
