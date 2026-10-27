@@ -219,3 +219,70 @@ class TestDomainExpressions:
     def test_price_margin(self):
         result = safe_eval("(sell_price - buy_price) / sell_price", {"sell_price": 100, "buy_price": 75})
         assert result == pytest.approx(0.25)
+
+
+# ── RU-070 / CEG-COR-062: magnitude and round() bounds ────
+
+
+def _run_with_deadline(expression: str, ctx: dict, seconds: float = 5.0):
+    """Evaluate in a child process so a non-terminating input fails the test instead of hanging it."""
+    import multiprocessing as mp
+
+    ctx_mp = mp.get_context("fork")
+    queue = ctx_mp.Queue()
+
+    def target() -> None:
+        try:
+            safe_eval(expression, ctx)
+            queue.put(("ok", None))
+        except ValueError as exc:
+            queue.put(("ValueError", str(exc)))
+        except Exception as exc:  # pragma: no cover - reported to the parent
+            queue.put((type(exc).__name__, str(exc)))
+
+    proc = ctx_mp.Process(target=target)
+    proc.start()
+    proc.join(seconds)
+    if proc.is_alive():
+        proc.kill()
+        proc.join()
+        return ("timeout", None)
+    return queue.get(timeout=1)
+
+
+class TestMagnitudeBounds:
+    @pytest.mark.parametrize("expression", ["(((10**100)**100)**100)**100", "round(1, -10**8)"])
+    def test_resource_exhaustion_inputs_raise_quickly(self, expression: str) -> None:
+        import time
+
+        start = time.monotonic()
+        outcome = _run_with_deadline(expression, {})
+        elapsed = time.monotonic() - start
+        assert outcome[0] == "ValueError", outcome
+        assert elapsed < 2.0  # process start-up included; the evaluation itself is the < 100 ms guard below
+
+    @pytest.mark.parametrize("expression", ["(((10**100)**100)**100)**100", "round(1, -10**8)", "round(1.5, 10**6)"])
+    def test_guard_is_fast_in_process(self, expression: str) -> None:
+        import time
+
+        start = time.monotonic()
+        with pytest.raises(ValueError):
+            safe_eval(expression, {})
+        assert time.monotonic() - start < 0.1
+
+    def test_within_bound_power_is_exact(self) -> None:
+        assert safe_eval("(10**100)**2", {}) == 10**200
+
+    def test_huge_context_integer_products_are_bounded(self) -> None:
+        with pytest.raises(ValueError, match="magnitude"):
+            safe_eval("x * x * x * x * x * x * x * x", {"x": 10**600})
+
+    def test_float_overflow_is_value_error(self) -> None:
+        with pytest.raises(ValueError):
+            safe_eval("exp(1000)", {})
+        with pytest.raises(ValueError):
+            safe_eval("10.0 ** 100 * 10.0 ** 100 * 10.0 ** 100 * 10.0 ** 100", {})
+
+    def test_round_with_modest_ndigits_unchanged(self) -> None:
+        assert safe_eval("round(2.567, 2)", {}) == 2.57
+        assert safe_eval("round(1234, -2)", {}) == 1200
