@@ -449,7 +449,11 @@ class GateCompiler:
         When no queryparam identifies the query entity, the gate degrades to
         "candidate has no exclusion edge at all" — conservative but valid.
         """
+        from engine.config.settings import settings
+
         edge_type = sanitize_label(gate.edgetype) if gate.edgetype else "EXCLUDED_FROM"
+        if settings.exclusion_endpoint_validation:
+            self._check_exclusion_endpoints(gate, edge_type)
         target_prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "entity_id"
         # edge_type and target_prop are sanitized via sanitize_label() above;
         # values only ever flow through $ parameters.
@@ -465,6 +469,42 @@ class GateCompiler:
                 + "}"
             )
         return "NOT EXISTS { MATCH " + exclusion_edge + "() }"
+
+    def _check_exclusion_endpoints(self, gate: GateSpec, edge_type: str) -> None:
+        """Refuse an exclusion gate the compiled predicate cannot honour (CEG-COR-019).
+
+        The predicate always anchors the edge at the matched candidate. A gate
+        declaring ``fromnode`` / ``tonode`` asks for another anchor (e.g. the
+        query entity), which the compiler ignores; an ontology edge that does
+        not start at a candidate label of the gate's direction(s) is one no
+        candidate can carry. Either way ``NOT EXISTS`` is always true and the
+        exclusion silently admits everything.
+        """
+        declared = [f for f in ("fromnode", "tonode") if _declared(gate, f)]
+        if declared:
+            msg = (
+                f"Gate '{gate.name}': exclusion gates do not support {' / '.join(declared)} — the edge is always "
+                "matched from the candidate, so the declared endpoint would be ignored"
+            )
+            raise ValueError(msg)
+        ontology = getattr(self.domain_spec, "ontology", None)
+        edges = getattr(ontology, "edges", None)
+        matchentities = getattr(self.domain_spec, "matchentities", None)
+        candidates = getattr(matchentities, "candidate", None)
+        if not isinstance(edges, list) or not isinstance(candidates, list):
+            return  # not a validated DomainSpec (a test double); nothing to check against
+        directions = set(gate.matchdirections or [])
+        candidate_labels = {c.label for c in candidates if not directions or c.matchdirection in directions}
+        origins = {e.from_ for e in edges if e.type == edge_type}
+        if not origins:
+            msg = f"Gate '{gate.name}': exclusion edge type '{edge_type}' is not declared in the ontology"
+            raise ValueError(msg)
+        if not origins & candidate_labels:
+            msg = (
+                f"Gate '{gate.name}': exclusion edge '{edge_type}' starts at {sorted(origins)}, not at a candidate "
+                f"label of its direction(s) {sorted(candidate_labels)}; no candidate can carry it"
+            )
+            raise ValueError(msg)
 
     def _compile_composite(self, gate: GateSpec) -> str:
         """

@@ -82,6 +82,7 @@ independently of the code default.
 | Childsync FOREACH Projection | `CHILDSYNC_FOREACH_PROJECTION` (`childsync_foreach_projection`) | `True` | unset | active; childsync writes children in `FOREACH` without copying them onto the parent — see §20 |
 | Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `True` | unset | active (hardening); admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
 | Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `True` | unset | active (hardening); admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
+| Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `True` | unset | active (hardening); an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
 
 ---
 
@@ -718,6 +719,19 @@ it until its `lenderresolve` step is in the assembler's
 match before. Rollback: `ADMISSION_CHECKS_FULL_MATCH=false` (with
 `SCORING_ADMISSION_CHECK_ENABLED=false` for the pre-remediation verdicts) or
 `UNVALIDATED_DOMAIN_PACKS_ENABLED=true`.
+
+### Exclusion endpoint validation (RU-041 / CEG-COR-019)
+
+`EXCLUSION_ENDPOINT_VALIDATION` (default `True`): the exclusion gate compiles
+to `NOT EXISTS { MATCH (candidate)-[:EDGE]->(…) }`, always anchored at the
+matched candidate. A gate that declares `fromnode` / `tonode` (an anchor the
+compiler ignores), or whose ontology edge type is undeclared or does not start
+at a candidate label of the gate's direction(s), compiled to a predicate that
+is always true. The compiler now refuses it, naming the gate, and admission
+withholds the pack (`mortgage-brokerage` `blacklist_exclusion`:
+`BorrowerProfile -[:BLACKLISTEDLENDER]-> Lender`, decision R2-DEC-04). A
+candidate-origin edge (PlasticOS `exclusion_check`) compiles unchanged.
+Rollback: `EXCLUSION_ENDPOINT_VALIDATION=false`.
 
 ---
 

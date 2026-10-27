@@ -299,6 +299,13 @@ class Settings(BaseSettings):
     # parameter, scoring queryprop, top_n or a compiler-bound literal). Off:
     # the previous checks only. Ships on (fail-closed, Stage-2 precedent).
     admission_checks_full_match: bool = True
+    # RU-041 / CEG-COR-019: an exclusion gate always anchors its edge at the
+    # matched candidate. One declaring fromnode/tonode, or whose ontology edge
+    # does not start at a candidate label of its direction(s), compiled to a
+    # NOT EXISTS that is always true (mortgage blacklist_exclusion). On: the
+    # compiler refuses such a gate, so admission withholds the pack. Off: the
+    # legacy always-true fragment.
+    exclusion_endpoint_validation: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

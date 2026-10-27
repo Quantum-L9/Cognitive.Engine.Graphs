@@ -55,7 +55,11 @@ WITHHELD_UNTIL_REPAIRED = {
         ("scoring_admission_check_enabled", "admission_checks_full_match"),
     ),
     # RU-039: traversal step 'lenderresolve' is not in the assembler's grammar (CEG-COR-012).
-    "mortgage-brokerage": (("lenderresolve",), ("admission_checks_full_match",)),
+    # RU-041: blacklist_exclusion declares fromnode/tonode the compiler cannot honour (CEG-COR-019).
+    "mortgage-brokerage": (
+        ("lenderresolve", "blacklist_exclusion"),
+        ("admission_checks_full_match", "exclusion_endpoint_validation"),
+    ),
 }
 
 
