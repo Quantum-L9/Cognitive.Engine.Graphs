@@ -756,7 +756,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # Flush audit entries (currently logs warning since db_pool=None;
     # will persist to PostgreSQL once provisioned)
-    await compliance.flush_audit()
+    await compliance.flush_audit_for_request()
 
     if compliance.enabled:
         response = compliance.redact_response(response, tenant)
@@ -882,7 +882,7 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             detail=str(exc),
         ) from exc
 
-    await compliance.flush_audit()
+    await compliance.flush_audit_for_request()
     result: dict[str, Any] = {
         "status": "success",
         "entity_type": entity_type,
