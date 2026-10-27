@@ -573,6 +573,12 @@ class Settings(BaseSettings):
     # duration clock) are timezone-aware UTC, so staleness is the same under
     # any process TZ. Off: naive local time, which consumers read as UTC.
     gds_history_utc_timestamps: bool = True
+    # RU-101 / CEG-COR-059..061: entity resolution threads and validates the
+    # batch threshold, verifies each member against the chosen canonical,
+    # MERGEs RESOLVED_FROM (at most one per pair, no cycles) and skips batch
+    # entities by entity id. Off: the previous merge behaviour. The path is also
+    # gated per domain by semantic_registry.enabled (default False).
+    entity_resolution_merge_integrity: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
