@@ -230,13 +230,13 @@ async def test_admin_list_domains() -> None:
 
 @pytest.mark.asyncio
 async def test_admin_get_domain() -> None:
-    result = await handle_admin("t", {"subaction": "get_domain", "domain_id": "plasticos"})
+    result = await handle_admin("plasticos", {"subaction": "get_domain", "domain_id": "plasticos"})
     assert "domain" in result
 
 
 @pytest.mark.asyncio
 async def test_admin_init_schema() -> None:
-    result = await handle_admin("t", {"subaction": "init_schema", "domain_id": "plasticos"})
+    result = await handle_admin("plasticos", {"subaction": "init_schema", "domain_id": "plasticos"})
     assert result["status"] == "schema_initialized"
 
 

@@ -1076,6 +1076,35 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _bind_admin_domain(
+    tenant: str,
+    payload: dict[str, Any],
+    *,
+    required: bool,
+    default: str | None = None,
+) -> Any:
+    """RU-003 / CEG-COR-003: the admin subaction's domain is the packet tenant's.
+
+    Every domain-bearing admin subaction reads ``domain_id`` here. A required
+    key still goes through ``_require_key`` (C-23); an optional one falls back
+    to ``default``. With ``admin_tenant_bound_domain`` on, a value that differs
+    from the packet tenant is rejected before any load_domain or driver call —
+    the identity contract binds tenant and domain id, mirroring HEALTH-05.
+    Off: the caller-chosen domain_id, exactly as before.
+    """
+    from engine.config.settings import settings as _admin_settings
+
+    domain_id = _require_key(payload, "domain_id", "admin", tenant) if required else payload.get("domain_id", default)
+    if _admin_settings.admin_tenant_bound_domain and domain_id is not None and domain_id != tenant:
+        raise ValidationError(
+            f"admin domain_id {domain_id!r} does not match the packet tenant {tenant!r}; "
+            "admin subactions operate on the caller's own domain only",
+            action="admin",
+            tenant=tenant,
+        )
+    return domain_id
+
+
 async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Admin: introspection, schema init, GDS trigger, capability delegation."""
     graph_driver, domain_loader = _require_deps()
@@ -1086,18 +1115,18 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {"domains": domain_loader.list_domains()}
 
     if subaction == "get_domain":
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
         return {"domain": spec.model_dump(mode="json")}
 
     if subaction == "init_schema":
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
         count = await _init_schema(graph_driver, spec)
         return {"status": "schema_initialized", "constraints_created": count}
 
     if subaction == "trigger_gds":
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         job_name = _require_key(payload, "job_name", "admin", tenant)
         spec = domain_loader.load_domain(domain_id)
         scheduler = _get_or_create_scheduler(spec, graph_driver)
@@ -1106,7 +1135,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # --- W2-01: Score Calibration ---
     if subaction == "calibration_run":
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
         from engine.scoring.calibration import ScoreCalibrator
 
@@ -1120,7 +1149,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         # caller's own pack decides the domain half of the predicate.
         if not _feedback_effective(domain_loader.load_domain(tenant)):
             return {"status": "disabled", "message": _FEEDBACK_DISABLED_MESSAGE}
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
         # Read recent outcomes from Neo4j. The outcome node label is the domain's
         # (feedbackloop.outcome_node_label), not a fixed engine vocabulary.
@@ -1261,7 +1290,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
         if not _kge_s.kge_enabled:
             raise FeatureNotEnabled("KGE", flag="KGE_ENABLED", action="admin", tenant=tenant)
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
         if spec.kge is None:
             raise ValidationError(
@@ -1307,7 +1336,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     if subaction == "kge_status":
         from engine.config.settings import settings as _kge_s
 
-        domain_id = payload.get("domain_id")
+        domain_id = _bind_admin_domain(tenant, payload, required=False)
         kge_config_info: dict[str, Any] = {}
         if domain_id:
             try:
@@ -1337,7 +1366,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         if not _gdpr_s.gdpr_erasure_enabled:
             raise FeatureNotEnabled("GDPR Erasure", flag="GDPR_ERASURE_ENABLED", action="admin", tenant=tenant)
         data_subject_id = _require_key(payload, "data_subject_id", "admin", tenant)
-        domain_id = payload.get("domain_id", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=False, default=tenant)
         spec = domain_loader.load_domain(domain_id)
 
         pii_handler = PIIHandler()
@@ -1397,7 +1426,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # --- W6-03: GDS Job History Exposure ---
     if subaction == "gds_status":
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
         scheduler = _get_or_create_scheduler(spec, graph_driver)
         history = await scheduler.get_job_history()
@@ -1419,7 +1448,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         }
 
     if subaction == "gds_trigger":
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         job_name = _require_key(payload, "job_name", "admin", tenant)
         spec = domain_loader.load_domain(domain_id)
         # Validate algorithm name exists in domain spec
@@ -1439,7 +1468,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
         from engine.config.settings import settings as _gds_s
 
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
         scheduler = _get_or_create_scheduler(spec, graph_driver)
         history = await scheduler.get_job_history()
@@ -1531,7 +1560,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # --- S2-08: Auto-generate calibration pairs from outcomes ---
     if subaction == "generate_calibration_pairs":
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
 
         # Read recent outcomes with scores (outcome node label is the domain's)
@@ -1577,7 +1606,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # --- S2-21: Domain density report ---
     if subaction == "domain_density_report":
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
 
         # Query graph statistics
@@ -1625,7 +1654,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # --- S2-23: Auto-tune aggregation strategies ---
     if subaction == "auto_tune":
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
 
         from engine.scoring.hgkr_utils import build_ablation_configs
@@ -1656,7 +1685,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 tenant=tenant,
             )
 
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
         n_samples = int(payload.get("n_samples", 50))
 
@@ -1783,7 +1812,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
         entity = _require_key(payload, "entity", "admin", tenant)
         entity_id = _require_key(payload, "entity_id", "admin", tenant)
-        domain_id = payload.get("domain_id", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=False, default=tenant)
 
         # The domain owns which inference may run for it (plugins.inference_rules).
         # `rules` absent means "every rule the domain authorizes"; `rules: []`
@@ -1860,7 +1889,7 @@ async def _handle_evaluate(
     """
     import math
 
-    domain_id = _require_key(payload, "domain_id", "admin", tenant)
+    domain_id = _bind_admin_domain(tenant, payload, required=True)
     test_set = _require_key(payload, "test_set", "admin", tenant)
     k = int(payload.get("k", 10))
     weight_overrides = payload.get("weights", {})
@@ -1907,7 +1936,10 @@ async def _handle_evaluate(
             match_payload["weights"] = weight_overrides
 
         try:
-            match_result = await handle_match(domain_id, match_payload)
+            # RU-003: with the domain bound to the tenant, match runs as the tenant.
+            match_result = await handle_match(
+                tenant if _eval_settings.admin_tenant_bound_domain else domain_id, match_payload
+            )
         except Exception as exc:
             per_case_results.append({"case_index": case_idx, "error": str(exc)})
             continue

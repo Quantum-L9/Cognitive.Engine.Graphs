@@ -431,7 +431,7 @@ class TestHandleAdmin:
         state._domain_loader = loader
         state._initialized = True
         try:
-            result = await handle_admin("t1", {"subaction": "get_domain", "domain_id": "plasticos"})
+            result = await handle_admin("plasticos", {"subaction": "get_domain", "domain_id": "plasticos"})
             assert "domain" in result
         finally:
             _reset_singleton()
@@ -450,7 +450,7 @@ class TestHandleAdmin:
         state._domain_loader = loader
         state._initialized = True
         try:
-            result = await handle_admin("t1", {"subaction": "init_schema", "domain_id": "plasticos"})
+            result = await handle_admin("plasticos", {"subaction": "init_schema", "domain_id": "plasticos"})
             assert result["status"] == "schema_initialized"
             assert "constraints_created" in result
         finally:
@@ -473,7 +473,7 @@ class TestHandleAdmin:
         try:
             with patch("engine.handlers._get_or_create_scheduler", return_value=mock_scheduler):
                 result = await handle_admin(
-                    "t1",
+                    "plasticos",
                     {
                         "subaction": "trigger_gds",
                         "domain_id": "plasticos",

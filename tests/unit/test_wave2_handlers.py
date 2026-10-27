@@ -56,7 +56,7 @@ class TestCalibrationRunSubaction:
         init_dependencies(driver, loader)
 
         result = await handle_admin(
-            "test_tenant",
+            "test_domain",
             {
                 "subaction": "calibration_run",
                 "domain_id": "test_domain",
@@ -84,7 +84,7 @@ class TestCalibrationRunSubaction:
         init_dependencies(driver, loader)
 
         result = await handle_admin(
-            "test_tenant",
+            "test_domain",
             {
                 "subaction": "calibration_run",
                 "domain_id": "test_domain",
@@ -108,7 +108,7 @@ class TestScoreFeedbackSubaction:
         with patch("engine.handlers._fb_settings", create=True):
             with patch("engine.config.settings.Settings") as mock_cls:
                 result = await handle_admin(
-                    "test_tenant",
+                    "test_domain",
                     {
                         "subaction": "score_feedback",
                         "domain_id": "test_domain",
@@ -126,7 +126,7 @@ class TestScoreFeedbackSubaction:
         with patch("engine.config.settings.settings") as mock_settings:
             mock_settings.feedback_enabled = True
             result = await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {
                     "subaction": "score_feedback",
                     "domain_id": "test_domain",
@@ -279,7 +279,7 @@ class TestFeedbackPredicate:
         init_dependencies(_make_graph_driver(), _make_domain_loader(domain_feedback=False))
         with patch("engine.config.settings.settings") as mock_settings:
             mock_settings.feedback_enabled = True
-            feedback = await handle_admin("test_tenant", {"subaction": "score_feedback", "domain_id": "test_domain"})
+            feedback = await handle_admin("test_domain", {"subaction": "score_feedback", "domain_id": "test_domain"})
             applied = await handle_admin(
                 "test_tenant",
                 {
@@ -312,7 +312,7 @@ class TestFeedbackPredicate:
     async def test_global_off_domain_on_is_still_disabled(self) -> None:
         """The domain pack cannot switch the loop on by itself; the operator flag stays authoritative."""
         init_dependencies(_make_graph_driver(), _make_domain_loader(domain_feedback=True))
-        result = await handle_admin("test_tenant", {"subaction": "score_feedback", "domain_id": "test_domain"})
+        result = await handle_admin("test_domain", {"subaction": "score_feedback", "domain_id": "test_domain"})
         assert result["status"] == "disabled"
 
     def test_no_feedback_site_reads_a_flag_on_its_own(self) -> None:
