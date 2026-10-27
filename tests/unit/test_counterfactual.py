@@ -14,6 +14,7 @@ Unit tests for R6 counterfactual scenario generation.
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -263,3 +264,106 @@ class TestCounterfactualGenerator:
             assert "key_difference" in scenario
             assert scenario["actual_outcome"] == "out_fail_005"
             assert scenario["counterfactual_outcome"] == "success"
+
+
+# ── RU-005 / CEG-COR-056: outcome map fields stored in one decodable encoding ──
+
+_DOMAINS = Path(__file__).resolve().parents[2] / "domains"
+
+
+def _fingerprint_rows(actual_weights: object, positive_weights: object) -> list[list[dict]]:
+    return [
+        [
+            {
+                "active_dimensions": ["geo", "price"],
+                "dimension_weights": actual_weights,
+                "gates_passed": [],
+                "match_direction": "forward",
+                "candidate_count": 3,
+                "outcome": "failure",
+            }
+        ],
+        [
+            {
+                "active_dimensions": ["geo", "price"],
+                "dimension_weights": positive_weights,
+                "gates_passed": [],
+                "outcome_id": "pos_1",
+            }
+        ],
+        [],
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-056")
+class TestStoredDimensionWeights:
+    async def test_json_string_weights_produce_weight_scenarios(self) -> None:
+        from engine.models.outcomes import encode_outcome_map
+
+        driver = _mock_driver()
+        driver.execute_query.side_effect = _fingerprint_rows(
+            encode_outcome_map({"geo": 0.1, "price": 0.3}),
+            encode_outcome_map({"geo": 0.5, "price": 0.3}),
+        )
+        scenarios = await CounterfactualGenerator(_make_spec(), driver, "d").generate_for_outcome("out_1")
+        assert [s["key_difference"] for s in scenarios] == ["geo_weight_increase"]
+
+    async def test_legacy_repr_string_is_tolerated_without_weight_scenarios(self) -> None:
+        driver = _mock_driver()
+        driver.execute_query.side_effect = _fingerprint_rows(
+            str({"geo": 0.1, "price": 0.3}),
+            str({"geo": 0.5, "price": 0.3}),
+        )
+        scenarios = await CounterfactualGenerator(_make_spec(), driver, "d").generate_for_outcome("out_1")
+        assert scenarios == []
+
+    async def test_dict_valued_weights_still_accepted(self) -> None:
+        driver = _mock_driver()
+        driver.execute_query.side_effect = _fingerprint_rows({"geo": 0.1}, {"geo": 0.5})
+        scenarios = await CounterfactualGenerator(_make_spec(), driver, "d").generate_for_outcome("out_1")
+        assert [s["key_difference"] for s in scenarios] == ["geo_weight_increase"]
+
+    def test_codec_round_trip_and_tolerance(self) -> None:
+        import json
+
+        from engine.models.outcomes import decode_outcome_map, encode_outcome_map
+
+        encoded = encode_outcome_map({"b": 0.2, "a": 0.5})
+        assert encoded == '{"a": 0.5, "b": 0.2}'
+        assert json.loads(encoded) == {"a": 0.5, "b": 0.2}
+        assert decode_outcome_map(encoded) == {"a": 0.5, "b": 0.2}
+        assert decode_outcome_map({"a": 1}) == {"a": 1}
+        assert decode_outcome_map("{'a': 0.5}") == {}  # legacy repr: never eval'd
+        assert decode_outcome_map("[1, 2]") == {}
+        assert decode_outcome_map(None) == {}
+        assert encode_outcome_map(None) == "{}"
+
+    async def test_handle_outcomes_writes_json(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import json
+
+        from engine.config.loader import DomainPackLoader
+        from engine.config.settings import settings
+        from engine.handlers import handle_outcomes, init_dependencies
+
+        spec = DomainPackLoader(config_path=str(_DOMAINS)).load_domain("plasticos")
+        driver = _mock_driver()
+        driver.execute_query.return_value = [{"outcome_id": "x"}]
+        loader = MagicMock()
+        loader.load_domain.return_value = spec
+        payload = {
+            "match_id": "m",
+            "candidate_id": "c",
+            "outcome": "success",
+            "fingerprint": {"dimension_weights": {"geo_proximity": 0.25, "credit_score": 0.15}},
+        }
+
+        init_dependencies(driver, loader)
+        await handle_outcomes("plasticos", dict(payload))
+        written = driver.execute_query.call_args.kwargs["parameters"]["dimension_weights"]
+        assert json.loads(written) == {"geo_proximity": 0.25, "credit_score": 0.15}
+
+        monkeypatch.setattr(settings, "outcome_map_json_encoding", False)
+        await handle_outcomes("plasticos", dict(payload))
+        legacy = driver.execute_query.call_args.kwargs["parameters"]["dimension_weights"]
+        assert legacy == str({"geo_proximity": 0.25, "credit_score": 0.15})
