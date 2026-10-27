@@ -171,6 +171,15 @@ def validate_llm_output(llm_response: str, expected_schema: type[T], strict: boo
         msg = f"LLM output is not valid JSON: {e}"
         raise ValueError(msg) from e
 
+    # RU-073 / CEG-COR-120: model_validate(strict=True) only disables type
+    # coercion; extra keys are ignored unless the model forbids them. strict
+    # promises "reject extra fields", so undeclared keys are refused here.
+    if strict and isinstance(data, dict):
+        extra = sorted(set(data) - set(expected_schema.model_fields))
+        if extra:
+            msg = f"LLM output has unexpected field(s) for {expected_schema.__name__}: {extra}"
+            raise ValueError(msg)
+
     # Validate against schema
     try:
         if strict:
