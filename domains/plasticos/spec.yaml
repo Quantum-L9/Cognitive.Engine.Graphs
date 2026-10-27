@@ -430,10 +430,14 @@ scoring:
     matchdirections:
     - supply_opportunity_to_buyer_facility
   - name: rate_score
+    # Normalised into [0, 1] (CEG-COR-151): `weightedrate` multiplied the raw
+    # rate by rate_confidence, so any realistic rate per ton clamped to 1.0 and
+    # the dimension could not rank. log(1 + rate) / log(1 + maxvalue) keeps the
+    # order; rates at or above maxvalue saturate.
     source: candidateproperty
-    computation: weightedrate
+    computation: lognormalized
     candidateprop: rate_per_ton
-    queryprop: rate_confidence
+    maxvalue: 1000.0
     weightkey: w_rate
     defaultweight: 0.15
     matchdirections:
@@ -448,10 +452,13 @@ scoring:
     matchdirections:
     - supply_opportunity_to_buyer_facility
   - name: recency
+    # temporalproximity reads its horizon in days from maxvalue (CEG-COR-151);
+    # decayconstant is the geodecay distance constant and was ignored here,
+    # leaving the 90-day default instead of the intended 180 days.
     source: candidateproperty
     computation: temporalproximity
     candidateprop: last_transaction_date
-    decayconstant: 15552000.0
+    maxvalue: 180.0
     weightkey: w_recency
     defaultweight: 0.1
     matchdirections:
