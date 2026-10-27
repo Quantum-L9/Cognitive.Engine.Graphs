@@ -315,6 +315,20 @@ Single source of truth: `engine/packet/packet_store.sql` — defines
 service at `/docker-entrypoint-initdb.d/01_packet_store.sql` (applied
 automatically on first container init only).
 
+The file is safe to re-apply (RU-080 / CEG-COR-096): it drops no table, every
+`CREATE TABLE` / `CREATE INDEX` is `IF NOT EXISTS`, each policy is dropped and
+re-created with the same definition, roles are created only when absent, and
+functions are `CREATE OR REPLACE`. The whole script runs in one transaction,
+so a failure leaves the database as it was. Re-apply it with
+`psql -v ON_ERROR_STOP=1 -f engine/packet/packet_store.sql` to bring an existing
+database up to the shipped schema; existing rows, including the append-only
+`packet_audit_log`, are kept. Before RU-080 the file began with
+`DROP TABLE ... CASCADE` of `packet_store`, `lineage_graph` and
+`packet_audit_log`, so a re-apply deleted every packet and audit row and then
+aborted on `CREATE TABLE hop_trace`, leaving `hop_trace` / `delegation_chain`
+without their foreign keys and the `hop_tenant` policy. A database damaged that
+way is not repaired by re-applying the file; it needs an operator-run repair.
+
 ### Validation
 - `feature_status` / `EngineState.health_check()` reports `db_pool_present: true`.
 - No `"No db_pool configured"` warning in logs after the flush interval elapses.

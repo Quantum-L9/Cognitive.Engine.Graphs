@@ -28,6 +28,8 @@ Scenarios:
   D. (RG-105) Connected as a login role in l9_product (RLS enforced): persist
      succeeds, and a row whose actor_tenant differs from the session tenant
      is still rejected.
+  E. (RG-107, RU-080) packet_store.sql applied a second time to a populated
+     database exits cleanly and keeps every row, foreign key and policy.
 """
 
 from __future__ import annotations
@@ -221,3 +223,65 @@ async def test_l9_product_cannot_write_another_tenants_row(product_dsn: str) -> 
                 await conn.execute(ps_mod._INSERT_PACKET_SQL, *row)
     finally:
         await conn.close()
+
+
+async def _fresh_database() -> tuple[str, str]:
+    assert _ADMIN_DSN is not None
+    name = f"ceg_packet_store_{uuid.uuid4().hex[:12]}"
+    admin = await asyncpg.connect(_ADMIN_DSN)
+    try:
+        await admin.execute(f'CREATE DATABASE "{name}"')
+    finally:
+        await admin.close()
+    return name, _with_database(_ADMIN_DSN, name)
+
+
+async def _drop_database(name: str) -> None:
+    assert _ADMIN_DSN is not None
+    admin = await asyncpg.connect(_ADMIN_DSN)
+    try:
+        await admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+    finally:
+        await admin.close()
+
+
+async def test_reapplying_ddl_preserves_rows() -> None:
+    """Scenario E: before RU-080 the second apply dropped packet_store and
+    packet_audit_log, then aborted with 'relation "hop_trace" already exists'."""
+    name, dsn = await _fresh_database()
+    try:
+        conn = await asyncpg.connect(dsn)
+        try:
+            await conn.execute(_DDL)
+            await conn.execute(
+                "INSERT INTO packet_store (packet_type, action, source_node, actor_tenant,"
+                " originator_tenant, envelope, content_hash, trace_id)"
+                " VALUES ('request', 'match', 'n', 'acme', 'acme', '{}', 'h-reapply', 't-reapply')"
+            )
+            await conn.execute(
+                "INSERT INTO packet_audit_log (packet_id, action, actor, tenant)"
+                " SELECT packet_id, 'INSERT', 'n', 'acme' FROM packet_store"
+            )
+            await conn.execute(
+                "INSERT INTO hop_trace (packet_id, node_id, action, entered_at, seq)"
+                " SELECT packet_id, 'n', 'match', now(), 1 FROM packet_store"
+            )
+            before = {
+                "fks": await conn.fetchval("SELECT count(*) FROM pg_constraint WHERE contype = 'f'"),
+                "policies": await conn.fetchval("SELECT count(*) FROM pg_policies"),
+            }
+
+            await conn.execute(_DDL)
+
+            for count_sql in (
+                "SELECT count(*) FROM packet_store",
+                "SELECT count(*) FROM packet_audit_log",
+                "SELECT count(*) FROM hop_trace",
+            ):
+                assert await conn.fetchval(count_sql) == 1, count_sql
+            assert await conn.fetchval("SELECT count(*) FROM pg_constraint WHERE contype = 'f'") == before["fks"]
+            assert await conn.fetchval("SELECT count(*) FROM pg_policies") == before["policies"]
+        finally:
+            await conn.close()
+    finally:
+        await _drop_database(name)

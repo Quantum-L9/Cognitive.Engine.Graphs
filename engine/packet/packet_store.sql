@@ -1,5 +1,16 @@
 -- L9 PacketStore v3.0.0 — Full RLS, Security Hardening, Constellation-Ready
--- Zero legacy. Clean-slate DDL.
+--
+-- Idempotent and non-destructive (RU-080 / CEG-COR-096): safe to re-apply to a
+-- database that already has it. Nothing is dropped except policies, which are
+-- re-created with the same definition in the same transaction; tables and
+-- indexes are IF NOT EXISTS, roles are created only when absent, and functions
+-- are CREATE OR REPLACE. The whole script is one transaction, so a failure
+-- leaves nothing half-applied. Apply with `psql -v ON_ERROR_STOP=1 -f`.
+-- It does not repair a database already damaged by a re-apply of the old
+-- destructive version (hop_trace/delegation_chain without their FKs); that
+-- needs an operator-run repair.
+
+BEGIN;
 
 -- ════════════════════════════════════════════════════════════════
 --  EXTENSIONS
@@ -8,16 +19,9 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ════════════════════════════════════════════════════════════════
---  DROP LEGACY (burn the boats)
--- ════════════════════════════════════════════════════════════════
-DROP TABLE IF EXISTS lineage_graph CASCADE;
-DROP TABLE IF EXISTS packet_store CASCADE;
-DROP TABLE IF EXISTS packet_audit_log CASCADE;
-
--- ════════════════════════════════════════════════════════════════
 --  CORE TABLE
 -- ════════════════════════════════════════════════════════════════
-CREATE TABLE packet_store (
+CREATE TABLE IF NOT EXISTS packet_store (
     -- identity
     packet_id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     packet_type         TEXT NOT NULL,
@@ -80,7 +84,7 @@ CREATE TABLE packet_store (
 -- ════════════════════════════════════════════════════════════════
 --  LINEAGE GRAPH (materialized derivation chains)
 -- ════════════════════════════════════════════════════════════════
-CREATE TABLE lineage_graph (
+CREATE TABLE IF NOT EXISTS lineage_graph (
     parent_id   UUID NOT NULL REFERENCES packet_store(packet_id) ON DELETE CASCADE,
     child_id    UUID NOT NULL REFERENCES packet_store(packet_id) ON DELETE CASCADE,
     generation  INT NOT NULL,
@@ -92,7 +96,7 @@ CREATE TABLE lineage_graph (
 -- ════════════════════════════════════════════════════════════════
 --  HOP TRACE (constellation journey log)
 -- ════════════════════════════════════════════════════════════════
-CREATE TABLE hop_trace (
+CREATE TABLE IF NOT EXISTS hop_trace (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     packet_id   UUID NOT NULL REFERENCES packet_store(packet_id) ON DELETE CASCADE,
     node_id     TEXT NOT NULL,
@@ -107,7 +111,7 @@ CREATE TABLE hop_trace (
 -- ════════════════════════════════════════════════════════════════
 --  DELEGATION CHAIN (authorization audit trail)
 -- ════════════════════════════════════════════════════════════════
-CREATE TABLE delegation_chain (
+CREATE TABLE IF NOT EXISTS delegation_chain (
     id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     packet_id   UUID NOT NULL REFERENCES packet_store(packet_id) ON DELETE CASCADE,
     delegator   TEXT NOT NULL,
@@ -122,7 +126,7 @@ CREATE TABLE delegation_chain (
 -- ════════════════════════════════════════════════════════════════
 --  AUDIT LOG (append-only, immutable)
 -- ════════════════════════════════════════════════════════════════
-CREATE TABLE packet_audit_log (
+CREATE TABLE IF NOT EXISTS packet_audit_log (
     audit_id            UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     packet_id           UUID,                          -- no FK: survives packet deletion
     timestamp           TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -147,27 +151,27 @@ CREATE TABLE packet_audit_log (
 -- ════════════════════════════════════════════════════════════════
 --  INDEXES
 -- ════════════════════════════════════════════════════════════════
-CREATE INDEX idx_ps_actor_tenant     ON packet_store (actor_tenant);
-CREATE INDEX idx_ps_originator       ON packet_store (originator_tenant);
-CREATE INDEX idx_ps_trace            ON packet_store (trace_id);
-CREATE INDEX idx_ps_correlation      ON packet_store (correlation_id) WHERE correlation_id IS NOT NULL;
-CREATE INDEX idx_ps_source_node      ON packet_store (source_node);
-CREATE INDEX idx_ps_dest_node        ON packet_store (destination_node) WHERE destination_node IS NOT NULL;
-CREATE INDEX idx_ps_type_action      ON packet_store (packet_type, action);
-CREATE INDEX idx_ps_created          ON packet_store (created_at DESC);
-CREATE INDEX idx_ps_ttl              ON packet_store (ttl) WHERE ttl IS NOT NULL;
-CREATE INDEX idx_ps_root             ON packet_store (root_id) WHERE root_id IS NOT NULL;
-CREATE INDEX idx_ps_classification   ON packet_store (classification);
-CREATE INDEX idx_ps_data_subject     ON packet_store (data_subject_id) WHERE data_subject_id IS NOT NULL;
-CREATE INDEX idx_ps_tags             ON packet_store USING GIN (tags);
-CREATE INDEX idx_ps_compliance       ON packet_store USING GIN (compliance_tags);
-CREATE INDEX idx_ps_envelope         ON packet_store USING GIN (envelope jsonb_path_ops);
+CREATE INDEX IF NOT EXISTS idx_ps_actor_tenant     ON packet_store (actor_tenant);
+CREATE INDEX IF NOT EXISTS idx_ps_originator       ON packet_store (originator_tenant);
+CREATE INDEX IF NOT EXISTS idx_ps_trace            ON packet_store (trace_id);
+CREATE INDEX IF NOT EXISTS idx_ps_correlation      ON packet_store (correlation_id) WHERE correlation_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_ps_source_node      ON packet_store (source_node);
+CREATE INDEX IF NOT EXISTS idx_ps_dest_node        ON packet_store (destination_node) WHERE destination_node IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_ps_type_action      ON packet_store (packet_type, action);
+CREATE INDEX IF NOT EXISTS idx_ps_created          ON packet_store (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ps_ttl              ON packet_store (ttl) WHERE ttl IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_ps_root             ON packet_store (root_id) WHERE root_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_ps_classification   ON packet_store (classification);
+CREATE INDEX IF NOT EXISTS idx_ps_data_subject     ON packet_store (data_subject_id) WHERE data_subject_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_ps_tags             ON packet_store USING GIN (tags);
+CREATE INDEX IF NOT EXISTS idx_ps_compliance       ON packet_store USING GIN (compliance_tags);
+CREATE INDEX IF NOT EXISTS idx_ps_envelope         ON packet_store USING GIN (envelope jsonb_path_ops);
 
-CREATE INDEX idx_ht_packet           ON hop_trace (packet_id, seq);
-CREATE INDEX idx_dc_packet           ON delegation_chain (packet_id, seq);
-CREATE INDEX idx_pal_packet          ON packet_audit_log (packet_id);
-CREATE INDEX idx_pal_tenant          ON packet_audit_log (tenant, timestamp DESC);
-CREATE INDEX idx_lg_child            ON lineage_graph (child_id);
+CREATE INDEX IF NOT EXISTS idx_ht_packet           ON hop_trace (packet_id, seq);
+CREATE INDEX IF NOT EXISTS idx_dc_packet           ON delegation_chain (packet_id, seq);
+CREATE INDEX IF NOT EXISTS idx_pal_packet          ON packet_audit_log (packet_id);
+CREATE INDEX IF NOT EXISTS idx_pal_tenant          ON packet_audit_log (tenant, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_lg_child            ON lineage_graph (child_id);
 
 -- ════════════════════════════════════════════════════════════════
 --  ROW-LEVEL SECURITY
@@ -182,6 +186,7 @@ ALTER TABLE lineage_graph ENABLE ROW LEVEL SECURITY;
 -- Tenant isolation: each product/tenant sees only its own packets
 -- current_setting('app.current_tenant') set by chassis on each connection
 
+DROP POLICY IF EXISTS tenant_isolation_select ON packet_store;
 CREATE POLICY tenant_isolation_select ON packet_store
     FOR SELECT USING (
         actor_tenant = current_setting('app.current_tenant', true)
@@ -189,11 +194,13 @@ CREATE POLICY tenant_isolation_select ON packet_store
         OR on_behalf_of = current_setting('app.current_tenant', true)
     );
 
+DROP POLICY IF EXISTS tenant_isolation_insert ON packet_store;
 CREATE POLICY tenant_isolation_insert ON packet_store
     FOR INSERT WITH CHECK (
         actor_tenant = current_setting('app.current_tenant', true)
     );
 
+DROP POLICY IF EXISTS tenant_isolation_delete ON packet_store;
 CREATE POLICY tenant_isolation_delete ON packet_store
     FOR DELETE USING (
         actor_tenant = current_setting('app.current_tenant', true)
@@ -203,6 +210,7 @@ CREATE POLICY tenant_isolation_delete ON packet_store
 -- If you need to change data, derive() a new packet.
 
 -- Hop trace inherits packet tenant isolation
+DROP POLICY IF EXISTS hop_tenant ON hop_trace;
 CREATE POLICY hop_tenant ON hop_trace
     FOR ALL USING (
         packet_id IN (
@@ -213,6 +221,7 @@ CREATE POLICY hop_tenant ON hop_trace
     );
 
 -- Delegation chain: visible to both delegator and delegatee tenants
+DROP POLICY IF EXISTS deleg_tenant ON delegation_chain;
 CREATE POLICY deleg_tenant ON delegation_chain
     FOR ALL USING (
         delegator = current_setting('app.current_tenant', true)
@@ -220,16 +229,19 @@ CREATE POLICY deleg_tenant ON delegation_chain
     );
 
 -- Audit log: tenant sees only its own audit entries
+DROP POLICY IF EXISTS audit_tenant ON packet_audit_log;
 CREATE POLICY audit_tenant ON packet_audit_log
     FOR SELECT USING (
         tenant = current_setting('app.current_tenant', true)
     );
 
 -- Audit log: insert-only, no delete/update
+DROP POLICY IF EXISTS audit_insert ON packet_audit_log;
 CREATE POLICY audit_insert ON packet_audit_log
     FOR INSERT WITH CHECK (true);
 
 -- Lineage: visible if either end is yours
+DROP POLICY IF EXISTS lineage_tenant ON lineage_graph;
 CREATE POLICY lineage_tenant ON lineage_graph
     FOR ALL USING (
         parent_id IN (SELECT packet_id FROM packet_store WHERE actor_tenant = current_setting('app.current_tenant', true))
@@ -451,3 +463,5 @@ RETURNS TABLE(packet_id UUID, generation INT, derivation_type TEXT) LANGUAGE SQL
     )
     SELECT packet_id, generation, derivation_type FROM descendants;
 $$;
+
+COMMIT;
