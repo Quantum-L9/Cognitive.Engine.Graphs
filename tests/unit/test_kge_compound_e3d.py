@@ -309,3 +309,19 @@ class TestScoreAgainstIcpDoesNotMutate:
         trained_model._entity_embeddings["__ICP_CENTROID__"] = prior
         trained_model.score_against_icp("gamma_mrf", "SUPPLIES_TO")
         assert trained_model._entity_embeddings["__ICP_CENTROID__"] is prior
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-113")
+class TestTrainDoesNotReorderInput:
+    """RU-126: train() shuffles a local copy, never the caller's list."""
+
+    def test_triples_list_unchanged(self) -> None:
+        triples = [(f"h{i}", "R", f"t{i}") for i in range(50)]
+        original = list(triples)
+        model = CompoundE3D(CompoundE3DConfig(embedding_dim=6))
+        with patch("engine.kge.compound_e3d.settings") as mock_settings:
+            mock_settings.kge_enabled = True
+            result = model.train(triples, epochs=3)
+        assert result["status"] == "completed"
+        assert triples == original

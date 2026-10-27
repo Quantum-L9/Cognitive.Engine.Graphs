@@ -162,10 +162,13 @@ class CompoundE3D:
         # Simplified training loop (production: replace with PyTorch optim)
         entity_list = list(entities)
         losses: list[float] = []
+        # Shuffle a local copy each epoch; the caller's list is never reordered
+        # (CEG-COR-113).
+        order = list(triples)
         for _ in range(epochs):
             epoch_loss = 0.0
-            rng.shuffle(triples)
-            for h, r, t in triples:
+            rng.shuffle(order)
+            for h, r, t in order:
                 pos_score = self._distance(h, r, t)
                 # Negative sampling — index the list so the type stays str
                 neg_t = entity_list[int(rng.integers(len(entity_list)))]
