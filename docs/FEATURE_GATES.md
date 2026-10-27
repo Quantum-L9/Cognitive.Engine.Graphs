@@ -1109,3 +1109,16 @@ deletion, as before. Ingest-time hashing of stored PII is out of scope. Off: bui
 inference with key deletion for every domain.
 
 Rollback: set the flag to `false`.
+
+### GDPR Erasure correctness (RU-066 / CEG-COR-054) — no new flag
+
+Still gated by `GDPR_ERASURE_ENABLED=False` / `GDPR_DRY_RUN=True` (§2). With erasure
+enabled, `erase_subject` now uses the domain's `compliance.gdpr_subject_id_field`
+(sanitized; default `data_subject_id`) for both the dry-run count and the deletion, calls
+`gdpr_erase_subject($1, $2)` with `performed_by` = tenant on the PacketStore pool
+(`PacketStore.get_pool()`, only while `PACKET_STORE_ENABLED`; otherwise the summary
+reports `packets_deleted: null`, `packets_erasable: false`), stores an integer count, and
+records the `PII_ERASURE` CRITICAL entry in the domain's `ComplianceEngine` audit trail
+before any deletion. **Release gate:** do not enable live erasure in any environment
+before the admin tenant-binding fix (RU-003, CEG-COR-003) is deployed with it — until
+then `domain_id` is caller-supplied.

@@ -576,29 +576,40 @@ class PIIHandler:
         db_pool: Any = None,
         *,
         database: str | None = None,
+        subject_property: str = "data_subject_id",
+        performed_by: str = "system",
     ) -> dict[str, Any]:
         """
         GDPR right-to-erasure: delete all data for a data subject.
 
-        Steps:
-        1. Log the erasure request to audit (before deletion)
-        2. Delete from PostgreSQL packet_store WHERE data_subject_id = ?
-        3. Delete from Neo4j WHERE entity.data_subject_id = ?
-        4. Delete from memory_embeddings via FK cascade
-        5. Return summary of what was deleted
+        Steps (the caller records the audit entry BEFORE calling this):
+        1. Delete from PostgreSQL packet_store via ``gdpr_erase_subject($1, $2)``
+           (subject id, performed_by) — the function also writes its own
+           packet_audit_log rows before deleting
+        2. Delete from Neo4j WHERE entity.<subject_property> = $dsid
+        3. Delete from memory_embeddings via FK cascade
+        4. Return summary of what was deleted
+
+        ``subject_property`` is the domain's ``compliance.gdpr_subject_id_field``
+        (RU-066); it is interpolated only after ``sanitize_label``, so an invalid
+        name raises ``ValueError`` before any query. ``db_pool`` is the
+        PacketStore pool; when it is ``None`` packets cannot be erased and the
+        summary says so (``packets_deleted: None``, ``packets_erasable: False``)
+        rather than reporting 0.
 
         ``database`` is the tenant's Neo4j database (tenant id == domain spec
         id == database name). DB-STRICT-01: ``GraphDriver.execute_query`` no
         longer falls back to the shared ``neo4j`` database when it is omitted,
         so the caller names the subject's domain database explicitly — the same
         ``domain_id`` the dry-run count in ``handle_admin`` already uses.
-
-        NOTE: Actual DB calls depend on injected drivers. This method
-        provides the orchestration contract.
         """
+        from engine.utils.security import sanitize_label
+
+        prop = sanitize_label(subject_property)
         summary: dict[str, Any] = {
             "data_subject_id": data_subject_id,
-            "packets_deleted": 0,
+            "packets_deleted": None,
+            "packets_erasable": db_pool is not None,
             "graph_nodes_deleted": 0,
             "embeddings_deleted": 0,
         }
@@ -606,24 +617,29 @@ class PIIHandler:
         if db_pool:
             try:
                 async with db_pool.acquire() as conn:
-                    result = await conn.execute("SELECT gdpr_erase_subject($1)", data_subject_id)
-                    summary["packets_deleted"] = result
+                    deleted = await conn.fetchval("SELECT gdpr_erase_subject($1, $2)", data_subject_id, performed_by)
+                    summary["packets_deleted"] = int(deleted or 0)
             except Exception:
-                logger.exception(f"GDPR erasure DB error for {data_subject_id}")
+                logger.exception("GDPR erasure packet-store error")
                 raise
 
         if graph_driver:
             try:
                 result = await graph_driver.execute_query(
-                    "MATCH (n {data_subject_id: $dsid}) DETACH DELETE n RETURN count(n) AS deleted",
+                    f"MATCH (n {{{prop}: $dsid}}) DETACH DELETE n RETURN count(n) AS deleted",
                     parameters={"dsid": data_subject_id},
                     database=database,
                 )
                 if result:
                     summary["graph_nodes_deleted"] = result[0].get("deleted", 0)
             except Exception:
-                logger.exception(f"GDPR erasure graph error for {data_subject_id}")
+                logger.exception("GDPR erasure graph error")
                 raise
 
-        logger.info(f"GDPR erasure complete for data_subject_id={data_subject_id}: {summary}")
+        logger.info(
+            "GDPR erasure complete: subject_property=%s packets_deleted=%s graph_nodes_deleted=%s",
+            prop,
+            summary["packets_deleted"],
+            summary["graph_nodes_deleted"],
+        )
         return summary

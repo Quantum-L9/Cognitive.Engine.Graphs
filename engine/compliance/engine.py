@@ -339,6 +339,23 @@ class ComplianceEngine:
             trace_id=trace_id,
         )
 
+    def log_pii_erasure(
+        self,
+        *,
+        tenant: str,
+        data_subject_id: str,
+        detail: str,
+        trace_id: str | None = None,
+    ) -> None:
+        """Audit a GDPR erasure in this domain's trail (RU-066). Emitted before deletion."""
+        self._audit.log_pii_erasure(
+            actor=tenant,
+            tenant=tenant,
+            data_subject_id=data_subject_id,
+            detail=detail,
+            trace_id=trace_id,
+        )
+
     def log_admin(
         self,
         *,

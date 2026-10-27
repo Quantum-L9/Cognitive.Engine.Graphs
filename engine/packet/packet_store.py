@@ -410,6 +410,10 @@ class PacketStore:
             )
             return False
 
+    async def get_pool(self) -> Any:
+        """Return the PacketStore asyncpg pool (lazily created; RU-066 GDPR erasure)."""
+        return await _pool_manager.get_pool()
+
     async def close(self) -> None:
         """Close the underlying connection pool."""
         await _pool_manager.close()
