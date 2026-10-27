@@ -53,7 +53,13 @@ class ComplianceEngine:
                 additional_pii = pii_cfg.additional_fields
 
         self._pii = PIIHandler(additional_pii_fields=additional_pii)
-        self._audit = AuditLogger()  # Uses default retention policies
+        from engine.config.settings import settings
+
+        if settings.compliance_audit_soft_sink:
+            # RU-065: retention bounded by the documented W4-04 setting.
+            self._audit = AuditLogger(buffer_size=settings.compliance_buffer_max)
+        else:
+            self._audit = AuditLogger()  # Uses default retention policies
 
         if self._db_pool is None:
             logger.info("compliance.audit_persistence_disabled", extra={"reason": "db_pool not configured"})
@@ -79,6 +85,29 @@ class ComplianceEngine:
             logger.warning("No db_pool configured, cannot flush audit entries")
             return 0
         return await self._audit.flush_to_store(self._db_pool)
+
+    async def flush_audit_for_request(self) -> int:
+        """Request-path flush (handle_match / handle_sync).
+
+        RU-065: the audit pool is a soft dependency (boot.py). With
+        ``compliance_audit_soft_sink`` on, a sink failure is logged and the
+        request continues; the entries stay buffered (bounded) for the boot
+        periodic flush loop. Off: the failure propagates as before.
+        """
+        from engine.config.settings import settings
+
+        if not settings.compliance_audit_soft_sink:
+            return await self.flush_audit()
+        try:
+            return await self.flush_audit()
+        except Exception as exc:
+            logger.warning(
+                "Compliance audit flush failed on the request path (%s); %d entries remain buffered, %d dropped so far",
+                type(exc).__name__,
+                self._audit.buffer_count,
+                self._audit.dropped_count,
+            )
+            return 0
 
     def validate_gates(self, gates: list[GateSpec]) -> None:
         """Validate all gates against prohibited factors at compile time.

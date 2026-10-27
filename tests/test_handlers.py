@@ -591,3 +591,40 @@ async def test_match_response_candidate_lacks_raw_pii() -> None:
 
     assert "ops@f1.com" not in str(result["candidates"])
     assert result["candidates"][0]["candidate"]["facility_id"] == "F-1"
+
+
+# ── RU-065 / CEG-COR-053: an audit sink failure never fails a request ──
+
+
+class _FailingPool:
+    def acquire(self):
+        class _Ctx:
+            async def __aenter__(self):
+                msg = "postgres unavailable"
+                raise ConnectionError(msg)
+
+            async def __aexit__(self, *exc: object) -> None:
+                return None
+
+        return _Ctx()
+
+
+@pytest.mark.asyncio
+async def test_match_and_sync_succeed_when_audit_sink_fails(caplog: pytest.LogCaptureFixture) -> None:
+    from engine.state import get_state
+
+    state = get_state()
+    init_dependencies(state.graph_driver, state.domain_loader, db_pool=_FailingPool())
+    _loaded_spec_for_results()
+    state.compliance_engines.pop("test_domain", None)
+    state.graph_driver.execute_query = AsyncMock(return_value=[{"candidate": {"facility_id": "F-1"}, "score": 0.9}])
+    try:
+        with caplog.at_level("WARNING"):
+            match = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
+            sync = await handle_sync("t", {"entity_type": "facility", "batch": [{"facility_id": "F1"}]})
+    finally:
+        state.compliance_engines.pop("test_domain", None)
+        init_dependencies(state.graph_driver, state.domain_loader)
+    assert match["candidates"][0]["candidate"]["facility_id"] == "F-1"
+    assert sync["status"] == "success"
+    assert any("audit flush failed" in r.getMessage() for r in caplog.records)

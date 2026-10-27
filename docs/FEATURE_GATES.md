@@ -107,6 +107,7 @@ independently of the code default.
 | Freshness Max-age Validated | `FRESHNESS_MAXAGEDAYS_VALIDATED` (`freshness_maxagedays_validated`) | `True` | unset | active (hardening); a freshness gate defaults `maxagedays` to 1 only when absent and refuses a value < 1 (0 became 1 day, a negative age a future cutoff) — see §21 |
 | Prohibited Factor Full Coverage | `PROHIBITED_FACTOR_FULL_COVERAGE` (`prohibited_factor_full_coverage`) | `True` | unset | active (hardening); every gate property field, scoring dimension and sync-row key at any depth is checked, casefolded — see lane D |
 | PII Redaction Recursive | `PII_REDACTION_RECURSIVE` (`pii_redaction_recursive`) | `True` | unset | active (hardening); PII detection/redaction/masking reaches list elements (match `candidates`) without mutating the input — see lane D |
+| Compliance Audit Soft Sink | `COMPLIANCE_AUDIT_SOFT_SINK` (`compliance_audit_soft_sink`) | `True` | unset | active (hardening); bounded audit buffer, JSON-encoded JSONB metadata, request never fails on audit persistence — see lane D |
 
 ---
 
@@ -1042,5 +1043,28 @@ dict-only payloads keep their dotted paths), and redaction/masking copy every co
 on the edited path, so the input is never mutated. `check_sync_request` records the
 detected field paths (never values) in the access audit entry. Off: the legacy
 dict-only traversal.
+
+Rollback: set the flag to `false`.
+
+### Compliance Audit Soft Sink (RU-065 / CEG-COR-052, CEG-COR-053)
+
+**Flag**: `COMPLIANCE_AUDIT_SOFT_SINK=True` (default on)
+
+The PostgreSQL audit pool (`POSTGRES_DSN`, §7) is a soft dependency, but without it
+`AuditLogger` retained every entry forever, and with it every flush failed (the
+`metadata` dict was bound to the JSONB column) and `handle_match` / `handle_sync`
+re-raised the failure after their Neo4j work had succeeded. On:
+
+- `ComplianceEngine` builds its `AuditLogger` with `buffer_size=COMPLIANCE_BUFFER_MAX`
+  (default 100). `_emit`, `emit_async` and the re-buffer after a failed
+  `flush_to_store` keep the newest `buffer_size` entries; dropped entries are counted
+  (`AuditLogger.dropped_count`) and logged at WARNING once per `buffer_size` drops.
+  Every entry is still emitted to the `l9.audit` logger when it is created.
+- `flush_to_store` binds `metadata` as `json.dumps(...)` text.
+- `handle_match` / `handle_sync` call `ComplianceEngine.flush_audit_for_request()`,
+  which logs a failure and returns 0; the entries stay buffered for the boot periodic
+  flush loop (`engine/boot.py` `_compliance_flush_loop`), which is unchanged.
+
+Off: unbounded retention, dict-bound metadata, and request-path propagation.
 
 Rollback: set the flag to `false`.

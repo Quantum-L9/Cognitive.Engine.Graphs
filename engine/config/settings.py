@@ -439,6 +439,15 @@ class Settings(BaseSettings):
     # and tuples are traversed with index-aware paths (`a[0].b`) and edits copy
     # every container on the edited path. Off: dict-only, legacy copies.
     pii_redaction_recursive: bool = True
+    # RU-065 / CEG-COR-052/053: the compliance audit buffer grew without bound
+    # when no Postgres pool was configured, a configured pool failed every
+    # flush (metadata dict bound to JSONB) and handle_match / handle_sync
+    # re-raised that failure after the Neo4j work succeeded. On: the buffer is
+    # bounded by compliance_buffer_max (oldest dropped, count logged; every
+    # entry is still emitted to the l9.audit log), metadata is bound as JSON
+    # text, and a request-path flush failure is logged, not raised. Off:
+    # unbounded retention and propagation.
+    compliance_audit_soft_sink: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
