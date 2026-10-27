@@ -20,7 +20,7 @@
 domain:
   id: plasticos
   name: PlasticOS Recycling Marketplace
-  version: 1.2.0
+  version: 1.3.0
   description: 'Domain specification for matching material intake requests (RFQs)
     from buyers to recycling facilities (suppliers) based on polymer compatibility,
     geographic proximity, capacity, certifications, and historical transaction success.
@@ -276,7 +276,11 @@ queryschema:
     type: float
   - name: requires_active_supply
     type: bool
-    description: When true, only active SupplyOpportunity candidates pass
+    # Declared default true (CEG-COR-004, DEC-12 option A'): omitted, the field
+    # bound NULL and the gate's FAIL null policy rejected every candidate.
+    default: true
+    description: When true (the default), only active SupplyOpportunity candidates
+      pass; when false, active and inactive candidates pass
 # No traversal steps (CEG-COR-013): a required `MATCH (candidate)-[:PROCESSES]->
 # (polymer)` step neither tested the requested polymer nor kept one row per
 # candidate — a facility processing three polymers came back three times. The
@@ -339,14 +343,20 @@ gates:
   - supply_opportunity_to_buyer_facility
   description: Exclude facilities on buyer's blacklist
 - name: active_supply_available
-  type: boolean
+  # An implication, not an equality (CEG-COR-004): Cypher orders false < true,
+  # so `active >= requires_active_supply` admits only active supply when the
+  # requirement is true (the default) and active or inactive supply when it is
+  # false. FAIL keeps candidates with no `active` value out: they are not
+  # SupplyOpportunity records.
+  type: threshold
   candidateprop: active
   queryparam: requires_active_supply
+  operator: '>='
   nullbehavior: fail
   matchdirections:
   - buyer_demand_to_supply_opportunity
-  description: Candidate must be an active SupplyOpportunity (not inactive capability
-    projection)
+  description: When active supply is required (the default), the candidate must be
+    an active SupplyOpportunity (not an inactive capability projection)
 - name: active_supply_volume
   type: threshold
   candidateprop: available_tons

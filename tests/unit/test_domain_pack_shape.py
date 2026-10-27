@@ -594,3 +594,63 @@ def test_full_match_check_off_restores_previous_admission(monkeypatch: pytest.Mo
     raw = _synthetic_raw()
     raw["traversal"] = {"steps": [{"name": "maker_hop", "pattern": "candidate-[:MADE_BY]->m:Maker", "required": True}]}
     assert admission_defects(DomainSpec.model_validate(raw)) == []
+
+
+# --------------------------------------------------------------------------
+# Correctness remediation lane J (plan 0d84ec8, round 2): served-pack
+# re-expressions with existing gate types.
+# --------------------------------------------------------------------------
+
+
+def _fail_wrapped_ge(candidate: bool | None, param: bool | None) -> bool:
+    """`(c IS NOT NULL AND $p IS NOT NULL AND (c >= $p))` — the FAIL wrap of a threshold gate."""
+    return candidate is not None and param is not None and bool(_three_valued_ge(candidate, param))
+
+
+# RG-042 (RU-033 / CEG-COR-004, DEC-12 option A'): "when true, only active
+# SupplyOpportunity candidates pass" is an implication with a declared default of
+# true. Omitting the field bound NULL and the FAIL wrap emptied every result;
+# false admitted inactive supply only.
+_ACTIVE_SUPPLY_FRAGMENT = (
+    "(candidate.active IS NOT NULL AND $requires_active_supply IS NOT NULL AND "
+    "(candidate.active >= $requires_active_supply))"
+)
+
+
+def test_plasticos_active_supply_gate_is_an_implication_with_a_true_default() -> None:
+    from engine.gates.compiler import GateCompiler
+
+    spec = _admitted_spec("plasticos")
+    gate = _gate(spec, "active_supply_available")
+    assert (gate.type.value, gate.operator, gate.nullbehavior.value) == ("threshold", ">=", "fail")
+    field = next(f for f in spec.queryschema.fields if f.name == "requires_active_supply")
+    assert field.default is True
+    where = GateCompiler(spec).compile_all_gates(_DIR2)
+    assert _ACTIVE_SUPPLY_FRAGMENT in where
+    assert "candidate.active = $requires_active_supply" not in where
+    # Direction 1 never sees the gate.
+    assert "requires_active_supply" not in GateCompiler(spec).compile_all_gates(_DIR1)
+    assert admission_defects(spec) == []
+    assert "plasticos" in DomainPackLoader(str(DOMAINS_ROOT)).list_domains()
+
+
+def test_plasticos_active_supply_truth_table() -> None:
+    """p=true admits active only; p=false admits active and inactive; NULL active never passes."""
+    table = {p: {c: _fail_wrapped_ge(c, p) for c in (None, False, True)} for p in (False, True)}
+    assert table == {
+        False: {None: False, False: True, True: True},
+        True: {None: False, False: False, True: True},
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("supplied", "bound"), [(None, True), (True, True), (False, False)])
+async def test_plasticos_active_supply_binds_the_declared_default(supplied: bool | None, bound: bool) -> None:
+    """handle_match without requires_active_supply binds the declared default, not None."""
+    query = dict(_PLASTICOS_QUERIES[_DIR2])
+    if supplied is not None:
+        query["requires_active_supply"] = supplied
+    cypher, parameters = await _capture_match("plasticos", _DIR2, query)
+    assert parameters["requires_active_supply"] is bound
+    assert _ACTIVE_SUPPLY_FRAGMENT in cypher
+    assert _missing_params(cypher, parameters) == []

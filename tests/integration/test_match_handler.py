@@ -228,3 +228,48 @@ async def test_match_returns_only_compatible_facilities_once(
     ids = _candidate_ids(result)
     assert sorted(ids) == sorted(expected)
     assert len(ids) == len(set(ids))
+
+
+SUPPLY_SEED = """
+UNWIND $batch AS row
+MERGE (s:SupplyOpportunity {entity_id: row.entity_id})
+SET s += row
+WITH s
+MERGE (p:PolymerFamily {code: s.polymer_type})
+MERGE (s)-[:FULFILLS_POLYMER]->(p)
+"""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("requires_active_supply", "expected"),
+    [(None, {"active"}), (True, {"active"}), (False, {"active", "inactive"})],
+)
+async def test_active_supply_requirement_is_an_implication_with_a_true_default(
+    engine_deps, graph_driver, clean_db, requires_active_supply, expected
+):
+    """RG-043 (RU-033 / CEG-COR-004): omitted/true -> active only; false -> active and inactive.
+
+    Supply with no `active` value is not a SupplyOpportunity record and never passes.
+    """
+    await graph_driver.execute_write(
+        cypher=SUPPLY_SEED,
+        parameters={
+            "batch": [
+                {"entity_id": "active", "active": True, "available_tons": 50.0, "polymer_type": "PET"},
+                {"entity_id": "inactive", "active": False, "available_tons": 50.0, "polymer_type": "PET"},
+                {"entity_id": "unknown", "available_tons": 50.0, "polymer_type": "PET"},
+            ]
+        },
+        database="plasticos",
+    )
+    from engine.handlers import handle_match
+
+    query: dict[str, object] = {"polymer_type": "PET", "volume_tons": 10.0}
+    if requires_active_supply is not None:
+        query["requires_active_supply"] = requires_active_supply
+    result = await handle_match(
+        "plasticos",
+        {"query": query, "match_direction": "buyer_demand_to_supply_opportunity", "top_n": 10},
+    )
+    assert set(_candidate_ids(result)) == expected
