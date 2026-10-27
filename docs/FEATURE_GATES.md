@@ -89,6 +89,7 @@ independently of the code default.
 | Causal Edge Declared Identity | `CAUSAL_EDGE_DECLARED_IDENTITY` (`causal_edge_declared_identity`) | `True` | unset | active; causal edges match declared node identities, anchor predicates in one WHERE with a bound threshold, MERGE on a stable key — see lane D |
 | Causal Validator Batch Edge Type | `CAUSAL_VALIDATOR_BATCH_EDGE_TYPE` (`causal_validator_batch_edge_type`) | `True` | unset | active; declared per-edge temporal validation applies to sync batches — see lane D |
 | safe_eval Rejects Keywords | `SAFE_EVAL_REJECT_KEYWORDS` (`safe_eval_reject_keywords`) | `True` | unset | active; keyword arguments in derived-parameter / unit expressions raise instead of being dropped — see lane D |
+| Causal Serializer Variable Depth | `CAUSAL_SERIALIZER_VARIABLE_DEPTH` (`causal_serializer_variable_depth`) | `True` | unset | active; causal match explanations follow chains up to the requested depth — see lane D |
 
 ---
 
@@ -1070,5 +1071,19 @@ so `round(2.567, ndigits=2)` returned `3`. On: any `ast.Call` with keywords rais
 `ValueError("keyword arguments not allowed")`. No shipped expression uses keywords.
 The companion resource bounds (RU-070: `_MAX_INT_BITS`, `_MAX_ROUND_NDIGITS`, overflow
 as `ValueError`) are guard-only and carry no flag. Off: keywords silently dropped.
+
+Rollback: set the flag to `false`.
+
+### Causal Serializer Variable Depth (RU-074 / CEG-COR-121)
+
+**Flag**: `CAUSAL_SERIALIZER_VARIABLE_DEPTH=True` (default on)
+
+`CausalSubgraphSerializer.serialize_neighborhood` matched `(start)-[r:T]->(neighbor)`, a
+single hop, so `match_explanation.depth_reached` never exceeded 1. On: the pattern is
+`[:T1|T2*1..N]` (`[*1..N]` without declared causal edges) where N is `max_depth` as an
+integer clamped to `[1, causal.chain_depth_limit]` and interpolated as a literal — Cypher
+does not accept a parameter as a variable-length bound; `$max_depth` carries N and
+`LIMIT $max_nodes` still bounds the result. `handle_match` keeps its depth policy
+(`min(chain_depth_limit, 2)`). Off: the one-hop pattern.
 
 Rollback: set the flag to `false`.

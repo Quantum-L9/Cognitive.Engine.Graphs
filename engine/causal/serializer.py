@@ -23,6 +23,7 @@ from typing import Any
 import structlog
 
 from engine.config.schema import DomainSpec
+from engine.config.settings import settings
 from engine.graph.driver import GraphDriver
 from engine.utils.security import sanitize_label
 
@@ -68,7 +69,19 @@ class CausalSubgraphSerializer:
 
         # Build causal edge pattern from domain spec
         causal_spec = self._spec.causal
-        if causal_spec.causal_edges:
+        if settings.causal_serializer_variable_depth:
+            # RU-074 / CEG-COR-121: `[r:T]` is length 1, so depth_reached never
+            # exceeded 1. Cypher does not accept a parameter as a var-length
+            # bound, so the bound is a validated integer literal in
+            # [1, chain_depth_limit]; `$max_depth` carries the same value.
+            hops = max(1, min(int(max_depth), int(causal_spec.chain_depth_limit)))
+            max_depth = hops
+            if causal_spec.causal_edges:
+                safe_types = [sanitize_label(e.edge_type) for e in causal_spec.causal_edges]
+                rel_pattern = f"[:{'|'.join(safe_types)}*1..{hops}]"
+            else:
+                rel_pattern = f"[*1..{hops}]"
+        elif causal_spec.causal_edges:
             safe_types = [sanitize_label(e.edge_type) for e in causal_spec.causal_edges]
             edge_filter = "|".join(safe_types)
             rel_pattern = f"[r:{edge_filter}]"
