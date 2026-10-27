@@ -32,6 +32,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from engine.config.settings import settings
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -232,13 +234,51 @@ def infer_email_domain_from_website(entity: dict, ctx: InferenceContext) -> Infe
     )
 
 
+# USPS ZIP first digit -> region, in the vocabulary this rule already emits
+# (RU-084). Zone-level and therefore approximate (zone 5 includes MT).
+_USPS_ZONE_REGION: dict[str, str] = {
+    "0": "Northeast",
+    "1": "Northeast",
+    "2": "Southeast",
+    "3": "Southeast",
+    "4": "Midwest",
+    "5": "Midwest",
+    "6": "Midwest",
+    "7": "South",
+    "8": "West",
+    "9": "West",
+}
+# Declared-country spellings that keep the US ZIP inference (compared
+# case-insensitively after stripping whitespace).
+_US_COUNTRY_DESIGNATIONS = frozenset({"us", "usa", "united states"})
+
+
 @register_inference_rule("infer_geography_from_postal_code")
 def infer_geography_from_postal_code(entity: dict, ctx: InferenceContext) -> InferenceResult | None:
-    """Infer region/country from postal code prefix."""
+    """Infer region/country from postal code prefix.
+
+    With ``inference_geo_usps_zones_enabled`` the region follows the USPS
+    first-digit zone, and an entity whose declared ``country`` is not a US
+    designation yields no inference (an absent country keeps the inference,
+    R4-DEC-07). Off: the legacy five-digit threshold ladder.
+    """
     postal = entity.get("postal_code") or entity.get("zip_code")
     if not postal:
         return None
     postal_str = str(postal).strip().upper()
+    if settings.inference_geo_usps_zones_enabled:
+        country = entity.get("country")
+        if country is not None and str(country).strip().lower() not in _US_COUNTRY_DESIGNATIONS:
+            return None
+        if not re.match(r"^\d{5}(-\d{4})?$", postal_str):
+            return None
+        return InferenceResult(
+            field_name="region",
+            value=_USPS_ZONE_REGION[postal_str[0]],
+            confidence=0.82,
+            rule_name="infer_geography_from_postal_code",
+            rationale=f"US zip={postal_str}",
+        )
     # US zip
     if re.match(r"^\d{5}(-\d{4})?$", postal_str):
         prefix = int(postal_str[:5])

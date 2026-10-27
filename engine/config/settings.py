@@ -512,6 +512,12 @@ class Settings(BaseSettings):
     # On: persist and record_outcome run `set_config('app.current_tenant',
     # <tenant>, true)` inside their transaction before writing. Off: no GUC.
     packet_store_rls_tenant_session_enabled: bool = True
+    # RU-084 / CEG-COR-043: infer_geography_from_postal_code bucketed the
+    # five-digit ZIP with a threshold ladder (30301 Atlanta -> Midwest, 60601
+    # Chicago -> South) and labelled foreign postcodes (75001 Paris) with a US
+    # region. On: USPS first-digit zones and a declared non-US `country`
+    # yields no inference. Off: the legacy ladder.
+    inference_geo_usps_zones_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
