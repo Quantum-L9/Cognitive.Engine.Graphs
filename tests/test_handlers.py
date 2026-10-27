@@ -275,6 +275,10 @@ async def test_outcomes_invalid_outcome() -> None:
 
 @pytest.mark.asyncio
 async def test_resolve_success() -> None:
+    from engine.state import get_state
+
+    # RU-004: success means the CREATE returned the RESOLVED_FROM row.
+    get_state().graph_driver.execute_query.return_value = [{"resolution_id": "res_0123456789ab"}]
     result = await handle_resolve(
         "t",
         {
