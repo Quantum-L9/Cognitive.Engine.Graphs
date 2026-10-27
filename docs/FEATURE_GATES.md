@@ -125,6 +125,7 @@ independently of the code default.
 | Capability Record Binding | `CAPABILITY_RECORD_BINDING_ENABLED` (`capability_record_binding_enabled`) | `True` | unset | active (hardening, RU-090); `CapabilityValidator.validate_action` authorizes only an object equal to the registered record (incl. `proof_hash`) and reads revocation, expiry, tenant and actions from that record; `expires_at` is part of `proof_hash`, so the admin `delegate_capability` response carries a different `proof_hash` value; off restores the legacy checks and hash input — see §12 |
 | Health Absent Confidence Counts | `HEALTH_ABSENT_CONFIDENCE_COUNTS_ENABLED` (`health_absent_confidence_counts_enabled`) | `True` | unset | active (hardening); an absent field confidence is "no signal", only an explicit confidence < 0.70 discounts a populated field; batch/report forward `field_confidences` (RU-108 / CEG-COR-044) — see §15 |
 | Health Range Gate Fields | `HEALTH_RANGE_GATE_FIELDS_ENABLED` (`health_range_gate_fields_enabled`) | `True` | unset | active (hardening); range/window bound properties (`candidateprop_min/max/start/end`) are gate-critical in health readiness (RU-109 / CEG-COR-045) — see §15 |
+| Health Blocked Score Scale | `HEALTH_BLOCKED_SCORE_SCALE_ENABLED` (`health_blocked_score_scale_enabled`) | `True` | unset | active (hardening); a blocked readiness reports the 60% gate component `round(gc*60, 2)` so the score is monotonic in gate completeness (RU-110 / CEG-COR-046) — see §15 |
 
 ---
 
