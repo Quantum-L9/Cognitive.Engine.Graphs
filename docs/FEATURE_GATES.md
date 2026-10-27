@@ -105,6 +105,7 @@ independently of the code default.
 | Gate Null Operands From Predicate | `GATE_NULL_OPERANDS_FROM_PREDICATE` (`gate_null_operands_from_predicate`) | `True` | unset | active; a gate's `nullbehavior` applies to exactly the operands its predicate tests (range FAIL rejects NULL bounds; temporalrange null-handles its window per side) — see §21 |
 | Composite Subgate Scoping | `COMPOSITE_SUBGATE_SCOPING` (`composite_subgate_scoping`) | `True` | unset | active; a composite's subgates contribute only through the composite (an OR composite is no longer AND-ed with its own subgates) and a subgate scoped to another direction is refused — see §21 |
 | Freshness Max-age Validated | `FRESHNESS_MAXAGEDAYS_VALIDATED` (`freshness_maxagedays_validated`) | `True` | unset | active (hardening); a freshness gate defaults `maxagedays` to 1 only when absent and refuses a value < 1 (0 became 1 day, a negative age a future cutoff) — see §21 |
+| Prohibited Factor Full Coverage | `PROHIBITED_FACTOR_FULL_COVERAGE` (`prohibited_factor_full_coverage`) | `True` | unset | active (hardening); every gate property field, scoring dimension and sync-row key at any depth is checked, casefolded — see lane D |
 
 ---
 
@@ -1003,3 +1004,26 @@ silently compiled inside the composite). Cycle and missing-subgate refusal
 and negative values (formerly a cutoff in the future) raise at compile, so
 admission withholds the pack naming the gate. No shipped pack is affected
 (the template declares 90). Rollback: `FRESHNESS_MAXAGEDAYS_VALIDATED=false`.
+
+---
+
+## Correctness remediation — lane D (plan 0d84ec8)
+
+Safety fixes from the correctness remediation plan, lane D (compliance, PII,
+prohibited factors, causal, safe_eval). Each ships on and each flag restores the
+previous behaviour when set to `false`.
+
+### Prohibited Factor Full Coverage (RU-061 / CEG-COR-008)
+
+**Flag**: `PROHIBITED_FACTOR_FULL_COVERAGE=True` (default on)
+
+On: `ProhibitedFactorValidator` compares, casefolded, every gate property field
+(`candidateprop`, `candidateprop_min/_max/_start/_end`, str `queryparam`,
+`queryparam_min/_max/_start/_end`), every scoring dimension `candidateprop` /
+`queryprop` (`ComplianceEngine.validate_scoring`, called by `handle_match` next to
+`validate_gates`) and every key at any depth of a sync row
+(`validate_sync_row`, nested dicts and lists of dicts). Off: the legacy check of
+gate `candidateprop` / `queryparam` and top-level sync keys, exact-case.
+Contract: `docs/contracts/PROHIBITED_FACTORS.md`.
+
+Rollback: set the flag to `false` while a spec is corrected.

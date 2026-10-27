@@ -24,7 +24,7 @@ from engine.compliance.pii import PIICategory, PIIHandler, PIISensitivity
 from engine.compliance.prohibited_factors import ProhibitedFactorValidator
 
 if TYPE_CHECKING:
-    from engine.config.schema import DomainSpec, GateSpec, SyncEndpointSpec
+    from engine.config.schema import DomainSpec, GateSpec, ScoringDimensionSpec, SyncEndpointSpec
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,15 @@ class ComplianceEngine:
         for gate in gates:
             self._prohibited.validate_gate(gate)
 
+    def validate_scoring(self, dimensions: list[ScoringDimensionSpec]) -> None:
+        """Validate scoring dimensions against prohibited factors (RU-061).
+
+        Raises:
+            ValueError: If any dimension's candidateprop/queryprop is a blocked field.
+        """
+        for dimension in dimensions:
+            self._prohibited.validate_scoring_dimension(dimension)
+
     def validate_sync_fields(self, endpoint_spec: SyncEndpointSpec) -> None:
         """Validate sync endpoint field mappings against prohibited factors.
 
@@ -95,7 +104,7 @@ class ComplianceEngine:
         # Check fieldsupdated list (PATCH operations)
         if endpoint_spec.fieldsupdated:
             for field in endpoint_spec.fieldsupdated:
-                if field in self._prohibited.blocked_fields:
+                if self._prohibited.is_blocked(field):
                     msg = (
                         f"Sync endpoint '{endpoint_spec.path}' updates prohibited "
                         f"field '{field}'. Blocked fields: {self._prohibited.blocked_fields}"
@@ -103,7 +112,7 @@ class ComplianceEngine:
                     raise ValueError(msg)
 
         # Check idproperty
-        if endpoint_spec.idproperty and endpoint_spec.idproperty in self._prohibited.blocked_fields:
+        if endpoint_spec.idproperty and self._prohibited.is_blocked(endpoint_spec.idproperty):
             msg = (
                 f"Sync endpoint '{endpoint_spec.path}' uses prohibited "
                 f"idproperty '{endpoint_spec.idproperty}'. Blocked fields: {self._prohibited.blocked_fields}"
@@ -160,14 +169,8 @@ class ComplianceEngine:
 
         # Check batch data for prohibited fields
         for item in batch:
-            if self._prohibited.blocked_fields:
-                for field_name in item:
-                    if field_name in self._prohibited.blocked_fields:
-                        msg = (
-                            f"Sync batch contains prohibited field '{field_name}'. "
-                            f"Blocked fields: {self._prohibited.blocked_fields}"
-                        )
-                        raise ValueError(msg)
+            # RU-061: every key at any depth (childsync lists included), casefolded.
+            self._prohibited.validate_sync_row(item)
 
             # Detect and log PII access
             pii_fields = self._pii.get_pii_field_paths(item)

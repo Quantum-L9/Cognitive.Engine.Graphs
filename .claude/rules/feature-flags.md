@@ -106,3 +106,6 @@ were industry-specific and had no caller).
 | gate_null_operands_from_predicate | True | A gate's `nullbehavior` applies to exactly the operands its predicate tests (per-side PASS, any-NULL FAIL); off restores the `candidate.<candidateprop>` / `$<queryparam>` wrap (RU-042) |
 | composite_subgate_scoping | True | Subgates referenced by a composite contribute only through it (skipped at top level of compile_all_gates / compile_relaxed); a subgate scoped away from the compiled direction is refused (RU-043) |
 | freshness_maxagedays_validated | True | Freshness `maxagedays` defaults to 1 only when absent; a value < 1 is refused at compile (RU-052) |
+
+## Correctness remediation — lane D (plan 0d84ec8)
+| prohibited_factor_full_coverage | True | Prohibited-factor check covers every gate property field, scoring dimension `candidateprop`/`queryprop` and sync-row keys at any depth, casefolded (RU-061 / CEG-COR-008); off restores the gate `candidateprop`/`queryparam` exact-case check |
