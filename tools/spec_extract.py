@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -410,6 +411,43 @@ def extract_research_features(root: Path) -> list[SpecFeature]:
     return features
 
 
+def _glob_to_regex(pattern: str) -> re.Pattern[str]:
+    """Translate a repo-relative glob to a regex: ``**/`` spans directories, ``*`` stays in one."""
+    out = []
+    i = 0
+    while i < len(pattern):
+        if pattern.startswith("**/", i):
+            out.append("(?:.*/)?")
+            i += 3
+        elif pattern.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif pattern[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        elif pattern[i] == "?":
+            out.append("[^/]")
+            i += 1
+        else:
+            out.append(re.escape(pattern[i]))
+            i += 1
+    return re.compile("".join(out) + r"\Z")
+
+
+def matches_search_file(path: str, pattern: str) -> bool:
+    """True when repo-relative *path* is in the scope declared by *pattern*.
+
+    A pattern with glob characters is matched as a glob. A plain path matches
+    that file exactly or, as a directory prefix (``engine/gds/`` or
+    ``engine/gds``), every file in its subtree.
+    """
+    path = path.replace("\\", "/")
+    if any(ch in pattern for ch in "*?["):
+        return _glob_to_regex(pattern).match(path) is not None
+    prefix = pattern.rstrip("/")
+    return path == prefix or path.startswith(prefix + "/")
+
+
 def scan_codebase(root: Path, features: list[SpecFeature]) -> None:
     py_cache: dict[str, str] = {}
     yaml_cache: dict[str, str] = {}
@@ -440,16 +478,15 @@ def scan_codebase(root: Path, features: list[SpecFeature]) -> None:
         matched_files = []
         matched_lines = []
 
+        # Scope = union of the files matched by the declared search_files. An empty
+        # scoped set means MISSING; it never widens to the whole tree.
         search_scope = all_files
         if feature.search_files:
-            filtered = {}
-            for glob_pat in feature.search_files:
-                for fpath, content in all_files.items():
-                    norm_glob = glob_pat.replace("**/*", "").replace("**", "").rstrip("/")
-                    if fpath.startswith(norm_glob.split("*")[0].rstrip("/")):
-                        filtered[fpath] = content
-            if filtered:
-                search_scope = filtered
+            search_scope = {
+                fpath: content
+                for fpath, content in all_files.items()
+                if any(matches_search_file(fpath, glob_pat) for glob_pat in feature.search_files)
+            }
 
         for fpath, content in search_scope.items():
             for token in feature.search_tokens:
