@@ -227,3 +227,101 @@ class TestCompoundE3DScores:
         assert "beta_compounding" in scores
         assert "gamma_mrf" in scores
         assert all(0.0 <= s <= 1.0 for s in scores.values())
+
+
+# ============================================================================
+# CORRECTNESS REMEDIATION (lane G)
+# ============================================================================
+
+DISJOINT_TRIPLES = [(f"h{i}", "R", f"t{i}") for i in range(20)]
+
+
+def _seeded_rng(monkeypatch: pytest.MonkeyPatch, seed: int = 1234) -> None:
+    """train() draws from an unseeded default_rng(); pin it for a deterministic test."""
+    real = np.random.default_rng
+    monkeypatch.setattr(np.random, "default_rng", lambda *_a, **_k: real(seed))
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-049")
+class TestCompoundE3DTrainingDescendsMarginLoss:
+    """RU-113: train() follows the TransE margin-loss gradient instead of collapsing."""
+
+    def _train(self, monkeypatch: pytest.MonkeyPatch) -> CompoundE3D:
+        _seeded_rng(monkeypatch)
+        model = CompoundE3D(CompoundE3DConfig(embedding_dim=16, learning_rate=0.05, margin=1.0))
+        with patch("engine.kge.compound_e3d.settings") as mock_settings:
+            mock_settings.kge_enabled = True
+            model.train(list(DISJOINT_TRIPLES), epochs=200)
+        return model
+
+    def test_true_tails_outscore_corrupted_tails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        model = self._train(monkeypatch)
+        wins = total = 0
+        for i in range(20):
+            true_score = model.score_triple(f"h{i}", "R", f"t{i}")
+            for j in range(20):
+                if i == j:
+                    continue
+                total += 1
+                wins += true_score > model.score_triple(f"h{i}", "R", f"t{j}")
+        assert wins / total >= 0.90, f"{wins}/{total}"
+
+    def test_entities_do_not_collapse(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        model = self._train(monkeypatch)
+        vecs = np.stack([model._entity_embeddings[f"t{i}"] for i in range(20)])
+        dists = [np.linalg.norm(vecs[a] - vecs[b]) for a in range(20) for b in range(a + 1, 20)]
+        assert float(np.mean(dists)) > 0.5
+        for i in range(20):
+            score = model.score_triple(f"h{i}", "R", f"t{i}")
+            assert 0.0 <= score <= 1.0
+            assert model._entity_embeddings[f"h{i}"].shape == (16,)
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-112")
+class TestScoreAgainstIcpDoesNotMutate:
+    """RU-125: the ICP centroid is registered only for the duration of one _distance call."""
+
+    def test_centroid_not_left_in_entity_table(self, trained_model: CompoundE3D) -> None:
+        trained_model.build_icp_centroid(["alpha_recycling", "beta_compounding"])
+        before = set(trained_model._entity_embeddings)
+        trained_model.score_against_icp("gamma_mrf", "SUPPLIES_TO")
+        assert "__ICP_CENTROID__" not in trained_model._entity_embeddings
+        assert set(trained_model._entity_embeddings) == before
+        pool = [eid for eid, _ in trained_model.predict_tail("alpha_recycling", "SUPPLIES_TO", top_k=100)]
+        assert "__ICP_CENTROID__" not in pool
+
+    def test_score_unchanged(self, trained_model: CompoundE3D) -> None:
+        centroid = trained_model.build_icp_centroid(["alpha_recycling", "beta_compounding"])
+        h = trained_model._entity_embeddings["gamma_mrf"]
+        r = trained_model._relation_embeddings["SUPPLIES_TO"]
+        dist = float(np.linalg.norm(h + r - centroid))
+        logit = -(trained_model._platt_alpha * dist - trained_model._platt_beta)
+        expected = 1.0 / (1.0 + np.exp(-logit))
+        score = trained_model.score_against_icp("gamma_mrf", "SUPPLIES_TO")
+        assert score == pytest.approx(float(expected))
+        assert 0.0 <= score <= 1.0
+
+    def test_prior_entity_under_the_key_is_restored(self, trained_model: CompoundE3D) -> None:
+        trained_model.build_icp_centroid(["alpha_recycling"])
+        prior = np.full(trained_model.dim, 7.0)
+        trained_model._entity_embeddings["__ICP_CENTROID__"] = prior
+        trained_model.score_against_icp("gamma_mrf", "SUPPLIES_TO")
+        assert trained_model._entity_embeddings["__ICP_CENTROID__"] is prior
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-113")
+class TestTrainDoesNotReorderInput:
+    """RU-126: train() shuffles a local copy, never the caller's list."""
+
+    def test_triples_list_unchanged(self) -> None:
+        triples = [(f"h{i}", "R", f"t{i}") for i in range(50)]
+        original = list(triples)
+        model = CompoundE3D(CompoundE3DConfig(embedding_dim=6))
+        with patch("engine.kge.compound_e3d.settings") as mock_settings:
+            mock_settings.kge_enabled = True
+            result = model.train(triples, epochs=3)
+        assert result["status"] == "completed"
+        assert triples == original

@@ -584,6 +584,30 @@ class Settings(BaseSettings):
     # also follows spec_declared_candidate_id). Off: label-less entity_id match,
     # which counts outcomes of same-id nodes of other labels.
     resolution_behavioral_label_scoped: bool = True
+    # Correctness remediation lane G (plan 0d84ec8, RU-108..)
+    # RU-108 / CEG-COR-044: readiness coerced an absent field confidence to 0,
+    # so a fully populated entity with no confidence map scored 0.0/F, and
+    # health_batch_assess / health_report dropped a supplied map. On: a
+    # populated field counts unless an explicit confidence < 0.70 discounts
+    # it, batch/report forward `field_confidences`, and blocking_fields names
+    # exactly the uncounted gate fields. Off: the legacy coercion.
+    health_absent_confidence_counts_enabled: bool = True
+    # RU-109 / CEG-COR-045: build_field_map marked only `candidateprop` as
+    # gate-critical, so a range gate's candidateprop_min/max (and a
+    # temporalrange's candidateprop_start/end) were "low" and an entity missing
+    # every bound scored 95/A. On: all five declared keys are gate-critical.
+    # Off: candidateprop only.
+    health_range_gate_fields_enabled: bool = True
+    # RU-110 / CEG-COR-046: a blocked readiness (gate completeness < 0.50)
+    # reported gate_score * 100, so gc=0.49 scored 49.0 while gc=0.50 could
+    # score 40.0. On: the blocked score is the 60% gate component
+    # round(gate_score * 60, 2), always < 30. Off: gate_score * 100.
+    health_blocked_score_scale_enabled: bool = True
+    # RU-111 / CEG-COR-047: compute_enrichment_priority's documented 10%
+    # staleness term read a staleness_penalty attribute EntityHealth does not
+    # have, so it was always 0. On: the term is
+    # compute_staleness_penalty(entity_health.field_health). Off: the zero term.
+    health_priority_staleness_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

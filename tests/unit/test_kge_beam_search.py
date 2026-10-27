@@ -102,14 +102,24 @@ class TestBeamSearchConfig:
     def test_defaults(self) -> None:
         """Default config has sensible values."""
         c = BeamSearchConfig()
-        assert c.beam_width == 5
+        assert c.beam_width == 10  # C-20: KGEBeamSearchSpec().beamwidth (CEG-COR-110; was 5)
         assert c.max_depth == 3
         assert c.prune_strategy == PruneStrategy.COMBINED
 
     def test_from_spec_with_none(self) -> None:
         """from_spec(None) returns defaults."""
         c = BeamSearchConfig.from_spec(None)
-        assert c.beam_width == 5
+        assert c.beam_width == 10  # C-20: KGEBeamSearchSpec().beamwidth (CEG-COR-110; was 5)
+        assert c.max_depth == 3
+
+    @pytest.mark.finding("CEG-COR-110")
+    def test_default_width_agrees_with_schema_default(self) -> None:
+        """RU-123: both constructors agree with KGEBeamSearchSpec (C-20)."""
+        from engine.config.schema import KGEBeamSearchSpec
+
+        spec_default = KGEBeamSearchSpec()
+        assert BeamSearchConfig.from_spec(None).beam_width == BeamSearchConfig().beam_width == spec_default.beamwidth
+        assert BeamSearchConfig.from_spec(None).max_depth == spec_default.maxdepth == 3
 
     def test_from_spec_with_spec(self) -> None:
         """from_spec extracts beamwidth and maxdepth."""
@@ -284,3 +294,96 @@ class TestSuccessorGeneration:
         """_build_transformation raises on unknown type."""
         with pytest.raises(ValueError, match="Unknown transformation type"):
             engine._build_transformation("warp", {"factor": 1.0})
+
+
+# ============================================================================
+# CORRECTNESS REMEDIATION (lane G)
+# ============================================================================
+
+
+def _model_with_embeddings() -> CompoundE3D:
+    import numpy as np
+
+    model = CompoundE3D(CompoundE3DConfig(embedding_dim=6))
+    rng = np.random.default_rng(3)
+    model._entity_embeddings = {f"e{i}": rng.normal(size=6) for i in range(10)}
+    return model
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-108")
+class TestComposedCascades:
+    """RU-121: a depth-d successor is its parent's cascade plus one new op, scored composed."""
+
+    def test_depth_two_chain_includes_parent_op(self) -> None:
+        engine = BeamSearchEngine(_model_with_embeddings(), BeamSearchConfig())
+        root = BeamCandidate("root", "identity", {}, score=1.0, depth=0)
+        depth1 = engine._generate_successors(root)
+        assert all(len(c.chain) == 1 for c in depth1)
+        parent = next(c for c in depth1 if c.transformation_type == "scale" and c.params == {"factor": 2.0})
+        depth2 = engine._generate_successors(parent)
+        assert all(len(c.chain) == 2 for c in depth2)
+        assert all(c.chain[0] == ("scale", {"factor": 2.0}) for c in depth2)
+        serialised = depth2[0].to_dict()["chain"]
+        assert serialised[0] == {"type": "scale", "params": {"factor": 2.0}}
+        assert serialised[1] == {"type": depth2[0].transformation_type, "params": depth2[0].params}
+
+    def test_depth_two_score_reflects_composition(self) -> None:
+        engine = BeamSearchEngine(_model_with_embeddings(), BeamSearchConfig())
+        root = BeamCandidate("root", "identity", {}, score=1.0, depth=0)
+        depth1 = engine._generate_successors(root)
+        parent = next(c for c in depth1 if c.transformation_type == "scale" and c.params == {"factor": 2.0})
+        depth2 = engine._generate_successors(parent)
+
+        def _score(cands: list[BeamCandidate], tx_type: str, params: dict[str, float]) -> float:
+            return next(c.score for c in cands if c.transformation_type == tx_type and c.params == params)
+
+        new_op = ("translation", {"offset_x": 0.1, "offset_y": 0.0, "offset_z": 0.0})
+        assert _score(depth2, *new_op) != pytest.approx(_score(depth1, *new_op))
+
+    def test_search_depth_levels_differ(self) -> None:
+        engine = BeamSearchEngine(
+            _model_with_embeddings(),
+            BeamSearchConfig(beam_width=3, max_depth=3, prune_strategy=PruneStrategy.SCORE_THRESHOLD),
+        )
+        with patch("engine.kge.beam_search.settings") as mock_settings:
+            mock_settings.kge_enabled = True
+            result = engine.search()
+        levels = result["depth_levels"]
+
+        def _triples(level: list[dict[str, object]]) -> list[tuple[object, object, object]]:
+            return [(c["type"], c["params"], c["score"]) for c in level]
+
+        assert _triples(levels[1]) != _triples(levels[2])
+        assert all(len(c["chain"]) == 2 for c in levels[2])
+        assert all(len(c["chain"]) == 3 for c in levels[3])
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-109")
+class TestDiversityComparesSameTypeOnly:
+    """RU-122: candidates of different transformation types are never near-duplicates."""
+
+    def test_equal_score_translation_and_flip_both_kept(self, engine: BeamSearchEngine) -> None:
+        translation = BeamCandidate(
+            "t", "translation", {"offset_x": 0.1, "offset_y": 0.0, "offset_z": 0.0}, score=0.9, depth=1
+        )
+        flip = BeamCandidate("f", "flip", {"axis": 0.0}, score=0.9, depth=1)
+        engine.config.diversity_threshold = 0.8
+        kept = engine._prune_by_diversity([translation, flip])
+        assert {c.transformation_id for c in kept} == {"t", "f"}
+
+    def test_cross_type_similarity_is_zero(self) -> None:
+        a = BeamCandidate("t", "translation", {"offset_x": 0.1}, score=0.9, depth=1)
+        b = BeamCandidate("f", "flip", {"axis": 0.0}, score=0.9, depth=1)
+        assert BeamSearchEngine._candidate_similarity(a, b) == 0.0
+
+    def test_same_type_similarity_unchanged(self) -> None:
+        a = BeamCandidate("a", "scale", {"factor": 0.5}, score=0.9, depth=1)
+        b = BeamCandidate("b", "scale", {"factor": 0.75}, score=0.8, depth=1)
+        assert BeamSearchEngine._candidate_similarity(a, b) == pytest.approx(0.8)
+        assert BeamSearchEngine._param_similarity(a.params, b.params) == pytest.approx(0.8)
+        engine = BeamSearchEngine(CompoundE3D(CompoundE3DConfig(embedding_dim=6)), BeamSearchConfig())
+        engine.config.diversity_threshold = 0.75
+        kept = engine._prune_by_diversity([a, b])
+        assert [c.transformation_id for c in kept] == ["a"]

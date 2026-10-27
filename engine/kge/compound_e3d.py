@@ -38,6 +38,9 @@ from engine.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+# Floor for a TransE residual norm when normalising it into a unit gradient.
+_NORM_EPS = 1e-12
+
 
 @dataclass
 class CompoundE3DConfig:
@@ -159,21 +162,23 @@ class CompoundE3D:
         # Simplified training loop (production: replace with PyTorch optim)
         entity_list = list(entities)
         losses: list[float] = []
+        # Shuffle a local copy each epoch; the caller's list is never reordered
+        # (CEG-COR-113).
+        order = list(triples)
         for _ in range(epochs):
             epoch_loss = 0.0
-            rng.shuffle(triples)
-            for h, r, t in triples:
+            rng.shuffle(order)
+            for h, r, t in order:
                 pos_score = self._distance(h, r, t)
                 # Negative sampling — index the list so the type stays str
                 neg_t = entity_list[int(rng.integers(len(entity_list)))]
                 neg_score = self._distance(h, r, neg_t)
                 loss = max(0.0, self.config.margin + pos_score - neg_score)
                 epoch_loss += loss
-                # SGD update (simplified)
+                # SGD step along the gradient of the TransE margin loss
+                # L = margin + ||h + r - t|| - ||h + r - t'|| (CEG-COR-049).
                 if loss > 0:
-                    grad = self.config.learning_rate
-                    self._entity_embeddings[h] -= grad * (self._entity_embeddings[h] - self._relation_embeddings[r])
-                    self._entity_embeddings[t] -= grad * (self._entity_embeddings[t] - self._relation_embeddings[r])
+                    self._margin_sgd_step(h, r, t, neg_t)
             losses.append(epoch_loss / max(len(triples), 1))
 
         self._trained = True
@@ -184,6 +189,29 @@ class CompoundE3D:
             "num_entities": len(entities),
             "num_relations": len(relations),
         }
+
+    def _margin_sgd_step(self, head: str, relation: str, tail: str, neg_tail: str) -> None:
+        """One SGD step on the TransE margin loss for (h, r, t) against (h, r, t').
+
+        With g = (h + r - t) / ||h + r - t|| and g' = (h + r - t') / ||h + r - t'||:
+        h -= lr * (g - g'); r -= lr * (g - g'); t += lr * g; t' -= lr * g'.
+        All deltas are computed before any embedding moves, so an aliased
+        entity (t' == h or t' == t) receives the sum of its gradients.
+        """
+        lr = self.config.learning_rate
+        h_emb = self._entity_embeddings[head]
+        r_emb = self._relation_embeddings[relation]
+        pos = h_emb + r_emb - self._entity_embeddings[tail]
+        neg = h_emb + r_emb - self._entity_embeddings[neg_tail]
+        g_pos = pos / max(float(np.linalg.norm(pos)), _NORM_EPS)
+        g_neg = neg / max(float(np.linalg.norm(neg)), _NORM_EPS)
+
+        entity_deltas: dict[str, npt.NDArray[np.float64]] = {}
+        for eid, delta in ((head, -lr * (g_pos - g_neg)), (tail, lr * g_pos), (neg_tail, -lr * g_neg)):
+            entity_deltas[eid] = entity_deltas[eid] + delta if eid in entity_deltas else delta
+        for eid, delta in entity_deltas.items():
+            self._entity_embeddings[eid] = self._entity_embeddings[eid] + delta
+        self._relation_embeddings[relation] = r_emb - lr * (g_pos - g_neg)
 
     # ------------------------------------------------------------------
     # Inference
@@ -397,10 +425,19 @@ class CompoundE3D:
         if not hasattr(self, "_icp_centroid"):
             msg = "score_against_icp: ICP centroid not built. Call build_icp_centroid(account_ids) first."
             raise RuntimeError(msg)
-        # Temporarily register ICP centroid as a named entity for _distance
+        # Register the ICP centroid as a named entity for this one _distance
+        # call only (CEG-COR-112): leaving it in the table put it in
+        # predict_tail's candidate pool. Any prior value under the key returns.
         icp_key = "__ICP_CENTROID__"
+        prior = self._entity_embeddings.get(icp_key)
         self._entity_embeddings[icp_key] = self._icp_centroid
-        raw_dist = self._distance(candidate_id, relation, icp_key)
+        try:
+            raw_dist = self._distance(candidate_id, relation, icp_key)
+        finally:
+            if prior is None:
+                del self._entity_embeddings[icp_key]
+            else:
+                self._entity_embeddings[icp_key] = prior
         # Apply Platt calibration
         logit = -(self._platt_alpha * raw_dist - self._platt_beta)
         prob = 1.0 / (1.0 + np.exp(-logit))
