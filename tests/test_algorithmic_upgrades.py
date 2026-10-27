@@ -206,6 +206,39 @@ class TestDetectDrift:
         assert "persona_id" in d
         assert "drift_detected" in d
 
+    # RU-104 / CEG-COR-127: vectors are aligned over a shared key set.
+
+    def test_disjoint_dominant_dimensions_have_nonzero_distance(self):
+        buckets = {"low": 0.5, "high": 0.5}
+        baseline = self._make_fp("p1", "w1", buckets, {"alpha": 1.0}, entropy=1.0, concentration=0.5)
+        current = self._make_fp("p1", "w2", buckets, {"zeta": 1.0}, entropy=1.0, concentration=0.5)
+        report = detect_drift(baseline, current)
+        assert report.vector_distance > 0
+        assert report.vector_distance == pytest.approx(2**0.5)
+
+    def test_different_dimension_counts_compare_entropy_to_entropy(self):
+        buckets = {"low": 0.5, "high": 0.5}
+        baseline = self._make_fp("p1", "w1", buckets, {"a": 1.0}, entropy=0.8, concentration=0.5)
+        current = self._make_fp("p1", "w2", buckets, {"a": 1.0, "b": 0.0}, entropy=0.8, concentration=0.5)
+        report = detect_drift(baseline, current)
+        assert report.vector_distance == pytest.approx(0.0)
+
+    def test_custom_bucket_labels_are_compared(self):
+        baseline = self._make_fp("p1", "w1", {"cold": 1.0, "hot": 0.0}, {"a": 1.0}, entropy=0.0, concentration=1.0)
+        current = self._make_fp("p1", "w2", {"cold": 0.0, "hot": 1.0}, {"a": 1.0}, entropy=0.0, concentration=1.0)
+        report = detect_drift(baseline, current)
+        assert report.vector_distance == pytest.approx(2**0.5)
+
+    def test_to_vector_default_layout_unchanged(self):
+        fp = self._make_fp(
+            "p1", "w1", {"low": 0.25, "high": 0.75}, {"b": 0.4, "a": 0.6}, entropy=0.9, concentration=0.75
+        )
+        assert fp.to_vector() == [0.0, 0.25, 0.0, 0.75, 0.6, 0.4, 0.9, 0.75]
+
+    def test_to_vector_explicit_key_order(self):
+        fp = self._make_fp("p1", "w1", {"cold": 0.3, "hot": 0.7}, {"a": 1.0}, entropy=0.5, concentration=0.7)
+        assert fp.to_vector(bucket_labels=("hot", "cold"), dimension_keys=("z", "a")) == [0.7, 0.3, 0.0, 1.0, 0.5, 0.7]
+
 
 # ── PacketStore (unit-level, no DB) ──────────────────────────
 
