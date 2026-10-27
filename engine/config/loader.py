@@ -274,6 +274,28 @@ def _match_admission_checks_enabled() -> bool:
     return settings.scoring_admission_check_enabled or settings.admission_checks_full_match
 
 
+_LEGACY_CACHE_MAX_SIZE_ENV = "DOMAIN_CACHE_MAX_SIZE"
+
+
+def _domain_cache_max_size() -> int:
+    """``settings.domain_cache_maxsize``, honouring the legacy spelling only when the contract one is unset.
+
+    The loader used to read ``DOMAIN_CACHE_MAX_SIZE`` directly, so the
+    documented contract variable ``DOMAIN_CACHE_MAXSIZE`` had no effect. An
+    operator who set the old name keeps that bound until they rename it.
+    """
+    legacy = os.getenv(_LEGACY_CACHE_MAX_SIZE_ENV)
+    if legacy is not None and "domain_cache_maxsize" not in settings.model_fields_set:
+        logger.warning(
+            "%s is deprecated; set DOMAIN_CACHE_MAXSIZE instead (honouring %s=%s)",
+            _LEGACY_CACHE_MAX_SIZE_ENV,
+            _LEGACY_CACHE_MAX_SIZE_ENV,
+            legacy,
+        )
+        return int(legacy)
+    return int(settings.domain_cache_maxsize)
+
+
 class DomainPackLoader:
     """Load and cache folder-shaped domain specs with bounded hot reload."""
 
@@ -282,8 +304,10 @@ class DomainPackLoader:
         self._base_path = Path(raw).resolve()
         self._cache: dict[str, tuple[DomainSpec, float, float]] = {}
         self._lock = threading.Lock()
-        self._max_size = int(os.getenv("DOMAIN_CACHE_MAX_SIZE", "100"))
-        self._ttl_seconds = float(os.getenv("DOMAIN_CACHE_TTL_SECONDS", "30"))
+        # C-24 bounded cache, sized by Settings (contract variables
+        # DOMAIN_CACHE_MAXSIZE / DOMAIN_CACHE_TTL_SECONDS, CEG-COR-078).
+        self._max_size = _domain_cache_max_size()
+        self._ttl_seconds = float(settings.domain_cache_ttl_seconds)
 
     def load_domain(self, domain_id: str) -> DomainSpec:
         """Load a domain only when the generic admission policy admits it.
