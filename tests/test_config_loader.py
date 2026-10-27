@@ -29,8 +29,15 @@ from engine.config.loader import (
 
 @pytest.fixture(autouse=True)
 def _zero_cache_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Disable TTL so mtime-based invalidation tests work immediately."""
+    """Disable TTL so mtime-based invalidation tests work immediately.
+
+    The loader reads the TTL from the Settings singleton (CEG-COR-078), which
+    was built at import, so the environment variable alone no longer reaches it.
+    """
+    from engine.config.settings import settings
+
     monkeypatch.setenv("DOMAIN_CACHE_TTL_SECONDS", "0")
+    monkeypatch.setattr(settings, "domain_cache_ttl_seconds", 0)
 
 
 @pytest.fixture

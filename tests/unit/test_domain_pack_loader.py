@@ -470,3 +470,70 @@ class TestScoringAdmission:
 
         monkeypatch.setattr(loader_module.settings, "unvalidated_domain_packs_enabled", True)
         assert loader_module.withholding_reason(_spec_with_dimensions([_BRIDGE])) is None
+
+
+# ============================================================================
+# RG-065 (RU-051 / CEG-COR-078): the loader cache is bounded by Settings, read
+# from the contract variable names DOMAIN_CACHE_MAXSIZE / DOMAIN_CACHE_TTL_SECONDS.
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestCacheBoundsFromSettings:
+    @pytest.fixture
+    def fresh_settings(self, monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
+        """Rebuild the Settings the loader reads after the test has set its environment."""
+        from engine.config import loader as loader_module
+        from engine.config.settings import Settings
+
+        def _apply() -> None:
+            monkeypatch.setattr(loader_module, "settings", Settings())
+
+        for name in ("DOMAIN_CACHE_MAXSIZE", "DOMAIN_CACHE_MAX_SIZE", "DOMAIN_CACHE_TTL_SECONDS"):
+            monkeypatch.delenv(name, raising=False)
+        return _apply
+
+    def test_contract_variable_bounds_the_cache(self, monkeypatch: pytest.MonkeyPatch, fresh_settings) -> None:  # type: ignore[no-untyped-def]
+        monkeypatch.setenv("DOMAIN_CACHE_MAXSIZE", "2")
+        monkeypatch.setenv("DOMAIN_CACHE_TTL_SECONDS", "7")
+        fresh_settings()
+        loader = DomainPackLoader()
+        assert loader._max_size == 2
+        assert loader._ttl_seconds == 7.0
+
+    def test_defaults_come_from_settings(self, fresh_settings) -> None:  # type: ignore[no-untyped-def]
+        fresh_settings()
+        loader = DomainPackLoader()
+        assert (loader._max_size, loader._ttl_seconds) == (100, 30.0)
+
+    def test_legacy_spelling_is_honoured_only_when_the_contract_variable_is_unset(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        fresh_settings,  # type: ignore[no-untyped-def]
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        monkeypatch.setenv("DOMAIN_CACHE_MAX_SIZE", "5")
+        fresh_settings()
+        with caplog.at_level("WARNING", logger="engine.config.loader"):
+            assert DomainPackLoader()._max_size == 5
+        assert "deprecated" in caplog.text
+
+        monkeypatch.setenv("DOMAIN_CACHE_MAXSIZE", "3")
+        fresh_settings()
+        assert DomainPackLoader()._max_size == 3
+
+    def test_cache_eviction_honours_the_bound(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        fresh_settings,  # type: ignore[no-untyped-def]
+    ) -> None:
+        monkeypatch.setenv("DOMAIN_CACHE_MAXSIZE", "2")
+        fresh_settings()
+        for name in ("pack-a", "pack-b", "pack-c"):
+            (tmp_path / name).mkdir()
+            (tmp_path / name / "spec.yaml").write_text(_minimal_spec_yaml(name))
+        loader = DomainPackLoader(config_path=str(tmp_path))
+        for name in ("pack-a", "pack-b", "pack-c"):
+            loader.load_domain(name)
+        assert len(loader._cache) == 2

@@ -87,8 +87,8 @@ These are infrastructure-level gates that live outside domain specs:
 | `KGE_ENABLED` | `False` | Controls whether KGE embeddings subsystem activates. Phase 4 feature |
 | `KGE_EMBEDDING_DIM` | `256` | KGE vector dimension. Must match `KGESpec.embeddingdim` in domain spec |
 | `TENANT_ALLOWLIST` | (empty) | Comma-separated list of allowed tenant IDs. Empty = all tenants allowed (dev mode) |
-| `DOMAIN_CACHE_MAX_SIZE` | `100` | Maximum number of domain specs in LRU cache |
-| `DOMAIN_CACHE_TTL_SECONDS` | `30` | Seconds before cached domain spec is re-validated against disk |
+| `DOMAIN_CACHE_MAXSIZE` | `100` | Maximum number of domain specs in the loader cache (`settings.domain_cache_maxsize`). The former spelling `DOMAIN_CACHE_MAX_SIZE` is deprecated: it is honoured, with a warning, only while `DOMAIN_CACHE_MAXSIZE` is unset |
+| `DOMAIN_CACHE_TTL_SECONDS` | `30` | Seconds before cached domain spec is re-validated against disk (`settings.domain_cache_ttl_seconds`) |
 
 ---
 
