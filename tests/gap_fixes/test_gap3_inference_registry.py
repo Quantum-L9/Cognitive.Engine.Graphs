@@ -96,3 +96,75 @@ def test_authorized_rules_default_to_none() -> None:
 def test_authorized_rules_come_from_domain_plugins() -> None:
     spec = _Spec(PluginsSpec(inference_rules=["infer_company_size_tier", "infer_email_domain_from_website"]))
     assert authorized_rules(spec) == ["infer_company_size_tier", "infer_email_domain_from_website"]
+
+
+# -- RU-084 / RG-113: USPS first-digit zones + country guard ------------------
+
+
+@pytest.mark.parametrize(
+    ("postal_code", "region"),
+    [
+        ("02108", "Northeast"),  # Boston MA (zone 0)
+        ("10115", "Northeast"),  # New York NY (zone 1)
+        ("30301", "Southeast"),  # Atlanta GA (zone 3)
+        ("33101", "Southeast"),  # Miami FL (zone 3)
+        ("37201", "Southeast"),  # Nashville TN (zone 3)
+        ("55401", "Midwest"),  # Minneapolis MN (zone 5)
+        ("60601", "Midwest"),  # Chicago IL (zone 6)
+        ("64101", "Midwest"),  # Kansas City MO (zone 6)
+        ("75201", "South"),  # Dallas TX (zone 7)
+        ("94105", "West"),  # San Francisco CA (zone 9)
+        ("80202-1234", "West"),  # Denver CO (zone 8), ZIP+4
+    ],
+)
+def test_geography_follows_usps_first_digit_zones(postal_code: str, region: str) -> None:
+    result = execute_rule("infer_geography_from_postal_code", {"postal_code": postal_code}, CTX)
+    assert result is not None
+    assert result.value == region
+    assert result.field_name == "region"
+    assert result.confidence == pytest.approx(0.82)
+
+
+@pytest.mark.parametrize(
+    "entity",
+    [
+        {"postal_code": "75001", "country": "FR"},  # Paris
+        {"postal_code": "10115", "country": "DE"},  # Berlin
+        {"zip_code": "30301", "country": "Canada"},
+    ],
+)
+def test_geography_declines_non_us_country(entity: dict[str, str]) -> None:
+    assert execute_rule("infer_geography_from_postal_code", entity, CTX) is None
+
+
+@pytest.mark.parametrize("country", ["US", "USA", "United States", "us", " usa "])
+def test_geography_accepts_us_designations(country: str) -> None:
+    result = execute_rule("infer_geography_from_postal_code", {"postal_code": "30301", "country": country}, CTX)
+    assert result is not None
+    assert result.value == "Southeast"
+
+
+def test_geography_absent_country_still_emits() -> None:
+    """R4-DEC-07 (recommended): no declared country keeps the US inference."""
+    result = execute_rule("infer_geography_from_postal_code", {"postal_code": "94105"}, CTX)
+    assert result is not None
+    assert result.value == "West"
+
+
+@pytest.mark.parametrize(
+    ("entity", "region"),
+    [
+        ({"postal_code": "30301"}, "Midwest"),
+        ({"postal_code": "60601"}, "South"),
+        ({"postal_code": "75001", "country": "FR"}, "South"),
+    ],
+)
+def test_geography_flag_off_restores_threshold_ladder(
+    monkeypatch: pytest.MonkeyPatch, entity: dict[str, str], region: str
+) -> None:
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "inference_geo_usps_zones_enabled", False)
+    result = execute_rule("infer_geography_from_postal_code", entity, CTX)
+    assert result is not None
+    assert result.value == region
