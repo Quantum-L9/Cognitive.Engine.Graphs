@@ -475,7 +475,8 @@ class Settings(BaseSettings):
     # validation was off, and MERGEd on `created_at: datetime()` so every
     # repeat created a parallel edge. On: declared identities (`outcome_id`
     # for the outcome label), one WHERE with `$confidence_threshold`, MERGE on
-    # the type with ON CREATE / ON MATCH SET. Off: the legacy Cypher.
+    # the type with ON CREATE / ON MATCH SET; AttributionCalculator reads each
+    # touchpoint's declared id per label (PO-04). Off: the legacy Cypher.
     causal_edge_declared_identity: bool = True
 
     @model_validator(mode="after")
