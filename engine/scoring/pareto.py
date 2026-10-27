@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -71,13 +72,29 @@ class WeightVector:
 # ── Dominance check ─────────────────────────────────────────────────────────
 
 
-def _dominates(a: dict[str, float], b: dict[str, float], dims: list[str]) -> bool:
+_MINIMIZE = "minimize"
+
+
+def _dominates(
+    a: dict[str, float],
+    b: dict[str, float],
+    dims: list[str],
+    directions: Mapping[str, str] | None = None,
+) -> bool:
     """Strict Pareto dominance: A dominates B iff A[i] >= B[i] for all dims
-    and A[i] > B[i] for at least one dim."""
+    and A[i] > B[i] for at least one dim.
+
+    RU-019 / CEG-COR-026: ``directions`` maps a dimension to ``"minimize"`` or
+    ``"maximize"``. A minimised dimension is compared on negated values; any
+    dimension not mapped to ``"minimize"`` (including ``directions=None``) is
+    maximised, so existing callers are unchanged.
+    """
     at_least_one_strict = False
     for d in dims:
         va = a.get(d, 0.0)
         vb = b.get(d, 0.0)
+        if directions is not None and directions.get(d) == _MINIMIZE:
+            va, vb = -va, -vb
         if va < vb:
             return False
         if va > vb:
@@ -88,13 +105,19 @@ def _dominates(a: dict[str, float], b: dict[str, float], dims: list[str]) -> boo
 # ── Core Pareto front computation ────────────────────────────────────────────
 
 
-def compute_pareto_front(candidates: list[ParetoCandidate]) -> ParetoFront:
+def compute_pareto_front(
+    candidates: list[ParetoCandidate],
+    directions: Mapping[str, str] | None = None,
+) -> ParetoFront:
     """Compute the rank-0 Pareto front via O(n² · d) pairwise dominance.
 
     Parameters
     ----------
     candidates : list[ParetoCandidate]
         Candidates with populated ``dimension_scores``.
+    directions : Mapping[str, str] | None
+        Optional per-dimension ``"minimize"`` / ``"maximize"``. ``None``
+        (default) maximises every dimension.
 
     Returns
     -------
@@ -123,6 +146,7 @@ def compute_pareto_front(candidates: list[ParetoCandidate]) -> ParetoFront:
                 candidates[j].dimension_scores,
                 candidates[i].dimension_scores,
                 dims,
+                directions,
             ):
                 dominated_flags[i] = True
                 candidates[i].is_dominated = True

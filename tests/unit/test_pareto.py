@@ -183,3 +183,44 @@ class TestWeightVector:
         assert wv.ndcg_score == 0.8
         assert wv.diversity_score == 0.9
         assert wv.coverage_score == 1.0
+
+
+# ── RU-019 / CEG-COR-026: objective direction (RG-025) ──────────────────────
+
+
+@pytest.mark.unit
+class TestObjectiveDirection:
+    """_dominates / compute_pareto_front honour an explicit 'minimize' direction."""
+
+    def test_dominates_minimize_prefers_lower(self) -> None:
+        from engine.scoring.pareto import _dominates
+
+        cheap, pricey = {"cost": 0.1}, {"cost": 0.9}
+        assert _dominates(cheap, pricey, ["cost"], {"cost": "minimize"})
+        assert not _dominates(pricey, cheap, ["cost"], {"cost": "minimize"})
+
+    def test_dominates_default_is_maximize(self) -> None:
+        from engine.scoring.pareto import _dominates
+
+        a, b = {"x": 0.9, "y": 0.5}, {"x": 0.1, "y": 0.5}
+        assert _dominates(a, b, ["x", "y"]) is _dominates(a, b, ["x", "y"], {"x": "maximize", "y": "maximize"})
+        assert _dominates(a, b, ["x", "y"])
+
+    def test_compute_front_minimize_selects_cheap(self) -> None:
+        cheap = ParetoCandidate(candidate_id="cheap", dimension_scores={"cost": 0.1})
+        pricey = ParetoCandidate(candidate_id="pricey", dimension_scores={"cost": 0.9})
+        front = compute_pareto_front([cheap, pricey], directions={"cost": "minimize"})
+        assert [c.candidate_id for c in front.non_dominated] == ["cheap"]
+
+    def test_compute_front_mixed_directions(self) -> None:
+        """maximize quality, minimize cost: a (q .9, c .2) dominates b (q .5, c .8)."""
+        a = ParetoCandidate(candidate_id="a", dimension_scores={"quality": 0.9, "cost": 0.2})
+        b = ParetoCandidate(candidate_id="b", dimension_scores={"quality": 0.5, "cost": 0.8})
+        c = ParetoCandidate(candidate_id="c", dimension_scores={"quality": 0.95, "cost": 0.9})
+        front = compute_pareto_front([a, b, c], directions={"quality": "maximize", "cost": "minimize"})
+        assert sorted(x.candidate_id for x in front.non_dominated) == ["a", "c"]
+
+    def test_compute_front_maximize_unchanged_without_directions(self) -> None:
+        cheap = ParetoCandidate(candidate_id="cheap", dimension_scores={"cost": 0.1})
+        pricey = ParetoCandidate(candidate_id="pricey", dimension_scores={"cost": 0.9})
+        assert [c.candidate_id for c in compute_pareto_front([cheap, pricey]).non_dominated] == ["pricey"]
