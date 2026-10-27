@@ -248,3 +248,63 @@ def test_smoke_nonzero_exit_without_failed_lines_counts_as_failure(tmp_path: Pat
 def test_smoke_all_passed_counts_as_pass(tmp_path: Path) -> None:
     out = "tests/test_a.py::test_x PASSED\n=== 13 passed in 1.2s ===\n"
     assert _smoke_section(tmp_path, out, 0) == {"passed": 1, "failed": 0}
+
+
+# ── RU-147 / RG-183: precommit_smoke health parsing and Gate 4 ──────────────
+
+_SMOKE_DOCKER_STUB = """
+args="$*"
+case "$args" in
+  *"ps --format json"*) printf '%s' "${PS_JSON:-}"; exit 0;;
+  *"-m pytest"*) echo "1 failed"; exit "${PYTEST_RC:-0}";;
+  *"import pytest"*) exit "${PYTEST_IMPORT_RC:-0}";;
+  run\\ *) printf 200; exit 0;;
+esac
+exit 0"""
+
+
+def _precommit_smoke(tmp_path: Path, **env: str) -> subprocess.CompletedProcess[str]:
+    proj = tmp_path / "proj"
+    script = _copy_script("tools/infra/precommit_smoke.sh", proj)
+    stubs = tmp_path / "stubs"
+    _stub(stubs, "docker", _SMOKE_DOCKER_STUB)
+    return _run([BASH, str(script)], cwd=proj, env=_env(tmp_path, stubs, **env))
+
+
+@pytest.mark.parametrize(
+    ("payload", "field", "expected"),
+    [
+        ('{"Name":"api","State":"running","Health":"healthy"}', "Health", "healthy"),
+        ('[{"Name":"api","Health":"healthy"}]', "Health", "healthy"),
+        ('{"Name":"api","State":"exited"}\n', "State", "exited"),
+        ('{"Name":"api","Health":"starting"}\n{"Name":"db","Health":"healthy"}\n', "Health", "starting"),
+        ("", "Health", "unknown"),
+        ("not json", "Health", "unknown"),
+        ("[]", "State", "unknown"),
+    ],
+)
+def test_compose_ps_field_parser(tmp_path: Path, payload: str, field: str, expected: str) -> None:
+    text = (REPO / "tools" / "infra" / "precommit_smoke.sh").read_text(encoding="utf-8")
+    match = re.search(r"^_compose_ps_field\(\) \{\n.*?^\}$", text, re.MULTILINE | re.DOTALL)
+    assert match is not None, "_compose_ps_field() not defined"
+    proc = _run([BASH, "-c", f"{match.group(0)}\n_compose_ps_field {field}"], cwd=tmp_path, stdin=payload)
+    assert proc.stdout.strip() == expected, proc.stderr
+
+
+def test_wait_for_healthy_accepts_object_json(tmp_path: Path) -> None:
+    proc = _precommit_smoke(tmp_path, HEALTH_SERVICES="api:4", PS_JSON='{"Name":"api","Health":"healthy"}')
+    assert "api is healthy" in proc.stdout
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_gate4_pytest_failure_exits_non_zero(tmp_path: Path) -> None:
+    proc = _precommit_smoke(tmp_path, PYTEST_RC="1")
+    assert proc.returncode == 4, proc.stdout + proc.stderr
+    assert "API health check OK" not in proc.stdout
+    assert "All smoke tests passed" not in proc.stdout
+
+
+def test_gate4_http_fallback_only_when_pytest_missing(tmp_path: Path) -> None:
+    proc = _precommit_smoke(tmp_path, PYTEST_IMPORT_RC="1")
+    assert "API health check OK" in proc.stdout
+    assert proc.returncode == 0, proc.stdout + proc.stderr
