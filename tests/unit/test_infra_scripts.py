@@ -159,3 +159,45 @@ def test_long_secret_reveals_only_a_fixed_small_prefix(tmp_path: Path) -> None:
     masked = _check_env_output(tmp_path, value)
     assert masked == "sk****"
     assert value[-4:] not in masked
+
+
+# ── RU-145 / RG-181: build-context errors reach the exit status ─────────────
+
+_DOCKER_CONFIG_STUB = """
+for a in "$@"; do
+  if [ "$a" = config ]; then
+    f=""
+    while [ $# -gt 0 ]; do if [ "$1" = -f ]; then f=$2; fi; shift; done
+    cat "$f"
+    exit 0
+  fi
+done
+exit 0"""
+
+
+def _docker_validate(tmp_path: Path, context: str) -> subprocess.CompletedProcess[str]:
+    work = tmp_path / "dv"
+    work.mkdir()
+    (work / "docker-compose.yml").write_text(
+        f"services:\n  api:\n    build:\n      context: {context}\n      dockerfile: Dockerfile\n", encoding="utf-8"
+    )
+    (work / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+    (work / "app").mkdir()
+    shutil.copy(REPO / "tools" / "infra" / "docker_validate.sh", work / "docker_validate.sh")
+    stubs = tmp_path / "stubs"
+    _stub(stubs, "docker", _DOCKER_CONFIG_STUB)
+    return _run([BASH, "./docker_validate.sh", "check-only"], cwd=work, env=_env(tmp_path, stubs))
+
+
+def test_docker_validate_missing_build_context_fails(tmp_path: Path) -> None:
+    proc = _docker_validate(tmp_path, "./does_not_exist")
+    assert "Build context directory not found" in proc.stderr
+    assert "ALL CHECKS PASSED" not in proc.stdout
+    assert proc.returncode == 1
+
+
+def test_docker_validate_existing_build_context_passes(tmp_path: Path) -> None:
+    proc = _docker_validate(tmp_path, "./app")
+    assert "Build context exists" in proc.stdout
+    assert "ALL CHECKS PASSED" in proc.stdout
+    assert proc.returncode == 0, proc.stderr
