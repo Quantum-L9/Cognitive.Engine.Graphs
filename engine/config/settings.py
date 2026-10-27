@@ -325,6 +325,11 @@ class Settings(BaseSettings):
     # DimensionWeight and the result is clamped to signal_weights
     # [min_weight, max_weight]. Off: the legacy query.
     propagation_single_application: bool = True
+    # RU-029 / CEG-COR-118: DriftDetector treated only a both-empty window pair
+    # as insufficient data, so an empty baseline (the first drift_window_days)
+    # scored divergence 1.0 and raised alert=True. On: either window empty is
+    # insufficient_data (with both counts). Off: legacy both-empty only.
+    drift_requires_both_windows: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
