@@ -534,6 +534,14 @@ class Settings(BaseSettings):
     # the cancelled call persists one ('<action>', 'failed') pair under
     # asyncio.shield, then the cancellation is re-raised. Off: no pair.
     packet_audit_on_cancel_enabled: bool = True
+    # RU-090 / CEG-COR-099: CapabilityValidator.validate_action checked the
+    # presented object, so a forged Capability reusing a registered id, an
+    # unexpired copy of an expired record, or an in-place `expires_at = 0`
+    # edit all validated. On: the object must equal the registered record and
+    # activity is read from the record; expires_at enters proof_hash (the
+    # admin delegate_capability response therefore shows a new proof_hash).
+    # Off: the legacy checks and hash input.
+    capability_record_binding_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
