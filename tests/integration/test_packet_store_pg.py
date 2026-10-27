@@ -21,9 +21,13 @@ neo4j only), so without that variable the module is skipped, the same way
 the Neo4j fixture skips without ``NEO4J_TEST_URI`` (R4-DEC-05 decides whether
 a PostgreSQL container joins CI).
 
-Scenarios (RG-102):
-  A. Two requests with identical payloads from one tenant: both pairs stored.
-  B. The same pair persisted twice: hop_trace keeps one row per hop.
+Scenarios:
+  A. (RG-102) Two requests with identical payloads from one tenant: both
+     pairs stored.
+  B. (RG-102) The same pair persisted twice: hop_trace keeps one row per hop.
+  D. (RG-105) Connected as a login role in l9_product (RLS enforced): persist
+     succeeds, and a row whose actor_tenant differs from the session tenant
+     is still rejected.
 """
 
 from __future__ import annotations
@@ -163,3 +167,57 @@ async def test_repersisted_pair_keeps_one_hop_row_per_hop(owner_store: ps_mod.Pa
         )
         assert rows == len(packet.hop_trace)
     assert await _count(packet_db, "SELECT count(*) FROM packet_store WHERE actor_tenant = $1", tenant) == 2
+
+
+@pytest.fixture(scope="module")
+async def product_dsn(packet_db: str) -> AsyncIterator[str]:
+    """A LOGIN role that is a member of l9_product, the DDL's RLS-enforced role."""
+    role = f"ceg_app_{uuid.uuid4().hex[:10]}"
+    password = uuid.uuid4().hex
+    conn = await asyncpg.connect(packet_db)
+    try:
+        await conn.execute(f"CREATE ROLE {role} LOGIN PASSWORD '{password}' IN ROLE l9_product")
+    finally:
+        await conn.close()
+    yield _with_user(packet_db, role, password)
+    conn = await asyncpg.connect(packet_db)
+    try:
+        await conn.execute(f"DROP OWNED BY {role}")
+        await conn.execute(f"DROP ROLE IF EXISTS {role}")
+    finally:
+        await conn.close()
+
+
+@pytest.fixture
+async def product_store(monkeypatch: pytest.MonkeyPatch, product_dsn: str) -> AsyncIterator[ps_mod.PacketStore]:
+    """PacketStore connected as an l9_product member (RLS enforced)."""
+    async for store in _store_for(monkeypatch, product_dsn):
+        yield store
+
+
+async def test_persist_as_l9_product_member(product_store: ps_mod.PacketStore, packet_db: str) -> None:
+    """Scenario D: before RU-079 this raised InsufficientPrivilegeError (RLS)."""
+    tenant = f"tenant-{uuid.uuid4().hex[:8]}"
+    req, resp = _pair({"query": {"x": 3}}, tenant, "tr-d")
+
+    await product_store.persist(req, resp)
+
+    assert await _count(packet_db, "SELECT count(*) FROM packet_store WHERE actor_tenant = $1", tenant) == 2
+    assert (
+        await _count(packet_db, "SELECT count(*) FROM hop_trace WHERE packet_id = $1::uuid", str(resp.header.packet_id))
+        == 1
+    )
+
+
+async def test_l9_product_cannot_write_another_tenants_row(product_dsn: str) -> None:
+    """The session tenant still bounds what an l9_product connection may insert."""
+    req, _resp = _pair({"query": {"x": 4}}, "tenant-other", "tr-d2")
+    row = ps_mod._extract_packet_row(req)
+    conn = await asyncpg.connect(product_dsn)
+    try:
+        async with conn.transaction():
+            await conn.fetchval(ps_mod._SET_TENANT_SQL, "tenant-session")
+            with pytest.raises(asyncpg.exceptions.InsufficientPrivilegeError):
+                await conn.execute(ps_mod._INSERT_PACKET_SQL, *row)
+    finally:
+        await conn.close()

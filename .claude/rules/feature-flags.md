@@ -53,6 +53,7 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | auto_create_domain_database | False | Provision the tenant domain database on first use (CEG-008; Enterprise-only CREATE DATABASE) |
 | health_api_enabled | False | Expose engine/health/api.py via admin health_* subactions (CEG-006) |
 | packet_store_packet_identity_dedup_enabled | True | PacketStore `content_hash` = SDK `transport_hash`; a duplicate-skipped packet writes no child rows (RU-078) |
+| packet_store_rls_tenant_session_enabled | True | PacketStore sets transaction-local `app.current_tenant` before each write so the RLS policies admit an `l9_product` DSN (RU-079) |
 
 ## Domain Pack Admission (generic; the engine names no domain)
 | Flag | Default | Purpose |
