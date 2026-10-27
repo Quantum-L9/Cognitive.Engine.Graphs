@@ -444,3 +444,34 @@ def test_plasticos_recency_uses_the_declared_180_day_horizon() -> None:
     expression = _dimension_expression("plasticos", "recency")
     assert "duration.inDays(candidate.last_transaction_date, datetime()).days / 180.0" in expression
     assert "/ 90.0" not in expression
+
+
+# RG-070 (RU-056 / CEG-COR-152): the authoring template is a spec the loader
+# would admit and every direction of which assembles. It stays non-served: it is
+# a file under domains/, not domains/<id>/spec.yaml.
+TEMPLATE_PATH = DOMAINS_ROOT / "_template.yaml"
+
+
+def _template_spec() -> DomainSpec:
+    raw = yaml.safe_load(TEMPLATE_PATH.read_text(encoding="utf-8"))
+    raw["domain"]["id"] = "template-check"
+    return DomainSpec.model_validate(raw)
+
+
+def test_template_is_not_a_served_pack() -> None:
+    assert TEMPLATE_PATH.is_file()
+    assert "_template" not in DomainPackLoader(str(DOMAINS_ROOT)).list_domains()
+
+
+def test_template_validates_and_assembles_for_every_direction() -> None:
+    from engine.scoring.assembler import ScoringAssembler
+    from engine.traversal.assembler import TraversalAssembler
+
+    spec = _template_spec()
+    assert admission_defects(spec) == []
+    for direction in spec.queryschema.matchdirections:
+        traversal = TraversalAssembler(spec).assemble_traversal(direction)
+        assert all(not clause.startswith("OPTIONAL MATCH") for clause in traversal[-1:]), traversal
+        ScoringAssembler(spec).assemble_scoring_clause(direction, {})
+    exclusion = next(g for g in spec.gates if g.type.value == "exclusion")
+    assert (exclusion.fromnode, exclusion.tonode) == (None, None)
