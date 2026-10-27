@@ -222,25 +222,32 @@ def _evaluate_weight_vector(
     outcome_history: list[dict[str, Any]] | None,
     ema_alpha: float,
 ) -> tuple[float, float, float]:
-    """Return (ndcg_score, diversity_score, coverage_score) for a weight vector."""
+    """Return (ndcg_score, diversity_score, coverage_score) for a weight vector.
+
+    RU-024 / CEG-COR-031: NDCG measures how well ``w`` ranks the outcomes that
+    were selected. Outcomes are ordered by their scalarised score under ``w``
+    (descending; ties keep history order), each carries the selection label as
+    its relevance (1.0 selected, 0.0 not), and NDCG = DCG(that order) /
+    DCG(ideal order). Sorting the relevances themselves, as before, made every
+    vector score 1.0. An empty history, or one with no selected outcome, scores
+    0.0. ``ema_alpha`` is retained for signature compatibility; the binary label
+    does not down-weight non-selected outcomes further.
+    """
     diversity = _shannon_entropy(w)
     coverage = _coverage(w)
 
     if not outcome_history:
         return 0.0, diversity, coverage
 
-    relevances: list[float] = []
+    ranked: list[tuple[float, float]] = []  # (scalarised score, relevance label)
     for outcome in outcome_history:
         dim_scores: dict[str, float] = outcome.get("dimension_scores", {})
         was_selected: bool = outcome.get("was_selected", False)
         scalarised = sum(w.get(d, 0.0) * s for d, s in dim_scores.items())
-        if was_selected:
-            relevances.append(scalarised)
-        else:
-            relevances.append(scalarised * ema_alpha)
+        ranked.append((scalarised, 1.0 if was_selected else 0.0))
 
-    relevances.sort(reverse=True)
-    ndcg_val = _ndcg(relevances)
+    ranked.sort(key=lambda pair: pair[0], reverse=True)  # stable for ties
+    ndcg_val = _ndcg([relevance for _, relevance in ranked])
     return ndcg_val, diversity, coverage
 
 

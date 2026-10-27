@@ -224,3 +224,46 @@ class TestObjectiveDirection:
         cheap = ParetoCandidate(candidate_id="cheap", dimension_scores={"cost": 0.1})
         pricey = ParetoCandidate(candidate_id="pricey", dimension_scores={"cost": 0.9})
         assert [c.candidate_id for c in compute_pareto_front([cheap, pricey]).non_dominated] == ["pricey"]
+
+
+# ── RU-024 / CEG-COR-031: NDCG against selection labels (RG-031) ────────────
+
+
+def _history_where_a_predicts_selection() -> list[dict]:
+    return [
+        {"dimension_scores": {"a": 0.9, "b": 0.1}, "was_selected": True},
+        {"dimension_scores": {"a": 0.8, "b": 0.3}, "was_selected": True},
+        {"dimension_scores": {"a": 0.2, "b": 0.9}, "was_selected": False},
+        {"dimension_scores": {"a": 0.1, "b": 0.7}, "was_selected": False},
+    ]
+
+
+@pytest.mark.unit
+class TestWeightVectorNdcg:
+    def test_ndcg_discriminates_predictive_dimension(self) -> None:
+        from engine.scoring.pareto import _evaluate_weight_vector
+
+        history = _history_where_a_predicts_selection()
+        ndcg_a, _, _ = _evaluate_weight_vector({"a": 1.0, "b": 0.0}, history, 0.1)
+        ndcg_b, _, _ = _evaluate_weight_vector({"a": 0.0, "b": 1.0}, history, 0.1)
+        assert ndcg_a > ndcg_b
+        assert ndcg_a == pytest.approx(1.0)  # selected outcomes ranked first
+
+    def test_ndcg_zero_without_history_or_selection(self) -> None:
+        from engine.scoring.pareto import _evaluate_weight_vector
+
+        assert _evaluate_weight_vector({"a": 1.0}, [], 0.1)[0] == 0.0
+        unselected = [{"dimension_scores": {"a": 0.9}, "was_selected": False}]
+        assert _evaluate_weight_vector({"a": 1.0}, unselected, 0.1)[0] == 0.0
+
+    def test_front_depends_on_history(self) -> None:
+        dims = ["a", "b"]
+        with_history = discover_pareto_weights(
+            dims, {"a": 0.5, "b": 0.5}, outcome_history=_history_where_a_predicts_selection(), n_samples=30, seed=7
+        )
+        without_history = discover_pareto_weights(
+            dims, {"a": 0.5, "b": 0.5}, outcome_history=None, n_samples=30, seed=7
+        )
+        assert [wv.weights for wv in with_history] != [wv.weights for wv in without_history]
+        # The best-NDCG vector leans on the predictive dimension.
+        assert with_history[0].weights["a"] > with_history[0].weights["b"]
