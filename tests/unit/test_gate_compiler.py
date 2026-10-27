@@ -196,3 +196,153 @@ def test_exclusion_endpoint_validation_off_restores_the_no_op(monkeypatch: pytes
     spec = _pack("mortgage-brokerage")
     gate = next(g for g in spec.gates if g.name == "blacklist_exclusion")
     assert GateCompiler(spec).compile(gate) == "NOT EXISTS { MATCH (candidate)-[:BLACKLISTEDLENDER]->() }"
+
+
+# RG-055 (RU-042 / CEG-COR-020, CEG-COR-021): the declared null policy applies to
+# exactly the operands the predicate tests.
+def _compile_one(gate: dict, fields: list[dict] | None = None) -> str:
+    from engine.gates.compiler import GateCompiler
+
+    spec = _two_label_spec([{"matchdirections": ["d1"], **gate}], fields)
+    return GateCompiler(spec).compile(spec.gates[0])
+
+
+def test_range_fail_rejects_null_candidate_bounds() -> None:  # counterexample [2]
+    fragment = _compile_one(
+        {
+            "name": "density_fail",
+            "type": "range",
+            "candidateprop_min": "min_density",
+            "candidateprop_max": "max_density",
+            "queryparam": "density",
+            "nullbehavior": "fail",
+        }
+    )
+    assert fragment.startswith(
+        "(candidate.min_density IS NOT NULL AND candidate.max_density IS NOT NULL AND $density IS NOT NULL AND ("
+    )
+
+
+def test_range_with_derived_bounds_does_not_null_check_the_untested_property() -> None:  # counterexample [3]
+    fragment = _compile_one(
+        {
+            "name": "density_pass",
+            "type": "range",
+            "candidateprop": "density",
+            "queryparam": "density",
+            "nullbehavior": "pass",
+        }
+    )
+    assert "candidate.density IS NULL" not in fragment
+    assert fragment == (
+        "($density IS NULL OR ((candidate.min_density IS NULL OR candidate.min_density <= $density) AND "
+        "(candidate.max_density IS NULL OR $density <= candidate.max_density)))"
+    )
+
+
+def test_temporalrange_pass_window_admits_null_operands() -> None:  # counterexample [4]
+    fragment = _compile_one(
+        {
+            "name": "tw",
+            "type": "temporalrange",
+            "candidateprop_start": "start",
+            "candidateprop_end": "end",
+            "queryparam_start": "ws",
+            "queryparam_end": "we",
+            "nullbehavior": "pass",
+        }
+    )
+    for operand in ("candidate.start", "candidate.end", "$ws", "$we"):
+        assert f"{operand} IS NULL" in fragment, fragment
+
+
+def test_temporalrange_null_checks_the_derived_parameters_it_tests() -> None:  # counterexample [5]
+    fragment = _compile_one(
+        {
+            "name": "tw",
+            "type": "temporalrange",
+            "candidateprop": "start",
+            "queryparam": "window",
+            "nullbehavior": "pass",
+        }
+    )
+    assert "$window_start IS NULL" in fragment
+    assert "$window_end IS NULL" in fragment
+    assert "$window " not in fragment
+    assert "$window)" not in fragment
+
+
+def test_exclusion_null_check_never_references_the_target_property() -> None:  # counterexample [6]
+    fragment = _compile_one(
+        {
+            "name": "blocked",
+            "type": "exclusion",
+            "edgetype": "BLOCKS",
+            "candidateprop": "buyer_id",
+            "queryparam": "buyer",
+            "nullbehavior": "pass",
+        }
+    )
+    assert "candidate.buyer_id IS NULL" not in fragment
+    assert fragment == (
+        "($buyer IS NULL OR (NOT EXISTS { MATCH (candidate)-[:BLOCKS]->(excluded) WHERE excluded.buyer_id = $buyer }))"
+    )
+
+
+def test_range_query_window_pass_lets_a_null_bound_impose_no_constraint() -> None:
+    fragment = _compile_one(
+        {
+            "name": "size_window",
+            "type": "range",
+            "candidateprop": "size",
+            "queryparam_min": "size_lo",
+            "queryparam_max": "size_hi",
+            "nullbehavior": "pass",
+        }
+    )
+    assert fragment == (
+        "(candidate.size IS NULL OR (($size_lo IS NULL OR candidate.size >= $size_lo) AND "
+        "($size_hi IS NULL OR candidate.size <= $size_hi)))"
+    )
+
+
+@pytest.mark.parametrize("domain_id", ["plasticos", "mortgage-brokerage"])
+def test_served_pack_fragments_are_unchanged_by_the_operand_wrap(
+    domain_id: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Plasticos and mortgage declare pass with explicit bounds: byte-identical either way."""
+    from engine.config.settings import settings
+    from engine.gates.compiler import GateCompiler
+
+    spec = _pack(domain_id)
+
+    def _fragments() -> dict[str, str]:
+        out: dict[str, str] = {}
+        for gate in spec.gates:
+            try:
+                out[gate.name] = GateCompiler(spec).compile(gate)
+            except ValueError as exc:
+                out[gate.name] = f"refused: {exc}"
+        return out
+
+    on = _fragments()
+    monkeypatch.setattr(settings, "gate_null_operands_from_predicate", False)
+    assert _fragments() == on
+
+
+def test_operand_wrap_off_restores_the_legacy_fragments(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "gate_null_operands_from_predicate", False)
+    fragment = _compile_one(
+        {
+            "name": "tw",
+            "type": "temporalrange",
+            "candidateprop": "start",
+            "queryparam": "window",
+            "nullbehavior": "pass",
+        }
+    )
+    assert fragment == (
+        "(candidate.start IS NULL OR $window IS NULL OR (candidate.start >= $window_start AND candidate.start <= $window_end))"
+    )

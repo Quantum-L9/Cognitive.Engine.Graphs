@@ -102,6 +102,7 @@ independently of the code default.
 | Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `True` | unset | active (hardening); admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
 | Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `True` | unset | active (hardening); admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
 | Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `True` | unset | active (hardening); an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
+| Gate Null Operands From Predicate | `GATE_NULL_OPERANDS_FROM_PREDICATE` (`gate_null_operands_from_predicate`) | `True` | unset | active; a gate's `nullbehavior` applies to exactly the operands its predicate tests (range FAIL rejects NULL bounds; temporalrange null-handles its window per side) — see §21 |
 
 ---
 
@@ -958,3 +959,27 @@ to return to.
 ### Rollback
 
 Set the flag to `false`. The placeholder fragments are emitted again verbatim.
+
+### Null operands from the predicate (RU-042 / CEG-COR-020, CEG-COR-021)
+
+`GATE_NULL_OPERANDS_FROM_PREDICATE` (default `True`): each gate handler reports
+the operands its predicate tests and `NullHandler.wrap_operands` applies the
+declared policy to exactly those — `pass`: a NULL operand imposes no
+constraint on its side; `fail`: any NULL tested operand rejects. Before, the
+wrap always used `candidate.<candidateprop>` and `$<queryparam>`:
+
+| Gate | Before | Now |
+|---|---|---|
+| `range` `fail`, candidate bounds | NULL `min_`/`max_` bound passed | NULL bound rejects (`candidate.min_x IS NOT NULL AND …`) |
+| `range` with `candidateprop` and derived bounds | null-checked `candidate.<prop>`, which it never reads | only the bounds and `$<queryparam>` |
+| `range` query window | a NULL `$min`/`$max` rejected under `pass` | each NULL bound is unconstrained on its side |
+| `temporalrange` window forms | no null handling | per-side handling of both candidate props and both params |
+| `temporalrange` with derived names | null-checked undeclared `$<queryparam>` | `$<queryparam>_start` / `_end` |
+| `exclusion` with `candidateprop` | null-checked `candidate.<candidateprop>` (a target-node property) | `$<queryparam>` only |
+
+Compiled fragments of `plasticos` and `mortgage-brokerage` are byte-identical
+(they declare `pass` with explicit bounds); of the shipped packs only
+temporalrange window gates change (`freight-matching` `availability_window`,
+dormant `legal-discovery` `temporal_relevance`). Rollback:
+`GATE_NULL_OPERANDS_FROM_PREDICATE=false`.
+

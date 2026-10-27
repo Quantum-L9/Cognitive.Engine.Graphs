@@ -127,5 +127,12 @@ handle NULL themselves.
 | `pass` | `(candidate.prop IS NULL OR <predicate>)` |
 | `fail` | `<predicate>` — a NULL candidate is rejected |
 
+The policy applies to exactly the operands the predicate tests — the candidate
+properties and declared query parameters it reads, never a literal operand and
+never a related node's property (traversal / exclusion `candidateprop`). Under
+`pass` a NULL operand imposes no constraint on its own side (range and
+temporalrange bounds are null-handled per side); under `fail` any NULL tested
+operand rejects (`gate_null_operands_from_predicate`, RU-042).
+
 The wrapping happens in `engine/gates/null_semantics.py`. Do not hand-write
 `IS NULL OR` into a gate's `compile_where()`; set `nullbehavior` in the spec instead.

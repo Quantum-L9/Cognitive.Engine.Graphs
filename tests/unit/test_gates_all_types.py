@@ -873,7 +873,9 @@ class TestLiteralOperands:
 
 @pytest.mark.unit
 class TestDeclaredBounds:
-    def test_range_query_window_uses_declared_min_max_parameters(self) -> None:
+    def test_range_query_window_uses_declared_min_max_parameters(self, monkeypatch) -> None:
+        from engine.config.settings import settings
+
         gate = make_mock_gate_spec(
             name="loanamount_range",
             gate_type=GateType.RANGE,
@@ -885,8 +887,16 @@ class TestDeclaredBounds:
 
         cypher = compiler.compile(gate)
 
-        assert "candidate.loanamountusd >= $minloanamountusd AND candidate.loanamountusd <= $maxloanamountusd" in cypher
+        # RU-042: under PASS each NULL query bound imposes no constraint on its side.
+        assert cypher == (
+            "(candidate.loanamountusd IS NULL OR (($minloanamountusd IS NULL OR "
+            "candidate.loanamountusd >= $minloanamountusd) AND ($maxloanamountusd IS NULL OR "
+            "candidate.loanamountusd <= $maxloanamountusd)))"
+        )
         assert "$value" not in cypher
+        monkeypatch.setattr(settings, "gate_null_operands_from_predicate", False)
+        legacy = compiler.compile(gate)
+        assert "candidate.loanamountusd >= $minloanamountusd AND candidate.loanamountusd <= $maxloanamountusd" in legacy
 
     def test_range_query_window_legacy_behind_flag(self, monkeypatch) -> None:
         from engine.config.settings import settings
@@ -922,7 +932,7 @@ class TestDeclaredBounds:
             "(candidate.max_density IS NULL OR $density <= candidate.max_density)))"
         )
 
-    def test_temporalrange_candidate_window_overlaps_query_window(self) -> None:
+    def test_temporalrange_candidate_window_overlaps_query_window(self, monkeypatch) -> None:
         gate = make_mock_gate_spec(
             name="availability_window",
             gate_type=GateType.TEMPORALRANGE,
@@ -933,6 +943,14 @@ class TestDeclaredBounds:
         )
         compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
 
+        # RU-042: each overlap side is null-handled over the operands it tests.
+        assert compiler.compile(gate) == (
+            "(candidate.availabledate IS NULL OR $pickupdate IS NULL OR candidate.availabledate <= $pickupdate)"
+            " AND (candidate.availabledate IS NULL OR $pickupdate IS NULL OR candidate.availabledate >= $pickupdate)"
+        )
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gate_null_operands_from_predicate", False)
         assert (
             compiler.compile(gate)
             == "candidate.availabledate <= $pickupdate AND candidate.availabledate >= $pickupdate"
@@ -952,6 +970,11 @@ class TestDeclaredBounds:
         )
         compiler = GateCompiler(make_mock_domain_spec(gates=[gate]))
 
+        assert compiler.compile(gate) == (
+            "(candidate.timestamp IS NULL OR (($pickupdate IS NULL OR candidate.timestamp >= $pickupdate) AND "
+            "($pickupdate IS NULL OR candidate.timestamp <= $pickupdate)))"
+        )
+        monkeypatch.setattr(settings, "gate_null_operands_from_predicate", False)
         assert compiler.compile(gate) == "candidate.timestamp >= $pickupdate AND candidate.timestamp <= $pickupdate"
 
     def test_temporalrange_without_any_bounds_is_refused(self) -> None:
