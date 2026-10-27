@@ -201,3 +201,50 @@ def test_docker_validate_existing_build_context_passes(tmp_path: Path) -> None:
     assert "Build context exists" in proc.stdout
     assert "ALL CHECKS PASSED" in proc.stdout
     assert proc.returncode == 0, proc.stderr
+
+
+# ── RU-146 / RG-182: smoke verdict from pytest's exit status ────────────────
+
+
+def _smoke_section(tmp_path: Path, pytest_output: str, pytest_rc: int) -> dict[str, int]:
+    text = (REPO / "tools" / "infra" / "test_everything.sh").read_text(encoding="utf-8")
+    helpers = re.findall(r"^test_(?:pass|fail|info|skip)\(\) \{.*\}$", text, re.MULTILINE)
+    start = text.index("# 8. Automated Test Suite")
+    end = text.index("# 9. WebSocket")
+    log = tmp_path / "smoke_test_output.txt"
+    section = text[start:end].replace("/tmp/smoke_test_output.txt", str(log))
+    stubs = tmp_path / "stubs"
+    out_file = tmp_path / "pytest_out.txt"
+    out_file.write_text(pytest_output, encoding="utf-8")
+    _stub(stubs, "docker", f'cat "{out_file}"; exit {pytest_rc}')
+    snippet = "\n".join(
+        [
+            "set +e",
+            "RED=; GREEN=; YELLOW=; NC=",
+            "PASSED=0; FAILED=0",
+            "API_CONTAINER=api; SMOKE_TEST_PATH=tests/",
+            *helpers,
+            section,
+            'echo "COUNTS PASSED=$PASSED FAILED=$FAILED"',
+        ]
+    )
+    proc = _run([BASH, "-c", snippet], cwd=tmp_path, env=_env(tmp_path, stubs))
+    assert log.read_text(encoding="utf-8") == pytest_output  # output still captured to the smoke log
+    counts = re.search(r"COUNTS PASSED=(\d+) FAILED=(\d+)", proc.stdout)
+    assert counts is not None, proc.stdout + proc.stderr
+    return {"passed": int(counts.group(1)), "failed": int(counts.group(2))}
+
+
+def test_smoke_mixed_pass_fail_counts_as_failure(tmp_path: Path) -> None:
+    out = "tests/test_a.py::test_x FAILED\n=== 3 failed, 10 passed in 1.2s ===\n"
+    assert _smoke_section(tmp_path, out, 1) == {"passed": 0, "failed": 1}
+
+
+def test_smoke_nonzero_exit_without_failed_lines_counts_as_failure(tmp_path: Path) -> None:
+    out = "ERROR: file or directory not found: tests/\n=== no tests ran in 0.01s ===\n"
+    assert _smoke_section(tmp_path, out, 4) == {"passed": 0, "failed": 1}
+
+
+def test_smoke_all_passed_counts_as_pass(tmp_path: Path) -> None:
+    out = "tests/test_a.py::test_x PASSED\n=== 13 passed in 1.2s ===\n"
+    assert _smoke_section(tmp_path, out, 0) == {"passed": 1, "failed": 0}
