@@ -306,6 +306,15 @@ class Settings(BaseSettings):
     # compiler refuses such a gate, so admission withholds the pack. Off: the
     # legacy always-true fragment.
     exclusion_endpoint_validation: bool = True
+    # RU-042 / CEG-COR-020, CEG-COR-021: a gate's null policy was applied to
+    # `candidate.<candidateprop>` and `$<queryparam>` whatever the predicate
+    # tested — range FAIL passed NULL bounds, derived-bound range and
+    # candidateprop exclusion null-checked a property they never read, and
+    # temporalrange checked an undeclared `$<queryparam>`. On: each handler
+    # reports the operands it tests and the wrap applies PASS (a NULL operand
+    # imposes no constraint on its side) or FAIL (any NULL rejects) to exactly
+    # those. Off: the previous fragments.
+    gate_null_operands_from_predicate: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
