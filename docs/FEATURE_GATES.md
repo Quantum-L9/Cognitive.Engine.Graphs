@@ -82,6 +82,7 @@ independently of the code default.
 | Childsync FOREACH Projection | `CHILDSYNC_FOREACH_PROJECTION` (`childsync_foreach_projection`) | `True` | unset | active; childsync writes children in `FOREACH` without copying them onto the parent — see §20 |
 | Match Dimension Projection | `MATCH_DIMENSION_PROJECTION` (`match_dimension_projection`) | `True` | unset | active (correctness, RU-001); match RETURNs the active dimension scores as `dimension_scores` so Pareto, arbitration and confidence checks see real values; off restores `RETURN candidate, score` |
 | Gate WHERE Row Scope | `GATE_WHERE_ROW_SCOPE` (`gate_where_row_scope`) | `True` | unset | active (correctness, RU-011); match emits `WITH *` before the gate `WHERE` so gates remove candidate rows even after a trailing `OPTIONAL MATCH`; off restores `WHERE` directly after the traversal |
+| Match Collapse Traversal Rows | `MATCH_COLLAPSE_TRAVERSAL_ROWS` (`match_collapse_traversal_rows`) | `True` | unset | active (correctness, RU-036); match keeps each candidate's best-scoring traversal row before `ORDER BY … LIMIT $top_n`, so `top_n` counts distinct candidates; off restores one row per path |
 
 ---
 

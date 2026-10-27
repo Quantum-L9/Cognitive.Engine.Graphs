@@ -575,10 +575,30 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     # Pareto, arbitration and confidence read real values. Aliases are the
     # sanitized names the scoring WITH binds; zero active dimensions -> `{}`.
     project_dimensions = bool(_match_settings.match_dimension_projection)
+    dim_projection = ""
     if project_dimensions:
         dim_aliases = [sanitize_label(name) for name in scoring_assembler.last_active_dimension_names]
         dim_map = ", ".join(f"{alias}: {alias}" for alias in dim_aliases)
-        return_line = f"RETURN candidate, score, {{{dim_map}}} AS dimension_scores\n"
+        dim_projection = f"{{{dim_map}}} AS dimension_scores"
+    # RU-036 / CEG-COR-007: one row per candidate (its best-scoring path) before
+    # ORDER BY / LIMIT, so top_n counts distinct candidates (R2-DEC-05 option A).
+    if _match_settings.match_collapse_traversal_rows:
+        if project_dimensions:
+            row_projection = f"WITH candidate, score, {dim_projection}\n"
+            best_row = "{score: score, dimension_scores: dimension_scores}"
+            return_line = "RETURN candidate, best.score AS score, best.dimension_scores AS dimension_scores\n"
+        else:
+            row_projection = "WITH candidate, score\n"
+            best_row = "{score: score}"
+            return_line = "RETURN candidate, best.score AS score\n"
+        return_line = (
+            row_projection
+            + "ORDER BY score DESC\n"
+            + f"WITH candidate, head(collect({best_row})) AS best\n"
+            + return_line
+        )
+    elif project_dimensions:
+        return_line = f"RETURN candidate, score, {dim_projection}\n"
     else:
         return_line = "RETURN candidate, score\n"
     # RU-011 / CEG-COR-033: a WHERE directly after OPTIONAL MATCH belongs to it

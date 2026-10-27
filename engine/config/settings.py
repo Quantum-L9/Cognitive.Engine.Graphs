@@ -294,6 +294,11 @@ class Settings(BaseSettings):
     # (whose own WHERE only nulls optional variables). Off: WHERE follows the
     # traversal clauses directly.
     gate_where_row_scope: bool = True
+    # RU-036 / CEG-COR-007: a candidate with k matching traversal paths produced
+    # k rows and LIMIT counted rows. On: after scoring, keep each candidate's
+    # highest-scoring row (`head(collect(...))` over score-ordered rows) before
+    # ORDER BY / LIMIT. Off: one row per path.
+    match_collapse_traversal_rows: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
