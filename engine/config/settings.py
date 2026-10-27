@@ -318,6 +318,13 @@ class Settings(BaseSettings):
     # single winning outcome got confidence 1.0. On: the CI of the win-rate
     # proportion (Agresti-Coull), divided by the base win rate. Off: legacy.
     signal_weight_proportion_ci: bool = True
+    # RU-028 / CEG-COR-117: ScorePropagator matched each prior outcome of the
+    # candidate and then every DimensionWeight, so one event multiplied
+    # boost_factor by factor^k and reported k*|dw| affected, unbounded. On:
+    # outcomes are collapsed to one existence row, SET runs once per
+    # DimensionWeight and the result is clamped to signal_weights
+    # [min_weight, max_weight]. Off: the legacy query.
+    propagation_single_application: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
