@@ -307,6 +307,11 @@ class Settings(BaseSettings):
     # resolving derived parameters, so a derivation over an omitted defaulted
     # field sees its default. Off: resolve first, backfill after.
     query_defaults_before_derived: bool = True
+    # RU-009 / CEG-COR-018: match `weights` are validated as the per-dimension
+    # weights scoring applies for the direction (override, else spec default),
+    # after the domain loads; unknown weight keys are rejected (R1a-DEC-06).
+    # Off: only the supplied keys are summed, before the domain loads.
+    match_effective_weight_validation: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

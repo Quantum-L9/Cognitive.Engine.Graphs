@@ -431,10 +431,21 @@ _WEIGHT_CEILING = 1.0
 _WEIGHT_SUM_TOLERANCE = 1e-9
 
 
-def _validate_match_weights(weights: dict[str, float], tenant: str) -> None:
+def _validate_match_weights(
+    weights: dict[str, float],
+    tenant: str,
+    effective_weights: dict[str, float] | None = None,
+    known_weightkeys: set[str] | None = None,
+) -> None:
     """W1-02: Validate user-supplied scoring weights.
 
     Each weight must be in [0, 1] and the total sum must be <= 1.0.
+
+    RU-009 / CEG-COR-018: when ``effective_weights`` is given (the per-dimension
+    weights the assembler will apply for the match direction: request override,
+    else spec default) the ceiling is checked against their sum, not against the
+    supplied keys alone; a key no active dimension declares
+    (``known_weightkeys``) is rejected (R1a-DEC-06).
     """
     for key, val in weights.items():
         try:
@@ -446,7 +457,14 @@ def _validate_match_weights(weights: dict[str, float], tenant: str) -> None:
             msg = f"Weight '{key}' = {w} is outside allowed range [{_WEIGHT_FLOOR}, {_WEIGHT_CEILING}]"
             raise ValidationError(msg, action="match", tenant=tenant)
 
-    weight_sum = sum(float(v) for v in weights.values())
+    if known_weightkeys is not None:
+        unknown = sorted(set(weights) - known_weightkeys)
+        if unknown:
+            msg = f"Unknown weight key(s) {unknown}: no active scoring dimension declares them"
+            raise ValidationError(msg, action="match", tenant=tenant)
+
+    source = weights if effective_weights is None else effective_weights
+    weight_sum = sum(float(v) for v in source.values())
     if weight_sum > _WEIGHT_CEILING + _WEIGHT_SUM_TOLERANCE:
         msg = f"Weights sum to {weight_sum:.4f}, exceeding {_WEIGHT_CEILING}"
         raise ValidationError(msg, action="match", tenant=tenant)
@@ -550,15 +568,30 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     weights = payload.get("weights", {})
 
-    # W1-02: Validate user-supplied weights are in [0, 1] and sum to <= 1.0
-    if weights:
-        from engine.config.settings import settings
+    from engine.config.settings import settings
 
-        if settings.score_clamp_enabled:
-            _validate_match_weights(weights, tenant)
+    # W1-02: Validate user-supplied weights are in [0, 1] and sum to <= 1.0
+    effective_weight_check = bool(settings.match_effective_weight_validation)
+    if weights and settings.score_clamp_enabled and not effective_weight_check:
+        _validate_match_weights(weights, tenant)
 
     domain_spec = domain_loader.load_domain(tenant)
     _enforce_capability(tenant, "match", domain_spec)
+
+    # RU-009 / CEG-COR-018: validate the weights scoring will actually apply for
+    # this direction (one merge, in the assembler), not only the supplied keys.
+    if weights and settings.score_clamp_enabled and effective_weight_check:
+        weight_merge = ScoringAssembler(domain_spec)
+        _validate_match_weights(
+            weights,
+            tenant,
+            effective_weights=weight_merge.merged_request_weights(match_direction, weights),
+            known_weightkeys={
+                d.weightkey
+                for d in domain_spec.scoring.dimensions
+                if not (d.matchdirections and match_direction not in d.matchdirections)
+            },
+        )
 
     compliance = _get_compliance_engine(domain_spec)
     if compliance.enabled:

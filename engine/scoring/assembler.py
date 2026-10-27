@@ -191,7 +191,7 @@ class ScoringAssembler:
                 expr = self._clamp_expression(expr)
             alias = sanitize_label(dim.name)
             dimension_exprs.append(f"{expr} AS {alias}")
-            weight = weights.get(dim.weightkey, dim.defaultweight)
+            weight = self._request_weight(dim, weights)
             # Convergence loop: multiply spec weight by learned adjustment factor
             if dim.name in learned and sw_spec is not None:
                 learned_w = learned[dim.name]
@@ -220,6 +220,24 @@ class ScoringAssembler:
     def last_active_dimension_names(self) -> list[str]:
         """Return dimension names from the most recent assemble_scoring_clause call."""
         return list(self._last_active_dims)
+
+    @staticmethod
+    def _request_weight(dim: ScoringDimensionSpec, weights: dict[str, float]) -> Any:
+        """The request override for this dimension's weightkey, else the spec default."""
+        return weights.get(dim.weightkey, dim.defaultweight)
+
+    def merged_request_weights(self, match_direction: str, weights: dict[str, float]) -> dict[str, float]:
+        """RU-009: per active dimension, the request-merged weight scoring will use.
+
+        Same merge (``_request_weight``) and same direction filter as
+        ``assemble_scoring_clause``, before any learned-weight adjustment, so the
+        match weight-ceiling check validates what the score expression applies.
+        """
+        return {
+            dim.name: float(self._request_weight(dim, weights))
+            for dim in self.scoring_spec.dimensions
+            if not (dim.matchdirections and match_direction not in dim.matchdirections)
+        }
 
     @property
     def last_effective_weights(self) -> dict[str, float]:
