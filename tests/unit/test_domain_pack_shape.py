@@ -325,7 +325,7 @@ async def _capture_match(domain_id: str, direction: str, query: dict[str, object
         await handle_match(domain_id, {"query": query, "match_direction": direction, "top_n": 5})
     finally:
         get_state().reset()
-    match_calls = [c for c in calls if "RETURN candidate, score" in c[0]]
+    match_calls = [c for c in calls if "ORDER BY score DESC\nLIMIT $top_n" in c[0]]
     assert len(match_calls) == 1, calls
     return match_calls[0]
 

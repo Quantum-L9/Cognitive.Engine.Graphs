@@ -11,6 +11,19 @@ from __future__ import annotations
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _load_withheld_pack_as_fixture_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests load freight-matching only as fixture data for a mocked loader.
+
+    Since RU-020/RU-039 the loader withholds that pack (its scoring references
+    unbound $lat/$lon/$target_price, CEG-COR-011 — GATED on RU-037). Admission
+    itself is covered by tests/unit/test_legacy_pack_serving_boundary.py.
+    """
+    from engine.config.settings import settings as _settings
+
+    monkeypatch.setattr(_settings, "unvalidated_domain_packs_enabled", True)
+
+
 @pytest.fixture
 def plasticos_spec():
     """Load plasticos spec, skip if not loadable."""
