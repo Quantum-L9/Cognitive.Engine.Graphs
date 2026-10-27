@@ -20,7 +20,7 @@
 domain:
   id: plasticos
   name: PlasticOS Recycling Marketplace
-  version: 1.1.0
+  version: 1.2.0
   description: 'Domain specification for matching material intake requests (RFQs)
     from buyers to recycling facilities (suppliers) based on polymer compatibility,
     geographic proximity, capacity, certifications, and historical transaction success.
@@ -320,9 +320,13 @@ gates:
   - supply_opportunity_to_buyer_facility
   description: Facility must tolerate the material's contamination level
 - name: food_grade_check
-  type: boolean
+  # An implication, not an equality (CEG-COR-005): Cypher orders false < true,
+  # so `certified >= required` admits every facility when certification is not
+  # required (false / NULL) and only certified ones when it is (true).
+  type: threshold
   candidateprop: food_grade_certified
   queryparam: requires_food_grade
+  operator: '>='
   nullbehavior: pass
   matchdirections:
   - supply_opportunity_to_buyer_facility

@@ -103,3 +103,38 @@ async def test_match_unknown_direction_raises(engine_deps):
             "plasticos",
             {"query": {"polymer_type": "PET"}, "match_direction": "nonexistent_direction", "top_n": 5},
         )
+
+
+def _candidate_ids(result: dict) -> list[str]:
+    return [c["candidate"]["entity_id"] for c in result.get("candidates", [])]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("requires_food_grade", "expected"),
+    [(False, {"certified", "uncertified"}), (None, {"certified", "uncertified"}), (True, {"certified"})],
+)
+async def test_food_grade_requirement_is_an_implication(
+    engine_deps, graph_driver, clean_db, requires_food_grade, expected
+):
+    """RG-045 (RU-034 / CEG-COR-005): not requiring food grade must not exclude certified facilities."""
+    await graph_driver.execute_write(
+        cypher=SEED_CYPHER,
+        parameters={
+            "batch": [
+                _facility("certified", food_grade_certified=True),
+                _facility("uncertified", food_grade_certified=False),
+            ]
+        },
+        database="plasticos",
+    )
+    from engine.handlers import handle_match
+
+    query = {"polymer_type": "PET", "contamination_pct": 0.04}
+    if requires_food_grade is not None:
+        query["requires_food_grade"] = requires_food_grade
+    result = await handle_match(
+        "plasticos",
+        {"query": query, "match_direction": "supply_opportunity_to_buyer_facility", "top_n": 10},
+    )
+    assert set(_candidate_ids(result)) == expected

@@ -230,3 +230,70 @@ def test_template_provenance_requires_id_and_version() -> None:
     raw["domain"]["template"] = {"id": "plasticos"}
     with pytest.raises(ValidationError):
         DomainSpec.model_validate(raw)
+
+
+# --------------------------------------------------------------------------
+# Correctness remediation lane C (plan 0d84ec8): served-pack re-expressions.
+# --------------------------------------------------------------------------
+
+
+def _admitted_spec(domain_id: str) -> DomainSpec:
+    spec = _spec(DOMAINS_ROOT / domain_id)
+    assert withholding_reason(spec) is None, withholding_reason(spec)
+    return spec
+
+
+def _gate(spec: DomainSpec, name: str):  # type: ignore[no-untyped-def]
+    return next(g for g in spec.gates if g.name == name)
+
+
+def _three_valued_ge(candidate: bool | None, param: bool | None) -> bool | None:
+    """Cypher `candidate >= $param` over booleans: NULL propagates, false < true."""
+    if candidate is None or param is None:
+        return None
+    return candidate >= param
+
+
+def _pass_wrapped(candidate: bool | None, param: bool | None) -> bool:
+    """`(c IS NULL OR $p IS NULL OR (c >= $p))` — the PASS wrap of a threshold gate."""
+    return candidate is None or param is None or bool(_three_valued_ge(candidate, param))
+
+
+# RG-044 (RU-034 / CEG-COR-005): "if food grade is required, the facility must be
+# certified" is an implication. Equality excluded every certified facility from
+# a request that did not require certification.
+_IMPLICATION_GATES = [
+    (
+        "plasticos",
+        "food_grade_check",
+        (
+            "(candidate.food_grade_certified IS NULL OR $requires_food_grade IS NULL OR "
+            "(candidate.food_grade_certified >= $requires_food_grade))"
+        ),
+    ),
+]
+
+
+@pytest.mark.parametrize(("domain_id", "gate_name", "expected"), _IMPLICATION_GATES, ids=lambda v: str(v)[:24])
+def test_requirement_gates_compile_as_implications(domain_id: str, gate_name: str, expected: str) -> None:
+    from engine.gates.compiler import GateCompiler
+
+    spec = _admitted_spec(domain_id)
+    gate = _gate(spec, gate_name)
+    fragment = GateCompiler(spec).compile(gate)
+    assert fragment == expected
+    assert " = $" not in fragment
+    direction_where = GateCompiler(spec).compile_all_gates("supply_opportunity_to_buyer_facility")
+    assert expected in direction_where
+
+
+def test_food_grade_truth_table_is_an_implication() -> None:
+    """p NULL/false -> every facility passes; p true -> certified or NULL passes."""
+    table = {p: {c: _pass_wrapped(c, p) for c in (None, False, True)} for p in (None, False, True)}
+    assert table == {
+        None: {None: True, False: True, True: True},
+        False: {None: True, False: True, True: True},
+        True: {None: True, False: False, True: True},
+    }
+    gate = _gate(_admitted_spec("plasticos"), "food_grade_check")
+    assert (gate.type.value, gate.operator, gate.nullbehavior.value) == ("threshold", ">=", "pass")
