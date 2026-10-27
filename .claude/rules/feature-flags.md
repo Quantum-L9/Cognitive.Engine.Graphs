@@ -59,6 +59,7 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | inference_input_parsing_strict_enabled | True | Company-size per-field parsing with is-None fallback; email domain from the URL hostname (RU-089) |
 | packet_audit_on_cancel_enabled | True | SDK audit wrapper persists a failed pair for a timeout-cancelled handler, then re-raises (RU-086) |
 | capability_record_binding_enabled | True | `validate_action` binds to the registered capability record; `expires_at` enters `proof_hash` (RU-090) |
+| health_absent_confidence_counts_enabled | True | Readiness counts a populated field unless an explicit confidence < 0.70 discounts it; batch/report forward `field_confidences`; blocking_fields = uncounted gate fields (RU-108 / CEG-COR-044); off restores None→0 coercion |
 
 ## Domain Pack Admission (generic; the engine names no domain)
 | Flag | Default | Purpose |

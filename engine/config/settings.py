@@ -584,6 +584,14 @@ class Settings(BaseSettings):
     # also follows spec_declared_candidate_id). Off: label-less entity_id match,
     # which counts outcomes of same-id nodes of other labels.
     resolution_behavioral_label_scoped: bool = True
+    # Correctness remediation lane G (plan 0d84ec8, RU-108..)
+    # RU-108 / CEG-COR-044: readiness coerced an absent field confidence to 0,
+    # so a fully populated entity with no confidence map scored 0.0/F, and
+    # health_batch_assess / health_report dropped a supplied map. On: a
+    # populated field counts unless an explicit confidence < 0.70 discounts
+    # it, batch/report forward `field_confidences`, and blocking_fields names
+    # exactly the uncounted gate fields. Off: the legacy coercion.
+    health_absent_confidence_counts_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
