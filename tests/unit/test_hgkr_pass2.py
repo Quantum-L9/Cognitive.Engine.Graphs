@@ -331,6 +331,33 @@ class TestAutoCalibrationPairs:
         pairs = generate_calibration_pairs(records)
         assert len(pairs) == 0
 
+    def test_out_of_range_score_is_skipped_not_raised(self, caplog) -> None:
+        """RU-026 / CEG-COR-084 (RG-033): one score outside [0, 1] must not abort the batch."""
+        from engine.scoring.hgkr_utils import generate_calibration_pairs
+
+        records = [
+            {"match_id": "m1", "candidate_id": "c1", "outcome": "success", "score": 0.7},
+            {"match_id": "m2", "candidate_id": "c2", "outcome": "success", "score": 42.5},
+        ]
+        with caplog.at_level("INFO", logger="engine.scoring.hgkr_utils"):
+            pairs = generate_calibration_pairs(records)
+        assert len(pairs) == 1
+        assert pairs[0].node_a == "m1"
+        assert "1 skipped" in caplog.text
+        assert "42.5" not in caplog.text  # count only, never the value
+
+    def test_non_finite_and_negative_scores_are_skipped(self) -> None:
+        from engine.scoring.hgkr_utils import generate_calibration_pairs
+
+        records = [
+            {"match_id": "m1", "candidate_id": "c1", "outcome": "success", "score": float("nan")},
+            {"match_id": "m2", "candidate_id": "c2", "outcome": "failure", "score": float("inf")},
+            {"match_id": "m3", "candidate_id": "c3", "outcome": "success", "score": -0.2},
+            {"match_id": "m4", "candidate_id": "c4", "outcome": "failure", "score": 0.4},
+        ]
+        pairs = generate_calibration_pairs(records)
+        assert [p.node_a for p in pairs] == ["m4"]
+
 
 # ═══════════════════════════════════════════════════════════
 # S2-09: Score drift detection
