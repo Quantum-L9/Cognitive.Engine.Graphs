@@ -132,6 +132,9 @@ class CircuitBreaker:
         self._state: BreakerState = BreakerState.CLOSED
         self._consecutive_failures: int = 0
         self._half_open_calls: int = 0
+        # RU-094: incremented on every transition into HALF_OPEN, so a probe
+        # can tell whether the slot it took still belongs to the current cycle.
+        self._half_open_cycle: int = 0
         self._opened_at: float = 0.0
 
         # Metrics
@@ -191,7 +194,11 @@ class CircuitBreaker:
         When HALF_OPEN, allows limited probe calls.
         On success in HALF_OPEN, transitions to CLOSED.
         On failure, increments counter; trips breaker if threshold reached.
+        A HALF_OPEN probe that ends without a result (``asyncio.CancelledError``,
+        e.g. the SDK runtime's ``wait_for`` timeout) returns its slot and records
+        neither success nor failure (RU-094).
         """
+        probe_cycle: int | None = None
         async with self._lock:
             self._total_calls += 1
 
@@ -216,12 +223,18 @@ class CircuitBreaker:
                         retry_after=self.recovery_timeout,
                     )
                 self._half_open_calls += 1
+                probe_cycle = self._half_open_cycle
 
         # Execute outside lock
         try:
             result = await func(*args, **kwargs)
         except Exception:
             await self._on_failure()
+            raise
+        except BaseException:
+            # Cancellation (or another non-Exception exit): no outcome to record.
+            if probe_cycle is not None:
+                self._release_probe_slot(probe_cycle)
             raise
         else:
             await self._on_success()
@@ -248,6 +261,7 @@ class CircuitBreaker:
 
         if new_state == BreakerState.HALF_OPEN:
             self._half_open_calls = 0
+            self._half_open_cycle += 1
 
         logger.warning(
             "CircuitBreaker '%s': %s → %s (failures=%d)",
@@ -256,6 +270,22 @@ class CircuitBreaker:
             new_state.value,
             self._consecutive_failures,
         )
+
+    def _release_probe_slot(self, probe_cycle: int) -> None:
+        """Return a HALF_OPEN probe slot taken in ``probe_cycle`` (RU-094).
+
+        Synchronous on purpose: with no ``await`` between the check and the
+        decrement, a second cancellation cannot interrupt it, and no other
+        coroutine can interleave on the event loop. The slot is returned only
+        while the breaker is still in the HALF_OPEN cycle the probe belongs to;
+        a probe from an older cycle never touches a newer cycle's counter.
+        """
+        from engine.config.settings import settings
+
+        if not settings.neo4j_circuit_release_cancelled_probes:
+            return
+        if self._state == BreakerState.HALF_OPEN and self._half_open_cycle == probe_cycle and self._half_open_calls > 0:
+            self._half_open_calls -= 1
 
     async def _on_success(self) -> None:
         async with self._lock:

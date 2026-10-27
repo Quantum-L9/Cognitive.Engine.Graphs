@@ -283,6 +283,12 @@ class Settings(BaseSettings):
     # re-enrichment targets and so spends EIE budget.
     graph_inference_feedback_enabled: bool = False
 
+    # Correctness remediation lane F (plan 0d84ec8, RU-093..RU-103)
+    # RU-094 / CEG-COR-035: a HALF_OPEN probe cancelled before it produced a
+    # result (the SDK runtime's wait_for timeout) returns its probe slot. Off:
+    # the slot leaks and three cancelled probes wedge the breaker until restart.
+    neo4j_circuit_release_cancelled_probes: bool = True
+
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
         """Raise if default secrets are used in production environment."""

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -306,6 +307,142 @@ class TestCircuitBreaker:
         metrics = cb.get_metrics()
         assert metrics.total_calls == 0
         assert metrics.total_successes == 0
+
+
+async def _hang() -> None:
+    """A call that never completes on its own (Neo4j connection-acquisition stall)."""
+    await asyncio.sleep(60)
+
+
+class TestCircuitBreakerCancelledProbes:
+    """RU-094 / CEG-COR-035: a cancelled HALF_OPEN probe returns its slot.
+
+    The SDK runtime wraps every handler in ``asyncio.wait_for``; a probe that
+    outlives the packet timeout is cancelled inside ``CircuitBreaker.call``.
+    Before the fix the slot was never returned, so after half_open_max_calls
+    cancellations the breaker rejected every call until process restart.
+    """
+
+    async def _tripped(self, half_open_max_calls: int = 3) -> Any:
+        from engine.graph.circuit_breaker import BreakerState, CircuitBreaker
+
+        cb = CircuitBreaker(
+            name="test",
+            failure_threshold=1,
+            recovery_timeout=0.0,
+            half_open_max_calls=half_open_max_calls,
+        )
+        with pytest.raises(RuntimeError):
+            await cb.call(AsyncMock(side_effect=RuntimeError("down")))
+        assert cb.state == BreakerState.OPEN
+        return cb
+
+    @pytest.mark.asyncio
+    async def test_cancelled_probes_release_slots_and_breaker_recovers(self) -> None:
+        from engine.graph.circuit_breaker import BreakerState
+
+        cb = await self._tripped()
+        for _ in range(3):
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(cb.call(_hang), timeout=0.01)
+
+        assert cb.state == BreakerState.HALF_OPEN
+        assert cb._half_open_calls == 0
+        # No failure/success was recorded for the cancelled probes.
+        assert cb.get_metrics().total_failures == 1
+        assert cb.get_metrics().total_successes == 0
+
+        assert await cb.call(AsyncMock(return_value="ok")) == "ok"
+        assert cb.state == BreakerState.CLOSED
+
+    @pytest.mark.asyncio
+    async def test_cancellation_propagates_to_caller(self) -> None:
+        cb = await self._tripped()
+        task = asyncio.ensure_future(cb.call(_hang))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert cb._half_open_calls == 0
+
+    @pytest.mark.asyncio
+    async def test_stale_probe_does_not_decrement_new_cycle(self) -> None:
+        """A probe from cycle N cancelled during cycle N+1 leaves N+1's counter alone."""
+        from engine.graph.circuit_breaker import BreakerState
+
+        cb = await self._tripped()
+        stale = asyncio.ensure_future(cb.call(_hang))
+        await asyncio.sleep(0)
+        assert cb._half_open_calls == 1
+
+        # A second probe of the same cycle fails: HALF_OPEN -> OPEN.
+        with pytest.raises(RuntimeError):
+            await cb.call(AsyncMock(side_effect=RuntimeError("still down")))
+        assert cb.state == BreakerState.OPEN
+
+        # recovery_timeout=0: the next call opens a new HALF_OPEN cycle.
+        fresh = asyncio.ensure_future(cb.call(_hang))
+        await asyncio.sleep(0)
+        assert cb.state == BreakerState.HALF_OPEN
+        assert cb._half_open_calls == 1
+
+        stale.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await stale
+        assert cb._half_open_calls == 1, "stale probe decremented the new cycle's counter"
+
+        fresh.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await fresh
+        assert cb._half_open_calls == 0
+
+    @pytest.mark.asyncio
+    async def test_concurrent_probes_still_bounded(self) -> None:
+        from engine.graph.circuit_breaker import CircuitOpenError
+
+        cb = await self._tripped(half_open_max_calls=3)
+        probes = [asyncio.ensure_future(cb.call(_hang)) for _ in range(5)]
+        await asyncio.sleep(0)
+        rejected = [p for p in probes if p.done() and isinstance(p.exception(), CircuitOpenError)]
+        assert len(rejected) == 2
+        assert cb._half_open_calls == 3
+        for p in probes:
+            p.cancel()
+        await asyncio.gather(*probes, return_exceptions=True)
+        assert cb._half_open_calls == 0
+
+    @pytest.mark.asyncio
+    async def test_closed_state_cancellation_changes_no_counters(self) -> None:
+        from engine.graph.circuit_breaker import BreakerState, CircuitBreaker
+
+        cb = CircuitBreaker(name="test", failure_threshold=3)
+        for _ in range(10):
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(cb.call(_hang), timeout=0.001)
+        m = cb.get_metrics()
+        assert cb.state == BreakerState.CLOSED
+        assert m.consecutive_failures == 0
+        assert m.total_failures == 0
+        assert cb._half_open_calls == 0
+
+    @pytest.mark.asyncio
+    async def test_flag_off_keeps_legacy_slot_accounting(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+        from engine.graph.circuit_breaker import CircuitOpenError
+
+        monkeypatch.setattr(settings, "neo4j_circuit_release_cancelled_probes", False)
+        cb = await self._tripped()
+        for _ in range(3):
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(cb.call(_hang), timeout=0.01)
+        assert cb._half_open_calls == 3
+        with pytest.raises(CircuitOpenError):
+            await cb.call(AsyncMock(return_value="ok"))
+
+    def test_flag_default_on(self) -> None:
+        from engine.config.settings import Settings
+
+        assert Settings().neo4j_circuit_release_cancelled_probes is True
 
 
 # ---------------------------------------------------------------------------

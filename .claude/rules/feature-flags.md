@@ -79,3 +79,8 @@ were industry-specific and had no caller).
 | childsync_foreach_projection | True | childsync null-overrides child fields in the parent SET, creates children in FOREACH, emits a valid childtoparent arrow; off restores the UNWIND path Neo4j rejects |
 | gate_explicit_nullbehavior | True | A gate's explicitly declared `nullbehavior` wins over the per-type default (C-14); off restores the override of an explicit `pass` on boolean/freshness/traversal gates |
 | spec_declared_candidate_id | True | `handle_match` identifies candidates by the domain's declared id property (sync `idproperty`, else first required property) instead of a hardcoded `entity_id`; off restores `entity_id` only |
+
+## Correctness remediation lane F (plan 0d84ec8)
+| Flag | Default | Purpose |
+|------|---------|---------|
+| neo4j_circuit_release_cancelled_probes | True | A HALF_OPEN probe cancelled before producing a result (SDK `wait_for` timeout) returns its slot, so the breaker re-probes instead of wedging until restart (RU-094 / CEG-COR-035); off restores the leaking slot accounting |
