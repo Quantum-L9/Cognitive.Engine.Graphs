@@ -43,7 +43,24 @@ RETIRED_LEGACY_PACKS = (
     "roofing-company",
 )
 # Served under default settings before the dormant marks; must stay served.
-SERVED_PACKS = ("freight-matching", "mortgage-brokerage", "plasticos")
+SERVED_PACKS = ("plasticos",)
+# Served before the dormant marks, now withheld by the generic admission policy
+# because their match Cypher cannot execute (they failed every match). Each
+# entry names what the withholding reason must cite, and the operator flags
+# that restore serving (failure recovery of the remediation unit).
+WITHHELD_UNTIL_REPAIRED = {
+    # RU-020: scoring references $lat/$lon/$target_price nothing binds (CEG-COR-011).
+    "freight-matching": (
+        ("'lat'", "'lon'", "'target_price'"),
+        ("scoring_admission_check_enabled", "admission_checks_full_match"),
+    ),
+    # RU-039: traversal step 'lenderresolve' is not in the assembler's grammar (CEG-COR-012).
+    # RU-041: blacklist_exclusion declares fromnode/tonode the compiler cannot honour (CEG-COR-019).
+    "mortgage-brokerage": (
+        ("lenderresolve", "blacklist_exclusion"),
+        ("admission_checks_full_match", "exclusion_endpoint_validation"),
+    ),
+}
 
 
 @pytest.fixture
@@ -87,3 +104,28 @@ def test_previously_served_pack_is_unaffected(pack: str, default_admission: load
 def test_served_set_is_exactly_the_previously_served_packs(default_admission: loader_module.DomainPackLoader) -> None:
     """No compiler or pack change may silently add a pack to the default serving surface."""
     assert set(default_admission.list_domains()) == set(SERVED_PACKS)
+
+
+@pytest.mark.parametrize("pack", sorted(WITHHELD_UNTIL_REPAIRED))
+def test_unexecutable_pack_is_withheld_for_its_defects(
+    pack: str, default_admission: loader_module.DomainPackLoader
+) -> None:
+    """Withheld for a named admission defect, not dormancy: the pack itself is active."""
+    raw = yaml.safe_load((DOMAINS / pack / "spec.yaml").read_text(encoding="utf-8"))
+    assert raw["domain"].get("activation", "active") == "active"
+    assert pack not in default_admission.list_domains()
+    with pytest.raises(loader_module.DomainNotFoundError, match="admission defect") as excinfo:
+        default_admission.load_domain(pack)
+    cited, _flags = WITHHELD_UNTIL_REPAIRED[pack]
+    for fragment in cited:
+        assert fragment in str(excinfo.value)
+
+
+@pytest.mark.parametrize("pack", sorted(WITHHELD_UNTIL_REPAIRED))
+def test_withheld_pack_is_served_again_when_its_checks_are_switched_off(
+    pack: str, monkeypatch: pytest.MonkeyPatch, default_admission: loader_module.DomainPackLoader
+) -> None:
+    _cited, flags = WITHHELD_UNTIL_REPAIRED[pack]
+    for flag in flags:
+        monkeypatch.setattr(loader_module.settings, flag, False)
+    assert default_admission.load_domain(pack).domain.id == pack

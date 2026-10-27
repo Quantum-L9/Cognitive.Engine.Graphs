@@ -98,3 +98,11 @@ were industry-specific and had no caller).
 | signal_weight_proportion_ci | True | SignalWeightCalculator derives ci_width from the win-rate proportion (Agresti-Coull 95% CI / base win rate), so confidence grows with n for any lift (RU-027 / CEG-COR-116); off restores `sqrt(lift*(1-min(lift,1))/n)` (0.0 for lift >= 1) |
 | propagation_single_application | True | ScorePropagator collapses the candidate's outcomes to one existence row before the DimensionWeight MATCH, so one event multiplies each `boost_factor` once, clamped to signal_weights [min_weight, max_weight] (RU-028 / CEG-COR-117); off restores factor^k, unbounded |
 | drift_requires_both_windows | True | DriftDetector reports `insufficient_data` (with recent/baseline counts) when either window is empty instead of alerting on an empty baseline (RU-029 / CEG-COR-118); off restores both-empty only |
+
+## Correctness remediation lane C (plan 0d84ec8)
+| scoring_admission_check_enabled | True | Admission compiles each direction's scoring and withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer (RU-020); off = gate-only admission |
+| admission_checks_full_match | True | Admission requires each direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound by `handle_match` (RU-039) |
+| exclusion_endpoint_validation | True | Refuse an exclusion gate declaring `fromnode`/`tonode` or whose edge does not start at a candidate label of its direction(s), instead of compiling an always-true `NOT EXISTS` (RU-041) |
+| gate_null_operands_from_predicate | True | A gate's `nullbehavior` applies to exactly the operands its predicate tests (per-side PASS, any-NULL FAIL); off restores the `candidate.<candidateprop>` / `$<queryparam>` wrap (RU-042) |
+| composite_subgate_scoping | True | Subgates referenced by a composite contribute only through it (skipped at top level of compile_all_gates / compile_relaxed); a subgate scoped away from the compiled direction is refused (RU-043) |
+| freshness_maxagedays_validated | True | Freshness `maxagedays` defaults to 1 only when absent; a value < 1 is refused at compile (RU-052) |

@@ -12,9 +12,12 @@
 # =============================================================================
 # Version: 1.0.0
 # Schema: engine/config/schema.py (DomainSpec)
-# Usage: Copy this file to domains/{domain-id}_domain_spec.yaml
+# Usage: Copy this file to domains/{domain-id}/spec.yaml (the directory name
+#        is the domain id; this file itself is never served)
 #
-# This template shows ALL available fields with their types and defaults.
+# This template shows the available fields with their types and defaults, and
+# uses only constructs the engine executes: it validates, every gate compiles,
+# and every direction assembles (tests/unit/test_domain_pack_shape.py).
 # Required fields are marked with # REQUIRED
 # Optional fields show their default values or "null" if no default.
 #
@@ -66,6 +69,10 @@ ontology:
           values: [active, inactive, pending]  # Required for enum type
           required: false
           nullable: true
+        - name: lat                     # geodecay reads candidate.<candidateprop> as latitude
+          type: float                   # and candidate.lon as longitude
+        - name: lon
+          type: float
 
     # Query entity node (what we match FROM)
     - label: QueryEntity
@@ -157,6 +164,18 @@ queryschema:
       unit: kilometers
       required: false
       default: 100.0
+    # Every $parameter a gate or scoring dimension references must be a field
+    # here (or a derived parameter); the loader withholds a pack that is not.
+    - name: query_score
+      type: float
+    - name: requested_volume
+      type: float
+    - name: requested_date
+      type: datetime
+    - name: lat                         # geodecay binds $<queryprop> as latitude
+      type: float
+    - name: lon                         # ... and $lon as longitude
+      type: float
 
 # ---------------------------------------------------------------------------
 # DERIVED PARAMETERS (Optional)
@@ -171,20 +190,19 @@ derivedparameters:
 # ---------------------------------------------------------------------------
 # TRAVERSAL (REQUIRED)
 # ---------------------------------------------------------------------------
+# A step is a bare pattern `(alias:Label)-[:TYPE]->(alias:Label)` — no MATCH
+# keyword; the engine emits MATCH (required: true) or OPTIONAL MATCH. The match
+# Cypher already begins `MATCH (candidate:<Label>)`, so no step is needed just
+# to match candidates. The gates' WHERE attaches to the LAST step, so never end
+# the list with an optional step. A required step yields one row per path:
+# use it only when scoring reads its alias (traversalalias below); to merely
+# require an edge, use a `type: traversal` gate instead.
 traversal:
   steps:
-    # Basic candidate match
-    - name: base_candidates
-      description: "Match all candidates"
-      pattern: "MATCH (candidate:Candidate)"
-      required: true
-      matchdirections: [query_to_candidate]
-
-    # Optional taxonomy join
     - name: category_join
-      description: "Join to category taxonomy"
-      pattern: "OPTIONAL MATCH (candidate)-[:HAS_CAPABILITY]->(cat:Category)"
-      required: false
+      description: "Bind each candidate's category for the traversalalias dimension"
+      pattern: "(candidate:Candidate)-[:HAS_CAPABILITY]->(cat:Category)"
+      required: true
       matchdirections: [query_to_candidate]
 
 # ---------------------------------------------------------------------------
@@ -230,10 +248,7 @@ gates:
     type: enummap
     candidateprop: accepted_categories
     queryparam: category_code
-    mapping:
-      premium: [premium, standard]      # premium query matches premium or standard candidates
-      standard: [standard, basic]
-      basic: [basic]
+    invertible: true                    # $category_code IN candidate.accepted_categories (list property)
     nullbehavior: pass
     matchdirections: [query_to_candidate]
 
@@ -241,9 +256,10 @@ gates:
   - name: exclusion_gate
     description: "Reject if EXCLUDED_FROM edge exists"
     type: exclusion
-    edgetype: EXCLUDED_FROM             # Must exist in ontology.edges
-    fromnode: QueryEntity
-    tonode: Candidate
+    edgetype: EXCLUDED_FROM             # Must exist in ontology.edges, from the candidate label
+    # No fromnode/tonode: the edge always starts at the candidate. Without a
+    # queryparam any outgoing EXCLUDED_FROM edge excludes the candidate; with
+    # one, only an edge to the node whose <candidateprop> equals it does.
     nullbehavior: pass                  # No edge = passes
     matchdirections: [query_to_candidate]
 
@@ -272,7 +288,8 @@ gates:
     type: temporalrange
     candidateprop_start: available_from
     candidateprop_end: available_until
-    queryparam: requested_date
+    queryparam_start: requested_date    # query window start (here a single date)
+    queryparam_end: requested_date      # query window end
     nullbehavior: pass
     matchdirections: [query_to_candidate]
 
@@ -291,8 +308,10 @@ gates:
   - name: has_category_gate
     description: "Candidate must have at least one category"
     type: traversal
-    pattern: "(candidate)-[:HAS_CAPABILITY]->(:Category)"
-    condition: "EXISTS"                 # EXISTS | NOT EXISTS | COUNT > N
+    edgetype: HAS_CAPABILITY            # EXISTS { MATCH (candidate)-[:HAS_CAPABILITY]->(t:Category) }
+    tonode: Category
+    # candidateprop: code               # optional: the TARGET node's property ...
+    # queryparam: category_code         # ... that must equal this query parameter
     nullbehavior: fail
     matchdirections: [query_to_candidate]
 
@@ -302,19 +321,20 @@ gates:
 # Computation types: geodecay | lognormalized | communitymatch | inverselinear |
 #                    candidateproperty | weightedrate | pricealignment |
 #                    temporalproximity | customcypher | traversalalias | kge
+# Default weights of the dimensions active in one direction must sum to <= 1.0.
 scoring:
   dimensions:
     # ─── GEO DECAY ─────────────────────────────────────────────────────────
     - name: proximity_score
       description: "Score based on geographic distance"
       source: candidateproperty
-      candidateprop: location           # Point property
-      queryprop: query_location
+      candidateprop: lat                # candidate latitude (longitude is candidate.lon)
+      queryprop: lat                    # query latitude parameter (longitude is $lon)
       computation: geodecay
       decayconstant: 50000              # Distance in meters where score = 0.5
       defaultwhennull: 0.0
       weightkey: w_proximity
-      defaultweight: 0.3
+      defaultweight: 0.2
       aggregation: additive
       matchdirections: [query_to_candidate]
 
@@ -328,7 +348,7 @@ scoring:
       maxvalue: 1000000.0
       defaultwhennull: 0.0
       weightkey: w_capacity
-      defaultweight: 0.2
+      defaultweight: 0.1
       aggregation: additive
       matchdirections: [query_to_candidate]
 
@@ -339,7 +359,7 @@ scoring:
       candidateprop: louvain_community_id
       queryprop: community_id
       computation: communitymatch
-      bias: 1.2                         # Multiplicative boost when communities match
+      bias: 1.0                         # Score when communities match (0.2 otherwise, 0.5 if unknown)
       defaultwhennull: 0.0
       weightkey: w_community
       defaultweight: 0.1
@@ -356,7 +376,7 @@ scoring:
       maxvalue: 10000.0
       defaultwhennull: 0.0
       weightkey: w_price
-      defaultweight: 0.2
+      defaultweight: 0.15
       aggregation: additive
       matchdirections: [query_to_candidate]
 
@@ -365,8 +385,7 @@ scoring:
       description: "Direct candidate rating"
       source: candidateproperty
       candidateprop: rating
-      computation: candidateproperty
-      normalization: "value / 5.0"      # Normalize 0-5 to 0-1
+      computation: candidateproperty    # read as-is: store the value in [0, 1]
       defaultwhennull: 0.5
       weightkey: w_rating
       defaultweight: 0.1
@@ -391,7 +410,7 @@ scoring:
       source: candidateproperty
       candidateprop: last_transaction_at
       computation: temporalproximity
-      decayconstant: 30                 # Days for half-life decay
+      maxvalue: 30                      # Decay horizon in days (decayconstant is geodecay's)
       defaultwhennull: 0.0
       weightkey: w_recency
       defaultweight: 0.1
@@ -424,23 +443,10 @@ scoring:
       matchdirections: [query_to_candidate]
 
 # ---------------------------------------------------------------------------
-# SOFT SIGNALS (Optional)
+# SOFT SIGNALS — not shown
 # ---------------------------------------------------------------------------
-# Bonus/penalty adjustments that don't hard-filter
-softsignals:
-  - name: premium_bonus
-    bonus: 0.1                          # Additive bonus
-    candidateprop: is_premium
-    matchtype: equals
-    threshold: true
-    matchdirections: [query_to_candidate]
-
-  - name: new_candidate_penalty
-    bonus: -0.05                        # Negative = penalty
-    candidateprop: onboarded_at
-    matchtype: greaterthan
-    threshold: "datetime() - duration('P30D')"  # Within last 30 days
-    matchdirections: [query_to_candidate]
+# `softsignals` is declared by the schema but no engine code reads it, so a
+# declared soft signal changes nothing. Express a bonus as a scoring dimension.
 
 # ---------------------------------------------------------------------------
 # SYNC ENDPOINTS (Optional)
@@ -454,19 +460,15 @@ sync:
       idproperty: id
       batchstrategy: UNWINDMERGE        # UNWINDMERGE | UNWINDMATCHSET
       taxonomyedges:
-        - field: category_codes         # JSON field containing taxonomy refs
+        - field: category_code          # scalar payload field naming one taxonomy node
           edgetype: HAS_CAPABILITY
           targetlabel: Category
           targetid: code
       childsync: []
-
-    # Edge sync
-    - path: /sync/transactions
-      method: POST
-      targetedge: TRANSACTED_WITH
-      fromnode: Candidate
-      tonode: Candidate
-      batchstrategy: UNWINDMERGE
+    # Edge-only endpoints (targetedge / fromnode / tonode) are declared by the
+    # schema but the sync generator requires targetnode + idproperty, so they
+    # are not shown. Create edges with taxonomyedges (scalar field -> existing
+    # node) or childsync (list of child maps) on a node endpoint.
 
 # ---------------------------------------------------------------------------
 # GDS JOBS (Optional)

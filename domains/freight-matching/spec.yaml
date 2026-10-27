@@ -15,7 +15,7 @@ domain:
   description: >
     Match freight loads to optimal carriers with ELD integration, backhaul
     optimization, and FMCSA compliance.
-  version: 1.0.0
+  version: 1.1.0
 
 ontology:
   nodes:
@@ -101,9 +101,12 @@ scoring:
       weightkey: wrate
       defaultweight: 0.25
     - name: ontime_rating
+      # ontimeratingpct is a 0-100 percentage (DEC-21 option A); read raw it
+      # clamped to 1.0 for every carrier above 1% (CEG-COR-151).
       source: candidateproperty
       candidateprop: ontimeratingpct
-      computation: candidateproperty
+      computation: lognormalized
+      maxvalue: 100.0
       weightkey: wontime
       defaultweight: 0.20
 

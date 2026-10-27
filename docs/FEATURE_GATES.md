@@ -99,6 +99,12 @@ independently of the code default.
 | Sync Count From Write Result | `SYNC_COUNT_FROM_WRITE_RESULT` (`sync_count_from_write_result`) | `True` | unset | active (correctness, RU-060); `UNWINDMATCHSET` sync returns `count(n) AS synced_count` and the response adds `unmatched_count`; `UNWINDMERGE` unchanged; off restores `synced_count = len(batch)` |
 | Admin Tenant-bound Domain | `ADMIN_TENANT_BOUND_DOMAIN` (`admin_tenant_bound_domain`) | `True` | unset | active (hardening, RU-003); every domain-bearing admin subaction rejects a `domain_id` other than the packet tenant before any load or query; `evaluate` matches as the tenant; off restores the caller-chosen `domain_id` |
 | Pricealignment Float Division | `PRICEALIGNMENT_FLOAT_DIVISION` (`pricealignment_float_division`) | `True` | unset | active (correctness); both ratio operands are cast with `toFloat()` so INTEGER-stored prices are not truncated (450/500 scored 0.0); `false` restores the legacy expression (RU-017 / CEG-COR-006) |
+| Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `True` | unset | active (hardening); admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
+| Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `True` | unset | active (hardening); admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
+| Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `True` | unset | active (hardening); an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
+| Gate Null Operands From Predicate | `GATE_NULL_OPERANDS_FROM_PREDICATE` (`gate_null_operands_from_predicate`) | `True` | unset | active; a gate's `nullbehavior` applies to exactly the operands its predicate tests (range FAIL rejects NULL bounds; temporalrange null-handles its window per side) — see §21 |
+| Composite Subgate Scoping | `COMPOSITE_SUBGATE_SCOPING` (`composite_subgate_scoping`) | `True` | unset | active; a composite's subgates contribute only through the composite (an OR composite is no longer AND-ed with its own subgates) and a subgate scoped to another direction is refused — see §21 |
+| Freshness Max-age Validated | `FRESHNESS_MAXAGEDAYS_VALIDATED` (`freshness_maxagedays_validated`) | `True` | unset | active (hardening); a freshness gate defaults `maxagedays` to 1 only when absent and refuses a value < 1 (0 became 1 day, a negative age a future cutoff) — see §21 |
 
 ---
 
@@ -696,6 +702,59 @@ compile to executable Cypher, and every withheld pack must still have a live
 generic reason (a compile defect or a declared dormant posture). A pack fixed
 later is served automatically — there is no per-domain list to forget it in.
 
+### Scoring admission (RU-020 / CEG-COR-027..029)
+
+`SCORING_ADMISSION_CHECK_ENABLED` (default `True`) extends `admission_defects`
+from gates to scoring. For every declared match direction each applicable
+dimension is compiled as `ScoringAssembler` compiles it, and the pack is
+withheld when:
+
+- the scoring compiler refuses a dimension (`preference_attention` without
+  `metadata.success_value`, which the schema cannot declare);
+- a dimension references a `$parameter` that `handle_match` does not bind —
+  not a queryschema field, derived parameter, scoring `queryprop`, `top_n`, or
+  a value the assembler binds itself (`community_bridge` without a
+  `query_<prop>` field; `geodecay`'s `$lon`);
+- a dimension declares an option nothing produces: `null_strategy:
+  inherit_prior | population_mean` or `cold_start_fallback:
+  structural_similarity | population_mean`.
+
+Each such pack failed every match (`ValueError` / `ParameterMissing`) or
+silently degraded. `freight-matching` is withheld by this check until its
+scoring binds `$lat` / `$lon` / `$target_price` (CEG-COR-011).
+Rollback: `SCORING_ADMISSION_CHECK_ENABLED=false` (gate-only admission, the
+previous wording of the withholding reason), or
+`UNVALIDATED_DOMAIN_PACKS_ENABLED=true` to serve every validated pack.
+
+### Full-match admission (RU-039)
+
+`ADMISSION_CHECKS_FULL_MATCH` (default `True`) makes admission keep the promise
+that an admitted pack executes for every declared match direction. For each
+direction `TraversalAssembler.assemble_traversal` must not raise,
+`GateCompiler.compile_all_gates` must not raise, and every `$parameter` in the
+gate WHERE, the traversal and the scoring clause must be a queryschema field, a
+derived parameter, a scoring `queryprop` (backfilled by `handle_match`), `top_n`
+or a value a compiler binds itself; otherwise the defect names the direction
+and the parameter or step. No Neo4j access. `mortgage-brokerage` is withheld by
+it until its `lenderresolve` step is in the assembler's
+`(alias:Label)-[:TYPE]->(alias:Label)` grammar (CEG-COR-012); it failed every
+match before. Rollback: `ADMISSION_CHECKS_FULL_MATCH=false` (with
+`SCORING_ADMISSION_CHECK_ENABLED=false` for the pre-remediation verdicts) or
+`UNVALIDATED_DOMAIN_PACKS_ENABLED=true`.
+
+### Exclusion endpoint validation (RU-041 / CEG-COR-019)
+
+`EXCLUSION_ENDPOINT_VALIDATION` (default `True`): the exclusion gate compiles
+to `NOT EXISTS { MATCH (candidate)-[:EDGE]->(…) }`, always anchored at the
+matched candidate. A gate that declares `fromnode` / `tonode` (an anchor the
+compiler ignores), or whose ontology edge type is undeclared or does not start
+at a candidate label of the gate's direction(s), compiled to a predicate that
+is always true. The compiler now refuses it, naming the gate, and admission
+withholds the pack (`mortgage-brokerage` `blacklist_exclusion`:
+`BorrowerProfile -[:BLACKLISTEDLENDER]-> Lender`, decision R2-DEC-04). A
+candidate-origin edge (PlasticOS `exclusion_check`) compiles unchanged.
+Rollback: `EXCLUSION_ENDPOINT_VALIDATION=false`.
+
 ---
 
 ## 17. Gate Re-registration
@@ -902,3 +961,46 @@ to return to.
 ### Rollback
 
 Set the flag to `false`. The placeholder fragments are emitted again verbatim.
+
+### Null operands from the predicate (RU-042 / CEG-COR-020, CEG-COR-021)
+
+`GATE_NULL_OPERANDS_FROM_PREDICATE` (default `True`): each gate handler reports
+the operands its predicate tests and `NullHandler.wrap_operands` applies the
+declared policy to exactly those — `pass`: a NULL operand imposes no
+constraint on its side; `fail`: any NULL tested operand rejects. Before, the
+wrap always used `candidate.<candidateprop>` and `$<queryparam>`:
+
+| Gate | Before | Now |
+|---|---|---|
+| `range` `fail`, candidate bounds | NULL `min_`/`max_` bound passed | NULL bound rejects (`candidate.min_x IS NOT NULL AND …`) |
+| `range` with `candidateprop` and derived bounds | null-checked `candidate.<prop>`, which it never reads | only the bounds and `$<queryparam>` |
+| `range` query window | a NULL `$min`/`$max` rejected under `pass` | each NULL bound is unconstrained on its side |
+| `temporalrange` window forms | no null handling | per-side handling of both candidate props and both params |
+| `temporalrange` with derived names | null-checked undeclared `$<queryparam>` | `$<queryparam>_start` / `_end` |
+| `exclusion` with `candidateprop` | null-checked `candidate.<candidateprop>` (a target-node property) | `$<queryparam>` only |
+
+Compiled fragments of `plasticos` and `mortgage-brokerage` are byte-identical
+(they declare `pass` with explicit bounds); of the shipped packs only
+temporalrange window gates change (`freight-matching` `availability_window`,
+dormant `legal-discovery` `temporal_relevance`). Rollback:
+`GATE_NULL_OPERANDS_FROM_PREDICATE=false`.
+
+### Composite subgate scoping (RU-043 / CEG-COR-022)
+
+`COMPOSITE_SUBGATE_SCOPING` (default `True`): `compile_all_gates` and
+`compile_relaxed` skip, at top level, every gate referenced as a subgate by a
+composite applicable to the direction, so `logic: OR` over `ga`, `gb` compiles
+to `((ga) OR (gb))` instead of `(ga) AND (gb) AND ((ga) OR (gb))`. A subgate
+whose `matchdirections` exclude the direction being compiled is refused (it was
+silently compiled inside the composite). Cycle and missing-subgate refusal
+(CEG-009c) are unchanged; specs without composites compile byte-identically
+(no shipped pack declares one). Rollback: `COMPOSITE_SUBGATE_SCOPING=false`.
+
+### Freshness max-age validation (RU-052 / CEG-COR-079)
+
+`FRESHNESS_MAXAGEDAYS_VALIDATED` (default `True`): a freshness gate without
+`maxagedays` still compiles as 1 day; `maxagedays: 0` (formerly coerced to 1)
+and negative values (formerly a cutoff in the future) raise at compile, so
+admission withholds the pack naming the gate. No shipped pack is affected
+(the template declares 90). Rollback: `FRESHNESS_MAXAGEDAYS_VALIDATED=false`.
+

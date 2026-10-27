@@ -95,3 +95,29 @@ def test_unwind_merge_unchanged_and_flag_off_restores_match_set(plasticos_spec, 
     cypher = gen.generate_sync_query(_match_set_endpoint(plasticos_spec), [{"facility_id": "f1"}])
     assert "RETURN" not in cypher
     assert cypher.endswith("SET n += row, n._tenant = $tenant")
+def _endpoint(spec, path):
+    return next(ep for ep in spec.sync.endpoints if ep.path == path)
+
+
+def test_plasticos_supply_opportunities_sync_links_fulfilled_polymer(plasticos_spec):
+    """RG-062 (RU-048 / CEG-COR-071): a synced SupplyOpportunity carries its FULFILLS_POLYMER edge."""
+    from engine.sync.generator import SyncGenerator
+
+    ep = _endpoint(plasticos_spec, "/v1/sync/supply-opportunities")
+    cypher = SyncGenerator(plasticos_spec).generate_sync_query(ep, [{"opportunity_id": "so1", "polymer_type": "PET"}])
+    assert "OPTIONAL MATCH (tax:PolymerFamily {code: row.polymer_type})" in cypher
+    assert "MERGE (n)-[:FULFILLS_POLYMER]->(tax)" in cypher
+
+
+def test_plasticos_facilities_sync_links_processed_polymers(plasticos_spec):
+    """RG-062 (RU-048 / CEG-COR-071): a synced Facility carries one PROCESSES edge per listed polymer."""
+    from engine.sync.generator import SyncGenerator
+
+    ep = _endpoint(plasticos_spec, "/v1/sync/facilities")
+    cypher = SyncGenerator(plasticos_spec).generate_sync_query(
+        ep, [{"facility_id": "f1", "processed_polymers": [{"code": "PET"}, {"code": "HDPE"}]}]
+    )
+    assert "SET n += row{.*, processed_polymers: null}" in cypher
+    assert "FOREACH (child_row IN coalesce(row.processed_polymers, []) |" in cypher
+    assert "MERGE (c:PolymerFamily {code: child_row.code})" in cypher
+    assert "MERGE (n)-[:PROCESSES]->(c)" in cypher

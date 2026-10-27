@@ -230,3 +230,360 @@ def test_template_provenance_requires_id_and_version() -> None:
     raw["domain"]["template"] = {"id": "plasticos"}
     with pytest.raises(ValidationError):
         DomainSpec.model_validate(raw)
+
+
+# --------------------------------------------------------------------------
+# Correctness remediation lane C (plan 0d84ec8): served-pack re-expressions.
+# --------------------------------------------------------------------------
+
+
+def _admitted_spec(domain_id: str) -> DomainSpec:
+    spec = _spec(DOMAINS_ROOT / domain_id)
+    assert withholding_reason(spec) is None, withholding_reason(spec)
+    return spec
+
+
+def _gate(spec: DomainSpec, name: str):  # type: ignore[no-untyped-def]
+    return next(g for g in spec.gates if g.name == name)
+
+
+def _three_valued_ge(candidate: bool | None, param: bool | None) -> bool | None:
+    """Cypher `candidate >= $param` over booleans: NULL propagates, false < true."""
+    if candidate is None or param is None:
+        return None
+    return candidate >= param
+
+
+def _pass_wrapped(candidate: bool | None, param: bool | None) -> bool:
+    """`(c IS NULL OR $p IS NULL OR (c >= $p))` — the PASS wrap of a threshold gate."""
+    return candidate is None or param is None or bool(_three_valued_ge(candidate, param))
+
+
+# RG-044 (RU-034 / CEG-COR-005): "if food grade is required, the facility must be
+# certified" is an implication. Equality excluded every certified facility from
+# a request that did not require certification.
+_IMPLICATION_GATES = [
+    (
+        "plasticos",
+        "food_grade_check",
+        (
+            "(candidate.food_grade_certified IS NULL OR $requires_food_grade IS NULL OR "
+            "(candidate.food_grade_certified >= $requires_food_grade))"
+        ),
+    ),
+]
+
+
+@pytest.mark.parametrize(("domain_id", "gate_name", "expected"), _IMPLICATION_GATES, ids=lambda v: str(v)[:24])
+def test_requirement_gates_compile_as_implications(domain_id: str, gate_name: str, expected: str) -> None:
+    from engine.gates.compiler import GateCompiler
+
+    spec = _admitted_spec(domain_id)
+    gate = _gate(spec, gate_name)
+    fragment = GateCompiler(spec).compile(gate)
+    assert fragment == expected
+    assert " = $" not in fragment
+    direction_where = GateCompiler(spec).compile_all_gates("supply_opportunity_to_buyer_facility")
+    assert expected in direction_where
+
+
+def test_food_grade_truth_table_is_an_implication() -> None:
+    """p NULL/false -> every facility passes; p true -> certified or NULL passes."""
+    table = {p: {c: _pass_wrapped(c, p) for c in (None, False, True)} for p in (None, False, True)}
+    assert table == {
+        None: {None: True, False: True, True: True},
+        False: {None: True, False: True, True: True},
+        True: {None: True, False: False, True: True},
+    }
+    gate = _gate(_admitted_spec("plasticos"), "food_grade_check")
+    assert (gate.type.value, gate.operator, gate.nullbehavior.value) == ("threshold", ">=", "pass")
+
+
+_DIR1 = "supply_opportunity_to_buyer_facility"
+_DIR2 = "buyer_demand_to_supply_opportunity"
+_PARAM_IDENTIFIER_REF = r"\$([A-Za-z_][A-Za-z0-9_]*)"
+
+
+async def _capture_match(domain_id: str, direction: str, query: dict[str, object]) -> tuple[str, dict[str, object]]:
+    """Drive the real handle_match against a recording driver; return the match Cypher and its parameters."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from engine.handlers import handle_match, init_dependencies
+    from engine.state import get_state
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _record(*, cypher: str, parameters: dict[str, object], database: str) -> list[dict[str, object]]:
+        calls.append((cypher, parameters))
+        return []
+
+    driver = MagicMock()
+    driver.execute_query = AsyncMock(side_effect=_record)
+    get_state().reset()
+    init_dependencies(driver, DomainPackLoader(str(DOMAINS_ROOT)))
+    try:
+        await handle_match(domain_id, {"query": query, "match_direction": direction, "top_n": 5})
+    finally:
+        get_state().reset()
+    match_calls = [c for c in calls if "RETURN candidate, score" in c[0]]
+    assert len(match_calls) == 1, calls
+    return match_calls[0]
+
+
+def _missing_params(cypher: str, parameters: dict[str, object]) -> list[str]:
+    import re
+
+    return sorted({p for p in re.findall(_PARAM_IDENTIFIER_REF, cypher) if p not in parameters})
+
+
+_PLASTICOS_QUERIES = {
+    _DIR1: {
+        "polymer_type": "HDPE",
+        "density": 0.95,
+        "mfi": 5.0,
+        "lat": 40.0,
+        "lon": -80.0,
+        "volume_tons": 10.0,
+        "requires_food_grade": False,
+        "target_price": 300.0,
+    },
+    _DIR2: {"polymer_type": "HDPE", "volume_tons": 10.0, "lat": 40.0, "lon": -80.0, "target_price": 300.0},
+}
+
+
+# RG-052 (RU-040 / CEG-COR-013): the polymer constraint is an EXISTS gate bound to
+# $polymer_type, not a row-multiplying traversal MATCH that ignores the polymer.
+@pytest.mark.parametrize(
+    ("direction", "edge", "label"),
+    [(_DIR1, "PROCESSES", "Facility"), (_DIR2, "FULFILLS_POLYMER", "SupplyOpportunity")],
+)
+def test_plasticos_polymer_constraint_is_an_exists_gate(direction: str, edge: str, label: str) -> None:
+    from engine.gates.compiler import GateCompiler
+    from engine.traversal.assembler import TraversalAssembler
+
+    spec = _admitted_spec("plasticos")
+    where = GateCompiler(spec).compile_all_gates(direction)
+    exists = f"EXISTS {{ MATCH (candidate)-[:{edge}]->(t:PolymerFamily) WHERE t.code = $polymer_type }}"
+    assert f"($polymer_type IS NOT NULL AND ({exists}))" in where
+    traversal = "\n".join(TraversalAssembler(spec).assemble_traversal(direction))
+    assert f"MATCH (candidate:{label})-[:{edge}]" not in traversal
+    assert f"[:{edge}]" not in traversal
+    assert admission_defects(spec) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("direction", [_DIR1, _DIR2])
+async def test_plasticos_match_cypher_binds_every_parameter(direction: str) -> None:
+    """Fake-driver capture: every $parameter the served match Cypher references is bound."""
+    cypher, parameters = await _capture_match("plasticos", direction, dict(_PLASTICOS_QUERIES[direction]))
+    assert _missing_params(cypher, parameters) == []
+    assert "$polymer_type" in cypher
+
+
+# RG-069 (RU-055 / CEG-COR-151): served scoring inputs are normalised into [0, 1]
+# by the computation that reads them, so the dimension discriminates instead of
+# saturating the clamp.
+def _dimension_expression(domain_id: str, dim_name: str) -> str:
+    from engine.scoring.assembler import ScoringAssembler
+
+    spec = _spec(DOMAINS_ROOT / domain_id)
+    dim = next(d for d in spec.scoring.dimensions if d.name == dim_name)
+    return ScoringAssembler(spec)._compile_dimension(dim)
+
+
+def _evaluate_numeric(expression: str, candidate: dict[str, float]) -> float:
+    """Evaluate a closed arithmetic scoring expression for one candidate, clamped like the assembler.
+
+    `coalesce(candidate.<prop>, <default>)` is substituted with the candidate's
+    value; what remains must be numbers, + - * /, parentheses and log(), walked
+    with a whitelist (never eval).
+    """
+    import ast
+    import math
+    import operator
+    import re
+
+    def _coalesce(match: re.Match[str]) -> str:
+        return repr(float(candidate.get(match.group(1), float(match.group(2)))))
+
+    python = re.sub(r"coalesce\(candidate\.([A-Za-z_][A-Za-z0-9_]*), ([0-9.]+)\)", _coalesce, expression)
+    binary = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv}
+
+    def _walk(node: ast.AST) -> float:
+        if isinstance(node, ast.Expression):
+            return _walk(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, int | float):
+            return float(node.value)
+        if isinstance(node, ast.BinOp) and type(node.op) in binary:
+            return binary[type(node.op)](_walk(node.left), _walk(node.right))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "log":
+            return math.log(_walk(node.args[0]))
+        msg = f"not a closed numeric expression: {python}"
+        raise AssertionError(msg)
+
+    return min(max(_walk(ast.parse(python, mode="eval")), 0.0), 1.0)
+
+
+@pytest.mark.parametrize(
+    ("domain_id", "dim_name", "prop", "low", "high"),
+    [
+        ("plasticos", "rate_score", "rate_per_ton", 200.0, 400.0),
+        ("freight-matching", "ontime_rating", "ontimeratingpct", 80.0, 95.0),
+    ],
+)
+def test_served_scoring_inputs_discriminate_within_unit_range(
+    domain_id: str, dim_name: str, prop: str, low: float, high: float
+) -> None:
+    expression = _dimension_expression(domain_id, dim_name)
+    low_score = _evaluate_numeric(expression, {prop: low})
+    high_score = _evaluate_numeric(expression, {prop: high})
+    assert 0.0 < low_score < high_score < 1.0, (expression, low_score, high_score)
+
+
+def test_plasticos_recency_uses_the_declared_180_day_horizon() -> None:
+    expression = _dimension_expression("plasticos", "recency")
+    assert "duration.inDays(candidate.last_transaction_date, datetime()).days / 180.0" in expression
+    assert "/ 90.0" not in expression
+
+
+# RG-070 (RU-056 / CEG-COR-152): the authoring template is a spec the loader
+# would admit and every direction of which assembles. It stays non-served: it is
+# a file under domains/, not domains/<id>/spec.yaml.
+TEMPLATE_PATH = DOMAINS_ROOT / "_template.yaml"
+
+
+def _template_spec() -> DomainSpec:
+    raw = yaml.safe_load(TEMPLATE_PATH.read_text(encoding="utf-8"))
+    raw["domain"]["id"] = "template-check"
+    return DomainSpec.model_validate(raw)
+
+
+def test_template_is_not_a_served_pack() -> None:
+    assert TEMPLATE_PATH.is_file()
+    assert "_template" not in DomainPackLoader(str(DOMAINS_ROOT)).list_domains()
+
+
+def test_template_validates_and_assembles_for_every_direction() -> None:
+    from engine.scoring.assembler import ScoringAssembler
+    from engine.traversal.assembler import TraversalAssembler
+
+    spec = _template_spec()
+    assert admission_defects(spec) == []
+    for direction in spec.queryschema.matchdirections:
+        traversal = TraversalAssembler(spec).assemble_traversal(direction)
+        assert all(not clause.startswith("OPTIONAL MATCH") for clause in traversal[-1:]), traversal
+        ScoringAssembler(spec).assemble_scoring_clause(direction, {})
+    exclusion = next(g for g in spec.gates if g.type.value == "exclusion")
+    assert (exclusion.fromnode, exclusion.tonode) == (None, None)
+
+
+# RG-051 (RU-039): a pack the loader admits is executable for every declared match
+# direction — its traversal assembles and every $parameter in gates, traversal and
+# scoring is one handle_match binds.
+def _synthetic_raw() -> dict[str, object]:
+    return yaml.safe_load(
+        """
+domain: {id: synthetic-check, name: Synthetic, version: 0.1.0}
+ontology:
+  nodes:
+    - label: Widget
+      managedby: sync
+      candidate: true
+      matchdirection: d1
+      properties: [{name: widget_id, type: string, required: true}, {name: size, type: float}]
+    - label: Ask
+      managedby: api
+      queryentity: true
+      matchdirection: d1
+      properties: [{name: ask_id, type: string, required: true}]
+    - label: Maker
+      managedby: sync
+      properties: [{name: maker_id, type: string, required: true}]
+  edges:
+    - {type: MADE_BY, from: Widget, to: Maker, direction: DIRECTED, category: capability, managedby: sync}
+matchentities:
+  candidate: [{label: Widget, matchdirection: d1}]
+  queryentity: [{label: Ask, matchdirection: d1}]
+queryschema:
+  matchdirections: [d1]
+  fields: [{name: size, type: float}]
+traversal:
+  steps: []
+gates:
+  - {name: size_floor, type: threshold, candidateprop: size, queryparam: size, operator: '>=', nullbehavior: pass}
+scoring:
+  dimensions: []
+"""
+    )
+
+
+def test_synthetic_baseline_pack_is_admitted() -> None:
+    assert admission_defects(DomainSpec.model_validate(_synthetic_raw())) == []
+
+
+def test_pack_with_an_off_grammar_traversal_step_is_withheld() -> None:
+    raw = _synthetic_raw()
+    raw["traversal"] = {"steps": [{"name": "maker_hop", "pattern": "candidate-[:MADE_BY]->m:Maker", "required": True}]}
+    spec = DomainSpec.model_validate(raw)
+    defects = admission_defects(spec)
+    assert any("traversal[d1]" in d and "maker_hop" in d for d in defects), defects
+    assert withholding_reason(spec) is not None
+
+
+def test_pack_with_an_unbound_scoring_default_is_withheld_by_the_full_match_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """pricealignment defaults its query parameter to $target_price, which this pack does not declare."""
+    from engine.config import loader as loader_module
+
+    monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", False)
+    raw = _synthetic_raw()
+    raw["scoring"] = {
+        "dimensions": [
+            {
+                "name": "price",
+                "source": "candidateproperty",
+                "candidateprop": "size",
+                "computation": "pricealignment",
+                "weightkey": "wp",
+                "defaultweight": 0.5,
+            }
+        ]
+    }
+    spec = DomainSpec.model_validate(raw)
+    defects = admission_defects(spec)
+    assert any("d1" in d and "'target_price'" in d for d in defects), defects
+    assert withholding_reason(spec) is not None
+
+
+def test_pack_whose_gate_references_an_undeclared_parameter_is_withheld() -> None:
+    raw = _synthetic_raw()
+    raw["gates"].append(
+        {"name": "size_cap", "type": "threshold", "candidateprop": "size", "queryparam": "max_size", "operator": "<="}
+    )
+    defects = admission_defects(DomainSpec.model_validate(raw))
+    assert any("match[d1]" in d and "'max_size'" in d for d in defects), defects
+
+
+def test_current_mortgage_pack_is_withheld_naming_its_unassemblable_step() -> None:
+    defects = admission_defects(_spec(DOMAINS_ROOT / "mortgage-brokerage"))
+    assert any("traversal[borrowertoproduct]" in d and "lenderresolve" in d for d in defects), defects
+
+
+def test_current_freight_pack_is_withheld_naming_its_unbound_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config import loader as loader_module
+
+    monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", False)
+    defects = "\n".join(admission_defects(_spec(DOMAINS_ROOT / "freight-matching")))
+    for param in ("'lat'", "'lon'", "'target_price'"):
+        assert param in defects
+
+
+def test_full_match_check_off_restores_previous_admission(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config import loader as loader_module
+
+    monkeypatch.setattr(loader_module.settings, "admission_checks_full_match", False)
+    monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", False)
+    raw = _synthetic_raw()
+    raw["traversal"] = {"steps": [{"name": "maker_hop", "pattern": "candidate-[:MADE_BY]->m:Maker", "required": True}]}
+    assert admission_defects(DomainSpec.model_validate(raw)) == []

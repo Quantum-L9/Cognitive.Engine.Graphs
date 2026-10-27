@@ -380,6 +380,52 @@ class Settings(BaseSettings):
     # scored divergence 1.0 and raised alert=True. On: either window empty is
     # insufficient_data (with both counts). Off: legacy both-empty only.
     drift_requires_both_windows: bool = True
+    # Correctness remediation lane C (plan 0d84ec8, RU-020..)
+    # RU-020 / CEG-COR-027..029: admission_defects also compiles every declared
+    # direction's scoring clause and withholds a pack whose scoring refuses to
+    # compile, references a $parameter nothing binds, or declares an HGKR option
+    # with no producer (inherit_prior / population_mean / structural_similarity).
+    # Such a pack failed every match (ValueError / ParameterMissing) or silently
+    # degraded. Off: admission checks gates only, as before. Ships on — it
+    # withholds only packs whose matches cannot execute.
+    scoring_admission_check_enabled: bool = True
+    # RU-039: a pack admission serves must execute for every declared match
+    # direction. On: admission_defects also requires TraversalAssembler to
+    # assemble each direction and every $parameter in gates, traversal and
+    # scoring to be one handle_match binds (queryschema field, derived
+    # parameter, scoring queryprop, top_n or a compiler-bound literal). Off:
+    # the previous checks only. Ships on (fail-closed, Stage-2 precedent).
+    admission_checks_full_match: bool = True
+    # RU-041 / CEG-COR-019: an exclusion gate always anchors its edge at the
+    # matched candidate. One declaring fromnode/tonode, or whose ontology edge
+    # does not start at a candidate label of its direction(s), compiled to a
+    # NOT EXISTS that is always true (mortgage blacklist_exclusion). On: the
+    # compiler refuses such a gate, so admission withholds the pack. Off: the
+    # legacy always-true fragment.
+    exclusion_endpoint_validation: bool = True
+    # RU-042 / CEG-COR-020, CEG-COR-021: a gate's null policy was applied to
+    # `candidate.<candidateprop>` and `$<queryparam>` whatever the predicate
+    # tested — range FAIL passed NULL bounds, derived-bound range and
+    # candidateprop exclusion null-checked a property they never read, and
+    # temporalrange checked an undeclared `$<queryparam>`. On: each handler
+    # reports the operands it tests and the wrap applies PASS (a NULL operand
+    # imposes no constraint on its side) or FAIL (any NULL rejects) to exactly
+    # those. Off: the previous fragments.
+    gate_null_operands_from_predicate: bool = True
+    # RU-043 / CEG-COR-022: a composite's subgates were also compiled as
+    # top-level filters (an OR composite degenerated to AND), and a subgate
+    # scoped to another direction was compiled inside the composite anyway.
+    # On: subgates referenced by a composite applicable to the direction are
+    # skipped at top level (compile_all_gates and compile_relaxed), and a
+    # subgate scoped away from the direction being compiled is refused.
+    # Off: the legacy compilation. Specs without composites are unaffected.
+    composite_subgate_scoping: bool = True
+    # RU-052 / CEG-COR-079: freshness `maxagedays` defaulted to 1 for any
+    # falsy value (0 -> 1 day) and a negative age compiled to a cutoff in the
+    # future. On: the default applies only when maxagedays is absent, and a
+    # value < 1 is refused at compile, so admission withholds the pack. Off:
+    # the legacy coercion.
+    freshness_maxagedays_validated: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

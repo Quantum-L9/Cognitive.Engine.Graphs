@@ -38,7 +38,7 @@ def test_no_tensor_runtime_package() -> None:
 
 def test_domain_version_and_feedbackloop_enabled() -> None:
     spec = _spec()
-    assert spec.domain.version == "1.1.0"
+    assert spec.domain.version == "1.2.0"
     assert spec.feedbackloop.enabled is True
 
 

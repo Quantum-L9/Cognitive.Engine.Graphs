@@ -108,6 +108,129 @@ def admission_defects(spec: DomainSpec) -> list[str]:
         for rule_name in spec.plugins.inference_rules:
             if rule_name not in registered:
                 defects.append(f"plugins.inference_rules: {rule_name!r} is not a registered inference rule")
+    if settings.scoring_admission_check_enabled or settings.admission_checks_full_match:
+        defects.extend(_scoring_defects(spec, check_producers=settings.scoring_admission_check_enabled))
+    if settings.admission_checks_full_match:
+        defects.extend(_match_defects(spec))
+    return list(dict.fromkeys(defects))
+
+
+def _match_defects(spec: DomainSpec) -> list[str]:
+    """Per declared match direction: the traversal assembles and the gate WHERE binds.
+
+    ``handle_match`` assembles ``TraversalAssembler.assemble_traversal`` and
+    ``GateCompiler.compile_all_gates`` for the requested direction and sends
+    the result with the parameters it binds; a step the assembler refuses or a
+    ``$parameter`` nothing binds fails every match in that direction. Scoring
+    is covered by ``_scoring_defects``. No Neo4j access.
+    """
+    from engine.gates.compiler import GateCompiler
+    from engine.traversal.assembler import TraversalAssembler
+
+    defects: list[str] = []
+    bindable = _bindable_parameters(spec)
+    for direction in spec.queryschema.matchdirections:
+        cypher_parts: list[str] = []
+        try:
+            cypher_parts.extend(TraversalAssembler(spec).assemble_traversal(direction))
+        except (ValueError, KeyError) as exc:
+            defects.append(f"traversal[{direction}]: refused by the traversal assembler — {exc}")
+        compiler = GateCompiler(spec)
+        try:
+            cypher_parts.append(compiler.compile_all_gates(direction))
+        except (ValueError, KeyError) as exc:
+            defects.append(f"match[{direction}]: gates refused by the compiler — {exc}")
+        bound = bindable | set(compiler.last_query_params)
+        unbound = sorted({p for part in cypher_parts for p in _PARAM_IDENTIFIER_REF.findall(part) if p not in bound})
+        if unbound:
+            names = ", ".join(repr(p) for p in unbound)
+            defects.append(
+                f"match[{direction}]: gates or traversal reference parameter(s) {names}, which nothing binds"
+            )
+    return defects
+
+
+# A `$name` parameter reference in compiled Cypher (identifiers only; the
+# non-identifier form is the separate `$85.0` defect above).
+_PARAM_IDENTIFIER_REF = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _bindable_parameters(spec: DomainSpec) -> set[str]:
+    """Parameter names ``handle_match`` always binds before executing a match.
+
+    Every queryschema field (backfilled with its default), every derived
+    parameter (``ParameterResolver``), every scoring ``queryprop`` (backfilled
+    with null for the scoring expressions) and ``top_n``. Values the compilers
+    bind themselves come from their ``last_query_params`` and are added by the
+    caller.
+    """
+    names = {field.name for field in spec.queryschema.fields}
+    names.update(param.name for param in spec.derivedparameters)
+    names.update(dim.queryprop for dim in spec.scoring.dimensions if dim.queryprop)
+    names.add("top_n")
+    return names
+
+
+def _no_producer_defect(dim: object) -> str | None:
+    """A declared HGKR option whose input nothing in the engine writes (R1b-DEC-01 option A)."""
+    from engine.config.schema import ColdStartFallback, NullStrategy
+
+    name = getattr(dim, "name", "?")
+    strategy = getattr(dim, "null_strategy", NullStrategy.ZERO)
+    if strategy is NullStrategy.INHERIT_PRIOR:
+        return f"scoring {name}: null_strategy inherit_prior has no producer (nothing writes candidate._prior_{name})"
+    if strategy is NullStrategy.POPULATION_MEAN:
+        return f"scoring {name}: null_strategy population_mean has no producer (nothing binds $_popmean_{name})"
+    fallback = getattr(dim, "cold_start_fallback", ColdStartFallback.ZERO)
+    if fallback is ColdStartFallback.STRUCTURAL_SIMILARITY:
+        return (
+            f"scoring {name}: cold_start_fallback structural_similarity has no producer "
+            "(nothing writes candidate.shared_neighbor_score)"
+        )
+    if fallback is ColdStartFallback.POPULATION_MEAN:
+        return f"scoring {name}: cold_start_fallback population_mean has no producer (nothing binds $_popmean_{name})"
+    return None
+
+
+def _scoring_defects(spec: DomainSpec, *, check_producers: bool) -> list[str]:
+    """Scoring dimensions that cannot execute in a declared match direction.
+
+    For each direction, every applicable dimension is compiled exactly as
+    ``ScoringAssembler.assemble_scoring_clause`` compiles it: a ``ValueError``
+    is a defect quoting the compiler, and every ``$parameter`` the expression
+    references must be one ``handle_match`` binds, or the match fails with
+    ``ParameterMissing``. One defect per offending dimension.
+    """
+    from engine.scoring.assembler import ScoringAssembler
+
+    defects: list[str] = []
+    bindable = _bindable_parameters(spec)
+    if check_producers:
+        for dim in spec.scoring.dimensions:
+            producer = _no_producer_defect(dim)
+            if producer is not None:
+                defects.append(producer)
+    for direction in spec.queryschema.matchdirections:
+        assembler = ScoringAssembler(spec)
+        for dim in spec.scoring.dimensions:
+            if dim.matchdirections and direction not in dim.matchdirections:
+                continue
+            try:
+                expression = assembler._compile_dimension(dim)
+            except (ValueError, KeyError, TypeError) as exc:
+                defects.append(f"scoring[{direction}] {dim.name}: refused by the scoring compiler — {exc}")
+                continue
+            bound = bindable | set(assembler.last_query_params)
+            unbound = sorted({p for p in _PARAM_IDENTIFIER_REF.findall(expression) if p not in bound})
+            if unbound:
+                names = ", ".join(repr(p) for p in unbound)
+                defects.append(f"scoring[{direction}] {dim.name}: references parameter(s) {names}, which nothing binds")
+        if not any(d.startswith(f"scoring[{direction}]") for d in defects):
+            # The clause as handle_match assembles it (aliases, weights, clamp).
+            try:
+                ScoringAssembler(spec).assemble_scoring_clause(direction, {})
+            except (ValueError, KeyError, TypeError) as exc:
+                defects.append(f"scoring[{direction}]: refused by the scoring assembler — {exc}")
     return defects
 
 
@@ -133,11 +256,44 @@ def withholding_reason(spec: DomainSpec) -> str | None:
     if not settings.unvalidated_domain_packs_enabled:
         defects = admission_defects(spec)
         if defects:
+            if not _match_admission_checks_enabled():
+                return (
+                    f"Domain '{spec.domain.id}' is withheld: {len(defects)} gate(s) do not compile to executable "
+                    f"Cypher ({defects[0]}); set UNVALIDATED_DOMAIN_PACKS_ENABLED=true to serve it anyway"
+                )
             return (
-                f"Domain '{spec.domain.id}' is withheld: {len(defects)} gate(s) do not compile to executable "
-                f"Cypher ({defects[0]}); set UNVALIDATED_DOMAIN_PACKS_ENABLED=true to serve it anyway"
+                f"Domain '{spec.domain.id}' is withheld: {len(defects)} admission defect(s) — its gates, traversal "
+                f"or scoring do not compile to executable Cypher ({'; '.join(defects)}); "
+                "set UNVALIDATED_DOMAIN_PACKS_ENABLED=true to serve it anyway"
             )
     return None
+
+
+def _match_admission_checks_enabled() -> bool:
+    """Whether admission checks more than gates (the pre-remediation wording applies otherwise)."""
+    return settings.scoring_admission_check_enabled or settings.admission_checks_full_match
+
+
+_LEGACY_CACHE_MAX_SIZE_ENV = "DOMAIN_CACHE_MAX_SIZE"
+
+
+def _domain_cache_max_size() -> int:
+    """``settings.domain_cache_maxsize``, honouring the legacy spelling only when the contract one is unset.
+
+    The loader used to read ``DOMAIN_CACHE_MAX_SIZE`` directly, so the
+    documented contract variable ``DOMAIN_CACHE_MAXSIZE`` had no effect. An
+    operator who set the old name keeps that bound until they rename it.
+    """
+    legacy = os.getenv(_LEGACY_CACHE_MAX_SIZE_ENV)
+    if legacy is not None and "domain_cache_maxsize" not in settings.model_fields_set:
+        logger.warning(
+            "%s is deprecated; set DOMAIN_CACHE_MAXSIZE instead (honouring %s=%s)",
+            _LEGACY_CACHE_MAX_SIZE_ENV,
+            _LEGACY_CACHE_MAX_SIZE_ENV,
+            legacy,
+        )
+        return int(legacy)
+    return int(settings.domain_cache_maxsize)
 
 
 class DomainPackLoader:
@@ -148,8 +304,10 @@ class DomainPackLoader:
         self._base_path = Path(raw).resolve()
         self._cache: dict[str, tuple[DomainSpec, float, float]] = {}
         self._lock = threading.Lock()
-        self._max_size = int(os.getenv("DOMAIN_CACHE_MAX_SIZE", "100"))
-        self._ttl_seconds = float(os.getenv("DOMAIN_CACHE_TTL_SECONDS", "30"))
+        # C-24 bounded cache, sized by Settings (contract variables
+        # DOMAIN_CACHE_MAXSIZE / DOMAIN_CACHE_TTL_SECONDS, CEG-COR-078).
+        self._max_size = _domain_cache_max_size()
+        self._ttl_seconds = float(settings.domain_cache_ttl_seconds)
 
     def load_domain(self, domain_id: str) -> DomainSpec:
         """Load a domain only when the generic admission policy admits it.
