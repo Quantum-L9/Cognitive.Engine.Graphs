@@ -50,7 +50,9 @@ async def _score(graph_driver, domain_spec) -> float:
             database="neo4j",
         )
     finally:
-        await graph_driver.execute_query(f"MATCH (n:{_LABEL}) DETACH DELETE n", parameters={}, database="neo4j")
+        await graph_driver.execute_query(
+            "MATCH (n:_PriceAlignmentProbe) DETACH DELETE n", parameters={}, database="neo4j"
+        )
     return float(rows[0]["price_alignment"])
 
 
