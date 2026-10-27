@@ -51,7 +51,7 @@ async def test_lognormalized_negative_value_clamps_to_zero(graph_driver, domain_
             database="neo4j",
         )
     finally:
-        await graph_driver.execute_query(f"MATCH (n:{_LABEL}) DETACH DELETE n", parameters={}, database="neo4j")
+        await graph_driver.execute_query("MATCH (n:_ClampNaNProbe) DETACH DELETE n", parameters={}, database="neo4j")
 
     row = rows[0]
     assert math.isnan(float(row["unclamped"]))  # the producer really emits NaN
