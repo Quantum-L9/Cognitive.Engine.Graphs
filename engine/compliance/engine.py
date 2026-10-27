@@ -29,6 +29,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _pii_recursive() -> bool:
+    from engine.config.settings import settings
+
+    return bool(settings.pii_redaction_recursive)
+
+
 class ComplianceEngine:
     """Orchestrates all compliance checks for a domain."""
 
@@ -181,6 +187,8 @@ class ComplianceEngine:
                     resource=f"{entity_type}:{item.get('entity_id', 'unknown')}",
                     resource_type=entity_type,
                     trace_id=trace_id,
+                    # RU-062: name the (index-aware) field paths, never values.
+                    pii_fields_accessed=list(pii_fields) if _pii_recursive() else None,
                 )
 
         # Log the sync operation
@@ -200,6 +208,10 @@ class ComplianceEngine:
         """Redact PII from response before returning to client."""
         if not self._enabled:
             return response
+        if _pii_recursive():
+            # RU-062: detection and removal reach list elements (match
+            # `candidates[*].candidate`) and never mutate `response`.
+            return self._pii.redact(response, redact_all_detected=True)
         # Detect and redact PII fields
         pii_fields = self._pii.get_pii_field_paths(response)
         if pii_fields:

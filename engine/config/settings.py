@@ -290,6 +290,12 @@ class Settings(BaseSettings):
     # candidateprop/queryprop, sync-row keys at any depth) is compared
     # casefolded. Off: the legacy two-field exact-case check.
     prohibited_factor_full_coverage: bool = True
+    # RU-062 / CEG-COR-009: PIIHandler detection descended only into dicts, so
+    # PII inside lists (match `candidates`, childsync rows) was never redacted,
+    # and redact()/mask_fields() mutated the caller's nested dicts. On: lists
+    # and tuples are traversed with index-aware paths (`a[0].b`) and edits copy
+    # every container on the edited path. Off: dict-only, legacy copies.
+    pii_redaction_recursive: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

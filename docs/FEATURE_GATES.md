@@ -81,6 +81,7 @@ independently of the code default.
 | Traversal Gate EXISTS Subquery | `TRAVERSAL_GATE_EXISTS_SUBQUERY` (`traversal_gate_exists_subquery`) | `True` | unset | active; traversal gates compile to an `EXISTS { … }` subquery Neo4j 5 accepts — see §20 |
 | Childsync FOREACH Projection | `CHILDSYNC_FOREACH_PROJECTION` (`childsync_foreach_projection`) | `True` | unset | active; childsync writes children in `FOREACH` without copying them onto the parent — see §20 |
 | Prohibited Factor Full Coverage | `PROHIBITED_FACTOR_FULL_COVERAGE` (`prohibited_factor_full_coverage`) | `True` | unset | active (hardening); every gate property field, scoring dimension and sync-row key at any depth is checked, casefolded — see lane D |
+| PII Redaction Recursive | `PII_REDACTION_RECURSIVE` (`pii_redaction_recursive`) | `True` | unset | active (hardening); PII detection/redaction/masking reaches list elements (match `candidates`) without mutating the input — see lane D |
 
 ---
 
@@ -907,3 +908,19 @@ gate `candidateprop` / `queryparam` and top-level sync keys, exact-case.
 Contract: `docs/contracts/PROHIBITED_FACTORS.md`.
 
 Rollback: set the flag to `false` while a spec is corrected.
+
+### PII Redaction Recursive (RU-062 / CEG-COR-009)
+
+**Flag**: `PII_REDACTION_RECURSIVE=True` (default on)
+
+`engine/compliance/pii.py` `PIIHandler.detect_pii` descended only into dicts, so the
+match response's `candidates` list was opaque and `ComplianceEngine.redact_response`
+returned candidate PII unchanged; `redact()` / `mask_fields()` shallow-copied and then
+edited nested caller dicts in place. On: detection descends into dicts and
+lists/tuples at any depth with index-aware paths (`candidates[0].candidate.contact_email`;
+dict-only payloads keep their dotted paths), and redaction/masking copy every container
+on the edited path, so the input is never mutated. `check_sync_request` records the
+detected field paths (never values) in the access audit entry. Off: the legacy
+dict-only traversal.
+
+Rollback: set the flag to `false`.

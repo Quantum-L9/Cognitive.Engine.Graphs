@@ -108,6 +108,80 @@ class PIIDetection(BaseModel):
     detected_by: str  # "field_name" | "pattern_match"
 
 
+# ── Structured paths (RU-062) ─────────────────────────────
+#
+# A path is a tuple of dict keys (str) and list/tuple indexes (int). Its string
+# form is `a.b[0].c` — identical to the legacy dotted form for dict-only
+# payloads. Edits copy every container on the edited path, so the caller's
+# object is never mutated.
+
+PathPart = str | int
+_PATH_TOKEN = re.compile(r"\[(\d+)\]|([^.\[\]]+)")
+_DELETE = object()
+
+
+def _recursive_enabled() -> bool:
+    from engine.config.settings import settings
+
+    return bool(settings.pii_redaction_recursive)
+
+
+def format_path(path: tuple[PathPart, ...]) -> str:
+    """Render a structured path: `key`, `.key`, `[index]`."""
+    out = ""
+    for part in path:
+        if isinstance(part, int):
+            out += f"[{part}]"
+        else:
+            out += f".{part}" if out else part
+    return out
+
+
+def parse_path(path: str) -> tuple[PathPart, ...]:
+    """Parse `a.b[0].c` into ``("a", "b", 0, "c")``."""
+    parts: list[PathPart] = []
+    for index, key in _PATH_TOKEN.findall(path):
+        parts.append(int(index) if index else key)
+    return tuple(parts)
+
+
+def _path_sort_key(path: tuple[PathPart, ...]) -> tuple[tuple[int, Any], ...]:
+    """Total order over mixed str/int paths (ints compare numerically)."""
+    return tuple((0, part) if isinstance(part, int) else (1, part) for part in path)
+
+
+def _edit_at_path(node: Any, path: tuple[PathPart, ...], transform: Any) -> Any:
+    """Return ``node`` with ``transform`` applied at ``path``, copying containers on the path.
+
+    ``transform(value)`` returns the replacement, or ``_DELETE`` to remove the
+    key / element. A path that does not resolve leaves the structure as is.
+    """
+    if not path:
+        return transform(node)
+    head, rest = path[0], path[1:]
+    if isinstance(node, dict) and isinstance(head, str):
+        if head not in node:
+            return node
+        new_value = _edit_at_path(node[head], rest, transform)
+        copied = dict(node)
+        if new_value is _DELETE:
+            copied.pop(head)
+        else:
+            copied[head] = new_value
+        return copied
+    if isinstance(node, (list, tuple)) and isinstance(head, int):
+        if head >= len(node):
+            return node
+        new_value = _edit_at_path(node[head], rest, transform)
+        items = list(node)
+        if new_value is _DELETE:
+            del items[head]
+        else:
+            items[head] = new_value
+        return tuple(items) if isinstance(node, tuple) else items
+    return node
+
+
 class PIIHandler:
     """
     PII detection, masking, and GDPR data subject operations.
@@ -159,6 +233,9 @@ class PIIHandler:
         Detect PII fields in a payload dict (recursive).
         Returns list of PIIDetection for every field containing PII.
         """
+        if _recursive_enabled():
+            base = parse_path(prefix) if prefix else ()
+            return [d for _, d in self._detect_structured(payload, base)]
         detections: list[PIIDetection] = []
         for key, value in payload.items():
             field_path = f"{prefix}.{key}" if prefix else key
@@ -202,6 +279,76 @@ class PIIHandler:
 
         return detections
 
+    def _detect_structured(
+        self,
+        node: Any,
+        path: tuple[PathPart, ...],
+    ) -> list[tuple[tuple[PathPart, ...], PIIDetection]]:
+        """RU-062: detection over dicts and lists/tuples with index-aware paths."""
+        found: list[tuple[tuple[PathPart, ...], PIIDetection]] = []
+        if isinstance(node, dict):
+            for key, value in node.items():
+                key_path = (*path, str(key))
+                if isinstance(value, dict):
+                    found.extend(self._detect_structured(value, key_path))
+                    continue
+                hint = self._hint_for(str(key))
+                if hint is not None:
+                    found.append((key_path, self._detection(key_path, *hint, "field_name")))
+                elif isinstance(value, (list, tuple)):
+                    found.extend(self._detect_structured(value, key_path))
+                else:
+                    found.extend(self._detect_value(value, key_path))
+        elif isinstance(node, (list, tuple)):
+            for index, item in enumerate(node):
+                item_path = (*path, index)
+                if isinstance(item, (dict, list, tuple)):
+                    found.extend(self._detect_structured(item, item_path))
+                else:
+                    found.extend(self._detect_value(item, item_path))
+        return found
+
+    def _hint_for(self, key: str) -> tuple[PIICategory, PIISensitivity] | None:
+        key_lower = key.lower()
+        for hint, category_sensitivity in self._field_hints.items():
+            if hint in key_lower:
+                return category_sensitivity
+        return None
+
+    def _detect_value(
+        self,
+        value: Any,
+        path: tuple[PathPart, ...],
+    ) -> list[tuple[tuple[PathPart, ...], PIIDetection]]:
+        if not isinstance(value, str):
+            return []
+        for value_category, pattern in self._patterns.items():
+            if pattern.search(value):
+                sensitivity = _PII_FIELD_HINTS.get(
+                    value_category.value,
+                    (value_category, PIISensitivity.MEDIUM),
+                )[1]
+                return [(path, self._detection(path, value_category, sensitivity, "pattern_match"))]
+        return []
+
+    @staticmethod
+    def _detection(
+        path: tuple[PathPart, ...],
+        category: PIICategory,
+        sensitivity: PIISensitivity,
+        detected_by: str,
+    ) -> PIIDetection:
+        return PIIDetection(
+            field_path=format_path(path),
+            category=category,
+            sensitivity=sensitivity,
+            detected_by=detected_by,
+        )
+
+    def detect_pii_paths(self, payload: Any) -> list[tuple[tuple[PathPart, ...], PIIDetection]]:
+        """Structured detections ``(path, detection)`` over dicts and lists (RU-062)."""
+        return self._detect_structured(payload, ())
+
     def get_pii_field_paths(self, payload: dict[str, Any]) -> tuple[str, ...]:
         """
         Return tuple of field paths containing PII.
@@ -227,6 +374,9 @@ class PIIHandler:
                      auto-detects and masks all PII.
             mask_all_detected: If True, detect and mask all PII fields.
         """
+        if _recursive_enabled():
+            return self._mask_structured(payload, fields, mask_all_detected)
+
         result = dict(payload)  # shallow copy
 
         # Always detect PII to get category information
@@ -243,6 +393,25 @@ class PIIHandler:
             category = category_map.get(field_path)
             self._mask_field_at_path(result, field_path.split("."), category=category)
 
+        return result
+
+    def _mask_structured(
+        self,
+        payload: dict[str, Any],
+        fields: list[str] | None,
+        mask_all_detected: bool,
+    ) -> dict[str, Any]:
+        """RU-062: copy-on-write masking that reaches list elements."""
+        detections = self.detect_pii_paths(payload)
+        category_map: dict[tuple[PathPart, ...], PIICategory] = {path: d.category for path, d in detections}
+        if fields is None and mask_all_detected:
+            paths = [path for path, _ in detections]
+        else:
+            paths = [parse_path(f) for f in fields or []]
+        result: dict[str, Any] = dict(payload)
+        for path in filter(None, paths):
+            category = category_map.get(path)
+            result = _edit_at_path(result, path, lambda v, c=category: self._mask_value(v, category=c))
         return result
 
     def _mask_field_at_path(
@@ -301,6 +470,13 @@ class PIIHandler:
         """
         Remove PII fields entirely from payload. Returns a new dict.
         """
+        if _recursive_enabled():
+            if fields is None and redact_all_detected:
+                paths = [path for path, _ in self.detect_pii_paths(payload)]
+            else:
+                paths = [parse_path(f) for f in fields or []]
+            return self.redact_paths(payload, paths)
+
         result = dict(payload)
 
         if fields is None and redact_all_detected:
@@ -313,6 +489,18 @@ class PIIHandler:
         for field_path in fields:
             self._redact_field_at_path(result, field_path.split("."))
 
+        return result
+
+    @staticmethod
+    def redact_paths(payload: dict[str, Any], paths: list[tuple[PathPart, ...]]) -> dict[str, Any]:
+        """Remove every structured path; the input is not mutated (RU-062).
+
+        Paths are applied deepest/highest-index first so removing a list element
+        never shifts the index of another path still to be applied.
+        """
+        result: dict[str, Any] = dict(payload)
+        for path in sorted(set(filter(None, paths)), key=_path_sort_key, reverse=True):
+            result = _edit_at_path(result, path, lambda _v: _DELETE)
         return result
 
     def _redact_field_at_path(self, data: dict[str, Any], path_parts: list[str]) -> None:
