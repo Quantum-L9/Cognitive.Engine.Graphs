@@ -279,6 +279,69 @@ class TestIntakeCompiler:
         assert isinstance(result, IntakeResult)
         assert result.scan.coverage_pct == 0.0
 
+    # -- RU-116 / CEG-COR-103: gate/scoring metadata comes from the spec for every mapping --
+
+    @pytest.mark.finding("CEG-COR-103")
+    def test_vertical_additions_keep_gate_and_scoring_metadata(self) -> None:
+        import yaml
+
+        from engine.config.loader import DomainPackLoader
+
+        spec = DomainPackLoader().load_domain("plasticos")
+        result = compile_intake(
+            ["facility_id", "name"],
+            "We are a plastics recycler",
+            spec,
+            vertical_keywords={"plastics": "plasticos"},
+        )
+        parsed = yaml.safe_load(result.domain_spec_yaml)
+        proposed_gates = {p["field"] for p in parsed.get("gate_proposals", [])}
+        proposed_scoring = set(parsed.get("scoring_proposals", []))
+
+        for gated in ("min_density", "max_density", "contamination_tolerance", "food_grade_certified"):
+            assert gated not in proposed_gates, gated
+        assert "capacity_tons_month" not in proposed_gates
+        for scored in ("lat", "credit_score", "rate_per_ton"):
+            assert scored not in proposed_scoring, scored
+        # provenance labels unchanged; genuinely ungated/unscored fields still proposed
+        assert result.field_origins["min_density"] == FieldOrigin.VERTICAL_STANDARD
+        assert result.field_origins["facility_id"] == FieldOrigin.CUSTOMER_PROVIDED
+        assert "rate_confidence" in proposed_gates
+        facility_fields = {f["name"]: f for f in parsed["intake_compilation"]["nodes"]["Facility"]["fields"]}
+        assert facility_fields["min_density"]["gate_critical"] is True
+        assert facility_fields["credit_score"]["scoring_weight"] > 0
+
+    @pytest.mark.finding("CEG-COR-103")
+    def test_derived_additions_keep_gate_and_scoring_metadata(self, intake_spec: DomainSpec) -> None:
+        import yaml
+
+        result = compile_intake(
+            ["name"],
+            "Unknown",
+            intake_spec,
+            derivation_graph={"credit_score": ["name"], "min_density": ["name"]},
+        )
+        assert result.field_origins["credit_score"] == FieldOrigin.L9_ENRICHABLE
+        parsed = yaml.safe_load(result.domain_spec_yaml)
+        assert "credit_score" not in parsed.get("scoring_proposals", [])
+        assert "min_density" not in {p["field"] for p in parsed.get("gate_proposals", [])}
+
+    @pytest.mark.finding("CEG-COR-103")
+    def test_scanner_gate_set_includes_window_bounds(self) -> None:
+        from engine.intake.crm_field_scanner import _gate_critical_fields
+
+        gates = [
+            GateSpec(
+                name="window",
+                type=GateType.TEMPORALRANGE,
+                candidateprop_start="available_from",
+                candidateprop_end="available_until",
+                queryparam="pickup_date",
+            ),
+            GateSpec(name="density_range", type=GateType.RANGE, candidateprop_min="lo", candidateprop_max="hi"),
+        ]
+        assert _gate_critical_fields(gates) == {"available_from", "available_until", "lo", "hi"}
+
 
 # ── Impact Reporter Tests ─────────────────────────────────
 
