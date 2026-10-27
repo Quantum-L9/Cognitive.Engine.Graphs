@@ -31,7 +31,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # Resolve repo root from git or script location
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || { cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd; })"
 ENV_FILE="${1:-$REPO_ROOT/.env}"
 
 if [[ -f "$ENV_FILE" ]]; then
