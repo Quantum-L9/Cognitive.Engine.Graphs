@@ -283,6 +283,14 @@ class Settings(BaseSettings):
     # re-enrichment targets and so spends EIE budget.
     graph_inference_feedback_enabled: bool = False
 
+    # Correctness remediation lane D (plan 0d84ec8, RU-061..RU-077)
+    # RU-061 / CEG-COR-008: the prohibited-factor check compared only
+    # GateSpec.candidateprop/queryparam, exact-case. On: every compiled
+    # property reference (gate min/max/start/end fields, scoring dimension
+    # candidateprop/queryprop, sync-row keys at any depth) is compared
+    # casefolded. Off: the legacy two-field exact-case check.
+    prohibited_factor_full_coverage: bool = True
+
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
         """Raise if default secrets are used in production environment."""

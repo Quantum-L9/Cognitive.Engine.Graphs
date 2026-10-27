@@ -80,6 +80,7 @@ independently of the code default.
 | Spec-declared Candidate Id | `SPEC_DECLARED_CANDIDATE_ID` (`spec_declared_candidate_id`) | `True` | unset | active; `handle_match` identifies candidates by the domain's declared id property, not `entity_id` — see §20 |
 | Traversal Gate EXISTS Subquery | `TRAVERSAL_GATE_EXISTS_SUBQUERY` (`traversal_gate_exists_subquery`) | `True` | unset | active; traversal gates compile to an `EXISTS { … }` subquery Neo4j 5 accepts — see §20 |
 | Childsync FOREACH Projection | `CHILDSYNC_FOREACH_PROJECTION` (`childsync_foreach_projection`) | `True` | unset | active; childsync writes children in `FOREACH` without copying them onto the parent — see §20 |
+| Prohibited Factor Full Coverage | `PROHIBITED_FACTOR_FULL_COVERAGE` (`prohibited_factor_full_coverage`) | `True` | unset | active (hardening); every gate property field, scoring dimension and sync-row key at any depth is checked, casefolded — see lane D |
 
 ---
 
@@ -883,3 +884,26 @@ to return to.
 ### Rollback
 
 Set the flag to `false`. The placeholder fragments are emitted again verbatim.
+
+---
+
+## Correctness remediation — lane D (plan 0d84ec8)
+
+Safety fixes from the correctness remediation plan, lane D (compliance, PII,
+prohibited factors, causal, safe_eval). Each ships on and each flag restores the
+previous behaviour when set to `false`.
+
+### Prohibited Factor Full Coverage (RU-061 / CEG-COR-008)
+
+**Flag**: `PROHIBITED_FACTOR_FULL_COVERAGE=True` (default on)
+
+On: `ProhibitedFactorValidator` compares, casefolded, every gate property field
+(`candidateprop`, `candidateprop_min/_max/_start/_end`, str `queryparam`,
+`queryparam_min/_max/_start/_end`), every scoring dimension `candidateprop` /
+`queryprop` (`ComplianceEngine.validate_scoring`, called by `handle_match` next to
+`validate_gates`) and every key at any depth of a sync row
+(`validate_sync_row`, nested dicts and lists of dicts). Off: the legacy check of
+gate `candidateprop` / `queryparam` and top-level sync keys, exact-case.
+Contract: `docs/contracts/PROHIBITED_FACTORS.md`.
+
+Rollback: set the flag to `false` while a spec is corrected.

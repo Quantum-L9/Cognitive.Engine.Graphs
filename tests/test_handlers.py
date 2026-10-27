@@ -13,6 +13,7 @@ Tests for engine/handlers.py - all 6 action handlers."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -472,3 +473,48 @@ async def test_match_binds_compiler_literals_into_query_parameters() -> None:
     assert parameters["gate_grade_gate_value"] == 85.0
     assert parameters["urgency"] == "routine"
     assert "top_n" in parameters
+
+
+# ── RU-061 / CEG-COR-008: prohibited factors block before any Cypher runs ──
+
+
+def _mortgage_spec_with(*, dimension_prop: str | None = None, gate_update: dict | None = None):
+    import yaml
+
+    from engine.config.schema import DomainSpec
+
+    spec = DomainSpec.model_validate(
+        yaml.safe_load(Path("domains/mortgage-brokerage/spec.yaml").read_text(encoding="utf-8"))
+    )
+    if dimension_prop is not None:
+        dims = list(spec.scoring.dimensions)
+        dims[0] = dims[0].model_copy(update={"candidateprop": dimension_prop})
+        spec = spec.model_copy(update={"scoring": spec.scoring.model_copy(update={"dimensions": dims})})
+    if gate_update is not None:
+        gates = list(spec.gates)
+        gates[0] = gates[0].model_copy(update=gate_update)
+        spec = spec.model_copy(update={"gates": gates})
+    return spec
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "spec_kwargs",
+    [
+        {"dimension_prop": "age"},
+        {"gate_update": {"candidateprop": "Race"}},
+        {"gate_update": {"candidateprop_min": "age"}},
+    ],
+)
+async def test_match_blocks_prohibited_reference_before_any_query(spec_kwargs: dict) -> None:
+    from engine.state import get_state
+
+    spec = _mortgage_spec_with(**spec_kwargs)
+    state = get_state()
+    state.compliance_engines.pop(spec.domain.id, None)
+    state.domain_loader.load_domain = MagicMock(return_value=spec)
+    driver = state.graph_driver
+
+    with pytest.raises(ValueError, match="prohibited field"):
+        await handle_match("t", {"query": {"creditscore": 700}, "match_direction": "borrowertoproduct"})
+    driver.execute_query.assert_not_awaited()
