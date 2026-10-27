@@ -378,3 +378,69 @@ async def test_plasticos_match_cypher_binds_every_parameter(direction: str) -> N
     cypher, parameters = await _capture_match("plasticos", direction, dict(_PLASTICOS_QUERIES[direction]))
     assert _missing_params(cypher, parameters) == []
     assert "$polymer_type" in cypher
+
+
+# RG-069 (RU-055 / CEG-COR-151): served scoring inputs are normalised into [0, 1]
+# by the computation that reads them, so the dimension discriminates instead of
+# saturating the clamp.
+def _dimension_expression(domain_id: str, dim_name: str) -> str:
+    from engine.scoring.assembler import ScoringAssembler
+
+    spec = _spec(DOMAINS_ROOT / domain_id)
+    dim = next(d for d in spec.scoring.dimensions if d.name == dim_name)
+    return ScoringAssembler(spec)._compile_dimension(dim)
+
+
+def _evaluate_numeric(expression: str, candidate: dict[str, float]) -> float:
+    """Evaluate a closed arithmetic scoring expression for one candidate, clamped like the assembler.
+
+    `coalesce(candidate.<prop>, <default>)` is substituted with the candidate's
+    value; what remains must be numbers, + - * /, parentheses and log(), walked
+    with a whitelist (never eval).
+    """
+    import ast
+    import math
+    import operator
+    import re
+
+    def _coalesce(match: re.Match[str]) -> str:
+        return repr(float(candidate.get(match.group(1), float(match.group(2)))))
+
+    python = re.sub(r"coalesce\(candidate\.([A-Za-z_][A-Za-z0-9_]*), ([0-9.]+)\)", _coalesce, expression)
+    binary = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv}
+
+    def _walk(node: ast.AST) -> float:
+        if isinstance(node, ast.Expression):
+            return _walk(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, int | float):
+            return float(node.value)
+        if isinstance(node, ast.BinOp) and type(node.op) in binary:
+            return binary[type(node.op)](_walk(node.left), _walk(node.right))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "log":
+            return math.log(_walk(node.args[0]))
+        msg = f"not a closed numeric expression: {python}"
+        raise AssertionError(msg)
+
+    return min(max(_walk(ast.parse(python, mode="eval")), 0.0), 1.0)
+
+
+@pytest.mark.parametrize(
+    ("domain_id", "dim_name", "prop", "low", "high"),
+    [
+        ("plasticos", "rate_score", "rate_per_ton", 200.0, 400.0),
+        ("freight-matching", "ontime_rating", "ontimeratingpct", 80.0, 95.0),
+    ],
+)
+def test_served_scoring_inputs_discriminate_within_unit_range(
+    domain_id: str, dim_name: str, prop: str, low: float, high: float
+) -> None:
+    expression = _dimension_expression(domain_id, dim_name)
+    low_score = _evaluate_numeric(expression, {prop: low})
+    high_score = _evaluate_numeric(expression, {prop: high})
+    assert 0.0 < low_score < high_score < 1.0, (expression, low_score, high_score)
+
+
+def test_plasticos_recency_uses_the_declared_180_day_horizon() -> None:
+    expression = _dimension_expression("plasticos", "recency")
+    assert "duration.inDays(candidate.last_transaction_date, datetime()).days / 180.0" in expression
+    assert "/ 90.0" not in expression
