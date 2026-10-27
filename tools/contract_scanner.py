@@ -198,6 +198,7 @@ RULES: list[dict] = [
             "engine/handlers.py",
             "engine/causal/causal_compiler.py",
             "engine/causal/attribution.py",
+            "engine/compliance/pii.py",  # RU-066: GDPR subject property via sanitize_label()
         ],  # labels sanitized via sanitize_label()
     ),
     _rule(
