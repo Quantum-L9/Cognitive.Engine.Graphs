@@ -726,9 +726,20 @@ async def _plasticos_dir1_match_cypher() -> str:
     from unittest.mock import MagicMock
 
     from engine.config.loader import DomainPackLoader
+    from engine.config.schema import TraversalSpec, TraversalStepSpec
     from engine.handlers import handle_match, init_dependencies
 
+    # RG-047 needs a required multi-valued traversal step. The served plasticos
+    # pack constrains polymers with EXISTS gates since RU-040 (CEG-COR-013), so
+    # the row-multiplying step is added back to a copy of the pack here.
     spec = DomainPackLoader(config_path=str(_DOMAINS_DIR)).load_domain("plasticos")
+    step = TraversalStepSpec(
+        name="polymer_capability",
+        pattern="(candidate:Facility)-[:PROCESSES]->(polymer:PolymerFamily)",
+        required=True,
+        matchdirections=["supply_opportunity_to_buyer_facility"],
+    )
+    spec = spec.model_copy(update={"traversal": TraversalSpec(steps=[step])})
     driver = _MatchCypherCapture()
     loader = MagicMock()
     loader.load_domain.return_value = spec
