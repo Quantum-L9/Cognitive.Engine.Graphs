@@ -816,9 +816,18 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 results = apply_constraint_penalties(list(results), constraint_dicts)
 
             # Spec-driven Pareto filter using declared objectives
-            arb_dims = [obj.dimension for obj in domain_spec.decision_arbitration.pareto_config.objectives]
+            arb_config = domain_spec.decision_arbitration.pareto_config
+            arb_dims = [obj.dimension for obj in arb_config.objectives]
             if arb_dims and len(results) > 1:
-                arb_pareto = apply_pareto_filter(results, arb_dims, candidate_id_key=id_property)
+                # RU-019: forward declared directions and front_size_limit
+                # (ignored by the filter while arbitration_objective_direction is off).
+                arb_pareto = apply_pareto_filter(
+                    results,
+                    arb_dims,
+                    candidate_id_key=id_property,
+                    directions={obj.dimension: obj.direction for obj in arb_config.objectives},
+                    front_size_limit=arb_config.front_size_limit,
+                )
                 if pareto_metadata is None:
                     pareto_metadata = {}
                 pareto_metadata["arbitration"] = {

@@ -103,14 +103,23 @@ class DriftDetector:
         """
         outcome_label = sanitize_label(self._spec.feedbackloop.outcome_node_label)
 
+        from engine.config.settings import settings
+
         recent = await self._query_dimension_frequency(outcome_label, window_days, recent=True)
         baseline = await self._query_dimension_frequency(outcome_label, window_days, recent=False)
 
-        if not recent and not baseline:
+        # RU-029 / CEG-COR-118: a divergence needs two distributions. With
+        # drift_requires_both_windows on (default) an empty recent OR baseline
+        # window is insufficient data (an empty baseline otherwise scored a
+        # divergence of 1.0 and alerted). Off: only both-empty is insufficient.
+        insufficient = (
+            (not recent or not baseline) if settings.drift_requires_both_windows else (not recent and not baseline)
+        )
+        if insufficient:
             return {
                 "divergence": 0.0,
-                "recent_dimensions": 0,
-                "baseline_dimensions": 0,
+                "recent_dimensions": len(recent),
+                "baseline_dimensions": len(baseline),
                 "status": "insufficient_data",
             }
 

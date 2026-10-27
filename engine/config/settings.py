@@ -333,6 +333,53 @@ class Settings(BaseSettings):
     # value is rejected before any load or query, and evaluate matches as the
     # tenant. Off: the caller-chosen domain_id.
     admin_tenant_bound_domain: bool = True
+    # Correctness remediation lane B (plan 0d84ec8, RU-017..RU-031)
+    # RU-017 / CEG-COR-006: pricealignment divided candidate.<p> / $<q>, which
+    # Cypher evaluates as INTEGER division when both are integer-stored
+    # (450/500 -> 0). On: both operands are wrapped in toFloat(). Off: the
+    # legacy expression, for C-21 rollback only.
+    pricealignment_float_division: bool = True
+    # RU-018 / CEG-COR-025: arbitration helpers (pareto_integrator) looked up a
+    # dimension with `or`, so a genuine 0.0 fell through to `<d>_score` or was
+    # treated as absent and skipped its hard constraint. On: presence is tested
+    # with `is None` (dimension_scores[d] -> d -> d_score). Off: legacy truthiness.
+    arbitration_zero_score_present: bool = True
+    # RU-019 / CEG-COR-026: the decision_arbitration Pareto front maximised
+    # every objective and was unbounded. On: ParetoObjectiveSpec.direction
+    # 'minimize' is honoured and the front is trimmed to
+    # ParetoConfigSpec.front_size_limit by composite score (R1b-DEC-04 A).
+    # Off: maximise-all, unbounded.
+    arbitration_objective_direction: bool = True
+    # RU-022 / CEG-COR-030: ScoringAssembler.load_learned_weights read
+    # DimensionWeight by `dimension_name` / `domain_id`, properties the writer
+    # (SignalWeightCalculator, keyed {dimension, tenant}) never sets, so learned
+    # weights were always {}. On: the reader filters on {tenant: $tenant} and
+    # dw.dimension. Off: the legacy (inert) reader. FEEDBACK_ENABLED stays the
+    # global gate (default False).
+    learned_weights_tenant_keyed: bool = True
+    # RU-023 / CEG-COR-083: learned multipliers (up to signal_weights.max_weight)
+    # pushed the positive weight sum past the C-22 ceiling, and a learned 0.0
+    # was dropped by a truthiness filter. On: a 0.0 row is loaded (and takes
+    # the penalty branch) and the non-penalised coefficients are rescaled to
+    # their pre-learning sum. Off: multiply-only, truthiness filter.
+    learned_weight_renormalization: bool = True
+    # RU-027 / CEG-COR-116: SignalWeightCalculator computed the CI as
+    # 1.96*sqrt(lift*(1-min(lift,1))/n), which is 0.0 for every lift >= 1, so a
+    # single winning outcome got confidence 1.0. On: the CI of the win-rate
+    # proportion (Agresti-Coull), divided by the base win rate. Off: legacy.
+    signal_weight_proportion_ci: bool = True
+    # RU-028 / CEG-COR-117: ScorePropagator matched each prior outcome of the
+    # candidate and then every DimensionWeight, so one event multiplied
+    # boost_factor by factor^k and reported k*|dw| affected, unbounded. On:
+    # outcomes are collapsed to one existence row, SET runs once per
+    # DimensionWeight and the result is clamped to signal_weights
+    # [min_weight, max_weight]. Off: the legacy query.
+    propagation_single_application: bool = True
+    # RU-029 / CEG-COR-118: DriftDetector treated only a both-empty window pair
+    # as insufficient data, so an empty baseline (the first drift_window_days)
+    # scored divergence 1.0 and raised alert=True. On: either window empty is
+    # insufficient_data (with both counts). Off: legacy both-empty only.
+    drift_requires_both_windows: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
