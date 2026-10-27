@@ -592,6 +592,12 @@ class Settings(BaseSettings):
     # it, batch/report forward `field_confidences`, and blocking_fields names
     # exactly the uncounted gate fields. Off: the legacy coercion.
     health_absent_confidence_counts_enabled: bool = True
+    # RU-109 / CEG-COR-045: build_field_map marked only `candidateprop` as
+    # gate-critical, so a range gate's candidateprop_min/max (and a
+    # temporalrange's candidateprop_start/end) were "low" and an entity missing
+    # every bound scored 95/A. On: all five declared keys are gate-critical.
+    # Off: candidateprop only.
+    health_range_gate_fields_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

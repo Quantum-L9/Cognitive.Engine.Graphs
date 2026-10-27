@@ -434,6 +434,87 @@ class TestMatchQualityDelta:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  DOMAIN FIELD MAP — gate-critical set (RU-109 / CEG-COR-045)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+def _plasticos_with_window_gate():
+    """Checked-in plasticos pack plus a TEMPORALRANGE gate reading two Facility window bounds."""
+    from engine.config.loader import DomainPackLoader
+    from engine.config.schema import GateSpec, GateType, PropertySpec, PropertyType
+
+    spec = DomainPackLoader().load_domain("plasticos")
+    nodes = []
+    for node in spec.ontology.nodes:
+        if node.label == "Facility":
+            extra = [
+                PropertySpec(name="available_from", type=PropertyType.DATETIME),
+                PropertySpec(name="available_until", type=PropertyType.DATETIME),
+            ]
+            nodes.append(node.model_copy(update={"properties": [*node.properties, *extra]}))
+        else:
+            nodes.append(node)
+    window_gate = GateSpec(
+        name="availability_window",
+        type=GateType.TEMPORALRANGE,
+        candidateprop_start="available_from",
+        candidateprop_end="available_until",
+        queryparam="pickup_date",
+    )
+    return spec.model_copy(
+        update={
+            "ontology": spec.ontology.model_copy(update={"nodes": nodes}),
+            "gates": [*spec.gates, window_gate],
+        }
+    )
+
+
+_RANGE_AND_WINDOW_BOUNDS = ("min_density", "max_density", "min_mfi", "max_mfi", "available_from", "available_until")
+
+
+class TestDomainFieldMapGateCritical:
+    def test_range_and_window_bounds_are_gate_critical(self):
+        from engine.health.domain_field_mapper import build_field_map
+
+        field_map = build_field_map(_plasticos_with_window_gate(), "Facility")
+        for name in _RANGE_AND_WINDOW_BOUNDS:
+            assert field_map.fields[name].gate_critical is True, name
+            assert field_map.fields[name].impact_tier == "critical", name
+        # candidateprop-only gates unchanged
+        assert field_map.fields["contamination_tolerance"].gate_critical is True
+        assert field_map.fields["name"].gate_critical is False
+
+    def test_entity_missing_range_bounds_is_not_gate_complete(self):
+        from engine.health.field_analyzer import analyze_entity_fields
+
+        spec = _plasticos_with_window_gate()
+        entity = {
+            "facility_id": "fac-1",
+            "contamination_tolerance": 0.05,
+            "food_grade_certified": True,
+            "capacity_tons_month": 400,
+        }
+        field_health = analyze_entity_fields(entity, spec, "Facility")
+        readiness = compute_readiness_score_v2(field_health, spec)
+        critical_gaps = [f.field_name for f in field_health if f.is_gate_critical and not f.is_populated]
+
+        assert readiness.gate_completeness < 1.0
+        for name in _RANGE_AND_WINDOW_BOUNDS:
+            assert name in critical_gaps, name
+
+    def test_range_gate_fields_flag_off_restores_candidateprop_only(self, monkeypatch):
+        from engine.config.settings import settings
+        from engine.health.domain_field_mapper import build_field_map
+
+        monkeypatch.setattr(settings, "health_range_gate_fields_enabled", False)
+        field_map = build_field_map(_plasticos_with_window_gate(), "Facility")
+        for name in _RANGE_AND_WINDOW_BOUNDS:
+            assert field_map.fields[name].gate_critical is False, name
+            assert field_map.fields[name].impact_tier == "low", name
+        assert field_map.fields["contamination_tolerance"].gate_critical is True
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  MODEL SERIALIZATION
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
