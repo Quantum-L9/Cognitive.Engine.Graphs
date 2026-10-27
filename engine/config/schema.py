@@ -1178,6 +1178,14 @@ class DomainSpec(BaseModel):
                 keys = dim.matchdirections or ["*"]
                 for key in keys:
                     buckets[key] = buckets.get(key, 0.0) + dim.defaultweight
+            if settings.weight_ceiling_includes_unscoped:
+                # RU-044: an unscoped dimension scores in every direction, so each
+                # declared direction (and any direction a dimension is scoped to)
+                # carries the unscoped weight on top of its own.
+                unscoped = buckets.get("*", 0.0)
+                directions = [*self.queryschema.matchdirections, *(k for k in buckets if k != "*")]
+                for direction in dict.fromkeys(directions):
+                    buckets[direction] = buckets.get(direction, 0.0) + unscoped
             for key, weight_sum in buckets.items():
                 if weight_sum > weight_ceiling + tolerance:
                     msg = (

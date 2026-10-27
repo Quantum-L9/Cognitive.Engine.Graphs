@@ -608,6 +608,12 @@ class Settings(BaseSettings):
     # have, so it was always 0. On: the term is
     # compute_staleness_penalty(entity_health.field_health). Off: the zero term.
     health_priority_staleness_enabled: bool = True
+    # Correctness remediation lane I (plan 0d84ec8, RU-044..RU-057)
+    # RU-044 / CEG-COR-024: the default-weight ceiling summed each scope bucket
+    # alone, so {'*': 0.6, 'd1': 0.6} loaded with an effective d1 sum of 1.2.
+    # On (with domain_strict_validation): every direction's sum includes the
+    # unscoped dimensions. Off: per-bucket check.
+    weight_ceiling_includes_unscoped: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

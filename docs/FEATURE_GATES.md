@@ -1254,3 +1254,13 @@ invariant the code already claimed, so each ships `True`; set the env var to
 
 Set the flag's env var to `false` and restart the process. A process already
 wedged by the pre-fix behaviour needs a restart either way.
+
+## 25. Correctness remediation lane I (plan 0d84ec8, round 2) — domain spec validation
+
+Every flag below tightens `engine/config/schema.py` validation, so a spec that
+violates the rule stops loading (`DomainSpec.model_validate` raises). All default
+`true`; every shipped pack and `domains/_template.yaml` validate with all of them on.
+
+| Flag (env var) | Default | Unit | On | Off |
+|---|---|---|---|---|
+| `weight_ceiling_includes_unscoped` (`WEIGHT_CEILING_INCLUDES_UNSCOPED`) | `true` | RU-044 / CEG-COR-024 | Under `domain_strict_validation`, for each `queryschema.matchdirections` entry (and any direction a dimension is scoped to) the default weights of unscoped dimensions plus the dimensions scoped to it must be <= 1.0; the error names the direction | Each scope bucket (`*` and every direction) is summed alone, so `{'*': 0.6, 'd1': 0.6}` loads with an effective `d1` sum of 1.2 |

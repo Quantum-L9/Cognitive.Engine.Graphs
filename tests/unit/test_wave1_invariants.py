@@ -226,6 +226,66 @@ class TestW101DomainCrossRef:
         spec = DomainSpec.model_validate(raw)
         assert len(spec.scoring.dimensions) == 2
 
+    @staticmethod
+    def _mixed_scope_dimensions(scoped: float, unscoped: float) -> dict[str, Any]:
+        """One dimension scoped to the spec's direction, one unscoped (applies to every direction)."""
+        return {
+            "dimensions": [
+                {
+                    "name": "scoped_dim",
+                    "source": "candidateproperty",
+                    "candidateprop": "credit_score",
+                    "computation": "candidateproperty",
+                    "weightkey": "w_scoped",
+                    "defaultweight": scoped,
+                    "matchdirections": ["supply_opportunity_to_buyer_facility"],
+                },
+                {
+                    "name": "unscoped_dim",
+                    "source": "candidateproperty",
+                    "candidateprop": "lat",
+                    "computation": "candidateproperty",
+                    "weightkey": "w_unscoped",
+                    "defaultweight": unscoped,
+                },
+            ],
+        }
+
+    def test_scoring_weight_mixed_scope_exceeds_ceiling_raises(self) -> None:
+        """RU-044 / CEG-COR-024: unscoped weight counts toward every declared direction.
+
+        Effective weight for the direction is 0.6 (scoped) + 0.6 (unscoped) = 1.2.
+        """
+        raw = _minimal_spec_raw()
+        raw["scoring"] = self._mixed_scope_dimensions(scoped=0.6, unscoped=0.6)
+        with pytest.raises(ValueError, match="'supply_opportunity_to_buyer_facility'"):
+            DomainSpec.model_validate(raw)
+
+    def test_scoring_weight_mixed_scope_at_ceiling_passes(self) -> None:
+        """RU-044: scoped 0.4 + unscoped 0.6 is exactly the ceiling and is accepted."""
+        raw = _minimal_spec_raw()
+        raw["scoring"] = self._mixed_scope_dimensions(scoped=0.4, unscoped=0.6)
+        spec = DomainSpec.model_validate(raw)
+        assert len(spec.scoring.dimensions) == 2
+
+    def test_scoring_weight_mixed_scope_flag_off_keeps_bucket_check(self) -> None:
+        """RU-044 flag off: each scope bucket is checked alone (legacy), so 0.6 + 0.6 loads."""
+        raw = _minimal_spec_raw()
+        raw["scoring"] = self._mixed_scope_dimensions(scoped=0.6, unscoped=0.6)
+        s = _make_settings(weight_ceiling_includes_unscoped=False)
+        with patch(_SETTINGS_TARGET, s):
+            spec = DomainSpec.model_validate(raw)
+        assert len(spec.scoring.dimensions) == 2
+
+    def test_scoring_weight_mixed_scope_skipped_without_strict_validation(self) -> None:
+        """RU-044 stays gated by domain_strict_validation, as the bucket check is today."""
+        raw = _minimal_spec_raw()
+        raw["scoring"] = self._mixed_scope_dimensions(scoped=0.6, unscoped=0.6)
+        s = _make_settings(domain_strict_validation=False)
+        with patch(_SETTINGS_TARGET, s):
+            spec = DomainSpec.model_validate(raw)
+        assert len(spec.scoring.dimensions) == 2
+
     def test_gate_exclusion_unknown_edge_raises(self) -> None:
         """Exclusion gate referencing unknown edge type is rejected."""
         raw = _minimal_spec_raw()

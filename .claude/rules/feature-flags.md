@@ -141,3 +141,8 @@ were industry-specific and had no caller).
 | gds_history_utc_timestamps | True | GDS job history `timestamp` (and job start/duration) use `datetime.now(tz=UTC)`, so `gds_health` / boot staleness is correct under any process TZ (RU-100 / CEG-COR-086); off restores naive local time |
 | entity_resolution_merge_integrity | True | Entity resolution validates and threads the batch `threshold`, verifies each member against the chosen canonical, MERGEs `RESOLVED_FROM` (one per pair, no cycles, deterministic canonical) and skips batch entities by entity id (RU-101 / CEG-COR-059..061); also gated per domain by `semantic_registry.enabled`; off restores the previous merge behaviour |
 | resolution_behavioral_label_scoped | True | Behavioral similarity matches both entities as `(a:<label> {<declared id>: $a_id})`, so same-id nodes of other labels contribute nothing (RU-103 / CEG-COR-177); the declared id (PO-04) also follows `spec_declared_candidate_id`; off restores the label-less `entity_id` match |
+
+## Correctness remediation lane I (plan 0d84ec8, round 2) — domain spec validation
+| Flag | Default | Purpose |
+|------|---------|---------|
+| weight_ceiling_includes_unscoped | True | With `domain_strict_validation`, the default-weight ceiling (C-22) for each declared direction counts unscoped dimensions plus the dimensions scoped to it; `{'*': 0.6, 'd1': 0.6}` is refused (RU-044 / CEG-COR-024); off restores the per-scope-bucket check |
