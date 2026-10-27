@@ -2344,8 +2344,12 @@ async def handle_resolve(tenant: str, payload: dict[str, Any]) -> dict[str, Any]
     """Entity resolution: create RESOLVED_FROM edge between duplicate entities.
 
     When semantic_registry is enabled, uses multi-signal similarity scoring
-    to automatically find and merge duplicates. Otherwise, falls back to
-    manual RESOLVED_FROM edge creation.
+    to find duplicates and link each one to a canonical entity with a
+    ``(duplicate)-[:RESOLVED_FROM]->(canonical)`` edge. Otherwise, falls back
+    to manual ``(source)-[:RESOLVED_FROM]->(target)`` edge creation.
+
+    Resolution is linkage only (RU-102): no relationships are moved and match
+    does not consult RESOLVED_FROM; ``merged_count`` counts links created.
     """
     graph_driver, domain_loader = _require_deps()
     _validate_tenant_access(tenant, "resolve")

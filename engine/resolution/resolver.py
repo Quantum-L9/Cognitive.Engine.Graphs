@@ -9,8 +9,15 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
-Entity resolver: finds duplicates above threshold, merges into canonical,
-creates RESOLVED_FROM edges, and transfers relationships.
+Entity resolver: finds duplicates above the similarity threshold, picks a
+canonical entity and links each duplicate to it with a
+``(duplicate)-[:RESOLVED_FROM]->(canonical)`` edge.
+
+Resolution is linkage only (RU-102 / CEG-COR-124, DEC-40 option A): no
+relationships are moved from a duplicate to its canonical, no node is deleted,
+and no engine match or scoring query consults RESOLVED_FROM, so a resolved
+duplicate remains a match candidate. The resolver itself reads the edge only
+to skip already-resolved entities.
 """
 
 from __future__ import annotations
@@ -55,8 +62,10 @@ class EntityResolver:
     Process:
     1. For a given entity, find candidates above similarity threshold
     2. Pick canonical entity (highest degree node)
-    3. Create RESOLVED_FROM edges from merged entities to canonical
-    4. Transfer edges from merged entities to canonical
+    3. Create RESOLVED_FROM edges from each duplicate to the canonical
+
+    ``merged_count`` / ``total_merged`` count the RESOLVED_FROM links created;
+    the duplicates' own relationships are left in place.
     """
 
     def __init__(
