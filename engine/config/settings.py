@@ -324,6 +324,10 @@ class Settings(BaseSettings):
     # reports the number of loaded packs instead of listing every domain id.
     # Off: the id list.
     health_probe_domain_count_only: bool = True
+    # RU-060 / CEG-COR-169: UNWINDMATCHSET sync statements RETURN count(n) and
+    # handle_sync reports that as synced_count plus unmatched_count. Off: no
+    # RETURN and synced_count = len(batch).
+    sync_count_from_write_result: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

@@ -60,3 +60,38 @@ def test_unknown_strategy_raises(plasticos_spec):
     object.__setattr__(ep, "batchstrategy", "NONEXISTENT_STRATEGY")
     with pytest.raises(ValueError):
         gen.generate_sync_query(ep, [{"facility_id": "f1"}])
+
+
+# ── RU-060 / CEG-COR-169: UNWINDMATCHSET reports the rows it matched ──
+
+
+def _match_set_endpoint(plasticos_spec, **updates):
+    from engine.config.schema import SyncStrategy
+
+    ep = plasticos_spec.sync.endpoints[0]
+    return ep.model_copy(update={"batchstrategy": SyncStrategy.UNWINDMATCHSET, **updates})
+
+
+@pytest.mark.finding("CEG-COR-169")
+def test_unwind_match_set_returns_matched_count(plasticos_spec):
+    from engine.sync.generator import SyncGenerator
+
+    for ep in (_match_set_endpoint(plasticos_spec), _match_set_endpoint(plasticos_spec, fieldsupdated=["name"])):
+        cypher = SyncGenerator(plasticos_spec).generate_sync_query(ep, [{"facility_id": "f1"}])
+        assert cypher.startswith("UNWIND $batch AS row\nMATCH (n:Facility {facility_id: row.facility_id})")
+        assert cypher.endswith("\nRETURN count(n) AS synced_count")
+
+
+@pytest.mark.finding("CEG-COR-169")
+def test_unwind_merge_unchanged_and_flag_off_restores_match_set(plasticos_spec, monkeypatch):
+    from engine.config.settings import settings
+    from engine.sync.generator import SyncGenerator
+
+    gen = SyncGenerator(plasticos_spec)
+    merge = gen.generate_sync_query(plasticos_spec.sync.endpoints[0], [{"facility_id": "f1"}])
+    assert "RETURN" not in merge
+
+    monkeypatch.setattr(settings, "sync_count_from_write_result", False)
+    cypher = gen.generate_sync_query(_match_set_endpoint(plasticos_spec), [{"facility_id": "f1"}])
+    assert "RETURN" not in cypher
+    assert cypher.endswith("SET n += row, n._tenant = $tenant")

@@ -89,6 +89,7 @@ independently of the code default.
 | Resolve Requires Created Edge | `RESOLVE_REQUIRES_CREATED_EDGE` (`resolve_requires_created_edge`) | `True` | unset | active (correctness, RU-004); legacy `resolve` raises a ValidationError when no `RESOLVED_FROM` edge was created; off restores an unconditional `resolved` |
 | Outcome Map JSON Encoding | `OUTCOME_MAP_JSON_ENCODING` (`outcome_map_json_encoding`) | `True` | unset | active (correctness, RU-005); `outcomes` stores `fingerprint.dimension_weights` as sorted-key JSON that counterfactual generation decodes (legacy repr strings read as empty, never eval'd); off restores the `str(dict)` writer |
 | Health Probe Domain Count Only | `HEALTH_PROBE_DOMAIN_COUNT_ONLY` (`health_probe_domain_count_only`) | `True` | unset | active (hardening, RU-013); `health` for a tenant without a pack reports `<N> domain packs`, not the loaded domain ids; off restores the id list |
+| Sync Count From Write Result | `SYNC_COUNT_FROM_WRITE_RESULT` (`sync_count_from_write_result`) | `True` | unset | active (correctness, RU-060); `UNWINDMATCHSET` sync returns `count(n) AS synced_count` and the response adds `unmatched_count`; `UNWINDMERGE` unchanged; off restores `synced_count = len(batch)` |
 
 ---
 

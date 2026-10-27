@@ -335,3 +335,58 @@ class TestFeedbackPredicate:
             and ("feedbackloop.enabled" in line or ".feedback_enabled" in line)
         ]
         assert gating == [], gating
+
+
+# ── RU-060 / CEG-COR-169: UNWINDMATCHSET synced_count comes from the write ──
+
+
+def _match_set_spec() -> MagicMock:
+    from engine.config.schema import SyncStrategy
+
+    endpoint = MagicMock()
+    endpoint.path = "/v1/sync/depot"
+    endpoint.batchstrategy = SyncStrategy.UNWINDMATCHSET
+    endpoint.targetnode = "Depot"
+    endpoint.idproperty = "depot_id"
+    endpoint.fieldsupdated = ["status"]
+    spec = MagicMock()
+    spec.domain.id = "test_domain"
+    spec.capabilities = []
+    spec.compliance = None
+    spec.causal.enabled = False
+    spec.sync.endpoints = [endpoint]
+    spec.feedbackloop.enabled = False
+    return spec
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-169")
+class TestSyncMatchSetCount:
+    BATCH = [{"depot_id": "d1", "status": "a"}, {"depot_id": "d2", "status": "b"}, {"depot_id": "d3", "status": "c"}]
+
+    @pytest.mark.asyncio
+    async def test_synced_count_is_the_driver_count(self):
+        driver = _make_graph_driver()
+        driver.execute_query = AsyncMock(return_value=[{"synced_count": 1}])
+        init_dependencies(driver, _make_domain_loader(_match_set_spec()))
+        with patch("engine.handlers._get_compliance_engine") as get_ce:
+            get_ce.return_value.enabled = False
+            get_ce.return_value.flush_audit = AsyncMock()
+            result = await handle_sync("test_domain", {"entity_type": "depot", "batch": list(self.BATCH)})
+        assert result["synced_count"] == 1
+        assert result["unmatched_count"] == 2
+        assert "RETURN count(n) AS synced_count" in driver.execute_query.call_args.kwargs["cypher"]
+
+    @pytest.mark.asyncio
+    async def test_flag_off_reports_batch_length(self, monkeypatch):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "sync_count_from_write_result", False)
+        driver = _make_graph_driver()
+        init_dependencies(driver, _make_domain_loader(_match_set_spec()))
+        with patch("engine.handlers._get_compliance_engine") as get_ce:
+            get_ce.return_value.enabled = False
+            get_ce.return_value.flush_audit = AsyncMock()
+            result = await handle_sync("test_domain", {"entity_type": "depot", "batch": list(self.BATCH)})
+        assert result["synced_count"] == 3
+        assert "unmatched_count" not in result
