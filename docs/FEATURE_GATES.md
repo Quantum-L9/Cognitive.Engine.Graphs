@@ -106,6 +106,7 @@ independently of the code default.
 | Composite Subgate Scoping | `COMPOSITE_SUBGATE_SCOPING` (`composite_subgate_scoping`) | `True` | unset | active; a composite's subgates contribute only through the composite (an OR composite is no longer AND-ed with its own subgates) and a subgate scoped to another direction is refused — see §21 |
 | Freshness Max-age Validated | `FRESHNESS_MAXAGEDAYS_VALIDATED` (`freshness_maxagedays_validated`) | `True` | unset | active (hardening); a freshness gate defaults `maxagedays` to 1 only when absent and refuses a value < 1 (0 became 1 day, a negative age a future cutoff) — see §21 |
 | Prohibited Factor Full Coverage | `PROHIBITED_FACTOR_FULL_COVERAGE` (`prohibited_factor_full_coverage`) | `True` | unset | active (hardening); every gate property field, scoring dimension and sync-row key at any depth is checked, casefolded — see lane D |
+| PII Redaction Recursive | `PII_REDACTION_RECURSIVE` (`pii_redaction_recursive`) | `True` | unset | active (hardening); PII detection/redaction/masking reaches list elements (match `candidates`) without mutating the input — see lane D |
 
 ---
 
@@ -1027,3 +1028,19 @@ gate `candidateprop` / `queryparam` and top-level sync keys, exact-case.
 Contract: `docs/contracts/PROHIBITED_FACTORS.md`.
 
 Rollback: set the flag to `false` while a spec is corrected.
+
+### PII Redaction Recursive (RU-062 / CEG-COR-009)
+
+**Flag**: `PII_REDACTION_RECURSIVE=True` (default on)
+
+`engine/compliance/pii.py` `PIIHandler.detect_pii` descended only into dicts, so the
+match response's `candidates` list was opaque and `ComplianceEngine.redact_response`
+returned candidate PII unchanged; `redact()` / `mask_fields()` shallow-copied and then
+edited nested caller dicts in place. On: detection descends into dicts and
+lists/tuples at any depth with index-aware paths (`candidates[0].candidate.contact_email`;
+dict-only payloads keep their dotted paths), and redaction/masking copy every container
+on the edited path, so the input is never mutated. `check_sync_request` records the
+detected field paths (never values) in the access audit entry. Off: the legacy
+dict-only traversal.
+
+Rollback: set the flag to `false`.

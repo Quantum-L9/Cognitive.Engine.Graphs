@@ -572,3 +572,22 @@ async def test_match_blocks_prohibited_reference_before_any_query(spec_kwargs: d
     with pytest.raises(ValueError, match="prohibited field"):
         await handle_match("t", {"query": {"creditscore": 700}, "match_direction": "borrowertoproduct"})
     driver.execute_query.assert_not_awaited()
+
+
+# ── RU-062 / CEG-COR-009: candidate PII is redacted on the match response ──
+
+
+@pytest.mark.asyncio
+async def test_match_response_candidate_lacks_raw_pii() -> None:
+    from engine.state import get_state
+
+    _loaded_spec_for_results()
+    get_state().compliance_engines.pop("test_domain", None)
+    get_state().graph_driver.execute_query = AsyncMock(
+        return_value=[{"candidate": {"facility_id": "F-1", "contact_email": "ops@f1.com"}, "score": 0.9}]
+    )
+
+    result = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
+
+    assert "ops@f1.com" not in str(result["candidates"])
+    assert result["candidates"][0]["candidate"]["facility_id"] == "F-1"

@@ -111,7 +111,10 @@ def test_validate_gates_blocked() -> None:
 
 
 def test_redact_passthrough_when_disabled() -> None:
-    s = _MockDomainSpec(compliance=None)
+    # RU-062: `compliance=None` leaves compliance ENABLED (see
+    # test_enabled_by_default_when_no_compliance); this passed only because
+    # list elements were never traversed. Disable compliance explicitly.
+    s = _MockDomainSpec(compliance=_MockComplianceDisabled(enabled=False))
     data = {"candidates": [{"ssn": "123"}]}
     assert ComplianceEngine(s).redact_response(data, "t") == data
 
@@ -172,3 +175,52 @@ def test_check_sync_request_flag_off_is_top_level_exact_case(monkeypatch: pytest
     )
     with pytest.raises(ValueError, match="prohibited field 'race'"):
         engine.check_sync_request(tenant="t", entity_type="Borrower", batch=[{"entity_id": "b1", "race": "x"}])
+
+
+# ── RU-062 / CEG-COR-009: enabled redact_response reaches match candidates ──
+
+
+def _healthcare_engine() -> ComplianceEngine:
+    import yaml
+
+    from engine.config.schema import DomainSpec
+
+    raw = yaml.safe_load(Path("domains/healthcare-referral/spec.yaml").read_text(encoding="utf-8"))
+    return ComplianceEngine(DomainSpec.model_validate(raw))
+
+
+def test_redact_response_removes_pii_inside_match_candidates() -> None:
+    import copy
+
+    response = {
+        "candidates": [{"candidate": {"contact_email": "a@b.com", "ssn": "123-45-6789", "npi": "N1"}, "score": 0.9}],
+        "query_id": "q_5c9382647927",
+    }
+    before = copy.deepcopy(response)
+    out = _healthcare_engine().redact_response(response, "t")
+    assert response == before  # caller's object untouched
+    candidate = out["candidates"][0]["candidate"]
+    assert "a@b.com" not in str(candidate)
+    assert "123-45-6789" not in str(candidate)
+    assert candidate["npi"] == "N1"
+    assert out["candidates"][0]["score"] == 0.9
+    assert out["query_id"] == "q_5c9382647927"
+
+
+def test_check_sync_request_audits_nested_pii_fields() -> None:
+    engine = _healthcare_engine()
+    engine.check_sync_request(
+        tenant="t", entity_type="Patient", batch=[{"entity_id": "p1", "contacts": [{"email": "x@y.com"}]}]
+    )
+    entries = engine._audit.flush_sync()
+    access = [e for e in entries if e.action == "access"]
+    assert len(access) == 1
+    assert access[0].pii_fields_accessed == ["contacts[0].email"]
+
+
+def test_redact_response_flag_off_keeps_candidates(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "pii_redaction_recursive", False)
+    response = {"candidates": [{"candidate": {"contact_email": "a@b.com"}, "score": 0.9}]}
+    assert _healthcare_engine().redact_response(response, "t") == response
