@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from engine.compliance.audit import AuditLogger
 from engine.compliance.pii import PIICategory, PIIHandler, PIISensitivity
-from engine.compliance.prohibited_factors import ProhibitedFactorValidator
+from engine.compliance.prohibited_factors import ProhibitedFactorValidator, ProhibitedFactorViolationError
 
 if TYPE_CHECKING:
     from engine.config.schema import DomainSpec, GateSpec, ScoringDimensionSpec, SyncEndpointSpec
@@ -109,23 +109,69 @@ class ComplianceEngine:
             )
             return 0
 
-    def validate_gates(self, gates: list[GateSpec]) -> None:
+    def _audit_violation(
+        self,
+        violation: ProhibitedFactorViolationError,
+        *,
+        tenant: str | None,
+        resource_type: str | None = None,
+        trace_id: str | None = None,
+    ) -> None:
+        """RU-063: record a denied attempt before the violation propagates.
+
+        Active when ``prohibited_factor_violation_audit`` is on and the
+        domain's ``prohibitedfactors.auditonviolation`` is true (schema default).
+        The entry names the gate / dimension / endpoint / row path and the
+        blocked field name, never a value.
+        """
+        from engine.config.settings import settings
+
+        if not settings.prohibited_factor_violation_audit:
+            return
+        compliance = getattr(self._spec, "compliance", None)
+        pf_config = getattr(compliance, "prohibitedfactors", None)
+        if pf_config is None or not getattr(pf_config, "auditonviolation", True):
+            return
+        regimes = [str(r.name) for r in (getattr(compliance, "regimes", None) or []) if getattr(r, "name", None)]
+        actor = tenant or "unknown"
+        prefix = f"{resource_type}:" if resource_type else ""
+        self._audit.log_violation(
+            actor=actor,
+            tenant=actor,
+            resource=f"{violation.subject_kind}:{prefix}{violation.subject}:{violation.field}",
+            blocked_field=violation.field,
+            detail=f"Prohibited field '{violation.field}' referenced by {violation.subject_kind} '{violation.subject}'",
+            resource_type=resource_type or violation.subject_kind,
+            compliance_tags=regimes,
+            trace_id=trace_id,
+        )
+
+    def validate_gates(self, gates: list[GateSpec], *, tenant: str | None = None) -> None:
         """Validate all gates against prohibited factors at compile time.
 
         Raises:
-            ValueError: If any gate references a prohibited field.
+            ValueError: If any gate references a prohibited field (audited first, RU-063).
         """
         for gate in gates:
-            self._prohibited.validate_gate(gate)
+            try:
+                self._prohibited.validate_gate(gate)
+            except ProhibitedFactorViolationError as violation:
+                self._audit_violation(violation, tenant=tenant)
+                raise
 
-    def validate_scoring(self, dimensions: list[ScoringDimensionSpec]) -> None:
+    def validate_scoring(self, dimensions: list[ScoringDimensionSpec], *, tenant: str | None = None) -> None:
         """Validate scoring dimensions against prohibited factors (RU-061).
 
         Raises:
-            ValueError: If any dimension's candidateprop/queryprop is a blocked field.
+            ValueError: If any dimension's candidateprop/queryprop is a blocked field
+                (audited first, RU-063).
         """
         for dimension in dimensions:
-            self._prohibited.validate_scoring_dimension(dimension)
+            try:
+                self._prohibited.validate_scoring_dimension(dimension)
+            except ProhibitedFactorViolationError as violation:
+                self._audit_violation(violation, tenant=tenant)
+                raise
 
     def validate_sync_fields(self, endpoint_spec: SyncEndpointSpec) -> None:
         """Validate sync endpoint field mappings against prohibited factors.
@@ -144,7 +190,9 @@ class ComplianceEngine:
                         f"Sync endpoint '{endpoint_spec.path}' updates prohibited "
                         f"field '{field}'. Blocked fields: {self._prohibited.blocked_fields}"
                     )
-                    raise ValueError(msg)
+                    raise ProhibitedFactorViolationError(
+                        msg, subject_kind="sync_endpoint", subject=str(endpoint_spec.path), field=str(field)
+                    )
 
         # Check idproperty
         if endpoint_spec.idproperty and self._prohibited.is_blocked(endpoint_spec.idproperty):
@@ -152,7 +200,12 @@ class ComplianceEngine:
                 f"Sync endpoint '{endpoint_spec.path}' uses prohibited "
                 f"idproperty '{endpoint_spec.idproperty}'. Blocked fields: {self._prohibited.blocked_fields}"
             )
-            raise ValueError(msg)
+            raise ProhibitedFactorViolationError(
+                msg,
+                subject_kind="sync_endpoint",
+                subject=str(endpoint_spec.path),
+                field=str(endpoint_spec.idproperty),
+            )
 
     def check_match_request(
         self,
@@ -200,12 +253,20 @@ class ComplianceEngine:
         """Audit sync operations and validate against prohibited factors."""
         # Validate endpoint spec if provided
         if endpoint_spec:
-            self.validate_sync_fields(endpoint_spec)
+            try:
+                self.validate_sync_fields(endpoint_spec)
+            except ProhibitedFactorViolationError as violation:
+                self._audit_violation(violation, tenant=tenant, resource_type=entity_type, trace_id=trace_id)
+                raise
 
         # Check batch data for prohibited fields
         for item in batch:
             # RU-061: every key at any depth (childsync lists included), casefolded.
-            self._prohibited.validate_sync_row(item)
+            try:
+                self._prohibited.validate_sync_row(item)
+            except ProhibitedFactorViolationError as violation:
+                self._audit_violation(violation, tenant=tenant, resource_type=entity_type, trace_id=trace_id)
+                raise
 
             # Detect and log PII access
             pii_fields = self._pii.get_pii_field_paths(item)

@@ -224,3 +224,94 @@ def test_redact_response_flag_off_keeps_candidates(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(settings, "pii_redaction_recursive", False)
     response = {"candidates": [{"candidate": {"contact_email": "a@b.com"}, "score": 0.9}]}
     assert _healthcare_engine().redact_response(response, "t") == response
+
+
+# ── RU-063 / CEG-COR-050: every violation is audited before it propagates ──
+
+
+def _mortgage_spec_audit(audit_on_violation: bool = True):
+    import yaml
+
+    from engine.config.schema import DomainSpec
+
+    raw = yaml.safe_load(Path("domains/mortgage-brokerage/spec.yaml").read_text(encoding="utf-8"))
+    raw["compliance"]["prohibitedfactors"]["auditonviolation"] = audit_on_violation
+    return DomainSpec.model_validate(raw)
+
+
+def _denied(engine: ComplianceEngine) -> list:
+    return [e for e in engine._audit.flush_sync() if e.outcome == "denied"]
+
+
+def test_blocked_gate_emits_one_denied_entry_then_raises() -> None:
+    from engine.config.schema import GateSpec
+
+    engine = ComplianceEngine(_mortgage_spec_audit())
+    engine._audit.flush_sync()
+    gate = GateSpec.model_validate({"name": "age_gate", "type": "threshold", "candidateprop": "age"})
+    with pytest.raises(ValueError, match="Gate 'age_gate' references prohibited field 'age'"):
+        engine.validate_gates([gate], tenant="acme")
+    denied = _denied(engine)
+    assert len(denied) == 1
+    assert "age_gate" in denied[0].resource
+    assert denied[0].metadata["blocked_field"] == "age"
+    assert denied[0].actor == "acme"
+
+
+def test_blocked_scoring_dimension_emits_denied_entry() -> None:
+    from engine.config.schema import ScoringDimensionSpec
+
+    engine = ComplianceEngine(_mortgage_spec_audit())
+    engine._audit.flush_sync()
+    dim = ScoringDimensionSpec.model_validate(
+        {
+            "name": "age_dim",
+            "source": "candidateproperty",
+            "candidateprop": "Age",
+            "computation": "candidateproperty",
+            "weightkey": "w",
+            "defaultweight": 0.1,
+        }
+    )
+    with pytest.raises(ValueError, match="prohibited field"):
+        engine.validate_scoring([dim])
+    denied = _denied(engine)
+    assert len(denied) == 1
+    assert "age_dim" in denied[0].resource
+    assert denied[0].metadata["blocked_field"] == "Age"
+
+
+def test_blocked_sync_row_emits_denied_entry_without_value() -> None:
+    engine = ComplianceEngine(_mortgage_spec_audit())
+    engine._audit.flush_sync()
+    with pytest.raises(ValueError, match="prohibited field 'race'"):
+        engine.check_sync_request(
+            tenant="acme", entity_type="Borrower", batch=[{"entity_id": "b1", "coborrowers": [{"race": "SECRET"}]}]
+        )
+    denied = _denied(engine)
+    assert len(denied) == 1
+    assert denied[0].metadata["blocked_field"] == "race"
+    assert "SECRET" not in denied[0].model_dump_json()
+
+
+def test_no_violation_audit_when_auditonviolation_false() -> None:
+    from engine.config.schema import GateSpec
+
+    engine = ComplianceEngine(_mortgage_spec_audit(audit_on_violation=False))
+    engine._audit.flush_sync()
+    gate = GateSpec.model_validate({"name": "g", "type": "threshold", "candidateprop": "age"})
+    with pytest.raises(ValueError):
+        engine.validate_gates([gate])
+    assert _denied(engine) == []
+
+
+def test_no_violation_audit_when_flag_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config.schema import GateSpec
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "prohibited_factor_violation_audit", False)
+    engine = ComplianceEngine(_mortgage_spec_audit())
+    engine._audit.flush_sync()
+    with pytest.raises(ValueError):
+        engine.validate_gates([GateSpec.model_validate({"name": "g", "type": "threshold", "candidateprop": "age"})])
+    assert _denied(engine) == []

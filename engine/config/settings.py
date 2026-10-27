@@ -448,6 +448,12 @@ class Settings(BaseSettings):
     # text, and a request-path flush failure is logged, not raised. Off:
     # unbounded retention and propagation.
     compliance_audit_soft_sink: bool = True
+    # RU-063 / CEG-COR-050: ProhibitedFactorsSpec.auditonviolation was read
+    # nowhere, so a blocked attempt left no audit trail. On: every violation
+    # raised through ComplianceEngine first emits one CRITICAL `denied` entry
+    # (regimes as compliance_tags, gate/dimension/endpoint/row path and the
+    # field name, never a value) when the domain's auditonviolation is true.
+    prohibited_factor_violation_audit: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

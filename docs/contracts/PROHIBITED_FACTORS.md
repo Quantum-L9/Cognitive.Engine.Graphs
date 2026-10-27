@@ -61,7 +61,7 @@ compliance:
       - disability
       - familial_status
       - national_origin
-    audit_on_violation: true
+    auditonviolation: true
 ```
 
 ## Correct
@@ -93,9 +93,14 @@ Blocked fields: {'race', 'ethnicity', ...}
 
 ## Audit
 
-With `audit_on_violation: true`, every blocked attempt is recorded through the audit
-path before the exception propagates. A rejected spec leaves a trail; it does not fail
-silently.
+With `auditonviolation: true` (the schema default), every blocked attempt raised through
+`ComplianceEngine` — gates, scoring dimensions, sync endpoint, sync rows — first emits
+one audit entry (`AuditLogger.log_violation`: severity `critical`, `outcome: denied`,
+`compliance_tags` = the domain's regime names, `resource` naming the gate / dimension /
+endpoint / row path and the blocked field, `metadata.blocked_field` = the field name —
+never a value), then re-raises the same `ValueError` (a `ProhibitedFactorViolationError`
+subclass). A rejected spec leaves a trail; it does not fail silently. The entry rides the
+next audit flush. `PROHIBITED_FACTOR_VIOLATION_AUDIT=false` turns the entry off.
 
 ## Verified by
 
