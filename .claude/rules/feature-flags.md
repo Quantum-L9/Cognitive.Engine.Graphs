@@ -87,3 +87,4 @@ were industry-specific and had no caller).
 | match_effective_weight_validation | True | Match weight ceiling checks the merged weights (`ScoringAssembler.merged_request_weights`) and rejects unknown keys (RU-009 / CEG-COR-018); off sums supplied keys only |
 | resolve_requires_created_edge | True | Legacy `handle_resolve` raises ValidationError when the CREATE returned no row (RU-004 / CEG-COR-014); off reports `resolved` unconditionally |
 | outcome_map_json_encoding | True | `handle_outcomes` writes `dimension_weights` via `engine.models.outcomes.encode_outcome_map` (JSON); counterfactual reads via `decode_outcome_map` (RU-005 / CEG-COR-056); off restores `str(dict)` |
+| health_probe_domain_count_only | True | `handle_health` tenant-missing text carries a pack count, not domain ids (RU-013 / CEG-COR-074); off restores the id list |

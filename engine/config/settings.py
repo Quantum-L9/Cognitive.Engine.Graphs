@@ -320,6 +320,10 @@ class Settings(BaseSettings):
     # (dimension_weights) as sorted-key JSON the counterfactual reader decodes.
     # Off: the str(dict) writer (the reader stays tolerant of both).
     outcome_map_json_encoding: bool = True
+    # RU-013 / CEG-COR-074: when the probed tenant has no pack, handle_health
+    # reports the number of loaded packs instead of listing every domain id.
+    # Off: the id list.
+    health_probe_domain_count_only: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
