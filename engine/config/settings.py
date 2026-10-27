@@ -389,6 +389,13 @@ class Settings(BaseSettings):
     # degraded. Off: admission checks gates only, as before. Ships on — it
     # withholds only packs whose matches cannot execute.
     scoring_admission_check_enabled: bool = True
+    # RU-039: a pack admission serves must execute for every declared match
+    # direction. On: admission_defects also requires TraversalAssembler to
+    # assemble each direction and every $parameter in gates, traversal and
+    # scoring to be one handle_match binds (queryschema field, derived
+    # parameter, scoring queryprop, top_n or a compiler-bound literal). Off:
+    # the previous checks only. Ships on (fail-closed, Stage-2 precedent).
+    admission_checks_full_match: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

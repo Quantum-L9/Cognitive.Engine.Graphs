@@ -43,14 +43,19 @@ RETIRED_LEGACY_PACKS = (
     "roofing-company",
 )
 # Served under default settings before the dormant marks; must stay served.
-SERVED_PACKS = ("mortgage-brokerage", "plasticos")
+SERVED_PACKS = ("plasticos",)
 # Served before the dormant marks, now withheld by the generic admission policy
 # because their match Cypher cannot execute (they failed every match). Each
 # entry names what the withholding reason must cite, and the operator flags
 # that restore serving (failure recovery of the remediation unit).
 WITHHELD_UNTIL_REPAIRED = {
     # RU-020: scoring references $lat/$lon/$target_price nothing binds (CEG-COR-011).
-    "freight-matching": (("'lat'", "'lon'", "'target_price'"), ("scoring_admission_check_enabled",)),
+    "freight-matching": (
+        ("'lat'", "'lon'", "'target_price'"),
+        ("scoring_admission_check_enabled", "admission_checks_full_match"),
+    ),
+    # RU-039: traversal step 'lenderresolve' is not in the assembler's grammar (CEG-COR-012).
+    "mortgage-brokerage": (("lenderresolve",), ("admission_checks_full_match",)),
 }
 
 
