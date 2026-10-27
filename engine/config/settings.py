@@ -350,6 +350,13 @@ class Settings(BaseSettings):
     # ParetoConfigSpec.front_size_limit by composite score (R1b-DEC-04 A).
     # Off: maximise-all, unbounded.
     arbitration_objective_direction: bool = True
+    # RU-022 / CEG-COR-030: ScoringAssembler.load_learned_weights read
+    # DimensionWeight by `dimension_name` / `domain_id`, properties the writer
+    # (SignalWeightCalculator, keyed {dimension, tenant}) never sets, so learned
+    # weights were always {}. On: the reader filters on {tenant: $tenant} and
+    # dw.dimension. Off: the legacy (inert) reader. FEEDBACK_ENABLED stays the
+    # global gate (default False).
+    learned_weights_tenant_keyed: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
