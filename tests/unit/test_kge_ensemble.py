@@ -343,3 +343,65 @@ class TestEnsembleController:
             mock_settings.kge_confidence_threshold = 0.0
             result = ctrl.predict(_scores(3))
             assert result.fusion_strategy == "fallback_mean"
+
+
+@pytest.mark.unit
+class TestEnsembleStrategyResolution:
+    """RG-159 (RU-124 / CEG-COR-111, DEC-46 option 1): a configured strategy is
+    applied or rejected; nothing silently becomes the weighted mean."""
+
+    @staticmethod
+    def _spec(strategy: str):
+        from engine.config.schema import KGEEnsembleSpec
+
+        return KGEEnsembleSpec(strategy=strategy)
+
+    @pytest.mark.parametrize("strategy", ["rank_aggregation", "weighted_average", "bogus", "median", "max"])
+    def test_unknown_or_unimplemented_spec_strategy_raises(self, strategy: str) -> None:
+        ctrl = EnsembleController(self._spec(strategy))
+        with pytest.raises(ValueError, match="weightedaverage, rankaggregation, mixtureofexperts"):
+            _ = ctrl.default_strategy
+
+    @pytest.mark.parametrize(
+        ("spelling", "expected"),
+        [
+            ("weightedaverage", FusionStrategy.WEIGHTED_MEAN),
+            ("rankaggregation", FusionStrategy.RANK_AGGREGATION),
+            ("mixtureofexperts", FusionStrategy.MIXTURE_EXPERTS),
+        ],
+    )
+    def test_code_spellings_resolve(self, spelling: str, expected: FusionStrategy) -> None:
+        assert EnsembleController(self._spec(spelling)).default_strategy == expected
+
+    def test_rankaggregation_spec_fuses_with_rank_aggregation(self) -> None:
+        ctrl = EnsembleController(self._spec("rankaggregation"))
+        with patch("engine.kge.ensemble.settings") as mock_settings:
+            mock_settings.kge_enabled = True
+            mock_settings.kge_confidence_threshold = 0.0
+            result = ctrl.predict(_scores(3))
+        assert result.fusion_strategy == "borda"
+
+    @pytest.mark.parametrize("strategy", [FusionStrategy.MEDIAN, FusionStrategy.MAX])
+    def test_predict_rejects_enum_member_without_implementation(self, strategy: FusionStrategy) -> None:
+        ctrl = EnsembleController()
+        with patch("engine.kge.ensemble.settings") as mock_settings:
+            mock_settings.kge_enabled = True
+            mock_settings.kge_confidence_threshold = 0.0
+            with pytest.raises(ValueError, match="no implementation"):
+                ctrl.predict(_scores(3), strategy=strategy)
+        assert ctrl.get_audit_log() == []
+
+    def test_predict_with_bad_spec_strategy_raises(self) -> None:
+        ctrl = EnsembleController(self._spec("rank_aggregation"))
+        with patch("engine.kge.ensemble.settings") as mock_settings:
+            mock_settings.kge_enabled = True
+            mock_settings.kge_confidence_threshold = 0.0
+            with pytest.raises(ValueError, match="rank_aggregation"):
+                ctrl.predict(_scores(3))
+
+    def test_kge_disabled_guard_still_short_circuits(self) -> None:
+        ctrl = EnsembleController(self._spec("bogus"))
+        with patch("engine.kge.ensemble.settings") as mock_settings:
+            mock_settings.kge_enabled = False
+            result = ctrl.predict(_scores(3), strategy=FusionStrategy.MEDIAN)
+        assert result.fusion_strategy == "disabled"

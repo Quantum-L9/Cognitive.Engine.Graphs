@@ -404,14 +404,39 @@ class EnsembleController:
         """Construct from domain-pack KGEEnsembleSpec."""
         return cls(spec=spec)
 
+    def _accepted_strategies(self) -> str:
+        return ", ".join(s.value for s in self.strategies)
+
+    def _resolve_strategy(self, strategy: FusionStrategy | str) -> FusionStrategy:
+        """Return the implemented strategy named by ``strategy`` or raise.
+
+        RU-124 / CEG-COR-111 (DEC-46 option 1): the code spellings
+        (``FusionStrategy`` values) are authoritative; an unknown name or an
+        enum member without an implementation is rejected, never silently
+        replaced by the weighted mean.
+        """
+        try:
+            resolved = FusionStrategy(strategy)
+        except ValueError:
+            msg = f"Unknown ensemble strategy {strategy!r}; accepted values: {self._accepted_strategies()}"
+            raise ValueError(msg) from None
+        if resolved not in self.strategies:
+            msg = (
+                f"Ensemble strategy {resolved.value!r} has no implementation; "
+                f"accepted values: {self._accepted_strategies()}"
+            )
+            raise ValueError(msg)
+        return resolved
+
     @property
     def default_strategy(self) -> FusionStrategy:
-        """Default fusion strategy from domain-pack spec."""
+        """Default fusion strategy from domain-pack spec (WDS when no spec).
+
+        Raises:
+            ValueError: ``spec.strategy`` is not an implemented strategy.
+        """
         if self._spec:
-            try:
-                return FusionStrategy(self._spec.strategy)
-            except ValueError:
-                pass
+            return self._resolve_strategy(self._spec.strategy)
         return FusionStrategy.WEIGHTED_MEAN
 
     def predict(
@@ -427,6 +452,10 @@ class EnsembleController:
 
         Returns:
             EnsembleResult with final_score ready for kge_score writeback.
+
+        Raises:
+            ValueError: no scores, or the requested / configured strategy is
+                unknown or has no implementation (RU-124).
         """
         if not settings.kge_enabled:
             logger.warning("EnsembleController.predict skipped — kge_enabled=False")
@@ -440,6 +469,8 @@ class EnsembleController:
 
         if not scores:
             raise ValueError("No scores to ensemble")
+
+        resolved_strategy = self._resolve_strategy(strategy) if strategy is not None else self.default_strategy
 
         # Filter below confidence threshold
         threshold = settings.kge_confidence_threshold
@@ -462,10 +493,7 @@ class EnsembleController:
                 explanation=f"Single variant: {single.variant_id}",
             )
 
-        resolved_strategy = strategy or self.default_strategy
-        impl = self.strategies.get(resolved_strategy)
-        if not impl:
-            impl = self.strategies[FusionStrategy.WEIGHTED_MEAN]
+        impl = self.strategies[resolved_strategy]
 
         try:
             result = impl.fuse(valid_scores)

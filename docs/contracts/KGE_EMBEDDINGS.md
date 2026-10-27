@@ -36,7 +36,7 @@ same weight ceiling.
 | Link prediction | Beam search, width 10, depth 3 |
 | Vector index | Neo4j, cosine similarity |
 
-Ensemble strategies: `weighted_average`, `rank_aggregation`, `mixture_of_experts`.
+Ensemble strategies (`KGEEnsembleSpec.strategy`, spelled as `FusionStrategy` values): `weightedaverage`, `rankaggregation`, `mixtureofexperts`. Any other value — including the unimplemented `median` and `max` — is rejected with a `ValueError`, never replaced by the weighted mean.
 
 ## Tenant isolation
 
