@@ -487,6 +487,11 @@ class Settings(BaseSettings):
     # round(2.567, ndigits=2) returned 3 and max(x, key=y) returned x. On: a
     # call with keywords raises ValueError. Off: keywords silently dropped.
     safe_eval_reject_keywords: bool = True
+    # RU-074 / CEG-COR-121: CausalSubgraphSerializer matched `[r:T]` (one
+    # hop), so match explanations never went deeper than 1. On: `[:T*1..N]`
+    # with N = max_depth clamped to [1, causal.chain_depth_limit]. Off: the
+    # fixed one-hop pattern.
+    causal_serializer_variable_depth: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
