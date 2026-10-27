@@ -26,6 +26,7 @@ that reads from the ``transaction_outcomes`` table.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
@@ -34,6 +35,34 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+
+# ── Outcome map-field codec (RU-005 / CEG-COR-056) ─────────────────────────
+#
+# Neo4j cannot store a map as a node property, so map-valued outcome
+# fingerprint fields (``dimension_weights``) are stored as a string. The writer
+# used ``str(dict)`` — a Python repr no reader can decode without ``eval`` —
+# and the counterfactual reader indexed that string as a dict. One encoding,
+# JSON with sorted keys, is written; readers decode it, accept a dict, and
+# treat anything undecodable (legacy repr strings) as empty. Never eval'd.
+
+
+def encode_outcome_map(value: Any) -> str:
+    """Encode a map-valued outcome field for storage as a node property."""
+    return json.dumps({} if value is None else value, sort_keys=True, default=str)
+
+
+def decode_outcome_map(value: Any) -> dict[str, Any]:
+    """Decode a stored map-valued outcome field; undecodable input yields ``{}``."""
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except ValueError:
+            return {}
+        return decoded if isinstance(decoded, dict) else {}
+    return {}
 
 
 # ── Models ───────────────────────────────────────────────────────────────────

@@ -22,6 +22,7 @@ from typing import Any
 
 from engine.config.schema import CounterfactualSpec
 from engine.graph.driver import GraphDriver
+from engine.models.outcomes import decode_outcome_map
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ class CounterfactualGenerator:
         row = results[0]
         return {
             "active_dimensions": row.get("active_dimensions") or [],
-            "dimension_weights": row.get("dimension_weights") or {},
+            "dimension_weights": decode_outcome_map(row.get("dimension_weights")),
             "gates_passed": row.get("gates_passed") or [],
             "match_direction": row.get("match_direction"),
             "candidate_count": row.get("candidate_count", 0),
@@ -141,7 +142,7 @@ class CounterfactualGenerator:
         return [
             {
                 "active_dimensions": r.get("active_dimensions") or [],
-                "dimension_weights": r.get("dimension_weights") or {},
+                "dimension_weights": decode_outcome_map(r.get("dimension_weights")),
                 "gates_passed": r.get("gates_passed") or [],
                 "outcome_id": r.get("outcome_id"),
             }

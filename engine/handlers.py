@@ -2086,6 +2086,15 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
     RETURN o.outcome_id AS outcome_id
     """
     )
+    from engine.config.settings import settings as _outcome_settings
+    from engine.models.outcomes import encode_outcome_map
+
+    # RU-005 / CEG-COR-056: one decodable encoding (JSON) for the map-valued
+    # fingerprint field; off restores the Python repr writer.
+    stored_dimension_weights = (
+        encode_outcome_map(dimension_weights) if _outcome_settings.outcome_map_json_encoding else str(dimension_weights)
+    )
+
     # RU-002: link the outcome to the candidate by its declared id property,
     # scoped to the fingerprint's direction when it names a declared one.
     outcome_candidate_predicate = _declared_id_predicate(domain_spec, "c", "candidate_id", match_direction)
@@ -2106,7 +2115,7 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
                 "tenant": tenant,
                 "domain_id": domain_spec.domain.id,
                 "active_dimensions": active_dimensions,
-                "dimension_weights": str(dimension_weights),
+                "dimension_weights": stored_dimension_weights,
                 "gates_passed": gates_passed,
                 "match_direction": match_direction,
                 "candidate_count": candidate_count,

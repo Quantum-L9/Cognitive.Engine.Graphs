@@ -86,3 +86,4 @@ were industry-specific and had no caller).
 | query_defaults_before_derived | True | `handle_match` backfills declared queryschema defaults before derived-parameter resolution (RU-016 / CEG-COR-171); off restores resolve-then-backfill |
 | match_effective_weight_validation | True | Match weight ceiling checks the merged weights (`ScoringAssembler.merged_request_weights`) and rejects unknown keys (RU-009 / CEG-COR-018); off sums supplied keys only |
 | resolve_requires_created_edge | True | Legacy `handle_resolve` raises ValidationError when the CREATE returned no row (RU-004 / CEG-COR-014); off reports `resolved` unconditionally |
+| outcome_map_json_encoding | True | `handle_outcomes` writes `dimension_weights` via `engine.models.outcomes.encode_outcome_map` (JSON); counterfactual reads via `decode_outcome_map` (RU-005 / CEG-COR-056); off restores `str(dict)` |

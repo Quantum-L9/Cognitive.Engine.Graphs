@@ -316,6 +316,10 @@ class Settings(BaseSettings):
     # returned no row (source or target not found) instead of reporting
     # `resolved`. Off: `resolved` regardless of the result.
     resolve_requires_created_edge: bool = True
+    # RU-005 / CEG-COR-056: handle_outcomes stores map-valued fingerprint fields
+    # (dimension_weights) as sorted-key JSON the counterfactual reader decodes.
+    # Off: the str(dict) writer (the reader stays tolerant of both).
+    outcome_map_json_encoding: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
