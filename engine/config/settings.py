@@ -305,6 +305,11 @@ class Settings(BaseSettings):
     # edge each run, and prunes on score OR age > max_age_days. Off: the
     # per-row create and score-only prune, under which aged edges never decay.
     gds_temporal_recency_decay_existing: bool = True
+    # RU-098 / CEG-COR-168: co-occurrence power-law pruning orders each node's
+    # edges by weight (elementId tie-break) and deletes an edge only when both
+    # endpoints prune and neither keeps it. Off: unordered per-endpoint prune
+    # that can leave hubs below their keep count and differs run to run.
+    gds_cooccurrence_deterministic_prune: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

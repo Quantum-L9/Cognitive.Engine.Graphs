@@ -38,7 +38,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from engine.config.schema import AggregationStrategy, DomainSpec, EdgeCategory, GDSJobSpec
 from engine.graph.driver import GraphDriver
-from engine.utils.security import sanitize_label
+from engine.utils.security import cypher_number, sanitize_label
 
 # S2-10: EdgeCategory → recommended GDS configuration mapping.
 # Paper: different relation types benefit from different algorithms/aggregation.
@@ -497,16 +497,12 @@ class GDSScheduler:
 
         # Step 2: Power-law pruning — prune high-degree nodes to d^0.86 edges
         # Only prune nodes with >10 co-occurrence edges to avoid over-pruning
-        prune_cypher = f"""
-        MATCH (n)-[r:{write_edge}]-()
-        WITH n, collect(r) AS edges, count(r) AS degree
-        WHERE degree > 10
-        WITH n, edges, degree, toInteger(degree ^ {pruning_alpha}) AS keep_count
-        WITH n, edges[keep_count..] AS to_prune
-        UNWIND to_prune AS r
-        DELETE r
-        RETURN count(r) AS pruned_edges
-        """
+        from engine.config.settings import settings
+
+        if settings.gds_cooccurrence_deterministic_prune:
+            prune_cypher = self._deterministic_cooccurrence_prune_cypher(write_edge, pruning_alpha)
+        else:
+            prune_cypher = self._legacy_cooccurrence_prune_cypher(write_edge, pruning_alpha)
         try:
             prune_result = await self.graph_driver.execute_query(prune_cypher, database=db)
             pruned = prune_result[0]["pruned_edges"] if prune_result else 0
@@ -516,6 +512,51 @@ class GDSScheduler:
 
         logger.info(f"Co-occurrence: {edges} edges created/updated, {pruned} pruned (alpha={pruning_alpha})")
         return {"edges_created": edges, "edges_pruned": pruned, "pruning_alpha": pruning_alpha}
+
+    @staticmethod
+    def _deterministic_cooccurrence_prune_cypher(write_edge: str, pruning_alpha: float) -> str:
+        """RU-098 / CEG-COR-168: weight-ordered, deterministic power-law pruning.
+
+        Every node with degree > 10 keeps its strongest
+        ``keep_count = floor(degree ^ alpha)`` edges, ordered by ``r.weight``
+        DESC with ``elementId(r)`` as the tie-break. An edge is deleted only
+        when *both* endpoints prune and neither keeps it (two rejection votes),
+        so a node never ends below its keep count and a node with degree <= 10
+        keeps all of its edges. Identical input gives an identical result.
+        ``write_edge`` arrives sanitized and is re-validated here.
+        """
+        edge = sanitize_label(write_edge)
+        alpha = cypher_number(pruning_alpha)
+        return f"""
+        MATCH (n)-[r:{edge}]-()
+        WITH n, r
+        ORDER BY r.weight DESC, elementId(r)
+        WITH n, collect(r) AS edges
+        WITH n, edges, size(edges) AS degree
+        WHERE degree > 10
+        WITH n, edges[toInteger(degree ^ {alpha})..] AS rejected
+        UNWIND rejected AS r
+        WITH r, count(*) AS votes
+        WHERE votes = 2
+        DELETE r
+        RETURN count(r) AS pruned_edges
+        """
+
+    @staticmethod
+    def _legacy_cooccurrence_prune_cypher(write_edge: str, pruning_alpha: float) -> str:
+        """Pre-RU-098 prune: unordered collect, per-endpoint deletion."""
+        edge = sanitize_label(write_edge)
+        alpha = cypher_number(pruning_alpha)
+        return f"""
+        MATCH (n)-[r:{edge}]-()
+        WITH n, collect(r) AS edges, count(r) AS degree
+        WHERE degree > 10
+        WITH n, edges, degree, toInteger(degree ^ {alpha}) AS keep_count
+        WITH n, edges[keep_count..] AS to_prune
+        UNWIND to_prune AS r
+        DELETE r
+        RETURN count(r) AS pruned_edges
+        """
 
     async def _run_reinforcement(self, job_spec: GDSJobSpec) -> dict[str, Any]:
         """
@@ -753,8 +794,13 @@ class GDSScheduler:
         3. prune — delete edges whose score fell below ``prune_below`` or whose
            ``last_event_date`` is older than ``max_age_days``.
 
-        Labels and types arrive sanitized; every value is a ``$param``.
+        Labels and types arrive sanitized and are re-validated here; every
+        value is a ``$param``.
         """
+        node_label = sanitize_label(node_label)
+        source_edge = sanitize_label(source_edge)
+        overlay_edge = sanitize_label(overlay_edge)
+        ts_prop = sanitize_label(ts_prop)
         count_agg = (
             ",\n             sum(CASE WHEN age_days <= $half_life "
             f"THEN coalesce(t.{sanitize_label(str(count_prop))}, 1) ELSE 0 END) AS recent_count"
