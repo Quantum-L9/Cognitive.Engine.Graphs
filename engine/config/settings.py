@@ -478,6 +478,11 @@ class Settings(BaseSettings):
     # the type with ON CREATE / ON MATCH SET; AttributionCalculator reads each
     # touchpoint's declared id per label (PO-04). Off: the legacy Cypher.
     causal_edge_declared_identity: bool = True
+    # RU-069 / CEG-COR-058: CausalEdgeRuntimeValidator looked a
+    # CausalSubgraphSpec edge up by record["edge_type"], which sync records do
+    # not carry, so declared temporal_validation was skipped for every sync
+    # batch. On: the batch edge_type is used. Off: the record key.
+    causal_validator_batch_edge_type: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
