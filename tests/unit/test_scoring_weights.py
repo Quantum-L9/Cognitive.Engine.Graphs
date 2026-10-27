@@ -338,6 +338,13 @@ class TestEffectiveRequestWeightValidation:
         with pytest.raises(ValidationError, match="outside allowed range"):
             await _orbital_match({"w_ports": 1.5})
 
+    async def test_non_numeric_weight_is_a_validation_error(self) -> None:
+        """A non-numeric override is reported as the caller's error, not a ValueError."""
+        from engine.handlers import ValidationError
+
+        with pytest.raises(ValidationError, match="'w_reliability' is not a valid number"):
+            await _orbital_match({"w_reliability": "abc"})
+
     async def test_flag_off_validates_supplied_keys_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from engine.config.settings import settings
 

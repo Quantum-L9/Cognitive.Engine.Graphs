@@ -239,7 +239,7 @@ class ScoringAssembler:
             self._renormalize_learned(weight_entries, rescalable)
         weight_exprs = [f"({cypher_number(w)} * {a})" for w, a in weight_entries]
         # RU-032: the monoculture check reads the coefficients actually emitted.
-        effective_weights = {name: float(w) for name, (w, _a) in zip(active_dim_names, weight_entries, strict=True)}
+        effective_weights = {name: w for name, (w, _a) in zip(active_dim_names, weight_entries, strict=True)}
 
         self._last_active_dims = list(active_dim_names)
         self._last_effective_weights = effective_weights
@@ -279,15 +279,17 @@ class ScoringAssembler:
         """The request override for this dimension's weightkey, else the spec default."""
         return weights.get(dim.weightkey, dim.defaultweight)
 
-    def merged_request_weights(self, match_direction: str, weights: dict[str, float]) -> dict[str, float]:
+    def merged_request_weights(self, match_direction: str, weights: dict[str, float]) -> dict[str, Any]:
         """RU-009: per active dimension, the request-merged weight scoring will use.
 
         Same merge (``_request_weight``) and same direction filter as
         ``assemble_scoring_clause``, before any learned-weight adjustment, so the
         match weight-ceiling check validates what the score expression applies.
+        Values are returned as supplied: the caller's validator parses them, so a
+        non-numeric override surfaces as its ValidationError, not a ValueError here.
         """
         return {
-            dim.name: float(self._request_weight(dim, weights))
+            dim.name: self._request_weight(dim, weights)
             for dim in self.scoring_spec.dimensions
             if not (dim.matchdirections and match_direction not in dim.matchdirections)
         }
