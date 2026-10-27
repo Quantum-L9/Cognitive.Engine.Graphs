@@ -492,6 +492,11 @@ class Settings(BaseSettings):
     # with N = max_depth clamped to [1, causal.chain_depth_limit]. Off: the
     # fixed one-hop pattern.
     causal_serializer_variable_depth: bool = True
+    # RU-075 / CEG-COR-122: CounterfactualGenerator emitted the same
+    # (change_weight, <dim>_weight_increase) once per qualifying positive and
+    # queried a hardcoded :TransactionOutcome. On: duplicates suppressed and
+    # the domain's feedbackloop.outcome_node_label used. Off: legacy.
+    counterfactual_dedupe_and_spec_label: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
