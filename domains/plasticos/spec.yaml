@@ -277,21 +277,13 @@ queryschema:
   - name: requires_active_supply
     type: bool
     description: When true, only active SupplyOpportunity candidates pass
+# No traversal steps (CEG-COR-013): a required `MATCH (candidate)-[:PROCESSES]->
+# (polymer)` step neither tested the requested polymer nor kept one row per
+# candidate — a facility processing three polymers came back three times. The
+# polymer constraint is the two `type: traversal` gates below, which compile to
+# `EXISTS { MATCH (candidate)-[:E]->(t:PolymerFamily) WHERE t.code = $polymer_type }`.
 traversal:
-  steps:
-  - name: polymer_capability
-    pattern: (candidate:Facility)-[:PROCESSES]->(polymer:PolymerFamily)
-    required: true
-    matchdirections:
-    - supply_opportunity_to_buyer_facility
-    description: Ensure facility processes the requested polymer type
-  - name: active_supply_polymer
-    pattern: (candidate:SupplyOpportunity)-[:FULFILLS_POLYMER]->(polymer:PolymerFamily)
-    required: true
-    matchdirections:
-    - buyer_demand_to_supply_opportunity
-    description: Active supply must fulfill requested polymer; distinct from Facility
-      PROCESSES capability
+  steps: []
 gates:
 - name: density_range
   type: range
@@ -374,6 +366,27 @@ gates:
   - buyer_demand_to_supply_opportunity
   description: Active supply polymer_type must equal demand polymer_type (PACK-026
     hard-gate harvest)
+- name: polymer_capability_gate
+  type: traversal
+  edgetype: PROCESSES
+  tonode: PolymerFamily
+  candidateprop: code
+  queryparam: polymer_type
+  nullbehavior: fail
+  matchdirections:
+  - supply_opportunity_to_buyer_facility
+  description: Facility must PROCESS the requested polymer family
+- name: fulfills_polymer_gate
+  type: traversal
+  edgetype: FULFILLS_POLYMER
+  tonode: PolymerFamily
+  candidateprop: code
+  queryparam: polymer_type
+  nullbehavior: fail
+  matchdirections:
+  - buyer_demand_to_supply_opportunity
+  description: Active supply must FULFILL the requested polymer family; distinct
+    from Facility PROCESSES capability
 scoring:
   dimensions:
   - name: geo_proximity
