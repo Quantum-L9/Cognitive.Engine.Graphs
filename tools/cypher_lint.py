@@ -63,6 +63,21 @@ Diagnostic f-strings (inside ``raise``, exception constructors, logger calls,
 ``msg``-like names) are not Cypher and are skipped by AST context, never by
 line regex.
 
+The same classification applies to Cypher built by string concatenation
+(``"MATCH (n:" + label + ")"``), ``str.format`` and ``%`` formatting: each
+operand / argument is classified by the literal text before its placeholder.
+
+Name facts are flow-aware: the bindings that reach a use are the last
+binding that dominates it in its block plus any later (conditional) ones, and
+a name with any reaching raw binding is raw even if another reaching binding
+is validated (raw wins on conflict). A same-module function certifies only a
+direct call (``helper(x)``) or a ``self.helper(x)`` method call, never an
+attribute call on another object (``spec.get(...)`` is not ``def get``).
+
+An assignment to a ``msg``-like name is skipped only when its text is not
+query-shaped (no ``(n:X)`` / ``-[`` / ``]->`` structure and fewer than two
+clause keywords).
+
 A finding may be waived only with an explicit, reasoned trailing comment on
 the interpolation's line — ``# cypher-lint: allow <reason>``. Waivers are
 printed on every run so they are never silent, and a marker without a reason
@@ -73,6 +88,7 @@ from __future__ import annotations
 
 import ast
 import re
+import string
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -132,6 +148,16 @@ _FRAGMENT_NAME_RE = re.compile(
 _FRAGMENT_LIST_RE = re.compile(
     r"exprs|clauses|parts|cases|statements|fragments|predicates|conditions|filters|lines", re.IGNORECASE
 )
+# A message-named assignment is still scanned when its text is query-shaped.
+_QUERY_STRUCTURE_RE = re.compile(r"\(\s*\w*\s*:\s*X|-\[|\]->|<-\[")
+_CLAUSE_KEYWORD_RE = re.compile(
+    r"\b(?:OPTIONAL MATCH|MATCH|MERGE|CREATE|DETACH DELETE|DELETE|SET|REMOVE|WHERE|WITH|RETURN|CALL|YIELD"
+    r"|UNWIND|ORDER BY|FOREACH|UNION)\b"
+)
+_PERCENT_SPEC_RE = re.compile(
+    r"%(?:\((?P<key>[^)]*)\))?[#0\- +]*(?:\*|\d+)?(?:\.(?:\*|\d+))?[hlL]?(?P<conv>[diouxXeEfFgGcrsa%])"
+)
+_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
 SINK_CALLS = frozenset({"execute_query", "execute_write", "run", "_raw_execute_query", "_raw_execute_write"})
 SINK_KWARGS = frozenset({"cypher", "query", "statement"})
 
@@ -167,16 +193,44 @@ def _own_nodes(root: ast.AST):
             stack.extend(ast.iter_child_nodes(node))
 
 
+@dataclass(frozen=True, eq=False)
+class _Binding:
+    """One binding of a name: the statement, the bound value and where it takes effect."""
+
+    scope: _Scope
+    stmt: ast.AST
+    value: ast.expr
+    kind: str  # "assign" | "loop" | "comp" | "walrus"
+    effect: tuple[int, int]
+
+
+def _target_names(target: ast.expr) -> list[str]:
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, ast.Starred):
+        return _target_names(target.value)
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return [name for elt in target.elts for name in _target_names(elt)]
+    return []
+
+
+def _end(node: ast.AST) -> tuple[int, int]:
+    return (getattr(node, "end_lineno", None) or 0, getattr(node, "end_col_offset", None) or 0)
+
+
 class _Scope:
-    """Validated / raw name facts for one lexical scope (module or function)."""
+    """Name bindings and attribute assignments for one lexical scope (module or function)."""
 
     def __init__(self, node: ast.AST, parent: _Scope | None) -> None:
         self.node = node
         self.parent = parent
-        self.safe_names: set[str] = set()
-        self.raw_names: set[str] = set()
+        self.bindings: dict[str, list[_Binding]] = {}
         self.assignments: list[tuple[ast.expr, ast.expr]] = []
         self.loops: list[tuple[ast.expr, ast.expr]] = []
+
+    def bind(self, binding: _Binding, target: ast.expr) -> None:
+        for name in _target_names(target):
+            self.bindings.setdefault(name, []).append(binding)
 
     def chain(self):
         scope: _Scope | None = self
@@ -192,7 +246,8 @@ class _ModuleFacts:
     visible in that function and its nested functions, never in a sibling —
     so ``label = sanitize_label(x)`` in one method cannot certify a bare
     ``{label}`` in another. ``self`` attributes are object state and stay
-    module-wide. Assignment order inside one scope is not tracked.
+    module-wide. Name facts are flow-aware (see :meth:`_reaching`); ``self``
+    attribute facts are not.
     """
 
     def __init__(self, tree: ast.Module) -> None:
@@ -217,15 +272,29 @@ class _ModuleFacts:
         self._functions: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Assign):
-                self.scope_of(node).assignments.extend((target, node.value) for target in node.targets)
+                scope = self.scope_of(node)
+                scope.assignments.extend((target, node.value) for target in node.targets)
+                binding = _Binding(scope, node, node.value, "assign", _end(node))
+                for target in node.targets:
+                    scope.bind(binding, target)
             elif (isinstance(node, (ast.AnnAssign, ast.AugAssign)) and node.value is not None) or isinstance(
                 node, ast.NamedExpr
             ):
-                self.scope_of(node).assignments.append((node.target, node.value))
+                scope = self.scope_of(node)
+                scope.assignments.append((node.target, node.value))
+                kind = "walrus" if isinstance(node, ast.NamedExpr) else "assign"
+                scope.bind(_Binding(scope, node, node.value, kind, _end(node)), node.target)
             elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
-                self.scope_of(node).loops.append((node.target, node.iter))
+                scope = self.scope_of(node)
+                scope.loops.append((node.target, node.iter))
+                kind = "comp" if isinstance(node, ast.comprehension) else "loop"
+                scope.bind(_Binding(scope, node, node.iter, kind, _end(node.iter)), node.target)
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 self._functions.append(node)
+        self._generation = 0
+        self._name_memo: dict[int, tuple[int, tuple[bool, bool]]] = {}
+        self._in_progress: set[int] = set()
+        self._cycle_hit = False
         self._fixpoint()
 
     def scope_of(self, node: ast.AST) -> _Scope:
@@ -238,20 +307,21 @@ class _ModuleFacts:
         return next(iter(self._scopes.values()))
 
     def _fixpoint(self) -> None:
+        """Grow ``self`` attribute and helper-function facts to a fixpoint.
+
+        Name facts are derived on demand from the reaching bindings; they are
+        memoised per generation, and the generation advances whenever an
+        attribute or function fact changes.
+        """
         changed = True
         while changed:
             changed = False
             for scope in self._scopes.values():
-                for target, value in scope.assignments:
+                for target, value in [*scope.assignments, *scope.loops]:
                     if self.is_safe(value, scope):
-                        changed |= self._mark(target, scope.safe_names, self.safe_attrs)
+                        changed |= self._mark(target, self.safe_attrs)
                     if self.is_raw(value, scope):
-                        changed |= self._mark(target, scope.raw_names, self.raw_attrs)
-                for target, iterable in scope.loops:
-                    if self.is_safe(iterable, scope):
-                        changed |= self._mark(target, scope.safe_names, self.safe_attrs)
-                    if self.is_raw(iterable, scope):
-                        changed |= self._mark(target, scope.raw_names, self.raw_attrs)
+                        changed |= self._mark(target, self.raw_attrs)
             for fn in self._functions:
                 if fn.name in self.safe_funcs:
                     continue
@@ -262,26 +332,104 @@ class _ModuleFacts:
                 if returns and all(self.is_safe(r, fn_scope) for r in returns):
                     self.safe_funcs.add(fn.name)
                     changed = True
+            if changed:
+                self._generation += 1
 
     @staticmethod
-    def _mark(target: ast.expr, names: set[str], attrs: set[str]) -> bool:
-        if isinstance(target, ast.Name):
-            if target.id in names:
-                return False
-            names.add(target.id)
-            return True
+    def _mark(target: ast.expr, attrs: set[str]) -> bool:
+        """Record a ``self.<attr>`` target (names are resolved by flow, not marked)."""
         if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name) and target.value.id == "self":
             if target.attr in attrs:
                 return False
             attrs.add(target.attr)
             return True
         if isinstance(target, (ast.Tuple, ast.List)):
-            return any(_ModuleFacts._mark(elt, names, attrs) for elt in target.elts)
+            return any(_ModuleFacts._mark(elt, attrs) for elt in target.elts)
         return False
 
+    # -- flow-aware name facts --
+
+    def _ancestors(self, node: ast.AST):
+        current = self.parents.get(node)
+        while current is not None:
+            yield current
+            current = self.parents.get(current)
+
+    def _dominates(self, binding: _Binding, use: ast.AST) -> bool:
+        """Does *binding* execute unconditionally before *use* (same block, earlier statement)?"""
+        stmt = binding.stmt
+        if binding.kind in {"comp", "walrus"}:
+            return False
+        if binding.kind == "loop":
+            body = getattr(stmt, "body", [])
+            return any(anc in body for anc in self._ancestors(use)) if body else False
+        container = self.parents.get(stmt)
+        if container is None:
+            return False
+        for field in ("body", "orelse", "finalbody"):
+            block = getattr(container, field, None)
+            if isinstance(block, list) and any(item is stmt for item in block):
+                index = next(i for i, item in enumerate(block) if item is stmt)
+                later = block[index + 1 :]
+                return any(any(anc is item for item in later) for anc in self._ancestors(use))
+        return False
+
+    def _reaching(self, use: ast.Name, use_scope: _Scope, def_scope: _Scope) -> list[_Binding]:
+        """The bindings of ``use.id`` that may reach *use*."""
+        binds = def_scope.bindings[use.id]
+        # Comprehension targets bind only inside their own comprehension.
+        for anc in self._ancestors(use):
+            if isinstance(anc, _COMPREHENSIONS):
+                own = [b for b in binds if b.kind == "comp" and any(b.stmt is g for g in anc.generators)]
+                if own:
+                    return own
+        binds = [b for b in binds if b.kind != "comp"]
+        if def_scope is not use_scope:
+            return binds  # closure / module global: no flow information
+        pos = (use.lineno, use.col_offset)
+        preceding = [b for b in binds if b.effect <= pos]
+        if not preceding:
+            return binds  # loop-carried or bound later: every binding may reach
+        dominating = [b for b in preceding if self._dominates(b, use)]
+        if dominating:
+            last = max(dominating, key=lambda b: b.effect)
+            return [b for b in preceding if b.effect >= last.effect]
+        return preceding
+
+    def _name_facts(self, use: ast.Name, scope: _Scope) -> tuple[bool, bool]:
+        """(validated, raw) for a name use. Raw wins: a name with any reaching raw binding is not validated."""
+        key = id(use)
+        cached = self._name_memo.get(key)
+        if cached is not None and cached[0] == self._generation:
+            return cached[1]
+        if key in self._in_progress:
+            self._cycle_hit = True
+            return (False, False)
+        def_scope = next((s for s in scope.chain() if use.id in s.bindings), None)
+        if def_scope is None:
+            return (False, False)
+        outer_cycle = self._cycle_hit
+        self._cycle_hit = False
+        self._in_progress.add(key)
+        try:
+            reaching = self._reaching(use, scope, def_scope)
+            raw = any(self.is_raw(b.value, b.scope) for b in reaching)
+            safe = not raw and any(self.is_safe(b.value, b.scope) for b in reaching)
+        finally:
+            self._in_progress.discard(key)
+        result = (safe, raw)
+        if not self._cycle_hit:
+            self._name_memo[key] = (self._generation, result)
+        self._cycle_hit = outer_cycle or self._cycle_hit
+        return result
+
     @staticmethod
-    def _name_in(name: str, scope: _Scope, attr: str) -> bool:
-        return any(name in getattr(s, attr) for s in scope.chain())
+    def _is_local_call(call: ast.Call) -> bool:
+        """A call that can resolve to a same-module function: ``helper(x)`` or ``self.helper(x)``."""
+        func = call.func
+        if isinstance(func, ast.Name):
+            return True
+        return isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id == "self"
 
     # -- validated? --
 
@@ -289,12 +437,12 @@ class _ModuleFacts:
         if isinstance(expr, ast.Constant):
             return isinstance(expr.value, str)
         if isinstance(expr, ast.Name):
-            return self._name_in(expr.id, scope, "safe_names")
+            return self._name_facts(expr, scope)[0]
         if isinstance(expr, ast.Attribute):
             return isinstance(expr.value, ast.Name) and expr.value.id == "self" and expr.attr in self.safe_attrs
         if isinstance(expr, ast.Call):
             name = _call_name(expr)
-            if name in SANITIZERS or name in self.safe_funcs:
+            if name in SANITIZERS or (name in self.safe_funcs and self._is_local_call(expr)):
                 return True
             if name in NUMERIC_CASTS and isinstance(expr.func, ast.Name):
                 return True  # a number cannot carry Cypher
@@ -330,7 +478,7 @@ class _ModuleFacts:
 
     def is_raw(self, expr: ast.expr, scope: _Scope) -> bool:
         if isinstance(expr, ast.Name):
-            return self._name_in(expr.id, scope, "raw_names")
+            return self._name_facts(expr, scope)[1]
         if isinstance(expr, ast.Attribute):
             root = _attribute_root(expr)
             if root in RAW_ROOTS:
@@ -340,7 +488,7 @@ class _ModuleFacts:
             return _attribute_chain_has_raw_segment(expr)
         if isinstance(expr, ast.Call):
             name = _call_name(expr)
-            if name in SANITIZERS or name in self.safe_funcs or name in NUMERIC_CASTS:
+            if name in SANITIZERS or name in NUMERIC_CASTS or (name in self.safe_funcs and self._is_local_call(expr)):
                 return False
             if isinstance(expr.func, ast.Attribute) and expr.func.attr in {"get", "pop", "strip", "lower", "upper"}:
                 return self.is_raw(expr.func.value, scope)
@@ -386,7 +534,14 @@ def _attribute_chain_has_raw_segment(expr: ast.Attribute) -> bool:
 # ── message context ─────────────────────────────────────────────────────────
 
 
-def _is_message_context(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
+def _looks_like_query(text: str) -> bool:
+    """Query-shaped literal text: a node/relationship pattern or two distinct clause keywords."""
+    if _QUERY_STRUCTURE_RE.search(text):
+        return True
+    return len(set(_CLAUSE_KEYWORD_RE.findall(text))) >= 2
+
+
+def _is_message_context(node: ast.AST, parents: dict[ast.AST, ast.AST], text: str = "") -> bool:
     """Diagnostic text, not Cypher: skip by AST context."""
     child: ast.AST = node
     while child in parents:
@@ -417,16 +572,16 @@ def _is_message_context(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
         if isinstance(parent, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
             targets = parent.targets if isinstance(parent, ast.Assign) else [parent.target]
             if any(isinstance(t, ast.Name) and t.id in MESSAGE_NAMES for t in targets):
-                return True
+                # A message-like name does not hide a query-shaped string.
+                return not _looks_like_query(text)
         if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
             return False
         child = parent
     return False
 
 
-def _is_cypher_candidate(node: ast.JoinedStr, parents: dict[ast.AST, ast.AST]) -> bool:
-    """Does this f-string build Cypher? Decided by its text *or* by where it flows."""
-    text = "".join(v.value if isinstance(v, ast.Constant) and isinstance(v.value, str) else "X" for v in node.values)
+def _is_cypher_candidate(node: ast.AST, parents: dict[ast.AST, ast.AST], text: str) -> bool:
+    """Does this string template build Cypher? Decided by its text *or* by where it flows."""
     if _CYPHER_TEXT_RE.search(text):
         return True
     child: ast.AST = node
@@ -494,6 +649,152 @@ def _classify(before: str, expr: ast.expr, facts: _ModuleFacts, scope: _Scope) -
     return None
 
 
+# A string template: its literal text (placeholders as "X") and, per
+# interpolated operand, the literal text immediately before it.
+_Template = tuple[str, list[tuple[str, ast.expr]]]
+
+
+def _fstring_template(node: ast.JoinedStr) -> _Template:
+    text, parts, before = "", [], ""
+    for value in node.values:
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            text += value.value
+            before = value.value
+        elif isinstance(value, ast.FormattedValue):
+            text += "X"
+            parts.append((before, value.value))
+            before = ""
+    return text, parts
+
+
+def _fstring_text(node: ast.JoinedStr) -> str:
+    return _fstring_template(node)[0]
+
+
+def _trailing_literal(node: ast.JoinedStr) -> str:
+    last = node.values[-1] if node.values else None
+    return last.value if isinstance(last, ast.Constant) and isinstance(last.value, str) else ""
+
+
+def _flatten_add(node: ast.expr) -> list[ast.expr]:
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return [*_flatten_add(node.left), *_flatten_add(node.right)]
+    return [node]
+
+
+def _str_value(node: ast.expr) -> str | None:
+    return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+
+def _concat_template(node: ast.BinOp) -> _Template | None:
+    operands = _flatten_add(node)
+    if not any(_str_value(op) is not None or isinstance(op, ast.JoinedStr) for op in operands):
+        return None  # numeric or list addition
+    text, parts, before = "", [], ""
+    for op in operands:
+        literal = _str_value(op)
+        if literal is not None:
+            text += literal
+            before = literal
+        elif isinstance(op, ast.JoinedStr):
+            # Its own interpolations are scanned with the f-string itself.
+            text += _fstring_text(op)
+            before = _trailing_literal(op)
+        else:
+            text += "X"
+            parts.append((before, op))
+            before = ""
+    return text, parts
+
+
+def _percent_template(node: ast.BinOp) -> _Template | None:
+    fmt = _str_value(node.left)
+    if fmt is None:
+        return None
+    right = node.right
+    positional = right.elts if isinstance(right, ast.Tuple) else None
+    keyed = (
+        {key: v for k, v in zip(right.keys, right.values, strict=True) if k is not None and (key := _str_value(k))}
+        if isinstance(right, ast.Dict)
+        else None
+    )
+    text, parts, pos, index = "", [], 0, 0
+    for match in _PERCENT_SPEC_RE.finditer(fmt):
+        literal = fmt[pos : match.start()]
+        text += literal
+        pos = match.end()
+        if match.group("conv") == "%":
+            text += "%"
+            continue
+        text += "X"
+        key = match.group("key")
+        arg: ast.expr | None
+        if key is not None:
+            arg = keyed.get(key) if keyed is not None else None
+        elif positional is not None:
+            arg = positional[index] if index < len(positional) else None
+            index += 1
+        else:
+            arg = right if index == 0 else None
+            index += 1
+        if arg is not None and not isinstance(arg, ast.Starred):
+            parts.append((literal, arg))
+    text += fmt[pos:]
+    return text, parts
+
+
+def _format_template(node: ast.Call) -> _Template | None:
+    func = node.func
+    fmt = _str_value(func.value) if isinstance(func, ast.Attribute) and func.attr == "format" else None
+    if fmt is None:
+        return None
+    try:
+        fields = list(string.Formatter().parse(fmt))
+    except ValueError:
+        return None
+    star_args = any(isinstance(a, ast.Starred) for a in node.args)
+    keywords = {kw.arg: kw.value for kw in node.keywords if kw.arg is not None}
+    text, parts, auto = "", [], 0
+    for literal, field_name, _spec, _conv in fields:
+        text += literal
+        if field_name is None:
+            continue
+        text += "X"
+        base = re.split(r"[.\[]", field_name, maxsplit=1)[0]
+        arg: ast.expr | None = None
+        if base == "":
+            arg = node.args[auto] if not star_args and auto < len(node.args) else None
+            auto += 1
+        elif base.isdigit():
+            i = int(base)
+            arg = node.args[i] if not star_args and i < len(node.args) else None
+        else:
+            arg = keywords.get(base)
+        if arg is not None:
+            parts.append((literal, arg))
+    return text, parts
+
+
+def _template(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> _Template | None:
+    """The string template a node builds, if it is one the scanner classifies."""
+    if isinstance(node, ast.JoinedStr):
+        if isinstance(parents.get(node), ast.FormattedValue):
+            return None  # nested format spec of another f-string
+        return _fstring_template(node)
+    if isinstance(node, ast.BinOp):
+        if isinstance(node.op, ast.Add):
+            parent = parents.get(node)
+            if isinstance(parent, ast.BinOp) and isinstance(parent.op, ast.Add):
+                return None  # inner link of a concatenation chain; the top is scanned
+            return _concat_template(node)
+        if isinstance(node.op, ast.Mod):
+            return _percent_template(node)
+        return None
+    if isinstance(node, ast.Call):
+        return _format_template(node)
+    return None
+
+
 def scan_source(source: str, *, rel_path: str) -> list[Finding]:
     """Scan one module's source text."""
     tree = ast.parse(source, filename=rel_path)
@@ -503,25 +804,20 @@ def scan_source(source: str, *, rel_path: str) -> list[Finding]:
 
     findings: list[Finding] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.JoinedStr):
+        template = _template(node, parents)
+        if template is None:
             continue
-        if isinstance(parents.get(node), ast.FormattedValue):
-            continue  # nested format spec of another f-string
-        if _is_message_context(node, parents) or not _is_cypher_candidate(node, parents):
+        text, parts = template
+        if not parts:
+            continue
+        if _is_message_context(node, parents, text) or not _is_cypher_candidate(node, parents, text):
             continue
         scope = facts.scope_of(node)
-        before = ""
-        for value in node.values:
-            if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                before = value.value
-                continue
-            if not isinstance(value, ast.FormattedValue):
-                continue
-            kind = _classify(before, value.value, facts, scope)
-            before = ""
+        for before, expr in parts:
+            kind = _classify(before, expr, facts, scope)
             if kind is None:
                 continue
-            line_no = getattr(value.value, "lineno", node.lineno)
+            line_no = getattr(expr, "lineno", getattr(node, "lineno", 0))
             line = lines[line_no - 1] if 0 < line_no <= len(lines) else ""
             findings.append(
                 Finding(
@@ -529,7 +825,7 @@ def scan_source(source: str, *, rel_path: str) -> list[Finding]:
                     line_no=line_no,
                     pattern=line.strip(),
                     kind=kind,
-                    expression=ast.unparse(value.value),
+                    expression=ast.unparse(expr),
                     waiver=_waiver(line),
                 )
             )
