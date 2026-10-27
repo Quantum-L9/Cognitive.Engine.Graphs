@@ -175,6 +175,9 @@ class GateCompiler:
         self._bound_by: dict[str, tuple[str, str]] = {}
         # CEG-009c: composite gates currently being expanded (cycle guard).
         self._composite_stack: list[str] = []
+        # RU-043: the direction compile_all_gates / compile_relaxed is compiling
+        # (None for a direct compile()), checked against composite subgates.
+        self._direction: str | None = None
 
     # ── W1-03: Gate validation (seL4-inspired) ──────────────
 
@@ -285,10 +288,14 @@ class GateCompiler:
         self._query_params = {}
         self._bound_by = {}
         fragments: list[str] = []
+        composed = self._composed_subgates(match_direction)
 
         for gate in self._gates:
             # Direction filter
             if gate.matchdirections and match_direction not in gate.matchdirections:
+                continue
+            # RU-043: a subgate contributes only through its composite.
+            if gate.name in composed:
                 continue
 
             # Role exemption
@@ -296,7 +303,7 @@ class GateCompiler:
                 logger.debug(f"Gate {gate.name} exempted for role={role}")
                 continue
 
-            fragment = self.compile(gate)
+            fragment = self._compile_for(gate, match_direction)
             if fragment:
                 fragments.append(f"({fragment})")
 
@@ -318,15 +325,18 @@ class GateCompiler:
         self._query_params = {}
         self._bound_by = {}
         hard_fragments: list[str] = []
+        composed = self._composed_subgates(match_direction)
 
         for gate in self._gates:
             if gate.matchdirections and match_direction not in gate.matchdirections:
+                continue
+            if gate.name in composed:
                 continue
             if role and gate.roleexempt and role in gate.roleexempt:
                 continue
 
             if math.isclose(gate.relaxedpenalty, 0.0, abs_tol=1e-9):
-                fragment = self.compile(gate)
+                fragment = self._compile_for(gate, match_direction)
                 if fragment:
                     hard_fragments.append(f"({fragment})")
 
@@ -334,6 +344,34 @@ class GateCompiler:
             return "true"
 
         return AND_JOINER.join(hard_fragments)
+
+    def _composed_subgates(self, match_direction: str) -> set[str]:
+        """Names referenced as subgates by a composite applicable to ``match_direction`` (RU-043).
+
+        Before, a subgate was also compiled as a top-level filter, so an OR
+        composite degenerated to the AND of its subgates.
+        """
+        from engine.config.settings import settings
+
+        if not settings.composite_subgate_scoping:
+            return set()
+        names: set[str] = set()
+        for gate in self._gates:
+            if gate.type != GateType.COMPOSITE or not gate.subgates:
+                continue
+            if gate.matchdirections and match_direction not in gate.matchdirections:
+                continue
+            names.update(gate.subgates)
+        return names
+
+    def _compile_for(self, gate: GateSpec, match_direction: str) -> str:
+        """``compile`` with the direction recorded so composites can check their subgates' scope."""
+        previous = self._direction
+        self._direction = match_direction
+        try:
+            return self.compile(gate)
+        finally:
+            self._direction = previous
 
     # ── Parameter binding (C-009 / CEG-009b) ────────────────
 
@@ -575,6 +613,8 @@ class GateCompiler:
         (CEG-009c); the previous behaviour — warn and compile what is left —
         silently widened the gate.
         """
+        from engine.config.settings import settings
+
         combinator = f" {_LOGIC[(gate.logic or 'AND').upper()]} "
         if not gate.subgates:
             msg = f"Gate '{gate.name}': composite gate declares no subgates"
@@ -591,6 +631,18 @@ class GateCompiler:
                 sub_gate_spec = next((g for g in self._gates if g.name == sub_gate_name), None)
                 if sub_gate_spec is None:
                     msg = f"Gate '{gate.name}': subgate '{sub_gate_name}' is not declared in this domain spec"
+                    raise ValueError(msg)
+                direction = self._direction
+                if (
+                    direction is not None
+                    and settings.composite_subgate_scoping
+                    and sub_gate_spec.matchdirections
+                    and direction not in sub_gate_spec.matchdirections
+                ):
+                    msg = (
+                        f"Gate '{gate.name}': subgate '{sub_gate_name}' is scoped to "
+                        f"{sub_gate_spec.matchdirections}, not to direction '{direction}' being compiled"
+                    )
                     raise ValueError(msg)
                 sub_fragments.append(f"({self.compile(sub_gate_spec)})")
         finally:

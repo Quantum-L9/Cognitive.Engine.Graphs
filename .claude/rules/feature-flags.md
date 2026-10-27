@@ -87,3 +87,4 @@ were industry-specific and had no caller).
 | admission_checks_full_match | True | Admission requires each direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound by `handle_match` (RU-039) |
 | exclusion_endpoint_validation | True | Refuse an exclusion gate declaring `fromnode`/`tonode` or whose edge does not start at a candidate label of its direction(s), instead of compiling an always-true `NOT EXISTS` (RU-041) |
 | gate_null_operands_from_predicate | True | A gate's `nullbehavior` applies to exactly the operands its predicate tests (per-side PASS, any-NULL FAIL); off restores the `candidate.<candidateprop>` / `$<queryparam>` wrap (RU-042) |
+| composite_subgate_scoping | True | Subgates referenced by a composite contribute only through it (skipped at top level of compile_all_gates / compile_relaxed); a subgate scoped away from the compiled direction is refused (RU-043) |

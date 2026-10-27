@@ -315,6 +315,14 @@ class Settings(BaseSettings):
     # imposes no constraint on its side) or FAIL (any NULL rejects) to exactly
     # those. Off: the previous fragments.
     gate_null_operands_from_predicate: bool = True
+    # RU-043 / CEG-COR-022: a composite's subgates were also compiled as
+    # top-level filters (an OR composite degenerated to AND), and a subgate
+    # scoped to another direction was compiled inside the composite anyway.
+    # On: subgates referenced by a composite applicable to the direction are
+    # skipped at top level (compile_all_gates and compile_relaxed), and a
+    # subgate scoped away from the direction being compiled is refused.
+    # Off: the legacy compilation. Specs without composites are unaffected.
+    composite_subgate_scoping: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

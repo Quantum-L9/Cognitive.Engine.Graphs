@@ -84,6 +84,7 @@ independently of the code default.
 | Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `True` | unset | active (hardening); admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
 | Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `True` | unset | active (hardening); an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
 | Gate Null Operands From Predicate | `GATE_NULL_OPERANDS_FROM_PREDICATE` (`gate_null_operands_from_predicate`) | `True` | unset | active; a gate's `nullbehavior` applies to exactly the operands its predicate tests (range FAIL rejects NULL bounds; temporalrange null-handles its window per side) — see §21 |
+| Composite Subgate Scoping | `COMPOSITE_SUBGATE_SCOPING` (`composite_subgate_scoping`) | `True` | unset | active; a composite's subgates contribute only through the composite (an OR composite is no longer AND-ed with its own subgates) and a subgate scoped to another direction is refused — see §21 |
 
 ---
 
@@ -963,4 +964,15 @@ Compiled fragments of `plasticos` and `mortgage-brokerage` are byte-identical
 temporalrange window gates change (`freight-matching` `availability_window`,
 dormant `legal-discovery` `temporal_relevance`). Rollback:
 `GATE_NULL_OPERANDS_FROM_PREDICATE=false`.
+
+### Composite subgate scoping (RU-043 / CEG-COR-022)
+
+`COMPOSITE_SUBGATE_SCOPING` (default `True`): `compile_all_gates` and
+`compile_relaxed` skip, at top level, every gate referenced as a subgate by a
+composite applicable to the direction, so `logic: OR` over `ga`, `gb` compiles
+to `((ga) OR (gb))` instead of `(ga) AND (gb) AND ((ga) OR (gb))`. A subgate
+whose `matchdirections` exclude the direction being compiled is refused (it was
+silently compiled inside the composite). Cycle and missing-subgate refusal
+(CEG-009c) are unchanged; specs without composites compile byte-identically
+(no shipped pack declares one). Rollback: `COMPOSITE_SUBGATE_SCOPING=false`.
 
