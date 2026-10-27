@@ -506,6 +506,12 @@ class Settings(BaseSettings):
     # packet writes no hop/delegation/lineage rows. Off: the legacy key and
     # unconditional child rows (C-21 rollback).
     packet_store_packet_identity_dedup_enabled: bool = True
+    # RU-079 / CEG-COR-042: packet_store.sql's RLS policies compare rows to
+    # current_setting('app.current_tenant') and nothing set it, so a DSN that
+    # connects as an l9_product member had every write rejected (swallowed).
+    # On: persist and record_outcome run `set_config('app.current_tenant',
+    # <tenant>, true)` inside their transaction before writing. Off: no GUC.
+    packet_store_rls_tenant_session_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

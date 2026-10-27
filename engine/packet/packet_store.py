@@ -100,6 +100,14 @@ _INSERT_DELEGATION_SQL = """
         packet_id, delegator, delegatee, scope, granted_at, expires_at, proof_hash, seq
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 """
+# RLS (packet_store.sql): every policy compares against the
+# app.current_tenant GUC. is_local=true scopes it to the current transaction,
+# so a pooled connection never carries one tenant's setting into the next
+# write (RU-079).
+_SET_TENANT_SQL = """
+    SELECT set_config('app.current_tenant', $1, true)
+"""
+
 # NEW: Outcome feedback-loop linkage
 _UPDATE_OUTCOME_SQL = """
     UPDATE packet_store
@@ -162,6 +170,15 @@ class _PoolManager:
 
 
 _pool_manager = _PoolManager()
+
+
+async def _set_session_tenant(conn: Any, tenant: str) -> None:
+    """Set the transaction-local tenant GUC the RLS policies check.
+
+    Must run inside ``conn.transaction()``: with is_local=true the setting
+    outside a transaction block would end with the statement.
+    """
+    await conn.fetchval(_SET_TENANT_SQL, tenant)
 
 
 def _insert_wrote_row(status: Any) -> bool:
@@ -272,6 +289,11 @@ class PacketStore:
         is skipped by ``ON CONFLICT (content_hash, actor_tenant) DO NOTHING`` is
         a re-delivery of a stored packet, so its hop_trace, delegation_chain and
         lineage_graph rows are already stored and are not written again.
+
+        With ``packet_store_rls_tenant_session_enabled`` each packet INSERT is
+        preceded by a transaction-local ``app.current_tenant`` = the packet's
+        ``tenant.actor``, which the DDL's RLS policies require for an
+        ``l9_product`` connection. Owner/superuser connections are unaffected.
         """
         if not _PACKET_STORE_ENABLED:
             logger.debug(
@@ -286,6 +308,8 @@ class PacketStore:
             # Insert both packets
             for packet in (request, response):
                 row = _extract_packet_row(packet)
+                if settings.packet_store_rls_tenant_session_enabled:
+                    await _set_session_tenant(conn, packet.tenant.actor)
                 status = await conn.execute(_INSERT_PACKET_SQL, *row)
                 if settings.packet_store_packet_identity_dedup_enabled and not _insert_wrote_row(status):
                     continue
@@ -398,12 +422,22 @@ class PacketStore:
         try:
             pool = await _pool_manager.get_pool()
             async with pool.acquire() as conn:
-                result = await conn.execute(
-                    _UPDATE_OUTCOME_SQL,
-                    json.dumps(outcome_payload),
-                    match_packet_id,
-                    tenant,
-                )
+                if settings.packet_store_rls_tenant_session_enabled:
+                    async with conn.transaction():
+                        await _set_session_tenant(conn, tenant)
+                        result = await conn.execute(
+                            _UPDATE_OUTCOME_SQL,
+                            json.dumps(outcome_payload),
+                            match_packet_id,
+                            tenant,
+                        )
+                else:
+                    result = await conn.execute(
+                        _UPDATE_OUTCOME_SQL,
+                        json.dumps(outcome_payload),
+                        match_packet_id,
+                        tenant,
+                    )
             rows_affected = int(result.split()[-1]) if result else 0
             if rows_affected == 1:
                 logger.info(

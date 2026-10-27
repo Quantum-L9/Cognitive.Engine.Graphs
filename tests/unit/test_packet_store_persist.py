@@ -20,8 +20,11 @@ Coverage:
   - RU-078 / RG-101: content_hash is the packet identity (transport_hash),
     and a packet INSERT reported as skipped ('INSERT 0 0') writes no
     hop_trace, delegation_chain or lineage_graph rows for that packet.
-  - Flag off (packet_store_packet_identity_dedup_enabled=False): the legacy
-    payload_hash key and unconditional child INSERTs.
+  - RU-079 / RG-103: a transaction-local
+    ``set_config('app.current_tenant', <tenant.actor>, true)`` precedes each
+    packet INSERT inside the persist transaction.
+  - Flags off: the legacy payload_hash key, unconditional child INSERTs and
+    no set_config statement.
 """
 
 from __future__ import annotations
@@ -264,3 +267,52 @@ class TestPacketIdentityDedupFlagOff:
 
         assert len(conn.statements(ps_mod._INSERT_HOP_SQL)) == len(req.hop_trace) + len(resp.hop_trace)
         assert len(conn.statements(ps_mod._INSERT_LINEAGE_SQL)) == 1
+
+
+# -- RU-079 / RG-103 ---------------------------------------------------------
+
+
+def _is_set_tenant(call: _Call) -> bool:
+    return "set_config('app.current_tenant'" in call.sql
+
+
+@pytest.mark.unit
+class TestRlsTenantSession:
+    async def test_set_config_precedes_each_packet_insert(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        conn = _FakeConn()
+        _install(monkeypatch, conn)
+        req, resp = _pair({"query": {"x": 1}}, tenant="tenant-rls")
+
+        await ps_mod.PacketStore().persist(req, resp)
+
+        inserts = [i for i, c in enumerate(conn.calls) if c.sql is ps_mod._INSERT_PACKET_SQL]
+        assert len(inserts) == 2
+        for index, packet in zip(inserts, (req, resp), strict=True):
+            previous = conn.calls[index - 1]
+            assert _is_set_tenant(previous)
+            assert previous.args == (packet.tenant.actor,)
+            assert previous.in_transaction
+        assert sum(_is_set_tenant(c) for c in conn.calls) == 2
+
+    async def test_set_config_is_transaction_local(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        conn = _FakeConn()
+        _install(monkeypatch, conn)
+        req, resp = _pair({"query": {"x": 1}})
+
+        await ps_mod.PacketStore().persist(req, resp)
+
+        (sql,) = {c.sql for c in conn.calls if _is_set_tenant(c)}
+        # is_local=true: the GUC ends with the transaction, so a pooled
+        # connection never carries one tenant's setting into another's write.
+        assert sql.strip() == "SELECT set_config('app.current_tenant', $1, true)"
+
+    async def test_flag_off_issues_no_set_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(settings, "packet_store_rls_tenant_session_enabled", False)
+        conn = _FakeConn()
+        _install(monkeypatch, conn)
+        req, resp = _pair({"query": {"x": 1}})
+
+        await ps_mod.PacketStore().persist(req, resp)
+
+        assert not any(_is_set_tenant(c) for c in conn.calls)
+        assert conn.calls[0].sql is ps_mod._INSERT_PACKET_SQL
