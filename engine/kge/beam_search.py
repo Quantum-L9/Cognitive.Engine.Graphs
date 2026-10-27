@@ -464,7 +464,7 @@ class BeamSearchEngine:
         pruned: list[BeamCandidate] = []
 
         for candidate in sorted_cands[1:]:
-            min_sim = min(self._param_similarity(candidate.params, k.params) for k in kept)
+            min_sim = min(self._candidate_similarity(candidate, k) for k in kept)
             if min_sim < self.config.diversity_threshold:
                 kept.append(candidate)
             else:
@@ -486,6 +486,18 @@ class BeamSearchEngine:
         if self.config.log_pruned and pruned:
             self.pruned_candidates.extend(pruned)
         return kept
+
+    @staticmethod
+    def _candidate_similarity(a: BeamCandidate, b: BeamCandidate) -> float:
+        """Similarity in [0, 1] between two candidates; 0.0 across transformation types.
+
+        Bare parameter dicts of different types share no keys, so comparing them
+        treated, e.g., translation(x=0.1) and flip(axis=0) as 0.91-similar and
+        pruned one of them (CEG-COR-109). Same-type comparison is unchanged.
+        """
+        if a.transformation_type != b.transformation_type:
+            return 0.0
+        return BeamSearchEngine._param_similarity(a.params, b.params)
 
     @staticmethod
     def _param_similarity(

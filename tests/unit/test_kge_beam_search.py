@@ -347,3 +347,33 @@ class TestComposedCascades:
         assert _triples(levels[1]) != _triples(levels[2])
         assert all(len(c["chain"]) == 2 for c in levels[2])
         assert all(len(c["chain"]) == 3 for c in levels[3])
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-109")
+class TestDiversityComparesSameTypeOnly:
+    """RU-122: candidates of different transformation types are never near-duplicates."""
+
+    def test_equal_score_translation_and_flip_both_kept(self, engine: BeamSearchEngine) -> None:
+        translation = BeamCandidate(
+            "t", "translation", {"offset_x": 0.1, "offset_y": 0.0, "offset_z": 0.0}, score=0.9, depth=1
+        )
+        flip = BeamCandidate("f", "flip", {"axis": 0.0}, score=0.9, depth=1)
+        engine.config.diversity_threshold = 0.8
+        kept = engine._prune_by_diversity([translation, flip])
+        assert {c.transformation_id for c in kept} == {"t", "f"}
+
+    def test_cross_type_similarity_is_zero(self) -> None:
+        a = BeamCandidate("t", "translation", {"offset_x": 0.1}, score=0.9, depth=1)
+        b = BeamCandidate("f", "flip", {"axis": 0.0}, score=0.9, depth=1)
+        assert BeamSearchEngine._candidate_similarity(a, b) == 0.0
+
+    def test_same_type_similarity_unchanged(self) -> None:
+        a = BeamCandidate("a", "scale", {"factor": 0.5}, score=0.9, depth=1)
+        b = BeamCandidate("b", "scale", {"factor": 0.75}, score=0.8, depth=1)
+        assert BeamSearchEngine._candidate_similarity(a, b) == pytest.approx(0.8)
+        assert BeamSearchEngine._param_similarity(a.params, b.params) == pytest.approx(0.8)
+        engine = BeamSearchEngine(CompoundE3D(CompoundE3DConfig(embedding_dim=6)), BeamSearchConfig())
+        engine.config.diversity_threshold = 0.75
+        kept = engine._prune_by_diversity([a, b])
+        assert [c.transformation_id for c in kept] == ["a"]
