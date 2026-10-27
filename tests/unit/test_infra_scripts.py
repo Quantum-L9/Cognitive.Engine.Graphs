@@ -133,3 +133,29 @@ def test_check_env_fails_when_required_var_unset(tmp_path: Path) -> None:
 
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert "MUST_BE_SET — MISSING" in proc.stdout
+
+
+# ── RU-144 / RG-180: short secrets fully masked ─────────────────────────────
+
+
+def _check_env_output(tmp_path: Path, value: str) -> str:
+    repo = _git_repo(tmp_path / "repo")
+    (repo / ".env.required").write_text("SECRET_UNDER_TEST\n", encoding="utf-8")
+    script = _copy_script("tools/infra/check_env.sh", repo)
+    proc = _run([BASH, str(script)], cwd=repo, env=_env(tmp_path, SECRET_UNDER_TEST=value))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    line = next(ln for ln in proc.stdout.splitlines() if "SECRET_UNDER_TEST =" in ln)
+    return line.split("SECRET_UNDER_TEST = ", 1)[1]
+
+
+@pytest.mark.parametrize("value", ["abc", "abcdef", "12345678"])
+def test_short_secret_reveals_no_characters(tmp_path: Path, value: str) -> None:
+    masked = _check_env_output(tmp_path, value)
+    assert masked == "****"
+
+
+def test_long_secret_reveals_only_a_fixed_small_prefix(tmp_path: Path) -> None:
+    value = "sk-live-0123456789abcdef"
+    masked = _check_env_output(tmp_path, value)
+    assert masked == "sk****"
+    assert value[-4:] not in masked

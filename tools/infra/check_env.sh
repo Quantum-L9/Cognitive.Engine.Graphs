@@ -87,7 +87,13 @@ if [[ ${#REQUIRED_VARS[@]} -gt 0 ]]; then
             echo -e "  ${RED}✗${NC} $var — PLACEHOLDER (needs real value)"
             ERRORS=$((ERRORS + 1))
         else
-            masked="${value:0:4}****${value: -4}"
+            # Never reveal more than a fixed 2-char prefix, and nothing of a
+            # value of 8 chars or fewer (a 4+4 window exposed short secrets whole).
+            if [[ ${#value} -le 8 ]]; then
+                masked="****"
+            else
+                masked="${value:0:2}****"
+            fi
             echo -e "  ${GREEN}✓${NC} $var = $masked"
         fi
     done
