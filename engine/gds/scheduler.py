@@ -190,14 +190,18 @@ class GDSScheduler:
         Jobs without depends_on are placed in wave 0 (backward compatible).
         """
         waves = self._build_execution_dag(self.domain_spec.gdsjobs)
+        registered = 0
         for wave_idx, wave in enumerate(waves):
             for job_spec in wave:
                 if job_spec.schedule.type == "cron":
                     self._register_cron_job(job_spec)
+                    registered += 1
                 elif job_spec.schedule.type == "manual":
                     logger.info("Job %s (wave %d) is manual-trigger only", job_spec.name, wave_idx)
+        # RU-096: report what was registered, not how many jobs the spec declares.
         logger.info(
-            "Registered %d GDS jobs across %d execution waves",
+            "Registered %d GDS cron jobs (of %d declared) across %d execution waves",
+            registered,
             len(self.domain_spec.gdsjobs),
             len(waves),
         )
@@ -223,6 +227,11 @@ class GDSScheduler:
         """
         if not jobs:
             return []
+
+        from engine.config.settings import settings
+
+        if settings.gds_dag_job_identity_by_name:
+            return GDSScheduler._build_execution_dag_by_job(jobs)
 
         job_map: dict[str, GDSJobSpec] = {j.algorithm: j for j in jobs}
         in_degree: dict[str, int] = {j.algorithm: 0 for j in jobs}
@@ -266,6 +275,66 @@ class GDSScheduler:
                 sorted(cycle_members),
             )
             waves.append([job_map[alg] for alg in sorted(cycle_members)])
+
+        return waves
+
+    @staticmethod
+    def _build_execution_dag_by_job(jobs: list[GDSJobSpec]) -> list[list[GDSJobSpec]]:
+        """RU-096 / CEG-COR-036: Kahn's sort with jobs (keyed by name) as nodes.
+
+        Keying by algorithm collapsed every same-algorithm job into the last
+        one declared, so only one of two ``louvain`` cron jobs was scheduled.
+        ``depends_on`` keeps its schema meaning — algorithm names — and resolves
+        to every job whose algorithm matches. Waves preserve declaration order;
+        an unknown dependency is ignored with a warning and cycle members go to
+        a final fallback wave, exactly as before.
+        """
+        job_map: dict[str, GDSJobSpec] = {}
+        for job in jobs:
+            job_map[job.name] = job
+        names = list(job_map)
+        by_algorithm: dict[str, list[str]] = defaultdict(list)
+        for name in names:
+            by_algorithm[job_map[name].algorithm].append(name)
+
+        in_degree: dict[str, int] = dict.fromkeys(names, 0)
+        dependents: dict[str, list[str]] = defaultdict(list)
+        for name in names:
+            job = job_map[name]
+            for dep in job.depends_on or []:
+                providers = by_algorithm.get(dep)
+                if not providers:
+                    logger.warning(
+                        "Job '%s' depends on unknown algorithm '%s'; ignoring dependency",
+                        job.name,
+                        dep,
+                    )
+                    continue
+                for provider in providers:
+                    in_degree[name] += 1
+                    dependents[provider].append(name)
+
+        order = {name: idx for idx, name in enumerate(names)}
+        waves: list[list[GDSJobSpec]] = []
+        queue = [name for name in names if in_degree[name] == 0]
+        while queue:
+            waves.append([job_map[name] for name in queue])
+            next_queue: list[str] = []
+            for name in queue:
+                for dependent in dependents[name]:
+                    in_degree[dependent] -= 1
+                    if in_degree[dependent] == 0:
+                        next_queue.append(dependent)
+            queue = sorted(next_queue, key=order.__getitem__)
+
+        placed = {job.name for wave in waves for job in wave}
+        cycle_members = [name for name in names if name not in placed]
+        if cycle_members:
+            logger.error(
+                "Circular dependency detected among GDS jobs: %s. Placing in fallback wave.",
+                sorted(cycle_members),
+            )
+            waves.append([job_map[name] for name in sorted(cycle_members)])
 
         return waves
 

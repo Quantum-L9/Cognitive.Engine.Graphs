@@ -178,6 +178,31 @@ class TestRegistration:
         with pytest.raises(ValueError, match="cron expression required"):
             scheduler._register_cron_job(job)
 
+    @pytest.mark.asyncio
+    async def test_same_algorithm_cron_jobs_all_register(self):
+        """RU-096 / CEG-COR-036: two louvain cron jobs are two APScheduler jobs."""
+        jobs = [_job("louvain_by_material", "louvain"), _job("louvain_by_polymer", "louvain")]
+        scheduler = GDSScheduler(_minimal_spec(jobs), _mock_driver())
+        scheduler.register_jobs()
+        scheduler.start()
+        try:
+            ids = sorted(job.id for job in scheduler.scheduler.get_jobs())
+        finally:
+            scheduler.scheduler.shutdown(wait=False)
+        assert ids == ["louvain_by_material", "louvain_by_polymer"]
+
+    def test_register_log_reports_jobs_actually_registered(self, caplog):
+        jobs = [
+            _job("louvain_by_material", "louvain"),
+            _job("louvain_by_polymer", "louvain"),
+            _job("manual_one", "louvain", schedule_type="manual"),
+        ]
+        scheduler = GDSScheduler(_minimal_spec(jobs), _mock_driver())
+        with patch.object(scheduler.scheduler, "add_job") as mock_add, caplog.at_level("INFO"):
+            scheduler.register_jobs()
+        assert mock_add.call_count == 2
+        assert "Registered 2 GDS cron jobs" in caplog.text
+
 
 # ── Algorithm Dispatch ────────────────────────────────────
 
