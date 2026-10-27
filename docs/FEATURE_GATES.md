@@ -80,6 +80,7 @@ independently of the code default.
 | Spec-declared Candidate Id | `SPEC_DECLARED_CANDIDATE_ID` (`spec_declared_candidate_id`) | `True` | unset | active; `handle_match` identifies candidates by the domain's declared id property, not `entity_id` — see §20 |
 | Traversal Gate EXISTS Subquery | `TRAVERSAL_GATE_EXISTS_SUBQUERY` (`traversal_gate_exists_subquery`) | `True` | unset | active; traversal gates compile to an `EXISTS { … }` subquery Neo4j 5 accepts — see §20 |
 | Childsync FOREACH Projection | `CHILDSYNC_FOREACH_PROJECTION` (`childsync_foreach_projection`) | `True` | unset | active; childsync writes children in `FOREACH` without copying them onto the parent — see §20 |
+| Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `True` | unset | active (hardening); admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
 
 ---
 
@@ -676,6 +677,30 @@ query-schema parameter per constant — a schema decision, not a file move.
 compile to executable Cypher, and every withheld pack must still have a live
 generic reason (a compile defect or a declared dormant posture). A pack fixed
 later is served automatically — there is no per-domain list to forget it in.
+
+### Scoring admission (RU-020 / CEG-COR-027..029)
+
+`SCORING_ADMISSION_CHECK_ENABLED` (default `True`) extends `admission_defects`
+from gates to scoring. For every declared match direction each applicable
+dimension is compiled as `ScoringAssembler` compiles it, and the pack is
+withheld when:
+
+- the scoring compiler refuses a dimension (`preference_attention` without
+  `metadata.success_value`, which the schema cannot declare);
+- a dimension references a `$parameter` that `handle_match` does not bind —
+  not a queryschema field, derived parameter, scoring `queryprop`, `top_n`, or
+  a value the assembler binds itself (`community_bridge` without a
+  `query_<prop>` field; `geodecay`'s `$lon`);
+- a dimension declares an option nothing produces: `null_strategy:
+  inherit_prior | population_mean` or `cold_start_fallback:
+  structural_similarity | population_mean`.
+
+Each such pack failed every match (`ValueError` / `ParameterMissing`) or
+silently degraded. `freight-matching` is withheld by this check until its
+scoring binds `$lat` / `$lon` / `$target_price` (CEG-COR-011).
+Rollback: `SCORING_ADMISSION_CHECK_ENABLED=false` (gate-only admission, the
+previous wording of the withholding reason), or
+`UNVALIDATED_DOMAIN_PACKS_ENABLED=true` to serve every validated pack.
 
 ---
 
