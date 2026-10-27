@@ -2379,7 +2379,14 @@ async def handle_health(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         # deployment is healthy but the "default" tenant hasn't been seeded.
         available = domain_loader.list_domains()
         if available:
-            checks["domain_spec"] = f"{_HEALTH_DOMAIN_TENANT_MISSING}: {available}"
+            from engine.config.settings import settings as _health_settings
+
+            # RU-013 / CEG-COR-074: the probe tenant is arbitrary and the probe is
+            # unauthenticated, so report how many packs exist, not their ids.
+            if _health_settings.health_probe_domain_count_only:
+                checks["domain_spec"] = f"{_HEALTH_DOMAIN_TENANT_MISSING}: {len(available)} domain packs"
+            else:
+                checks["domain_spec"] = f"{_HEALTH_DOMAIN_TENANT_MISSING}: {available}"
         else:
             checks["domain_spec"] = _HEALTH_DOMAIN_NO_PACKS
     except Exception:

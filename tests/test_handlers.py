@@ -332,7 +332,28 @@ async def test_health_neo4j_ok_domain_missing_tenant_but_packs_available() -> No
     assert "neo4j" in result["checks"]
     assert result["checks"]["neo4j"] == "ok"
     assert "tenant not found" in result["checks"]["domain_spec"]
-    assert "plasticos" in result["checks"]["domain_spec"]
+    # RU-013 / CEG-COR-074: the unauthenticated probe reports a count, never the
+    # other tenants' domain ids (this assertion used to require the leak).
+    assert "plasticos" not in result["checks"]["domain_spec"]
+    assert result["checks"]["domain_spec"] == "ok: tenant not found; fallback available: 1 domain packs"
+
+
+@pytest.mark.asyncio
+async def test_health_domain_ids_listed_with_count_only_flag_off(monkeypatch) -> None:
+    """HEALTH_PROBE_DOMAIN_COUNT_ONLY=false restores the id list (rollback)."""
+    from engine.config.loader import DomainNotFoundError
+    from engine.config.settings import settings
+    from engine.state import get_state
+
+    monkeypatch.setattr(settings, "health_probe_domain_count_only", False)
+    state = get_state()
+    state.graph_driver.execute_query = AsyncMock(return_value=None)
+    state.domain_loader.load_domain = MagicMock(side_effect=DomainNotFoundError("not found"))
+    state.domain_loader.list_domains = MagicMock(return_value=["plasticos"])
+
+    result = await handle_health("unknown-tenant", {})
+
+    assert result["checks"]["domain_spec"] == "ok: tenant not found; fallback available: ['plasticos']"
 
 
 @pytest.mark.asyncio
