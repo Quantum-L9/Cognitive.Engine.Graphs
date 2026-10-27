@@ -38,6 +38,7 @@ and rollback procedure.
 | Learned Weight Renormalization | `LEARNED_WEIGHT_RENORMALIZATION` (`learned_weight_renormalization`) | `True` | unset | active (correctness) for feedback-enabled domains; learning redistributes weight among non-penalised dimensions without raising their sum above the pre-learning (C-22) value, and a learned `0.0` is honoured; `false` restores multiply-only (RU-023 / CEG-COR-083) |
 | Signal Weight Proportion CI | `SIGNAL_WEIGHT_PROPORTION_CI` (`signal_weight_proportion_ci`) | `True` | unset | active (correctness) for feedback-enabled domains; stored DimensionWeight `ci_width`/`confidence` come from the win-rate proportion, so an early positive lift is dampened; `false` restores the lift-based formula (RU-027 / CEG-COR-116) |
 | Propagation Single Application | `PROPAGATION_SINGLE_APPLICATION` (`propagation_single_application`) | `True` | unset | active (correctness); one outcome event updates each tenant DimensionWeight `boost_factor` once, bounded, and `candidates_affected` counts DimensionWeights; `false` restores the row-multiplying query (RU-028 / CEG-COR-117) |
+| Drift Requires Both Windows | `DRIFT_REQUIRES_BOTH_WINDOWS` (`drift_requires_both_windows`) | `True` | unset | active (correctness); outcomes `metadata.drift` raises no alert unless both a recent and a baseline distribution exist; `false` restores the one-sided divergence (RU-029 / CEG-COR-118) |
 
 The **Default** column is the code-level default in `engine/config/settings.py`
 (what ships if no environment variable is set — the seL4 "dormant mechanism"
