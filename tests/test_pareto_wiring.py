@@ -473,3 +473,70 @@ class TestArbitrationZeroScorePresent:
         assert [r["candidate"]["entity_id"] for r in kept] == ["a", "c"]
         cands = build_pareto_candidates([{"risk": 0.0, "risk_score": 0.99}], ["risk"])
         assert cands[0].dimension_scores["risk"] == 0.99
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  RU-019 / CEG-COR-026: objective direction and front_size_limit (RG-024)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestArbitrationObjectiveDirection:
+    def test_minimize_objective_selects_cheap(self):
+        from engine.scoring.pareto_integrator import apply_pareto_filter
+
+        candidates = [
+            {"candidate": {"entity_id": "cheap"}, "cost": 0.1, "score": 0.4},
+            {"candidate": {"entity_id": "pricey"}, "cost": 0.9, "score": 0.6},
+        ]
+        result = apply_pareto_filter(candidates, ["cost"], directions={"cost": "minimize"})
+        assert result["nondominated"] == ["cheap"]
+        assert result["dominated"] == ["pricey"]
+
+    def test_front_size_limit_keeps_higher_score(self):
+        """Two mutually non-dominated rows, limit 1 -> exactly the higher composite score (DEC-04 A)."""
+        from engine.scoring.pareto_integrator import apply_pareto_filter
+
+        candidates = [
+            {"candidate": {"entity_id": "lo"}, "a": 0.9, "b": 0.1, "score": 0.3},
+            {"candidate": {"entity_id": "hi"}, "a": 0.1, "b": 0.9, "score": 0.8},
+        ]
+        result = apply_pareto_filter(candidates, ["a", "b"], front_size_limit=1)
+        assert result["nondominated"] == ["hi"]
+        assert result["frontsize"] == 1
+        assert result["trimmed"] == ["lo"]
+
+    def test_front_within_limit_is_untouched(self):
+        from engine.scoring.pareto_integrator import apply_pareto_filter
+
+        candidates = [
+            {"candidate": {"entity_id": "lo"}, "a": 0.9, "b": 0.1, "score": 0.3},
+            {"candidate": {"entity_id": "hi"}, "a": 0.1, "b": 0.9, "score": 0.8},
+        ]
+        result = apply_pareto_filter(candidates, ["a", "b"], front_size_limit=5)
+        assert result["nondominated"] == ["lo", "hi"]
+        assert result["trimmed"] == []
+
+    def test_unknown_direction_is_maximize(self, caplog):
+        from engine.scoring.pareto_integrator import apply_pareto_filter
+
+        candidates = [
+            {"candidate": {"entity_id": "cheap"}, "cost": 0.1},
+            {"candidate": {"entity_id": "pricey"}, "cost": 0.9},
+        ]
+        with caplog.at_level("WARNING"):
+            result = apply_pareto_filter(candidates, ["cost"], directions={"cost": "lowest"})
+        assert result["nondominated"] == ["pricey"]
+        assert "lowest" in caplog.text
+
+    def test_flag_off_restores_maximise_all_unbounded(self, monkeypatch):
+        """C-21: arbitration_objective_direction=False ignores directions and the limit."""
+        from engine.config.settings import settings
+        from engine.scoring.pareto_integrator import apply_pareto_filter
+
+        monkeypatch.setattr(settings, "arbitration_objective_direction", False)
+        candidates = [
+            {"candidate": {"entity_id": "cheap"}, "cost": 0.1, "q": 0.1, "score": 0.4},
+            {"candidate": {"entity_id": "pricey"}, "cost": 0.9, "q": 0.0, "score": 0.6},
+        ]
+        result = apply_pareto_filter(candidates, ["cost", "q"], directions={"cost": "minimize"}, front_size_limit=1)
+        assert result["nondominated"] == ["cheap", "pricey"]

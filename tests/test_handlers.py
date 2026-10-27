@@ -467,6 +467,34 @@ async def test_match_arbitration_front_uses_declared_candidate_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_match_arbitration_forwards_direction_and_front_size_limit() -> None:
+    """RU-019 / CEG-COR-026: handle_match passes the declared objective direction and front_size_limit."""
+    from engine.state import get_state
+
+    spec = _loaded_spec_for_results()
+    spec.decision_arbitration.enabled = True
+    spec.decision_arbitration.constraints = []
+    objective = MagicMock()
+    objective.dimension = "cost"
+    objective.direction = "minimize"
+    spec.decision_arbitration.pareto_config.objectives = [objective]
+    spec.decision_arbitration.pareto_config.front_size_limit = 1
+    get_state().graph_driver.execute_query = AsyncMock(
+        return_value=[
+            {"candidate": {"facility_id": "F-1"}, "score": 0.4, "cost": 0.1},
+            {"candidate": {"facility_id": "F-2"}, "score": 0.6, "cost": 0.9},
+            {"candidate": {"facility_id": "F-3"}, "score": 0.9, "cost": 0.1},
+        ]
+    )
+
+    result = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
+
+    # cost is minimised: F-1 and F-3 tie on the front; the limit keeps the higher score.
+    assert result["pareto"]["arbitration"]["nondominated_ids"] == ["F-3"]
+    assert result["pareto"]["arbitration"]["frontsize"] == 1
+
+
+@pytest.mark.asyncio
 async def test_match_binds_compiler_literals_into_query_parameters() -> None:
     """CEG-009b: a literal-operand gate reaches execute_query bound.
 

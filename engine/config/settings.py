@@ -344,6 +344,12 @@ class Settings(BaseSettings):
     # treated as absent and skipped its hard constraint. On: presence is tested
     # with `is None` (dimension_scores[d] -> d -> d_score). Off: legacy truthiness.
     arbitration_zero_score_present: bool = True
+    # RU-019 / CEG-COR-026: the decision_arbitration Pareto front maximised
+    # every objective and was unbounded. On: ParetoObjectiveSpec.direction
+    # 'minimize' is honoured and the front is trimmed to
+    # ParetoConfigSpec.front_size_limit by composite score (R1b-DEC-04 A).
+    # Off: maximise-all, unbounded.
+    arbitration_objective_direction: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

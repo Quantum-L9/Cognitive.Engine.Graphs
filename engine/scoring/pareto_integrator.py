@@ -26,6 +26,7 @@ primitives.  Provides:
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from engine.scoring.pareto import ParetoCandidate, ParetoFront, compute_pareto_front
@@ -201,11 +202,36 @@ def apply_constraint_penalties(
 # ── Pareto filter ────────────────────────────────────────────────────────────
 
 
+def _resolve_directions(directions: Mapping[str, Any] | None) -> dict[str, str] | None:
+    """Normalise declared objective directions; anything but 'minimize' maximises.
+
+    ``ParetoObjectiveSpec.direction`` is a free ``str`` in the schema, so an
+    unrecognised value is logged and treated as ``"maximize"``.
+    """
+    if not directions:
+        return None
+    resolved: dict[str, str] = {}
+    for dim, direction in directions.items():
+        if direction == "minimize":
+            resolved[dim] = "minimize"
+            continue
+        if direction != "maximize":
+            logger.warning(
+                "Arbitration objective %s: unknown direction %r treated as 'maximize'",
+                dim,
+                direction,
+            )
+        resolved[dim] = "maximize"
+    return resolved
+
+
 def apply_pareto_filter(
     candidates: list[dict[str, Any]],
     dimension_names: list[str],
     *,
     candidate_id_key: str = "entity_id",
+    directions: Mapping[str, Any] | None = None,
+    front_size_limit: int | None = None,
 ) -> dict[str, Any]:
     """Apply Pareto dominance filtering to a candidate set.
 
@@ -217,42 +243,84 @@ def apply_pareto_filter(
         Scoring dimension names from the DomainSpec.
     candidate_id_key:
         Key within the ``"candidate"`` sub-dict for the ID.
+    directions:
+        RU-019: optional ``{dimension: "minimize" | "maximize"}`` from
+        ``ParetoObjectiveSpec.direction``. Default maximises every dimension.
+    front_size_limit:
+        RU-019: optional ``ParetoConfigSpec.front_size_limit``. When the
+        non-dominated set is larger, the candidates with the highest composite
+        ``score`` are kept (R1b-DEC-04 A); the rest are reported as ``trimmed``.
+
+    Both keyword arguments are ignored while
+    ``settings.arbitration_objective_direction`` is off (C-21 rollback).
 
     Returns
     -------
     dict with keys:
-        ``nondominated`` — list of non-dominated candidate IDs
+        ``nondominated`` — list of non-dominated candidate IDs (at most
+        ``front_size_limit``, input order preserved)
         ``dominated`` — list of dominated candidate IDs
-        ``frontsize`` — number of non-dominated candidates
+        ``trimmed`` — non-dominated IDs dropped by ``front_size_limit``
+        ``frontsize`` — number of candidates reported on the front
         ``pruned_pct`` — percentage of candidates pruned
     """
+    from engine.config.settings import settings
+
+    if settings.arbitration_objective_direction:
+        resolved_directions = _resolve_directions(directions)
+        limit = (
+            front_size_limit if isinstance(front_size_limit, int) and not isinstance(front_size_limit, bool) else None
+        )
+    else:
+        resolved_directions = None
+        limit = None
+
     pareto_candidates = build_pareto_candidates(candidates, dimension_names, candidate_id_key=candidate_id_key)
 
     if not pareto_candidates:
         return {
             "nondominated": [],
             "dominated": [],
+            "trimmed": [],
             "frontsize": 0,
             "pruned_pct": 0.0,
         }
 
-    front: ParetoFront = compute_pareto_front(pareto_candidates)
+    front: ParetoFront = compute_pareto_front(pareto_candidates, directions=resolved_directions)
 
-    nondominated_ids = [c.candidate_id for c in front.non_dominated]
+    kept = list(front.non_dominated)
+    trimmed_ids: list[str] = []
+    if limit is not None and limit >= 1 and len(kept) > limit:
+        # build_pareto_candidates is positional: pareto_candidates[i] <-> candidates[i].
+        position = {id(c): i for i, c in enumerate(pareto_candidates)}
+
+        def _composite(cand: ParetoCandidate) -> float:
+            raw = candidates[position[id(cand)]].get("score")
+            return float(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else 0.0
+
+        ranked = sorted(kept, key=_composite, reverse=True)  # stable: ties keep input order
+        keep_ids = {id(c) for c in ranked[:limit]}
+        trimmed_ids = [c.candidate_id for c in kept if id(c) not in keep_ids]
+        kept = [c for c in kept if id(c) in keep_ids]
+
+    nondominated_ids = [c.candidate_id for c in kept]
     dominated_ids = [c.candidate_id for c in front.dominated]
     total = len(pareto_candidates)
-    pruned_pct = round((1.0 - front.front_size / total) * 100, 1) if total else 0.0
+    front_size = len(kept)
+    pruned_pct = round((1.0 - front_size / total) * 100, 1) if total else 0.0
 
     logger.info(
-        "Pareto filter: %d/%d on front (%.1f%% pruned)",
-        front.front_size,
+        "Pareto filter: %d/%d on front (%.1f%% pruned, %d trimmed by front_size_limit)",
+        front_size,
         total,
         pruned_pct,
+        len(trimmed_ids),
     )
 
     return {
         "nondominated": nondominated_ids,
         "dominated": dominated_ids,
-        "frontsize": front.front_size,
+        "trimmed": trimmed_ids,
+        "frontsize": front_size,
         "pruned_pct": pruned_pct,
     }
