@@ -140,14 +140,27 @@ def _eval_node(node: ast.AST, ctx: dict[str, Any], depth: int = 0) -> Any:
         unary_op_func = _SAFE_UNARY_OPS[unary_op_type]
         return unary_op_func(_eval_node(node.operand, ctx, depth + 1))
     if isinstance(node, ast.Call):
-        func = _eval_node(node.func, ctx, depth + 1)
-        if func not in _SAFE_FUNCS.values():
-            msg = f"Function not whitelisted: {ast.dump(node.func)}"
-            raise ValueError(msg)
-        args = [_check_magnitude(_eval_node(a, ctx, depth + 1)) for a in node.args]
-        if func is round and len(args) >= 2 and isinstance(args[1], (int, float)) and abs(args[1]) > _MAX_ROUND_NDIGITS:
-            msg = f"round() ndigits out of range (max {_MAX_ROUND_NDIGITS})"
-            raise ValueError(msg)
-        return _check_magnitude(func(*args))
+        return _eval_call(node, ctx, depth)
     msg = f"Disallowed expression node: {type(node).__name__}"
     raise ValueError(msg)
+
+
+def _eval_call(node: ast.Call, ctx: dict[str, Any], depth: int) -> Any:
+    """Evaluate a whitelisted function call (positional arguments only)."""
+    func = _eval_node(node.func, ctx, depth + 1)
+    if func not in _SAFE_FUNCS.values():
+        msg = f"Function not whitelisted: {ast.dump(node.func)}"
+        raise ValueError(msg)
+    if node.keywords:
+        from engine.config.settings import settings
+
+        # RU-076 / CEG-COR-125: keywords were silently dropped
+        # (round(2.567, ndigits=2) -> 3). Off: legacy drop.
+        if settings.safe_eval_reject_keywords:
+            msg = "keyword arguments not allowed"
+            raise ValueError(msg)
+    args = [_check_magnitude(_eval_node(a, ctx, depth + 1)) for a in node.args]
+    if func is round and len(args) >= 2 and isinstance(args[1], (int, float)) and abs(args[1]) > _MAX_ROUND_NDIGITS:
+        msg = f"round() ndigits out of range (max {_MAX_ROUND_NDIGITS})"
+        raise ValueError(msg)
+    return _check_magnitude(func(*args))
