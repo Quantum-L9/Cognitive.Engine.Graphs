@@ -683,6 +683,18 @@ class GDSScheduler:
             "prune_below": self._get_job_parameter(job_spec, "prune_below", 0.1),
         }
         count_prop = self._get_job_setting(job_spec, "count_property")
+        from engine.config.settings import settings
+
+        if settings.gds_temporal_recency_decay_existing:
+            return await self._run_temporal_recency_decaying(
+                db=db,
+                node_label=node_label,
+                source_edge=source_edge,
+                overlay_edge=overlay_edge,
+                ts_prop=ts_prop,
+                count_prop=count_prop,
+                params=params,
+            )
         count_set = (
             f",\n            r.recent_count = CASE WHEN age_days <= $half_life THEN coalesce(t.{sanitize_label(str(count_prop))}, 1) ELSE 0 END"
             if count_prop
@@ -709,6 +721,82 @@ class GDSScheduler:
         """
 
         create_result = await self.graph_driver.execute_query(create_cypher, parameters=params, database=db)
+        prune_result = await self.graph_driver.execute_query(prune_cypher, parameters=params, database=db)
+
+        created = create_result[0]["edges_created"] if create_result else 0
+        pruned = prune_result[0]["edges_pruned"] if prune_result else 0
+
+        logger.info(f"Temporal recency: {created} edges created, {pruned} pruned")
+        return {"edges_created": created, "edges_pruned": pruned}
+
+    async def _run_temporal_recency_decaying(
+        self,
+        *,
+        db: str,
+        node_label: str,
+        source_edge: str,
+        overlay_edge: str,
+        ts_prop: str,
+        count_prop: Any | None,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """RU-097 / CEG-COR-037: per-pair aggregation and decay of existing edges.
+
+        1. create — one row per (src, dst): the newest interaction within
+           ``max_age_days`` is ``last_event_date`` and its age drives
+           ``recency_score``; ``recent_count`` (only when ``count_property`` is
+           declared) sums ``coalesce(t.<count_property>, 1)`` over the pair's
+           interactions within ``half_life_days``.
+        2. refresh — every existing overlay edge has ``recency_score``
+           recomputed from its own ``last_event_date``, so an edge whose
+           interactions aged out keeps decaying instead of freezing.
+        3. prune — delete edges whose score fell below ``prune_below`` or whose
+           ``last_event_date`` is older than ``max_age_days``.
+
+        Labels and types arrive sanitized; every value is a ``$param``.
+        """
+        count_agg = (
+            ",\n             sum(CASE WHEN age_days <= $half_life "
+            f"THEN coalesce(t.{sanitize_label(str(count_prop))}, 1) ELSE 0 END) AS recent_count"
+            if count_prop
+            else ""
+        )
+        count_set = ",\n            r.recent_count = recent_count" if count_prop else ""
+
+        create_cypher = f"""
+        MATCH (src:{node_label})-[t:{source_edge}]->(dst:{node_label})
+        WHERE t.{ts_prop} IS NOT NULL
+        WITH src, dst, t,
+             duration.inDays(t.{ts_prop}, datetime()).days AS age_days
+        WHERE age_days <= $max_age_days
+        WITH src, dst,
+             max(t.{ts_prop}) AS last_event_date,
+             min(age_days) AS newest_age_days{count_agg}
+        MERGE (src)-[r:{overlay_edge}]->(dst)
+        SET r.last_event_date = last_event_date,
+            r.recency_score = exp(-1.0 * newest_age_days / $half_life){count_set}
+        RETURN count(r) AS edges_created
+        """
+
+        refresh_cypher = f"""
+        MATCH ()-[r:{overlay_edge}]->()
+        WHERE r.last_event_date IS NOT NULL
+        WITH r, duration.inDays(r.last_event_date, datetime()).days AS age_days
+        SET r.recency_score = exp(-1.0 * age_days / $half_life)
+        RETURN count(r) AS edges_refreshed
+        """
+
+        prune_cypher = f"""
+        MATCH ()-[r:{overlay_edge}]-()
+        WHERE r.recency_score < $prune_below
+           OR (r.last_event_date IS NOT NULL
+               AND duration.inDays(r.last_event_date, datetime()).days > $max_age_days)
+        DELETE r
+        RETURN count(r) AS edges_pruned
+        """
+
+        create_result = await self.graph_driver.execute_query(create_cypher, parameters=params, database=db)
+        await self.graph_driver.execute_query(refresh_cypher, parameters=params, database=db)
         prune_result = await self.graph_driver.execute_query(prune_cypher, parameters=params, database=db)
 
         created = create_result[0]["edges_created"] if create_result else 0

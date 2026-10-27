@@ -316,9 +316,11 @@ class TestAlgorithmDispatch:
     @pytest.mark.asyncio
     async def test_temporal_recency_creates_and_prunes(self):
         driver = _mock_driver()
+        # RU-097: create, refresh (recency of every existing overlay edge), prune.
         driver.execute_query = AsyncMock(
             side_effect=[
                 [{"edges_created": 20}],
+                [{"edges_refreshed": 25}],
                 [{"edges_pruned": 5}],
             ]
         )
@@ -333,6 +335,59 @@ class TestAlgorithmDispatch:
         sent = _cypher_sent(driver)
         assert ":RECENTLY_INTERACTED_WITH" in sent
         assert "t.last_seen_at" in sent
+
+        # RU-097 / CEG-COR-037: aggregate per (src, dst) before MERGE, refresh
+        # existing overlay edges, then prune on score OR age.
+        create, refresh, prune = (str(c.args[0]) for c in driver.execute_query.call_args_list)
+        assert "max(t.last_seen_at)" in create
+        assert create.index("max(t.last_seen_at)") < create.index("MERGE")
+        assert "r.last_event_date" in refresh
+        assert "SET r.recency_score" in refresh
+        assert "MERGE" not in refresh
+        assert "DELETE" not in refresh
+        assert "$prune_below" in prune
+        assert "$max_age_days" in prune
+        assert "DELETE r" in prune
+        for call in driver.execute_query.call_args_list:
+            assert call.kwargs["parameters"] == {"half_life": 90.0, "max_age_days": 207.0, "prune_below": 0.1}
+
+    @pytest.mark.asyncio
+    async def test_temporal_recency_recent_count_aggregates_per_pair(self):
+        driver = _mock_driver()
+        driver.execute_query = AsyncMock(side_effect=[[{"edges_created": 1}], [], [{"edges_pruned": 0}]])
+        job = _job(
+            "test_temporal_count",
+            "temporalrecency",
+            sourceedge="INTERACTED_WITH",
+            writeedge="RECENTLY_INTERACTED_WITH",
+            writeproperties=[{"timestamp_property": "last_seen_at"}, {"count_property": "hits"}],
+        )
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+        await scheduler.execute_job(job)
+        create = str(driver.execute_query.call_args_list[0].args[0])
+        assert "sum(CASE WHEN age_days <= $half_life THEN coalesce(t.hits, 1) ELSE 0 END)" in create
+
+    @pytest.mark.asyncio
+    async def test_temporal_recency_flag_off_restores_legacy_cypher(self, monkeypatch):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gds_temporal_recency_decay_existing", False)
+        driver = _mock_driver()
+        driver.execute_query = AsyncMock(side_effect=[[{"edges_created": 20}], [{"edges_pruned": 5}]])
+        job = _job("test_temporal", "temporalrecency", **_TEMPORAL_JOB)
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+        result = await scheduler.execute_job(job)
+        assert result["edges_created"] == 20
+        assert result["edges_pruned"] == 5
+        create, prune = (str(c.args[0]) for c in driver.execute_query.call_args_list)
+        assert "max(" not in create
+        assert "SET r.last_event_date = t.last_seen_at" in create
+        assert "$max_age_days" not in prune
+
+    def test_temporal_recency_flag_default_on(self):
+        from engine.config.settings import Settings
+
+        assert Settings().gds_temporal_recency_decay_existing is True
 
     @pytest.mark.asyncio
     async def test_temporal_recency_requires_timestamp_property(self):
