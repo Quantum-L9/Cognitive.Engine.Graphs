@@ -91,3 +91,4 @@ were industry-specific and had no caller).
 | sync_count_from_write_result | True | `UNWINDMATCHSET` sync reports the matched row count (`RETURN count(n) AS synced_count`) and `unmatched_count` (RU-060 / CEG-COR-169); off reports `len(batch)` |
 | admin_tenant_bound_domain | True | `handle_admin` binds `domain_id` to the packet tenant via `_bind_admin_domain` (RU-003 / CEG-COR-003); off restores the caller-chosen domain |
 | pricealignment_float_division | True | pricealignment divides `toFloat(candidate.<p>) / toFloat($<q>)` so INTEGER-stored prices are not truncated (RU-017 / CEG-COR-006); off restores the legacy `candidate.<p> / $<q>` text |
+| arbitration_zero_score_present | True | decision_arbitration constraints and the arbitration Pareto read a dimension via `dimension_scores[d]` -> `d` -> `d_score` with `is None` tests, so a 0.0 is a score (RU-018 / CEG-COR-025); off restores the `or` fall-through |

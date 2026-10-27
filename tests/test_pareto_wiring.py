@@ -405,3 +405,71 @@ class TestApplyParetoFilterDeclaredId:
         # Without the key the same rows fall back to positional ids.
         positional = apply_pareto_filter(candidates, ["structural", "geo"])
         assert positional["nondominated"] == ["0"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  RU-018 / CEG-COR-025: a numeric 0.0 is a score, not absence (RG-023)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestArbitrationZeroScorePresent:
+    def test_hard_constraint_rejects_top_level_zero(self):
+        """A top-level d=0.0 is below threshold 0.5 and must be rejected, not skipped."""
+        from engine.scoring.pareto_integrator import apply_constraint_penalties
+
+        candidates = [
+            {"candidate": {"entity_id": "a"}, "d": 0.0, "score": 0.9},
+            {"candidate": {"entity_id": "b"}, "d": 0.2, "score": 0.8},
+            {"candidate": {"entity_id": "c"}, "d": 0.9, "score": 0.7},
+        ]
+        constraints = [{"dimension": "d", "threshold": 0.5, "hard": True, "penalty": 0.5}]
+        kept = apply_constraint_penalties(candidates, constraints)
+        assert [r["candidate"]["entity_id"] for r in kept] == ["c"]
+
+    def test_soft_constraint_penalises_top_level_zero(self):
+        from engine.scoring.pareto_integrator import apply_constraint_penalties
+
+        candidates = [{"d": 0.0, "d_score": 0.99, "score": 1.0}]
+        kept = apply_constraint_penalties(candidates, [{"dimension": "d", "threshold": 0.5, "hard": False}])
+        assert kept[0]["score"] == 0.5
+
+    def test_absent_dimension_still_skips_constraint(self):
+        """Preserved: a dimension absent everywhere does not trigger the constraint."""
+        from engine.scoring.pareto_integrator import apply_constraint_penalties
+
+        candidates = [{"other": 0.1, "score": 1.0}]
+        kept = apply_constraint_penalties(candidates, [{"dimension": "d", "threshold": 0.5, "hard": True}])
+        assert len(kept) == 1
+        assert kept[0]["score"] == 1.0
+
+    def test_build_pareto_candidates_keeps_zero(self):
+        """risk=0.0 next to risk_score=0.99 is read as 0.0, not substituted."""
+        from engine.scoring.pareto_integrator import build_pareto_candidates
+
+        results = [{"candidate": {"entity_id": "c1"}, "risk": 0.0, "risk_score": 0.99}]
+        cands = build_pareto_candidates(results, ["risk"])
+        assert cands[0].dimension_scores["risk"] == 0.0
+
+    def test_build_pareto_candidates_zero_in_subdict_wins(self):
+        """Lookup order dimension_scores[d] -> d -> d_score; a 0.0 in the sub-dict is present."""
+        from engine.scoring.pareto_integrator import build_pareto_candidates
+
+        results = [{"candidate": {"entity_id": "c1"}, "dimension_scores": {"risk": 0.0}, "risk_score": 0.99}]
+        cands = build_pareto_candidates(results, ["risk"])
+        assert cands[0].dimension_scores["risk"] == 0.0
+
+    def test_flag_off_restores_legacy_truthiness(self, monkeypatch):
+        """C-21: arbitration_zero_score_present=False restores the `or` fall-through."""
+        from engine.config.settings import settings
+        from engine.scoring.pareto_integrator import apply_constraint_penalties, build_pareto_candidates
+
+        monkeypatch.setattr(settings, "arbitration_zero_score_present", False)
+        candidates = [
+            {"candidate": {"entity_id": "a"}, "d": 0.0, "score": 0.9},
+            {"candidate": {"entity_id": "b"}, "d": 0.2, "score": 0.8},
+            {"candidate": {"entity_id": "c"}, "d": 0.9, "score": 0.7},
+        ]
+        kept = apply_constraint_penalties(candidates, [{"dimension": "d", "threshold": 0.5, "hard": True}])
+        assert [r["candidate"]["entity_id"] for r in kept] == ["a", "c"]
+        cands = build_pareto_candidates([{"risk": 0.0, "risk_score": 0.99}], ["risk"])
+        assert cands[0].dimension_scores["risk"] == 0.99

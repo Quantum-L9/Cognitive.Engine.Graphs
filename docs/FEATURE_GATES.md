@@ -32,6 +32,7 @@ and rollback procedure.
 ---
 
 ## Quick Reference
+| Arbitration Zero Score Present | `ARBITRATION_ZERO_SCORE_PRESENT` (`arbitration_zero_score_present`) | `True` | unset | active (correctness); a dimension value of 0.0 is evaluated by hard/soft constraints and Pareto dominance instead of being skipped or replaced by `<d>_score`; `false` restores legacy truthiness (RU-018 / CEG-COR-025) |
 
 The **Default** column is the code-level default in `engine/config/settings.py`
 (what ships if no environment variable is set — the seL4 "dormant mechanism"

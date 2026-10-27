@@ -339,6 +339,11 @@ class Settings(BaseSettings):
     # (450/500 -> 0). On: both operands are wrapped in toFloat(). Off: the
     # legacy expression, for C-21 rollback only.
     pricealignment_float_division: bool = True
+    # RU-018 / CEG-COR-025: arbitration helpers (pareto_integrator) looked up a
+    # dimension with `or`, so a genuine 0.0 fell through to `<d>_score` or was
+    # treated as absent and skipped its hard constraint. On: presence is tested
+    # with `is None` (dimension_scores[d] -> d -> d_score). Off: legacy truthiness.
+    arbitration_zero_score_present: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

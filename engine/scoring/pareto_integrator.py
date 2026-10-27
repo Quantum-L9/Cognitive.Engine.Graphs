@@ -33,6 +33,28 @@ from engine.scoring.pareto import ParetoCandidate, ParetoFront, compute_pareto_f
 logger = logging.getLogger(__name__)
 
 
+# ── Dimension lookup ─────────────────────────────────────────────────────────
+
+
+def _lookup_dimension_score(record: dict[str, Any], dim: str) -> Any:
+    """Return the dimension's value from a result row, or ``None`` when absent.
+
+    RU-018 / CEG-COR-025: lookup order is ``dimension_scores[dim]`` ->
+    top-level ``dim`` -> top-level ``f"{dim}_score"``, and each step tests
+    ``is None`` rather than truthiness, so a genuine ``0.0`` is a score that
+    constraints and dominance evaluate like any other value.
+    """
+    ds = record.get("dimension_scores")
+    if isinstance(ds, dict):
+        value = ds.get(dim)
+        if value is not None:
+            return value
+    value = record.get(dim)
+    if value is not None:
+        return value
+    return record.get(f"{dim}_score")
+
+
 # ── Candidate construction ───────────────────────────────────────────────────
 
 
@@ -60,6 +82,9 @@ def build_pareto_candidates(
     -------
     list[ParetoCandidate]
     """
+    from engine.config.settings import settings
+
+    zero_present = settings.arbitration_zero_score_present
     candidates: list[ParetoCandidate] = []
     for idx, record in enumerate(results):
         cand_dict = record.get("candidate", {})
@@ -67,6 +92,18 @@ def build_pareto_candidates(
 
         dim_scores: dict[str, float] = {}
         for dim in dimension_names:
+            if zero_present:
+                # RU-018: 0.0 is a score; only an absent / None value is missing.
+                present = _lookup_dimension_score(record, dim)
+                if present is None:
+                    dim_scores[dim] = 0.0
+                    continue
+                try:
+                    dim_scores[dim] = float(present)
+                except (TypeError, ValueError):
+                    dim_scores[dim] = 0.0
+                continue
+            # Legacy (C-21 rollback): truthiness fall-through substitutes a 0.0.
             # Try both "dim" and "dim_score" keys
             val = record.get(dim) or record.get(f"{dim}_score")
             if val is not None:
@@ -109,6 +146,9 @@ def apply_constraint_penalties(
     -------
     Filtered list — hard constraint violations removed, soft penalties applied.
     """
+    from engine.config.settings import settings
+
+    zero_present = settings.arbitration_zero_score_present
     filtered: list[dict[str, Any]] = []
 
     for candidate in candidates:
@@ -123,10 +163,14 @@ def apply_constraint_penalties(
             is_hard = constraint.get("hard", False)
             penalty = float(constraint.get("penalty", 0.5))
 
-            score = ds.get(dim)
-            if score is None:
-                # Also check top-level keys
-                score = candidate.get(dim) or candidate.get(f"{dim}_score")
+            if zero_present:
+                # RU-018: dimension_scores[d] -> d -> d_score, presence by `is None`.
+                score = _lookup_dimension_score(candidate, dim)
+            else:
+                score = ds.get(dim)
+                if score is None:
+                    # Also check top-level keys
+                    score = candidate.get(dim) or candidate.get(f"{dim}_score")
 
             if score is None:
                 continue
