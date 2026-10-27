@@ -611,9 +611,15 @@ class ScoringAssembler:
         property (``point.distance`` on a null ``lat``, a freshness date never
         synced) made the whole weighted ``score`` null, which the handler then
         tried to rank. Null clamps to 0.0, the ``NullStrategy.ZERO`` contract.
+
+        RU-031 / CEG-COR-166: NaN (``log`` of a negative argument, ``0.0 / 0.0``)
+        compares false to both bounds and so fell through to ELSE. It is treated
+        like null and clamps to 0.0; the test follows IS NULL so ``isNaN`` never
+        receives a null.
         """
         return (
-            f"CASE WHEN ({expr}) IS NULL THEN 0.0 WHEN ({expr}) < 0.0 THEN 0.0 "
+            f"CASE WHEN ({expr}) IS NULL THEN 0.0 WHEN isNaN(({expr})) THEN 0.0 "
+            f"WHEN ({expr}) < 0.0 THEN 0.0 "
             f"WHEN ({expr}) > 1.0 THEN 1.0 ELSE ({expr}) END"
         )
 

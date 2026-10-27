@@ -272,6 +272,21 @@ class TestW102ScoreRange:
         assert result.startswith("CASE WHEN (candidate.score) IS NULL THEN 0.0 ")
         assert result.endswith("ELSE (candidate.score) END")
 
+    def test_clamp_expression_maps_nan_to_zero(self) -> None:
+        """RU-031 / CEG-COR-166 (RG-039): NaN compares false to both bounds and fell to ELSE.
+
+        ``log(1 + x)`` for x < -1 or ``0.0 / 0.0`` is NaN in Cypher; NaN is
+        treated like null (``NullStrategy.ZERO``) and clamps to 0.0, tested
+        right after IS NULL so ``isNaN`` never sees a null.
+        """
+        from engine.scoring.assembler import ScoringAssembler
+
+        result = ScoringAssembler._clamp_expression("x")
+        assert "WHEN isNaN((x)) THEN 0.0" in result
+        assert result.index("IS NULL THEN 0.0") < result.index("isNaN((x))") < result.index("< 0.0 THEN 0.0")
+        assert "> 1.0 THEN 1.0" in result
+        assert result.endswith("ELSE (x) END")
+
     def test_scoring_assembler_clamps_when_enabled(self) -> None:
         """Dimension expressions are clamped when SCORE_CLAMP_ENABLED=True."""
         raw = _minimal_spec_raw()
