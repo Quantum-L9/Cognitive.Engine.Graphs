@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -43,8 +44,22 @@ class PacketEnvelope(BaseModel):
         return value
 
     def model_post_init(self, __context: Any) -> None:
-        if not self.content_hash:
-            object.__setattr__(self, "content_hash", self.compute_content_hash())
+        # The model is frozen but its payload dict is not: copy it so a
+        # caller's later edits to the dict it passed cannot reach the packet
+        # and silently stale content_hash (RU-087).
+        object.__setattr__(self, "payload", copy.deepcopy(self.payload))
+        computed = self.compute_content_hash()
+        if self.content_hash and self.content_hash != computed:
+            msg = "content_hash does not match packet content"
+            raise ValueError(msg)
+        object.__setattr__(self, "content_hash", computed)
+
+    def verify_integrity(self) -> bool:
+        """True while the content still hashes to ``content_hash``.
+
+        Detects in-place mutation of the (mutable) payload after construction.
+        """
+        return self.compute_content_hash() == self.content_hash
 
     def compute_content_hash(self) -> str:
         canonical_json = json.dumps(

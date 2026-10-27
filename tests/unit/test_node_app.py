@@ -18,6 +18,7 @@ would leak across tests.
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -236,6 +237,69 @@ def test_failing_handler_persists_pair_and_returns_failure_packet(
     assert response.status_code == 200
     assert response.json()["header"]["packet_type"] == "failure"
     assert len(persisted_packets) == 1
+
+
+# ── Handler cancellation (RU-086) ───────────────────────────────────────────
+
+
+async def _never_returns(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
+    await asyncio.sleep(3600)
+    return {"unreachable": True}
+
+
+def _cancel_ingress_packet() -> Any:
+    return create_transport_packet(
+        action="match",
+        payload={"query": {}},
+        tenant="plasticos",
+        source_node=GATE_NODE,
+        destination_node=NODE_NAME,
+        reply_to=GATE_NODE,
+        provenance=RoutingProvenance(origin_kind="gate", requested_action="match", resolved_by_gate=True),
+    )
+
+
+async def test_timeout_cancelled_handler_persists_one_failed_pair(
+    persisted_packets: list[tuple[Any, Any]],
+) -> None:
+    """Port of repro r6_audit_timeout.py: the SDK cancels a handler on timeout."""
+    audited = _with_packet_audit("match", _never_returns)
+    packet = _cancel_ingress_packet()
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(audited("plasticos", {"query": {}}, packet), timeout=0.05)
+
+    pairs = [(resp.header.action, resp.payload["status"]) for _req, resp in persisted_packets]
+    assert pairs == [("match", "failed")]
+    ((request, response),) = persisted_packets
+    assert request.header.packet_id == packet.header.packet_id
+    assert response.payload["data"] == {"error": "handler_cancelled"}
+
+
+async def test_cancel_audit_flag_off_persists_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+    persisted_packets: list[tuple[Any, Any]],
+) -> None:
+    monkeypatch.setattr(handler_registration.settings, "packet_audit_on_cancel_enabled", False)
+    audited = _with_packet_audit("match", _never_returns)
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(audited("plasticos", {"query": {}}, _cancel_ingress_packet()), timeout=0.05)
+
+    assert persisted_packets == []
+
+
+async def test_cancel_audit_store_failure_still_reraises_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Broken:
+        async def persist(self, request: Any, response: Any) -> None:
+            msg = "store down"
+            raise RuntimeError(msg)
+
+    monkeypatch.setattr(handler_registration, "get_packet_store", _Broken)
+    audited = _with_packet_audit("match", _never_returns)
+
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(audited("plasticos", {"query": {}}, _cancel_ingress_packet()), timeout=0.05)
 
 
 # ── Ingress provenance (CEG-FIX-002) ────────────────────────────────────────

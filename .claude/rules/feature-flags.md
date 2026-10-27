@@ -52,6 +52,13 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | graph_inference_feedback_enabled | False | Emit `graph-inference-result` to EIE through Gate (EIE-008 / CEG-006) |
 | auto_create_domain_database | False | Provision the tenant domain database on first use (CEG-008; Enterprise-only CREATE DATABASE) |
 | health_api_enabled | False | Expose engine/health/api.py via admin health_* subactions (CEG-006) |
+| packet_store_packet_identity_dedup_enabled | True | PacketStore `content_hash` = SDK `transport_hash`; a duplicate-skipped packet writes no child rows (RU-078) |
+| packet_store_rls_tenant_session_enabled | True | PacketStore sets transaction-local `app.current_tenant` before each write so the RLS policies admit an `l9_product` DSN (RU-079) |
+| inference_geo_usps_zones_enabled | True | Postal-code region follows USPS first-digit zones; declared non-US `country` yields no region (RU-084) |
+| inference_persona_token_match_enabled | True | Buyer-persona keywords match whole job-title tokens, not substrings (RU-088) |
+| inference_input_parsing_strict_enabled | True | Company-size per-field parsing with is-None fallback; email domain from the URL hostname (RU-089) |
+| packet_audit_on_cancel_enabled | True | SDK audit wrapper persists a failed pair for a timeout-cancelled handler, then re-raises (RU-086) |
+| capability_record_binding_enabled | True | `validate_action` binds to the registered capability record; `expires_at` enters `proof_hash` (RU-090) |
 
 ## Domain Pack Admission (generic; the engine names no domain)
 | Flag | Default | Purpose |

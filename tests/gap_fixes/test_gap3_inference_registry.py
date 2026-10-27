@@ -96,3 +96,186 @@ def test_authorized_rules_default_to_none() -> None:
 def test_authorized_rules_come_from_domain_plugins() -> None:
     spec = _Spec(PluginsSpec(inference_rules=["infer_company_size_tier", "infer_email_domain_from_website"]))
     assert authorized_rules(spec) == ["infer_company_size_tier", "infer_email_domain_from_website"]
+
+
+# -- RU-084 / RG-113: USPS first-digit zones + country guard ------------------
+
+
+@pytest.mark.parametrize(
+    ("postal_code", "region"),
+    [
+        ("02108", "Northeast"),  # Boston MA (zone 0)
+        ("10115", "Northeast"),  # New York NY (zone 1)
+        ("30301", "Southeast"),  # Atlanta GA (zone 3)
+        ("33101", "Southeast"),  # Miami FL (zone 3)
+        ("37201", "Southeast"),  # Nashville TN (zone 3)
+        ("55401", "Midwest"),  # Minneapolis MN (zone 5)
+        ("60601", "Midwest"),  # Chicago IL (zone 6)
+        ("64101", "Midwest"),  # Kansas City MO (zone 6)
+        ("75201", "South"),  # Dallas TX (zone 7)
+        ("94105", "West"),  # San Francisco CA (zone 9)
+        ("80202-1234", "West"),  # Denver CO (zone 8), ZIP+4
+    ],
+)
+def test_geography_follows_usps_first_digit_zones(postal_code: str, region: str) -> None:
+    result = execute_rule("infer_geography_from_postal_code", {"postal_code": postal_code}, CTX)
+    assert result is not None
+    assert result.value == region
+    assert result.field_name == "region"
+    assert result.confidence == pytest.approx(0.82)
+
+
+@pytest.mark.parametrize(
+    "entity",
+    [
+        {"postal_code": "75001", "country": "FR"},  # Paris
+        {"postal_code": "10115", "country": "DE"},  # Berlin
+        {"zip_code": "30301", "country": "Canada"},
+    ],
+)
+def test_geography_declines_non_us_country(entity: dict[str, str]) -> None:
+    assert execute_rule("infer_geography_from_postal_code", entity, CTX) is None
+
+
+@pytest.mark.parametrize("country", ["US", "USA", "United States", "us", " usa "])
+def test_geography_accepts_us_designations(country: str) -> None:
+    result = execute_rule("infer_geography_from_postal_code", {"postal_code": "30301", "country": country}, CTX)
+    assert result is not None
+    assert result.value == "Southeast"
+
+
+def test_geography_absent_country_still_emits() -> None:
+    """R4-DEC-07 (recommended): no declared country keeps the US inference."""
+    result = execute_rule("infer_geography_from_postal_code", {"postal_code": "94105"}, CTX)
+    assert result is not None
+    assert result.value == "West"
+
+
+@pytest.mark.parametrize(
+    ("entity", "region"),
+    [
+        ({"postal_code": "30301"}, "Midwest"),
+        ({"postal_code": "60601"}, "South"),
+        ({"postal_code": "75001", "country": "FR"}, "South"),
+    ],
+)
+def test_geography_flag_off_restores_threshold_ladder(
+    monkeypatch: pytest.MonkeyPatch, entity: dict[str, str], region: str
+) -> None:
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "inference_geo_usps_zones_enabled", False)
+    result = execute_rule("infer_geography_from_postal_code", entity, CTX)
+    assert result is not None
+    assert result.value == region
+
+
+# -- RU-088 / RG-117: persona keywords match whole title tokens ---------------
+
+
+@pytest.mark.parametrize(
+    ("title", "persona"),
+    [
+        ("Marketing Coordinator", "unknown"),  # 'coo' inside 'coordinator'
+        ("Cooperative Liaison", "unknown"),  # 'coo' inside 'cooperative'
+        ("Avp-less Analyst", "unknown"),  # 'vp' inside 'avp'
+        ("DevOps Engineer", "technical"),  # 'ops' inside 'devops'; 'engineer' matches
+        ("Chief Operating Officer COO", "executive"),
+        ("VP Sales", "executive"),
+        ("SVP, Global Sourcing", "executive"),  # precedence: executive before procurement
+        ("Product Owner", "executive"),  # keyword sets unchanged
+        ("Head of Purchasing", "procurement"),
+        ("Plant Operations Lead", "operations"),
+        ("R&D Manager", "technical"),  # '&' kept inside the token
+        ("Quality/Research Analyst", "technical"),
+    ],
+)
+def test_buyer_persona_matches_whole_tokens(title: str, persona: str) -> None:
+    result = execute_rule("infer_buyer_persona", {"job_title": title}, CTX)
+    assert result is not None
+    assert result.value == persona
+
+
+def test_buyer_persona_confidences_unchanged() -> None:
+    expected = {"VP Sales": 0.85, "Buyer": 0.83, "Ops Manager": 0.80, "Engineer": 0.78, "Analyst": 0.55}
+    for title, confidence in expected.items():
+        result = execute_rule("infer_buyer_persona", {"job_title": title}, CTX)
+        assert result is not None
+        assert result.confidence == pytest.approx(confidence), title
+
+
+@pytest.mark.parametrize(
+    ("title", "persona"),
+    [("Marketing Coordinator", "executive"), ("DevOps Engineer", "operations")],
+)
+def test_buyer_persona_flag_off_restores_substring_match(
+    monkeypatch: pytest.MonkeyPatch, title: str, persona: str
+) -> None:
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "inference_persona_token_match_enabled", False)
+    result = execute_rule("infer_buyer_persona", {"job_title": title}, CTX)
+    assert result is not None
+    assert result.value == persona
+
+
+# -- RU-089 / RG-118: per-field parsing in company-size and email-domain rules --
+
+
+@pytest.mark.parametrize(
+    ("entity", "tier"),
+    [
+        ({"employee_count": "1,200", "annual_revenue_usd": 50e6}, "mid_market"),  # revenue fallback
+        ({"employee_count": 0, "employees": 5000}, "micro"),  # 0 is a value, not absent
+        ({"annual_revenue_usd": 0, "revenue": 5e8}, "micro"),
+        ({"employees": 300}, "enterprise"),
+        ({"employee_count": "abc", "revenue": 2e6}, "small"),
+    ],
+)
+def test_company_size_tier_parses_each_field(entity: dict[str, object], tier: str) -> None:
+    result = execute_rule("infer_company_size_tier", entity, CTX)
+    assert result is not None
+    assert result.value == tier
+
+
+def test_company_size_tier_unparseable_everything_is_none() -> None:
+    assert execute_rule("infer_company_size_tier", {"employee_count": "n/a", "annual_revenue_usd": "?"}, CTX) is None
+
+
+@pytest.mark.parametrize(
+    ("website", "domain"),
+    [
+        ("https://acme.com:8443/x", "acme.com"),
+        ("https://user:pw@www.acme.com/login", "acme.com"),
+        ("acme.com/about", "acme.com"),
+        ("www.Example.ORG?q=1", "example.org"),
+        ("http://www.example.org", "example.org"),
+    ],
+)
+def test_email_domain_uses_url_hostname(website: str, domain: str) -> None:
+    result = execute_rule("infer_email_domain_from_website", {"website": website}, CTX)
+    assert result is not None
+    assert result.value == domain
+
+
+@pytest.mark.parametrize("website", ["localhost", "https://", "http://[::1"])
+def test_email_domain_rejects_hostless_or_dotless(website: str) -> None:
+    assert execute_rule("infer_email_domain_from_website", {"website": website}, CTX) is None
+
+
+@pytest.mark.parametrize(
+    ("rule", "entity", "expected"),
+    [
+        ("infer_company_size_tier", {"employee_count": "1,200", "annual_revenue_usd": 50e6}, None),
+        ("infer_company_size_tier", {"employee_count": 0, "employees": 5000}, "large_enterprise"),
+        ("infer_email_domain_from_website", {"website": "https://acme.com:8443/x"}, "acme.com:8443"),
+    ],
+)
+def test_input_parsing_flag_off_restores_legacy(
+    monkeypatch: pytest.MonkeyPatch, rule: str, entity: dict[str, object], expected: str | None
+) -> None:
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "inference_input_parsing_strict_enabled", False)
+    result = execute_rule(rule, entity, CTX)
+    assert (result.value if result is not None else None) == expected

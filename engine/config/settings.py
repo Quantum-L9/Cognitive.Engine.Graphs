@@ -497,6 +497,51 @@ class Settings(BaseSettings):
     # queried a hardcoded :TransactionOutcome. On: duplicates suppressed and
     # the domain's feedbackloop.outcome_node_label used. Off: legacy.
     counterfactual_dedupe_and_spec_label: bool = True
+    # Correctness remediation lane E (plan 0d84ec8, RU-078..RU-090)
+    # RU-078 / CEG-COR-040, -095: PacketStore keyed packet_store.content_hash
+    # on the payload hash, so two requests with an equal payload collided, the
+    # second pair's lineage insert broke the FK and the whole pair rolled back.
+    # Child rows were also rewritten for a packet whose INSERT was skipped. On:
+    # content_hash is the SDK transport_hash (packet identity) and a skipped
+    # packet writes no hop/delegation/lineage rows. Off: the legacy key and
+    # unconditional child rows (C-21 rollback).
+    packet_store_packet_identity_dedup_enabled: bool = True
+    # RU-079 / CEG-COR-042: packet_store.sql's RLS policies compare rows to
+    # current_setting('app.current_tenant') and nothing set it, so a DSN that
+    # connects as an l9_product member had every write rejected (swallowed).
+    # On: persist and record_outcome run `set_config('app.current_tenant',
+    # <tenant>, true)` inside their transaction before writing. Off: no GUC.
+    packet_store_rls_tenant_session_enabled: bool = True
+    # RU-084 / CEG-COR-043: infer_geography_from_postal_code bucketed the
+    # five-digit ZIP with a threshold ladder (30301 Atlanta -> Midwest, 60601
+    # Chicago -> South) and labelled foreign postcodes (75001 Paris) with a US
+    # region. On: USPS first-digit zones and a declared non-US `country`
+    # yields no inference. Off: the legacy ladder.
+    inference_geo_usps_zones_enabled: bool = True
+    # RU-088 / CEG-COR-097: infer_buyer_persona matched keywords as substrings
+    # ('Marketing Coordinator' -> executive via 'coo', 'DevOps Engineer' ->
+    # operations via 'ops'). On: whole title tokens only. Off: substrings.
+    inference_persona_token_match_enabled: bool = True
+    # RU-089 / CEG-COR-098: infer_company_size_tier used `or` to pick a field
+    # (employee_count=0 fell through to employees) and parsed both values in
+    # one try (an unparseable employee count discarded a valid revenue), and
+    # infer_email_domain_from_website kept the port ('acme.com:8443'). On:
+    # is-None fallback, per-field parsing, and the URL hostname. Off: legacy.
+    inference_input_parsing_strict_enabled: bool = True
+    # RU-086 / CEG-COR-093: the SDK audit wrapper (chassis/handler_registration
+    # .py) recorded a failed pair for a raising handler but not for one the SDK
+    # cancelled on timeout (CancelledError bypasses `except Exception`). On:
+    # the cancelled call persists one ('<action>', 'failed') pair under
+    # asyncio.shield, then the cancellation is re-raised. Off: no pair.
+    packet_audit_on_cancel_enabled: bool = True
+    # RU-090 / CEG-COR-099: CapabilityValidator.validate_action checked the
+    # presented object, so a forged Capability reusing a registered id, an
+    # unexpired copy of an expired record, or an in-place `expires_at = 0`
+    # edit all validated. On: the object must equal the registered record and
+    # activity is read from the record; expires_at enters proof_hash (the
+    # admin delegate_capability response therefore shows a new proof_hash).
+    # Off: the legacy checks and hash input.
+    capability_record_binding_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
