@@ -241,6 +241,34 @@ class TestAlgorithmDispatch:
 
         result = await scheduler.execute_job(job)
         assert result["status"] == "success"
+        # RU-098 / CEG-COR-168: per-node keep sets are ordered by weight (with a
+        # deterministic tie-break) before collect; an edge is deleted only when
+        # both endpoints prune (degree > 10) and neither keeps it.
+        prune = str(driver.execute_query.call_args_list[1].args[0])
+        assert "ORDER BY r.weight DESC, elementId(r)" in prune
+        assert prune.index("ORDER BY r.weight DESC") < prune.index("collect(r)")
+        assert "WHERE degree > 10" in prune
+        assert "WHERE votes = 2" in prune
+        assert ":CO_PROCESSES" in prune
+
+    @pytest.mark.asyncio
+    async def test_cooccurrence_flag_off_restores_legacy_prune(self, monkeypatch):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gds_cooccurrence_deterministic_prune", False)
+        driver = _mock_driver([{"edges_created": 15}])
+        job = _job("test_cooc", "cooccurrence", sourceedge="ACCEPTS_POLYMER", writeedge="CO_PROCESSES")
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+        result = await scheduler.execute_job(job)
+        assert result["pruning_alpha"] == 0.86
+        prune = str(driver.execute_query.call_args_list[1].args[0])
+        assert "ORDER BY" not in prune
+        assert "edges[keep_count..] AS to_prune" in prune
+
+    def test_cooccurrence_flag_default_on(self):
+        from engine.config.settings import Settings
+
+        assert Settings().gds_cooccurrence_deterministic_prune is True
 
     @pytest.mark.asyncio
     async def test_reinforcement_creates_accepted_and_rejected(self):
