@@ -20,6 +20,7 @@ import os
 from typing import Any
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
+from neo4j import exceptions as neo4j_exceptions
 
 from engine.graph.circuit_breaker import CircuitBreaker
 from engine.utils.security import sanitize_database_name
@@ -47,6 +48,24 @@ class DatabaseNotProvisionedError(RuntimeError):
     until an operator happened to run CREATE DATABASE by hand. This names the
     missing database and the command that provides it.
     """
+
+
+def _is_breaker_failure(exc: BaseException) -> bool:
+    """RU-093 / CEG-COR-034: does this exception count toward opening the breaker?
+
+    The Neo4j breaker is process-wide, so one tenant's client errors
+    (CypherSyntaxError, ConstraintError, DatabaseNotFound, a null MERGE key)
+    must not fail every other tenant fast. ``neo4j.exceptions.ClientError`` and
+    its subclasses are per-request faults: not failures. Infrastructure and
+    transient faults (ServiceUnavailable, SessionExpired, TransientError,
+    DatabaseError, OSError, anything else) still count. With
+    ``neo4j_circuit_ignore_client_errors`` off every exception counts.
+    """
+    from engine.config.settings import settings
+
+    if not settings.neo4j_circuit_ignore_client_errors:
+        return True
+    return not isinstance(exc, neo4j_exceptions.ClientError)
 
 
 def _looks_like_absent_database(exc: Exception) -> bool:
@@ -93,6 +112,7 @@ class GraphDriver:
             failure_threshold=settings.neo4j_circuit_threshold,
             recovery_timeout=settings.neo4j_circuit_cooldown,
             half_open_max_calls=settings.neo4j_circuit_half_open_max,
+            is_failure=_is_breaker_failure,
         )
 
     async def connect(self) -> None:
