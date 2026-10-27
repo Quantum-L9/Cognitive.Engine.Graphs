@@ -79,3 +79,4 @@ were industry-specific and had no caller).
 | childsync_foreach_projection | True | childsync null-overrides child fields in the parent SET, creates children in FOREACH, emits a valid childtoparent arrow; off restores the UNWIND path Neo4j rejects |
 | gate_explicit_nullbehavior | True | A gate's explicitly declared `nullbehavior` wins over the per-type default (C-14); off restores the override of an explicit `pass` on boolean/freshness/traversal gates |
 | spec_declared_candidate_id | True | `handle_match` identifies candidates by the domain's declared id property (sync `idproperty`, else first required property) instead of a hardcoded `entity_id`; off restores `entity_id` only |
+| pricealignment_float_division | True | pricealignment divides `toFloat(candidate.<p>) / toFloat($<q>)` so INTEGER-stored prices are not truncated (RU-017 / CEG-COR-006); off restores the legacy `candidate.<p> / $<q>` text |

@@ -340,16 +340,28 @@ class ScoringAssembler:
 
         Formula: 1 - |log(candidate_p / target_p)| / tau
         Handles SaaS $10/mo to $10k/mo ranges appropriately.
+
+        RU-017 / CEG-COR-006: the ratio is computed in floating point. Cypher
+        divides two INTEGER operands as INTEGER (450 / 500 -> 0), so both
+        operands are wrapped in ``toFloat()`` while
+        ``settings.pricealignment_float_division`` is on (default). Off emits
+        the legacy ``candidate.<p> / $<q>`` text for C-21 rollback.
         """
+        from engine.config.settings import settings
+
         cand_prop = sanitize_label(dim.candidateprop or "price_per_unit")
         query_prop = sanitize_label(dim.queryprop or "target_price")
         tau = cypher_number(dim.maxvalue or 2.0)  # tolerance: 2.0 = ~7.4x ratio scores 0
         default = float(dim.defaultwhennull)  # nosemgrep: float-requires-try-except
+        if settings.pricealignment_float_division:
+            ratio = f"toFloat(candidate.{cand_prop}) / toFloat(${query_prop})"
+        else:
+            ratio = f"candidate.{cand_prop} / ${query_prop}"
         return (
             f"CASE "
             f"  WHEN ${query_prop} IS NULL OR ${query_prop} <= 0 THEN {default} "
             f"  WHEN candidate.{cand_prop} IS NULL OR candidate.{cand_prop} <= 0 THEN {default} "
-            f"  ELSE toFloat(1.0 - abs(log(candidate.{cand_prop} / ${query_prop})) / {tau}) "
+            f"  ELSE toFloat(1.0 - abs(log({ratio})) / {tau}) "
             f"END"
         )
 
