@@ -612,6 +612,80 @@ class TestW104TraversalValidators:
             with pytest.raises(ValueError, match="exceeds hard cap"):
                 DomainSpec.model_validate(raw)
 
+    @staticmethod
+    def _spec_with_step_pattern(pattern: str) -> dict[str, Any]:
+        raw = _minimal_spec_raw()
+        raw["traversal"] = {"steps": [{"name": "step1", "pattern": pattern, "required": True}]}
+        return raw
+
+    @pytest.mark.parametrize("hops", ["*1..", "*2..", "*..", "*"])
+    def test_open_hop_range_raises(self, hops: str) -> None:
+        """RU-045 / CEG-COR-038: a variable-length step with no explicit upper bound is refused."""
+        raw = self._spec_with_step_pattern(f"(candidate:Facility)-[:EXCLUDED_FROM{hops}]->(target:Facility)")
+        s = _make_settings(max_hop_hard_cap=10)
+        with patch(_SETTINGS_TARGET, s):
+            with pytest.raises(ValueError, match=r"no explicit upper bound|exceeds hard cap"):
+                DomainSpec.model_validate(raw)
+
+    @pytest.mark.parametrize("hops", ["*1..", "*2.."])
+    def test_open_hop_range_names_the_missing_bound(self, hops: str) -> None:
+        """RU-045: the refusal of `*N..` names the open range (it was accepted before)."""
+        raw = self._spec_with_step_pattern(f"(candidate:Facility)-[:EXCLUDED_FROM{hops}]->(target:Facility)")
+        s = _make_settings(max_hop_hard_cap=10)
+        with patch(_SETTINGS_TARGET, s):
+            with pytest.raises(ValueError, match="no explicit upper bound"):
+                DomainSpec.model_validate(raw)
+
+    @pytest.mark.parametrize(
+        ("hops", "message"),
+        [("*0..", "hop count must be >= 1"), ("*..20", "exceeds hard cap"), ("*0..3", "hop count must be >= 1")],
+    )
+    def test_existing_hop_refusals_preserved(self, hops: str, message: str) -> None:
+        """RU-045 preserves the existing `*0..` / `*..20` refusals and their messages."""
+        raw = self._spec_with_step_pattern(f"(candidate:Facility)-[:EXCLUDED_FROM{hops}]->(target:Facility)")
+        s = _make_settings(max_hop_hard_cap=10)
+        with patch(_SETTINGS_TARGET, s):
+            with pytest.raises(ValueError, match=message):
+                DomainSpec.model_validate(raw)
+
+    @pytest.mark.parametrize("hops", ["*1..3", "*2", "*..3", ""])
+    def test_bounded_hop_ranges_accepted(self, hops: str) -> None:
+        """RU-045 preserves `*1..3`, `*2`, `*..3` and fixed one-hop steps."""
+        pattern = f"(candidate:Facility)-[:EXCLUDED_FROM{hops}]->(target:Facility)"
+        raw = self._spec_with_step_pattern(pattern)
+        s = _make_settings(max_hop_hard_cap=10)
+        with patch(_SETTINGS_TARGET, s):
+            spec = DomainSpec.model_validate(raw)
+        assert spec.traversal is not None
+
+        from engine.traversal.assembler import _validate_traversal_pattern
+
+        with patch(_SETTINGS_TARGET, s):
+            assert _validate_traversal_pattern(pattern, "step1") == pattern
+
+    @pytest.mark.parametrize("hops", ["*1..", "*2..", "*..", "*"])
+    def test_assembler_rejects_open_hop_range(self, hops: str) -> None:
+        """RU-045 defence in depth: the assembler grammar requires an explicit upper bound."""
+        from engine.traversal.assembler import _validate_traversal_pattern
+
+        s = _make_settings(max_hop_hard_cap=10)
+        with patch(_SETTINGS_TARGET, s):
+            with pytest.raises(ValueError, match="does not match allowed structure"):
+                _validate_traversal_pattern(f"(a:A)-[:R{hops}]->(b:B)", "s")
+
+    @pytest.mark.parametrize("hops", ["*1..", "*2.."])
+    def test_open_hop_range_flag_off_restores_acceptance(self, hops: str) -> None:
+        """RU-045 flag off: `*N..` loads and the assembler grammar accepts it, as before."""
+        from engine.traversal.assembler import _validate_traversal_pattern
+
+        pattern = f"(candidate:Facility)-[:EXCLUDED_FROM{hops}]->(target:Facility)"
+        raw = self._spec_with_step_pattern(pattern)
+        s = _make_settings(max_hop_hard_cap=10, traversal_open_range_rejected=False)
+        with patch(_SETTINGS_TARGET, s):
+            spec = DomainSpec.model_validate(raw)
+            assert spec.traversal is not None
+            assert _validate_traversal_pattern(pattern, "step1") == pattern
+
     def test_hop_count_zero_raises(self) -> None:
         """Traversal with 0 hops is rejected."""
         raw = _minimal_spec_raw()

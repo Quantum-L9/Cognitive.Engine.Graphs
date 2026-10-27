@@ -614,6 +614,11 @@ class Settings(BaseSettings):
     # On (with domain_strict_validation): every direction's sum includes the
     # unscoped dimensions. Off: per-bucket check.
     weight_ceiling_includes_unscoped: bool = True
+    # RU-045 / CEG-COR-038: the hop validator read `*1..` as one hop, so `*1..`
+    # and `*2..` loaded and were emitted unbounded. On: a `..` needs an explicit
+    # upper bound (checked against max_hop_hard_cap) and the assembler grammar
+    # requires `*N` or `*[M]..N`. Off: legacy parse and grammar.
+    traversal_open_range_rejected: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

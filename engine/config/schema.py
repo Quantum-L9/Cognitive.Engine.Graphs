@@ -336,6 +336,8 @@ class TraversalSpec(BaseModel):
         from engine.config.settings import settings
 
         max_cap = settings.max_hop_hard_cap
+        if settings.traversal_open_range_rejected:
+            return self._validate_hop_ranges(max_cap)
         hop_re = re.compile(r"\*(\d+)?(?:\.\.(\d+))?")
 
         for step in self.steps:
@@ -362,6 +364,43 @@ class TraversalSpec(BaseModel):
                     msg = f"Traversal step '{step.name}': max hops {max_hops} exceeds hard cap {max_cap}"
                     raise ValueError(msg)
 
+        return self
+
+    def _validate_hop_ranges(self, max_cap: int) -> TraversalSpec:
+        """RU-045 / CEG-COR-038: parse the whole `*[min][..[max]]` range token.
+
+        The legacy regex matched `*1` inside `*1..` and read it as exactly one
+        hop, so `*1..` / `*2..` loaded and were emitted unbounded. A `..` must be
+        followed by an explicit upper bound; that bound is checked against the cap.
+        """
+        import re
+
+        hop_re = re.compile(r"\*(\d*)(\.\.)?(\d*)")
+        for step in self.steps:
+            for match in hop_re.finditer(step.pattern):
+                min_hops_str, range_sep, max_hops_str = match.group(1), match.group(2), match.group(3)
+                if min_hops_str and int(min_hops_str) < 1:
+                    msg = f"Traversal step '{step.name}': hop count must be >= 1, got {int(min_hops_str)}"
+                    raise ValueError(msg)
+                if range_sep and not max_hops_str:
+                    msg = (
+                        f"Traversal step '{step.name}': variable-length range '{match.group(0)}' "
+                        "has no explicit upper bound"
+                    )
+                    raise ValueError(msg)
+                if max_hops_str:
+                    max_hops = int(max_hops_str)
+                elif min_hops_str:
+                    max_hops = int(min_hops_str)
+                else:
+                    # unbounded '*' — flag it
+                    max_hops = max_cap + 1
+                if max_hops < 1:
+                    msg = f"Traversal step '{step.name}': hop count must be >= 1, got {max_hops}"
+                    raise ValueError(msg)
+                if max_hops > max_cap:
+                    msg = f"Traversal step '{step.name}': max hops {max_hops} exceeds hard cap {max_cap}"
+                    raise ValueError(msg)
         return self
 
 

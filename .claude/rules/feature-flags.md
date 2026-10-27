@@ -146,3 +146,4 @@ were industry-specific and had no caller).
 | Flag | Default | Purpose |
 |------|---------|---------|
 | weight_ceiling_includes_unscoped | True | With `domain_strict_validation`, the default-weight ceiling (C-22) for each declared direction counts unscoped dimensions plus the dimensions scoped to it; `{'*': 0.6, 'd1': 0.6}` is refused (RU-044 / CEG-COR-024); off restores the per-scope-bucket check |
+| traversal_open_range_rejected | True | `TraversalSpec` parses the whole `*[min][..[max]]` token: a `..` without an upper bound (`*1..`, `*2..`, `*..`) is refused and explicit bounds are checked against `max_hop_hard_cap`; the assembler grammar accepts only `*N` / `*[M]..N` (RU-045 / CEG-COR-038); off restores the parse that read `*1..` as one hop |
