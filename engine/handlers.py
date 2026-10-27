@@ -581,10 +581,15 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         return_line = f"RETURN candidate, score, {{{dim_map}}} AS dimension_scores\n"
     else:
         return_line = "RETURN candidate, score\n"
+    # RU-011 / CEG-COR-033: a WHERE directly after OPTIONAL MATCH belongs to it
+    # and never removes a row; `WITH *` makes the gates a row filter while every
+    # traversal variable stays in scope.
+    gate_row_boundary = "WITH *\n" if _match_settings.gate_where_row_scope else ""
     cypher = (
         f"MATCH (candidate:{sanitize_label(candidate_labels[0])})\n"
         + "\n".join(traversal_clauses)
         + "\n"
+        + gate_row_boundary
         + f"WHERE {where_clause}\n"
         + f"{scoring_clause}\n"
         + return_line
