@@ -112,3 +112,30 @@ def test_research_directory_prefixes_keep_resolving() -> None:
     for feat in se.extract_research_features(repo):
         for pattern in feat.search_files:
             assert any(se.matches_search_file(f, pattern) for f in files), (feat.name, pattern)
+
+
+def test_research_features_counted_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """RG-171 (RU-135): research patterns are added to the feature list exactly once."""
+    import json
+    import sys
+
+    repo = Path(__file__).resolve().parents[2]
+    research = tmp_path / se.RESEARCH_DIR
+    research.mkdir(parents=True)
+    src = repo / se.RESEARCH_DIR / se.RESEARCH_PATTERNS_FILE
+    (research / se.RESEARCH_PATTERNS_FILE).write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    spec = tmp_path / "my-spec.yaml"
+    spec.write_text("gates:\n  types: {}\n", encoding="utf-8")
+    mapped = len(se.extract_research_features(tmp_path))
+    assert mapped == 5
+
+    monkeypatch.setattr(
+        sys, "argv", ["spec_extract.py", "--spec", str(spec), "--root", str(tmp_path), "--fail-on", "NONE"]
+    )
+    assert se.main() == 0
+
+    matrix = json.loads((tmp_path / "artifacts" / se.COVERAGE_MATRIX_JSON).read_text(encoding="utf-8"))
+    assert matrix["categories"]["research_pattern"]["total"] == mapped
+    checklist = json.loads((tmp_path / "artifacts" / "spec_checklist.json").read_text(encoding="utf-8"))
+    names = [f["name"] for f in checklist if f["category"] == "research_pattern"]
+    assert len(names) == len(set(names)) == mapped

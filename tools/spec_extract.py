@@ -614,7 +614,6 @@ def main() -> int:
     features += extract_v11_additions(spec)
     features += extract_action_features(spec)
     features += extract_gds_features(spec)
-    features += extract_research_features(root)
 
     research = extract_research_features(root)
     features += research
