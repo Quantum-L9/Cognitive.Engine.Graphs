@@ -91,6 +91,7 @@ class ScoringAssembler:
         self.domain_spec = domain_spec
         self.scoring_spec = domain_spec.scoring
         self._last_active_dims: list[str] = []
+        self._last_effective_weights: dict[str, float] = {}
         self._query_params: dict[str, Any] = {}
         self._graph_driver = graph_driver
         self._learned_weights: dict[str, float] | None = None
@@ -176,6 +177,7 @@ class ScoringAssembler:
         dimension_exprs: list[str] = []
         weight_exprs: list[str] = []
         active_dim_names: list[str] = []
+        effective_weights: dict[str, float] = {}
 
         learned = self._learned_weights or {}
         sw_spec = self.domain_spec.feedbackloop.signal_weights if learned else None
@@ -199,8 +201,10 @@ class ScoringAssembler:
                 weight = -abs(sw_spec.penalty_factor) if learned_w < sw_spec.penalty_threshold else weight * learned_w
             weight_exprs.append(f"({cypher_number(weight)} * {alias})")
             active_dim_names.append(dim.name)
+            effective_weights[dim.name] = float(weight)
 
         self._last_active_dims = list(active_dim_names)
+        self._last_effective_weights = effective_weights
         all_exprs = ", ".join(dimension_exprs)
         score_expr = self._build_score_expression(weight_exprs)
 
@@ -216,6 +220,15 @@ class ScoringAssembler:
     def last_active_dimension_names(self) -> list[str]:
         """Return dimension names from the most recent assemble_scoring_clause call."""
         return list(self._last_active_dims)
+
+    @property
+    def last_effective_weights(self) -> dict[str, float]:
+        """Weight coefficient per active dimension emitted by the most recent assemble call.
+
+        RU-032: request override or spec default, times any learned adjustment —
+        exactly the number written into the score expression.
+        """
+        return dict(self._last_effective_weights)
 
     @property
     def last_query_params(self) -> dict[str, Any]:
