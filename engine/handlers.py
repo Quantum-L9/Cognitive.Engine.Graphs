@@ -434,7 +434,7 @@ _WEIGHT_SUM_TOLERANCE = 1e-9
 def _validate_match_weights(
     weights: dict[str, float],
     tenant: str,
-    effective_weights: dict[str, float] | None = None,
+    effective_weights: dict[str, Any] | None = None,
     known_weightkeys: set[str] | None = None,
 ) -> None:
     """W1-02: Validate user-supplied scoring weights.
@@ -464,7 +464,13 @@ def _validate_match_weights(
             raise ValidationError(msg, action="match", tenant=tenant)
 
     source = weights if effective_weights is None else effective_weights
-    weight_sum = sum(float(v) for v in source.values())
+    weight_sum = 0.0
+    for key, val in source.items():
+        try:
+            weight_sum += float(val)
+        except (TypeError, ValueError) as exc:
+            msg = f"Weight '{key}' is not a valid number"
+            raise ValidationError(msg, action="match", tenant=tenant) from exc
     if weight_sum > _WEIGHT_CEILING + _WEIGHT_SUM_TOLERANCE:
         msg = f"Weights sum to {weight_sum:.4f}, exceeding {_WEIGHT_CEILING}"
         raise ValidationError(msg, action="match", tenant=tenant)
@@ -528,7 +534,7 @@ def _annotate_weighted_confidence(
         if isinstance(raw, dict):
             for name, value in raw.items():
                 if isinstance(value, (int, float)):
-                    contributions[name] = float(value) * effective_weights.get(name, 1.0)
+                    contributions[name] = value * effective_weights.get(name, 1.0)
         contribution_views.append({"dimension_scores": contributions})
 
     mono = {f["candidate_index"]: f for f in checker.check_monoculture(contribution_views)}
