@@ -540,3 +540,26 @@ class TestArbitrationObjectiveDirection:
         ]
         result = apply_pareto_filter(candidates, ["cost", "q"], directions={"cost": "minimize"}, front_size_limit=1)
         assert result["nondominated"] == ["cheap", "pricey"]
+
+    def test_minimize_missing_or_none_value_is_worst_not_best(self):
+        """RU-019: an absent / None / non-numeric minimised value never beats a real cost."""
+        from engine.scoring.pareto_integrator import apply_pareto_filter
+
+        candidates = [
+            {"candidate": {"entity_id": "real"}, "cost": 0.2, "q": 0.5, "score": 0.5},
+            {"candidate": {"entity_id": "absent"}, "q": 0.5, "score": 0.5},
+            {"candidate": {"entity_id": "none"}, "cost": None, "q": 0.5, "score": 0.5},
+            {"candidate": {"entity_id": "junk"}, "cost": "n/a", "q": 0.5, "score": 0.5},
+        ]
+        result = apply_pareto_filter(candidates, ["cost", "q"], directions={"cost": "minimize"})
+        assert result["nondominated"] == ["real"]
+        assert result["dominated"] == ["absent", "none", "junk"]
+
+    def test_minimize_missing_value_flag_off_keeps_zero_fill(self, monkeypatch):
+        """C-21: with arbitration_objective_direction off the 0.0 fill and maximise-all are restored."""
+        from engine.config.settings import settings
+        from engine.scoring.pareto_integrator import build_pareto_candidates
+
+        monkeypatch.setattr(settings, "arbitration_objective_direction", False)
+        cands = build_pareto_candidates([{"q": 0.5}], ["cost", "q"])
+        assert cands[0].dimension_scores["cost"] == 0.0

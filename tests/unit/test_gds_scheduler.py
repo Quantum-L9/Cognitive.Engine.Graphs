@@ -92,9 +92,9 @@ def _cypher_sent(driver: AsyncMock) -> str:
     return "\n".join(str(call.args[0]) for call in driver.execute_query.call_args_list)
 
 
-def _minimal_spec(jobs: list[GDSJobSpec]) -> DomainSpec:
+def _minimal_spec(jobs: list[GDSJobSpec], domain_id: str = "test-domain") -> DomainSpec:
     raw = {
-        "domain": {"id": "test-domain", "name": "Test", "version": "0.0.1"},
+        "domain": {"id": domain_id, "name": "Test", "version": "0.0.1"},
         "ontology": {
             "nodes": [
                 {
@@ -376,6 +376,10 @@ class TestAlgorithmDispatch:
         assert "$prune_below" in prune
         assert "$max_age_days" in prune
         assert "DELETE r" in prune
+        # Refresh and prune are scoped to the job's own node label, as create is.
+        scoped = "MATCH (:Site)-[r:RECENTLY_INTERACTED_WITH]->(:Site)"
+        assert scoped in refresh
+        assert scoped in prune
         for call in driver.execute_query.call_args_list:
             assert call.kwargs["parameters"] == {"half_life": 90.0, "max_age_days": 207.0, "prune_below": 0.1}
 

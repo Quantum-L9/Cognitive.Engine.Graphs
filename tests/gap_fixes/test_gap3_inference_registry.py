@@ -151,6 +151,14 @@ def test_geography_absent_country_still_emits() -> None:
     assert result.value == "West"
 
 
+@pytest.mark.parametrize("country", ["", " ", "\t"])
+def test_geography_blank_country_counts_as_absent(country: str) -> None:
+    """A blank optional ``country`` is missing data, not a declared non-US country."""
+    result = execute_rule("infer_geography_from_postal_code", {"postal_code": "94105", "country": country}, CTX)
+    assert result is not None
+    assert result.value == "West"
+
+
 @pytest.mark.parametrize(
     ("entity", "region"),
     [
