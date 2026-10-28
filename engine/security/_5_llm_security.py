@@ -30,7 +30,7 @@ import re
 from collections.abc import Generator
 from typing import TypeVar
 
-from pydantic import BaseModel, ValidationError
+from pydantic import AliasChoices, AliasPath, BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +135,39 @@ def _reject_injection(text: str) -> None:
 # ============================================================
 
 
+def _alias_keys(alias: str | AliasPath | AliasChoices) -> set[str]:
+    """Top-level input keys a validation alias accepts."""
+    if isinstance(alias, str):
+        return {alias}
+    if isinstance(alias, AliasPath):
+        head = alias.path[0] if alias.path else None
+        return {head} if isinstance(head, str) else set()
+    keys: set[str] = set()
+    for choice in alias.choices:
+        keys |= _alias_keys(choice)
+    return keys
+
+
+def _accepted_input_keys(schema: type[BaseModel]) -> set[str]:
+    """Top-level keys ``schema`` accepts on validation: field names and/or aliases.
+
+    Mirrors pydantic's ``validate_by_alias`` / ``validate_by_name``
+    (``populate_by_name``) so a key such as ``"from"`` that targets a field
+    whose validation alias is ``"from"`` is not reported as undeclared.
+    """
+    config = schema.model_config
+    by_alias = config.get("validate_by_alias", True)
+    by_name = bool(config.get("validate_by_name") or config.get("populate_by_name"))
+    keys: set[str] = set()
+    for name, field in schema.model_fields.items():
+        alias = field.validation_alias
+        if alias is None or by_name:
+            keys.add(name)
+        if alias is not None and by_alias:
+            keys |= _alias_keys(alias)
+    return keys
+
+
 def validate_llm_output(llm_response: str, expected_schema: type[T], strict: bool = True) -> T:
     """
     Validate LLM JSON output against Pydantic schema.
@@ -174,8 +207,10 @@ def validate_llm_output(llm_response: str, expected_schema: type[T], strict: boo
     # RU-073 / CEG-COR-120: model_validate(strict=True) only disables type
     # coercion; extra keys are ignored unless the model forbids them. strict
     # promises "reject extra fields", so undeclared keys are refused here.
+    # Declared keys are the ones pydantic itself accepts: field names and/or
+    # validation aliases, per the schema's validate_by_name/validate_by_alias.
     if strict and isinstance(data, dict):
-        extra = sorted(set(data) - set(expected_schema.model_fields))
+        extra = sorted(set(data) - _accepted_input_keys(expected_schema))
         if extra:
             msg = f"LLM output has unexpected field(s) for {expected_schema.__name__}: {extra}"
             raise ValueError(msg)
