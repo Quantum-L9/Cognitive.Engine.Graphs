@@ -349,6 +349,9 @@ def _match_set_spec() -> MagicMock:
     endpoint.targetnode = "Depot"
     endpoint.idproperty = "depot_id"
     endpoint.fieldsupdated = ["status"]
+    # A node endpoint: MagicMock attributes are truthy, so name the absent edge
+    # explicitly (relationship endpoints set ``targetedge``).
+    endpoint.targetedge = None
     spec = MagicMock()
     spec.domain.id = "test_domain"
     spec.capabilities = []
