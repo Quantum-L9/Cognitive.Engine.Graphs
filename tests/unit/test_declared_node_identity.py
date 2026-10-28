@@ -50,7 +50,8 @@ PACKS = {
 # RU-010 (R1a-DEC-03): each pack's required gate parameters for its direction.
 _REQUIRED_QUERY: dict[str, dict[str, Any]] = {
     "plasticos": {"polymer_type": "HDPE"},
-    "freight-matching": {"weightlbs": 1000.0, "equipmenttype": "van"},
+    # pickupdate: required since RU-046 made availability_window read it.
+    "freight-matching": {"weightlbs": 1000.0, "equipmenttype": "van", "pickupdate": "2026-11-02T08:00:00Z"},
 }
 
 

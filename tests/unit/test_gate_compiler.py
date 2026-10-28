@@ -494,9 +494,13 @@ def _gate(name: str, param: object, **extra: object) -> dict:
     return {"name": name, "type": "threshold", "candidateprop": "score", "queryparam": param, "operator": ">=", **extra}
 
 
-def test_validate_gates_rejects_null_required_and_undeclared_parameters() -> None:
+def test_validate_gates_rejects_null_required_and_undeclared_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config.settings import settings
     from engine.gates.compiler import GateCompiler, UnboundGateParameterError
 
+    # RU-050 rejects an undeclared gate parameter at spec load; this test covers the
+    # match-time defence for specs loaded with that validation off.
+    monkeypatch.setattr(settings, "domain_undeclared_param_rejected", False)
     spec = _two_label_spec(
         [_gate("req_gate", "req"), _gate("undeclared_gate", "ghost"), _gate("opt_gate", "opt")],
         [{"name": "req", "type": "float", "required": True}, {"name": "opt", "type": "float"}],
@@ -509,10 +513,14 @@ def test_validate_gates_rejects_null_required_and_undeclared_parameters() -> Non
     ]
 
 
-def test_validate_gates_leaves_null_optional_and_derived_to_nullbehavior() -> None:
+def test_validate_gates_leaves_null_optional_and_derived_to_nullbehavior(monkeypatch: pytest.MonkeyPatch) -> None:
     from engine.config.schema import DerivedParameterSpec
+    from engine.config.settings import settings
     from engine.gates.compiler import GateCompiler
 
+    # The derived parameter is attached after construction (model_copy), so the
+    # RU-050 load-time check would see 'half' as undeclared; it is off for the build.
+    monkeypatch.setattr(settings, "domain_undeclared_param_rejected", False)
     spec = _two_label_spec(
         [_gate("opt_gate", "opt"), _gate("derived_gate", "half"), _gate("literal_gate", 0.5)],
         [{"name": "opt", "type": "float"}],

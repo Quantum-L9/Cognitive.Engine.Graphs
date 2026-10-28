@@ -109,7 +109,8 @@ async def _match_freight(query: dict) -> dict:
     init_dependencies(driver, loader)  # type: ignore[arg-type]
     # RU-010 (R1a-DEC-03): the pack's required gate fields must be supplied;
     # the defaulted derivation under test is unaffected by them.
-    query = {"weightlbs": 1000.0, "equipmenttype": "van", **query}
+    # pickupdate: required since RU-046 made availability_window read it.
+    query = {"weightlbs": 1000.0, "equipmenttype": "van", "pickupdate": "2026-11-02T08:00:00Z", **query}
     await handle_match(spec.domain.id, {"query": query, "match_direction": spec.queryschema.matchdirections[0]})
     return driver.parameters[0]
 
