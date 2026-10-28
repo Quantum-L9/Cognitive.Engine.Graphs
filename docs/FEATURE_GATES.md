@@ -1127,6 +1127,18 @@ before any deletion. **Release gate:** do not enable live erasure in any environ
 before the admin tenant-binding fix (RU-003, CEG-COR-003) is deployed with it — until
 then `domain_id` is caller-supplied.
 
+**Tenant-scoped packet erasure (RU-066 follow-up, PR #352 review).** The packet step
+erases only the requesting tenant's packets: `gdpr_erase_subject(subject_id,
+performed_by, tenant)` filters both its audit insert and its delete on
+`actor_tenant = tenant`, and `PIIHandler.erase_subject` passes the requesting tenant.
+Before, the two-argument function filtered on the subject id only, so on an owner/admin
+DSN a subject id reused by another tenant deleted that tenant's packets too.
+`packet_store.sql` drops the two-argument function, so re-apply it
+(§7) together with this release; a packet erasure without a tenant raises `ValueError`
+in Python and an exception in SQL. No new flag: the SQL and Python contracts change
+together (an off path would call the dropped function), and live erasure stays behind
+`GDPR_ERASURE_ENABLED=False` / `GDPR_DRY_RUN=True`.
+
 ### Causal Attribution Unique Touchpoints (RU-067 / CEG-COR-055)
 
 **Flag**: `CAUSAL_ATTRIBUTION_UNIQUE_TOUCHPOINTS=True` (default on)
