@@ -95,6 +95,8 @@ def test_unwind_merge_unchanged_and_flag_off_restores_match_set(plasticos_spec, 
     cypher = gen.generate_sync_query(_match_set_endpoint(plasticos_spec), [{"facility_id": "f1"}])
     assert "RETURN" not in cypher
     assert cypher.endswith("SET n += row, n._tenant = $tenant")
+
+
 def _endpoint(spec, path):
     return next(ep for ep in spec.sync.endpoints if ep.path == path)
 
