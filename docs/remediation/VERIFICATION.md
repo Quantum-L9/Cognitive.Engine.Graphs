@@ -112,7 +112,7 @@ published as 32 stacked PRs, merged bottom-up. Each part's head was verified on 
 publication, with the gates CI scopes to that PR:
 
 - `ruff check`, `ruff format --check`, `mypy engine/`, `contract_scanner.py`, `cypher_lint.py`,
-  `verify_contracts.py`, and `l9_meta_injector.py check` from the part that adds it onward;
+  `verify_contracts.py`, and `l9_meta_injector.py` (dry-run check) from the part that adds it onward;
 - `semgrep` with `--baseline-commit` set to the part's base, and the terminology guard over the
   part's changed `engine/` and `tests/` files;
 - the non-integration suite, then `tests/integration` + `tests/performance` against Neo4j Enterprise
@@ -131,6 +131,42 @@ assertion was weakened and no gate was suppressed. Examples:
 - the C-18 registry entry for that move lands with the RU-131 check that reads it;
 - redundant `float()` calls and `log` handle names are fixed in the part that adds them.
 
-The stack's top tree equals the reviewed #352 tree apart from one removed code comment in
-`engine/feedback/score_propagator.py`. The commit references in the ledger and in this file name the
-stacked commits.
+As first published, the stack's top tree equalled the reviewed #352 tree apart from one removed code
+comment in `engine/feedback/score_propagator.py`; §7.1 lists what review changed since. The commit
+references in the ledger and in this file name the stacked commits.
+
+### 7.1 Review round on the stack
+
+Codex and Copilot reviewed each stacked PR. Every finding was reproduced at that part's head
+before any change. A real defect was fixed in the part that introduces the code, with a test
+that fails before the fix and passes after it; the fix was then merged up through every later
+part. A finding that rests on `feature_flag.required: false` in the plan (C-21 rationale recorded
+per unit) was answered on its thread instead. Fixes by part:
+
+| Part | PR | Commit | Fix |
+|---|---|---|---|
+| 03 | #355 | `53a11bf` | minimised Pareto value missing → `inf`; `pareto.arbitration.trimmed_ids`; FEATURE_GATES rows inside the table |
+| 05 | #357 | `6eed646` | admission honours a declared `$_popmean_<dim>` and declared prior/structural properties |
+| 06 | #358 | `2d49557` | exclusion gate endpoints validated per direction |
+| 08 | #360 | `36bcd3a` | list-reaching PII redaction only for `compliance.pii.enabled` domains |
+| 09 | #361 | `aa57ec2` | audit rows built inside the flush `try`; `compliance_buffer_max` < 1 rejected |
+| 10 | #362 | `61b3d13` | GDPR packet erasure scoped to the requesting tenant (3-argument `gdpr_erase_subject`) |
+| 11 | #363 | `5b164ab` | strict LLM output accepts aliases; chassis PII empty-key paths; write-clause guard ignores literals |
+| 12 | #364 | `1975815` | re-delivered legacy packets skipped by `packet_id`; a blank country counts as absent |
+| 14 | #366 | `214fd78`, `b5808df` | overlay refresh/prune scoped to the job's node label |
+| 15 | #367 | `b47100a` | resolution scores every member before writing edges; compares unrounded scores |
+| 17 | #369 | `49faee9` | beam search validates and diversity-prunes complete cascades |
+| 18 | #370 | `9522c77` | audit harness reports a step timeout (124) as an infrastructure error |
+| 19 | #371 | `b08940a` | cypher_lint models `str.format` field access and `%`-mapping operands |
+| 20 | #372 | `4d0a58b` | `setup-repo-vars.sh` survives its first counter increment under `set -e`; N+1 scan covers a nested loop's `else` |
+| 21 | #373 | `7b33e16` | semver components accept ASCII digits only |
+| 22 | #374 | `a4be0f0` | cascade distance annotated `float` (CI type-checks without NumPy stubs) |
+| 24 | #376 | `0a5d5f6` | the refused tenant is no longer written to the log (SonarCloud S5145, log injection) |
+| 25 | #377 | `94bebd8` | contract_scanner resolves HTTP client names by lexical scope (RU-137 finding raised on #371) |
+| 29 | #381 | `884451f` | the scheduler registry test reuses the shared spec helpers (SonarCloud duplication 9.5% > 3%) |
+
+Four parts then exceeded the 1000-addition limit by 22–48 lines. One self-contained unit moved up
+one part each, by a withdrawal commit in the source part and an unchanged re-apply in the next:
+RU-056 05→06, RU-076 10→11, RU-088 12→13, RU-129 17→18. The RU-137 fix was carried in part 25 for
+the same reason. Each PR description names its moved unit. The four units net to zero at the top
+of the stack, whose tree now differs from the previous top only by the fixes in the table above.
