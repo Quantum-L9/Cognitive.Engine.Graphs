@@ -206,13 +206,6 @@ FILE_REGISTRY: list[FileMeta] = [
     FileMeta("scripts/entrypoint.sh", "l9-template", ["scripts"], ["L9_TEMPLATE", "scripts", "entrypoint"], "platform"),
     FileMeta("scripts/audit.sh", "l9-template", ["scripts", "audit"], ["L9_TEMPLATE", "scripts", "audit"], "platform"),
     FileMeta("scripts/README.md", "l9-template", ["scripts"], ["L9_TEMPLATE", "scripts", "docs"], "platform"),
-    FileMeta(
-        "tools/domain_extractor.py",
-        "l9-template",
-        ["tools"],
-        ["L9_TEMPLATE", "tools", "domain-extractor"],
-        "platform",
-    ),
     # --- Test Harness ---
     FileMeta("tests/conftest.py", "l9-template", ["test"], ["L9_TEMPLATE", "test", "fixtures"], "platform"),
     FileMeta("tests/README.md", "l9-template", ["test"], ["L9_TEMPLATE", "test", "docs"], "platform"),
