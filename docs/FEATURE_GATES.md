@@ -32,13 +32,6 @@ and rollback procedure.
 ---
 
 ## Quick Reference
-| Arbitration Zero Score Present | `ARBITRATION_ZERO_SCORE_PRESENT` (`arbitration_zero_score_present`) | `True` | unset | active (correctness); a dimension value of 0.0 is evaluated by hard/soft constraints and Pareto dominance instead of being skipped or replaced by `<d>_score`; `false` restores legacy truthiness (RU-018 / CEG-COR-025) |
-| Arbitration Objective Direction | `ARBITRATION_OBJECTIVE_DIRECTION` (`arbitration_objective_direction`) | `True` | unset | active (correctness); the arbitration front honours `direction: minimize` (unknown strings maximise with a warning) and keeps at most `front_size_limit` ids, highest composite `score` first, reporting the rest as `trimmed`; `false` restores maximise-all, unbounded (RU-019 / CEG-COR-026) |
-| Learned Weights Tenant Keyed | `LEARNED_WEIGHTS_TENANT_KEYED` (`learned_weights_tenant_keyed`) | `True` | unset | active (correctness) for feedback-enabled domains only (`FEEDBACK_ENABLED` defaults `False`); learned DimensionWeight multipliers are read by the writer's `{dimension, tenant}` keys; `false` restores the inert legacy reader (RU-022 / CEG-COR-030) |
-| Learned Weight Renormalization | `LEARNED_WEIGHT_RENORMALIZATION` (`learned_weight_renormalization`) | `True` | unset | active (correctness) for feedback-enabled domains; learning redistributes weight among non-penalised dimensions without raising their sum above the pre-learning (C-22) value, and a learned `0.0` is honoured; `false` restores multiply-only (RU-023 / CEG-COR-083) |
-| Signal Weight Proportion CI | `SIGNAL_WEIGHT_PROPORTION_CI` (`signal_weight_proportion_ci`) | `True` | unset | active (correctness) for feedback-enabled domains; stored DimensionWeight `ci_width`/`confidence` come from the win-rate proportion, so an early positive lift is dampened; `false` restores the lift-based formula (RU-027 / CEG-COR-116) |
-| Propagation Single Application | `PROPAGATION_SINGLE_APPLICATION` (`propagation_single_application`) | `True` | unset | active (correctness); one outcome event updates each tenant DimensionWeight `boost_factor` once, bounded, and `candidates_affected` counts DimensionWeights; `false` restores the row-multiplying query (RU-028 / CEG-COR-117) |
-| Drift Requires Both Windows | `DRIFT_REQUIRES_BOTH_WINDOWS` (`drift_requires_both_windows`) | `True` | unset | active (correctness); outcomes `metadata.drift` raises no alert unless both a recent and a baseline distribution exist; `false` restores the one-sided divergence (RU-029 / CEG-COR-118) |
 
 The **Default** column is the code-level default in `engine/config/settings.py`
 (what ships if no environment variable is set — the seL4 "dormant mechanism"
@@ -99,6 +92,13 @@ independently of the code default.
 | Sync Count From Write Result | `SYNC_COUNT_FROM_WRITE_RESULT` (`sync_count_from_write_result`) | `True` | unset | active (correctness, RU-060); `UNWINDMATCHSET` sync returns `count(n) AS synced_count` and the response adds `unmatched_count`; `UNWINDMERGE` unchanged; off restores `synced_count = len(batch)` |
 | Admin Tenant-bound Domain | `ADMIN_TENANT_BOUND_DOMAIN` (`admin_tenant_bound_domain`) | `True` | unset | active (hardening, RU-003); every domain-bearing admin subaction rejects a `domain_id` other than the packet tenant before any load or query; `evaluate` matches as the tenant; off restores the caller-chosen `domain_id` |
 | Pricealignment Float Division | `PRICEALIGNMENT_FLOAT_DIVISION` (`pricealignment_float_division`) | `True` | unset | active (correctness); both ratio operands are cast with `toFloat()` so INTEGER-stored prices are not truncated (450/500 scored 0.0); `false` restores the legacy expression (RU-017 / CEG-COR-006) |
+| Arbitration Zero Score Present | `ARBITRATION_ZERO_SCORE_PRESENT` (`arbitration_zero_score_present`) | `True` | unset | active (correctness); a dimension value of 0.0 is evaluated by hard/soft constraints and Pareto dominance instead of being skipped or replaced by `<d>_score`; `false` restores legacy truthiness (RU-018 / CEG-COR-025) |
+| Arbitration Objective Direction | `ARBITRATION_OBJECTIVE_DIRECTION` (`arbitration_objective_direction`) | `True` | unset | active (correctness); the arbitration front honours `direction: minimize` (unknown strings maximise with a warning) and keeps at most `front_size_limit` ids, highest composite `score` first, reporting the rest as `trimmed` (`pareto.arbitration.trimmed_ids` in the match response); a missing or non-numeric minimised value ranks as the worst cost (`inf`), not `0.0`; `false` restores maximise-all, unbounded (RU-019 / CEG-COR-026) |
+| Learned Weights Tenant Keyed | `LEARNED_WEIGHTS_TENANT_KEYED` (`learned_weights_tenant_keyed`) | `True` | unset | active (correctness) for feedback-enabled domains only (`FEEDBACK_ENABLED` defaults `False`); learned DimensionWeight multipliers are read by the writer's `{dimension, tenant}` keys; `false` restores the inert legacy reader (RU-022 / CEG-COR-030) |
+| Learned Weight Renormalization | `LEARNED_WEIGHT_RENORMALIZATION` (`learned_weight_renormalization`) | `True` | unset | active (correctness) for feedback-enabled domains; learning redistributes weight among non-penalised dimensions without raising their sum above the pre-learning (C-22) value, and a learned `0.0` is honoured; `false` restores multiply-only (RU-023 / CEG-COR-083) |
+| Signal Weight Proportion CI | `SIGNAL_WEIGHT_PROPORTION_CI` (`signal_weight_proportion_ci`) | `True` | unset | active (correctness) for feedback-enabled domains; stored DimensionWeight `ci_width`/`confidence` come from the win-rate proportion, so an early positive lift is dampened; `false` restores the lift-based formula (RU-027 / CEG-COR-116) |
+| Propagation Single Application | `PROPAGATION_SINGLE_APPLICATION` (`propagation_single_application`) | `True` | unset | active (correctness); one outcome event updates each tenant DimensionWeight `boost_factor` once, bounded, and `candidates_affected` counts DimensionWeights; `false` restores the row-multiplying query (RU-028 / CEG-COR-117) |
+| Drift Requires Both Windows | `DRIFT_REQUIRES_BOTH_WINDOWS` (`drift_requires_both_windows`) | `True` | unset | active (correctness); outcomes `metadata.drift` raises no alert unless both a recent and a baseline distribution exist; `false` restores the one-sided divergence (RU-029 / CEG-COR-118) |
 | Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `True` | unset | active (hardening); admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
 | Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `True` | unset | active (hardening); admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
 | Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `True` | unset | active (hardening); an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
@@ -721,8 +721,12 @@ withheld when:
   a value the assembler binds itself (`community_bridge` without a
   `query_<prop>` field; `geodecay`'s `$lon`);
 - a dimension declares an option nothing produces: `null_strategy:
-  inherit_prior | population_mean` or `cold_start_fallback:
-  structural_similarity | population_mean`.
+  inherit_prior` or `cold_start_fallback: structural_similarity`, unless the
+  pack declares the property they read (`_prior_<dim>`,
+  `shared_neighbor_score`) on a candidate node, which sync writes.
+  `population_mean` (either option) reads `$_popmean_<dim>`: a pack that
+  declares it as a queryschema field or derived parameter is admitted
+  (`handle_match` binds it); otherwise it is the unbound-parameter defect above.
 
 Each such pack failed every match (`ValueError` / `ParameterMissing`) or
 silently degraded. `freight-matching` is withheld by this check until its
@@ -1042,9 +1046,12 @@ returned candidate PII unchanged; `redact()` / `mask_fields()` shallow-copied an
 edited nested caller dicts in place. On: detection descends into dicts and
 lists/tuples at any depth with index-aware paths (`candidates[0].candidate.contact_email`;
 dict-only payloads keep their dotted paths), and redaction/masking copy every container
-on the edited path, so the input is never mutated. `check_sync_request` records the
-detected field paths (never values) in the access audit entry. Off: the legacy
-dict-only traversal.
+on the edited path, so the input is never mutated. `redact_response` reaches
+`candidates` only for a domain whose `compliance.pii.enabled` is `true`; a domain that
+opts out (`enabled: false`, or no `pii` section — `PIISpec.enabled` defaults to `false`)
+keeps the pre-RU-062 reach: dict paths only, candidate fields untouched.
+`check_sync_request` records the detected field paths (never values) in the access audit
+entry. Off: the legacy dict-only traversal.
 
 Rollback: set the flag to `false`.
 
@@ -1109,7 +1116,8 @@ per `PIISpec.handling`:
 | `encrypt`, `tokenize`, other | fail closed to `[REDACTED]`, with a WARNING naming the mode and field paths (decision DEC-22 (a); no key sourcing or token store exists) |
 
 `compliance.pii.enabled: false` (or no `pii` section): built-in inference with key
-deletion, as before. Ingest-time hashing of stored PII is out of scope. Off: built-in
+deletion over dict paths only (never into `candidates`), as `pii_redaction_recursive`
+documents for opted-out domains. Ingest-time hashing of stored PII is out of scope. Off: built-in
 inference with key deletion for every domain.
 
 Rollback: set the flag to `false`.

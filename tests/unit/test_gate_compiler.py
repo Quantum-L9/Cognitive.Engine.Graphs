@@ -176,6 +176,33 @@ def test_exclusion_edge_from_another_directions_candidate_is_refused() -> None:
         GateCompiler(spec).compile(spec.gates[0])
 
 
+def test_unscoped_exclusion_is_checked_per_direction() -> None:
+    """Unscoped, BLOCKS applies to d2 too, where the candidate is a Gadget and NOT EXISTS is always true.
+
+    The Widget candidate of d1 must not vouch for d2 through a union of labels.
+    """
+    from engine.config.loader import admission_defects
+    from engine.gates.compiler import GateCompiler
+
+    spec = _two_label_spec([{"name": "blocked_all", "type": "exclusion", "edgetype": "BLOCKS"}])
+    with pytest.raises(ValueError, match=r"blocked_all.*direction 'd2'"):
+        GateCompiler(spec).compile(spec.gates[0])
+    assert any(d.startswith("blocked_all:") for d in admission_defects(spec))
+
+
+def test_unscoped_exclusion_carried_in_every_direction_compiles() -> None:
+    from engine.config.schema import DomainSpec
+    from engine.gates.compiler import GateCompiler
+
+    raw = _two_label_spec([{"name": "blocked_all", "type": "exclusion", "edgetype": "BLOCKS"}]).model_dump(
+        by_alias=True, exclude_none=True
+    )
+    gadget_blocks = {"type": "BLOCKS", "from": "Gadget", "to": "Widget", "direction": "DIRECTED"}
+    raw["ontology"]["edges"].append({**gadget_blocks, "category": "exclusion", "managedby": "sync"})
+    spec = DomainSpec.model_validate(raw)
+    assert GateCompiler(spec).compile(spec.gates[0]) == "NOT EXISTS { MATCH (candidate)-[:BLOCKS]->() }"
+
+
 def test_candidate_origin_exclusion_compiles_unchanged() -> None:
     from engine.gates.compiler import GateCompiler
 
