@@ -28,6 +28,8 @@ is unavailable (see tests/conftest.py::neo4j_container).
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from engine.config.schema import DomainSpec, GDSJobScheduleSpec, GDSJobSpec, GDSProjectionSpec
@@ -104,3 +106,67 @@ async def test_overlay_keeps_newest_interaction_and_prunes_aged_edges(
     second = await scheduler.execute_job(spec.gdsjobs[0])
     assert second["status"] == "success"
     assert await _overlay(graph_driver) == overlay
+
+
+SHARED_WRITEEDGE_SEED = """
+MERGE (a:Site {site_id: 1})
+MERGE (b:Site {site_id: 2})
+MERGE (q1:Query {query_id: 1})
+MERGE (q2:Query {query_id: 2})
+CREATE (a)-[:INTERACTED_WITH {last_seen_at: datetime() - duration({days: 60})}]->(b)
+CREATE (q1)-[:INTERACTED_WITH {last_seen_at: datetime() - duration({days: 5})}]->(q2)
+"""
+
+
+def _shared_writeedge_spec() -> DomainSpec:
+    """Two temporal-recency jobs, two node labels, one ``writeedge`` (the schema allows it)."""
+
+    def job(name: str, label: str, settings: list[dict]) -> GDSJobSpec:
+        return GDSJobSpec(
+            name=name,
+            algorithm="temporalrecency",
+            schedule=GDSJobScheduleSpec(type="manual"),
+            projection=GDSProjectionSpec(nodelabels=[label], edgetypes=["INTERACTED_WITH"]),
+            sourceedge="INTERACTED_WITH",
+            writeedge="RECENTLY_INTERACTED_WITH",
+            writeproperties=[{"timestamp_property": "last_seen_at"}, *settings],
+        )
+
+    return _minimal_spec(
+        [
+            job("site_recency", "Site", []),  # defaults: half_life 90, max_age 207
+            job("query_recency", "Query", [{"half_life_days": 10.0}, {"max_age_days": 30.0}]),
+        ],
+        domain_id=DB,
+    )
+
+
+@pytest.mark.asyncio
+async def test_jobs_sharing_a_writeedge_only_maintain_their_own_label(
+    graph_driver, plasticos_database, clean_db
+) -> None:
+    """A job's refresh and prune touch only overlay edges between its own node label."""
+    await graph_driver.execute_write(cypher=SHARED_WRITEEDGE_SEED, parameters={}, database=DB)
+    spec = _shared_writeedge_spec()
+    scheduler = GDSScheduler(spec, graph_driver)
+
+    site_job, query_job = spec.gdsjobs
+    assert (await scheduler.execute_job(site_job))["status"] == "success"
+    query_run = await scheduler.execute_job(query_job)
+    assert query_run["status"] == "success"
+    assert query_run["edges_pruned"] == 0
+
+    rows = await graph_driver.execute_query(
+        """
+        MATCH (s)-[r:RECENTLY_INTERACTED_WITH]->()
+        RETURN labels(s)[0] AS label, r.recency_score AS score
+        """,
+        parameters={},
+        database=DB,
+    )
+    scores = {row["label"]: row["score"] for row in rows}
+    # The 60-day-old Site edge is inside the Site job's max_age_days (207) and keeps
+    # the Site job's half-life (90), not the Query job's 10-day half-life / 30-day age.
+    assert set(scores) == {"Site", "Query"}
+    assert scores["Site"] == pytest.approx(math.exp(-60 / 90))
+    assert scores["Query"] == pytest.approx(math.exp(-5 / 10))

@@ -753,6 +753,13 @@ class GDSScheduler:
         3. prune — delete edges whose score fell below ``prune_below`` or whose
            ``last_event_date`` is older than ``max_age_days``.
 
+        Refresh and prune match ``(:node_label)-[r:writeedge]->(:node_label)``,
+        the same endpoints the create step MERGEs: the schema does not make
+        ``writeedge`` unique per job, so a job sharing the type with another
+        job over a different label must not rescale or delete that job's edges
+        with its own ``half_life_days`` / ``max_age_days``. The directed pattern
+        also counts each pruned relationship once.
+
         Labels and types arrive sanitized and are re-validated here; every
         value is a ``$param``.
         """
@@ -784,7 +791,7 @@ class GDSScheduler:
         """
 
         refresh_cypher = f"""
-        MATCH ()-[r:{overlay_edge}]->()
+        MATCH (:{node_label})-[r:{overlay_edge}]->(:{node_label})
         WHERE r.last_event_date IS NOT NULL
         WITH r, duration.inDays(r.last_event_date, datetime()).days AS age_days
         SET r.recency_score = exp(-1.0 * age_days / $half_life)
@@ -792,7 +799,7 @@ class GDSScheduler:
         """
 
         prune_cypher = f"""
-        MATCH ()-[r:{overlay_edge}]-()
+        MATCH (:{node_label})-[r:{overlay_edge}]->(:{node_label})
         WHERE r.recency_score < $prune_below
            OR (r.last_event_date IS NOT NULL
                AND duration.inDays(r.last_event_date, datetime()).days > $max_age_days)

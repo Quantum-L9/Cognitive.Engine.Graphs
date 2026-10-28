@@ -348,6 +348,10 @@ class TestAlgorithmDispatch:
         assert "$prune_below" in prune
         assert "$max_age_days" in prune
         assert "DELETE r" in prune
+        # Refresh and prune are scoped to the job's own node label, as create is.
+        scoped = "MATCH (:Site)-[r:RECENTLY_INTERACTED_WITH]->(:Site)"
+        assert scoped in refresh
+        assert scoped in prune
         for call in driver.execute_query.call_args_list:
             assert call.kwargs["parameters"] == {"half_life": 90.0, "max_age_days": 207.0, "prune_below": 0.1}
 
