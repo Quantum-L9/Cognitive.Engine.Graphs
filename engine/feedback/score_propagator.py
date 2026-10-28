@@ -99,8 +99,8 @@ class ScorePropagator:
 
         if settings.propagation_single_application:
             sw_spec = self._spec.feedbackloop.signal_weights
-            parameters["min_weight"] = float(sw_spec.min_weight)
-            parameters["max_weight"] = float(sw_spec.max_weight)
+            parameters["min_weight"] = sw_spec.min_weight
+            parameters["max_weight"] = sw_spec.max_weight
             cypher = f"""
         MATCH (o:{outcome_label} {{candidate_id: $candidate_id, tenant: $tenant}})
         WITH count(o) AS outcomes
