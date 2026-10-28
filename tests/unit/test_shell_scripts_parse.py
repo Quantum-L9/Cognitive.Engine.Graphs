@@ -170,3 +170,156 @@ def test_entrypoint_banner_prints_sdk_when_unset(tmp_path: Path) -> None:
     env = {k: v for k, v in os.environ.items() if k != "L9_CHASSIS"}
     proc = _run([BASH, "-c", banner], cwd=tmp_path, env=env)
     assert proc.stdout == "Chassis: sdk\n"
+
+
+# ── RU-149 / RG-185: seed / gds / dev scripts use the live ingress ──────────
+#
+# A stub curl records each call (URL + body) and answers with a fixed HTTP code,
+# so the scripts run end to end without a server.
+
+_CURL_STUB = r"""
+url=""; body=""; want_code=0; to_null=0; fail=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -X|-H) shift ;;
+    -f|-sf|-fs|-sSf|--fail) fail=1 ;;
+    -o) to_null=1; shift ;;
+    -w) want_code=1; shift ;;
+    -d|--data|--data-binary)
+      shift
+      if [ "$1" = "@-" ]; then body="$(cat)"; elif [ "${1#@}" != "$1" ]; then body="$(cat "${1#@}")"; else body="$1"; fi ;;
+    http*) url="$1" ;;
+  esac
+  shift
+done
+printf '%s\n%s\n' "$url" "$body" >> "$CURL_LOG"
+if [ "$want_code" = 1 ]; then printf '%s' "$CURL_CODE"; fi
+[ "$fail" = 1 ] && [ "$CURL_CODE" -ge 400 ] && exit 22
+[ "$to_null" = 1 ] || printf '{"status": "ok"}'
+"""
+
+
+def _curl_project(tmp_path: Path, script: str, code: str) -> tuple[Path, dict[str, str], Path]:
+    proj = tmp_path / "proj"
+    (proj / "scripts").mkdir(parents=True)
+    shutil.copy(REPO / "scripts" / script, proj / "scripts" / script)
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    _stub(stubs, "curl", _CURL_STUB)
+    log = tmp_path / "curl.log"
+    env = {
+        **os.environ,
+        "PATH": f"{stubs}{os.pathsep}{os.environ.get('PATH', '')}",
+        "CURL_LOG": str(log),
+        "CURL_CODE": code,
+    }
+    env.pop("API_URL", None)
+    return proj, env, log
+
+
+def _calls(log: Path) -> list[tuple[str, dict]]:
+    import json
+
+    lines = log.read_text(encoding="utf-8").splitlines() if log.exists() else []
+    return [(lines[i], json.loads(lines[i + 1]) if lines[i + 1] else {}) for i in range(0, len(lines), 2)]
+
+
+def _seed(proj: Path, entities: dict[str, str]) -> None:
+    seeds = proj / "domains" / "acme" / "seeds"
+    seeds.mkdir(parents=True)
+    for name, body in entities.items():
+        (seeds / f"{name}.json").write_text(body, encoding="utf-8")
+
+
+@needs_bash
+def test_seed_posts_sync_through_v1_execute(tmp_path: Path) -> None:
+    assert BASH is not None
+    proj, env, log = _curl_project(tmp_path, "scripts-seed.sh", "200")
+    _seed(proj, {"suppliers": '[{"id": "s1"}]'})
+
+    proc = _run([BASH, "scripts/scripts-seed.sh", "acme", "http://api.test"], cwd=proj, env=env)
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _calls(log) == [
+        (
+            "http://api.test/v1/execute",
+            {"action": "sync", "tenant": "acme", "payload": {"entity_type": "suppliers", "batch": [{"id": "s1"}]}},
+        )
+    ]
+
+
+@needs_bash
+def test_seed_exits_nonzero_when_an_entity_fails(tmp_path: Path) -> None:
+    assert BASH is not None
+    proj, env, log = _curl_project(tmp_path, "scripts-seed.sh", "500")
+    _seed(proj, {"buyers": '[{"id": "b1"}]', "suppliers": '[{"id": "s1"}]'})
+
+    proc = _run([BASH, "scripts/scripts-seed.sh", "acme", "http://api.test"], cwd=proj, env=env)
+
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    # Every entity is still attempted; the failure is reported, not hidden.
+    assert [url for url, _ in _calls(log)] == ["http://api.test/v1/execute"] * 2
+    assert "2 of 2" in proc.stdout
+
+
+@needs_bash
+def test_seed_rejects_a_seed_file_that_is_not_a_json_array(tmp_path: Path) -> None:
+    assert BASH is not None
+    proj, env, log = _curl_project(tmp_path, "scripts-seed.sh", "200")
+    _seed(proj, {"suppliers": '{"id": "s1"}'})
+
+    proc = _run([BASH, "scripts/scripts-seed.sh", "acme", "http://api.test"], cwd=proj, env=env)
+
+    assert proc.returncode == 1
+    assert _calls(log) == []
+
+
+@needs_bash
+def test_gds_trigger_posts_admin_gds_trigger(tmp_path: Path) -> None:
+    assert BASH is not None
+    proj, env, log = _curl_project(tmp_path, "scripts-gds-trigger.sh", "200")
+    env["API_URL"] = "http://api.test"
+
+    proc = _run([BASH, "scripts/scripts-gds-trigger.sh", "acme", "louvain"], cwd=proj, env=env)
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert _calls(log) == [
+        (
+            "http://api.test/v1/execute",
+            {
+                "action": "admin",
+                "tenant": "acme",
+                "payload": {"subaction": "gds_trigger", "domain_id": "acme", "job_name": "louvain"},
+            },
+        )
+    ]
+
+
+@needs_bash
+@pytest.mark.parametrize("args", [["acme"], ["acme", "all"]])
+def test_gds_trigger_requires_an_explicit_job_name(tmp_path: Path, args: list[str]) -> None:
+    """DEC-52: no admin subaction triggers every job, so there is no 'all' mode."""
+    assert BASH is not None
+    proj, env, log = _curl_project(tmp_path, "scripts-gds-trigger.sh", "200")
+
+    proc = _run([BASH, "scripts/scripts-gds-trigger.sh", *args], cwd=proj, env=env)
+
+    assert proc.returncode != 0
+    assert _calls(log) == []
+
+
+@needs_bash
+def test_gds_trigger_propagates_http_failure(tmp_path: Path) -> None:
+    assert BASH is not None
+    proj, env, _log = _curl_project(tmp_path, "scripts-gds-trigger.sh", "500")
+
+    proc = _run([BASH, "scripts/scripts-gds-trigger.sh", "acme", "louvain"], cwd=proj, env=env)
+
+    assert proc.returncode != 0
+
+
+def test_dev_script_launches_the_chassis_entrypoint_factory() -> None:
+    text = (REPO / "scripts" / "scripts-dev.sh").read_text(encoding="utf-8")
+    assert "engine.api.app" not in text
+    launches = re.findall(r"uvicorn (\S+) (--factory)", text)
+    assert launches == [("chassis.entrypoint:create_app", "--factory")] * 2
