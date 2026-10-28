@@ -556,11 +556,18 @@ def test_pack_with_an_unbound_scoring_default_is_withheld_by_the_full_match_chec
     assert withholding_reason(spec) is not None
 
 
-def test_pack_whose_gate_references_an_undeclared_parameter_is_withheld() -> None:
+def test_pack_whose_gate_references_an_undeclared_parameter_is_withheld(monkeypatch: pytest.MonkeyPatch) -> None:
     raw = _synthetic_raw()
     raw["gates"].append(
         {"name": "size_cap", "type": "threshold", "candidateprop": "size", "queryparam": "max_size", "operator": "<="}
     )
+    # RU-050: validation now refuses the undeclared reference before admission.
+    with pytest.raises(ValueError, match="Gate 'size_cap' references undeclared parameter 'max_size'"):
+        DomainSpec.model_validate(raw)
+    # Admission remains the backstop when that validation is switched off.
+    from engine.config import loader as loader_module
+
+    monkeypatch.setattr(loader_module.settings, "domain_undeclared_param_rejected", False)
     defects = admission_defects(DomainSpec.model_validate(raw))
     assert any("match[d1]" in d and "'max_size'" in d for d in defects), defects
 

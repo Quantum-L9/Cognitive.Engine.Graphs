@@ -286,6 +286,72 @@ class TestW101DomainCrossRef:
             spec = DomainSpec.model_validate(raw)
         assert len(spec.scoring.dimensions) == 2
 
+    @staticmethod
+    def _spec_with_gate(gate: dict[str, Any], extra_fields: list[str] | None = None) -> dict[str, Any]:
+        raw = _minimal_spec_raw()
+        for name in extra_fields or []:
+            raw["queryschema"]["fields"].append({"name": name, "type": "datetime"})
+        raw["gates"] = [gate]
+        return raw
+
+    _THRESHOLD_ABSENT = {
+        "name": "tw",
+        "type": "threshold",
+        "candidateprop": "credit_score",
+        "operator": ">=",
+        "queryparam": "window",
+    }
+    _TEMPORAL_WINDOW = {"name": "tw", "type": "temporalrange", "candidateprop": "name", "queryparam": "window"}
+
+    def test_undeclared_gate_param_raises(self) -> None:
+        """RU-050 / CEG-COR-077: a gate naming an absent parameter fails validation (was warning only)."""
+        raw = self._spec_with_gate(dict(self._THRESHOLD_ABSENT))
+        with pytest.raises(ValueError, match="Gate 'tw' references undeclared parameter 'window'"):
+            DomainSpec.model_validate(raw)
+
+    def test_temporalrange_derived_params_declared_passes(self, caplog: pytest.LogCaptureFixture) -> None:
+        """RU-050: temporalrange {queryparam: window} with window_start and window_end declared validates."""
+        raw = self._spec_with_gate(dict(self._TEMPORAL_WINDOW), ["window_start", "window_end"])
+        with caplog.at_level("WARNING", logger="engine.config.schema"):
+            spec = DomainSpec.model_validate(raw)
+        assert spec.gates[0].queryparam == "window"
+        assert "undeclared parameter" not in caplog.text
+
+    @pytest.mark.parametrize("declared", [[], ["window_start"], ["window_end"]])
+    def test_temporalrange_derived_params_missing_raises(self, declared: list[str]) -> None:
+        """RU-050: temporalrange needs both <q>_start and <q>_end declared; neither or one alone raises."""
+        raw = self._spec_with_gate(dict(self._TEMPORAL_WINDOW), declared)
+        with pytest.raises(ValueError, match="references undeclared parameter 'window'"):
+            DomainSpec.model_validate(raw)
+
+    def test_suffixed_param_with_declared_base_passes(self) -> None:
+        """RU-050 keeps the `<base>_min/_max/_start/_end` exemption for a declared base."""
+        gate = dict(self._THRESHOLD_ABSENT, queryparam="density_min")
+        spec = DomainSpec.model_validate(self._spec_with_gate(gate))
+        assert spec.gates[0].queryparam == "density_min"
+
+    def test_literal_queryparam_is_not_a_reference(self) -> None:
+        """RU-050 keeps literal queryparam operands exempt."""
+        gate = dict(self._THRESHOLD_ABSENT, queryparam=85.0)
+        spec = DomainSpec.model_validate(self._spec_with_gate(gate))
+        assert spec.gates[0].queryparam == pytest.approx(85.0)
+
+    def test_undeclared_gate_param_flag_off_warns(self, caplog: pytest.LogCaptureFixture) -> None:
+        """RU-050 flag off: the legacy warning, and the spec loads."""
+        raw = self._spec_with_gate(dict(self._THRESHOLD_ABSENT))
+        s = _make_settings(domain_undeclared_param_rejected=False)
+        with patch(_SETTINGS_TARGET, s), caplog.at_level("WARNING", logger="engine.config.schema"):
+            spec = DomainSpec.model_validate(raw)
+        assert spec.gates[0].queryparam == "window"
+        assert "Gate 'tw' references undeclared parameter 'window'" in caplog.text
+
+    def test_undeclared_gate_param_skipped_without_strict_validation(self) -> None:
+        """RU-050 applies only under domain_strict_validation, as the warning did."""
+        raw = self._spec_with_gate(dict(self._THRESHOLD_ABSENT))
+        with patch(_SETTINGS_TARGET, _make_settings(domain_strict_validation=False)):
+            spec = DomainSpec.model_validate(raw)
+        assert spec.gates[0].queryparam == "window"
+
     def test_gate_exclusion_unknown_edge_raises(self) -> None:
         """Exclusion gate referencing unknown edge type is rejected."""
         raw = _minimal_spec_raw()

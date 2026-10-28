@@ -623,6 +623,11 @@ class Settings(BaseSettings):
     # the second literal overwrote the first. On: ValueError naming the
     # duplicated name(s). Off: accepted.
     gate_name_uniqueness: bool = True
+    # RU-050 / CEG-COR-077: a gate naming an undeclared parameter only logged
+    # a warning and the spec loaded. On (with domain_strict_validation): the
+    # same message is a ValueError; a temporalrange whose derived
+    # `<q>_start` and `<q>_end` are both declared is valid. Off: warning only.
+    domain_undeclared_param_rejected: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

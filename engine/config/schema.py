@@ -1212,14 +1212,27 @@ class DomainSpec(BaseModel):
                     base = gate.queryparam.removesuffix("_min").removesuffix("_max")
                     base = base.removesuffix("_start").removesuffix("_end")
                     if base not in all_param_names and gate.queryparam not in all_param_names:
-                        import logging
+                        if settings.domain_undeclared_param_rejected:
+                            # RU-050 / CEG-COR-077: the temporalrange compiler derives
+                            # `<q>_start` / `<q>_end` from a named queryparam; both
+                            # declared makes the reference valid.
+                            derived_declared = (
+                                gate.type == GateType.TEMPORALRANGE
+                                and f"{gate.queryparam}_start" in all_param_names
+                                and f"{gate.queryparam}_end" in all_param_names
+                            )
+                            if not derived_declared:
+                                msg = f"Gate '{gate.name}' references undeclared parameter '{gate.queryparam}'"
+                                raise ValueError(msg)
+                        else:
+                            import logging
 
-                        _logger = logging.getLogger(__name__)
-                        _logger.warning(
-                            "Gate '%s' references undeclared parameter '%s'",
-                            gate.name,
-                            gate.queryparam,
-                        )
+                            _logger = logging.getLogger(__name__)
+                            _logger.warning(
+                                "Gate '%s' references undeclared parameter '%s'",
+                                gate.name,
+                                gate.queryparam,
+                            )
 
         # (c) W1-01: Scoring dimension default weights sum check (per match direction)
         if settings.domain_strict_validation and self.scoring and self.scoring.dimensions:

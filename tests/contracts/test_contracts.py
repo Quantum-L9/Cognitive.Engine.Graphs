@@ -334,7 +334,10 @@ class TestContract10ProhibitedFactors:
         spec = _build_minimal_spec(
             extra_gates=[
                 GateSpec(name="bad_gate", type=GateType.BOOLEAN, candidateprop="race", queryparam="race"),
-            ]
+            ],
+            # The gate's parameter is declared so the spec validates (RU-050);
+            # the refusal under test is the prohibited-factor check.
+            extra_query_fields=["race"],
         )
         # Add compliance config with prohibited factors
         spec = spec.model_copy(
@@ -801,7 +804,7 @@ class TestContract24ResiliencePatterns:
 # ============================================================================
 
 
-def _build_minimal_spec(extra_gates: list | None = None) -> DomainSpec:
+def _build_minimal_spec(extra_gates: list | None = None, extra_query_fields: list[str] | None = None) -> DomainSpec:
     """Build a minimal DomainSpec for testing without YAML."""
     from engine.config.schema import (
         DomainMetadata,
@@ -861,6 +864,7 @@ def _build_minimal_spec(extra_gates: list | None = None) -> DomainSpec:
             fields=[
                 QueryFieldSpec(name="is_active", type=PropertyType.BOOL),
                 QueryFieldSpec(name="density", type=PropertyType.FLOAT),
+                *(QueryFieldSpec(name=name, type=PropertyType.STRING) for name in extra_query_fields or []),
             ],
         ),
         gates=gates,
