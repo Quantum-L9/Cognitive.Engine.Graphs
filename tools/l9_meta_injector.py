@@ -825,7 +825,7 @@ FILE_REGISTRY: list[FileMeta] = [
         "platform-team",
     ),
     FileMeta(
-        "chassis/auth/test_auth_middleware.py",
+        "tests/unit/test_chassis_auth_middleware.py",
         "chassis",
         ["api", "auth", "test"],
         ["chassis", "auth", "test"],
