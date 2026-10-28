@@ -861,3 +861,19 @@ def test_geodecay_declared_longitude_off_restores_the_hardcoded_operands(monkeyp
     defects = "\n".join(admission_defects(_spec(DOMAINS_ROOT / "freight-matching")))
     assert "deadhead_distance" in defects
     assert "'lon'" in defects
+
+
+# RG-060 (RU-046 / CEG-COR-069): a carrier available on or before the pickup date
+# qualifies. The temporalrange window with start == end == availabledate and
+# pickupdate on both sides admitted only availabledate == pickupdate exactly.
+def test_freight_availability_admits_carriers_available_on_or_before_pickup() -> None:
+    from engine.gates.compiler import GateCompiler
+
+    spec = _admitted_spec("freight-matching")
+    gate = _gate(spec, "availability_window")
+    assert (gate.type.value, gate.operator, gate.nullbehavior.value) == ("threshold", "<=", "pass")
+    where = GateCompiler(spec).compile_all_gates("loadtocarrier")
+    assert (
+        "(candidate.availabledate IS NULL OR $pickupdate IS NULL OR (candidate.availabledate <= $pickupdate))"
+    ) in where
+    assert ">= $pickupdate" not in where

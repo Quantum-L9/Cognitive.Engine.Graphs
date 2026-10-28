@@ -85,11 +85,16 @@ gates:
     candidateprop: equipmenttypes
     queryparam: equipmenttype
   - name: availability_window
-    type: temporalrange
-    candidateprop_start: availabledate
-    candidateprop_end: availabledate
-    queryparam_start: pickupdate
-    queryparam_end: pickupdate
+    # The carrier is available on or before pickup (CEG-COR-069). A
+    # temporalrange window whose start and end were both availabledate and
+    # pickupdate admitted only carriers available exactly at pickup.
+    # nullbehavior pass: a carrier with no recorded availability is not
+    # excluded (as before).
+    type: threshold
+    candidateprop: availabledate
+    queryparam: pickupdate
+    operator: "<="
+    nullbehavior: pass
 
 scoring:
   dimensions:

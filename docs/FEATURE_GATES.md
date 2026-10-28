@@ -1033,8 +1033,9 @@ the query window). `GateCompiler` ignored all four, so:
 
 `$value` is a parameter nothing supplies and `candidate.timestamp` a property
 no such candidate carries, so neither legacy fragment ever matched what the
-spec author wrote. `freight-matching`'s `availability_window` is the live case:
-it compared `candidate.timestamp` and therefore rejected every candidate.
+spec author wrote. `freight-matching`'s `availability_window` was the live case:
+it compared `candidate.timestamp` and therefore rejected every candidate (since
+RU-046 it is a `threshold` gate, `availabledate <= $pickupdate`).
 
 Off: the legacy fragments, for C-21 rollback only. The surrounding CEG-009b
 change — a scalar `queryparam` (`85.0`, `true`) is bound as a generated
@@ -1071,8 +1072,9 @@ wrap always used `candidate.<candidateprop>` and `$<queryparam>`:
 
 Compiled fragments of `plasticos` and `mortgage-brokerage` are byte-identical
 (they declare `pass` with explicit bounds); of the shipped packs only
-temporalrange window gates change (`freight-matching` `availability_window`,
-dormant `legal-discovery` `temporal_relevance`). Rollback:
+temporalrange window gates change (dormant `legal-discovery`
+`temporal_relevance`; `freight-matching` `availability_window` until RU-046
+re-expressed it as a threshold gate). Rollback:
 `GATE_NULL_OPERANDS_FROM_PREDICATE=false`.
 
 ### Composite subgate scoping (RU-043 / CEG-COR-022)

@@ -15,6 +15,7 @@ must live in the 'plasticos' database and include that edge.
 from __future__ import annotations
 
 import pytest
+import pytest_asyncio
 
 SEED_CYPHER = """
 UNWIND $batch AS row
@@ -303,3 +304,64 @@ async def test_va_eligibility_fragment_orders_booleans_false_before_true(graph_d
         database="neo4j",
     )
     assert rows[0]["passes"] is expected
+
+
+FREIGHT_DB = "freight-matching"
+CARRIER_SEED = """
+UNWIND $batch AS row
+MERGE (c:Carrier {carrierid: row.carrierid})
+SET c += row
+"""
+
+
+@pytest_asyncio.fixture
+async def freight_db(graph_driver):
+    """The per-domain freight-matching database, emptied after the test."""
+    await graph_driver.execute_query(
+        cypher=f"CREATE DATABASE `{FREIGHT_DB}` IF NOT EXISTS WAIT", parameters={}, database="system"
+    )
+    yield
+    await graph_driver.execute_write(cypher="MATCH (n) DETACH DELETE n", parameters={}, database=FREIGHT_DB)
+
+
+def _freight_query(**overrides: object) -> dict[str, object]:
+    query: dict[str, object] = {
+        "loadid": "L1",
+        "pickuplat": 41.8,
+        "pickuplon": -87.6,
+        "deliverylat": 39.7,
+        "deliverylon": -104.9,
+        "weightlbs": 30000.0,
+        "equipmenttype": "van",
+        "pickupdate": "2026-11-02T08:00:00Z",
+        "deliverydate": "2026-11-04T08:00:00Z",
+        "ratepermile": 2.5,
+    }
+    query.update(overrides)
+    return query
+
+
+def _carrier_ids(result: dict) -> set[str]:
+    return {c["candidate"]["carrierid"] for c in result.get("candidates", [])}
+
+
+@pytest.mark.asyncio
+async def test_freight_carrier_available_before_pickup_qualifies(engine_deps, graph_driver, freight_db):
+    """RU-046 / CEG-COR-069: availabledate <= pickupdate (same ISO-8601 string form as the query)."""
+    await graph_driver.execute_write(
+        cypher=CARRIER_SEED,
+        parameters={
+            "batch": [
+                {"carrierid": "day_before", "availabledate": "2026-11-01T08:00:00Z", "equipmenttypes": "van"},
+                {"carrierid": "same_time", "availabledate": "2026-11-02T08:00:00Z", "equipmenttypes": "van"},
+                {"carrierid": "day_after", "availabledate": "2026-11-03T08:00:00Z", "equipmenttypes": "van"},
+            ]
+        },
+        database=FREIGHT_DB,
+    )
+    from engine.handlers import handle_match
+
+    result = await handle_match(
+        FREIGHT_DB, {"query": _freight_query(), "match_direction": "loadtocarrier", "top_n": 10}
+    )
+    assert _carrier_ids(result) == {"day_before", "same_time"}
