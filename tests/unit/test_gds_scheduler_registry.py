@@ -39,61 +39,21 @@ from engine.config.settings import settings
 from engine.gds.scheduler import GDSScheduler
 from engine.handlers import handle_admin
 from engine.state import _reset_singleton, get_state
+from tests.unit.test_gds_scheduler import _job, _minimal_spec
 
 DOMAIN_ID = "test-domain"
 CRON_JOB = "louvain_community"
 
 
 def _spec() -> DomainSpec:
-    raw = {
-        "domain": {"id": DOMAIN_ID, "name": "Test", "version": "0.0.1"},
-        "ontology": {
-            "nodes": [
-                {
-                    "label": "Site",
-                    "managedby": "sync",
-                    "candidate": True,
-                    "matchdirection": "d1",
-                    "properties": [{"name": "site_id", "type": "int", "required": True}],
-                },
-                {
-                    "label": "Query",
-                    "managedby": "api",
-                    "queryentity": True,
-                    "matchdirection": "d1",
-                    "properties": [{"name": "query_id", "type": "int", "required": True}],
-                },
-            ],
-            "edges": [
-                {
-                    "type": "INTERACTED_WITH",
-                    "from": "Site",
-                    "to": "Site",
-                    "direction": "DIRECTED",
-                    "category": "transaction",
-                    "managedby": "sync",
-                },
-            ],
-        },
-        "matchentities": {
-            "candidate": [{"label": "Site", "matchdirection": "d1"}],
-            "queryentity": [{"label": "Query", "matchdirection": "d1"}],
-        },
-        "queryschema": {"matchdirections": ["d1"], "fields": []},
-        "traversal": {"steps": []},
-        "gates": [],
-        "scoring": {"dimensions": []},
-        "gdsjobs": [
-            {
-                "name": CRON_JOB,
-                "algorithm": "louvain",
-                "schedule": {"type": "cron", "cron": "0 2 * * *"},
-                "projection": {"nodelabels": ["Site"], "edgetypes": ["INTERACTED_WITH"]},
-                "writeproperty": "community_id",
-            }
-        ],
-    }
-    return DomainSpec(**raw)
+    job = _job(
+        CRON_JOB,
+        "louvain",
+        node_labels=["Site"],
+        edge_types=["INTERACTED_WITH"],
+        writeproperty="community_id",
+    )
+    return _minimal_spec([job], domain_id=DOMAIN_ID)
 
 
 class _Probe:
