@@ -372,6 +372,7 @@ class TestSyncMatchSetCount:
         with patch("engine.handlers._get_compliance_engine") as get_ce:
             get_ce.return_value.enabled = False
             get_ce.return_value.flush_audit = AsyncMock()
+            get_ce.return_value.flush_audit_for_request = AsyncMock()  # RU-065 request-path flush
             result = await handle_sync("test_domain", {"entity_type": "depot", "batch": list(self.BATCH)})
         assert result["synced_count"] == 1
         assert result["unmatched_count"] == 2
@@ -387,6 +388,7 @@ class TestSyncMatchSetCount:
         with patch("engine.handlers._get_compliance_engine") as get_ce:
             get_ce.return_value.enabled = False
             get_ce.return_value.flush_audit = AsyncMock()
+            get_ce.return_value.flush_audit_for_request = AsyncMock()  # RU-065 request-path flush
             result = await handle_sync("test_domain", {"entity_type": "depot", "batch": list(self.BATCH)})
         assert result["synced_count"] == 3
         assert "unmatched_count" not in result
