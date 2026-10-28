@@ -128,6 +128,7 @@ independently of the code default.
 | Health Blocked Score Scale | `HEALTH_BLOCKED_SCORE_SCALE_ENABLED` (`health_blocked_score_scale_enabled`) | `True` | unset | active (hardening); a blocked readiness reports the 60% gate component `round(gc*60, 2)` so the score is monotonic in gate completeness (RU-110 / CEG-COR-046) — see §15 |
 | Health Priority Staleness | `HEALTH_PRIORITY_STALENESS_ENABLED` (`health_priority_staleness_enabled`) | `True` | unset | active (hardening); the 10% staleness term of the enrichment priority is computed from field staleness instead of always 0 (RU-111 / CEG-COR-047) — see §15 |
 | Legacy Chassis Auth | `LEGACY_CHASSIS_AUTH_ENABLED` (`legacy_chassis_auth_enabled`) | `True` | unset | active (hardening, dev/test-only legacy chassis); with `L9_API_KEY` set, `chassis_app.create_app` registers `BearerAuthMiddleware` (`/v1/health` public) and POST `/v1/execute` returns 403 for a tenant outside the token's `allowed_tenants` while `TENANT_AUTH_ENABLED`; the factory also refuses to build outside dev/local/test while `REQUIRE_SDK_CHASSIS_IN_PROD` (RU-082 / CEG-COR-039); off restores the unauthenticated factory — see §11 |
+| Legacy Chassis Status Mapping | `LEGACY_CHASSIS_STATUS_MAPPING_ENABLED` (`legacy_chassis_status_mapping_enabled`) | `True` | unset | active (correctness, dev/test-only legacy chassis); `chassis.actions.execute_action` attaches an HTTP status hint that POST `/v1/execute` honours: circuit open → 503 + `Retry-After`, `ChassisError` (e.g. `FeatureNotEnabled`) → its `status_code`, engine `ValidationError` → 422, other `EngineError` → 500 with its message, anything else → 500 `Internal server error` (the exception text stays in logs and the persisted response packet) (RU-083 / CEG-COR-087 / CEG-COR-088); off restores 200 for circuit open and the keyword mapping with the raw exception text — see §11 |
 
 ---
 
@@ -465,6 +466,19 @@ Rollback in dev: `LEGACY_CHASSIS_AUTH_ENABLED=false` and/or
 `TENANT_AUTH_ENABLED=false`; the factory guard is relaxed only by
 `REQUIRE_SDK_CHASSIS_IN_PROD=false`. The SDK chassis (`chassis/node_app.py`) is
 unaffected.
+
+**Legacy chassis status mapping (RU-083 / CEG-COR-087 / CEG-COR-088).** With
+`LEGACY_CHASSIS_STATUS_MAPPING_ENABLED=True` (default), the legacy POST
+`/v1/execute` keeps the failure class: an open Neo4j circuit is HTTP 503 with a
+`Retry-After` header (seconds, rounded up) instead of 200 with `status_code: 503`
+inside `data`; `FeatureNotEnabled` and other `ChassisError`s use their
+`status_code` (422 for a disabled feature) and an engine `ValidationError` (e.g.
+the tenant allowlist rejection) is 422, where both were 500; other `EngineError`s
+are 500 with their message; any other exception is 500 with the detail
+`Internal server error` — before, its raw text (connection URIs, query text)
+was the response body. The persisted response packet is unchanged and still
+carries the error text. An unknown action stays 400 and success responses are
+unchanged. Off restores the previous mapping.
 
 The control that is enforced on every action is `TENANT_ALLOWLIST`
 (comma-separated tenant ids, resolved into `EngineState` at startup):

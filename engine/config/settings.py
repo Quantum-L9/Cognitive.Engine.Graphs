@@ -645,6 +645,13 @@ class Settings(BaseSettings):
     # tenant_auth_enabled, POST /v1/execute returns 403 for a tenant outside
     # the token's allowed_tenants. Off: the unauthenticated factory.
     legacy_chassis_auth_enabled: bool = True
+    # RU-083 / CEG-COR-087 / CEG-COR-088: the legacy chassis returned 200 for an
+    # open circuit, 500 for FeatureNotEnabled and engine ValidationError, and the
+    # raw str(exception) of unexpected errors in the 500 body. On:
+    # chassis.actions.execute_action attaches an HTTP status hint (503 +
+    # Retry-After, ChassisError.status_code, 422, 500 with the EngineError
+    # message, else 500 "Internal server error"). Off: the keyword mapping.
+    legacy_chassis_status_mapping_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
