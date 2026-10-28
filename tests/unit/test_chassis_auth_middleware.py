@@ -319,6 +319,22 @@ async def test_legacy_execute_tenant_outside_token_returns_403(monkeypatch: pyte
 
 
 @pytest.mark.asyncio
+async def test_legacy_execute_refused_tenant_is_not_logged(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The refused tenant is request text: a CR/LF in it must not forge a log line."""
+    forged = "globex\nINFO forged audit line"
+    with caplog.at_level("WARNING"):
+        async with _legacy_client(monkeypatch) as client:
+            response = await client.post(
+                "/v1/execute", json=_execute_body(forged), headers={"Authorization": f"Bearer {ACME_KEY}"}
+            )
+    assert response.status_code == 403
+    assert any("allowed_tenants" in r.getMessage() for r in caplog.records)
+    assert "forged audit line" not in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_legacy_execute_tenant_mismatch_with_bypass_key_returns_200(monkeypatch: pytest.MonkeyPatch) -> None:
     async with _legacy_client(monkeypatch) as client:
         response = await client.post(
