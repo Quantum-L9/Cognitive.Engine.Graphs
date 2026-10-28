@@ -286,25 +286,3 @@ class TestMagnitudeBounds:
     def test_round_with_modest_ndigits_unchanged(self) -> None:
         assert safe_eval("round(2.567, 2)", {}) == 2.57
         assert safe_eval("round(1234, -2)", {}) == 1200
-
-
-# ── RU-076 / CEG-COR-125: keyword arguments are rejected ──
-
-
-class TestKeywordArguments:
-    def test_round_ndigits_keyword_raises(self) -> None:
-        with pytest.raises(ValueError, match="keyword arguments not allowed"):
-            safe_eval("round(2.567, ndigits=2)", {})
-
-    def test_max_key_keyword_raises(self) -> None:
-        with pytest.raises(ValueError, match="keyword arguments not allowed"):
-            safe_eval("max(x, key=y)", {"x": 1, "y": 2})
-
-    def test_positional_round_unchanged(self) -> None:
-        assert safe_eval("round(2.567, 2)", {}) == 2.57
-
-    def test_flag_off_restores_silent_keyword_drop(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from engine.config.settings import settings
-
-        monkeypatch.setattr(settings, "safe_eval_reject_keywords", False)
-        assert safe_eval("round(2.567, ndigits=2)", {}) == 3

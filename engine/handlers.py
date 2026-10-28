@@ -842,6 +842,10 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                     "pruned_pct": arb_pareto["pruned_pct"],
                     "nondominated_ids": arb_pareto["nondominated"],
                 }
+                if _settings.arbitration_objective_direction:
+                    # RU-019: non-dominated ids dropped by front_size_limit are
+                    # reported, not silently folded into pruned_pct.
+                    pareto_metadata["arbitration"]["trimmed_ids"] = arb_pareto["trimmed"]
 
     execution_time_ms = (time.monotonic() - start_time) * 1000
 
@@ -1467,6 +1471,8 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 database=domain_id,
                 subject_property=subject_property,
                 performed_by=tenant,
+                # RU-066 follow-up: packets are erased for this tenant only.
+                tenant=tenant,
             )
         except Exception as exc:
             raise ExecutionError(
