@@ -75,14 +75,14 @@ while IFS= read -r line; do
 
     # Skip if no value
     if [ -z "$VALUE" ]; then
-      ((SKIPPED++))
+      ((++SKIPPED))
       continue
     fi
 
     echo "  Setting: $KEY = $VALUE"
 
     if gh variable set "$KEY" --body "$VALUE" 2>/dev/null; then
-      ((COUNT++))
+      ((++COUNT))
     else
       echo "  ⚠️  Failed to set $KEY (may already exist or need permissions)"
     fi
