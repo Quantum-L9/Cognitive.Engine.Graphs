@@ -63,7 +63,8 @@ stays `len(batch)` and it carries no `unmatched_count`.
 ```python
 class AdminPayload(BaseModel):
     subaction: Literal["list_domains", "get_domain", "init_schema", "trigger_gds"]
-    domain_id: str | None = None  # Required for get_domain, init_schema, trigger_gds; must equal the packet tenant (RU-003)
+    # Required for get_domain, init_schema, trigger_gds; must equal the packet tenant (RU-003)
+    domain_id: str | None = None
     job_name: str | None = None  # Required for trigger_gds
 
 
