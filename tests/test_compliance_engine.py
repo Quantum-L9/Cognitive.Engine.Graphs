@@ -393,3 +393,60 @@ def test_declared_fields_flag_off_restores_builtin_only(monkeypatch: pytest.Monk
     engine = ComplianceEngine(_spec_from("domains/healthcare-referral/spec.yaml"))
     out = engine.redact_response({"name": "Dr Jane Roe", "ssn": "123-45-6789"}, "t")
     assert out == {"name": "Dr Jane Roe"}  # built-in inference deletes ssn; name survives
+
+
+# ── RU-062: list-reaching redaction honours the domain's compliance.pii opt-in ──
+
+
+def _shipped_engine(domain_id: str) -> ComplianceEngine:
+    import yaml
+
+    from engine.config.schema import DomainSpec
+
+    raw = yaml.safe_load(Path(f"domains/{domain_id}/spec.yaml").read_text(encoding="utf-8"))
+    return ComplianceEngine(DomainSpec.model_validate(raw))
+
+
+@pytest.mark.parametrize(
+    "domain_id",
+    [
+        "idea-portfolio",  # compliance.pii: {enabled: false}
+        "plasticos",  # compliance.pii without `enabled` (PIISpec default False)
+        "mortgage-brokerage",  # compliance without a pii section
+        "roofing-company",  # no compliance section
+    ],
+)
+def test_redact_response_keeps_candidate_fields_when_domain_opts_out(domain_id: str) -> None:
+    import copy
+
+    response = {
+        "candidates": [
+            {"candidate": {"contact_email": "a@b.com", "propertyaddress": "1 Main St", "id": "c1"}, "score": 0.9}
+        ],
+        "query_id": "q_5c9382647927",
+    }
+    before = copy.deepcopy(response)
+    engine = _shipped_engine(domain_id)
+    assert engine.enabled is True  # the compliance engine itself is active
+    assert engine.redact_response(response, "t") == before
+    assert response == before
+
+
+def test_redact_response_opted_out_domain_keeps_dict_level_redaction() -> None:
+    """Opting out restores the pre-RU-062 reach (dict paths), not a pass-through."""
+    import copy
+
+    response = {"meta": {"owner_email": "x@y.io", "n": 1}, "candidates": [{"candidate": {"email": "a@b.com"}}]}
+    before = copy.deepcopy(response)
+    out = _shipped_engine("idea-portfolio").redact_response(response, "t")
+    assert out == {"meta": {"n": 1}, "candidates": [{"candidate": {"email": "a@b.com"}}]}
+    assert response == before
+
+
+def test_redact_response_pii_flag_on_mock_spec_follows_pii_enabled() -> None:
+    response = {"candidates": [{"candidate": {"contact_email": "a@b.com", "id": "c1"}}]}
+    opted_in = ComplianceEngine(_spec(enabled=True)).redact_response(response, "t")
+    assert "a@b.com" not in str(opted_in["candidates"])
+    assert opted_in["candidates"][0]["candidate"]["id"] == "c1"
+    opted_out = _MockDomainSpec(compliance=_MockCompliance(pii=_MockPII(enabled=False)))
+    assert ComplianceEngine(opted_out).redact_response(response, "t") == response
