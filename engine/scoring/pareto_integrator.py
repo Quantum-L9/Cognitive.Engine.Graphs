@@ -296,7 +296,7 @@ def apply_pareto_filter(
 
         def _composite(cand: ParetoCandidate) -> float:
             raw = candidates[position[id(cand)]].get("score")
-            return float(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else 0.0
+            return raw if isinstance(raw, (int, float)) and not isinstance(raw, bool) else 0.0
 
         ranked = sorted(kept, key=_composite, reverse=True)  # stable: ties keep input order
         keep_ids = {id(c) for c in ranked[:limit]}

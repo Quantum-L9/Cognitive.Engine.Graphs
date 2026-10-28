@@ -336,6 +336,8 @@ class TestEffectiveRequestWeightValidation:
         clause, _ = assembler.assemble_scoring_clause("window_to_depot", {"w_reliability": 1.0})
         assert "(1.0 * depot_reliability)" in clause
         assert "(0.3 * port_capacity)" in clause
+
+
 # ── RU-022 / CEG-COR-030: reader keys match the writer's DimensionWeight (RG-028) ──
 
 
