@@ -1467,6 +1467,8 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 database=domain_id,
                 subject_property=subject_property,
                 performed_by=tenant,
+                # RU-066 follow-up: packets are erased for this tenant only.
+                tenant=tenant,
             )
         except Exception as exc:
             raise ExecutionError(

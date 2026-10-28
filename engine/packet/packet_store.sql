@@ -423,20 +423,32 @@ BEGIN
 END;
 $$;
 
--- GDPR right-to-delete: removes all packets for a data subject
-CREATE OR REPLACE FUNCTION gdpr_erase_subject(p_subject_id TEXT, p_performed_by TEXT)
+-- GDPR right-to-delete: removes one tenant's packets for a data subject.
+-- Tenant-scoped (RU-066 follow-up, PR #352 review): a data subject id is not
+-- unique across tenants, so both the audit insert and the delete filter on
+-- actor_tenant = p_tenant. The old two-argument form filtered on the subject
+-- id only (an owner/admin connection deleted every tenant's packets for a
+-- reused id); it is dropped so nothing can still call it. Callers on the
+-- RLS-enforced l9_product role also set the transaction-local
+-- app.current_tenant to p_tenant, or the policies hide every row.
+DROP FUNCTION IF EXISTS gdpr_erase_subject(TEXT, TEXT);
+CREATE OR REPLACE FUNCTION gdpr_erase_subject(p_subject_id TEXT, p_performed_by TEXT, p_tenant TEXT)
 RETURNS INT LANGUAGE plpgsql AS $$
 DECLARE
     v_count INT;
 BEGIN
+    IF p_tenant IS NULL OR p_tenant = '' THEN
+        RAISE EXCEPTION 'gdpr_erase_subject requires a tenant';
+    END IF;
+
     -- Log before delete (audit survives)
     INSERT INTO packet_audit_log (packet_id, tenant, action, actor, detail, metadata)
     SELECT packet_id, actor_tenant, 'GDPR_DELETE', p_performed_by,
            'Right to erasure request',
            jsonb_build_object('data_subject_id', p_subject_id, 'reason', 'right_to_erasure')
-    FROM packet_store WHERE data_subject_id = p_subject_id;
+    FROM packet_store WHERE data_subject_id = p_subject_id AND actor_tenant = p_tenant;
 
-    DELETE FROM packet_store WHERE data_subject_id = p_subject_id;
+    DELETE FROM packet_store WHERE data_subject_id = p_subject_id AND actor_tenant = p_tenant;
     GET DIAGNOSTICS v_count = ROW_COUNT;
     RETURN v_count;
 END;

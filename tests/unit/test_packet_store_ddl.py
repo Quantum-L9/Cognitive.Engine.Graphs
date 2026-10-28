@@ -192,3 +192,38 @@ class TestPacketStoreDdlOutcomeColumn:
     def test_no_update_on_audit_log(self) -> None:
         assert not re.search(r"\bON\s+packet_audit_log\s+FOR\s+UPDATE\b", _SQL, re.IGNORECASE)
         assert not re.search(r"\bGRANT\s+[^;]*UPDATE[^;]*\bON\s+packet_audit_log\b", _SQL, re.IGNORECASE)
+
+
+class TestPacketStoreDdlGdprEraseTenantScoped:
+    """RU-066 follow-up: gdpr_erase_subject erases one tenant's packets only."""
+
+    def _body(self) -> str:
+        match = re.search(
+            r"\bCREATE\s+OR\s+REPLACE\s+FUNCTION\s+gdpr_erase_subject\s*\((?P<args>[^)]*)\)(?P<rest>.*?)\$\$;",
+            _SQL,
+            re.IGNORECASE | re.DOTALL,
+        )
+        assert match is not None
+        return match.group("args") + "\n" + match.group("rest")
+
+    def test_function_takes_a_tenant(self) -> None:
+        args = re.search(r"FUNCTION\s+gdpr_erase_subject\s*\(([^)]*)\)", _SQL, re.IGNORECASE)
+        assert args is not None
+        names = [a.split()[0] for a in args.group(1).split(",")]
+        assert names == ["p_subject_id", "p_performed_by", "p_tenant"]
+
+    def test_old_unscoped_overload_is_dropped(self) -> None:
+        assert re.search(
+            r"\bDROP\s+FUNCTION\s+IF\s+EXISTS\s+gdpr_erase_subject\s*\(\s*TEXT\s*,\s*TEXT\s*\)", _SQL, re.I
+        )
+
+    def test_audit_and_delete_filter_on_tenant(self) -> None:
+        body = self._body()
+        statements = re.findall(r"\b(?:FROM|DELETE\s+FROM)\s+packet_store\s+WHERE\s+([^;]*);", body, re.IGNORECASE)
+        assert len(statements) == 2, statements
+        for where in statements:
+            assert re.search(r"\bactor_tenant\s*=\s*p_tenant\b", where), where
+            assert re.search(r"\bdata_subject_id\s*=\s*p_subject_id\b", where), where
+
+    def test_missing_tenant_is_refused(self) -> None:
+        assert re.search(r"\bRAISE\s+EXCEPTION\b", self._body(), re.IGNORECASE)

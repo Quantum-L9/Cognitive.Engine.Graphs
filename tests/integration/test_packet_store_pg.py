@@ -31,6 +31,9 @@ Scenarios:
   C. (RG-109, RU-081) record_outcome() for a persisted match request returns
      True as the owner and as an l9_product member; the l9_product UPDATE
      grant covers outcome_jsonb only, and another tenant's row is not updated.
+  F. (RU-066 follow-up, PR #352 review) PIIHandler.erase_subject erases the
+     requesting tenant's packets for a subject id and nothing of another
+     tenant's that reuses the id, as the owner and as an l9_product member.
   E. (RG-107, RU-080) packet_store.sql applied a second time to a populated
      database exits cleanly and keeps every row, foreign key and policy.
 """
@@ -355,3 +358,58 @@ async def test_l9_product_cannot_update_other_packet_columns(product_dsn: str, p
                 )
     finally:
         await conn.close()
+
+
+async def _seed_subject_packets(dsn: str, subject: str) -> None:
+    conn = await asyncpg.connect(dsn)
+    try:
+        for tenant in ("tenant-gdpr-a", "tenant-gdpr-b"):
+            await conn.execute(
+                "INSERT INTO packet_store (packet_type, action, source_node, actor_tenant,"
+                " originator_tenant, envelope, content_hash, trace_id, data_subject_id)"
+                " VALUES ('request', 'match', 'n', $1, $1, '{}', $2, 't-gdpr', $3)",
+                tenant,
+                f"h-{tenant}-{subject}",
+                subject,
+            )
+    finally:
+        await conn.close()
+
+
+async def _tenants_with_subject(dsn: str, subject: str) -> list[str]:
+    conn = await asyncpg.connect(dsn)
+    try:
+        rows = await conn.fetch(
+            "SELECT actor_tenant FROM packet_store WHERE data_subject_id = $1 ORDER BY actor_tenant", subject
+        )
+        return [r["actor_tenant"] for r in rows]
+    finally:
+        await conn.close()
+
+
+@pytest.mark.parametrize("role", ["owner", "l9_product"])
+async def test_gdpr_erase_is_tenant_scoped(role: str, packet_db: str, product_dsn: str) -> None:
+    """Scenario F: before the fix the owner call deleted both tenants' packets
+    (returned 2) and the l9_product call saw no row (returned 0)."""
+    from engine.compliance.pii import PIIHandler
+
+    subject = f"subj-{uuid.uuid4().hex[:8]}"
+    await _seed_subject_packets(packet_db, subject)
+    pool = await asyncpg.create_pool(packet_db if role == "owner" else product_dsn, min_size=1, max_size=1)
+    try:
+        summary = await PIIHandler().erase_subject(
+            subject, db_pool=pool, tenant="tenant-gdpr-a", performed_by="tenant-gdpr-a"
+        )
+    finally:
+        await pool.close()
+
+    assert summary["packets_deleted"] == 1
+    assert await _tenants_with_subject(packet_db, subject) == ["tenant-gdpr-b"]
+    assert (
+        await _count(
+            packet_db,
+            "SELECT count(*) FROM packet_audit_log WHERE action = 'GDPR_DELETE' AND metadata->>'data_subject_id' = $1",
+            subject,
+        )
+        == 1
+    )
