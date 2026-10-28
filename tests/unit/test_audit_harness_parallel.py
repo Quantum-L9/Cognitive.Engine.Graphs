@@ -168,3 +168,53 @@ def test_overall_exit_code_precedence() -> None:
     # An informational step forced to passed (non-strict Spec Coverage) never blocks.
     informational = ah.StepResult(name="e", exit_code=2, passed=True)
     assert ah.overall_exit_code([ok, informational]) == 0
+
+
+@pytest.mark.unit
+def test_run_step_timeout_is_an_infrastructure_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ah, "STEP_TIMEOUT_S", 0.5)
+    _write_script(tmp_path, "slow.py", "import time; time.sleep(30)")
+
+    res = ah.run_step("slow", [sys.executable, "slow.py"], tmp_path)
+
+    assert res.exit_code == ah.TIMEOUT_EXIT_CODE
+    assert res.passed is False
+    assert "TIMEOUT: slow exceeded 0.5s" in res.stderr
+    assert ah.is_infra_error(res)
+
+
+@pytest.mark.unit
+def test_overall_exit_code_classifies_timeout_as_infrastructure() -> None:
+    """A step the harness timed out (124) never reached a verdict: exit 2, not 1."""
+    failed = ah.StepResult(name="b", exit_code=1, passed=False)
+    timed_out = ah.StepResult(name="t", exit_code=ah.TIMEOUT_EXIT_CODE, passed=False)
+    assert ah.overall_exit_code([timed_out]) == 2
+    assert ah.overall_exit_code([failed, timed_out]) == 2
+    assert not ah.is_infra_error(failed)
+
+
+@pytest.mark.unit
+def test_timed_out_contract_wiring_exits_infrastructure_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """RU-133 review: a step the harness times out is an infrastructure error (exit 2), not a finding."""
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    _write_script(tools, "audit_engine.py", "import sys; sys.exit(0)")
+    _write_script(tools, "spec_extract.py", "import sys; sys.exit(0)")
+    _write_script(tools, "verify_contracts.py", "import time; time.sleep(60)")
+    monkeypatch.setattr(ah, "STEP_TIMEOUT_S", 1)
+
+    rc = _run_harness(monkeypatch, tmp_path, "--json")
+
+    out = capsys.readouterr().out
+    assert rc == 2
+    assert "Infrastructure error: TIMEOUT: Contract Wiring exceeded 1s" in out
+    assert "safe to merge" not in out
+    wiring = next(
+        s
+        for s in ah.json.loads(out.split("--- JSON Summary ---", 1)[1])["steps"]
+        if s["name"] == ah.CONTRACT_WIRING_STEP
+    )
+    assert wiring["exit_code"] == ah.TIMEOUT_EXIT_CODE
+    assert wiring["passed"] is False

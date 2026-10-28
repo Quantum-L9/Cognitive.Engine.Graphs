@@ -31,7 +31,8 @@ def _loop_body_calls(loop):
     """Calls executed once per iteration of *loop*: its body, not its iterable or ``else``.
 
     A nested loop's own body is left to that loop (so each call is reported
-    once), but the nested loop's iterable still runs once per outer iteration.
+    once), but the nested loop's iterable and ``else`` block still run once per
+    outer iteration.
     """
     stack = list(loop.body)
     while stack:
@@ -39,7 +40,7 @@ def _loop_body_calls(loop):
         if isinstance(node, ast.Call):
             yield node
         if isinstance(node, _LOOPS):
-            stack.extend([node.target, node.iter])
+            stack.extend([node.target, node.iter, *node.orelse])
             continue
         stack.extend(ast.iter_child_nodes(node))
 
