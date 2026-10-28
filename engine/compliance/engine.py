@@ -64,6 +64,9 @@ class ComplianceEngine:
                 if hasattr(pii_cfg, "additional_fields") and isinstance(pii_cfg.additional_fields, dict):
                     additional_pii = pii_cfg.additional_fields
             self._pii = PIIHandler(additional_pii_fields=additional_pii)
+        # RU-062: list-reaching response redaction is the domain's opt-in
+        # (`compliance.pii.enabled`, PIISpec default False).
+        self._pii_opted_in = pii_cfg is not None and getattr(pii_cfg, "enabled", False) is True
         if settings.compliance_audit_soft_sink:
             # RU-065: retention bounded by the documented W4-04 setting.
             self._audit = AuditLogger(buffer_size=settings.compliance_buffer_max)
@@ -313,9 +316,19 @@ class ComplianceEngine:
             # tokenize fail closed to redact).
             return self._pii.apply_handling(response, self._pii_handling)
         if _pii_recursive():
-            # RU-062: detection and removal reach list elements (match
-            # `candidates[*].candidate`) and never mutate `response`.
-            return self._pii.redact(response, redact_all_detected=True)
+            if self._pii_opted_in:
+                # RU-062: detection and removal reach list elements (match
+                # `candidates[*].candidate`) and never mutate `response`.
+                return self._pii.redact(response, redact_all_detected=True)
+            # The domain opts out (`compliance.pii` absent or `enabled: false`):
+            # keep the pre-RU-062 reach — dict paths only, never into lists such
+            # as `candidates` — still without mutating `response`.
+            dict_paths = [
+                path
+                for path, _ in self._pii.detect_pii_paths(response)
+                if not any(isinstance(part, int) for part in path)
+            ]
+            return self._pii.redact_paths(response, dict_paths) if dict_paths else response
         # Detect and redact PII fields
         pii_fields = self._pii.get_pii_field_paths(response)
         if pii_fields:
