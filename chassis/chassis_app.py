@@ -320,7 +320,9 @@ def _enforce_token_tenant(tenant: str, http_request: Request) -> None:
     if isinstance(allowed, str):
         allowed = [allowed]
     if not isinstance(allowed, (list, tuple, set, frozenset)) or tenant not in allowed:
-        logger.warning("Tenant not in token allowed_tenants: tenant=%s", tenant)
+        # The tenant is caller-supplied request body text: never write it to the
+        # log (log injection, S5145); the 403 is the caller's evidence.
+        logger.warning("Tenant not in token allowed_tenants; request refused")
         raise HTTPException(status_code=403, detail="Tenant not authorized for this API key")
 
 
