@@ -1003,4 +1003,3 @@ silently compiled inside the composite). Cycle and missing-subgate refusal
 and negative values (formerly a cutoff in the future) raise at compile, so
 admission withholds the pack naming the gate. No shipped pack is affected
 (the template declares 90). Rollback: `FRESHNESS_MAXAGEDAYS_VALIDATED=false`.
-
