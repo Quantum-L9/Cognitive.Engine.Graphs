@@ -211,8 +211,8 @@ def _smoke_section(tmp_path: Path, pytest_output: str, pytest_rc: int) -> dict[s
     helpers = re.findall(r"^test_(?:pass|fail|info|skip)\(\) \{.*\}$", text, re.MULTILINE)
     start = text.index("# 8. Automated Test Suite")
     end = text.index("# 9. WebSocket")
-    log = tmp_path / "smoke_test_output.txt"
-    section = text[start:end].replace("/tmp/smoke_test_output.txt", str(log))
+    smoke_log = tmp_path / "smoke_test_output.txt"
+    section = text[start:end].replace("/tmp/smoke_test_output.txt", str(smoke_log))
     stubs = tmp_path / "stubs"
     out_file = tmp_path / "pytest_out.txt"
     out_file.write_text(pytest_output, encoding="utf-8")
@@ -229,7 +229,7 @@ def _smoke_section(tmp_path: Path, pytest_output: str, pytest_rc: int) -> dict[s
         ]
     )
     proc = _run([BASH, "-c", snippet], cwd=tmp_path, env=_env(tmp_path, stubs))
-    assert log.read_text(encoding="utf-8") == pytest_output  # output still captured to the smoke log
+    assert smoke_log.read_text(encoding="utf-8") == pytest_output  # output still captured to the smoke log
     counts = re.search(r"COUNTS PASSED=(\d+) FAILED=(\d+)", proc.stdout)
     assert counts is not None, proc.stdout + proc.stderr
     return {"passed": int(counts.group(1)), "failed": int(counts.group(2))}
