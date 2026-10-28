@@ -415,9 +415,10 @@ def test_generated_artifacts_are_excluded() -> None:
         assert inj.is_excluded(rel)
 
 
-def test_domain_extractor_registered_at_its_real_path() -> None:
+def test_retired_domain_extractor_is_not_registered_at_any_path() -> None:
+    """RU-054 (DEC-19 A) retired tools/domain_extractor.py; no registry entry may name it."""
     paths = {fm.path for fm in inj.FILE_REGISTRY}
-    assert "tools/domain_extractor.py" in paths
+    assert "tools/domain_extractor.py" not in paths
     assert "scripts/domain_extractor.py" not in paths
 
 
