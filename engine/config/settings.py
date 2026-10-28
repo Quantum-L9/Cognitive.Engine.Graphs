@@ -632,6 +632,10 @@ class Settings(BaseSettings):
     # snake_case `null_behavior: fail` compiled as PASS. On: a gate key that is
     # not a GateSpec field is a ValidationError naming it. Off: ignored.
     gate_spec_forbid_unknown_keys: bool = True
+    # RU-057 / CEG-COR-152: domain.version accepted any string ('latest',
+    # 'v2', dates). On: `<major>.<minor>.<patch>[-<stage>]` per
+    # DOMAIN_SPEC_VERSIONING.md. Off: any string.
+    domain_version_semver_enforced: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

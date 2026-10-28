@@ -1124,6 +1124,30 @@ class DomainMetadata(BaseModel):
     # absent on the shipped vertical packs, which are the templates themselves.
     template: TemplateProvenance | None = None
 
+    @field_validator("version")
+    @classmethod
+    def validate_version_semver(cls, v: str) -> str:
+        """RU-057 / CEG-COR-152: `{major}.{minor}.{patch}[-{stage}]` per DOMAIN_SPEC_VERSIONING.md.
+
+        `latest`, `v2`, dates and other free-form strings were accepted. The
+        stage, when present, is one of the contract's six production stages.
+        """
+        import re
+
+        from engine.config.settings import settings
+
+        if not settings.domain_version_semver_enforced:
+            return v
+        semver = r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+        stages = "seed|discovered|inferred|proposed|reviewed|production"
+        if re.fullmatch(rf"{semver}(?:-(?:{stages}))?", v) is None:
+            msg = (
+                f"domain.version {v!r} is not semver: expected "
+                f"'<major>.<minor>.<patch>' with an optional '-<stage>' suffix ({stages.replace('|', ', ')})"
+            )
+            raise ValueError(msg)
+        return v
+
 
 class DomainSpec(BaseModel):
     """Complete domain pack specification."""

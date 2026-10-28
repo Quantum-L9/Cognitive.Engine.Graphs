@@ -518,5 +518,30 @@ class TestDomainMetadata:
 
     def test_alternate_domains(self) -> None:
         """DomainMetadata stores alternate domains."""
-        m = DomainMetadata(id="p", name="P", version="1", alternatedomains=["alt1"])
+        m = DomainMetadata(id="p", name="P", version="1.0.0", alternatedomains=["alt1"])
         assert m.alternatedomains == ["alt1"]
+
+    @pytest.mark.parametrize("version", ["latest", "v2", "2026-03-01", "1", "1.0", "01.0.0", "1.0.0-beta", "1.0.0 "])
+    def test_non_semver_version_rejected(self, version: str) -> None:
+        """RU-057 / CEG-COR-152: DOMAIN_SPEC_VERSIONING.md bans non-semver versions."""
+        with pytest.raises(PydanticValidationError, match="is not semver"):
+            DomainMetadata(id="p", name="P", version=version)
+
+    @pytest.mark.parametrize(
+        "version", ["0.0.1", "0.1.0", "1.0.0", "1.0.1", "1.1.0", "1.2.0", "2.0.0", "1.0.0-reviewed", "0.1.0-seed"]
+    )
+    def test_semver_version_accepted(self, version: str) -> None:
+        """RU-057: semver with an optional DOMAIN_SPEC_VERSIONING stage suffix validates."""
+        assert DomainMetadata(id="p", name="P", version=version).version == version
+
+    def test_non_semver_version_rejected_in_domain_spec(self) -> None:
+        """RU-057: the refusal reaches a full DomainSpec load."""
+        raw = _minimal_domain_raw()
+        raw["domain"]["version"] = "latest"
+        with pytest.raises(PydanticValidationError, match="'latest' is not semver"):
+            DomainSpec.model_validate(raw)
+
+    def test_non_semver_version_flag_off_accepted(self) -> None:
+        """RU-057 flag off: any string version is accepted, as before."""
+        with patch(_SETTINGS_TARGET, _settings(domain_version_semver_enforced=False)):
+            assert DomainMetadata(id="p", name="P", version="latest").version == "latest"
