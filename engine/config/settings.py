@@ -485,6 +485,10 @@ class Settings(BaseSettings):
     # not carry, so declared temporal_validation was skipped for every sync
     # batch. On: the batch edge_type is used. Off: the record key.
     causal_validator_batch_edge_type: bool = True
+    # RU-076 / CEG-COR-125: safe_eval ignored keyword arguments, so
+    # round(2.567, ndigits=2) returned 3 and max(x, key=y) returned x. On: a
+    # call with keywords raises ValueError. Off: keywords silently dropped.
+    safe_eval_reject_keywords: bool = True
     # RU-074 / CEG-COR-121: CausalSubgraphSerializer matched `[r:T]` (one
     # hop), so match explanations never went deeper than 1. On: `[:T*1..N]`
     # with N = max_depth clamped to [1, causal.chain_depth_limit]. Off: the
