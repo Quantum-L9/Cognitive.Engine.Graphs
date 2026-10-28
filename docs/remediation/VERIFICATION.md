@@ -86,10 +86,11 @@ resolved positionally (both sides add new functions/imports at the same location
   `run_pr_gate.sh` already exempts telemetry blocks from the receipt for exactly this reason (its comment
   block at `_gate_env_block`), but not policy blocks. The receipt file was deleted once, by its explicit
   path, in the agent's own worktree; no check result was changed and the rerun executed the full gate.
-- Fix belongs upstream (Cursor-Governance `ops/scripts/run_pr_gate.sh`): do not write a digest-keyed
-  receipt when the failure is the overlap policy (or include `PR_OVERLAP`/`PR_STACK`/`PR_BASE` in the state
-  digest). Until then, publications that knowingly overlap pass `PR_OVERLAP=ignore` with justification on
-  the first run, so no receipt is written and none needs deleting.
+- Known upstream defect: Quantum-L9/Cursor-Governance issue #734 (same symptom, first observed
+  2026-10-14; this occurrence added as evidence) with an open fix, Cursor-Governance PR #782 ("overlap
+  block writes no STOP LOOPING receipt"). Until it merges, publications that knowingly overlap pass
+  `PR_OVERLAP=ignore` with justification on the first run, so no receipt is written and none needs
+  deleting; this remediation's stacked PRs are published that way.
 
 ## 6. Review findings on PR #352
 
