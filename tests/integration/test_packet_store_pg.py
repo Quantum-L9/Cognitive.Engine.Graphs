@@ -30,6 +30,8 @@ Scenarios:
      is still rejected.
   E. (RG-107, RU-080) packet_store.sql applied a second time to a populated
      database exits cleanly and keeps every row, foreign key and policy.
+  F. (RU-078) A packet stored under the legacy payload_hash key, re-delivered
+     with the flag on: skipped, and the new response is stored.
 """
 
 from __future__ import annotations
@@ -285,3 +287,55 @@ async def test_reapplying_ddl_preserves_rows() -> None:
             await conn.close()
     finally:
         await _drop_database(name)
+
+
+async def test_redelivered_legacy_packet_is_skipped(
+    owner_store: ps_mod.PacketStore, packet_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Scenario F: a row written before RU-078 carries payload_hash in content_hash.
+
+    Re-delivering that packet with the flag on hashes it by transport_hash, so
+    (content_hash, actor_tenant) does not match. Before the fix the INSERT then
+    hit the packet_id primary key and the whole new pair rolled back.
+    """
+    tenant = f"tenant-{uuid.uuid4().hex[:8]}"
+    req, resp1 = _pair({"query": {"x": 5}}, tenant, "tr-e")
+    monkeypatch.setattr(settings, "packet_store_packet_identity_dedup_enabled", False)
+    await owner_store.persist(req, resp1)
+    stored_hash = await _count_text(
+        packet_db, "SELECT content_hash FROM packet_store WHERE packet_id = $1::uuid", str(req.header.packet_id)
+    )
+    assert stored_hash == req.security.payload_hash  # precondition: legacy key
+
+    monkeypatch.setattr(settings, "packet_store_packet_identity_dedup_enabled", True)
+    resp2 = deflate_egress(
+        request=req,
+        engine_data={"ok": True, "retry": 1},
+        status="success",
+        processing_ms=1.0,
+        engine_version="1.1.0",
+        responding_node="graph-engine",
+    )
+    await owner_store.persist(req, resp2)
+
+    assert await _count(packet_db, "SELECT count(*) FROM packet_store WHERE actor_tenant = $1", tenant) == 3
+    assert await _count(
+        packet_db, "SELECT count(*) FROM hop_trace WHERE packet_id = $1::uuid", str(req.header.packet_id)
+    ) == len(req.hop_trace)
+    assert (
+        await _count(
+            packet_db,
+            "SELECT count(*) FROM lineage_graph WHERE parent_id = $1::uuid AND child_id = $2::uuid",
+            str(req.header.packet_id),
+            str(resp2.header.packet_id),
+        )
+        == 1
+    )
+
+
+async def _count_text(dsn: str, sql: str, *args: Any) -> str:
+    conn = await asyncpg.connect(dsn)
+    try:
+        return str(await conn.fetchval(sql, *args))
+    finally:
+        await conn.close()

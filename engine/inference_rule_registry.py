@@ -322,8 +322,8 @@ def infer_geography_from_postal_code(entity: dict, ctx: InferenceContext) -> Inf
 
     With ``inference_geo_usps_zones_enabled`` the region follows the USPS
     first-digit zone, and an entity whose declared ``country`` is not a US
-    designation yields no inference (an absent country keeps the inference,
-    R4-DEC-07). Off: the legacy five-digit threshold ladder.
+    designation yields no inference (an absent or blank country keeps the
+    inference, R4-DEC-07). Off: the legacy five-digit threshold ladder.
     """
     postal = entity.get("postal_code") or entity.get("zip_code")
     if not postal:
@@ -331,7 +331,8 @@ def infer_geography_from_postal_code(entity: dict, ctx: InferenceContext) -> Inf
     postal_str = str(postal).strip().upper()
     if settings.inference_geo_usps_zones_enabled:
         country = entity.get("country")
-        if country is not None and str(country).strip().lower() not in _US_COUNTRY_DESIGNATIONS:
+        declared = "" if country is None else str(country).strip().lower()
+        if declared and declared not in _US_COUNTRY_DESIGNATIONS:
             return None
         if not re.match(r"^\d{5}(-\d{4})?$", postal_str):
             return None
