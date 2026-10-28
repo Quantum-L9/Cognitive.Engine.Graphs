@@ -71,6 +71,10 @@ curl -X POST http://localhost:8000/v1/match \
 
 ## 2. MORTGAGE-BROKERAGE (Loan Matching)
 
+The pack is declared dormant (DEC-15: no state-licensing or lender-blacklist
+enforcement yet). Start the engine with `DORMANT_DOMAIN_PACKS_ENABLED=true` to
+run the requests below.
+
 **Query File**: `domains/mortgage-brokerage/test-query.json`
 
 ```json
