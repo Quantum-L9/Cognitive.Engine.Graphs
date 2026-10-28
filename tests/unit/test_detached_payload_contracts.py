@@ -322,46 +322,35 @@ def _example_match_request() -> dict:
 
 
 @pytest.mark.finding("CEG-COR-063")
-async def test_match_request_example_is_admitted_and_mapped(monkeypatch: pytest.MonkeyPatch) -> None:
-    """repro I/match_contract: the example returns candidates.
+async def test_match_request_example_is_admitted_and_mapped() -> None:
+    """repro I/match_contract: the verbatim example returns candidates under default flags.
 
-    The example's facts (polymer_code, form_code, quantity_lbs) are not the
-    plasticos queryschema vocabulary; RU-010 rejects the missing required
-    polymer_type, so the verbatim example is shown with strict_null_gates off.
+    query.facts becomes the pack query, so the example's facts use the plasticos
+    queryschema vocabulary (``polymer_type``, the pack's required field; C-12).
     """
-    from engine.config.settings import settings
     from engine.handlers import handle_match
 
-    monkeypatch.setattr(settings, "strict_null_gates", False)
     driver = _wire_plasticos()
     payload = _example_match_request()
     result = await handle_match("plasticos", payload)
 
     assert result["candidates"]
     _cypher, params = driver.calls[0]
-    assert params["polymer_code"] == "HDPE"  # query.facts became the query
+    assert params["polymer_type"] == "HDPE"  # query.facts became the query
     assert params["top_n"] == payload["top_n"]
     assert result["match_direction"] == payload["direction"]
 
 
 @pytest.mark.finding("CEG-COR-063")
-async def test_match_request_with_pack_vocabulary_returns_candidates() -> None:
-    from engine.handlers import handle_match
-
-    _wire_plasticos()
-    payload = _example_match_request()
-    payload["query"]["facts"] = {"polymer_type": "HDPE"}
-    result = await handle_match("plasticos", payload)
-    assert result["candidates"]
-
-
-async def test_match_request_example_meets_required_parameter_check() -> None:
-    """Default flags: admission succeeds; RU-010 then names the unmet required gate parameter."""
+async def test_match_request_missing_required_fact_is_named() -> None:
+    """RU-010: a contract request that omits the pack's required field is rejected, naming it."""
     from engine.handlers import ValidationError, handle_match
 
     _wire_plasticos()
+    payload = _example_match_request()
+    payload["query"]["facts"] = {"polymer_code": "HDPE"}
     with pytest.raises(ValidationError, match="polymer_type"):
-        await handle_match("plasticos", _example_match_request())
+        await handle_match("plasticos", payload)
 
 
 @pytest.mark.parametrize(
