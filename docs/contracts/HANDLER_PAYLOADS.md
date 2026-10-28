@@ -58,6 +58,40 @@ endpoint updates only rows whose node already exists, so its statement ends
 stays `len(batch)` and it carries no `unmatched_count`.
 
 
+## outcomes
+
+```python
+class OutcomeFingerprint(BaseModel):
+    active_dimensions: list[str] = []
+    dimension_weights: dict[str, float] = {}  # stored as sorted-key JSON (RU-005)
+    gates_passed: list[str] = []
+    match_direction: str | None = None  # scopes the RESULTED_IN candidate lookup (RU-002)
+    candidate_count: int = 0
+    dimension_scores: dict[str, float] | None = None  # RU-006: per-dimension scores of the match
+    was_selected: bool | None = None  # RU-006: whether the caller selected this candidate
+
+
+class OutcomesPayload(BaseModel):
+    match_id: str
+    candidate_id: str
+    outcome: Literal["success", "failure", "partial"]
+    value: Any | None = None
+    fingerprint: OutcomeFingerprint = OutcomeFingerprint()
+```
+
+RU-006 (`OUTCOME_SCHEMA_UNIFIED`, default on, R1a-DEC-02): `handle_outcomes` is
+the canonical outcome writer. It creates one `feedbackloop.outcome_node_label`
+node (default `TransactionOutcome`) carrying the fingerprint, plus
+`dimension_scores` (JSON; null when omitted) and `was_selected`, which feed
+`admin score_feedback` and `admin discover_weights`. A `dimension_scores` that
+is not a map of finite numbers, or a non-boolean `was_selected`, raises
+`ValidationError`. The sync `outcome` entity type (feedback-effective domains
+only) writes each batch item — `match_id`, `chosen_candidate_id`, `outcome`,
+optional `value` and `fingerprint` — through the same writer, mapping
+`positive`/`negative`/`neutral` to `success`/`failure`/`partial`; items with any
+other outcome or a malformed fingerprint are skipped.
+
+
 ## admin
 
 ```python

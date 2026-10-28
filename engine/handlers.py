@@ -946,6 +946,59 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     return response
 
 
+async def _sync_outcomes_unified(
+    graph_driver: GraphDriver,
+    domain_spec: DomainSpec,
+    tenant: str,
+    batch: list[Any],
+) -> dict[str, Any]:
+    """RU-006 / CEG-COR-015: sync ``outcome`` items through the handle_outcomes writer.
+
+    Each item's ``outcome`` maps onto success|failure|partial
+    (_SYNC_OUTCOME_VOCABULARY); the node is the domain's outcome label with the
+    same properties, RESULTED_IN edge and causal check as handle_outcomes. Items
+    that are not maps, carry an unknown outcome or a malformed ``fingerprint``
+    are skipped, as unknown outcomes always were.
+    """
+    synced = 0
+    rejected_count = 0
+    for item in batch:
+        if not isinstance(item, dict):
+            continue
+        outcome_val = _SYNC_OUTCOME_VOCABULARY.get(item.get("outcome"))  # type: ignore[arg-type]
+        if outcome_val is None:
+            continue
+        match_id = item.get("match_id")
+        create_resulted_in = _resulted_in_permitted(domain_spec, item)
+        try:
+            cypher, parameters = _build_outcome_write(
+                domain_spec,
+                tenant,
+                outcome_id=f"out_{uuid.uuid4().hex[:12]}",
+                match_id=match_id,
+                candidate_id=item.get("chosen_candidate_id"),
+                outcome=outcome_val,
+                value=item.get("value"),
+                fingerprint=item.get("fingerprint", {}),
+                create_resulted_in=create_resulted_in,
+            )
+        except ValueError as exc:
+            logger.warning("Skipping outcome sync item for match_id=%s: %s", match_id, exc)
+            continue
+        try:
+            await graph_driver.execute_query(cypher=cypher, parameters=parameters, database=domain_spec.domain.id)
+        except Exception:
+            logger.warning("Failed to sync outcome for match_id=%s", match_id, exc_info=True)
+            continue
+        synced += 1
+        if not create_resulted_in:
+            rejected_count += 1
+    response: dict[str, Any] = {"status": "success", "entity_type": "outcome", "synced_count": synced}
+    if rejected_count:
+        response["rejected_count"] = rejected_count
+    return response
+
+
 async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Batch UNWIND MERGE/MATCH SET for graph entities."""
     graph_driver, domain_loader = _require_deps()
@@ -967,6 +1020,10 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     if entity_type == "outcome" and _feedback_effective(domain_loader.load_domain(tenant)):
         domain_spec = domain_loader.load_domain(tenant)
         _enforce_capability(tenant, "sync", domain_spec)
+        from engine.config.settings import settings as _sync_outcome_settings
+
+        if _sync_outcome_settings.outcome_schema_unified:
+            return await _sync_outcomes_unified(graph_driver, domain_spec, tenant, batch)
         # RU-002: the chosen candidate is found by its declared id property.
         outcome_candidate_predicate = _declared_id_predicate(domain_spec, "c", "candidate_id")
         synced = 0
@@ -1201,11 +1258,16 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         # Read recent outcomes from Neo4j. The outcome node label is the domain's
         # (feedbackloop.outcome_node_label), not a fixed engine vocabulary.
         outcome_label = sanitize_label(spec.feedbackloop.outcome_node_label)
+        from engine.config.settings import settings as _fb_schema_settings
+
+        # RU-006: project the per-dimension scores the writers persist.
+        unified_schema = bool(_fb_schema_settings.outcome_schema_unified)
+        dimension_projection = ", o.dimension_scores AS dimension_scores" if unified_schema else ""
         outcome_cypher = f"""
         MATCH (o:{outcome_label})
         WHERE o.tenant = $tenant
         RETURN o.outcome AS outcome, o.candidate_id AS candidate_id,
-               o.match_id AS match_id, o.value AS value
+               o.match_id AS match_id, o.value AS value{dimension_projection}
         ORDER BY o.created_at DESC
         LIMIT 500
         """
@@ -1225,6 +1287,12 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
         from engine.scoring.feedback import OutcomeFeedback
 
+        if unified_schema:
+            from engine.models.outcomes import decode_outcome_map
+
+            outcome_records = [
+                {**rec, "dimension_scores": decode_outcome_map(rec.get("dimension_scores"))} for rec in outcome_records
+            ]
         feedback = OutcomeFeedback(outcome_records)
         result = feedback.compute_feedback()
         return {"status": "feedback_computed", **result}
@@ -2115,6 +2183,176 @@ def _get_or_create_scheduler(spec: DomainSpec, driver: GraphDriver) -> GDSSchedu
     return result
 
 
+# RU-006 / CEG-COR-015 (R1a-DEC-02): the sync `outcome` entity type used a
+# second vocabulary. It maps onto the canonical success|failure|partial that
+# handle_outcomes writes and every established reader counts.
+_SYNC_OUTCOME_VOCABULARY: dict[str, str] = {
+    "positive": "success",
+    "negative": "failure",
+    "neutral": "partial",
+    "success": "success",
+    "failure": "failure",
+    "partial": "partial",
+}
+
+
+def _resulted_in_permitted(domain_spec: DomainSpec, record: dict[str, Any]) -> bool:
+    """R3 / CEG-FIX-001: may the RESULTED_IN edge for this outcome be created?
+
+    A rejection by CausalEdgeRuntimeValidator suppresses the edge (when
+    enforcement is on); the outcome node is the observation and is still written.
+    """
+    if not domain_spec.causal.enabled:
+        return True
+    from engine.causal.causal_validator import CausalEdgeRuntimeValidator
+    from engine.config.settings import settings as _causal_settings
+
+    validator = CausalEdgeRuntimeValidator(domain_spec.causal)
+    edge_record = {
+        "edge_type": "RESULTED_IN",
+        "source_ts": record.get("source_ts"),
+        "target_ts": record.get("target_ts"),
+        "confidence": record.get("confidence"),
+    }
+    _valid, rejected = validator.validate_batch([edge_record], "RESULTED_IN")
+    if rejected:
+        logger.info(
+            "Causal validation rejected RESULTED_IN edge: %s",
+            rejected[0].get("rejection_reason"),
+        )
+        return not _causal_settings.causal_rejection_enforcement_enabled
+    return True
+
+
+def _outcome_feedback_fields(fingerprint: dict[str, Any]) -> tuple[str | None, bool | None]:
+    """RU-006: optional ``fingerprint.dimension_scores`` / ``was_selected``.
+
+    ``dimension_scores`` is a map of dimension name to a finite number, stored
+    as sorted-key JSON (RU-005 codec) because Neo4j cannot hold a map property;
+    ``was_selected`` is a bool. Either absent is stored as null. Raises
+    ValueError on any other shape.
+    """
+    import math
+
+    from engine.models.outcomes import encode_outcome_map
+
+    raw_scores = fingerprint.get("dimension_scores")
+    encoded: str | None = None
+    if raw_scores is not None:
+        if not isinstance(raw_scores, dict):
+            msg = "fingerprint.dimension_scores must be a map of dimension -> number"
+            raise ValueError(msg)
+        for dim, score in raw_scores.items():
+            numeric = isinstance(score, (int, float)) and not isinstance(score, bool)
+            if not isinstance(dim, str) or not numeric or not math.isfinite(score):
+                msg = f"fingerprint.dimension_scores[{dim!r}] must be a finite number"
+                raise ValueError(msg)
+        encoded = encode_outcome_map(raw_scores)
+    was_selected = fingerprint.get("was_selected")
+    if was_selected is not None and not isinstance(was_selected, bool):
+        msg = "fingerprint.was_selected must be a boolean"
+        raise ValueError(msg)
+    return encoded, was_selected
+
+
+def _build_outcome_write(
+    domain_spec: DomainSpec,
+    tenant: str,
+    *,
+    outcome_id: str,
+    match_id: Any,
+    candidate_id: Any,
+    outcome: str,
+    value: Any,
+    fingerprint: Any,
+    create_resulted_in: bool,
+) -> tuple[str, dict[str, Any]]:
+    """The one outcome-record writer (handle_outcomes; sync ``outcome`` under RU-006).
+
+    Writes the domain's ``feedbackloop.outcome_node_label`` node with the match
+    fingerprint and a RESULTED_IN edge from the candidate found by its declared
+    id (RU-002). With ``outcome_schema_unified`` the node also carries
+    ``dimension_scores`` (JSON) and ``was_selected`` for score_feedback and
+    discover_weights. Raises ValueError for a malformed fingerprint.
+    """
+    from engine.config.settings import settings as _outcome_settings
+    from engine.models.outcomes import encode_outcome_map
+
+    unified = bool(_outcome_settings.outcome_schema_unified)
+    if unified and not isinstance(fingerprint, dict):
+        msg = "fingerprint must be a map"
+        raise ValueError(msg)
+    active_dimensions = fingerprint.get("active_dimensions", [])
+    dimension_weights = fingerprint.get("dimension_weights", {})
+    gates_passed = fingerprint.get("gates_passed", [])
+    match_direction = fingerprint.get("match_direction")
+    candidate_count = fingerprint.get("candidate_count", 0)
+    feedback_fields = _outcome_feedback_fields(fingerprint) if unified else None
+
+    # The outcome node label is the domain's (feedbackloop.outcome_node_label);
+    # the engine's system graph schema documents the default, not a fixed name.
+    outcome_label = sanitize_label(domain_spec.feedbackloop.outcome_node_label)
+    feedback_props = (
+        ",\n        dimension_scores: $dimension_scores,\n        was_selected: $was_selected" if unified else ""
+    )
+    cypher = (
+        f"\n    CREATE (o:{outcome_label} {{"
+        """
+        outcome_id: $outcome_id, match_id: $match_id,
+        candidate_id: $candidate_id, outcome: $outcome,
+        value: $value, created_at: datetime(), tenant: $tenant,
+        domain_id: $domain_id,
+        active_dimensions: $active_dimensions,
+        dimension_weights: $dimension_weights,
+        gates_passed: $gates_passed,
+        match_direction: $match_direction,
+        candidate_count: $candidate_count"""
+        f"{feedback_props}"
+        """
+    })
+    WITH o
+    OPTIONAL MATCH (c {entity_id: $candidate_id})
+    FOREACH (_ IN CASE WHEN c IS NOT NULL AND $create_resulted_in THEN [1] ELSE [] END |
+        CREATE (c)-[:RESULTED_IN]->(o)
+    )
+    RETURN o.outcome_id AS outcome_id
+    """
+    )
+
+    # RU-005 / CEG-COR-056: one decodable encoding (JSON) for the map-valued
+    # fingerprint field; off restores the Python repr writer.
+    stored_dimension_weights = (
+        encode_outcome_map(dimension_weights) if _outcome_settings.outcome_map_json_encoding else str(dimension_weights)
+    )
+
+    # RU-002: link the outcome to the candidate by its declared id property,
+    # scoped to the fingerprint's direction when it names a declared one.
+    outcome_candidate_predicate = _declared_id_predicate(domain_spec, "c", "candidate_id", match_direction)
+    if outcome_candidate_predicate is not None:
+        cypher = cypher.replace(
+            "OPTIONAL MATCH (c {entity_id: $candidate_id})",
+            f"OPTIONAL MATCH (c) WHERE {outcome_candidate_predicate}",
+        )
+    parameters: dict[str, Any] = {
+        "outcome_id": outcome_id,
+        "match_id": match_id,
+        "candidate_id": candidate_id,
+        "outcome": outcome,
+        "value": value,
+        "tenant": tenant,
+        "domain_id": domain_spec.domain.id,
+        "active_dimensions": active_dimensions,
+        "dimension_weights": stored_dimension_weights,
+        "gates_passed": gates_passed,
+        "match_direction": match_direction,
+        "candidate_count": candidate_count,
+        "create_resulted_in": create_resulted_in,
+    }
+    if feedback_fields is not None:
+        parameters["dimension_scores"], parameters["was_selected"] = feedback_fields
+    return cypher, parameters
+
+
 async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Write TransactionOutcome nodes with match fingerprint and RESULTED_IN edges."""
     graph_driver, domain_loader = _require_deps()
@@ -2138,93 +2376,28 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
     # R3: Causal validation for RESULTED_IN edge. CEG-FIX-001: a rejection
     # suppresses the edge in both write paths below; the outcome node is the
     # observation and is still recorded.
-    create_resulted_in = True
-    if domain_spec.causal.enabled:
-        from engine.causal.causal_validator import CausalEdgeRuntimeValidator
-        from engine.config.settings import settings as _causal_settings
-
-        validator = CausalEdgeRuntimeValidator(domain_spec.causal)
-        edge_record = {
-            "edge_type": "RESULTED_IN",
-            "source_ts": payload.get("source_ts"),
-            "target_ts": payload.get("target_ts"),
-            "confidence": payload.get("confidence"),
-        }
-        _valid, rejected = validator.validate_batch([edge_record], "RESULTED_IN")
-        if rejected:
-            logger.info(
-                "Causal validation rejected RESULTED_IN edge: %s",
-                rejected[0].get("rejection_reason"),
-            )
-            create_resulted_in = not _causal_settings.causal_rejection_enforcement_enabled
+    create_resulted_in = _resulted_in_permitted(domain_spec, payload)
 
     # R5: Extract match fingerprint from payload
     fingerprint = payload.get("fingerprint", {})
-    active_dimensions = fingerprint.get("active_dimensions", [])
-    dimension_weights = fingerprint.get("dimension_weights", {})
-    gates_passed = fingerprint.get("gates_passed", [])
-    match_direction = fingerprint.get("match_direction")
-    candidate_count = fingerprint.get("candidate_count", 0)
-
-    # The outcome node label is the domain's (feedbackloop.outcome_node_label);
-    # the engine's system graph schema documents the default, not a fixed name.
-    outcome_label = sanitize_label(domain_spec.feedbackloop.outcome_node_label)
-    cypher = (
-        f"\n    CREATE (o:{outcome_label} {{"
-        """
-        outcome_id: $outcome_id, match_id: $match_id,
-        candidate_id: $candidate_id, outcome: $outcome,
-        value: $value, created_at: datetime(), tenant: $tenant,
-        domain_id: $domain_id,
-        active_dimensions: $active_dimensions,
-        dimension_weights: $dimension_weights,
-        gates_passed: $gates_passed,
-        match_direction: $match_direction,
-        candidate_count: $candidate_count
-    })
-    WITH o
-    OPTIONAL MATCH (c {entity_id: $candidate_id})
-    FOREACH (_ IN CASE WHEN c IS NOT NULL AND $create_resulted_in THEN [1] ELSE [] END |
-        CREATE (c)-[:RESULTED_IN]->(o)
-    )
-    RETURN o.outcome_id AS outcome_id
-    """
-    )
-    from engine.config.settings import settings as _outcome_settings
-    from engine.models.outcomes import encode_outcome_map
-
-    # RU-005 / CEG-COR-056: one decodable encoding (JSON) for the map-valued
-    # fingerprint field; off restores the Python repr writer.
-    stored_dimension_weights = (
-        encode_outcome_map(dimension_weights) if _outcome_settings.outcome_map_json_encoding else str(dimension_weights)
-    )
-
-    # RU-002: link the outcome to the candidate by its declared id property,
-    # scoped to the fingerprint's direction when it names a declared one.
-    outcome_candidate_predicate = _declared_id_predicate(domain_spec, "c", "candidate_id", match_direction)
-    if outcome_candidate_predicate is not None:
-        cypher = cypher.replace(
-            "OPTIONAL MATCH (c {entity_id: $candidate_id})",
-            f"OPTIONAL MATCH (c) WHERE {outcome_candidate_predicate}",
+    try:
+        cypher, parameters = _build_outcome_write(
+            domain_spec,
+            tenant,
+            outcome_id=outcome_id,
+            match_id=match_id,
+            candidate_id=candidate_id,
+            outcome=outcome,
+            value=payload.get("value"),
+            fingerprint=fingerprint,
+            create_resulted_in=create_resulted_in,
         )
+    except ValueError as exc:
+        raise ValidationError(str(exc), action="outcomes", tenant=tenant) from exc
     try:
         await graph_driver.execute_query(
             cypher=cypher,
-            parameters={
-                "outcome_id": outcome_id,
-                "match_id": match_id,
-                "candidate_id": candidate_id,
-                "outcome": outcome,
-                "value": payload.get("value"),
-                "tenant": tenant,
-                "domain_id": domain_spec.domain.id,
-                "active_dimensions": active_dimensions,
-                "dimension_weights": stored_dimension_weights,
-                "gates_passed": gates_passed,
-                "match_direction": match_direction,
-                "candidate_count": candidate_count,
-                "create_resulted_in": create_resulted_in,
-            },
+            parameters=parameters,
             database=domain_spec.domain.id,
         )
     except Exception as exc:

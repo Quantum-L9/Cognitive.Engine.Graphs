@@ -11,7 +11,7 @@ status: active
 
 Outcome feedback loop for weight tuning proposals.
 
-Reads outcome data (positive/negative/neutral) from Neo4j, computes
+Reads outcome data (success/failure/partial; RU-006) from Neo4j, computes
 per-dimension discriminability, and proposes weight adjustments. Does NOT
 auto-apply — returns proposals for human-in-the-loop approval.
 
@@ -33,6 +33,21 @@ logger = logging.getLogger(__name__)
 WEIGHT_NUDGE = 0.02
 # Minimum outcomes required for meaningful analysis
 MIN_OUTCOMES = 10
+
+
+def outcome_classes() -> tuple[str, str]:
+    """The (positive, negative) outcome values this analyzer partitions on.
+
+    RU-006 / CEG-COR-015: the canonical outcome record (handle_outcomes, and the
+    sync outcome type under ``outcome_schema_unified``) stores
+    success|failure|partial, so success is the positive class and failure the
+    negative one; partial is neither. Off: the legacy positive|negative labels.
+    """
+    from engine.config.settings import settings
+
+    if settings.outcome_schema_unified:
+        return "success", "failure"
+    return "positive", "negative"
 
 
 class OutcomeFeedback:
@@ -65,6 +80,8 @@ class OutcomeFeedback:
                 "message": f"Insufficient outcomes ({len(self.outcomes)} < {MIN_OUTCOMES}). Collect more data.",
             }
 
+        positive_class, negative_class = outcome_classes()
+
         # Partition scores by outcome type
         positive_dims: dict[str, list[float]] = defaultdict(list)
         negative_dims: dict[str, list[float]] = defaultdict(list)
@@ -80,9 +97,9 @@ class OutcomeFeedback:
             for dim, score in dim_scores.items():
                 if not isinstance(score, (int, float)):
                     continue
-                if outcome_type == "positive":
+                if outcome_type == positive_class:
                     positive_dims[dim].append(float(score))
-                elif outcome_type == "negative":
+                elif outcome_type == negative_class:
                     negative_dims[dim].append(float(score))
 
         all_dims = set(positive_dims.keys()) | set(negative_dims.keys())

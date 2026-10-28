@@ -668,6 +668,14 @@ class Settings(BaseSettings):
     # False, registers jobs without starting APScheduler (manual trigger only);
     # EngineState.shutdown stops them all. Off: boot-local list, admin duplicate.
     gds_shared_scheduler_registry: bool = True
+    # RU-006 / CEG-COR-015 (R1a-DEC-02): one outcome record schema. Sync
+    # entity_type=outcome writes through handle_outcomes' writer (domain
+    # outcome_node_label, positive|negative|neutral -> success|failure|partial,
+    # RESULTED_IN); outcomes persist optional fingerprint.dimension_scores (JSON)
+    # and was_selected; score_feedback projects dimension_scores and
+    # OutcomeFeedback counts success/failure. Off: :Outcome + HAS_OUTCOME with
+    # the sync vocabulary, no dimension_scores, positive/negative classes.
+    outcome_schema_unified: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
