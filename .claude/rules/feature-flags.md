@@ -109,4 +109,4 @@ were industry-specific and had no caller).
 
 ## Correctness remediation — lane D (plan 0d84ec8)
 | prohibited_factor_full_coverage | True | Prohibited-factor check covers every gate property field, scoring dimension `candidateprop`/`queryprop` and sync-row keys at any depth, casefolded (RU-061 / CEG-COR-008); off restores the gate `candidateprop`/`queryparam` exact-case check |
-| pii_redaction_recursive | True | `PIIHandler` detects PII inside lists/tuples with index-aware paths (`candidates[0].candidate.email`) and redacts/masks by copying the edited path, never mutating the input; `redact_response` reaches match candidates (RU-062 / CEG-COR-009); off restores dict-only traversal |
+| pii_redaction_recursive | True | `PIIHandler` detects PII inside lists/tuples with index-aware paths (`candidates[0].candidate.email`) and redacts/masks by copying the edited path, never mutating the input; `redact_response` reaches match candidates when the domain's `compliance.pii.enabled` is true (opted-out domains keep dict-only reach) (RU-062 / CEG-COR-009); off restores dict-only traversal |

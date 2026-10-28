@@ -1039,8 +1039,11 @@ returned candidate PII unchanged; `redact()` / `mask_fields()` shallow-copied an
 edited nested caller dicts in place. On: detection descends into dicts and
 lists/tuples at any depth with index-aware paths (`candidates[0].candidate.contact_email`;
 dict-only payloads keep their dotted paths), and redaction/masking copy every container
-on the edited path, so the input is never mutated. `check_sync_request` records the
-detected field paths (never values) in the access audit entry. Off: the legacy
-dict-only traversal.
+on the edited path, so the input is never mutated. `redact_response` reaches
+`candidates` only for a domain whose `compliance.pii.enabled` is `true`; a domain that
+opts out (`enabled: false`, or no `pii` section — `PIISpec.enabled` defaults to `false`)
+keeps the pre-RU-062 reach: dict paths only, candidate fields untouched.
+`check_sync_request` records the detected field paths (never values) in the access audit
+entry. Off: the legacy dict-only traversal.
 
 Rollback: set the flag to `false`.

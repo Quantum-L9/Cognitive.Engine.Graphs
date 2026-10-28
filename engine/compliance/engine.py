@@ -53,6 +53,10 @@ class ComplianceEngine:
                 additional_pii = pii_cfg.additional_fields
 
         self._pii = PIIHandler(additional_pii_fields=additional_pii)
+        # RU-062: list-reaching response redaction is the domain's opt-in
+        # (`compliance.pii.enabled`, PIISpec default False).
+        pii_section = getattr(compliance, "pii", None) if compliance else None
+        self._pii_opted_in = pii_section is not None and getattr(pii_section, "enabled", False) is True
         self._audit = AuditLogger()  # Uses default retention policies
 
         if self._db_pool is None:
@@ -209,9 +213,19 @@ class ComplianceEngine:
         if not self._enabled:
             return response
         if _pii_recursive():
-            # RU-062: detection and removal reach list elements (match
-            # `candidates[*].candidate`) and never mutate `response`.
-            return self._pii.redact(response, redact_all_detected=True)
+            if self._pii_opted_in:
+                # RU-062: detection and removal reach list elements (match
+                # `candidates[*].candidate`) and never mutate `response`.
+                return self._pii.redact(response, redact_all_detected=True)
+            # The domain opts out (`compliance.pii` absent or `enabled: false`):
+            # keep the pre-RU-062 reach — dict paths only, never into lists such
+            # as `candidates` — still without mutating `response`.
+            dict_paths = [
+                path
+                for path, _ in self._pii.detect_pii_paths(response)
+                if not any(isinstance(part, int) for part in path)
+            ]
+            return self._pii.redact_paths(response, dict_paths) if dict_paths else response
         # Detect and redact PII fields
         pii_fields = self._pii.get_pii_field_paths(response)
         if pii_fields:
