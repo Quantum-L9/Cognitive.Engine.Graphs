@@ -406,34 +406,55 @@ def infer_icp_fit_score(entity: dict, ctx: InferenceContext) -> InferenceResult 
     )
 
 
+# Job-title tokenizer for infer_buyer_persona (RU-088): '&' is kept so the
+# declared 'r&d' keyword remains matchable.
+_TITLE_TOKEN_SPLIT = re.compile(r"[^a-z0-9&]+")
+
+
 @register_inference_rule("infer_buyer_persona")
 def infer_buyer_persona(entity: dict, ctx: InferenceContext) -> InferenceResult | None:
-    """Infer buyer_persona from job_title if present."""
+    """Infer buyer_persona from job_title if present.
+
+    With ``inference_persona_token_match_enabled`` a keyword matches only a
+    whole token of the title, split on ``[^a-z0-9&]+`` so ``r&d`` stays one
+    token ('Marketing Coordinator' no longer matches 'coo'). Off: the legacy
+    substring test. Keyword sets, precedence and confidences are unchanged.
+    """
     title = entity.get("job_title") or entity.get("title") or ""
     title_lower = str(title).lower()
     if not title_lower:
         return None
+    if settings.inference_persona_token_match_enabled:
+        tokens = frozenset(_TITLE_TOKEN_SPLIT.split(title_lower))
+
+        def _has(kw: str) -> bool:
+            return kw in tokens
+    else:
+
+        def _has(kw: str) -> bool:
+            return kw in title_lower
+
     exec_keywords = {"ceo", "coo", "president", "owner", "founder", "vp", "svp", "evp"}
     ops_keywords = {"operations", "ops", "plant", "facility", "production", "supply"}
     proc_keywords = {"procurement", "purchasing", "buyer", "sourcing"}
     tech_keywords = {"engineer", "technical", "r&d", "research", "quality"}
     for kw in exec_keywords:
-        if kw in title_lower:
+        if _has(kw):
             return InferenceResult(
                 "buyer_persona", "executive", 0.85, "infer_buyer_persona", rationale=f"title={title}"
             )
     for kw in proc_keywords:
-        if kw in title_lower:
+        if _has(kw):
             return InferenceResult(
                 "buyer_persona", "procurement", 0.83, "infer_buyer_persona", rationale=f"title={title}"
             )
     for kw in ops_keywords:
-        if kw in title_lower:
+        if _has(kw):
             return InferenceResult(
                 "buyer_persona", "operations", 0.80, "infer_buyer_persona", rationale=f"title={title}"
             )
     for kw in tech_keywords:
-        if kw in title_lower:
+        if _has(kw):
             return InferenceResult(
                 "buyer_persona", "technical", 0.78, "infer_buyer_persona", rationale=f"title={title}"
             )
