@@ -189,3 +189,116 @@ def test_main_exits_one_on_violation(tmp_path: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cs.sys, "argv", ["contract_scanner.py"])
     assert cs.main() == 1
+
+
+# ── ERR-002 (RU-136, RG-172; DEC-51: enforced in engine/ only) ──────────────
+
+ERR002_FIXTURE = """def swallow():
+    try:
+        risky()
+    except ValueError:
+        pass
+"""
+
+ERR002_CASES = """def a():
+    try:
+        x()
+    except (TypeError, ValueError):
+        pass
+
+
+def b():
+    try:
+        x()
+    except KeyError:
+        pass
+        pass
+
+
+def c():
+    try:
+        x()
+    except ValueError as exc:
+        log_and_raise(exc)
+
+
+def d():
+    try:
+        x()
+    except ValueError:
+        # documented, but still nothing but pass
+        pass
+    finally:
+        pass
+
+
+def e():
+    try:
+        x()
+    {BARE_EXCEPT}
+        pass
+
+
+def f():
+    try:
+        x()
+    except OSError: pass
+""".replace("{BARE_EXCEPT}", "except" + ":")  # spelled apart so ERR-001 does not flag this test file
+
+
+def test_err002_fixture_produces_one_violation_at_the_except_line() -> None:
+    assert _rule_lines(ERR002_FIXTURE, "ERR-002", path="engine/err002.py") == [4]
+
+
+def test_err002_flags_only_pass_only_typed_handlers() -> None:
+    # a(): tuple type, b(): several passes, d(): comment + pass, f(): one-line form.
+    # c() handles the error; e() is a bare except (ERR-001's finding, not ERR-002's).
+    assert _rule_lines(ERR002_CASES, "ERR-002", path="engine/cases.py") == [4, 11, 26, 43]
+
+
+def test_err002_scoped_to_engine() -> None:
+    assert _rule_lines(ERR002_FIXTURE, "ERR-002", path="tools/err002.py") == []
+    assert _rule_lines(ERR002_FIXTURE, "ERR-002", path="tests/test_err002.py") == []
+
+
+def test_err002_unparsable_file_falls_back_to_one_line_form() -> None:
+    src = "def broken(:\n    try:\n        x()\n    except OSError: pass\n"
+    assert _rule_lines(src, "ERR-002", path="engine/broken.py") == [4]
+
+
+def test_err002_exemption_is_keyed_on_path_function_and_type() -> None:
+    src = (
+        "class GraphLifecycle:\n"
+        "    async def shutdown(self):\n"
+        "        try:\n"
+        "            await task\n"
+        "        except asyncio.CancelledError:\n"
+        "            pass\n"
+        "        try:\n"
+        "            await other\n"
+        "        except ValueError:\n"
+        "            pass\n"
+    )
+    # The CancelledError handler in GraphLifecycle.shutdown is exempt; ValueError is not.
+    assert _rule_lines(src, "ERR-002", path="engine/boot.py") == [9]
+    # The same code in another module has no exemption.
+    assert _rule_lines(src, "ERR-002", path="engine/other.py") == [5, 9]
+
+
+def test_err002_every_exemption_has_a_reason_and_a_live_handler() -> None:
+    import ast
+
+    live = set()
+    for rel, qualname, exc in cs.ERR_002_EXEMPTIONS:
+        tree = ast.parse((REPO / rel).read_text(encoding="utf-8"))
+        live |= {(rel, q, e) for q, e, _ in cs.swallowed_handlers(tree) if (rel, q, e) == (rel, qualname, exc)}
+    assert live == set(cs.ERR_002_EXEMPTIONS)
+    assert all(reason.strip() for reason in cs.ERR_002_EXEMPTIONS.values())
+
+
+def test_err002_engine_tree_is_clean() -> None:
+    hits = []
+    for path in sorted((REPO / "engine").rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        hits += [(v.file, v.line) for v in cs.scan_file(path, source, REPO) if v.rule_id == "ERR-002"]
+    assert hits == []
