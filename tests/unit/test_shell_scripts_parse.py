@@ -170,3 +170,27 @@ def test_entrypoint_banner_prints_sdk_when_unset(tmp_path: Path) -> None:
     env = {k: v for k, v in os.environ.items() if k != "L9_CHASSIS"}
     proc = _run([BASH, "-c", banner], cwd=tmp_path, env=env)
     assert proc.stdout == "Chassis: sdk\n"
+
+
+@needs_bash
+def test_setup_repo_vars_processes_every_assignment(tmp_path: Path) -> None:
+    """Counter increments must not trip ``set -e``: ``((N++))`` returns 1 when N is 0."""
+    assert BASH is not None
+    shutil.copy(REPO / ".github" / "scripts" / "setup-repo-vars.sh", tmp_path / "setup-repo-vars.sh")
+    (tmp_path / "vars.env").write_text("EMPTY_FIRST=\nFOO_BAR=baz\nEMPTY_LATER=\nSECOND_VAR=qux\n", encoding="utf-8")
+    call_log = tmp_path / "gh.log"
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    _stub(stubs, "gh", f'echo "$*" >> "{call_log}"; case "$1" in repo) echo owner/repo;; esac; exit 0')
+    env = {**os.environ, "PATH": f"{stubs}{os.pathsep}{os.environ.get('PATH', '')}"}
+
+    proc = _run([BASH, "setup-repo-vars.sh", "vars.env"], cwd=tmp_path, env=env)
+
+    assert proc.returncode == 0, proc.stderr
+    calls = call_log.read_text(encoding="utf-8").splitlines()
+    assert [c for c in calls if c.startswith("variable set")] == [
+        "variable set FOO_BAR --body baz",
+        "variable set SECOND_VAR --body qux",
+    ]
+    assert "Variables Set: 2" in proc.stdout
+    assert "Skipped (empty): 2" in proc.stdout

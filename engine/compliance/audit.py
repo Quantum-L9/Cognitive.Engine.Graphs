@@ -137,6 +137,12 @@ class AuditLogger:
         siem_endpoint: str | None = None,
         buffer_size: int = 100,
     ):
+        if buffer_size < 1 and _soft_sink():
+            # RU-065: the bound (and its once-per-buffer_size drop warning)
+            # needs a positive size; 0 used to raise ZeroDivisionError on the
+            # second emit, a negative size over-deleted and over-counted.
+            msg = f"AuditLogger buffer_size must be >= 1 (got {buffer_size})"
+            raise ValueError(msg)
         self._retention = retention_policies or DEFAULT_RETENTION
         self._siem_endpoint = siem_endpoint
         self._buffer: list[AuditEntry] = []
@@ -377,31 +383,30 @@ class AuditLogger:
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
         """
 
-        batch_data = [
-            (
-                e.audit_id,
-                e.timestamp,
-                e.action.value,
-                e.severity.value,
-                e.actor,
-                e.tenant,
-                e.trace_id,
-                e.resource,
-                e.resource_type,
-                e.detail,
-                e.payload_hash,
-                e.compliance_tags,
-                e.pii_fields_accessed,
-                e.data_subject_id,
-                e.outcome,
-                # RU-065: asyncpg binds JSONB from text; a dict fails every flush
-                # (PacketStore already json.dumps its JSONB, packet_store.py).
-                json.dumps(e.metadata) if _soft_sink() else e.metadata,
-            )
-            for e in entries
-        ]
-
         try:
+            # RU-065: rows are built inside the protected block so a
+            # serialization failure re-buffers the batch instead of losing it.
+            batch_data = [
+                (
+                    e.audit_id,
+                    e.timestamp,
+                    e.action.value,
+                    e.severity.value,
+                    e.actor,
+                    e.tenant,
+                    e.trace_id,
+                    e.resource,
+                    e.resource_type,
+                    e.detail,
+                    e.payload_hash,
+                    e.compliance_tags,
+                    e.pii_fields_accessed,
+                    e.data_subject_id,
+                    e.outcome,
+                    self._metadata_param(e),
+                )
+                for e in entries
+            ]
             async with db_pool.acquire() as conn:
                 await conn.executemany(insert_sql, batch_data)
         except Exception:
@@ -415,6 +420,21 @@ class AuditLogger:
             persisted = len(entries)
             logger.info(f"Persisted {persisted} audit entries to packet_audit_log")
             return persisted
+
+    @staticmethod
+    def _metadata_param(entry: AuditEntry) -> Any:
+        """The ``metadata`` ($16) bind value for the JSONB column.
+
+        RU-065: asyncpg binds JSONB from text; a dict fails every flush
+        (PacketStore already json.dumps its JSONB, packet_store.py). The text is
+        Pydantic's JSON mode, the serialization ``_emit`` / ``emit_async``
+        already applied to every buffered entry, so datetimes, UUIDs and
+        Decimals bind as strings and NaN as null, not as a TypeError or the
+        ``NaN`` token JSONB rejects.
+        """
+        if not _soft_sink():
+            return entry.metadata
+        return json.dumps(entry.model_dump(mode="json", include={"metadata"})["metadata"])
 
     @property
     def buffer_count(self) -> int:

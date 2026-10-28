@@ -122,6 +122,25 @@ def test_call_in_nested_loop_iterable_is_inside_the_outer_body(tmp_path: Path) -
     assert found == [("N_PLUS_ONE", "engine/sub/nested.py", 3)]
 
 
+def test_call_in_nested_loop_else_is_inside_the_outer_body(tmp_path: Path) -> None:
+    """A nested loop's ``else`` runs once per outer iteration; the outer loop's own ``else`` runs once."""
+    src = (
+        "async def f(driver, rows):\n"
+        "    for row in rows:\n"
+        "        for item in row:\n"
+        "            pass\n"
+        "        else:\n"
+        "            await driver.execute_query('RETURN 1')\n"
+        "    for z in rows:\n"
+        "        pass\n"
+        "    else:\n"
+        "        await driver.execute_query('RETURN 2')\n"
+    )
+    _write(tmp_path, "engine/sub/nested_else.py", src)
+    found = [f for f in _findings(qp.QueryPerformanceAuditor(), tmp_path) if f[0] == "N_PLUS_ONE"]
+    assert found == [("N_PLUS_ONE", "engine/sub/nested_else.py", 6)]
+
+
 # ── audit_dispatch --strict ─────────────────────────────────────────────────
 
 
