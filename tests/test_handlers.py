@@ -493,6 +493,35 @@ async def test_match_arbitration_forwards_direction_and_front_size_limit() -> No
     # cost is minimised: F-1 and F-3 tie on the front; the limit keeps the higher score.
     assert result["pareto"]["arbitration"]["nondominated_ids"] == ["F-3"]
     assert result["pareto"]["arbitration"]["frontsize"] == 1
+    # RU-019: the non-dominated id dropped by the limit is reported, not lost.
+    assert result["pareto"]["arbitration"]["trimmed_ids"] == ["F-1"]
+
+
+@pytest.mark.asyncio
+async def test_match_arbitration_flag_off_omits_trimmed_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    """C-21: arbitration_objective_direction off restores the pre-RU-019 arbitration metadata shape."""
+    from engine.config.settings import settings
+    from engine.state import get_state
+
+    monkeypatch.setattr(settings, "arbitration_objective_direction", False)
+    spec = _loaded_spec_for_results()
+    spec.decision_arbitration.enabled = True
+    spec.decision_arbitration.constraints = []
+    objective = MagicMock()
+    objective.dimension = "cost"
+    objective.direction = "minimize"
+    spec.decision_arbitration.pareto_config.objectives = [objective]
+    spec.decision_arbitration.pareto_config.front_size_limit = 1
+    get_state().graph_driver.execute_query = AsyncMock(
+        return_value=[
+            {"candidate": {"facility_id": "F-1"}, "score": 0.4, "cost": 0.1},
+            {"candidate": {"facility_id": "F-2"}, "score": 0.6, "cost": 0.9},
+        ]
+    )
+
+    result = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
+
+    assert set(result["pareto"]["arbitration"]) == {"frontsize", "pruned_pct", "nondominated_ids"}
 
 
 @pytest.mark.asyncio

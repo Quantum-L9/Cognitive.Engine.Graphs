@@ -383,8 +383,10 @@ class Settings(BaseSettings):
     # Correctness remediation lane C (plan 0d84ec8, RU-020..)
     # RU-020 / CEG-COR-027..029: admission_defects also compiles every declared
     # direction's scoring clause and withholds a pack whose scoring refuses to
-    # compile, references a $parameter nothing binds, or declares an HGKR option
-    # with no producer (inherit_prior / population_mean / structural_similarity).
+    # compile, references a $parameter nothing binds (population_mean's
+    # $_popmean_<dim> unless the pack declares it), or declares an HGKR option
+    # whose candidate property no node declares (inherit_prior /
+    # structural_similarity).
     # Such a pack failed every match (ValueError / ParameterMissing) or silently
     # degraded. Off: admission checks gates only, as before. Ships on — it
     # withholds only packs whose matches cannot execute.
