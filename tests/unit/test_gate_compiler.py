@@ -128,11 +128,31 @@ scoring: {dimensions: []}
 
 
 # RG-054 (RU-041 / CEG-COR-019): an exclusion gate the compiler cannot honour is
-# refused instead of compiling to an always-true NOT EXISTS.
+# refused instead of compiling to an always-true NOT EXISTS. RU-038 (DEC-15)
+# removed the gate from the mortgage pack, which is now dormant; these tests
+# re-create it on the pack as the pre-repair spec declared it.
+_PRE_REPAIR_MORTGAGE_BLACKLIST = {
+    "name": "blacklist_exclusion",
+    "type": "exclusion",
+    "edgetype": "BLACKLISTEDLENDER",
+    "fromnode": "query",
+    "tonode": "lender",
+}
+
+
+def _mortgage_with_query_anchored_blacklist():  # type: ignore[no-untyped-def]
+    from engine.config.schema import DomainSpec
+
+    raw = yaml.safe_load((_DOMAINS / "mortgage-brokerage" / "spec.yaml").read_text())
+    assert not any(g["name"] == "blacklist_exclusion" for g in raw["gates"])
+    raw["gates"].append(dict(_PRE_REPAIR_MORTGAGE_BLACKLIST))
+    return DomainSpec.model_validate(raw)
+
+
 def test_mortgage_blacklist_exclusion_is_refused_by_name() -> None:
     from engine.gates.compiler import GateCompiler
 
-    spec = _pack("mortgage-brokerage")
+    spec = _mortgage_with_query_anchored_blacklist()
     gate = next(g for g in spec.gates if g.name == "blacklist_exclusion")
     with pytest.raises(ValueError, match="blacklist_exclusion"):
         GateCompiler(spec).compile(gate)
@@ -141,7 +161,11 @@ def test_mortgage_blacklist_exclusion_is_refused_by_name() -> None:
 def test_mortgage_admission_lists_the_blacklist_exclusion() -> None:
     from engine.config.loader import admission_defects
 
-    assert any(d.startswith("blacklist_exclusion:") for d in admission_defects(_pack("mortgage-brokerage")))
+    assert any(
+        d.startswith("blacklist_exclusion:") for d in admission_defects(_mortgage_with_query_anchored_blacklist())
+    )
+    # The repository pack no longer declares it (RU-038).
+    assert not any(d.startswith("blacklist_exclusion:") for d in admission_defects(_pack("mortgage-brokerage")))
 
 
 @pytest.mark.parametrize(
@@ -193,7 +217,7 @@ def test_exclusion_endpoint_validation_off_restores_the_no_op(monkeypatch: pytes
     from engine.gates.compiler import GateCompiler
 
     monkeypatch.setattr(settings, "exclusion_endpoint_validation", False)
-    spec = _pack("mortgage-brokerage")
+    spec = _mortgage_with_query_anchored_blacklist()
     gate = next(g for g in spec.gates if g.name == "blacklist_exclusion")
     assert GateCompiler(spec).compile(gate) == "NOT EXISTS { MATCH (candidate)-[:BLACKLISTEDLENDER]->() }"
 

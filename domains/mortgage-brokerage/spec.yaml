@@ -15,8 +15,18 @@ domain:
   description: >
     Match borrower profiles to optimal wholesale lender loan products with
     ECOA-compliant scoring and outcome feedback loops.
-  version: 1.0.1
+  version: 1.1.0
   alternatedomains: []
+  # Dormant until state licensing and the borrower's lender blacklist can be
+  # enforced (CEG-COR-012, decision DEC-15 "D now, then A"). Both constrain the
+  # LoanProduct's Lender — Lender-[:OPERATESIN]->State with statecode =
+  # $propertystate, and BorrowerProfile-[:BLACKLISTEDLENDER]->Lender — and no
+  # existing gate can constrain a non-candidate alias or a query-anchored edge.
+  # Serving without them would rank products from lenders unlicensed in the
+  # borrower's state. The pack compiles cleanly; only this declaration withholds
+  # it. DORMANT_DOMAIN_PACKS_ENABLED=true serves it WITHOUT licensing and
+  # blacklist enforcement.
+  activation: dormant
 
 ontology:
   nodes:
@@ -115,13 +125,15 @@ derivedparameters:
     type: float
     unit: percentage
 
+# The lender step binds `lender` for scoring (CEG-COR-012). The former
+# `lenderstatelicensing` step (`lender-[:OPERATESIN]->st:State {statecode:
+# $query.propertystate}`) is not expressible: traversal patterns forbid braces
+# and parameters, so it refused every match. Licensing awaits an alias-aware
+# gate (DEC-15 option A); the pack is dormant until then.
 traversal:
   steps:
     - name: lenderresolve
-      pattern: "candidate-[:OFFEREDBY]->lender:Lender"
-      required: true
-    - name: lenderstatelicensing
-      pattern: "lender-[:OPERATESIN]->st:State {statecode: $query.propertystate}"
+      pattern: "(candidate:LoanProduct)-[:OFFEREDBY]->(lender:Lender)"
       required: true
 
 gates:
@@ -164,11 +176,11 @@ gates:
     type: enummap
     candidateprop: loanpurpose
     queryparam: loanpurpose
-  - name: blacklist_exclusion
-    type: exclusion
-    edgetype: BLACKLISTEDLENDER
-    fromnode: query
-    tonode: lender
+  # No blacklist gate (CEG-COR-019, DEC-15): `blacklist_exclusion` declared
+  # BLACKLISTEDLENDER from the query entity to the lender, but an exclusion gate
+  # always anchors its edge at the candidate, so the compiler refuses it
+  # (exclusion_endpoint_validation). Enforcement awaits a query-anchored
+  # exclusion construct (DEC-15 option A); the pack is dormant until then.
 
 scoring:
   dimensions:

@@ -572,9 +572,16 @@ def test_pack_whose_gate_references_an_undeclared_parameter_is_withheld(monkeypa
     assert any("match[d1]" in d and "'max_size'" in d for d in defects), defects
 
 
-def test_current_mortgage_pack_is_withheld_naming_its_unassemblable_step() -> None:
-    defects = admission_defects(_spec(DOMAINS_ROOT / "mortgage-brokerage"))
+def test_pre_repair_mortgage_step_is_withheld_naming_its_unassemblable_step() -> None:
+    """RU-039 coverage on the mortgage shape RU-038 repaired: the off-grammar lender step is named."""
+    raw = _raw("mortgage-brokerage")
+    raw["traversal"] = {
+        "steps": [{"name": "lenderresolve", "pattern": "candidate-[:OFFEREDBY]->lender:Lender", "required": True}]
+    }
+    defects = admission_defects(DomainSpec.model_validate(raw))
     assert any("traversal[borrowertoproduct]" in d and "lenderresolve" in d for d in defects), defects
+    # The repository pack's lender step assembles (RU-038).
+    assert admission_defects(_spec(DOMAINS_ROOT / "mortgage-brokerage")) == []
 
 
 def test_current_freight_pack_is_withheld_naming_its_unbound_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
