@@ -80,3 +80,44 @@ class TestChassisPIIHandler:
     def test_mask_format_is_capped_at_twelve(self) -> None:
         out = PIIHandler().mask({"email": "averyveryverylongaddress@example.com"})
         assert out["email"] == "*" * 12
+
+
+@pytest.mark.unit
+class TestChassisPIIEmptyKeyPaths:
+    """RU-071 follow-up: empty key components stay addressable through string paths."""
+
+    def test_top_level_empty_key_round_trips(self) -> None:
+        payload = {"": "secret@example.com", "id": 1}
+        handler = PIIHandler()
+        paths = list(handler.get_pii_paths(payload))
+        assert paths == ['""']
+        assert handler.mask(payload, fields=paths) == {"": "************", "id": 1}
+        assert handler.redact(payload, fields=paths) == {"id": 1}
+
+    def test_nested_empty_key_does_not_resolve_to_parent(self) -> None:
+        payload = {"outer": {"": "secret@example.com", "keep": 1}}
+        handler = PIIHandler()
+        paths = list(handler.get_pii_paths(payload))
+        assert paths == ['outer.""']
+        assert handler.mask(payload, fields=paths) == {"outer": {"": "************", "keep": 1}}
+        assert handler.redact(payload, fields=paths) == {"outer": {"keep": 1}}
+
+    def test_empty_key_holding_list_is_not_a_list_root(self) -> None:
+        payload = {"": ["x@y.com"]}
+        handler = PIIHandler()
+        paths = list(handler.get_pii_paths(payload))
+        assert paths == ['""[0]']
+        assert handler.redact(payload, fields=paths) == {"": []}
+
+    def test_literal_quote_keys_are_escaped(self) -> None:
+        payload = {'""': "a@b.com", '"': "c@d.com", "": "e@f.com"}
+        handler = PIIHandler()
+        paths = list(handler.get_pii_paths(payload))
+        assert paths == ['\\"\\"', '\\"', '""']
+        assert handler.redact(payload, fields=paths[:1]) == {'"': "c@d.com", "": "e@f.com"}
+        assert handler.redact(payload, fields=paths[2:]) == {'""': "a@b.com", '"': "c@d.com"}
+
+    @pytest.mark.parametrize("path", [".email", "outer.", "a..b", "a.[0]"])
+    def test_empty_component_paths_rejected(self, path: str) -> None:
+        with pytest.raises(ValueError, match="empty key component"):
+            PIIHandler().mask({"outer": {"email": "a@b.com"}}, fields=[path])

@@ -1134,6 +1134,7 @@ class DomainMetadata(BaseModel):
 
         `latest`, `v2`, dates and other free-form strings were accepted. The
         stage, when present, is one of the contract's six production stages.
+        Components are ASCII digits ([0-9]); a regex digit class would also accept Unicode decimals.
         """
         import re
 
@@ -1141,7 +1142,7 @@ class DomainMetadata(BaseModel):
 
         if not settings.domain_version_semver_enforced:
             return v
-        semver = r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+        semver = r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
         stages = "seed|discovered|inferred|proposed|reviewed|production"
         if re.fullmatch(rf"{semver}(?:-(?:{stages}))?", v) is None:
             msg = (
