@@ -89,7 +89,14 @@ def _harness_root(tmp_path: Path, *, with_contract_wiring: bool) -> Path:
     """A minimal root holding real copies of the harness's step scripts."""
     tools = tmp_path / "tools"
     tools.mkdir()
-    for name in ("audit_engine.py", "audit_rules.yaml", "spec_extract.py", "l9_template_manifest.yaml"):
+    # cypher_lint.py: audit_engine delegates the SEC_LABEL rule to it (RU-132).
+    for name in (
+        "audit_engine.py",
+        "audit_rules.yaml",
+        "cypher_lint.py",
+        "spec_extract.py",
+        "l9_template_manifest.yaml",
+    ):
         (tools / name).write_text((REPO_ROOT / "tools" / name).read_text(encoding="utf-8"), encoding="utf-8")
     if with_contract_wiring:
         _write_script(tools, "verify_contracts.py", "import sys; sys.exit(0)")
