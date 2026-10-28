@@ -273,3 +273,33 @@ async def test_active_supply_requirement_is_an_implication_with_a_true_default(
         {"query": query, "match_direction": "buyer_demand_to_supply_opportunity", "top_n": 10},
     )
     assert set(_candidate_ids(result)) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("required", "eligible", "expected"),
+    [
+        (None, True, True),
+        (False, False, True),
+        (False, True, True),
+        (True, True, True),
+        (True, False, False),
+        (True, None, True),
+    ],
+)
+async def test_va_eligibility_fragment_orders_booleans_false_before_true(graph_driver, required, eligible, expected):
+    """RU-035 / CEG-COR-005: pins the Cypher boolean ordering the mortgage implication relies on.
+
+    The mortgage pack is dormant (DEC-15), so the compiled fragment is evaluated
+    directly rather than through handle_match.
+    """
+    rows = await graph_driver.execute_query(
+        cypher=(
+            "WITH $required AS requiresvaeligibility "
+            "RETURN (requiresvaeligibility IS NULL OR $vaeligible IS NULL OR "
+            "(requiresvaeligibility <= $vaeligible)) AS passes"
+        ),
+        parameters={"required": required, "vaeligible": eligible},
+        database="neo4j",
+    )
+    assert rows[0]["passes"] is expected

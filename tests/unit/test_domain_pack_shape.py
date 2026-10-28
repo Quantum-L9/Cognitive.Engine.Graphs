@@ -661,3 +661,42 @@ async def test_plasticos_active_supply_binds_the_declared_default(supplied: bool
     assert parameters["requires_active_supply"] is bound
     assert _ACTIVE_SUPPLY_FRAGMENT in cypher
     assert _missing_params(cypher, parameters) == []
+
+
+def _dormant_pack_spec(domain_id: str) -> DomainSpec:
+    """A pack declared dormant (not withheld for defects): validated, never served by default."""
+    spec = _spec(DOMAINS_ROOT / domain_id)
+    assert spec.domain.activation is DomainActivation.DORMANT
+    assert admission_defects(spec) == []
+    return spec
+
+
+def _le_pass_wrapped(candidate: bool | None, param: bool | None) -> bool:
+    """`(c IS NULL OR $p IS NULL OR (c <= $p))` over booleans (false < true)."""
+    return candidate is None or param is None or candidate <= param
+
+
+# RG-046 (RU-035 / CEG-COR-005, DEC-13 option A): "a product requiring VA
+# eligibility needs a VA-eligible borrower" is an implication. Equality dropped
+# every non-VA product for a VA-eligible borrower.
+_VA_FRAGMENT = (
+    "(candidate.requiresvaeligibility IS NULL OR $vaeligible IS NULL OR "
+    "(candidate.requiresvaeligibility <= $vaeligible))"
+)
+
+
+def test_mortgage_va_eligibility_is_an_implication() -> None:
+    from engine.gates.compiler import GateCompiler
+
+    spec = _dormant_pack_spec("mortgage-brokerage")
+    gate = _gate(spec, "va_eligibility")
+    assert (gate.type.value, gate.operator, gate.nullbehavior.value) == ("threshold", "<=", "pass")
+    where = GateCompiler(spec).compile_all_gates("borrowertoproduct")
+    assert _VA_FRAGMENT in where
+    assert "candidate.requiresvaeligibility = $vaeligible" not in where
+    table = {p: {c: _le_pass_wrapped(c, p) for c in (None, False, True)} for p in (None, False, True)}
+    assert table == {
+        None: {None: True, False: True, True: True},
+        False: {None: True, False: True, True: False},
+        True: {None: True, False: True, True: True},
+    }

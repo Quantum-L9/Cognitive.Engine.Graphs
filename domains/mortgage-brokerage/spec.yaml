@@ -168,9 +168,14 @@ gates:
     queryparam: loanamountusd
     nullbehavior: pass
   - name: va_eligibility
-    type: boolean
+    # An implication, not an equality (CEG-COR-005, DEC-13 option A): Cypher
+    # orders false < true, so `requiresvaeligibility <= vaeligible` admits every
+    # product for a VA-eligible borrower and only products that do not require
+    # VA eligibility for one who is not.
+    type: threshold
     candidateprop: requiresvaeligibility
     queryparam: vaeligible
+    operator: "<="
     nullbehavior: pass
   - name: loanpurpose_match
     type: enummap
