@@ -124,11 +124,6 @@ class HopRAGConfig:
         if self.m_outgoing_questions < 1:
             msg = f"m_outgoing_questions must be >= 1, got {self.m_outgoing_questions}"
             raise ValueError(msg)
-        # CEG-COR-176: a non-positive page size never advances the indexer's
-        # offset (0 indexes nothing; negative slices skip or loop forever).
-        if self.index_batch_size < 1:
-            msg = f"index_batch_size must be >= 1, got {self.index_batch_size}"
-            raise ValueError(msg)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> HopRAGConfig:
