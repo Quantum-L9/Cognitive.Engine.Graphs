@@ -360,7 +360,14 @@ def _forwarded_confidences(raw: Any) -> dict[str, float] | None:
     if not isinstance(raw, dict):
         msg = f"field_confidences must be a mapping of field name to confidence, got {type(raw).__name__}"
         raise ValueError(msg)
-    return {str(k): float(v) for k, v in raw.items()}
+    confidences: dict[str, float] = {}
+    for key, value in raw.items():
+        try:
+            confidences[str(key)] = float(value)
+        except (TypeError, ValueError) as exc:
+            msg = f"field_confidences[{key!r}] must be a number, got {type(value).__name__}"
+            raise ValueError(msg) from exc
+    return confidences
 
 
 def _build_action_strings(critical_gaps: list[str], caps: EffectiveHealthCapabilities) -> list[str]:
