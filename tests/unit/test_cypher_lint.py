@@ -372,6 +372,72 @@ def test_percent_format_is_scanned() -> None:
     assert [f.expression for f in _blocking(src)] == ["spec.target_node", "spec.a", "spec.b"]
 
 
+def test_str_format_field_access_is_classified_as_the_accessed_value() -> None:
+    """RU-138 review: `{0.threshold}` interpolates spec.threshold, not the bare argument."""
+    src = (
+        "def format_access(spec):\n"
+        "    a = 'MATCH (n) WHERE n.score > {0.threshold} RETURN n'.format(spec)\n"
+        "    b = 'MATCH (n:{0.target_node}) RETURN n'.format(spec)\n"
+        "    c = 'MATCH (n:{0[label]}) RETURN n'.format(spec.labels)\n"
+        "    return a, b, c\n"
+    )
+    findings = _blocking(src)
+    assert [f.expression for f in findings] == ["spec.threshold", "spec.target_node", "spec.labels['label']"]
+    assert findings[0].kind.startswith("raw domain-spec value")
+
+
+def test_str_format_field_access_on_a_validated_attribute_passes() -> None:
+    src = (
+        "class C:\n"
+        "    def __init__(self, spec):\n"
+        "        self.lbl = sanitize_label(spec.label)\n"
+        "    def compile_q(self):\n"
+        "        return 'MATCH (n:{0.lbl}) RETURN n'.format(self)\n"
+    )
+    assert _blocking(src) == []
+
+
+def test_percent_format_over_a_runtime_mapping_is_scanned() -> None:
+    """RU-138 review: `%(key)s % params` interpolates params[key]; it is not dropped."""
+    src = (
+        "def percent_mapping(params, m, spec):\n"
+        "    a = 'MATCH (n) WHERE n.score > %(threshold)s RETURN n' % params\n"
+        "    b = 'MATCH (n:%(label)s) RETURN n' % m\n"
+        "    c = 'MATCH (n:%(label)s) RETURN n' % {'other': 1, **spec.labels}\n"
+        "    return a, b, c\n"
+    )
+    findings = _blocking(src)
+    assert [(f.line_no, f.expression) for f in findings] == [
+        (2, "params['threshold']"),
+        (3, "m['label']"),
+        (4, "spec.labels['label']"),
+    ]
+    assert findings[0].kind.startswith("raw domain-spec value")
+
+
+def test_str_format_over_unpacked_mapping_is_scanned() -> None:
+    src = (
+        "def format_mapping(params, m):\n"
+        "    a = 'MATCH (n) WHERE n.score > {threshold} RETURN n'.format(**params)\n"
+        "    b = 'MATCH (n:{label}) RETURN n'.format(**m)\n"
+        "    return a, b\n"
+    )
+    assert [f.expression for f in _blocking(src)] == ["params['threshold']", "m['label']"]
+
+
+def test_mapping_placeholders_with_validated_values_pass() -> None:
+    src = (
+        "def q(spec):\n"
+        "    label = sanitize_label(spec.label)\n"
+        "    a = 'MATCH (n:%(label)s) RETURN n' % {'label': label}\n"
+        "    b = 'MATCH (n:%(label)s) RETURN n' % {**spec.labels, 'label': label}\n"
+        "    c = 'MATCH (n) WHERE n.score > %(t)s RETURN n' % {'t': 0.5}\n"
+        "    d = 'MATCH (n:{label}) RETURN n'.format(**{'label': label})\n"
+        "    return a, b, c, d\n"
+    )
+    assert _blocking(src) == []
+
+
 def test_concat_and_format_with_validated_operands_pass() -> None:
     src = (
         "def q(spec):\n"
