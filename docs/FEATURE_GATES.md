@@ -113,7 +113,6 @@ independently of the code default.
 | Causal Attribution Unique Touchpoints | `CAUSAL_ATTRIBUTION_UNIQUE_TOUCHPOINTS` (`causal_attribution_unique_touchpoints`) | `True` | unset | active; attribution weights are computed over unique touchpoints and sum to 1.0 — see lane D |
 | Causal Edge Declared Identity | `CAUSAL_EDGE_DECLARED_IDENTITY` (`causal_edge_declared_identity`) | `True` | unset | active; causal edges match declared node identities, anchor predicates in one WHERE with a bound threshold, MERGE on a stable key — see lane D |
 | Causal Validator Batch Edge Type | `CAUSAL_VALIDATOR_BATCH_EDGE_TYPE` (`causal_validator_batch_edge_type`) | `True` | unset | active; declared per-edge temporal validation applies to sync batches — see lane D |
-| safe_eval Rejects Keywords | `SAFE_EVAL_REJECT_KEYWORDS` (`safe_eval_reject_keywords`) | `True` | unset | active; keyword arguments in derived-parameter / unit expressions raise instead of being dropped — see lane D |
 
 ---
 
@@ -1190,17 +1189,5 @@ declared `temporal_validation: true` was never enforced on sync batches. On:
 `CausalSpec.enforce_temporal_precedence` when present, else the matching
 `CausalEdgeSpec.temporal_validation`. Tenants syncing inverted timestamps now see
 `rejected_count` / `all_rejected`. Off: the record-key lookup.
-
-Rollback: set the flag to `false`.
-
-### safe_eval Rejects Keyword Arguments (RU-076 / CEG-COR-125)
-
-**Flag**: `SAFE_EVAL_REJECT_KEYWORDS=True` (default on)
-
-`engine/utils/safe_eval.py` evaluated only positional arguments of a whitelisted call,
-so `round(2.567, ndigits=2)` returned `3`. On: any `ast.Call` with keywords raises
-`ValueError("keyword arguments not allowed")`. No shipped expression uses keywords.
-The companion resource bounds (RU-070: `_MAX_INT_BITS`, `_MAX_ROUND_NDIGITS`, overflow
-as `ValueError`) are guard-only and carry no flag. Off: keywords silently dropped.
 
 Rollback: set the flag to `false`.
