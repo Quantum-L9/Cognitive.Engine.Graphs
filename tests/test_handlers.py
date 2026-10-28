@@ -579,9 +579,11 @@ async def test_match_blocks_prohibited_reference_before_any_query(spec_kwargs: d
 
 @pytest.mark.asyncio
 async def test_match_response_candidate_lacks_raw_pii() -> None:
+    from engine.config.schema import ComplianceSpec, PIISpec
     from engine.state import get_state
 
-    _loaded_spec_for_results()
+    spec = _loaded_spec_for_results()
+    spec.compliance = ComplianceSpec(pii=PIISpec(enabled=True))  # the domain opts in to PII handling
     get_state().compliance_engines.pop("test_domain", None)
     get_state().graph_driver.execute_query = AsyncMock(
         return_value=[{"candidate": {"facility_id": "F-1", "contact_email": "ops@f1.com"}, "score": 0.9}]
@@ -706,3 +708,21 @@ async def test_sync_rejects_inverted_causal_records_by_batch_edge_type() -> None
     assert result["status"] == "success"
     assert result["synced_count"] == 1
     assert result["rejected_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_match_response_keeps_candidate_fields_when_domain_opts_out_of_pii() -> None:
+    from engine.config.schema import ComplianceSpec, PIISpec
+    from engine.state import get_state
+
+    spec = _loaded_spec_for_results()
+    spec.compliance = ComplianceSpec(pii=PIISpec(enabled=False))  # idea-portfolio: compliance.pii: {enabled: false}
+    get_state().compliance_engines.pop("test_domain", None)
+    get_state().graph_driver.execute_query = AsyncMock(
+        return_value=[{"candidate": {"facility_id": "F-1", "contact_email": "ops@f1.com"}, "score": 0.9}]
+    )
+
+    result = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
+
+    assert result["candidates"][0]["candidate"]["contact_email"] == "ops@f1.com"
+    assert result["candidates"][0]["candidate"]["facility_id"] == "F-1"

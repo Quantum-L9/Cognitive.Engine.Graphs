@@ -221,6 +221,56 @@ class TestAuditSoftSink:
         assert json.loads(pool.calls[0][0][15]) == {"k": "v", "n": 1}
         assert audit.buffer_count == 0
 
+    @pytest.mark.asyncio
+    async def test_flush_binds_pydantic_json_metadata(self) -> None:
+        """Metadata the entry accepts (datetime, UUID, Decimal, NaN) persists as JSON text."""
+        import json
+        import uuid
+        from datetime import UTC, datetime
+        from decimal import Decimal
+
+        audit = AuditLogger()
+        at = datetime(2026, 10, 28, 12, 0, tzinfo=UTC)
+        uid = uuid.UUID("12345678-1234-5678-1234-567812345678")
+        audit.log_access(
+            actor="a",
+            tenant="t",
+            resource="r",
+            metadata={"at": at, "id": uid, "amount": Decimal("1.5"), "ratio": float("nan")},
+        )
+        audit.log_query(actor="a", tenant="t", detail="q")
+        pool = _FakePool()
+        assert await audit.flush_to_store(pool) == 2
+        assert json.loads(pool.calls[0][0][15]) == {
+            "at": "2026-10-28T12:00:00Z",
+            "id": str(uid),
+            "amount": "1.5",
+            "ratio": None,
+        }
+        assert audit.buffer_count == 0
+
+    @pytest.mark.asyncio
+    async def test_row_build_failure_rebuffers_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A failure while building the rows keeps the batch buffered, never discards it."""
+
+        from types import SimpleNamespace
+
+        from engine.compliance import audit as audit_module
+
+        def _boom(obj: object) -> str:
+            msg = "metadata not serializable"
+            raise TypeError(msg)
+
+        audit = AuditLogger()
+        audit.log_query(actor="a", tenant="t", detail="q1")
+        audit.log_query(actor="a", tenant="t", detail="q2")
+        monkeypatch.setattr(audit_module, "json", SimpleNamespace(dumps=_boom))
+        pool = _FakePool()
+        with pytest.raises(TypeError):
+            await audit.flush_to_store(pool)
+        assert [e.detail for e in audit.flush_sync()] == ["q1", "q2"]
+        assert pool.calls == []
+
     def test_flag_off_restores_unbounded_retention(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from engine.config.settings import settings
 
@@ -229,6 +279,43 @@ class TestAuditSoftSink:
         for i in range(10):
             audit.log_access(actor="a", tenant="t", resource=f"r{i}")
         assert audit.buffer_count == 10
+
+    @pytest.mark.parametrize("size", [0, -1])
+    def test_non_positive_buffer_size_rejected(self, size: int) -> None:
+        """A bound below 1 is refused up front, not a ZeroDivisionError on the second emit."""
+        with pytest.raises(ValueError, match="buffer_size must be >= 1"):
+            AuditLogger(buffer_size=size)
+
+    def test_size_one_buffer_keeps_newest_and_counts_drops(self) -> None:
+        audit = AuditLogger(buffer_size=1)
+        for i in range(5):
+            audit.log_access(actor="a", tenant="t", resource=f"r{i}")
+        assert audit.dropped_count == 4
+        assert [e.resource for e in audit.flush_sync()] == ["r4"]
+
+    def test_flag_off_accepts_zero_buffer_size(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "compliance_audit_soft_sink", False)
+        audit = AuditLogger(buffer_size=0)
+        for i in range(3):
+            audit.log_access(actor="a", tenant="t", resource=f"r{i}")
+        assert audit.buffer_count == 3
+
+    @pytest.mark.parametrize("size", [0, -5])
+    def test_settings_reject_non_positive_compliance_buffer_max(self, size: int) -> None:
+        from pydantic import ValidationError
+
+        from engine.config.settings import Settings
+
+        with pytest.raises(ValidationError, match="compliance_buffer_max must be >= 1"):
+            Settings(compliance_buffer_max=size)
+
+    def test_settings_accept_zero_buffer_max_with_flag_off(self) -> None:
+        from engine.config.settings import Settings
+
+        s = Settings(compliance_buffer_max=0, compliance_audit_soft_sink=False)
+        assert s.compliance_buffer_max == 0
 
 
 @pytest.mark.compliance
