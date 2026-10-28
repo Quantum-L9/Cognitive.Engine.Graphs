@@ -840,9 +840,6 @@ FILE_REGISTRY: list[FileMeta] = [
     # =========================================================================
     # DOMAIN-SPECIFIC FILES  (origin: domain-specific, owner: domain-team)
     # =========================================================================
-    FileMeta(
-        "domains/MASTER-SPEC-ALL-DOMAINS.yaml", "domain-specific", ["config"], ["domains", "master-spec"], "domain-team"
-    ),
     FileMeta("domains/README.md", "domain-specific", ["config"], ["domains", "docs"], "domain-team"),
     FileMeta("domains/TESTING_GUIDE.md", "domain-specific", ["test"], ["domains", "testing", "guide"], "domain-team"),
     # =========================================================================

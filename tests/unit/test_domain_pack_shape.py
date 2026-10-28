@@ -982,3 +982,17 @@ def test_executive_assistant_response_time_compares_hours_with_hours() -> None:
     field = next(f for f in spec.queryschema.fields if f.name == gate.queryparam)
     assert expert[gate.candidateprop].type.value == field.type.value == "float"
     assert (gate.type.value, gate.operator) == ("threshold", "<=")
+
+
+# RU-054 / CEG-COR-150 (DEC-19 option A): the consolidated master spec and its
+# extractor are retired. The extractor wrote domains/<id>/spec.yaml
+# unconditionally, so a working copy would have overwritten the curated served
+# packs with stale content; packs are folder-shaped and curated individually.
+def test_consolidated_master_spec_workflow_is_retired() -> None:
+    assert not (DOMAINS_ROOT / "MASTER-SPEC-ALL-DOMAINS.yaml").exists()
+    assert not (REPO_ROOT / "tools" / "domain_extractor.py").exists()
+    live = [REPO_ROOT / ".yamllint.yml", REPO_ROOT / ".pre-commit-config.yaml", REPO_ROOT / "README.md"]
+    live += sorted((REPO_ROOT / "tools").rglob("*.py")) + sorted(DOMAINS_ROOT.rglob("*.md"))
+    stale = [str(p.relative_to(REPO_ROOT)) for p in live if "MASTER-SPEC" in p.read_text(encoding="utf-8")]
+    stale += [str(p.relative_to(REPO_ROOT)) for p in live if "tools/domain_extractor" in p.read_text(encoding="utf-8")]
+    assert stale == []
