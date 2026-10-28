@@ -482,24 +482,44 @@ class BeamSearchEngine:
         kept: list[BeamCandidate] = []
         pruned: list[BeamCandidate] = []
         for candidate in candidates:
-            tx = self._build_transformation(candidate.transformation_type, candidate.params)
+            tx = self._composed_transformation(candidate)
             valid = all(v(tx) for v in self.config.constraint_validators)
             (kept if valid else pruned).append(candidate)
         if self.config.log_pruned and pruned:
             self.pruned_candidates.extend(pruned)
         return kept
 
+    def _composed_transformation(self, candidate: BeamCandidate) -> Transformation3D:
+        """The transformation a candidate represents: its whole op chain, composed.
+
+        A single-op chain is that op itself (so depth-1 validators see the same
+        object as before); a longer chain is the ordered ``_CascadeTransformation``
+        (RU-121 follow-up: validating only the terminal op accepted a cascade
+        whose earlier op violated the constraint).
+        """
+        txs = [self._build_transformation(t, p) for t, p in candidate.ops()]
+        if len(txs) == 1:
+            return txs[0]
+        return _CascadeTransformation(txs)
+
     @staticmethod
     def _candidate_similarity(a: BeamCandidate, b: BeamCandidate) -> float:
-        """Similarity in [0, 1] between two candidates; 0.0 across transformation types.
+        """Similarity in [0, 1] between two candidates' complete op chains.
 
-        Bare parameter dicts of different types share no keys, so comparing them
-        treated, e.g., translation(x=0.1) and flip(axis=0) as 0.91-similar and
-        pruned one of them (CEG-COR-109). Same-type comparison is unchanged.
+        Chains of different length, or with a different transformation type at
+        any position, are 0.0-similar: bare parameter dicts of different types
+        share no keys, so comparing them treated, e.g., translation(x=0.1) and
+        flip(axis=0) as 0.91-similar (CEG-COR-109), and comparing only the
+        terminal op pruned two different cascades that end in the same op
+        (RU-122 follow-up). Same-type chains compare all their parameters,
+        position by position; a single-op chain compares exactly as before.
         """
-        if a.transformation_type != b.transformation_type:
+        ops_a, ops_b = a.ops(), b.ops()
+        if len(ops_a) != len(ops_b) or any(ta != tb for (ta, _), (tb, _) in zip(ops_a, ops_b, strict=True)):
             return 0.0
-        return BeamSearchEngine._param_similarity(a.params, b.params)
+        params_a = {f"{i}:{k}": v for i, (_, p) in enumerate(ops_a) for k, v in p.items()}
+        params_b = {f"{i}:{k}": v for i, (_, p) in enumerate(ops_b) for k, v in p.items()}
+        return BeamSearchEngine._param_similarity(params_a, params_b)
 
     @staticmethod
     def _param_similarity(
