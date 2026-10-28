@@ -46,16 +46,25 @@ class TestOutcomeFeedbackCompute:
         assert result["sample_count"] == 1
         assert result["proposed_weights"] == {}
 
-    def test_sufficient_positive_only(self, vocab):
+    def test_positive_only_is_insufficient(self, vocab):
+        # RU-025 / CEG-COR-032: formerly test_sufficient_positive_only, which
+        # asserted sufficient_data True for rows of one class — the defect
+        # (no negative evidence read as a mean of 0.0, giving +0.01 nudges).
         pos, _, _ = vocab
         outcomes = [{"outcome": pos, "dimension_scores": {"geo": 0.9, "structural": 0.7}} for _ in range(MIN_OUTCOMES)]
         fb = OutcomeFeedback(outcomes)
         result = fb.compute_feedback()
 
-        assert result["sufficient_data"] is True
+        assert result["sufficient_data"] is False
+        assert result["proposed_weights"] == {}
         assert result["sample_count"] == MIN_OUTCOMES
         assert "geo" in result["dimension_analysis"]
         assert "structural" in result["dimension_analysis"]
+        geo = result["dimension_analysis"]["geo"]
+        assert geo["positive_count"] == MIN_OUTCOMES
+        assert geo["negative_count"] == 0
+        assert geo["discriminability"] is None
+        assert "message" in result
 
     def test_discriminability_positive_vs_negative(self, vocab):
         pos, neg, _ = vocab
@@ -107,24 +116,52 @@ class TestOutcomeFeedbackCompute:
         fb = OutcomeFeedback(outcomes)
         result = fb.compute_feedback()
 
-        assert result["sufficient_data"] is True
+        # RU-025: neutral-only rows give no dimension two classes to compare
+        # (this asserted sufficient_data True before the fix).
+        assert result["sufficient_data"] is False
         # Neutral outcomes don't contribute to positive or negative
         assert result["proposed_weights"] == {}
 
     def test_invalid_outcome_items_skipped(self, vocab):
-        pos, _, _ = vocab
+        pos, neg, _ = vocab
         outcomes = [
             "not a dict",
             {"outcome": pos},  # missing dimension_scores
             {"outcome": pos, "dimension_scores": "not a dict"},
         ]
-        # Pad to minimum
-        for _ in range(MIN_OUTCOMES):
-            outcomes.append({"outcome": pos, "dimension_scores": {"geo": 0.5}})
+        # Pad to minimum with both classes (RU-025: one class alone is not evidence)
+        for i in range(MIN_OUTCOMES):
+            outcomes.append({"outcome": pos if i % 2 else neg, "dimension_scores": {"geo": 0.5}})
         fb = OutcomeFeedback(outcomes)
         result = fb.compute_feedback()
 
         assert result["sufficient_data"] is True
+        assert result["dimension_analysis"]["geo"]["positive_count"] == MIN_OUTCOMES // 2
+
+    def test_rows_without_dimension_scores_are_insufficient(self, vocab):
+        pos, neg, _ = vocab
+        outcomes = [{"outcome": pos if i % 2 else neg} for i in range(2 * MIN_OUTCOMES)]
+        result = OutcomeFeedback(outcomes).compute_feedback()
+
+        assert result["sufficient_data"] is False
+        assert result["proposed_weights"] == {}
+        assert result["dimension_analysis"] == {}
+        assert "message" in result
+
+    def test_only_dimensions_with_both_classes_get_proposals(self, vocab):
+        pos, neg, _ = vocab
+        outcomes = [{"outcome": pos, "dimension_scores": {"geo": 0.9, "price": 0.8}} for _ in range(6)]
+        outcomes += [{"outcome": neg, "dimension_scores": {"geo": 0.2}} for _ in range(6)]
+        result = OutcomeFeedback(outcomes).compute_feedback()
+
+        assert result["sufficient_data"] is True
+        assert set(result["proposed_weights"]) == {"geo"}
+        assert result["proposed_weights"]["geo"] > 0
+        price = result["dimension_analysis"]["price"]
+        assert price["positive_count"] == 6
+        assert price["negative_count"] == 0
+        assert price["discriminability"] is None
+        assert price["proposed_nudge"] is None
 
     @pytest.mark.usefixtures("vocab")
     def test_empty_outcomes(self):
