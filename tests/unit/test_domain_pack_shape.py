@@ -877,3 +877,47 @@ def test_freight_availability_admits_carriers_available_on_or_before_pickup() ->
         "(candidate.availabledate IS NULL OR $pickupdate IS NULL OR (candidate.availabledate <= $pickupdate))"
     ) in where
     assert ">= $pickupdate" not in where
+
+
+# RG-073 (RU-059 / CEG-COR-164): scalar enum matching is equality. Every
+# queryschema field type is scalar (PropertyType has no list type), so
+# `candidate.<p> IN $<field>` is `IN` over a non-list operand.
+@pytest.mark.parametrize("domain_id", _SERVABLE_PACKS)
+def test_no_servable_gate_tests_membership_in_a_scalar_parameter(domain_id: str) -> None:
+    import re
+
+    from engine.gates.compiler import GateCompiler
+
+    spec = _spec(DOMAINS_ROOT / domain_id)
+    assert withholding_reason(spec) is None or spec.domain.activation is DomainActivation.DORMANT
+    scalar = {f.name for f in spec.queryschema.fields} | {p.name for p in spec.derivedparameters}
+    flagged = []
+    for direction in spec.queryschema.matchdirections:
+        where = GateCompiler(spec).compile_all_gates(direction)
+        flagged += [m for m in re.findall(r"candidate\.\w+ IN \$(\w+)", where) if m in scalar]
+    assert flagged == []
+
+
+@pytest.mark.parametrize(
+    ("domain_id", "gate_name", "fragment"),
+    [
+        (
+            "freight-matching",
+            "equipment_match",
+            "(candidate.equipmenttypes IS NULL OR $equipmenttype IS NULL OR (candidate.equipmenttypes = $equipmenttype))",
+        ),
+        (
+            "mortgage-brokerage",
+            "loanpurpose_match",
+            "(candidate.loanpurpose IS NULL OR $loanpurpose IS NULL OR (candidate.loanpurpose = $loanpurpose))",
+        ),
+    ],
+)
+def test_scalar_enum_gates_compile_to_equality(domain_id: str, gate_name: str, fragment: str) -> None:
+    from engine.gates.compiler import GateCompiler
+
+    spec = _spec(DOMAINS_ROOT / domain_id)
+    gate = _gate(spec, gate_name)
+    assert (gate.type.value, gate.operator, gate.nullbehavior.value) == ("threshold", "=", "pass")
+    assert GateCompiler(spec).compile(gate) == fragment
+    assert admission_defects(spec) == []

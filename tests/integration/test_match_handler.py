@@ -365,3 +365,46 @@ async def test_freight_carrier_available_before_pickup_qualifies(engine_deps, gr
         FREIGHT_DB, {"query": _freight_query(), "match_direction": "loadtocarrier", "top_n": 10}
     )
     assert _carrier_ids(result) == {"day_before", "same_time"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("equipmenttype", "expected"), [("van", {"van_carrier"}), ("reefer", {"reefer_carrier"})])
+async def test_freight_equipment_match_is_scalar_equality(
+    engine_deps, graph_driver, freight_db, equipmenttype, expected
+):
+    """RG-074 (RU-059 / CEG-COR-164): equipmenttypes='van' matches 'van' and not 'reefer'."""
+    await graph_driver.execute_write(
+        cypher=CARRIER_SEED,
+        parameters={
+            "batch": [
+                {"carrierid": "van_carrier", "equipmenttypes": "van"},
+                {"carrierid": "reefer_carrier", "equipmenttypes": "reefer"},
+            ]
+        },
+        database=FREIGHT_DB,
+    )
+    from engine.handlers import handle_match
+
+    result = await handle_match(
+        FREIGHT_DB,
+        {"query": _freight_query(equipmenttype=equipmenttype), "match_direction": "loadtocarrier", "top_n": 10},
+    )
+    assert _carrier_ids(result) == expected
+
+
+@pytest.mark.asyncio
+async def test_scalar_membership_and_equality_forms_on_neo4j(graph_driver):
+    """RG-074 evidence: the old `prop IN $scalar` form never matches as specified; `=` does."""
+    rows = await graph_driver.execute_query(
+        cypher="RETURN 'van' = $equipmenttype AS equal", parameters={"equipmenttype": "van"}, database="neo4j"
+    )
+    assert rows[0]["equal"] is True
+    from neo4j.exceptions import ClientError
+
+    try:
+        rows = await graph_driver.execute_query(
+            cypher="RETURN 'van' IN $equipmenttype AS member", parameters={"equipmenttype": "van"}, database="neo4j"
+        )
+    except ClientError:
+        return  # Neo4j rejects IN over a non-list operand outright (type error)
+    assert rows[0]["member"] is not True

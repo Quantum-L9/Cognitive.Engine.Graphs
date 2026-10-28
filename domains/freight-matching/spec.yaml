@@ -81,9 +81,15 @@ gates:
     queryparam: weightlbs
     operator: ">="
   - name: equipment_match
-    type: enummap
+    # Scalar equality (CEG-COR-164): enummap compiled `candidate.equipmenttypes
+    # IN $equipmenttype`, IN over a scalar string. A carrier stores one
+    # equipment type string; a multi-type carrier would need list storage and
+    # enummap `invertible: true` ($equipmenttype IN candidate.equipmenttypes).
+    type: threshold
     candidateprop: equipmenttypes
     queryparam: equipmenttype
+    operator: "="
+    nullbehavior: pass
   - name: availability_window
     # The carrier is available on or before pickup (CEG-COR-069). A
     # temporalrange window whose start and end were both availabledate and

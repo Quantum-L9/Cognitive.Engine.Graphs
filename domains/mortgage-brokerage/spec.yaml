@@ -178,9 +178,13 @@ gates:
     operator: "<="
     nullbehavior: pass
   - name: loanpurpose_match
-    type: enummap
+    # Scalar equality (CEG-COR-164): enummap compiled `candidate.loanpurpose IN
+    # $loanpurpose`, IN over a scalar enum value.
+    type: threshold
     candidateprop: loanpurpose
     queryparam: loanpurpose
+    operator: "="
+    nullbehavior: pass
   # No blacklist gate (CEG-COR-019, DEC-15): `blacklist_exclusion` declared
   # BLACKLISTEDLENDER from the query entity to the lender, but an exclusion gate
   # always anchors its edge at the candidate, so the compiler refuses it
