@@ -921,3 +921,64 @@ def test_scalar_enum_gates_compile_to_equality(domain_id: str, gate_name: str, f
     assert (gate.type.value, gate.operator, gate.nullbehavior.value) == ("threshold", "=", "pass")
     assert GateCompiler(spec).compile(gate) == fragment
     assert admission_defects(spec) == []
+
+
+# RG-072 (RU-058 / CEG-COR-153, DEC-20 option A): dormant packs express "current
+# load below maximum" as a threshold over an ingested remaining-capacity property
+# (maximum - current), and compare response hours with an hours-typed query field.
+# Validated without serving: the packs stay dormant.
+def _eval_threshold_ge(fragment: str, prop: str, value: int | None, literal: int) -> bool:
+    """Evaluate `(candidate.<prop> IS NULL OR (candidate.<prop> >= $<literal>))` for one candidate.
+
+    The literal operand is compiler-bound and never NULL, so only the candidate side is null-checked.
+    """
+    import re
+
+    match = re.fullmatch(rf"\(candidate\.{prop} IS NULL OR \(candidate\.{prop} >= \$gate_\w+_value\)\)", fragment)
+    assert match, fragment
+    return value is None or value >= literal
+
+
+@pytest.mark.parametrize(
+    ("domain_id", "gate_name", "prop", "current", "maximum"),
+    [
+        ("healthcare-referral", "panel_capacity", "remainingpanelcapacity", "currentpanelsize", "maxpanelsize"),
+        (
+            "roofing-company",
+            "capacity_check",
+            "remainingprojectcapacity",
+            "currentprojectcount",
+            "maxconcurrentprojects",
+        ),
+    ],
+)
+def test_dormant_capacity_gates_admit_only_candidates_below_maximum(
+    domain_id: str, gate_name: str, prop: str, current: str, maximum: str
+) -> None:
+    from engine.gates.compiler import GateCompiler
+
+    spec = _spec(DOMAINS_ROOT / domain_id)
+    assert spec.domain.activation is DomainActivation.DORMANT
+    node = next(n for n in spec.ontology.nodes if n.candidate)
+    declared = {p.name: p for p in node.properties}
+    assert {prop, current, maximum} <= set(declared)
+    assert declared[prop].type.value == "int"
+    gate = _gate(spec, gate_name)
+    assert (gate.type.value, gate.operator, gate.queryparam) == ("threshold", ">=", 1)
+    compiler = GateCompiler(spec)
+    fragment = compiler.compile(gate)
+    assert compiler.last_query_params == {f"gate_{gate_name}_value": 1}
+    # The ingestion contract: remaining = maximum - current.
+    assert _eval_threshold_ge(fragment, prop, 10 - 5, 1) is True
+    assert _eval_threshold_ge(fragment, prop, 10 - 10, 1) is False
+    assert "<= $gate_" not in fragment
+
+
+def test_executive_assistant_response_time_compares_hours_with_hours() -> None:
+    spec = _spec(DOMAINS_ROOT / "executive-assistant")
+    assert spec.domain.activation is DomainActivation.DORMANT
+    gate = _gate(spec, "deadline_feasibility")
+    expert = {p.name: p for n in spec.ontology.nodes if n.label == "Expert" for p in n.properties}
+    field = next(f for f in spec.queryschema.fields if f.name == gate.queryparam)
+    assert expert[gate.candidateprop].type.value == field.type.value == "float"
+    assert (gate.type.value, gate.operator) == ("threshold", "<=")
