@@ -26,6 +26,7 @@ primitives.  Provides:
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -64,6 +65,7 @@ def build_pareto_candidates(
     dimension_names: list[str],
     *,
     candidate_id_key: str = "entity_id",
+    directions: Mapping[str, str] | None = None,
 ) -> list[ParetoCandidate]:
     """Convert raw Neo4j result dicts into ``ParetoCandidate`` instances.
 
@@ -78,6 +80,12 @@ def build_pareto_candidates(
         "geo_decay", "price_alignment"]``).
     candidate_id_key:
         Key within the ``"candidate"`` sub-dict to use as the candidate ID.
+    directions:
+        RU-019: resolved ``{dimension: "minimize" | "maximize"}``. A missing or
+        non-numeric value on a ``"minimize"`` dimension is filled with
+        ``math.inf`` (the worst possible cost) instead of ``0.0``, which
+        dominance would negate into the best possible value. ``None`` keeps the
+        ``0.0`` fill for every dimension.
 
     Returns
     -------
@@ -86,6 +94,7 @@ def build_pareto_candidates(
     from engine.config.settings import settings
 
     zero_present = settings.arbitration_zero_score_present
+    minimized = {d for d, v in (directions or {}).items() if v == "minimize"}
     candidates: list[ParetoCandidate] = []
     for idx, record in enumerate(results):
         cand_dict = record.get("candidate", {})
@@ -95,14 +104,16 @@ def build_pareto_candidates(
         for dim in dimension_names:
             if zero_present:
                 # RU-018: 0.0 is a score; only an absent / None value is missing.
+                # RU-019: a missing minimised value is the worst cost, never the best.
+                missing = math.inf if dim in minimized else 0.0
                 present = _lookup_dimension_score(record, dim)
                 if present is None:
-                    dim_scores[dim] = 0.0
+                    dim_scores[dim] = missing
                     continue
                 try:
                     dim_scores[dim] = float(present)
                 except (TypeError, ValueError):
-                    dim_scores[dim] = 0.0
+                    dim_scores[dim] = missing
                 continue
             # Legacy (C-21 rollback): truthiness fall-through substitutes a 0.0.
             # Try both "dim" and "dim_score" keys
@@ -275,7 +286,12 @@ def apply_pareto_filter(
         resolved_directions = None
         limit = None
 
-    pareto_candidates = build_pareto_candidates(candidates, dimension_names, candidate_id_key=candidate_id_key)
+    pareto_candidates = build_pareto_candidates(
+        candidates,
+        dimension_names,
+        candidate_id_key=candidate_id_key,
+        directions=resolved_directions,
+    )
 
     if not pareto_candidates:
         return {

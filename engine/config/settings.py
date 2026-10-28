@@ -383,8 +383,10 @@ class Settings(BaseSettings):
     # Correctness remediation lane C (plan 0d84ec8, RU-020..)
     # RU-020 / CEG-COR-027..029: admission_defects also compiles every declared
     # direction's scoring clause and withholds a pack whose scoring refuses to
-    # compile, references a $parameter nothing binds, or declares an HGKR option
-    # with no producer (inherit_prior / population_mean / structural_similarity).
+    # compile, references a $parameter nothing binds (population_mean's
+    # $_popmean_<dim> unless the pack declares it), or declares an HGKR option
+    # whose candidate property no node declares (inherit_prior /
+    # structural_similarity).
     # Such a pack failed every match (ValueError / ParameterMissing) or silently
     # degraded. Off: admission checks gates only, as before. Ships on — it
     # withholds only packs whose matches cannot execute.
@@ -502,9 +504,11 @@ class Settings(BaseSettings):
     # on the payload hash, so two requests with an equal payload collided, the
     # second pair's lineage insert broke the FK and the whole pair rolled back.
     # Child rows were also rewritten for a packet whose INSERT was skipped. On:
-    # content_hash is the SDK transport_hash (packet identity) and a skipped
-    # packet writes no hop/delegation/lineage rows. Off: the legacy key and
-    # unconditional child rows (C-21 rollback).
+    # content_hash is the SDK transport_hash (packet identity), the INSERT
+    # skips on ON CONFLICT (packet_id) so a re-delivered row stored under the
+    # legacy key is skipped instead of raising on packet_store_pkey, and a
+    # skipped packet writes no hop/delegation/lineage rows. Off: the legacy key
+    # and unconditional child rows (C-21 rollback).
     packet_store_packet_identity_dedup_enabled: bool = True
     # RU-079 / CEG-COR-042: packet_store.sql's RLS policies compare rows to
     # current_setting('app.current_tenant') and nothing set it, so a DSN that
@@ -663,6 +667,14 @@ class Settings(BaseSettings):
             if self.api_secret_key in _DEFAULT_SECRETS:
                 msg = "api_secret_key must be changed from default in production"
                 raise ValueError(msg)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_compliance_buffer_max(self) -> "Settings":
+        """RU-065: the soft sink sizes every compliance AuditLogger from compliance_buffer_max."""
+        if self.compliance_audit_soft_sink and self.compliance_buffer_max < 1:
+            msg = f"compliance_buffer_max must be >= 1 when compliance_audit_soft_sink is on (got {self.compliance_buffer_max})"
+            raise ValueError(msg)
         return self
 
     @property

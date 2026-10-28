@@ -56,7 +56,7 @@ _PACKET_STORE_ENABLED: bool = settings.packet_store_enabled
 
 # ── SQL ──────────────────────────────────────────────────────
 
-_INSERT_PACKET_SQL = """
+_INSERT_PACKET_VALUES_SQL = """
     INSERT INTO packet_store (
         packet_id, packet_type, action, schema_version,
         source_node, destination_node, reply_to,
@@ -82,8 +82,18 @@ _INSERT_PACKET_SQL = """
         $33, $34,
         $35, $36
     )
-    ON CONFLICT (content_hash, actor_tenant) DO NOTHING
 """
+
+# Legacy key (flag off): skip a packet whose (content_hash, actor_tenant) is stored.
+_INSERT_PACKET_SQL = _INSERT_PACKET_VALUES_SQL + "    ON CONFLICT (content_hash, actor_tenant) DO NOTHING\n"
+
+# Packet-identity key (packet_store_packet_identity_dedup_enabled): skip a packet
+# whose packet_id is stored. transport_hash covers header.packet_id, so every
+# (content_hash, actor_tenant) conflict of a transport_hash row is also a
+# packet_id conflict; keying on packet_id additionally skips a re-delivery of a
+# row written under the legacy key, whose content_hash is the payload_hash and
+# which would otherwise raise on packet_store_pkey and roll back the pair.
+_INSERT_PACKET_IDENTITY_SQL = _INSERT_PACKET_VALUES_SQL + "    ON CONFLICT (packet_id) DO NOTHING\n"
 
 _INSERT_LINEAGE_SQL = """
     INSERT INTO lineage_graph (parent_id, child_id, generation, derivation_type, created_at)
@@ -287,9 +297,11 @@ class PacketStore:
         All writes are wrapped in a single transaction.
 
         With ``packet_store_packet_identity_dedup_enabled`` a packet whose INSERT
-        is skipped by ``ON CONFLICT (content_hash, actor_tenant) DO NOTHING`` is
-        a re-delivery of a stored packet, so its hop_trace, delegation_chain and
-        lineage_graph rows are already stored and are not written again.
+        is skipped by ``ON CONFLICT (packet_id) DO NOTHING`` is a re-delivery of
+        a stored packet (including a row stored under the legacy payload_hash
+        key), so its hop_trace, delegation_chain and lineage_graph rows are
+        already stored and are not written again. With the flag off the legacy
+        ``ON CONFLICT (content_hash, actor_tenant) DO NOTHING`` applies.
 
         With ``packet_store_rls_tenant_session_enabled`` each packet INSERT is
         preceded by a transaction-local ``app.current_tenant`` = the packet's
@@ -305,14 +317,17 @@ class PacketStore:
 
         pool = await _pool_manager.get_pool()
 
+        identity_dedup = settings.packet_store_packet_identity_dedup_enabled
+        insert_sql = _INSERT_PACKET_IDENTITY_SQL if identity_dedup else _INSERT_PACKET_SQL
+
         async with pool.acquire() as conn, conn.transaction():
             # Insert both packets
             for packet in (request, response):
                 row = _extract_packet_row(packet)
                 if settings.packet_store_rls_tenant_session_enabled:
                     await _set_session_tenant(conn, packet.tenant.actor)
-                status = await conn.execute(_INSERT_PACKET_SQL, *row)
-                if settings.packet_store_packet_identity_dedup_enabled and not _insert_wrote_row(status):
+                status = await conn.execute(insert_sql, *row)
+                if identity_dedup and not _insert_wrote_row(status):
                     continue
 
                 # Insert hop trace entries
