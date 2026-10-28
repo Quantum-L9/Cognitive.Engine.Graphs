@@ -700,3 +700,46 @@ def test_mortgage_va_eligibility_is_an_implication() -> None:
         False: {None: True, False: True, True: False},
         True: {None: True, False: True, True: True},
     }
+
+
+# RG-061 (RU-047 / CEG-COR-070, DEC-18): no dimension of a servable pack is
+# constant across candidates by construction — neither the `candidate.value`
+# fallback of a dimension that names no property, nor a query-side value no
+# caller can supply (a queryprop that is not a queryschema field or derived
+# parameter, backfilled NULL by handle_match on every request).
+_SERVABLE_PACKS = ("freight-matching", "mortgage-brokerage", "plasticos")
+
+
+@pytest.mark.parametrize("domain_id", _SERVABLE_PACKS)
+def test_no_servable_dimension_is_candidate_independent(domain_id: str) -> None:
+    from engine.scoring.assembler import ScoringAssembler
+
+    spec = _spec(DOMAINS_ROOT / domain_id)
+    suppliable = {f.name for f in spec.queryschema.fields} | {p.name for p in spec.derivedparameters}
+    flagged = []
+    for dim in spec.scoring.dimensions:
+        expression = ScoringAssembler(spec)._compile_dimension(dim)
+        if "candidate.value" in expression:
+            flagged.append(f"{dim.name}: candidate.value fallback")
+        if dim.queryprop and dim.queryprop not in suppliable:
+            flagged.append(f"{dim.name}: queryprop {dim.queryprop!r} no caller can supply")
+    assert flagged == []
+
+
+def test_mortgage_approval_rate_reads_the_lender_percentage_normalised() -> None:
+    expression = _dimension_expression("mortgage-brokerage", "approval_rate")
+    assert "lender.approvalratepct" in expression
+    # approvalratepct is a 0-100 percentage: 85% scores 0.85, not the clamp ceiling.
+    assert expression == "coalesce(lender.approvalratepct, 0.0) / 100.0"
+    assert not any(
+        d.computation.value == "communitymatch" for d in _spec(DOMAINS_ROOT / "mortgage-brokerage").scoring.dimensions
+    )
+
+
+def test_plasticos_community_match_reads_a_caller_supplied_community() -> None:
+    spec = _admitted_spec("plasticos")
+    dim = next(d for d in spec.scoring.dimensions if d.name == "community_match")
+    field = next(f for f in spec.queryschema.fields if f.name == dim.queryprop)
+    assert (field.type.value, field.required) == ("int", False)
+    expression = _dimension_expression("plasticos", "community_match")
+    assert "candidate.community_id = $community_id" in expression

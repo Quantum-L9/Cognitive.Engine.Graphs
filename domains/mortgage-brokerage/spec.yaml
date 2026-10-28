@@ -198,9 +198,16 @@ scoring:
       weightkey: wrate
       defaultweight: 0.35
     - name: approval_rate
+      # The lender's approval rate, read through the `lender` alias the
+      # lenderresolve step binds (CEG-COR-070). `alias: lender.approvalratepct`
+      # with `computation: candidateproperty` compiled to coalesce(candidate.value,
+      # 0.0) — 0 for every product. approvalratepct is a 0-100 percentage, so it
+      # is divided by 100 into [0, 1]; read raw it would saturate the clamp.
       source: traversalalias
-      alias: lender.approvalratepct
-      computation: candidateproperty
+      alias: lender
+      candidateprop: approvalratepct
+      computation: customcypher
+      expression: "coalesce(lender.approvalratepct, 0.0) / 100.0"
       weightkey: wapproval
       defaultweight: 0.25
     - name: closing_speed
@@ -211,13 +218,11 @@ scoring:
       maxvalue: 60
       weightkey: wspeed
       defaultweight: 0.20
-    - name: community_match
-      source: computed
-      candidateprop: louvaincommunityid
-      queryprop: louvaincommunityid
-      computation: communitymatch
-      weightkey: wcommunity
-      defaultweight: 0.10
+    # No community_match dimension (CEG-COR-070, DEC-18 option B): it compared
+    # LoanProduct.louvaincommunityid with $louvaincommunityid, which no
+    # queryschema field supplies (a BorrowerProfile has no community) and no GDS
+    # job writes, so it scored 0.5 for every product. The remaining weights are
+    # unchanged (sum 0.80 <= 1.0): a constant term never changed the ranking.
 
 compliance:
   regimes:
