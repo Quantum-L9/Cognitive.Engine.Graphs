@@ -449,3 +449,64 @@ class TestMergeIntegrity:
         from engine.config.settings import Settings
 
         assert Settings().entity_resolution_merge_integrity is True
+
+
+class _StructuralFakeScorer(_FakeScorer):
+    """Like _FakeScorer, but a pair scored after a RESOLVED_FROM edge already
+    touches either entity drops by ``penalty`` -- the effect of the new edge on
+    the real structural (neighbor-overlap) signal."""
+
+    def __init__(self, *args: Any, penalty: float, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._penalty = penalty
+
+    async def compute_similarity(self, a: str, b: str, entity_label: str) -> float:
+        base = await super().compute_similarity(a, b, entity_label)
+        touched = any(a in key[:2] or b in key[:2] for key in self._graph.edges)
+        return base - self._penalty if touched else base
+
+
+@pytest.mark.unit
+class TestMergeIntegrityReviewFollowUp:
+    """PR #367 review: score every member before writing, compare unrounded scores."""
+
+    @pytest.mark.asyncio
+    async def test_members_are_scored_before_any_resolution_edge_is_written(self) -> None:
+        # e2 is canonical (highest degree); the subject e1 is linked first. e3's
+        # canonical-relative similarity (0.9) must be measured on the graph as it
+        # was, not after e1 -> e2 has changed e2's neighbor set.
+        sims = {("e1", "e2"): 0.9, ("e1", "e3"): 0.9, ("e2", "e3"): 0.9}
+        graph = _FakeGraph({"e1": 0, "e2": 5, "e3": 0})
+        resolver = EntityResolver(_make_spec(threshold=0.85), graph, "test_domain")  # type: ignore[arg-type]
+        resolver._scorer = _StructuralFakeScorer(  # type: ignore[assignment]
+            graph, {frozenset(k): v for k, v in sims.items()}, 0.85, penalty=0.1
+        )
+        result = await resolver.resolve_entity("e1", "Supplier")
+        assert {(s, c) for s, c, _ in graph.resolved_from()} == {("e1", "e2"), ("e3", "e2")}
+        assert sorted(result["merged_entity_ids"]) == ["e1", "e3"]
+        assert result["merged_count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_subject_candidate_passing_unrounded_threshold_is_merged(self) -> None:
+        # 0.850041 >= 0.85004 passes find_candidates, but rounds to 0.85 < 0.85004.
+        resolver, graph, _ = _resolver({"e1": 5, "e2": 0}, {("e1", "e2"): 0.850041}, threshold=0.85004)
+        result = await resolver.resolve_entity("e1", "Supplier")
+        assert graph.resolved_from() == [("e2", "e1", 0.85)]
+        assert result["merged_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_batch_override_compares_unrounded_canonical_similarity(self) -> None:
+        # e2 is canonical; e3 is verified against e2 with compute_similarity.
+        sims = {("e1", "e2"): 0.9, ("e1", "e3"): 0.9, ("e2", "e3"): 0.850041}
+        resolver, graph, _ = _resolver({"e1": 0, "e2": 5, "e3": 0}, sims, threshold=0.6)
+        await resolver.resolve_batch("Supplier", threshold=0.85004)
+        assert {(s, c) for s, c, _ in graph.resolved_from()} == {("e1", "e2"), ("e3", "e2")}
+
+    @pytest.mark.asyncio
+    async def test_unrounded_canonical_similarity_below_threshold_is_not_merged(self) -> None:
+        # 0.849996 rounds up to 0.85 but is below the 0.85 threshold.
+        sims = {("e1", "e2"): 0.9, ("e1", "e3"): 0.9, ("e2", "e3"): 0.849996}
+        resolver, graph, _ = _resolver({"e1": 0, "e2": 5, "e3": 0}, sims, threshold=0.85)
+        result = await resolver.resolve_entity("e1", "Supplier")
+        assert graph.resolved_from() == [("e1", "e2", 0.9)]
+        assert result["merged_entity_ids"] == ["e1"]

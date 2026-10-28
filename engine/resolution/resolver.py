@@ -207,10 +207,12 @@ class EntityResolver:
           candidates nor canonical; an already-resolved subject is a no-op;
         - the canonical is the highest-degree remaining entity (RESOLVED_FROM
           not counted), ties broken by entity_id ascending;
-        - each other member is merged only when its similarity *to the
-          canonical* meets the threshold, and the edge stores that measured
-          similarity (the subject's similarity to the canonical is the
-          candidate score already measured);
+        - each other member is merged only when its unrounded similarity *to
+          the canonical* meets the threshold, and the edge stores that measured
+          similarity rounded to 4 places (the subject's similarity to the
+          canonical is the candidate score already measured);
+        - every member is scored before any edge is written, so one merge never
+          shifts the structural similarity of the members after it;
         - the edge is MERGEd, so it exists at most once per (source, canonical).
         """
         effective = threshold if threshold is not None else self._spec.similarity_threshold
@@ -238,28 +240,38 @@ class EntityResolver:
         all_ids = [entity_id, *measured]
         canonical_id = await self._find_canonical(all_ids, entity_label)
 
-        resolution_ids: list[str] = []
-        merged_entity_ids: list[str] = []
-        created_count = 0
+        # Score every member against the canonical before writing any edge: a
+        # RESOLVED_FROM edge changes the canonical's neighbor set, so a write
+        # here would bias the structural similarity of the members after it.
+        # The threshold is compared with the unrounded score; only the stored
+        # confidence is rounded. A pair involving the subject was already
+        # measured, unrounded, against ``effective`` by find_candidates.
+        accepted: list[tuple[str, float]] = []
         for member in all_ids:
             if member == canonical_id:
                 continue
             if canonical_id == entity_id:
-                similarity = measured[member]
-            elif member == entity_id:
-                similarity = measured[canonical_id]
-            else:
-                score = await self._scorer.compute_similarity(member, canonical_id, entity_label)
-                similarity = round(score, 4)
-            if similarity < effective:
+                accepted.append((member, measured[member]))
+                continue
+            if member == entity_id:
+                accepted.append((member, measured[canonical_id]))
+                continue
+            score = await self._scorer.compute_similarity(member, canonical_id, entity_label)
+            if score < effective:
                 logger.info(
-                    "Not merging %s into %s: similarity %.4f below threshold %.4f",
+                    "Not merging %s into %s: similarity %.6f below threshold %.6f",
                     member,
                     canonical_id,
-                    similarity,
+                    score,
                     effective,
                 )
                 continue
+            accepted.append((member, round(score, 4)))
+
+        resolution_ids: list[str] = []
+        merged_entity_ids: list[str] = []
+        created_count = 0
+        for member, similarity in accepted:
             linked = await self._merge_resolution(member, canonical_id, entity_label, similarity)
             if linked is None:
                 continue
