@@ -1,12 +1,3 @@
-> **Domain neutrality (ADR-112, Stage 2):** CEG is a domain-agnostic graph engine. No pack in this
-> directory is privileged; `DomainPackLoader` admits every pack through one generic, fail-closed
-> policy (validates, gates compile, not declared `activation: dormant`). The packs here are
-> **examples and verification inputs**, not a required part of the core.
->
-> **PlasticOS example (ADR-103 / TASK-015):** the executable PlasticOS example source is
-> `domains/plasticos/spec.yaml` only. Alternate PlasticOS YAML lives under `docs/archive/plasticos/`
-> and is non-authoritative.
-
 <!-- L9_META
 l9_schema: 1
 origin: domain-specific
@@ -16,6 +7,16 @@ tags: [domains, docs]
 owner: domain-team
 status: active
 /L9_META -->
+
+> **Domain neutrality (ADR-112, Stage 2):** CEG is a domain-agnostic graph engine. No pack in this
+> directory is privileged; `DomainPackLoader` admits every pack through one generic, fail-closed
+> policy (validates, gates compile, not declared `activation: dormant`). The packs here are
+> **examples and verification inputs**, not a required part of the core.
+>
+> **PlasticOS example (ADR-103 / TASK-015):** the executable PlasticOS example source is
+> `domains/plasticos/spec.yaml` only. Alternate PlasticOS YAML lives under `docs/archive/plasticos/`
+> and is non-authoritative.
+
 
 # domains/README.md
 """

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
 --- L9_META ---
-l9_schema: 2
+l9_schema: 1
 origin: l9-template
 engine: graph
 layer: [audit]
-tags: [delivery, harness]
+tags: [L9_TEMPLATE, audit, contracts]
+owner: platform
 status: active
 --- /L9_META ---
 
