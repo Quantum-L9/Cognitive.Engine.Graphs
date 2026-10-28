@@ -753,8 +753,13 @@ class GDSScheduler:
         3. prune — delete edges whose score fell below ``prune_below`` or whose
            ``last_event_date`` is older than ``max_age_days``.
 
-        Labels and types arrive sanitized; every value is a ``$param``.
+        Labels and types arrive sanitized and are re-validated here; every
+        value is a ``$param``.
         """
+        node_label = sanitize_label(node_label)
+        source_edge = sanitize_label(source_edge)
+        overlay_edge = sanitize_label(overlay_edge)
+        ts_prop = sanitize_label(ts_prop)
         count_agg = (
             ",\n             sum(CASE WHEN age_days <= $half_life "
             f"THEN coalesce(t.{sanitize_label(str(count_prop))}, 1) ELSE 0 END) AS recent_count"
