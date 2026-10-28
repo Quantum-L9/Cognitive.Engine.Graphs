@@ -680,6 +680,23 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             resolved_query[dim.queryprop] = None
 
     gate_compiler = GateCompiler(domain_spec)
+    # RU-010 / CEG-COR-023 (R1a-DEC-03, third alternative): W1-03 runs on the
+    # final resolved parameters (defaults backfilled, derived resolved) for the
+    # gates of this direction. strict_null_gates rejects a null undeclared or
+    # required gate parameter; a null optional one follows the gate's
+    # nullbehavior and is logged. Off: no pre-pass (compiled Cypher only).
+    if settings.strict_null_gates:
+        from engine.gates.compiler import UnboundGateParameterError
+
+        try:
+            gate_compiler.validate_gates(resolved_query, match_direction=match_direction, reject_unbound=True)
+        except UnboundGateParameterError as exc:
+            raise ValidationError(
+                str(exc),
+                action="match",
+                tenant=tenant,
+                detail="W1-03 strict_null_gates: undeclared or required gate parameter is null",
+            ) from exc
     where_clause = gate_compiler.compile_all_gates(match_direction)
 
     traversal_assembler = TraversalAssembler(domain_spec)

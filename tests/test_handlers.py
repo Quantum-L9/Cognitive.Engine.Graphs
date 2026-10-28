@@ -126,6 +126,11 @@ def _make_domain_spec() -> MagicMock:
 
     spec.derivedparameters = []
     spec.compliance = None
+    # RU-010 (R1a-DEC-03): the gate reads $min_grade, so the query schema declares
+    # it (optional); an undeclared gate parameter is refused before the query.
+    grade_field = MagicMock(required=False, default=None)
+    grade_field.name = "min_grade"
+    spec.queryschema.fields = [grade_field]
 
     endpoint = MagicMock()
     endpoint.path = "/v1/sync/facility"

@@ -481,3 +481,112 @@ def test_freshness_validation_off_restores_the_legacy_coercion(monkeypatch: pyte
     negative = _two_label_spec([_freshness(-30)])
     assert "duration({days: 1})" in GateCompiler(zero).compile(zero.gates[0])
     assert "duration({days: -30})" in GateCompiler(negative).compile(negative.gates[0])
+
+
+# ── RG-012 (RU-010 / CEG-COR-023, R1a-DEC-03 third alternative) ──────────────
+# strict_null_gates: W1-03 validation runs inside handle_match on the final
+# resolved parameters for the direction's gates. A null undeclared or required
+# gate parameter is rejected; a null optional one follows the gate's
+# nullbehavior in Cypher and is only warned about.
+
+
+def _gate(name: str, param: object, **extra: object) -> dict:
+    return {"name": name, "type": "threshold", "candidateprop": "score", "queryparam": param, "operator": ">=", **extra}
+
+
+def test_validate_gates_rejects_null_required_and_undeclared_parameters() -> None:
+    from engine.gates.compiler import GateCompiler, UnboundGateParameterError
+
+    spec = _two_label_spec(
+        [_gate("req_gate", "req"), _gate("undeclared_gate", "ghost"), _gate("opt_gate", "opt")],
+        [{"name": "req", "type": "float", "required": True}, {"name": "opt", "type": "float"}],
+    )
+    with pytest.raises(UnboundGateParameterError) as info:
+        GateCompiler(spec).validate_gates({"req": None, "opt": None}, match_direction="d1", reject_unbound=True)
+    assert info.value.problems == [
+        "gate 'req_gate' needs required parameter 'req'",
+        "gate 'undeclared_gate' needs undeclared parameter 'ghost'",
+    ]
+
+
+def test_validate_gates_leaves_null_optional_and_derived_to_nullbehavior() -> None:
+    from engine.config.schema import DerivedParameterSpec
+    from engine.gates.compiler import GateCompiler
+
+    spec = _two_label_spec(
+        [_gate("opt_gate", "opt"), _gate("derived_gate", "half"), _gate("literal_gate", 0.5)],
+        [{"name": "opt", "type": "float"}],
+    )
+    spec = spec.model_copy(
+        update={"derivedparameters": [DerivedParameterSpec(name="half", expression="opt / 2.0", type="float")]}
+    )
+    warnings = GateCompiler(spec).validate_gates({"opt": None, "half": None}, match_direction="d1", reject_unbound=True)
+    assert warnings == [
+        "Gate 'opt_gate': parameter '$opt' resolved to null",
+        "Gate 'derived_gate': parameter '$half' resolved to null",
+    ]
+
+
+def test_validate_gates_direction_filter() -> None:
+    from engine.gates.compiler import GateCompiler
+
+    spec = _two_label_spec(
+        [_gate("d2_only", "req", matchdirections=["d2"])],
+        [{"name": "req", "type": "float", "required": True}],
+    )
+    assert GateCompiler(spec).validate_gates({"req": None}, match_direction="d1", reject_unbound=True) == []
+
+
+class _MatchCapture:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    async def execute_query(self, *, cypher: str, parameters: dict, database: str) -> list[dict]:
+        self.calls.append((cypher, parameters))
+        return []
+
+
+async def _plasticos_match(query: dict, direction: str = "supply_opportunity_to_buyer_facility") -> _MatchCapture:
+    from unittest.mock import MagicMock
+
+    from engine.handlers import handle_match, init_dependencies
+
+    spec = _pack("plasticos")
+    driver = _MatchCapture()
+    loader = MagicMock()
+    loader.load_domain.return_value = spec
+    init_dependencies(driver, loader)  # type: ignore[arg-type]
+    await handle_match("plasticos", {"query": query, "match_direction": direction})
+    return driver
+
+
+@pytest.mark.finding("CEG-COR-023")
+async def test_match_omitting_optional_density_succeeds_with_one_warning_per_null_gate(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING", logger="engine.gates.compiler"):
+        driver = await _plasticos_match({"polymer_type": "HDPE"})
+    assert len(driver.calls) == 1
+    null_gate_warnings = [r.getMessage() for r in caplog.records if "resolved to null" in r.getMessage()]
+    assert "Gate 'density_range': parameter '$density' resolved to null" in null_gate_warnings
+    assert len(null_gate_warnings) == len(set(null_gate_warnings))
+    # Gates of the other direction are not validated.
+    assert not [m for m in null_gate_warnings if "active_supply" in m]
+
+
+@pytest.mark.finding("CEG-COR-023")
+async def test_match_with_null_required_gate_parameter_is_rejected() -> None:
+    from engine.handlers import ValidationError
+
+    with pytest.raises(ValidationError, match="polymer_capability_gate") as info:
+        await _plasticos_match({"density": 0.95})
+    assert "fulfills_polymer_gate" not in str(info.value)  # other direction's gate
+
+
+@pytest.mark.finding("CEG-COR-023")
+async def test_strict_null_gates_off_runs_no_pre_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "strict_null_gates", False)
+    driver = await _plasticos_match({"density": 0.95})
+    assert len(driver.calls) == 1

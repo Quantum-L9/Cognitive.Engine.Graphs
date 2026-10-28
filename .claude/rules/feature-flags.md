@@ -21,7 +21,7 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 |------|---------|---------|
 | domain_strict_validation | True | Cross-reference validation at domain load |
 | score_clamp_enabled | True | Clamp dimension scores to [0, 1] |
-| strict_null_gates | True | Reject gates with null-resolved parameters |
+| strict_null_gates | True | `handle_match` runs the W1-03 `validate_gates` pre-pass on the final resolved parameters for the direction's gates: a null gate parameter that is undeclared or a `required` queryschema field is rejected (ValidationError naming the gate); a null optional or derived one follows the gate's `nullbehavior` and is logged (RU-010 / CEG-COR-023, R1a-DEC-03); off = no pre-pass |
 | max_hop_hard_cap | 10 | Maximum traversal hops |
 | param_strict_mode | True | Raise on derived parameter resolution failures |
 
