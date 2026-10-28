@@ -850,6 +850,20 @@ FILE_REGISTRY: list[FileMeta] = [
         "docs/FEATURE_GATES.md", "engine-specific", ["docs"], ["feature-gates", "activation", "runbook"], "engine-team"
     ),
     FileMeta(
+        "docs/remediation/CEG_CORRECTNESS_0d84ec8_LEDGER.md",
+        "engine-specific",
+        ["docs"],
+        ["remediation", "audit", "ledger"],
+        "engine-team",
+    ),
+    FileMeta(
+        "docs/remediation/VERIFICATION.md",
+        "engine-specific",
+        ["docs"],
+        ["remediation", "audit", "verification"],
+        "engine-team",
+    ),
+    FileMeta(
         "tests/contracts/test_chassis_parity.py", "engine-specific", ["test"], ["platform", "chassis"], "engine-team"
     ),
     FileMeta("tests/contracts/test_contracts.py", "l9-template", ["test"], ["governance", "compliance"], "platform"),
