@@ -124,7 +124,8 @@ async def test_same_tenant_domain_is_served(wired) -> None:
 @pytest.mark.finding("CEG-COR-003")
 async def test_optional_domain_defaults_to_tenant(wired) -> None:
     driver, loader = wired
-    loader.load_domain.return_value = MagicMock()
+    # RU-066 reads compliance.gdpr_subject_id_field; None selects the default field.
+    loader.load_domain.return_value = MagicMock(compliance=None)
     result = await handle_admin(TENANT, {"subaction": "erase_subject", "data_subject_id": "ds-1"})
     assert result["status"] == "dry_run"
     assert driver.calls[0]["database"] == TENANT

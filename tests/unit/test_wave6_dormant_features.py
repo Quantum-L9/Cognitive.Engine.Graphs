@@ -120,8 +120,9 @@ class _ErasureRecorder:
         init_dependencies(driver, _make_domain_loader(spec))
         get_state().compliance_engines.pop("test_domain", None)
         try:
+            # RU-003: an admin domain_id must equal the packet tenant.
             return await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "erase_subject", "data_subject_id": subject_id, "domain_id": "test_domain"},
             )
         finally:
@@ -419,7 +420,7 @@ class TestEraseSubject:
         result = await recorder.run(monkeypatch, subject_field="customer_id", subject_id="cust-42")
 
         assert recorder.cypher == ["MATCH (n {customer_id: $dsid}) DETACH DELETE n RETURN count(n) AS deleted"]
-        assert recorder.sql == [("SELECT gdpr_erase_subject($1, $2)", ("cust-42", "test_tenant"))]
+        assert recorder.sql == [("SELECT gdpr_erase_subject($1, $2)", ("cust-42", "test_domain"))]
         assert result["summary"]["packets_deleted"] == 7
         assert isinstance(result["summary"]["packets_deleted"], int)
 
