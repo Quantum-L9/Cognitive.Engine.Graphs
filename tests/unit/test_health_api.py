@@ -537,8 +537,11 @@ class TestHealthAssessAction:
         # RU-014 / CEG-COR-075 (C-23): the admin route stamps its response
         # envelope (`subaction`, and `status` where the body set none); the body
         # the shared dispatcher produced is otherwise identical.
-        assert via_admin.pop("subaction") == subaction
-        assert via_admin.pop("status") == via_action.pop("status", "success")
+        admin_subaction = via_admin.pop("subaction")
+        admin_status = via_admin.pop("status")
+        action_status = via_action.pop("status", "success")
+        assert admin_subaction == subaction
+        assert admin_status == action_status
         assert via_action == via_admin
         assert pipeline.loaded_domains == [TENANT, TENANT]
 
