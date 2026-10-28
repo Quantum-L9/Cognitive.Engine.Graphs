@@ -44,10 +44,61 @@ T = TypeVar("T", bound=BaseModel)
 # ── Output Schemas ───────────────────────────────────────────
 
 
+# A keyword directly after `$` is a parameter name and after `.` a property
+# key, never a clause; everything else (whitespace included) still counts.
 _WRITE_CLAUSE_RE = re.compile(
-    r"\b(?:DETACH\s+DELETE|LOAD\s+CSV|CREATE|MERGE|SET|DELETE|REMOVE|DROP|FOREACH|CALL)\b",
+    r"(?<![.$])\b(?:DETACH\s+DELETE|LOAD\s+CSV|CREATE|MERGE|SET|DELETE|REMOVE|DROP|FOREACH|CALL)\b",
     re.IGNORECASE,
 )
+# Any line terminator ends a `//` comment (a superset of Cypher's, so a
+# comment is never assumed to run further than Neo4j's does).
+_LINE_BREAK_RE = re.compile(r"[\n\r\x0b\x0c\x1c-\x1e\x85\u2028\u2029]")
+
+
+def _literal_end(query: str, i: int) -> int:
+    """End index of the literal, quoted identifier or comment opening at ``i``; -1 if none or unterminated."""
+    ch = query[i]
+    if ch in "'\"":
+        j = i + 1
+        while j < len(query):
+            if query[j] == "\\":
+                j += 2
+            elif query[j] == ch:
+                return j + 1
+            else:
+                j += 1
+        return -1
+    if ch == "`":
+        j = query.find("`", i + 1)
+        while j != -1 and query.startswith("``", j):
+            j = query.find("`", j + 2)
+        return j + 1 if j != -1 else -1
+    if query.startswith("//", i):
+        m = _LINE_BREAK_RE.search(query, i + 2)
+        return m.start() if m else len(query)
+    if query.startswith("/*", i):
+        close = query.find("*/", i + 2)
+        return close + 2 if close != -1 else -1
+    return -1
+
+
+def _cypher_code_only(query: str) -> str:
+    """Blank string literals, backtick identifiers and comments to one space each.
+
+    Fail-closed: an unterminated literal or block comment stays as code, so
+    the keyword scan can only see more of the query than Neo4j executes.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(query):
+        end = _literal_end(query, i)
+        if end == -1:
+            out.append(query[i])
+            i += 1
+        else:
+            out.append(" ")
+            i = end
+    return "".join(out)
 
 
 class CypherQueryOutput(BaseModel):
@@ -65,10 +116,14 @@ class CypherQueryOutput(BaseModel):
         # clauses are rejected as whole keywords (word boundaries), so
         # identifiers such as `n.deleted_at` pass; CALL is rejected entirely
         # (DEC-28 recommended (a): procedures and CALL {} IN TRANSACTIONS can write).
-        match = _WRITE_CLAUSE_RE.search(v)
+        # Literals, quoted identifiers and comments are blanked first, so a
+        # value such as 'CREATE' or `$set` is not a clause, while a comment
+        # splitting a keyword pair (LOAD/**/CSV) collapses to whitespace.
+        match = _WRITE_CLAUSE_RE.search(_cypher_code_only(v))
         if match:
             kw = " ".join(match.group(0).upper().split())
-            raise ValueError(f"Destructive keyword rejected: {kw}")
+            msg = f"Destructive keyword rejected: {kw}"
+            raise ValueError(msg)
         return v
 
     @field_validator("parameters")

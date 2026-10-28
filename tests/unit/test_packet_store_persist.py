@@ -18,8 +18,11 @@ the tests can assert on the SQL PacketStore issues without a PostgreSQL.
 
 Coverage:
   - RU-078 / RG-101: content_hash is the packet identity (transport_hash),
-    and a packet INSERT reported as skipped ('INSERT 0 0') writes no
-    hop_trace, delegation_chain or lineage_graph rows for that packet.
+    the packet INSERT skips on ``ON CONFLICT (packet_id)`` (so a re-delivery
+    of a row stored under the legacy payload_hash key is skipped rather than
+    raising on the primary key), and a packet INSERT reported as skipped
+    ('INSERT 0 0') writes no hop_trace, delegation_chain or lineage_graph
+    rows for that packet.
   - RU-079 / RG-103: a transaction-local
     ``set_config('app.current_tenant', <tenant.actor>, true)`` precedes each
     packet INSERT inside the persist transaction.
@@ -45,6 +48,10 @@ _CONTENT_HASH_ARG = 13
 # -- Fake asyncpg ------------------------------------------------------------
 
 
+def _is_packet_insert(sql: str) -> bool:
+    return sql is ps_mod._INSERT_PACKET_SQL or sql is ps_mod._INSERT_PACKET_IDENTITY_SQL
+
+
 @dataclass
 class _Call:
     method: str
@@ -66,7 +73,7 @@ class _FakeConn:
 
     async def execute(self, sql: str, *args: Any) -> str:
         self._record("execute", sql, args)
-        if sql is ps_mod._INSERT_PACKET_SQL:
+        if _is_packet_insert(sql):
             return self.insert_status(args)
         if sql.lstrip().startswith("UPDATE"):
             return "UPDATE 1"
@@ -162,7 +169,7 @@ class TestPacketIdentityDedup:
         await store.persist(req1, resp1)
         await store.persist(req2, resp2)
 
-        hashes = [c.args[_CONTENT_HASH_ARG] for c in conn.statements(ps_mod._INSERT_PACKET_SQL)]
+        hashes = [c.args[_CONTENT_HASH_ARG] for c in conn.statements(ps_mod._INSERT_PACKET_IDENTITY_SQL)]
         assert hashes == [
             req1.security.transport_hash,
             resp1.security.transport_hash,
@@ -182,7 +189,7 @@ class TestPacketIdentityDedup:
 
         await ps_mod.PacketStore().persist(req, resp)
 
-        assert len(conn.statements(ps_mod._INSERT_PACKET_SQL)) == 2
+        assert len(conn.statements(ps_mod._INSERT_PACKET_IDENTITY_SQL)) == 2
         assert conn.statements(ps_mod._INSERT_HOP_SQL) == []
         assert conn.statements(ps_mod._INSERT_DELEGATION_SQL) == []
         assert conn.statements(ps_mod._INSERT_LINEAGE_SQL) == []
@@ -206,8 +213,8 @@ class TestPacketIdentityDedup:
         stored: set[tuple[Any, Any]] = set()
 
         def status(args: tuple[Any, ...]) -> str:
-            # Model UNIQUE(content_hash, actor_tenant) ... ON CONFLICT DO NOTHING.
-            key = (args[_CONTENT_HASH_ARG], args[7])
+            # Model the packet_id primary key ... ON CONFLICT (packet_id) DO NOTHING.
+            key = args[0]
             if key in stored:
                 return "INSERT 0 0"
             stored.add(key)
@@ -223,6 +230,19 @@ class TestPacketIdentityDedup:
 
         assert len(conn.statements(ps_mod._INSERT_HOP_SQL)) == len(req.hop_trace) + len(resp.hop_trace)
         assert len(conn.statements(ps_mod._INSERT_LINEAGE_SQL)) == 1
+
+    async def test_flag_on_insert_skips_on_packet_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        conn = _FakeConn()
+        _install(monkeypatch, conn)
+        req, resp = _pair({"query": {"x": 1}})
+
+        await ps_mod.PacketStore().persist(req, resp)
+
+        inserts = [c for c in conn.calls if _is_packet_insert(c.sql)]
+        assert len(inserts) == 2
+        for call in inserts:
+            assert call.sql is ps_mod._INSERT_PACKET_IDENTITY_SQL
+            assert call.sql.rstrip().endswith("ON CONFLICT (packet_id) DO NOTHING")
 
     async def test_all_writes_share_one_transaction(self, monkeypatch: pytest.MonkeyPatch) -> None:
         conn = _FakeConn()
@@ -256,6 +276,8 @@ class TestPacketIdentityDedupFlagOff:
             resp2.security.payload_hash,
         ]
         assert hashes[0] == hashes[2]
+        assert all(not _is_packet_insert(c.sql) or c.sql is ps_mod._INSERT_PACKET_SQL for c in conn.calls)
+        assert ps_mod._INSERT_PACKET_SQL.rstrip().endswith("ON CONFLICT (content_hash, actor_tenant) DO NOTHING")
 
     async def test_flag_off_writes_children_after_skipped_insert(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings, "packet_store_packet_identity_dedup_enabled", False)
@@ -285,7 +307,7 @@ class TestRlsTenantSession:
 
         await ps_mod.PacketStore().persist(req, resp)
 
-        inserts = [i for i, c in enumerate(conn.calls) if c.sql is ps_mod._INSERT_PACKET_SQL]
+        inserts = [i for i, c in enumerate(conn.calls) if _is_packet_insert(c.sql)]
         assert len(inserts) == 2
         for index, packet in zip(inserts, (req, resp), strict=True):
             previous = conn.calls[index - 1]
@@ -315,4 +337,4 @@ class TestRlsTenantSession:
         await ps_mod.PacketStore().persist(req, resp)
 
         assert not any(_is_set_tenant(c) for c in conn.calls)
-        assert conn.calls[0].sql is ps_mod._INSERT_PACKET_SQL
+        assert _is_packet_insert(conn.calls[0].sql)
