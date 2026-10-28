@@ -682,6 +682,11 @@ class Settings(BaseSettings):
     # -> match_direction, query.facts -> query, top_n). Legacy MatchPayload is
     # unchanged. Off: such a payload is rejected (no match_direction).
     match_request_contract_admission: bool = True
+    # RU-015 / CEG-COR-080 (R1a-DEC-05 "withhold"): a gate's roleexempt and
+    # relaxedpenalty are accepted by the schema and ignored by the match path, so
+    # engine.config.loader.admission_defects reports a pack declaring either and
+    # the loader withholds it until a domain needs roles. Off: accepted, ignored.
+    gate_role_exemption: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

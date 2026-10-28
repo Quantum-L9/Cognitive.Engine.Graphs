@@ -598,3 +598,52 @@ async def test_strict_null_gates_off_runs_no_pre_pass(monkeypatch: pytest.Monkey
     monkeypatch.setattr(settings, "strict_null_gates", False)
     driver = await _plasticos_match({"density": 0.95})
     assert len(driver.calls) == 1
+
+
+# ── RG-019 (RU-015 / CEG-COR-080, R1a-DEC-05 "withhold") ─────────────────────
+# GateSpec.roleexempt / relaxedpenalty are accepted by the schema and ignored by
+# the match path (handle_match passes no role and never compiles relaxed). Until
+# a domain needs roles, a pack declaring either is withheld with a named defect.
+
+
+def _boolean_gate(**extra: object) -> dict:
+    return {"name": "flag_gate", "type": "boolean", "candidateprop": "active", "queryparam": "active", **extra}
+
+
+@pytest.mark.finding("CEG-COR-080")
+@pytest.mark.parametrize(
+    ("extra", "field"),
+    [({"roleexempt": ["broker"]}, "roleexempt"), ({"relaxedpenalty": 0.3}, "relaxedpenalty")],
+)
+def test_pack_declaring_role_fields_is_withheld_with_a_named_defect(extra: dict, field: str) -> None:
+    from engine.config.loader import admission_defects, withholding_reason
+
+    spec = _two_label_spec([_boolean_gate(**extra)], [{"name": "active", "type": "bool"}])
+    defects = admission_defects(spec)
+    assert [d for d in defects if d.startswith(f"flag_gate: {field}")], defects
+    reason = withholding_reason(spec)
+    assert reason is not None
+    assert field in reason
+
+
+def test_pack_without_role_fields_has_no_role_defect() -> None:
+    from engine.config.loader import admission_defects
+
+    spec = _two_label_spec([_boolean_gate()], [{"name": "active", "type": "bool"}])
+    assert not [d for d in admission_defects(spec) if "roleexempt" in d or "relaxedpenalty" in d]
+
+
+@pytest.mark.parametrize("domain_id", ["plasticos", "freight-matching", "mortgage-brokerage"])
+def test_served_packs_declare_no_role_fields(domain_id: str) -> None:
+    from engine.config.loader import admission_defects
+
+    assert not [d for d in admission_defects(_pack(domain_id)) if "roleexempt" in d or "relaxedpenalty" in d]
+
+
+def test_gate_role_exemption_off_admits_role_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config.loader import admission_defects
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "gate_role_exemption", False)
+    spec = _two_label_spec([_boolean_gate(roleexempt=["broker"])], [{"name": "active", "type": "bool"}])
+    assert not [d for d in admission_defects(spec) if "roleexempt" in d]
