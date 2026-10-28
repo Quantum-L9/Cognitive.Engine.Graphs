@@ -18,6 +18,17 @@ incoming payloads against these schemas before processing.
 ## match
 
 > TASK-040 / ADR-106: prefer `engine.models.payloads.MatchRequest` / `MatchResponse` (payload-only; no transport fields; no ungoverned weights).
+>
+> RU-012 (`MATCH_REQUEST_CONTRACT_ADMISSION`, default on, R1a-DEC-04 "admit both"): the
+> match action accepts both shapes. A payload carrying `contract_version` is admitted as
+> `MatchRequest` against `DomainContract.from_spec(<tenant's pack>)` (its `domain` must be
+> the tenant's, its `direction` declared, unknown and transport fields refused; any failure is
+> a `ValidationError`) and mapped onto the legacy internals: `direction` -> `match_direction`,
+> `query.facts` -> `query`, `top_n` -> `top_n`. `query_id`, `query_entity_ref`,
+> `evidence_summary`, `governed_filters`, `projection_version`, `policy_ref` and
+> `field_dictionary_version` are validated but not used by the match. A payload without
+> `contract_version` is the legacy `MatchPayload` below, unchanged. The response is the legacy
+> `MatchResponse` in both cases (`MatchResponse` emission is not implemented).
 ```python
 class MatchPayload(BaseModel):
     query: dict[str, Any]  # Entity attributes to match against
