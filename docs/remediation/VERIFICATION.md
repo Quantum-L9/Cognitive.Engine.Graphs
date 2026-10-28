@@ -16,14 +16,14 @@ measured on the remediation stack's top commit; inferences are marked as such.
 ## 1. Regression evidence (failing before, passing after)
 
 Every unit commit carries its acceptance evidence in the commit body. Each regression test was run against
-the unmodified code (base `0d84ec8` for round 1, `4eb68ff` for round 2) and failed for the recorded reason
+the unmodified code (base `0d84ec8` for round 1, `4eb68ff` on the superseded #352 branch for round 2) and failed for the recorded reason
 before the fix was written. The ledger maps every unit to its commits.
 
 ## 2. Suites run on the final tree
 
 | Run | Services | Result |
 |---|---|---|
-| `pytest tests/` (CI form) | Neo4j Enterprise 5.18.1 + GDS 2.6.8 (`NEO4J_TEST_URI`), PostgreSQL 16.15 (`PACKET_STORE_TEST_DSN`) | 3635 passed, 19 skipped, 56 xfailed, rc=0 |
+| `pytest tests/` (CI form) | Neo4j Enterprise 5.18.1 + GDS 2.6.8 (`NEO4J_TEST_URI`), PostgreSQL 16.15 (`PACKET_STORE_TEST_DSN`) | 3634 passed, 19 skipped, 56 xfailed (3709 collected), rc=0 |
 | `pytest tests/integration` | same | 110 passed, 0 skipped |
 | `ruff check .`, `ruff format --check .`, `mypy engine/` | — | clean |
 | `tools/contract_scanner.py`, `tools/cypher_lint.py`, `tools/verify_contracts.py`, `tools/check_action_refs.py`, `tools/payload_contract_compiler.py --stdout-only` | — | clean / exit 0 |
@@ -60,10 +60,10 @@ resolved positionally (both sides add new functions/imports at the same location
 - Real interactions found and fixed **in this remediation**:
   1. RU-138's stricter `cypher_lint` flagged 4 findings in #342's error-message f-string
      (`"…edge (A)-[:R]->(B)…"`, only ever passed to `raise ValueError`). Fixed: a message-named variable
-     whose every read reaches an exception/logger is not Cypher (62afe60), with a test that one sink read
+     whose every read reaches an exception/logger is not Cypher (2827ed3), with a test that one sink read
      keeps it scanned.
   2. RU-060's sync test fixture used a `MagicMock` endpoint whose `targetedge` was truthy, which #342
-     routes to relationship sync. Fixed: the fixture names `targetedge=None` (2ee9120).
+     routes to relationship sync. Fixed: the fixture names `targetedge=None` (81e4e1d).
 - Result on the combined tree after the fixes: 3370 passed, 0 failed; cypher-lint 0 findings.
 - Circuit breaker semantics: #343 makes absent-database reads breaker-neutral by raising a
   `BaseException` in CLOSED and returning a sentinel in HALF_OPEN. Against RU-094 (release a HALF_OPEN
@@ -96,10 +96,41 @@ resolved positionally (both sides add new functions/imports at the same location
 
 | Finding | Source | Outcome |
 |---|---|---|
-| GDPR packet erasure not tenant-scoped (P1) | Codex | Real (proved on PostgreSQL 16: owner DSN deleted both tenants' rows; `l9_product` saw none). Fixed: tenant-qualified `gdpr_erase_subject(subject, performed_by, tenant)` + transaction-local `app.current_tenant` (871c3fe). |
-| Beam-search constraint pruning sees only the terminal op (P2) | Codex | Real. Fixed: validate the composed cascade from `ops()` (3dd2dd5). |
-| Diversity pruning compares only the terminal op (P2) | Codex | Real. Fixed: compare full op chains (3dd2dd5). |
-| Side-effecting `assert` (×2) | github-code-quality | Fixed (3b8fc64). |
+| GDPR packet erasure not tenant-scoped (P1) | Codex | Real (proved on PostgreSQL 16: owner DSN deleted both tenants' rows; `l9_product` saw none). Fixed: tenant-qualified `gdpr_erase_subject(subject, performed_by, tenant)` + transaction-local `app.current_tenant` (42f185a). |
+| Beam-search constraint pruning sees only the terminal op (P2) | Codex | Real. Fixed: validate the composed cascade from `ops()` (7a7ecd3). |
+| Diversity pruning compares only the terminal op (P2) | Codex | Real. Fixed: compare full op chains (7a7ecd3). |
+| Side-effecting `assert` (×2) | github-code-quality | Fixed (2df3110, in part 03 with the RU-014 change that introduced it). |
 | Lambda arity in a dataclass default | github-code-quality | False positive (field default becomes an instance attribute; no binding). Replied and resolved. |
-| Non-numeric weight escapes as `ValueError` | found while triaging semgrep | Real. Fixed (db6278c). |
+| Non-numeric weight escapes as `ValueError` | found while triaging semgrep | Real. Fixed (fa7b1cc). |
 | semgrep `float-requires-try-except`, terminology guard | CI | Fixed without suppression (redundant `float()` removed; untrusted input parsed in try/except). |
+
+## 7. Stacked publication (supersedes PR #352)
+
+PR #352 carried the whole campaign in one diff, which this repository's size policy
+(`pr-review-enforcement.yml`: at most 1000 added lines and 50 files) blocks. The same commits are
+published as 32 stacked PRs, merged bottom-up. Each part's head was verified on its own before
+publication, with the gates CI scopes to that PR:
+
+- `ruff check`, `ruff format --check`, `mypy engine/`, `contract_scanner.py`, `cypher_lint.py`,
+  `verify_contracts.py`, and `l9_meta_injector.py check` from the part that adds it onward;
+- `semgrep` with `--baseline-commit` set to the part's base, and the terminology guard over the
+  part's changed `engine/` and `tests/` files;
+- the non-integration suite, then `tests/integration` + `tests/performance` against Neo4j Enterprise
+  5.18.1 + GDS 2.6.8 and PostgreSQL 16.15;
+- the size policy.
+
+Splitting exposed states the single branch never had: a fix committed after the unit that needed it.
+Each such follow-up was moved into the part that introduces the code it corrects, never later. No
+assertion was weakened and no gate was suppressed. Examples:
+
+- lane reconcile fixtures land with the unit that changes the behaviour they depend on (RU-020/RU-040,
+  RU-065, RU-066, RU-010);
+- the RU-097 overlay helper re-validates its labels where the query is built (C-009);
+- `chassis/auth/test_auth_middleware.py` moves into `tests/unit/` in the same commit (RU-082) that fixes
+  its imports, so no part collects it unfixed;
+- the C-18 registry entry for that move lands with the RU-131 check that reads it;
+- redundant `float()` calls and `log` handle names are fixed in the part that adds them.
+
+The stack's top tree equals the reviewed #352 tree apart from one removed code comment in
+`engine/feedback/score_propagator.py`. The commit references in the ledger and in this file name the
+stacked commits.
