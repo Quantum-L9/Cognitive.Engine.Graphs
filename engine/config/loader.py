@@ -134,24 +134,36 @@ def _bindable_parameters(spec: DomainSpec) -> set[str]:
     return names
 
 
-def _no_producer_defect(dim: object) -> str | None:
-    """A declared HGKR option whose input nothing in the engine writes (R1b-DEC-01 option A)."""
+def _candidate_properties(spec: DomainSpec) -> set[str]:
+    """Properties the pack declares on a candidate node; sync writes them (``SET n += row``)."""
+    labels = {entity.label for entity in spec.matchentities.candidate}
+    return {
+        prop.name for node in spec.ontology.nodes if node.candidate or node.label in labels for prop in node.properties
+    }
+
+
+def _no_producer_defect(dim: object, *, candidate_properties: set[str]) -> str | None:
+    """A declared HGKR option whose input the engine never produces and the pack does not declare (R1b-DEC-01 A).
+
+    A pack that declares the input is its producer: ``_prior_<dim>`` /
+    ``shared_neighbor_score`` declared on a candidate node is written by sync.
+    ``population_mean`` (either option) reads ``$_popmean_<dim>``, which
+    ``handle_match`` binds when the pack declares it as a queryschema field or
+    derived parameter; when it does not, the unbound-parameter check in
+    ``_scoring_defects`` reports it, so it is not a producer defect here.
+    """
     from engine.config.schema import ColdStartFallback, NullStrategy
 
     name = getattr(dim, "name", "?")
     strategy = getattr(dim, "null_strategy", NullStrategy.ZERO)
-    if strategy is NullStrategy.INHERIT_PRIOR:
+    if strategy is NullStrategy.INHERIT_PRIOR and f"_prior_{name}" not in candidate_properties:
         return f"scoring {name}: null_strategy inherit_prior has no producer (nothing writes candidate._prior_{name})"
-    if strategy is NullStrategy.POPULATION_MEAN:
-        return f"scoring {name}: null_strategy population_mean has no producer (nothing binds $_popmean_{name})"
     fallback = getattr(dim, "cold_start_fallback", ColdStartFallback.ZERO)
-    if fallback is ColdStartFallback.STRUCTURAL_SIMILARITY:
+    if fallback is ColdStartFallback.STRUCTURAL_SIMILARITY and "shared_neighbor_score" not in candidate_properties:
         return (
             f"scoring {name}: cold_start_fallback structural_similarity has no producer "
             "(nothing writes candidate.shared_neighbor_score)"
         )
-    if fallback is ColdStartFallback.POPULATION_MEAN:
-        return f"scoring {name}: cold_start_fallback population_mean has no producer (nothing binds $_popmean_{name})"
     return None
 
 
@@ -169,8 +181,9 @@ def _scoring_defects(spec: DomainSpec, *, check_producers: bool) -> list[str]:
     defects: list[str] = []
     bindable = _bindable_parameters(spec)
     if check_producers:
+        candidate_properties = _candidate_properties(spec)
         for dim in spec.scoring.dimensions:
-            producer = _no_producer_defect(dim)
+            producer = _no_producer_defect(dim, candidate_properties=candidate_properties)
             if producer is not None:
                 defects.append(producer)
     for direction in spec.queryschema.matchdirections:

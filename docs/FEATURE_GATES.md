@@ -711,8 +711,12 @@ withheld when:
   a value the assembler binds itself (`community_bridge` without a
   `query_<prop>` field; `geodecay`'s `$lon`);
 - a dimension declares an option nothing produces: `null_strategy:
-  inherit_prior | population_mean` or `cold_start_fallback:
-  structural_similarity | population_mean`.
+  inherit_prior` or `cold_start_fallback: structural_similarity`, unless the
+  pack declares the property they read (`_prior_<dim>`,
+  `shared_neighbor_score`) on a candidate node, which sync writes.
+  `population_mean` (either option) reads `$_popmean_<dim>`: a pack that
+  declares it as a queryschema field or derived parameter is admitted
+  (`handle_match` binds it); otherwise it is the unbound-parameter defect above.
 
 Each such pack failed every match (`ValueError` / `ParameterMissing`) or
 silently degraded. `freight-matching` is withheld by this check until its
