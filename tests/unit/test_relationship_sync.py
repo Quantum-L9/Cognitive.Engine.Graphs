@@ -27,6 +27,7 @@ import pytest
 import yaml
 from neo4j.exceptions import ConstraintError
 
+import engine.handlers as handlers_module
 from chassis.errors import FeatureNotEnabled
 from engine.config.schema import DomainSpec, SyncEndpointSpec
 from engine.config.settings import Settings, settings
@@ -405,6 +406,16 @@ async def test_flag_off_writes_no_evidence_edge_even_when_the_spec_declares_one(
         await handle_sync("cheese-aging", {"entity_type": "tended-by", "batch": [_row()]})
     driver.execute_query.assert_not_awaited()
     driver.execute_write.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("_clean_state")
+async def test_flag_off_is_refused_before_compliance_records_the_mutation(monkeypatch: pytest.MonkeyPatch) -> None:
+    compliance = MagicMock(enabled=True)
+    monkeypatch.setattr(handlers_module, "_get_compliance_engine", lambda _spec: compliance)
+    _install(_graph())
+    with pytest.raises(FeatureNotEnabled):
+        await handle_sync("cheese-aging", {"entity_type": "tended-by", "batch": [_row()]})
+    compliance.check_sync_request.assert_not_called()
 
 
 @pytest.mark.parametrize("enabled", [False, True], ids=["flag-off", "flag-on"])

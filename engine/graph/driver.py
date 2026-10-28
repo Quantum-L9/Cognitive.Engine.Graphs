@@ -17,9 +17,11 @@ import asyncio
 import functools
 import logging
 import os
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from neo4j import READ_ACCESS, AsyncDriver, AsyncGraphDatabase
+from neo4j.exceptions import ConstraintError
 
 from engine.graph.circuit_breaker import BreakerState, CircuitBreaker
 from engine.utils.security import sanitize_database_name
@@ -54,16 +56,30 @@ def _looks_like_absent_database(exc: Exception) -> bool:
     return any(marker in message for marker in _DATABASE_ABSENT_MARKERS)
 
 
-class _AbsentDatabaseRead(BaseException):
-    """A read named an absent database: neither a success nor a failure of the server.
+class ExpectedWriteOutcome(Exception):  # noqa: N818 - an outcome, not an error of the store
+    """A write the server answered and the caller refuses: not an outage.
+
+    Raised from inside a write transaction function to roll it back (for example
+    a post-write check that finds the stored state differs from what was sent).
+    Like a ``ConstraintError``, it never counts against the shared circuit breaker.
+    """
+
+
+def _is_expected_write_outcome(exc: Exception) -> bool:
+    return isinstance(exc, ConstraintError | ExpectedWriteOutcome)
+
+
+class _BreakerNeutral(BaseException):
+    """An outcome that is neither a success nor a failure of the server.
 
     ``CircuitBreaker.call`` records an ``Exception`` as a failure and a return as
-    a success. An absent tenant database is an expected configuration fact, not
-    an outage, so counting it would let one unprovisioned tenant trip the breaker
-    shared by every tenant, and a sentinel return would reset a genuine run of
-    consecutive failures. A ``BaseException`` passes through the breaker without
-    either outcome (as ``asyncio.CancelledError`` does) and is converted to
-    ``DatabaseNotProvisionedError`` before it leaves ``execute_read``.
+    a success. An absent tenant database, a uniqueness-constraint violation or a
+    rolled-back post-write check is an expected answer, not an outage: counting
+    it would let one tenant's configuration or one lost identity race trip the
+    breaker shared by every tenant, and a sentinel return would reset a genuine
+    run of consecutive failures. A ``BaseException`` passes through the breaker
+    without either outcome (as ``asyncio.CancelledError`` does) and is unwrapped
+    before it leaves the driver.
     """
 
     def __init__(self, cause: Exception) -> None:
@@ -71,11 +87,12 @@ class _AbsentDatabaseRead(BaseException):
         self.cause = cause
 
 
-class _AbsentOnProbe:
-    """Returned instead of raised when a HALF_OPEN probe read finds the database absent.
+class _AnsweredOnProbe:
+    """Returned instead of raised when a HALF_OPEN probe gets an expected answer.
 
     The server answered, so the probe genuinely succeeded; a neutral exit would
-    leave the probe slot it consumed unreleased.
+    leave the probe slot it consumed unreleased. Unwrapped and re-raised by the
+    caller.
     """
 
     def __init__(self, cause: Exception) -> None:
@@ -211,21 +228,38 @@ class GraphDriver:
             records: list[Any] = await session.execute_read(_read)
             return records
 
-    async def _breaker_neutral_read(
+    async def _classified(
         self,
-        cypher: str,
-        parameters: dict[str, Any] | None,
-        database: str,
-    ) -> list[Any] | _AbsentOnProbe:
-        """``_raw_execute_read`` with an absent database classified before the breaker sees it."""
+        is_expected: Callable[[Exception], bool],
+        func: Callable[..., Awaitable[Any]],
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        """Run ``func`` so that an expected answer reaches the breaker as neither outcome."""
         try:
-            return await self._raw_execute_read(cypher, parameters, database)
+            return await func(*args, **kwargs)
         except Exception as exc:
-            if not _looks_like_absent_database(exc) or database in _BUILTIN_DATABASES:
+            if not is_expected(exc):
                 raise
             if self._circuit_breaker.state == BreakerState.HALF_OPEN:
-                return _AbsentOnProbe(exc)
-            raise _AbsentDatabaseRead(exc) from exc
+                return _AnsweredOnProbe(exc)
+            raise _BreakerNeutral(exc) from exc
+
+    async def _call_breaker_neutral(
+        self,
+        is_expected: Callable[[Exception], bool],
+        func: Callable[..., Awaitable[Any]],
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        """``CircuitBreaker.call`` with expected answers re-raised to the caller uncounted."""
+        try:
+            result = await self._circuit_breaker.call(self._classified, is_expected, func, *args, **kwargs)
+        except _BreakerNeutral as neutral:
+            raise neutral.cause from None
+        if isinstance(result, _AnsweredOnProbe):
+            raise result.cause
+        return result
 
     async def execute_read(
         self,
@@ -242,17 +276,19 @@ class GraphDriver:
         as ``DatabaseNotProvisionedError``. Same explicit-database rule and
         circuit breaker as ``execute_query``, except that an absent database
         is breaker-neutral: it neither counts as a failure nor resets a run of
-        genuine failures (see ``_AbsentDatabaseRead``).
+        genuine failures (see ``_BreakerNeutral``).
         """
         database = self._resolve_database(database, "execute_read")
+
+        def absent(exc: Exception) -> bool:
+            return _looks_like_absent_database(exc) and database not in _BUILTIN_DATABASES
+
         try:
-            records = await self._circuit_breaker.call(self._breaker_neutral_read, cypher, parameters, database)
-        except _AbsentDatabaseRead as absent:
-            raise self._translate_absent_database(absent.cause, database) from absent.cause
+            records: list[Any] = await self._call_breaker_neutral(
+                absent, self._raw_execute_read, cypher, parameters, database
+            )
         except Exception as exc:
             raise self._translate_absent_database(exc, database) from exc
-        if isinstance(records, _AbsentOnProbe):
-            raise self._translate_absent_database(records.cause, database) from records.cause
         return records
 
     @staticmethod
@@ -427,11 +463,16 @@ class GraphDriver:
         managed transaction function (neo4j-driver style) or a
         ``cypher=``/``parameters=`` keyword form returning a counters summary
         dict. Raises CircuitOpenError (maps to 503) if breaker is OPEN.
+
+        A ``ConstraintError`` or ``ExpectedWriteOutcome`` is the server's answer,
+        not an outage: it reaches the caller unchanged and never counts against
+        the shared breaker (see ``_BreakerNeutral``).
         """
         database = self._resolve_database(database, "execute_write")
         await self._provision_on_first_use(database)
         try:
-            return await self._circuit_breaker.call(
+            return await self._call_breaker_neutral(
+                _is_expected_write_outcome,
                 self._raw_execute_write,
                 transaction_function,
                 *args,

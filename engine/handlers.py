@@ -44,7 +44,7 @@ from engine.config.loader import DomainPackLoader
 from engine.config.schema import DomainSpec, SyncEndpointSpec
 from engine.gates.compiler import GateCompiler
 from engine.gds.scheduler import GDSScheduler
-from engine.graph.driver import GraphDriver
+from engine.graph.driver import ExpectedWriteOutcome, GraphDriver
 from engine.scoring.assembler import ScoringAssembler
 from engine.scoring.evidence_priority import (
     EvidenceBinding,
@@ -857,6 +857,22 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             tenant=tenant,
         )
 
+    if endpoint_spec.targetedge:
+        from chassis.errors import FeatureNotEnabled
+
+        # Imported at call time: tests patch ``engine.config.settings.settings``.
+        from engine.config.settings import settings as _relationship_settings
+
+        # Refused before compliance logs the request: the audit trail must not
+        # record a mutation the gate never let happen.
+        if not _relationship_settings.relationship_sync_enabled:
+            raise FeatureNotEnabled(
+                "Relationship evidence sync",
+                flag="RELATIONSHIP_SYNC_ENABLED",
+                action="sync",
+                tenant=tenant,
+            )
+
     # Run compliance checks on sync request
     compliance = _get_compliance_engine(domain_spec)
     if compliance.enabled:
@@ -868,18 +884,6 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         )
 
     if endpoint_spec.targetedge:
-        from chassis.errors import FeatureNotEnabled
-
-        # Imported at call time: tests patch ``engine.config.settings.settings``.
-        from engine.config.settings import settings as _relationship_settings
-
-        if not _relationship_settings.relationship_sync_enabled:
-            raise FeatureNotEnabled(
-                "Relationship evidence sync",
-                flag="RELATIONSHIP_SYNC_ENABLED",
-                action="sync",
-                tenant=tenant,
-            )
         relationship_result = await _sync_relationships(
             graph_driver, domain_spec, endpoint_spec, entity_type=entity_type, batch=batch, tenant=tenant
         )
@@ -952,7 +956,7 @@ def _relationship_row_defect(check: dict[str, Any], row: dict[str, Any]) -> str 
     return None
 
 
-class _RelationshipNotRecordedError(Exception):
+class _RelationshipNotRecordedError(ExpectedWriteOutcome):
     """The write did not record exactly the submitted evidence.
 
     Raised inside the managed write transaction so the driver rolls the whole

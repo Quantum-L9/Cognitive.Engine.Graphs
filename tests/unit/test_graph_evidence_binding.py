@@ -24,10 +24,17 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from neo4j.exceptions import ClientError, CypherSyntaxError, ServiceUnavailable, SessionExpired, TransientError
+from neo4j.exceptions import (
+    ClientError,
+    ConstraintError,
+    CypherSyntaxError,
+    ServiceUnavailable,
+    SessionExpired,
+    TransientError,
+)
 
 from engine.graph.circuit_breaker import BreakerState, CircuitBreaker, CircuitOpenError
-from engine.graph.driver import DatabaseNotProvisionedError, GraphDriver
+from engine.graph.driver import DatabaseNotProvisionedError, ExpectedWriteOutcome, GraphDriver
 from engine.handlers import handle_score
 from engine.scoring.evidence_priority import EvidenceRead, EvidenceUnavailableError, approved_relevance_map
 from engine.scoring.graph_evidence import MAX_EVIDENCE_EDGES, GraphEvidenceBinding, _is_stale, _single_revision
@@ -178,6 +185,29 @@ async def test_healthy_tenant_read_recovers_and_an_absent_probe_closes_a_half_op
     driver._raw_execute_read = AsyncMock(return_value=[{"ok": 1}])  # type: ignore[method-assign]
     assert await driver.execute_read("RETURN 1", {}, database="tenant-b") == [{"ok": 1}]
     assert driver.circuit_breaker.get_metrics().consecutive_failures == 0
+
+
+# ── Expected write answers are breaker-neutral (GraphDriver.execute_write) ─────
+
+
+async def test_constraint_conflicts_and_rolled_back_writes_never_count_against_the_breaker() -> None:
+    driver = _breaker_driver(threshold=2)
+    answers = [ConstraintError("duplicate evidence_ref"), ExpectedWriteOutcome("rolled back"), ConstraintError("dup")]
+    driver._raw_execute_write = AsyncMock(side_effect=answers)  # type: ignore[method-assign]
+    for answer in answers:
+        with pytest.raises(type(answer)):
+            await driver.execute_write(AsyncMock(), database="tenant-a")
+    metrics = driver.circuit_breaker.get_metrics()
+    assert (metrics.state, metrics.total_failures, metrics.consecutive_failures) == ("CLOSED", 0, 0)
+
+
+async def test_a_real_write_outage_still_trips_the_breaker() -> None:
+    driver = _breaker_driver(threshold=2)
+    driver._raw_execute_write = AsyncMock(side_effect=ServiceUnavailable("down"))  # type: ignore[method-assign]
+    for _ in range(2):
+        with pytest.raises(ServiceUnavailable):
+            await driver.execute_write(AsyncMock(), database="tenant-a")
+    assert driver.circuit_breaker.state is BreakerState.OPEN
 
 
 def test_staleness_and_revision_are_observed_never_invented() -> None:
