@@ -387,3 +387,104 @@ class TestDiversityComparesSameTypeOnly:
         engine.config.diversity_threshold = 0.75
         kept = engine._prune_by_diversity([a, b])
         assert [c.transformation_id for c in kept] == ["a"]
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-108")
+@pytest.mark.finding("CEG-COR-109")
+class TestPruningSeesCompleteCascade:
+    """RU-121/RU-122 follow-up (PR #352 review): constraint and diversity pruning
+    judge a candidate's whole op chain, not only its terminal op."""
+
+    @staticmethod
+    def _flip_then_scale(score: float = 0.9, cid: str = "fs") -> BeamCandidate:
+        return BeamCandidate(
+            cid,
+            "scale",
+            {"factor": 1.5},
+            score=score,
+            depth=2,
+            parent_id="p",
+            chain=[("flip", {"axis": 0.0}), ("scale", {"factor": 1.5})],
+        )
+
+    def test_constraint_rejects_cascade_whose_earlier_op_violates(self, engine: BeamSearchEngine) -> None:
+        from engine.kge.transformations import Flip
+
+        def _no_flip(tx: object) -> bool:
+            ops = getattr(tx, "ops", [tx])
+            return not any(isinstance(op, Flip) for op in ops)
+
+        engine.config.constraint_validators = [_no_flip]
+        clean = BeamCandidate(
+            "ss",
+            "scale",
+            {"factor": 1.5},
+            score=0.8,
+            depth=2,
+            parent_id="q",
+            chain=[("scale", {"factor": 2.0}), ("scale", {"factor": 1.5})],
+        )
+        kept = engine._prune_by_constraint([self._flip_then_scale(), clean])
+        assert [c.transformation_id for c in kept] == ["ss"]
+
+    def test_constraint_validator_receives_composed_cascade(self, engine: BeamSearchEngine) -> None:
+        import numpy as np
+
+        seen: list[object] = []
+
+        def _record(tx: object) -> bool:
+            seen.append(tx)
+            return True
+
+        engine.config.constraint_validators = [_record]
+        engine._prune_by_constraint([self._flip_then_scale()])
+        (tx,) = seen
+        v = np.arange(6, dtype=np.float64)
+        expected = np.array([-0.0, 1.0, 2.0, -3.0, 4.0, 5.0]) * 1.5
+        assert np.allclose(tx.apply(v), expected)  # type: ignore[attr-defined]
+
+    def test_same_terminal_op_with_different_parents_both_kept(self, engine: BeamSearchEngine) -> None:
+        via_flip = self._flip_then_scale(score=0.9, cid="via_flip")
+        via_rotation = BeamCandidate(
+            "via_rotation",
+            "scale",
+            {"factor": 1.5},
+            score=0.85,
+            depth=2,
+            parent_id="r",
+            chain=[
+                ("rotation", {"angle": 45.0, "axis_x": 1.0, "axis_y": 0.0, "axis_z": 0.0}),
+                ("scale", {"factor": 1.5}),
+            ],
+        )
+        engine.config.diversity_threshold = 0.8
+        kept = engine._prune_by_diversity([via_flip, via_rotation])
+        assert {c.transformation_id for c in kept} == {"via_flip", "via_rotation"}
+        assert BeamSearchEngine._candidate_similarity(via_flip, via_rotation) == 0.0
+
+    def test_identical_chains_still_pruned_as_duplicates(self, engine: BeamSearchEngine) -> None:
+        a = self._flip_then_scale(score=0.9, cid="a")
+        b = self._flip_then_scale(score=0.8, cid="b")
+        engine.config.diversity_threshold = 0.8
+        kept = engine._prune_by_diversity([a, b])
+        assert [c.transformation_id for c in kept] == ["a"]
+
+    def test_chain_similarity_counts_parent_params(self) -> None:
+        a = BeamCandidate(
+            "a",
+            "scale",
+            {"factor": 1.5},
+            score=0.9,
+            depth=2,
+            chain=[("scale", {"factor": 0.5}), ("scale", {"factor": 1.5})],
+        )
+        b = BeamCandidate(
+            "b",
+            "scale",
+            {"factor": 1.5},
+            score=0.8,
+            depth=2,
+            chain=[("scale", {"factor": 2.0}), ("scale", {"factor": 1.5})],
+        )
+        assert BeamSearchEngine._candidate_similarity(a, b) == pytest.approx(1.0 / (1.0 + 1.5))

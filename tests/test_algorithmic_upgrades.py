@@ -328,6 +328,50 @@ class TestCypherQueryOutputReadOnly:
         assert validate_llm_json(self._raw(query), CypherQueryOutput).cypher_query == query
 
 
+class TestCypherQueryOutputLexicalContext:
+    """RU-073 follow-up: keywords inside literals, comments, parameter and
+    property names are not clauses; real clauses around them still are."""
+
+    @staticmethod
+    def _raw(query: str) -> str:
+        return json.dumps({"cypher_query": query, "parameters": {}, "explanation": "generated", "confidence": 0.5})
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "MATCH (n) WHERE n.status = $set RETURN n",
+            "MATCH (n) WHERE n.status = 'CREATE' RETURN n",
+            'MATCH (n) WHERE n.action IN ["DELETE", "MERGE"] RETURN n',
+            "MATCH (n) RETURN n.set, n.merge, n {.call}",
+            "MATCH (n) // create a report\nRETURN n",
+            "MATCH (n) /* merge later */ RETURN n",
+            "MATCH (n:`Create`) RETURN n",
+        ],
+    )
+    def test_non_clause_keywords_accepted(self, query: str) -> None:
+        assert validate_llm_json(self._raw(query), CypherQueryOutput).cypher_query == query
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "MATCH (n) WHERE n.x = 'a' CREATE (m) RETURN m",
+            "MATCH (n) WHERE n.x = 'it\\'s' CREATE (m) RETURN m",
+            'MATCH (n) WHERE n.x = "a" SET n.y = 1 RETURN n',
+            "MATCH (n) WHERE n.x = 'unterminated CREATE (m) RETURN m",
+            "MATCH (n) /* unterminated CREATE (m) RETURN m",
+            "MATCH (n) // comment\rCREATE (m) RETURN m",
+            "MATCH (n) // comment\u2028CREATE (m) RETURN m",
+            "MATCH (n) RETURN n.x AS `a``b` CREATE (m)",
+            "MATCH (n) WITH n /* c */ DETACH DELETE n",
+            "MATCH (n) SET n.x = $set RETURN n",
+            "LOAD/**/CSV FROM 'https://example.com/x.csv' AS row RETURN row",
+        ],
+    )
+    def test_real_clauses_still_rejected(self, query: str) -> None:
+        with pytest.raises(ValidationError, match="Destructive keyword rejected"):
+            validate_llm_json(self._raw(query), CypherQueryOutput)
+
+
 class TestValidatedLLMClientNoProvider:
     """Test that the client raises FeatureNotEnabled when no API key is set."""
 
