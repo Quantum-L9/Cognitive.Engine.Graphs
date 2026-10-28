@@ -19,9 +19,15 @@ at chassis.entrypoint:create_app so switching chassis is a config change,
 not a command change.
 
 Seam audit 2026-09-02: the legacy chassis accepts a dict ExecuteRequest with
-api-key auth and no Gate provenance — a direct-ingress side door around Gate.
-It is therefore refused at startup outside dev/local/test environments while
-``settings.require_sdk_chassis_in_prod`` is on (the default).
+no Gate provenance — a direct-ingress side door around Gate. It is therefore
+refused outside dev/local/test environments while
+``settings.require_sdk_chassis_in_prod`` is on (the default). RU-082: the same
+predicate (``legacy_chassis_refusal``) is enforced by
+``chassis.chassis_app.create_app`` itself, so launching that factory directly
+(``uvicorn chassis.chassis_app:create_app --factory``) cannot bypass it. The
+legacy chassis authenticates only when ``L9_API_KEY`` is configured (and
+``legacy_chassis_auth_enabled`` is on); without a key it is auth-free, which
+is acceptable only because it cannot start outside dev/local/test.
 """
 
 from __future__ import annotations
@@ -43,6 +49,22 @@ _VALID = (LEGACY, SDK)
 LEGACY_PERMITTED_ENVS: frozenset[str] = frozenset({"dev", "local", "test"})
 
 
+def legacy_chassis_refusal() -> str | None:
+    """Why the legacy dict chassis may not run here, or None when it may.
+
+    Single predicate shared by ``resolve_chassis`` and the legacy factory
+    ``chassis.chassis_app.create_app`` (RU-082).
+    """
+    from engine.config.settings import settings
+
+    if settings.require_sdk_chassis_in_prod and settings.l9_env not in LEGACY_PERMITTED_ENVS:
+        return (
+            f"L9_CHASSIS must be {SDK!r} outside {sorted(LEGACY_PERMITTED_ENVS)} "
+            f"(l9_env={settings.l9_env!r}, production={settings.is_production})"
+        )
+    return None
+
+
 def resolve_chassis() -> str:
     """Return the selected chassis name, validating L9_CHASSIS."""
     selected = os.environ.get("L9_CHASSIS", DEFAULT_CHASSIS).strip().lower()
@@ -50,14 +72,11 @@ def resolve_chassis() -> str:
         msg = f"L9_CHASSIS must be one of {_VALID}, got {selected!r}"
         raise ValueError(msg)
 
-    from engine.config.settings import settings
-
-    if selected != SDK and settings.require_sdk_chassis_in_prod and settings.l9_env not in LEGACY_PERMITTED_ENVS:
-        msg = (
-            f"L9_CHASSIS must be {SDK!r} outside {sorted(LEGACY_PERMITTED_ENVS)} "
-            f"(l9_env={settings.l9_env!r}, production={settings.is_production}); got {selected!r}"
-        )
-        raise ValueError(msg)
+    if selected != SDK:
+        refusal = legacy_chassis_refusal()
+        if refusal is not None:
+            msg = f"{refusal}; got {selected!r}"
+            raise ValueError(msg)
     return selected
 
 
@@ -77,4 +96,12 @@ def create_app() -> FastAPI:
     return build_legacy_app()
 
 
-__all__ = ["DEFAULT_CHASSIS", "LEGACY", "LEGACY_PERMITTED_ENVS", "SDK", "create_app", "resolve_chassis"]
+__all__ = [
+    "DEFAULT_CHASSIS",
+    "LEGACY",
+    "LEGACY_PERMITTED_ENVS",
+    "SDK",
+    "create_app",
+    "legacy_chassis_refusal",
+    "resolve_chassis",
+]

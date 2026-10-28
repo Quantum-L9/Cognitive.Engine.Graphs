@@ -127,6 +127,7 @@ independently of the code default.
 | Health Range Gate Fields | `HEALTH_RANGE_GATE_FIELDS_ENABLED` (`health_range_gate_fields_enabled`) | `True` | unset | active (hardening); range/window bound properties (`candidateprop_min/max/start/end`) are gate-critical in health readiness (RU-109 / CEG-COR-045) — see §15 |
 | Health Blocked Score Scale | `HEALTH_BLOCKED_SCORE_SCALE_ENABLED` (`health_blocked_score_scale_enabled`) | `True` | unset | active (hardening); a blocked readiness reports the 60% gate component `round(gc*60, 2)` so the score is monotonic in gate completeness (RU-110 / CEG-COR-046) — see §15 |
 | Health Priority Staleness | `HEALTH_PRIORITY_STALENESS_ENABLED` (`health_priority_staleness_enabled`) | `True` | unset | active (hardening); the 10% staleness term of the enrichment priority is computed from field staleness instead of always 0 (RU-111 / CEG-COR-047) — see §15 |
+| Legacy Chassis Auth | `LEGACY_CHASSIS_AUTH_ENABLED` (`legacy_chassis_auth_enabled`) | `True` | unset | active (hardening, dev/test-only legacy chassis); with `L9_API_KEY` set, `chassis_app.create_app` registers `BearerAuthMiddleware` (`/v1/health` public) and POST `/v1/execute` returns 403 for a tenant outside the token's `allowed_tenants` while `TENANT_AUTH_ENABLED`; the factory also refuses to build outside dev/local/test while `REQUIRE_SDK_CHASSIS_IN_PROD` (RU-082 / CEG-COR-039); off restores the unauthenticated factory — see §11 |
 
 ---
 
@@ -441,8 +442,29 @@ bypass key. It does **not** compare the claim against the request tenant — the
 middleware defers that "to the handler layer", and no caller ever forwarded the
 claim into the engine. The engine-side branch of `_validate_tenant_access` that
 would have compared it was therefore unreachable; CEG-AUTH-01 removed it rather
-than keep code that documented an enforcement which did not exist. Wiring the
-claim through the execute route is a chassis change and is not done here.
+than keep code that documented an enforcement which did not exist.
+
+**Legacy chassis (RU-082 / CEG-COR-039, DEC-29/DEC-30).** The legacy dict chassis
+(`chassis/chassis_app.py`, dev/test only) now enforces the claim at the chassis,
+where it belongs:
+
+- `create_app` refuses to build (`ValueError`) outside `dev`/`local`/`test` while
+  `REQUIRE_SDK_CHASSIS_IN_PROD` is on — the same predicate as
+  `chassis.entrypoint.resolve_chassis` (`legacy_chassis_refusal`), so
+  `uvicorn chassis.chassis_app:create_app --factory` cannot bypass the entrypoint.
+- With `L9_API_KEY` set (`ChassisSettings.l9_api_key`) and
+  `LEGACY_CHASSIS_AUTH_ENABLED=True` (default), `BearerAuthMiddleware` is
+  registered: no `Authorization` → 401, wrong key → 403, `/v1/health` public.
+- With `TENANT_AUTH_ENABLED`, POST `/v1/execute` compares `ExecuteRequest.tenant`
+  with the token's `allowed_tenants` and returns 403 on a mismatch; a valid
+  `X-Internal-Bypass-Key` skips the comparison. A string claim names one tenant.
+- Without `L9_API_KEY` the legacy chassis stays auth-free, which is acceptable
+  only because it cannot start outside dev/local/test.
+
+Rollback in dev: `LEGACY_CHASSIS_AUTH_ENABLED=false` and/or
+`TENANT_AUTH_ENABLED=false`; the factory guard is relaxed only by
+`REQUIRE_SDK_CHASSIS_IN_PROD=false`. The SDK chassis (`chassis/node_app.py`) is
+unaffected.
 
 The control that is enforced on every action is `TENANT_ALLOWLIST`
 (comma-separated tenant ids, resolved into `EngineState` at startup):

@@ -636,6 +636,15 @@ class Settings(BaseSettings):
     # 'v2', dates). On: `<major>.<minor>.<patch>[-<stage>]` per
     # DOMAIN_SPEC_VERSIONING.md. Off: any string.
     domain_version_semver_enforced: bool = True
+    # Correctness remediation lane L (plan 0d84ec8, RU-082..RU-083)
+    # RU-082 / CEG-COR-039: the legacy dict chassis (chassis/chassis_app.py,
+    # dev/test only) registered no authentication, so any caller executed for
+    # any tenant, and W3-01 stored the token's allowed_tenants without ever
+    # comparing it. On: when L9_API_KEY is configured, create_app registers
+    # BearerAuthMiddleware (/v1/health stays public) and, with
+    # tenant_auth_enabled, POST /v1/execute returns 403 for a tenant outside
+    # the token's allowed_tenants. Off: the unauthenticated factory.
+    legacy_chassis_auth_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
