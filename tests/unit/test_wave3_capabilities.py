@@ -738,6 +738,8 @@ class TestAdminCapabilityEnforcement:
         _admin_wired([CapabilitySpec(name="admin_ops", actions=["admin:write"], allowed_subjects=["ops-only"])])
         result = await handle_admin("orbital-logistics", {"subaction": "list_domains"})
         assert result["domains"] == ["orbital-logistics"]
+
+
 class TestCapabilityRecordBinding:
     """RU-090 / RG-119: validation is bound to the registered record (repro capability_forgery.py)."""
 
