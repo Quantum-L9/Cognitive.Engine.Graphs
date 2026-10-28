@@ -415,12 +415,16 @@ class TestEraseSubject:
         assert recorder.erasure_entries_before_delete == 1
 
     @pytest.mark.asyncio
-    async def test_erase_subject_uses_configured_subject_field_and_two_arg_sql(self, monkeypatch):
+    async def test_erase_subject_uses_configured_subject_field_and_tenant_scoped_sql(self, monkeypatch):
+        """RU-066 follow-up (PR #352 review): the packet erasure is scoped to the
+        requesting tenant. Before, ``gdpr_erase_subject($1, $2)`` filtered on the
+        subject id only, so under an owner DSN another tenant's packets for a
+        reused id were deleted too."""
         recorder = _ErasureRecorder()
         result = await recorder.run(monkeypatch, subject_field="customer_id", subject_id="cust-42")
 
         assert recorder.cypher == ["MATCH (n {customer_id: $dsid}) DETACH DELETE n RETURN count(n) AS deleted"]
-        assert recorder.sql == [("SELECT gdpr_erase_subject($1, $2)", ("cust-42", "test_domain"))]
+        assert recorder.sql == [("SELECT gdpr_erase_subject($1, $2, $3)", ("cust-42", "test_domain", "test_domain"))]
         assert result["summary"]["packets_deleted"] == 7
         assert isinstance(result["summary"]["packets_deleted"], int)
 
@@ -809,3 +813,51 @@ class TestGDSHealthProbeRegistration:
 
         result = await lifecycle._gds_health_check()
         assert "degraded" in result["gds"]
+
+
+class _FakeErasePool:
+    """Pool whose connection records every statement."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple]] = []
+
+    def acquire(self):
+        pool = self
+
+        class _Conn:
+            async def fetchval(self, sql, *args):
+                pool.calls.append((sql, args))
+                return 1
+
+        class _Ctx:
+            async def __aenter__(self):
+                return _Conn()
+
+            async def __aexit__(self, *exc):
+                return None
+
+        return _Ctx()
+
+
+class TestPiiEraseSubjectTenantScope:
+    """RU-066 follow-up: PIIHandler.erase_subject scopes packet erasure to one tenant."""
+
+    @pytest.mark.asyncio
+    async def test_packet_erasure_passes_the_tenant(self) -> None:
+        from engine.compliance.pii import PIIHandler
+
+        pool = _FakeErasePool()
+        summary = await PIIHandler().erase_subject("subj-1", db_pool=pool, tenant="tenant-a", performed_by="tenant-a")
+
+        assert pool.calls == [("SELECT gdpr_erase_subject($1, $2, $3)", ("subj-1", "tenant-a", "tenant-a"))]
+        assert summary["packets_deleted"] == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tenant", [None, ""])
+    async def test_packet_erasure_without_tenant_raises_before_any_sql(self, tenant) -> None:
+        from engine.compliance.pii import PIIHandler
+
+        pool = _FakeErasePool()
+        with pytest.raises(ValueError, match="tenant"):
+            await PIIHandler().erase_subject("subj-1", db_pool=pool, tenant=tenant)
+        assert pool.calls == []
