@@ -476,6 +476,14 @@ class Settings(BaseSettings):
                 raise ValueError(msg)
         return self
 
+    @model_validator(mode="after")
+    def _validate_compliance_buffer_max(self) -> "Settings":
+        """RU-065: the soft sink sizes every compliance AuditLogger from compliance_buffer_max."""
+        if self.compliance_audit_soft_sink and self.compliance_buffer_max < 1:
+            msg = f"compliance_buffer_max must be >= 1 when compliance_audit_soft_sink is on (got {self.compliance_buffer_max})"
+            raise ValueError(msg)
+        return self
+
     @property
     def is_production(self) -> bool:
         return self.l9_env == "prod"

@@ -1058,7 +1058,11 @@ The PostgreSQL audit pool (`POSTGRES_DSN`, §7) is a soft dependency, but withou
 re-raised the failure after their Neo4j work had succeeded. On:
 
 - `ComplianceEngine` builds its `AuditLogger` with `buffer_size=COMPLIANCE_BUFFER_MAX`
-  (default 100). `_emit`, `emit_async` and the re-buffer after a failed
+  (default 100; a value < 1 is refused at Settings load and by `AuditLogger`, since 0
+  would drop every entry meant for persistence). Metadata is bound as the JSON text of
+  the entry's Pydantic JSON form (datetimes, UUIDs and decimals become strings, NaN
+  becomes `null`), and the rows are built inside the protected block, so a batch that
+  fails to serialize or persist is re-buffered rather than lost. `_emit`, `emit_async` and the re-buffer after a failed
   `flush_to_store` keep the newest `buffer_size` entries; dropped entries are counted
   (`AuditLogger.dropped_count`) and logged at WARNING once per `buffer_size` drops.
   Every entry is still emitted to the `l9.audit` logger when it is created.
