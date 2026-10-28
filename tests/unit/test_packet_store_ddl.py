@@ -173,9 +173,7 @@ class TestPacketStoreDdlOutcomeColumn:
         assert update_grants, "no UPDATE grant on packet_store for l9_product"
         for grant in update_grants:
             normalized = re.sub(r"\s+", "", grant).upper()
-            assert normalized == "UPDATE(OUTCOME_JSONB)", (
-                f"UPDATE grant must be column-level on outcome_jsonb: {grant!r}"
-            )
+            assert normalized == "UPDATE(OUTCOME_JSONB)", "grant must be column-level on outcome_jsonb: " + repr(grant)
 
     def test_update_policy_is_tenant_scoped(self) -> None:
         match = re.search(
