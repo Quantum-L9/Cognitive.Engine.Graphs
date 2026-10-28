@@ -43,7 +43,9 @@ RETIRED_LEGACY_PACKS = (
     "roofing-company",
 )
 # Served under default settings before the dormant marks; must stay served.
-SERVED_PACKS = ("plasticos",)
+# freight-matching was withheld by the round-1 admission checks (it failed every
+# match) and is served again since RU-037 bound its scoring (CEG-COR-011).
+SERVED_PACKS = ("freight-matching", "plasticos")
 # Active packs that are not retired legacy packs but are declared dormant by
 # their owner until an open product decision lands. Each names the decision.
 # The pack must compile cleanly (admission_defects == []): dormancy is the only
@@ -80,6 +82,14 @@ def _pre_repair_mortgage(raw: dict) -> None:
     )
 
 
+def _pre_repair_freight(raw: dict) -> None:
+    """freight-matching as it was before RU-037: deadhead/rate dims declare no operands."""
+    for dim in raw["scoring"]["dimensions"]:
+        if dim["name"] in ("deadhead_distance", "rate_alignment"):
+            for key in ("candidateprop", "candidateprop_lon", "queryprop", "queryprop_lon"):
+                dim.pop(key, None)
+
+
 # Unexecutable pack shapes the generic admission policy must withhold, for the
 # named defects, until the operator switches the named checks off. ``None``
 # means the repository pack as it is today; a mutation re-creates the defect a
@@ -87,8 +97,9 @@ def _pre_repair_mortgage(raw: dict) -> None:
 # stays covered after the repository pack is fixed.
 WITHHELD_UNTIL_REPAIRED = {
     # RU-020: scoring references $lat/$lon/$target_price nothing binds (CEG-COR-011).
+    # Repaired by RU-037; re-created on a copy.
     "freight-matching": (
-        None,
+        _pre_repair_freight,
         ("'lat'", "'lon'", "'target_price'"),
         ("scoring_admission_check_enabled", "admission_checks_full_match"),
     ),

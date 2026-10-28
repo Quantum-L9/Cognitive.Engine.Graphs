@@ -512,6 +512,9 @@ class ScoringDimensionSpec(BaseModel):
     maxvalue: float | None = None
     defaultwhennull: float = 0.0
     decayconstant: float | None = None  # For geodecay: distance k in meters
+    # For geodecay: longitude operands (RU-037); default candidate.lon / $lon.
+    candidateprop_lon: str | None = None
+    queryprop_lon: str | None = None
     bias: float | None = None  # For communitymatch: multiplicative boost
     weightkey: str
     defaultweight: float

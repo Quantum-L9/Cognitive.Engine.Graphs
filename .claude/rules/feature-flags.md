@@ -156,3 +156,7 @@ were industry-specific and had no caller).
 |------|---------|---------|
 | legacy_chassis_auth_enabled | True | Legacy dict chassis (dev/test only): with `L9_API_KEY` set, `create_app` registers `BearerAuthMiddleware` (`/v1/health` public) and POST `/v1/execute` returns 403 for a tenant outside the token's `allowed_tenants` (with `tenant_auth_enabled`); the factory refuses to build outside dev/local/test while `require_sdk_chassis_in_prod` (RU-082 / CEG-COR-039); off restores the unauthenticated factory |
 | legacy_chassis_status_mapping_enabled | True | Legacy dict chassis (dev/test only): `execute_action` attaches an HTTP status hint — circuit open → 503 + `Retry-After`, `ChassisError` → its `status_code`, engine `ValidationError` → 422, other `EngineError` → 500 with its message, else 500 `Internal server error` (no raw exception text) (RU-083 / CEG-COR-087 / CEG-COR-088); off restores 200-for-circuit-open and the keyword mapping |
+## Correctness remediation lane J (plan 0d84ec8)
+| Flag | Default | Purpose |
+|------|---------|---------|
+| geodecay_declared_longitude | True | A `geodecay` dimension's declared `candidateprop_lon` / `queryprop_lon` name the longitude operands (default `candidate.lon` / `$lon`, byte-identical when undeclared); freight `deadhead_distance` binds Carrier `currentlon` to Load `pickuplon` (RU-037 / CEG-COR-011); off ignores the declarations |

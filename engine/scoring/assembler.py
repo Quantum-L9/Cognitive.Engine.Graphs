@@ -354,13 +354,28 @@ class ScoringAssembler:
         return base_expr
 
     def _compile_geodecay(self, dim: ScoringDimensionSpec) -> str:
+        """Distance decay between the candidate's and the query's coordinates.
+
+        RU-037 / CEG-COR-011: with ``settings.geodecay_declared_longitude`` on
+        (default) the longitude operands are the dimension's declared
+        ``candidateprop_lon`` / ``queryprop_lon``, defaulting to
+        ``candidate.lon`` / ``$lon``; off ignores the declarations.
+        """
+        from engine.config.settings import settings
+
         k = cypher_number(dim.decayconstant or 50000.0)
         lat_prop = sanitize_label(dim.candidateprop or "lat")
         query_lat_param = sanitize_label(dim.queryprop or lat_prop)
+        lon_prop = "lon"
+        query_lon_param = "lon"
+        if settings.geodecay_declared_longitude:
+            # getattr: duck-typed dimension doubles predate the fields (cf. soft_match).
+            lon_prop = sanitize_label(getattr(dim, "candidateprop_lon", None) or "lon")
+            query_lon_param = sanitize_label(getattr(dim, "queryprop_lon", None) or "lon")
         return (
             f"1.0 / (1.0 + point.distance("
-            f"point({{latitude: candidate.{lat_prop}, longitude: candidate.lon}}),"
-            f" point({{latitude: ${query_lat_param}, longitude: $lon}})"
+            f"point({{latitude: candidate.{lat_prop}, longitude: candidate.{lon_prop}}}),"
+            f" point({{latitude: ${query_lat_param}, longitude: ${query_lon_param}}})"
             f") / {k})"
         )
 

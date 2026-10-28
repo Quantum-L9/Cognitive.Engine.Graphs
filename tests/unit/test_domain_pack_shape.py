@@ -584,13 +584,20 @@ def test_pre_repair_mortgage_step_is_withheld_naming_its_unassemblable_step() ->
     assert admission_defects(_spec(DOMAINS_ROOT / "mortgage-brokerage")) == []
 
 
-def test_current_freight_pack_is_withheld_naming_its_unbound_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pre_repair_freight_pack_is_withheld_naming_its_unbound_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """RU-039 coverage on the freight shape RU-037 repaired: dims without operand declarations."""
     from engine.config import loader as loader_module
 
     monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", False)
-    defects = "\n".join(admission_defects(_spec(DOMAINS_ROOT / "freight-matching")))
+    raw = _raw("freight-matching")
+    for dim in raw["scoring"]["dimensions"]:
+        if dim["name"] in ("deadhead_distance", "rate_alignment"):
+            for key in ("candidateprop", "candidateprop_lon", "queryprop", "queryprop_lon"):
+                dim.pop(key, None)
+    defects = "\n".join(admission_defects(DomainSpec.model_validate(raw)))
     for param in ("'lat'", "'lon'", "'target_price'"):
         assert param in defects
+    assert admission_defects(_spec(DOMAINS_ROOT / "freight-matching")) == []
 
 
 def test_full_match_check_off_restores_previous_admission(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -743,3 +750,114 @@ def test_plasticos_community_match_reads_a_caller_supplied_community() -> None:
     assert (field.type.value, field.required) == ("int", False)
     expression = _dimension_expression("plasticos", "community_match")
     assert "candidate.community_id = $community_id" in expression
+
+
+# RG-049 (RU-037 / CEG-COR-011, DEC-14 option A): every admitted pack's full match
+# Cypher, compiled by handle_match from a query carrying only queryschema fields,
+# binds every $parameter. Freight scored with geodecay's hardcoded
+# candidate.lat/lon vs $lat/$lon and pricealignment's $target_price.
+_FREIGHT_QUERY = {
+    "loadid": "L1",
+    "pickuplat": 41.8,
+    "pickuplon": -87.6,
+    "deliverylat": 39.7,
+    "deliverylon": -104.9,
+    "weightlbs": 30000.0,
+    "equipmenttype": "van",
+    "pickupdate": "2026-11-01T08:00:00Z",
+    "deliverydate": "2026-11-03T08:00:00Z",
+    "ratepermile": 2.5,
+}
+_MORTGAGE_QUERY = {
+    "borrowerid": "B1",
+    "creditscore": 720,
+    "annualincomeusd": 120000.0,
+    "monthlydebtusd": 2000.0,
+    "loanamountusd": 400000.0,
+    "propertyvalueusd": 500000.0,
+    "downpaymentusd": 100000.0,
+    "propertystate": "TX",
+    "loanpurpose": "purchase",
+    "vaeligible": True,
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("domain_id", "direction", "query"),
+    [
+        ("freight-matching", "loadtocarrier", _FREIGHT_QUERY),
+        ("mortgage-brokerage", "borrowertoproduct", _MORTGAGE_QUERY),
+        ("plasticos", _DIR1, _PLASTICOS_QUERIES[_DIR1]),
+        ("plasticos", _DIR2, _PLASTICOS_QUERIES[_DIR2]),
+    ],
+    ids=["freight", "mortgage", "plasticos-dir1", "plasticos-dir2"],
+)
+async def test_queryschema_only_match_binds_every_parameter(
+    domain_id: str, direction: str, query: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from engine.config import loader as loader_module
+
+    # mortgage-brokerage is dormant (DEC-15); the override serves it only if it admits.
+    monkeypatch.setattr(loader_module.settings, "dormant_domain_packs_enabled", True)
+    monkeypatch.setattr(loader_module.settings, "unvalidated_domain_packs_enabled", False)
+    cypher, parameters = await _capture_match(domain_id, direction, dict(query))
+    assert _missing_params(cypher, parameters) == []
+
+
+def test_freight_deadhead_measures_carrier_position_to_pickup() -> None:
+    expression = _dimension_expression("freight-matching", "deadhead_distance")
+    assert expression == (
+        "1.0 / (1.0 + point.distance(point({latitude: candidate.currentlat, longitude: candidate.currentlon}),"
+        " point({latitude: $pickuplat, longitude: $pickuplon})) / 50000.0)"
+    )
+
+
+def test_freight_dimensions_read_only_declared_carrier_properties() -> None:
+    import re
+
+    spec = _admitted_spec("freight-matching")
+    carrier = {p.name for n in spec.ontology.nodes if n.label == "Carrier" for p in n.properties}
+    for dim in spec.scoring.dimensions:
+        read = set(
+            re.findall(r"candidate\.([A-Za-z_][A-Za-z0-9_]*)", _dimension_expression("freight-matching", dim.name))
+        )
+        assert read, dim.name
+        assert read <= carrier, (dim.name, read - carrier)
+    rate = _dimension_expression("freight-matching", "rate_alignment")
+    assert "candidate.ratepermile" in rate
+    assert "$ratepermile" in rate
+
+
+def test_geodecay_declared_longitude_flag_defaults_on() -> None:
+    from engine.config.settings import Settings
+
+    assert Settings.model_fields["geodecay_declared_longitude"].default is True
+
+
+@pytest.mark.parametrize("flag", [True, False])
+@pytest.mark.parametrize("dim_name", ["geo_proximity", "active_supply_geo"])
+def test_plasticos_geodecay_is_byte_identical_under_the_flag(
+    dim_name: str, flag: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Plasticos declares no longitude operands: candidate.lon / $lon either way."""
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "geodecay_declared_longitude", flag)
+    assert _dimension_expression("plasticos", dim_name) == (
+        "1.0 / (1.0 + point.distance(point({latitude: candidate.lat, longitude: candidate.lon}),"
+        " point({latitude: $lat, longitude: $lon})) / 800000.0)"
+    )
+
+
+def test_geodecay_declared_longitude_off_restores_the_hardcoded_operands(monkeypatch: pytest.MonkeyPatch) -> None:
+    """C-21 rollback: the declarations are ignored, so freight is withheld again for its unbound $lon."""
+    from engine.config import loader as loader_module
+
+    monkeypatch.setattr(loader_module.settings, "geodecay_declared_longitude", False)
+    expression = _dimension_expression("freight-matching", "deadhead_distance")
+    assert "longitude: candidate.lon}" in expression
+    assert "longitude: $lon}" in expression
+    defects = "\n".join(admission_defects(_spec(DOMAINS_ROOT / "freight-matching")))
+    assert "deadhead_distance" in defects
+    assert "'lon'" in defects

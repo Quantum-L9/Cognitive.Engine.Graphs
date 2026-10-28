@@ -652,6 +652,15 @@ class Settings(BaseSettings):
     # Retry-After, ChassisError.status_code, 422, 500 with the EngineError
     # message, else 500 "Internal server error"). Off: the keyword mapping.
     legacy_chassis_status_mapping_enabled: bool = True
+    # Correctness remediation lane J (plan 0d84ec8, RU-037)
+    # RU-037 / CEG-COR-011 (DEC-14 option A): geodecay hardcoded the longitude
+    # operands `candidate.lon` / `$lon`, so a pack whose coordinates are not
+    # named lat/lon (freight Carrier currentlat/currentlon vs Load
+    # pickuplat/pickuplon) could not bind them. On: a dimension's declared
+    # `candidateprop_lon` / `queryprop_lon` name the longitude operands; a
+    # dimension declaring neither compiles byte-identically. Off: the fields
+    # are ignored and `candidate.lon` / `$lon` are emitted as before.
+    geodecay_declared_longitude: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

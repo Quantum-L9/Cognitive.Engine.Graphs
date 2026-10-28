@@ -15,7 +15,7 @@ domain:
   description: >
     Match freight loads to optimal carriers with ELD integration, backhaul
     optimization, and FMCSA compliance.
-  version: 1.1.0
+  version: 1.2.0
 
 ontology:
   nodes:
@@ -46,6 +46,9 @@ ontology:
         - {name: maxweightlbs, type: float, unit: weight}
         - {name: ontimeratingpct, type: float, unit: percentage}
         - {name: safetyscore, type: float}
+        # The carrier's quoted rate per mile, compared with the load's
+        # ratepermile by rate_alignment (CEG-COR-011, DEC-14 option A).
+        - {name: ratepermile, type: float, unit: rate_per_distance}
 
   edges:
     - {type: COMPLETED_LOAD, from: Carrier, to: Load, direction: DIRECTED, category: transaction, managedby: sync}
@@ -90,14 +93,26 @@ gates:
 
 scoring:
   dimensions:
+    # Both dimensions declare their operands (CEG-COR-011, DEC-14 option A).
+    # Undeclared, geodecay read candidate.lat/lon vs $lat/$lon and
+    # pricealignment candidate.price_per_unit vs $target_price: no Carrier
+    # property and no query field, so every freight match failed.
     - name: deadhead_distance
+      # Distance from the carrier's current position to the load's pickup.
       source: computed
       computation: geodecay
+      candidateprop: currentlat
+      candidateprop_lon: currentlon
+      queryprop: pickuplat
+      queryprop_lon: pickuplon
       weightkey: wdeadhead
       defaultweight: 0.40
     - name: rate_alignment
+      # The carrier's quoted rate per mile against the load's offered rate.
       source: computed
       computation: pricealignment
+      candidateprop: ratepermile
+      queryprop: ratepermile
       weightkey: wrate
       defaultweight: 0.25
     - name: ontime_rating
