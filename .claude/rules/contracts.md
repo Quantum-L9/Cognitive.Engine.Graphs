@@ -37,7 +37,7 @@ Enforced by `tools/contract_scanner.py` and `tools/verify_contracts.py`.
 |---|------|------|
 | 12 | Domain Spec Source of Truth | All behavior from YAML → DomainConfig Pydantic. Never raw YAML/dicts. |
 | 13 | Gate-Then-Score | 10 gate types, 13 scoring computations. All in Cypher WHERE/WITH — no Python post-filtering. |
-| 14 | NULL Semantics | Every gate declares null_behavior: pass or fail. Compiler handles it. |
+| 14 | NULL Semantics | Every gate declares `nullbehavior`: pass or fail (default pass). Compiler handles it. Unknown gate keys (e.g. `null_behavior`) fail validation (RU-053). |
 | 15 | Bidirectional Matching | invertible: true swaps candidate ↔ query. match_directions scopes to direction. |
 | 16 | File Structure Fixed | No new top-level directories without architectural approval. |
 

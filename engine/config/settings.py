@@ -628,6 +628,10 @@ class Settings(BaseSettings):
     # same message is a ValueError; a temporalrange whose derived
     # `<q>_start` and `<q>_end` are both declared is valid. Off: warning only.
     domain_undeclared_param_rejected: bool = True
+    # RU-053 / CEG-COR-081: GateSpec ignored unknown keys, so the documented
+    # snake_case `null_behavior: fail` compiled as PASS. On: a gate key that is
+    # not a GateSpec field is a ValidationError naming it. Off: ignored.
+    gate_spec_forbid_unknown_keys: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

@@ -399,6 +399,36 @@ class TestGateSpec:
         gate = GateSpec(name="g1", type=GateType.THRESHOLD)
         assert gate.nullbehavior == NullBehavior.PASS
 
+    _GATE = {"name": "g1", "type": "threshold", "candidateprop": "p", "queryparam": "q", "operator": ">="}
+
+    def test_snake_case_null_behavior_key_rejected(self) -> None:
+        """RU-053 / CEG-COR-081: `null_behavior: fail` was ignored (PASS); it now fails validation."""
+        with pytest.raises(PydanticValidationError, match=r"unknown key\(s\) \['null_behavior'\]"):
+            GateSpec.model_validate({**self._GATE, "null_behavior": "fail"})
+
+    def test_unknown_gate_key_names_the_real_key(self) -> None:
+        """RU-053: the refusal points at the declared key the misspelling resembles."""
+        with pytest.raises(PydanticValidationError, match="did you mean 'nullbehavior'"):
+            GateSpec.model_validate({**self._GATE, "null_behavior": "fail"})
+
+    def test_unknown_gate_key_rejected_in_domain_spec(self) -> None:
+        """RU-053: a domain spec whose gate carries an unrecognised key fails validation."""
+        raw = _minimal_domain_raw()
+        raw["gates"] = [{**self._GATE, "queryparam": 1, "candidateprop": "fid", "threshold": 5}]
+        with pytest.raises(PydanticValidationError, match=r"unknown key\(s\) \['threshold'\]"):
+            DomainSpec.model_validate(raw)
+
+    def test_declared_gate_keys_accepted(self) -> None:
+        """RU-053: every declared key (here `nullbehavior`) still validates."""
+        gate = GateSpec.model_validate({**self._GATE, "nullbehavior": "fail"})
+        assert gate.nullbehavior == NullBehavior.FAIL
+
+    def test_unknown_gate_key_flag_off_ignored(self) -> None:
+        """RU-053 flag off: unknown keys are ignored as before (and nullbehavior stays PASS)."""
+        with patch(_SETTINGS_TARGET, _settings(gate_spec_forbid_unknown_keys=False)):
+            gate = GateSpec.model_validate({**self._GATE, "null_behavior": "fail"})
+        assert gate.nullbehavior == NullBehavior.PASS
+
 
 @pytest.mark.unit
 class TestScoringDimensionSpec:

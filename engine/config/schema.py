@@ -418,6 +418,34 @@ class GateSpec(BaseModel):
     # the parameter name `$True` and `85.0` the refused name `$85.0`.
     queryparam: str | int | float | bool | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_unknown_keys(cls, data: object) -> object:
+        """RU-053 / CEG-COR-081: refuse a gate key that is not a declared field.
+
+        Pydantic ignores unknown keys by default, so the documented-but-wrong
+        `null_behavior: fail` compiled as the PASS default. Field names are the
+        YAML keys (no aliases, PYDANTIC_YAML_MAPPING.md), so `model_fields` is
+        the complete set of accepted keys.
+        """
+        from engine.config.settings import settings
+
+        if not settings.gate_spec_forbid_unknown_keys or not isinstance(data, dict):
+            return data
+        unknown = sorted(str(key) for key in data if key not in cls.model_fields)
+        if unknown:
+            by_squashed = {name.replace("_", "").lower(): name for name in cls.model_fields}
+            hints = [
+                f"'{key}' (did you mean '{by_squashed[key.replace('_', '').lower()]}'?)"
+                for key in unknown
+                if key.replace("_", "").lower() in by_squashed
+            ]
+            msg = f"Gate '{data.get('name')}' has unknown key(s) {unknown}"
+            if hints:
+                msg += f"; {', '.join(hints)}"
+            raise ValueError(msg)
+        return data
+
     @field_validator("queryparam", mode="before")
     @classmethod
     def validate_queryparam_shape(cls, v: object) -> object:

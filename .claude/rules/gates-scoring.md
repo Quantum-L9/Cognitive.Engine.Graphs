@@ -9,7 +9,7 @@ paths:
 ## Gate Compilation (Contract 13, 14, 15)
 - 10 gate types: range, threshold, boolean, composite, enummap, exclusion, selfrange, freshness, temporalrange, traversal
 - Compilation order: Traversal → Gates → Scoring (gate WHERE depends on traversal MATCH)
-- Every gate declares `null_behavior: pass | fail` — compiler handles it, callers don't
+- Every gate declares `nullbehavior: pass | fail` (default `pass`) — compiler handles it, callers don't. The key is `nullbehavior`; an unknown gate key such as `null_behavior` fails validation (`gate_spec_forbid_unknown_keys`, RU-053)
 - Gates with `invertible: true` swap candidate ↔ query for bidirectional matching
 - `validate_gates()` pre-pass (W1-03): rejects gates with null-resolved params when `strict_null_gates=True`
 - All labels MUST pass `sanitize_label()` before Cypher interpolation (Contract 9)
