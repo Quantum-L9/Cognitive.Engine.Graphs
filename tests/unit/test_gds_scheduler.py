@@ -92,9 +92,9 @@ def _cypher_sent(driver: AsyncMock) -> str:
     return "\n".join(str(call.args[0]) for call in driver.execute_query.call_args_list)
 
 
-def _minimal_spec(jobs: list[GDSJobSpec]) -> DomainSpec:
+def _minimal_spec(jobs: list[GDSJobSpec], domain_id: str = "test-domain") -> DomainSpec:
     raw = {
-        "domain": {"id": "test-domain", "name": "Test", "version": "0.0.1"},
+        "domain": {"id": domain_id, "name": "Test", "version": "0.0.1"},
         "ontology": {
             "nodes": [
                 {

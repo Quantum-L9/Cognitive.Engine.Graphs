@@ -32,6 +32,7 @@ import pytest
 
 from engine.config.schema import DomainSpec, GDSJobScheduleSpec, GDSJobSpec, GDSProjectionSpec
 from engine.gds.scheduler import GDSScheduler
+from tests.unit.test_gds_scheduler import _minimal_spec
 
 DB = "plasticos"  # created by the plasticos_database fixture; wiped by clean_db
 
@@ -60,47 +61,8 @@ def _spec() -> DomainSpec:
         writeedge="RECENTLY_INTERACTED_WITH",
         writeproperties=[{"timestamp_property": "last_seen_at"}],
     )
-    raw = {
-        "domain": {"id": DB, "name": "Recency", "version": "0.0.1"},
-        "ontology": {
-            "nodes": [
-                {
-                    "label": "Site",
-                    "managedby": "sync",
-                    "candidate": True,
-                    "matchdirection": "d1",
-                    "properties": [{"name": "site_id", "type": "int", "required": True}],
-                },
-                {
-                    "label": "Query",
-                    "managedby": "api",
-                    "queryentity": True,
-                    "matchdirection": "d1",
-                    "properties": [{"name": "query_id", "type": "int", "required": True}],
-                },
-            ],
-            "edges": [
-                {
-                    "type": "INTERACTED_WITH",
-                    "from": "Site",
-                    "to": "Site",
-                    "direction": "DIRECTED",
-                    "category": "transaction",
-                    "managedby": "sync",
-                },
-            ],
-        },
-        "matchentities": {
-            "candidate": [{"label": "Site", "matchdirection": "d1"}],
-            "queryentity": [{"label": "Query", "matchdirection": "d1"}],
-        },
-        "queryschema": {"matchdirections": ["d1"], "fields": []},
-        "traversal": {"steps": []},
-        "gates": [],
-        "scoring": {"dimensions": []},
-        "gdsjobs": [job.model_dump()],
-    }
-    return DomainSpec(**raw)
+    # The scheduler unit tests' Site/Query ontology, bound to the integration database.
+    return _minimal_spec([job], domain_id=DB)
 
 
 async def _overlay(graph_driver) -> dict[int, dict]:
