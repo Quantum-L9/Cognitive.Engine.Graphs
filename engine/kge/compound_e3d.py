@@ -203,8 +203,8 @@ class CompoundE3D:
         r_emb = self._relation_embeddings[relation]
         pos = h_emb + r_emb - self._entity_embeddings[tail]
         neg = h_emb + r_emb - self._entity_embeddings[neg_tail]
-        g_pos = pos / max(float(np.linalg.norm(pos)), _NORM_EPS)
-        g_neg = neg / max(float(np.linalg.norm(neg)), _NORM_EPS)
+        g_pos = pos / max(np.linalg.norm(pos).item(), _NORM_EPS)
+        g_neg = neg / max(np.linalg.norm(neg).item(), _NORM_EPS)
 
         entity_deltas: dict[str, npt.NDArray[np.float64]] = {}
         for eid, delta in ((head, -lr * (g_pos - g_neg)), (tail, lr * g_pos), (neg_tail, -lr * g_neg)):

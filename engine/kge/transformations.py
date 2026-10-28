@@ -262,9 +262,8 @@ class LinearMap3D(Transformation3D):
         if m.shape != (3, 3):
             msg = f"LinearMap3D needs a 3x3 matrix, got shape {m.shape}"
             raise ValueError(msg)
-        r0 = (float(m[0, 0]), float(m[0, 1]), float(m[0, 2]))
-        r1 = (float(m[1, 0]), float(m[1, 1]), float(m[1, 2]))
-        r2 = (float(m[2, 0]), float(m[2, 1]), float(m[2, 2]))
+        rows: list[list[float]] = m.tolist()
+        r0, r1, r2 = ((row[0], row[1], row[2]) for row in rows)
         return cls(matrix=(r0, r1, r2))
 
     def _matrix(self) -> npt.NDArray[np.float64]:
