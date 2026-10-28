@@ -502,9 +502,11 @@ class Settings(BaseSettings):
     # on the payload hash, so two requests with an equal payload collided, the
     # second pair's lineage insert broke the FK and the whole pair rolled back.
     # Child rows were also rewritten for a packet whose INSERT was skipped. On:
-    # content_hash is the SDK transport_hash (packet identity) and a skipped
-    # packet writes no hop/delegation/lineage rows. Off: the legacy key and
-    # unconditional child rows (C-21 rollback).
+    # content_hash is the SDK transport_hash (packet identity), the INSERT
+    # skips on ON CONFLICT (packet_id) so a re-delivered row stored under the
+    # legacy key is skipped instead of raising on packet_store_pkey, and a
+    # skipped packet writes no hop/delegation/lineage rows. Off: the legacy key
+    # and unconditional child rows (C-21 rollback).
     packet_store_packet_identity_dedup_enabled: bool = True
     # RU-079 / CEG-COR-042: packet_store.sql's RLS policies compare rows to
     # current_setting('app.current_tenant') and nothing set it, so a DSN that
