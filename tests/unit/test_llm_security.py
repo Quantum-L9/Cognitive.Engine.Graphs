@@ -74,3 +74,55 @@ class TestStrictOutputValidation:
         from engine.security.llm import validate_llm_output
 
         assert validate_llm_output('{"nodes": ["a"], "count": 1}', self._schema()).nodes == ["a"]
+
+
+class TestStrictOutputValidationAliases:
+    """RU-073 follow-up: strict=True counts validation aliases as declared keys."""
+
+    def test_alias_key_accepted(self) -> None:
+        from pydantic import BaseModel, Field
+
+        from engine.security.llm import validate_llm_output
+
+        class Edge(BaseModel):
+            from_: str = Field(..., alias="from")
+
+        assert validate_llm_output('{"from": "a"}', Edge).from_ == "a"
+
+    def test_alias_choices_and_path_accepted(self) -> None:
+        from pydantic import AliasChoices, AliasPath, BaseModel, Field
+
+        from engine.security.llm import validate_llm_output
+
+        class Score(BaseModel):
+            value: int = Field(..., validation_alias=AliasChoices("val", AliasPath("wrapped", 0)))
+
+        assert validate_llm_output('{"val": 1}', Score).value == 1
+        assert validate_llm_output('{"wrapped": [2]}', Score).value == 2
+
+    def test_field_name_accepted_only_when_validate_by_name(self) -> None:
+        from pydantic import BaseModel, ConfigDict, Field
+
+        from engine.security.llm import validate_llm_output
+
+        class ByName(BaseModel):
+            model_config = ConfigDict(populate_by_name=True)
+            from_: str = Field(..., alias="from")
+
+        class AliasOnly(BaseModel):
+            from_: str = Field(..., alias="from")
+
+        assert validate_llm_output('{"from_": "a"}', ByName).from_ == "a"
+        with pytest.raises(ValueError, match="unexpected field"):
+            validate_llm_output('{"from_": "a"}', AliasOnly)
+
+    def test_extra_field_still_rejected_beside_alias(self) -> None:
+        from pydantic import BaseModel, Field
+
+        from engine.security.llm import validate_llm_output
+
+        class Edge(BaseModel):
+            from_: str = Field(..., alias="from")
+
+        with pytest.raises(ValueError, match=r"unexpected field.*\['admin'\]"):
+            validate_llm_output('{"from": "a", "admin": true}', Edge)

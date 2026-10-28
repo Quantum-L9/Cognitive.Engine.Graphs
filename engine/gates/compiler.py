@@ -590,18 +590,35 @@ class GateCompiler:
         candidates = getattr(matchentities, "candidate", None)
         if not isinstance(edges, list) or not isinstance(candidates, list):
             return  # not a validated DomainSpec (a test double); nothing to check against
-        directions = set(gate.matchdirections or [])
-        candidate_labels = {c.label for c in candidates if not directions or c.matchdirection in directions}
         origins = {e.from_ for e in edges if e.type == edge_type}
         if not origins:
             msg = f"Gate '{gate.name}': exclusion edge type '{edge_type}' is not declared in the ontology"
             raise ValueError(msg)
-        if not origins & candidate_labels:
-            msg = (
-                f"Gate '{gate.name}': exclusion edge '{edge_type}' starts at {sorted(origins)}, not at a candidate "
-                f"label of its direction(s) {sorted(candidate_labels)}; no candidate can carry it"
-            )
-            raise ValueError(msg)
+        # ``compile_all_gates`` applies the gate to each direction on its own,
+        # binding ``candidate`` to that direction's label, so the edge must be
+        # one the candidate of *every* applicable direction can carry. An
+        # unscoped gate applies to every declared direction; checking it against
+        # the union of their labels would let one direction's candidate vouch
+        # for another whose NOT EXISTS is always true.
+        for direction in self._exclusion_directions(gate, candidates):
+            candidate_labels = {c.label for c in candidates if c.matchdirection == direction}
+            if not origins & candidate_labels:
+                msg = (
+                    f"Gate '{gate.name}': exclusion edge '{edge_type}' starts at {sorted(origins)}, not at a "
+                    f"candidate label of direction '{direction}' {sorted(candidate_labels)}; no candidate there "
+                    "can carry it"
+                )
+                raise ValueError(msg)
+
+    def _exclusion_directions(self, gate: GateSpec, candidates: list[Any]) -> list[str]:
+        """The match directions ``compile_all_gates`` applies ``gate`` to, in declaration order."""
+        if gate.matchdirections:
+            return list(dict.fromkeys(gate.matchdirections))
+        queryschema = getattr(self.domain_spec, "queryschema", None)
+        declared = getattr(queryschema, "matchdirections", None)
+        if isinstance(declared, list) and declared:
+            return list(dict.fromkeys(declared))
+        return list(dict.fromkeys(c.matchdirection for c in candidates))
 
     def _compile_composite(self, gate: GateSpec) -> str:
         """
