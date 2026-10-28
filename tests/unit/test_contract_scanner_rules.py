@@ -161,6 +161,49 @@ def test_del_rules_ignore_unrelated_get_calls() -> None:
     assert _rule_lines(src, "DEL-002") == []
 
 
+@pytest.mark.parametrize(
+    "src",
+    [
+        # a parameter of another function that shares the client's name
+        "import httpx\ndef make():\n    client = httpx.Client()\n    return client\ndef read(client):\n    return client.get('k')\n",
+        # rebound to a non-HTTP object before the call
+        "import httpx\ndef f():\n    client = httpx.Client()\n    client.close()\n    client = {}\n    return client.get('k')\n",
+        # a same-named local in a sibling function
+        "import httpx\ndef a():\n    client = httpx.Client()\n    return client\ndef b():\n    client = {'k': 1}\n    return client.get('k')\n",
+        # a loop target that shadows a module-level client
+        "import httpx\nclient = httpx.Client()\ndef f(caches):\n    for client in caches:\n        client.get('k')\n",
+        # a class attribute is not visible to its methods as a bare name
+        "import httpx\nclass A:\n    client = httpx.Client()\n    def f(self, client):\n        return client.get('k')\n",
+    ],
+)
+def test_del001_client_names_are_scoped_to_their_bindings(src: str) -> None:
+    """RU-137 review: a client binding certifies only the uses it can reach."""
+    assert _rule_lines(src, "DEL-001") == []
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        # module-level client used inside a function
+        "import httpx\nclient = httpx.Client()\ndef f(u):\n    return client.get(u)\n",
+        # module singleton assigned through `global`
+        "import httpx\nclient = None\ndef init():\n    global client\n    client = httpx.Client()\ndef f(u):\n    return client.get(u)\n",
+        # closure over an enclosing function's client
+        "import httpx\ndef outer(u):\n    client = httpx.Client()\n    def inner():\n        return client.get(u)\n    return inner\n",
+        # a conditional client binding still reaches the call
+        "import httpx\ndef f(flag, u):\n    client = {}\n    if flag:\n        client = httpx.Client()\n    return client.get(u)\n",
+        # an annotated binding, and a later use in the same block
+        "import httpx\ndef f(u):\n    client: httpx.Client = httpx.Client()\n    x = 1\n    return client.get(u)\n",
+        # bound in a loop body and called on a later iteration
+        "import httpx\ndef f(us):\n    for u in us:\n        if u:\n            client.get(u)\n        client = httpx.Client()\n",
+    ],
+)
+def test_del001_scoped_client_names_still_flag(src: str) -> None:
+    lines = src.splitlines()
+    expected = [i for i, line in enumerate(lines, start=1) if "client.get(" in line]
+    assert _rule_lines(src, "DEL-001") == expected
+
+
 def test_del_rules_scoped_to_engine() -> None:
     assert _rule_lines(ARCH_CASES, "DEL-001", path="tools/x.py") == []
 

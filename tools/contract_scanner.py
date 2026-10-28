@@ -144,6 +144,178 @@ def _import_check(top_level: str) -> AstCheck:
     return check
 
 
+_SCOPES = (
+    ast.Module,
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.Lambda,
+    ast.ClassDef,
+    ast.ListComp,
+    ast.SetComp,
+    ast.GeneratorExp,
+    ast.DictComp,
+)
+_FUNCTION_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+_BLOCK_FIELDS = ("body", "orelse", "finalbody")
+
+
+@dataclass(frozen=True, eq=False)
+class _NameBinding:
+    """One binding of a name: whether it binds an HTTP client, and where it takes effect."""
+
+    stmt: ast.AST | None  # None: a parameter, bound before the function body runs
+    effect: tuple[int, int]
+    is_client: bool
+    foreign: bool = False  # made in another scope via ``global`` / ``nonlocal``: no flow information
+
+
+def _end(node: ast.AST) -> tuple[int, int]:
+    return (getattr(node, "end_lineno", None) or 0, getattr(node, "end_col_offset", None) or 0)
+
+
+class _ClientNames:
+    """Which name uses refer to an HTTP client object, by lexical scope and assignment flow.
+
+    A use resolves to the nearest enclosing scope that binds the name (class
+    bodies are not visible to their methods; ``global`` / ``nonlocal`` are
+    honoured). In the binding scope itself the bindings that may reach the use
+    are the last one that dominates it in its block plus any later
+    (conditional) ones; a use is a client when any reaching binding is a client
+    factory call. A use in a nested scope sees every binding of the enclosing
+    scope. So a parameter, a rebinding to a non-HTTP value, or a same-named
+    local in a sibling function is never a client.
+    """
+
+    def __init__(self, tree: ast.Module, is_factory: Callable[[ast.expr], bool]) -> None:
+        self._parents: dict[ast.AST, ast.AST] = {}
+        for parent in ast.walk(tree):
+            for child in ast.iter_child_nodes(parent):
+                self._parents[child] = parent
+        self._module = tree
+        self._bindings: dict[ast.AST, dict[str, list[_NameBinding]]] = {}
+        self._declared: dict[ast.AST, dict[str, str]] = {}  # scope -> {name: "global" | "nonlocal"}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Global | ast.Nonlocal):
+                kind = "global" if isinstance(node, ast.Global) else "nonlocal"
+                declared = self._declared.setdefault(self._scope_of(node), {})
+                declared.update(dict.fromkeys(node.names, kind))
+        for node in ast.walk(tree):
+            if isinstance(node, _FUNCTION_SCOPES):
+                args = node.args
+                for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]:
+                    if arg is not None:
+                        self._add(node, arg.arg, _NameBinding(None, (0, 0), is_client=False))
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                self._bind_store(node, is_factory)
+
+    def _scope_of(self, node: ast.AST) -> ast.AST:
+        current = self._parents.get(node)
+        while current is not None and not isinstance(current, _SCOPES):
+            current = self._parents.get(current)
+        return current if current is not None else self._module
+
+    def _add(self, scope: ast.AST, name: str, binding: _NameBinding) -> None:
+        self._bindings.setdefault(scope, {}).setdefault(name, []).append(binding)
+
+    def _bind_store(self, target: ast.Name, is_factory: Callable[[ast.expr], bool]) -> None:
+        parent = self._parents.get(target)
+        if isinstance(parent, ast.AnnAssign) and parent.value is None:
+            return  # a bare annotation declares, it does not bind
+        stmt: ast.AST = target
+        effect = _end(target)
+        is_client = False
+        if isinstance(parent, ast.Assign | ast.AnnAssign | ast.AugAssign):
+            stmt, effect = parent, _end(parent)
+            direct = target in parent.targets if isinstance(parent, ast.Assign) else parent.target is target
+            is_client = direct and parent.value is not None and is_factory(parent.value)
+        elif isinstance(parent, ast.withitem):
+            stmt, effect = self._parents[parent], _end(parent.context_expr)
+            is_client = parent.optional_vars is target and is_factory(parent.context_expr)
+        elif isinstance(parent, ast.NamedExpr):
+            stmt, effect = parent, _end(parent)
+            is_client = is_factory(parent.value)
+        else:
+            # Tuple / starred targets, loop and comprehension targets: never a lone client binding.
+            node: ast.AST | None = parent
+            while node is not None and not isinstance(node, ast.stmt | ast.comprehension):
+                node = self._parents.get(node)
+            if isinstance(node, ast.For | ast.AsyncFor | ast.comprehension):
+                stmt, effect = node, _end(node.iter)
+            elif node is not None:
+                stmt, effect = node, _end(node)
+        scope = self._scope_of(target)
+        declared = self._declared.get(scope, {}).get(target.id)
+        if declared is None:
+            self._add(scope, target.id, _NameBinding(stmt, effect, is_client))
+        else:
+            owner = self._module if declared == "global" else self._enclosing(scope)
+            self._add(owner or self._module, target.id, _NameBinding(stmt, effect, is_client, foreign=True))
+
+    def _enclosing(self, scope: ast.AST) -> ast.AST | None:
+        """The scope a nested scope's free names resolve in (skipping class bodies)."""
+        if scope is self._module:
+            return None
+        current = self._scope_of(scope)
+        while isinstance(current, ast.ClassDef):
+            current = self._scope_of(current)
+        return current
+
+    def _resolve_scope(self, name: str, scope: ast.AST | None) -> ast.AST | None:
+        while scope is not None:
+            kind = self._declared.get(scope, {}).get(name)
+            if kind == "global":
+                return self._module
+            if kind is None and name in self._bindings.get(scope, {}):
+                return scope
+            scope = self._enclosing(scope)
+        return None
+
+    def _ancestors(self, node: ast.AST):
+        current = self._parents.get(node)
+        while current is not None:
+            yield current
+            current = self._parents.get(current)
+
+    def _dominates(self, binding: _NameBinding, use: ast.AST) -> bool:
+        """Does *binding* execute unconditionally before *use* (an earlier statement of its block)?"""
+        stmt = binding.stmt
+        if stmt is None:
+            return True  # a parameter is bound before the body runs
+        if isinstance(stmt, ast.With | ast.AsyncWith | ast.For | ast.AsyncFor):
+            if any(anc in stmt.body for anc in self._ancestors(use)):
+                return True
+        container = self._parents.get(stmt)
+        for field in _BLOCK_FIELDS:
+            block = getattr(container, field, None)
+            if isinstance(block, list) and any(item is stmt for item in block):
+                later = block[next(i for i, item in enumerate(block) if item is stmt) + 1 :]
+                return any(any(anc is item for item in later) for anc in self._ancestors(use))
+        return False
+
+    def is_client(self, use: ast.Name) -> bool:
+        use_scope = self._scope_of(use)
+        def_scope = self._resolve_scope(use.id, use_scope)
+        if def_scope is None:
+            return False
+        binds = self._bindings.get(def_scope, {}).get(use.id, [])
+        if def_scope is not use_scope:
+            return any(b.is_client for b in binds)  # closure / module global: no flow information
+        pos = (use.lineno, use.col_offset)
+        foreign = [b for b in binds if b.foreign]
+        local = [b for b in binds if not b.foreign]
+        preceding = [b for b in local if b.effect <= pos]
+        if not preceding:
+            reaching = local  # loop-carried or bound later: every binding may reach
+        else:
+            dominating = [b for b in preceding if self._dominates(b, use)]
+            if dominating:
+                last = max(dominating, key=lambda b: b.effect)
+                reaching = [b for b in preceding if b.effect >= last.effect]
+            else:
+                reaching = preceding
+        return any(b.is_client for b in [*reaching, *foreign])
+
+
 def _http_call_check(module: str, client_factories: frozenset[str]) -> AstCheck:
     """Raw HTTP via *module*: module-level calls, imported functions, and calls on client objects."""
 
@@ -155,18 +327,22 @@ def _http_call_check(module: str, client_factories: frozenset[str]) -> AstCheck:
         def is_client_factory_call(node: ast.expr) -> bool:
             return isinstance(node, ast.Call) and _is_member_ref(node.func, modules, members, client_factories)
 
-        # Expressions bound to a client object: ``c = httpx.Client()``,
-        # ``self.c = httpx.Client()``, ``with httpx.AsyncClient() as c``.
-        clients: set[str] = set()
+        # Client-bound names are resolved by lexical scope and assignment flow
+        # (``_ClientNames``); other client-bound expressions — object state such
+        # as ``self.c = httpx.Client()`` — stay module-wide.
+        names = _ClientNames(tree, is_client_factory_call)
+        attr_clients: set[str] = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.Assign | ast.AnnAssign) and node.value is not None:
                 if is_client_factory_call(node.value):
                     targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                    clients.update(ast.unparse(t) for t in targets)
+                    attr_clients.update(ast.unparse(t) for t in targets if not isinstance(t, ast.Name))
             elif isinstance(node, ast.With | ast.AsyncWith):
                 for item in node.items:
-                    if item.optional_vars is not None and is_client_factory_call(item.context_expr):
-                        clients.add(ast.unparse(item.optional_vars))
+                    target = item.optional_vars
+                    if target is not None and not isinstance(target, ast.Name):
+                        if is_client_factory_call(item.context_expr):
+                            attr_clients.add(ast.unparse(target))
 
         lines: list[int] = []
         for node in ast.walk(tree):
@@ -177,7 +353,11 @@ def _http_call_check(module: str, client_factories: frozenset[str]) -> AstCheck:
                 lines.append(node.lineno)
             elif isinstance(func, ast.Attribute) and func.attr in _HTTP_METHODS:
                 receiver = func.value
-                if is_client_factory_call(receiver) or ast.unparse(receiver) in clients:
+                if isinstance(receiver, ast.Name):
+                    is_client = names.is_client(receiver)
+                else:
+                    is_client = is_client_factory_call(receiver) or ast.unparse(receiver) in attr_clients
+                if is_client:
                     lines.append(node.lineno)
         return lines
 
