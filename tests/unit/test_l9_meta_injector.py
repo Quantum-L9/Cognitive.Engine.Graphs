@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import ast
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -241,3 +243,189 @@ def test_self_application_changes_only_the_header() -> None:
     tail = re.split(r'^"""$', source, maxsplit=2, flags=re.MULTILINE)[2]
     assert out.endswith(tail)
     assert inj.inject_meta(out, fm, "graph") == out
+
+
+# ── verification mode (RU-131, RG-166) ──────────────────────────────────────
+#
+# main() is the C-18 gate (contracts.yml meta-headers, pre-commit
+# l9-meta-check). Each case builds a throwaway git repository and swaps the
+# module's registry and baseline for a two-file one, so the verdict depends
+# only on the scratch tree.
+
+ENGINE_HEADER_FM = inj.FileMeta("engine/core.py", "engine-specific", ["engine"], ["core"], "engine-team")
+DOC_FM = inj.FileMeta("docs/guide.md", "engine-specific", ["docs"], ["guide"], "engine-team")
+
+
+GIT = shutil.which("git")
+
+
+def _git(root: Path, *args: str) -> None:
+    assert GIT is not None, "git is required for the verification-mode tests"
+    subprocess.run([GIT, *args], cwd=root, check=True, capture_output=True)  # noqa: S603
+
+
+def _write(root: Path, rel: str, text: str) -> Path:
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def scratch_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A git repo whose only eligible files carry the header the registry expects."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    _git(root, "init", "-q")
+    _write(root, "engine/core.py", inj.inject_meta('"""Core."""\nX = 1\n', ENGINE_HEADER_FM, "graph"))
+    _write(root, "docs/guide.md", inj.inject_meta("# Guide\n", DOC_FM, "graph"))
+    _write(root, "engine/__init__.py", "")
+    _write(root, "notes.txt", "out of the contract's scope\n")
+    _git(root, "add", "--", "engine/core.py", "docs/guide.md", "engine/__init__.py", "notes.txt")
+    monkeypatch.setattr(inj, "FILE_REGISTRY", [ENGINE_HEADER_FM, DOC_FM])
+    monkeypatch.setattr(inj, "HEADERLESS_BASELINE", frozenset())
+    return root
+
+
+def _verdict(argv: list[str]) -> int | None:
+    try:
+        return inj.main(argv)
+    except SystemExit as exc:  # argparse usage error
+        return 2 if exc.code is None else int(exc.code)
+
+
+@pytest.mark.parametrize("mode", [[], ["check"]])
+def test_fully_headered_tree_exits_0(scratch_repo: Path, mode: list[str]) -> None:
+    assert _verdict([*mode, "--root", str(scratch_repo)]) == 0
+
+
+@pytest.mark.parametrize("mode", [[], ["check"]])
+def test_removed_header_exits_1(scratch_repo: Path, mode: list[str], capsys: pytest.CaptureFixture[str]) -> None:
+    _write(scratch_repo, "engine/core.py", '"""Core."""\nX = 1\n')
+    assert _verdict([*mode, "--root", str(scratch_repo)]) == 1
+    assert "engine/core.py" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("mode", [[], ["check"]])
+def test_new_tracked_engine_file_without_header_is_reported(
+    scratch_repo: Path, mode: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write(scratch_repo, "engine/gates/new_gate.py", '"""New gate."""\n')
+    _git(scratch_repo, "add", "--", "engine/gates/new_gate.py")
+    assert _verdict([*mode, "--root", str(scratch_repo)]) == 1
+    out = capsys.readouterr().out
+    assert "engine/gates/new_gate.py" in out
+    assert "NOHEADER" in out
+
+
+def test_untracked_file_is_not_eligible(scratch_repo: Path) -> None:
+    _write(scratch_repo, "engine/scratch.py", "X = 1\n")
+    assert _verdict(["check", "--root", str(scratch_repo)]) == 0
+
+
+def test_unregistered_file_with_canonical_header_passes(scratch_repo: Path) -> None:
+    fm = inj.FileMeta("engine/extra.py", "engine-specific", ["engine"], ["extra"], "engine-team")
+    _write(scratch_repo, "engine/extra.py", inj.inject_meta("X = 1\n", fm, "graph"))
+    _git(scratch_repo, "add", "--", "engine/extra.py")
+    assert _verdict(["check", "--root", str(scratch_repo)]) == 0
+
+
+def test_unregistered_schema_v2_header_is_invalid(scratch_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    v2 = (
+        '"""\n--- L9_META ---\nl9_schema: 2\norigin: chassis\nengine: graph\n'
+        'layer: [api]\ntags: [chassis]\nstatus: active\n--- /L9_META ---\n"""\n'
+    )
+    _write(scratch_repo, "chassis/app.py", v2)
+    _git(scratch_repo, "add", "--", "chassis/app.py")
+    assert _verdict(["check", "--root", str(scratch_repo)]) == 1
+    assert "INVALID" in capsys.readouterr().out
+
+
+def test_registered_file_absent_from_tree_exits_1(scratch_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    gone = inj.FileMeta("engine/gone.py", "engine-specific", ["engine"], ["gone"], "engine-team")
+    monkeypatch.setattr(inj, "FILE_REGISTRY", [ENGINE_HEADER_FM, DOC_FM, gone])
+    assert _verdict(["check", "--root", str(scratch_repo)]) == 1
+
+
+def test_headerless_baseline_entry_is_exempt(scratch_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(scratch_repo, "docs/legacy.md", "# Legacy\n")
+    _git(scratch_repo, "add", "--", "docs/legacy.md")
+    assert _verdict(["check", "--root", str(scratch_repo)]) == 1
+    monkeypatch.setattr(inj, "HEADERLESS_BASELINE", frozenset({"docs/legacy.md"}))
+    assert _verdict(["check", "--root", str(scratch_repo)]) == 0
+
+
+def test_check_never_writes(scratch_repo: Path) -> None:
+    _write(scratch_repo, "engine/core.py", '"""Core."""\nX = 1\n')
+    assert _verdict(["check", "--root", str(scratch_repo)]) == 1
+    assert (scratch_repo / "engine" / "core.py").read_text(encoding="utf-8") == '"""Core."""\nX = 1\n'
+
+
+def test_apply_repairs_then_check_passes(scratch_repo: Path) -> None:
+    _write(scratch_repo, "engine/core.py", '"""Core."""\nX = 1\n')
+    assert _verdict(["--apply", "--root", str(scratch_repo)]) == 0
+    assert _verdict(["check", "--root", str(scratch_repo)]) == 0
+
+
+def test_check_and_apply_together_are_rejected(scratch_repo: Path) -> None:
+    assert _verdict(["check", "--apply", "--root", str(scratch_repo)]) == 2
+
+
+def test_root_outside_a_git_repository_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(inj, "FILE_REGISTRY", [])
+    monkeypatch.setattr(inj, "HEADERLESS_BASELINE", frozenset())
+    assert _verdict(["check", "--root", str(tmp_path)]) == 1
+
+
+# ── discovery configuration stays in lockstep with the contract ─────────────
+
+
+def test_scope_patterns_match_contract_18() -> None:
+    import yaml
+
+    contract = yaml.safe_load((REPO / "contracts" / "contract_18.yaml").read_text(encoding="utf-8"))
+    assert list(inj.SCOPE_PATTERNS) == contract["scope"]["paths"]
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("engine/gates/x.py", True),
+        ("setup.py", True),
+        ("Makefile", True),
+        ("sub/Makefile", True),
+        ("chassis/Dockerfile.chassis", True),
+        ("notes.txt", False),
+        (".env.template", False),
+    ],
+)
+def test_in_scope(path: str, expected: bool) -> None:
+    assert inj.in_scope(path) is expected
+
+
+def test_registry_has_no_duplicate_or_excluded_paths() -> None:
+    paths = [fm.path for fm in inj.FILE_REGISTRY]
+    assert len(paths) == len(set(paths))
+    assert not [p for p in paths if inj.is_excluded(p)]
+    assert not set(paths) & inj.HEADERLESS_BASELINE
+
+
+def test_generated_artifacts_are_excluded() -> None:
+    for rel in ("artifacts/audit_report.md", "artifacts/coverage_matrix.json", "artifacts/coverage_report.md"):
+        assert inj.is_excluded(rel)
+
+
+def test_domain_extractor_registered_at_its_real_path() -> None:
+    paths = {fm.path for fm in inj.FILE_REGISTRY}
+    assert "tools/domain_extractor.py" in paths
+    assert "scripts/domain_extractor.py" not in paths
+
+
+# ── markdown: only the header is stripped, never an example in a code fence ──
+
+
+def test_markdown_example_in_code_fence_survives() -> None:
+    example = "```markdown\n<!-- L9_META\nl9_schema: 1\n/L9_META -->\n```\n"
+    once = inj.inject_meta("# Doc\n\n" + example, _meta("docs/x.md"), "graph")
+    assert once.endswith(example)
+    assert inj.inject_meta(once, _meta("docs/x.md"), "graph") == once
