@@ -468,7 +468,8 @@ class CompoundE3D:
         head_ops, tail_ops = self._effective_ops(relation)
         transformed_h = _CascadeTransformation(head_ops).apply(h_emb.copy())
         transformed_t = _CascadeTransformation(tail_ops).apply(t_emb.copy())
-        return np.linalg.norm(transformed_h + r_emb - transformed_t).item()
+        distance: float = np.linalg.norm(transformed_h + r_emb - transformed_t).item()
+        return distance
 
     def calibrate_platt(
         self,

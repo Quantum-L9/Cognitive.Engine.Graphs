@@ -334,7 +334,11 @@ class TestInvalidate:
 _REPO_DOMAINS = Path(__file__).resolve().parents[2] / "domains"
 
 
-def _spec_with_dimensions(dimensions: list[dict[str, object]], fields: list[dict[str, object]] | None = None):  # type: ignore[no-untyped-def]
+def _spec_with_dimensions(  # type: ignore[no-untyped-def]
+    dimensions: list[dict[str, object]],
+    fields: list[dict[str, object]] | None = None,
+    candidate_properties: list[dict[str, object]] | None = None,
+):
     import yaml
 
     from engine.config.schema import DomainSpec
@@ -342,6 +346,7 @@ def _spec_with_dimensions(dimensions: list[dict[str, object]], fields: list[dict
     raw = yaml.safe_load(_minimal_spec_yaml("scoring-check"))
     raw["scoring"]["dimensions"] = dimensions
     raw["queryschema"]["fields"] = fields or []
+    raw["ontology"]["nodes"][0]["properties"] += candidate_properties or []
     return DomainSpec.model_validate(raw)
 
 
@@ -446,6 +451,86 @@ class TestScoringAdmission:
         assert len(defects) == 1
         assert dim["name"] in defects[0]
         assert "no producer" in defects[0]
+
+    @pytest.mark.parametrize(
+        "dim",
+        [_POPMEAN, {**_POPMEAN, "null_strategy": "zero", "cold_start_fallback": "population_mean"}],
+        ids=["null_strategy", "cold_start_fallback"],
+    )
+    @pytest.mark.parametrize(
+        "producer",
+        [
+            {"fields": [{"name": "_popmean_rating", "type": "float", "default": 0.5}]},
+            {"derived": {"name": "_popmean_rating", "expression": "0.5", "type": "float"}},
+        ],
+        ids=["queryschema", "derived"],
+    )
+    def test_population_mean_with_a_declared_parameter_is_admitted(
+        self, dim: dict[str, object], producer: dict[str, object]
+    ) -> None:
+        """handle_match binds a declared `_popmean_<dim>`; the option executes, so it is not a defect."""
+        from engine.config.loader import admission_defects, withholding_reason
+
+        spec = _spec_with_dimensions([dim], fields=producer.get("fields"))  # type: ignore[arg-type]
+        if "derived" in producer:
+            from engine.config.schema import DerivedParameterSpec
+
+            spec = spec.model_copy(
+                update={"derivedparameters": [DerivedParameterSpec.model_validate(producer["derived"])]}
+            )
+        assert admission_defects(spec) == []
+        assert withholding_reason(spec) is None
+
+    @pytest.mark.asyncio
+    async def test_admitted_population_mean_pack_binds_every_match_parameter(self) -> None:
+        """The admitted pack executes: handle_match binds `$_popmean_rating` and every other reference."""
+        import re
+        from typing import Any
+        from unittest.mock import MagicMock
+
+        from engine.handlers import handle_match, init_dependencies
+
+        spec = _spec_with_dimensions([_POPMEAN], fields=[{"name": "_popmean_rating", "type": "float", "default": 0.5}])
+        calls: list[tuple[str, dict[str, Any]]] = []
+
+        class _Driver:
+            async def execute_query(
+                self, *, cypher: str, parameters: dict[str, Any], database: str
+            ) -> list[dict[str, Any]]:
+                calls.append((cypher, parameters))
+                return []
+
+        loader = MagicMock()
+        loader.load_domain.return_value = spec
+        loader.list_domains.return_value = ["scoring-check"]
+        init_dependencies(_Driver(), loader)  # type: ignore[arg-type]
+        await handle_match("scoring-check", {"query": {}, "match_direction": "d1"})
+
+        cypher, parameters = calls[0]
+        assert "$_popmean_rating" in cypher
+        assert parameters["_popmean_rating"] == 0.5
+        assert set(re.findall(r"\$([A-Za-z_][A-Za-z0-9_]*)", cypher)) <= set(parameters)
+
+    def test_population_mean_without_its_parameter_is_one_unbound_defect(self) -> None:
+        from engine.config.loader import admission_defects
+
+        defects = admission_defects(_spec_with_dimensions([_POPMEAN]))
+        assert len(defects) == 1
+        assert "'_popmean_rating'" in defects[0]
+
+    @pytest.mark.parametrize(
+        ("dim", "prop"),
+        [(_PRIOR, "_prior_prior"), (_STRUCTURAL, "shared_neighbor_score")],
+        ids=["inherit_prior", "structural_similarity"],
+    )
+    def test_options_whose_candidate_property_the_pack_declares_are_admitted(
+        self, dim: dict[str, object], prop: str
+    ) -> None:
+        """A property declared on the candidate node is written by sync (`SET n += row`): a producer."""
+        from engine.config.loader import admission_defects
+
+        spec = _spec_with_dimensions([dim], candidate_properties=[{"name": prop, "type": "float", "managedby": "sync"}])
+        assert admission_defects(spec) == []
 
     def test_one_defect_per_offending_dimension(self) -> None:
         from engine.config.loader import admission_defects

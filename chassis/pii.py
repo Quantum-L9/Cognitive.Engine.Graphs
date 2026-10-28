@@ -119,9 +119,10 @@ class PIIHandler:
 
         A key matching a PII hint is flagged whatever its value type (a
         dict-valued ``address`` included). Paths are unambiguous: ``a.b[0].c``,
-        with ``.``, ``[``, ``]`` and ``\\`` inside a key escaped by a backslash
-        (``user\\.email``), so every detected path is addressable by
-        ``mask`` / ``redact``. Simple nested-dict paths are unchanged.
+        with ``.``, ``[``, ``]``, ``"`` and ``\\`` inside a key escaped by a
+        backslash (``user\\.email``) and the empty key written ``""``, so every
+        detected path is addressable by ``mask`` / ``redact``. Simple
+        nested-dict paths are unchanged.
         """
         base = _parse_path(prefix) if prefix else ()
         return [d for _, d in self._detect(payload, base)]
@@ -190,7 +191,10 @@ class PIIHandler:
 
 _Part = str | int
 _DELETE = object()
-_ESCAPE_RE = re.compile(r"([.\[\]\\])")
+_ESCAPE_RE = re.compile(r'([.\[\]\\"])')
+# The empty key has no characters to escape; it is written as an unescaped
+# `""` (a literal `"` in a key is always escaped, so this cannot collide).
+_EMPTY_KEY = '""'
 
 
 def _format_path(path: tuple[_Part, ...]) -> str:
@@ -199,40 +203,56 @@ def _format_path(path: tuple[_Part, ...]) -> str:
         if isinstance(part, int):
             out += f"[{part}]"
         else:
-            escaped = _ESCAPE_RE.sub(r"\\\1", part)
+            escaped = _ESCAPE_RE.sub(r"\\\1", part) if part else _EMPTY_KEY
             out += f".{escaped}" if out else escaped
     return out
+
+
+def _malformed(path: str) -> ValueError:
+    msg = f"Malformed PII field path {path!r}: empty key component (write the empty key as {_EMPTY_KEY})"
+    return ValueError(msg)
 
 
 def _parse_path(path: str) -> tuple[_Part, ...]:
     parts: list[_Part] = []
     key: list[str] = []
     have_key = False
+    escaped = False
+    after_dot = False
+
+    def close_key() -> None:
+        raw = "".join(key)
+        parts.append("" if raw == _EMPTY_KEY and not escaped else raw)
+
     i = 0
     while i < len(path):
         ch = path[i]
         if ch == "\\" and i + 1 < len(path):
             key.append(path[i + 1])
-            have_key = True
+            have_key = escaped = True
+            after_dot = False
             i += 2
             continue
-        if ch == ".":
+        if ch in ".[":
             if have_key:
-                parts.append("".join(key))
-            key, have_key = [], False
-        elif ch == "[":
-            if have_key:
-                parts.append("".join(key))
-            key, have_key = [], False
-            end = path.index("]", i)
-            parts.append(int(path[i + 1 : end]))
-            i = end
+                close_key()
+            elif after_dot or (ch == "." and not parts):
+                raise _malformed(path)
+            key, have_key, escaped = [], False, False
+            after_dot = ch == "."
+            if ch == "[":
+                end = path.index("]", i)
+                parts.append(int(path[i + 1 : end]))
+                i = end
         else:
             key.append(ch)
             have_key = True
+            after_dot = False
         i += 1
     if have_key:
-        parts.append("".join(key))
+        close_key()
+    elif after_dot:
+        raise _malformed(path)
     return tuple(parts)
 
 

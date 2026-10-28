@@ -66,6 +66,9 @@ line regex.
 The same classification applies to Cypher built by string concatenation
 (``"MATCH (n:" + label + ")"``), ``str.format`` and ``%`` formatting: each
 operand / argument is classified by the literal text before its placeholder.
+A ``str.format`` field's ``.attr`` / ``[key]`` access (``{0.threshold}``) is
+classified as the accessed value, and a mapping placeholder (``%(key)s`` over a
+runtime mapping, ``{key}`` over ``**mapping``) as ``mapping[key]``.
 
 Name facts are flow-aware: the bindings that reach a use are the last
 binding that dominates it in its block plus any later (conditional) ones, and
@@ -96,7 +99,7 @@ from pathlib import Path
 SANITIZERS = frozenset({"sanitize_label", "sanitize_database_name", "cypher_number"})
 NUMERIC_CASTS = frozenset({"int", "float"})
 
-# Names whose attributes are domain-spec / payload data, never Cypher-safe.
+# Names whose attributes / items are domain-spec / payload data, never Cypher-safe.
 RAW_ROOTS = frozenset(
     {
         "spec",
@@ -500,6 +503,8 @@ class _ModuleFacts:
         if isinstance(expr, ast.IfExp):
             return self.is_raw(expr.body, scope) or self.is_raw(expr.orelse, scope)
         if isinstance(expr, ast.Subscript):
+            if isinstance(expr.value, ast.Name) and expr.value.id in RAW_ROOTS:
+                return True
             return self.is_raw(expr.value, scope)
         if isinstance(expr, ast.JoinedStr):
             return any(self.is_raw(v.value, scope) for v in expr.values if isinstance(v, ast.FormattedValue))
@@ -731,18 +736,58 @@ def _concat_template(node: ast.BinOp) -> _Template | None:
     return text, parts
 
 
+def _item(mapping: ast.expr, key: str | int) -> ast.expr:
+    """``mapping[key]`` as an expression node located at *mapping*."""
+    node = ast.Subscript(value=mapping, slice=ast.Constant(key), ctx=ast.Load())
+    return ast.copy_location(node, mapping)
+
+
+def _mapping_items(mapping: ast.expr, key: str) -> list[ast.expr]:
+    """The expressions a ``%(key)s`` placeholder may interpolate from *mapping*.
+
+    A literal dict yields the value under *key*, or an item of any ``**`` entry
+    that may supply or override it; any other operand is a runtime mapping and
+    yields ``mapping[key]``.
+    """
+    if not isinstance(mapping, ast.Dict):
+        return [_item(mapping, key)]
+    found: list[ast.expr] = []
+    for k, v in zip(mapping.keys, mapping.values, strict=True):
+        if k is None:
+            found.append(_item(v, key))
+        elif _str_value(k) == key:
+            found = [v]  # a later literal entry overrides everything before it
+    return found
+
+
+_FIELD_ACCESS_RE = re.compile(r"\.(?P<attr>[^.\[]+)|\[(?P<key>[^\]]+)\]")
+
+
+def _field_access(arg: ast.expr, access: str) -> ast.expr:
+    """Apply a format field's ``.attr`` / ``[key]`` chain (``{0.a[b]}``) to its argument."""
+    node, pos = arg, 0
+    while pos < len(access):
+        match = _FIELD_ACCESS_RE.match(access, pos)
+        if match is None:
+            return _item(node, access[pos:])  # unparseable tail: still an item of the argument
+        if match.group("attr") is not None:
+            node = ast.copy_location(ast.Attribute(value=node, attr=match.group("attr"), ctx=ast.Load()), arg)
+        else:
+            key = match.group("key")
+            node = _item(node, int(key) if key.isdigit() else key)
+        pos = match.end()
+    return node
+
+
 def _percent_template(node: ast.BinOp) -> _Template | None:
     fmt = _str_value(node.left)
     if fmt is None:
         return None
     right = node.right
     positional = right.elts if isinstance(right, ast.Tuple) else None
-    keyed = (
-        {key: v for k, v in zip(right.keys, right.values, strict=True) if k is not None and (key := _str_value(k))}
-        if isinstance(right, ast.Dict)
-        else None
-    )
-    text, parts, pos, index = "", [], 0, 0
+    text: str = ""
+    parts: list[tuple[str, ast.expr]] = []
+    pos, index = 0, 0
     for match in _PERCENT_SPEC_RE.finditer(fmt):
         literal = fmt[pos : match.start()]
         text += literal
@@ -752,17 +797,17 @@ def _percent_template(node: ast.BinOp) -> _Template | None:
             continue
         text += "X"
         key = match.group("key")
-        arg: ast.expr | None
+        args: list[ast.expr]
         if key is not None:
-            arg = keyed.get(key) if keyed is not None else None
+            # A literal dict, or a runtime mapping (`% params`) read as params[key].
+            args = _mapping_items(right, key)
         elif positional is not None:
-            arg = positional[index] if index < len(positional) else None
+            args = [positional[index]] if index < len(positional) else []
             index += 1
         else:
-            arg = right if index == 0 else None
+            args = [right] if index == 0 else []
             index += 1
-        if arg is not None and not isinstance(arg, ast.Starred):
-            parts.append((literal, arg))
+        parts.extend((literal, arg) for arg in args if not isinstance(arg, ast.Starred))
     text += fmt[pos:]
     return text, parts
 
@@ -778,24 +823,33 @@ def _format_template(node: ast.Call) -> _Template | None:
         return None
     star_args = any(isinstance(a, ast.Starred) for a in node.args)
     keywords = {kw.arg: kw.value for kw in node.keywords if kw.arg is not None}
-    text, parts, auto = "", [], 0
+    unpacked = [kw.value for kw in node.keywords if kw.arg is None]
+    text: str = ""
+    parts: list[tuple[str, ast.expr]] = []
+    auto = 0
     for literal, field_name, _spec, _conv in fields:
         text += literal
         if field_name is None:
             continue
         text += "X"
         base = re.split(r"[.\[]", field_name, maxsplit=1)[0]
-        arg: ast.expr | None = None
+        access = field_name[len(base) :]
+        args: list[ast.expr] = []
         if base == "":
-            arg = node.args[auto] if not star_args and auto < len(node.args) else None
+            if not star_args and auto < len(node.args):
+                args = [node.args[auto]]
             auto += 1
         elif base.isdigit():
             i = int(base)
-            arg = node.args[i] if not star_args and i < len(node.args) else None
+            if not star_args and i < len(node.args):
+                args = [node.args[i]]
+        elif base in keywords:
+            args = [keywords[base]]
         else:
-            arg = keywords.get(base)
-        if arg is not None:
-            parts.append((literal, arg))
+            # `.format(**params)`: the field reads params[base].
+            args = [_item(mapping, base) for mapping in unpacked]
+        # `{0.threshold}` / `{0[key]}` interpolate the accessed value, as an f-string would.
+        parts.extend((literal, _field_access(arg, access)) for arg in args)
     return text, parts
 
 

@@ -527,6 +527,12 @@ class TestDomainMetadata:
         with pytest.raises(PydanticValidationError, match="is not semver"):
             DomainMetadata(id="p", name="P", version=version)
 
+    @pytest.mark.parametrize("version", ["1.2\u0663.3", "1\u0660.0.0", "1.0.1\u0662-reviewed", "2.0.1\u0669"])
+    def test_non_ascii_digit_version_rejected(self, version: str) -> None:
+        """RU-057: version components are ASCII digits; Python's ``\\d`` also matches e.g. Arabic-Indic digits."""
+        with pytest.raises(PydanticValidationError, match="is not semver"):
+            DomainMetadata(id="p", name="P", version=version)
+
     @pytest.mark.parametrize(
         "version", ["0.0.1", "0.1.0", "1.0.0", "1.0.1", "1.1.0", "1.2.0", "2.0.0", "1.0.0-reviewed", "0.1.0-seed"]
     )
