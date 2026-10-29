@@ -37,7 +37,13 @@ from engine.graph.circuit_breaker import BreakerState, CircuitBreaker, CircuitOp
 from engine.graph.driver import DatabaseNotProvisionedError, ExpectedWriteOutcome, GraphDriver
 from engine.handlers import handle_score
 from engine.scoring.evidence_priority import EvidenceRead, EvidenceUnavailableError, approved_relevance_map
-from engine.scoring.graph_evidence import MAX_EVIDENCE_EDGES, GraphEvidenceBinding, _is_stale, _single_revision
+from engine.scoring.graph_evidence import (
+    MAX_EVIDENCE_EDGES,
+    GraphEvidenceBinding,
+    _is_stale,
+    _single_revision,
+    declared_evidence_types,
+)
 from engine.state import get_state
 
 pytestmark = pytest.mark.unit
@@ -208,6 +214,54 @@ async def test_a_real_write_outage_still_trips_the_breaker() -> None:
         with pytest.raises(ServiceUnavailable):
             await driver.execute_write(AsyncMock(), database="tenant-a")
     assert driver.circuit_breaker.state is BreakerState.OPEN
+
+
+async def test_declared_types_bound_the_read_and_never_become_values() -> None:
+    driver = _driver([])
+    binding = GraphEvidenceBinding(driver, {}, relationship_types=("SYNTHETIC_A", "SYNTHETIC_B"))
+    await binding.read(database="tenant-a", entity_refs=["a:1"])
+    cypher, params = driver.execute_read.await_args.args
+    assert "MATCH ()-[r:SYNTHETIC_A|SYNTHETIC_B]->()" in cypher
+    assert "MATCH ()-[r]->()" not in cypher
+    assert "SYNTHETIC_A" not in repr(params)
+
+
+async def test_untyped_scan_is_kept_only_without_a_declaration() -> None:
+    driver = _driver([])
+    await GraphEvidenceBinding(driver, {}).read(database="tenant-a", entity_refs=["a:1"])
+    assert "MATCH ()-[r]->()" in driver.execute_read.await_args.args[0]
+
+
+async def test_an_empty_declaration_reads_nothing() -> None:
+    driver = _driver([])
+    read = await GraphEvidenceBinding(driver, {}, relationship_types=()).read(database="tenant-a", entity_refs=["a:1"])
+    assert read == EvidenceRead(connected=True, database="tenant-a", observations=())
+    driver.execute_read.assert_not_awaited()
+
+
+@pytest.mark.parametrize("bad", [("R]->() DETACH DELETE r //",), ("BAD-TYPE",), ("",)])
+def test_unsafe_relationship_types_are_refused_before_any_read(bad: tuple[str, ...]) -> None:
+    with pytest.raises(ValueError, match="Invalid label"):
+        GraphEvidenceBinding(_driver([]), {}, relationship_types=bad)
+
+
+def test_one_string_is_not_a_type_sequence() -> None:
+    with pytest.raises(TypeError):
+        GraphEvidenceBinding(_driver([]), {}, relationship_types="SYNTHETIC_A")
+
+
+def test_declared_evidence_types_come_from_targetedge_endpoints_only() -> None:
+    def endpoint(targetedge: str | None) -> MagicMock:
+        return MagicMock(targetedge=targetedge)
+
+    spec = MagicMock()
+    spec.sync.endpoints = [endpoint("SYNTHETIC_B"), endpoint(None), endpoint("SYNTHETIC_A"), endpoint("SYNTHETIC_B")]
+    assert declared_evidence_types(spec) == ("SYNTHETIC_A", "SYNTHETIC_B")
+    spec.sync = None
+    assert declared_evidence_types(spec) == ()
+    spec.sync = MagicMock(endpoints=[endpoint("BAD-TYPE")])
+    with pytest.raises(ValueError, match="Invalid label"):
+        declared_evidence_types(spec)
 
 
 def test_staleness_and_revision_are_observed_never_invented() -> None:

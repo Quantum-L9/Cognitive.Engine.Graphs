@@ -87,8 +87,11 @@ async def graph(graph_driver: GraphDriver) -> AsyncGenerator[GraphDriver, None]:
     get_state().reset()
 
 
-def _binding(driver: GraphDriver, relevance: dict[str, float] | None = None) -> GraphEvidenceBinding:
-    return GraphEvidenceBinding(driver, approved_relevance_map({RELATION: 1.0} if relevance is None else relevance))
+def _binding(
+    driver: GraphDriver, relevance: dict[str, float] | None = None, types: tuple[str, ...] | None = None
+) -> GraphEvidenceBinding:
+    relevance_map = approved_relevance_map({RELATION: 1.0} if relevance is None else relevance)
+    return GraphEvidenceBinding(driver, relevance_map, relationship_types=types)
 
 
 async def _score(driver: GraphDriver, **binding_kwargs: Any) -> dict[str, Any]:
@@ -110,6 +113,18 @@ async def test_local_score_reads_only_stamped_tenant_evidence(graph: GraphDriver
     assert [a["entity_ref"] for a in result["abstained"]] == [SUBJECTS[1]]
     assert "evidence:raw" not in repr(result)
     assert "evidence:foreign" not in repr(result)
+
+
+async def test_type_bounded_read_matches_only_declared_types(graph: GraphDriver) -> None:
+    """The typed MATCH executes on real Neo4j: declared types read their edges, others are never touched."""
+    untyped = await _score(graph)
+    typed = await _score(graph, types=("SYNTHETIC_UNRELATED", RELATION))
+    assert typed["scored"] == untyped["scored"]
+    assert typed["scored"][0]["score"] == 80.0
+    undeclared = await _score(graph, types=("SYNTHETIC_UNRELATED",))
+    assert undeclared["evidence_reader"]["connected"] is True
+    assert undeclared["scored"] == []
+    assert "evidence:1" not in repr(undeclared)
 
 
 async def test_removing_the_edge_abstains_and_unapproved_types_never_qualify(graph: GraphDriver) -> None:
