@@ -129,7 +129,7 @@ scoring: {dimensions: []}
 
 # RG-054 (RU-041 / CEG-COR-019): an exclusion gate the compiler cannot honour is
 # refused instead of compiling to an always-true NOT EXISTS. RU-038 (DEC-15)
-# removed the gate from the mortgage pack, which is now dormant; these tests
+# removed the gate from the mortgage pack (served without it, DEC-15); these tests
 # re-create it on the pack as the pre-repair spec declared it.
 _PRE_REPAIR_MORTGAGE_BLACKLIST = {
     "name": "blacklist_exclusion",

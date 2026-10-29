@@ -828,9 +828,10 @@ or a value a compiler binds itself; otherwise the defect names the direction
 and the parameter or step. No Neo4j access. `mortgage-brokerage` was withheld
 by it until RU-038 rewrote its `lenderresolve` step in the assembler's
 `(alias:Label)-[:TYPE]->(alias:Label)` grammar (CEG-COR-012); it failed every
-match before. The repaired pack compiles cleanly and is declared
-`domain.activation: dormant` (DEC-15) until state licensing and the lender
-blacklist can be enforced. Rollback: `ADMISSION_CHECKS_FULL_MATCH=false` (with
+match before. The repaired pack compiles cleanly. It is served, as on main
+(owner decision 2026-10-29), without state-licensing or lender-blacklist
+enforcement; its DEC-15 `domain.activation: dormant` declaration is left
+commented in the pack until the owner enables withholding. Rollback: `ADMISSION_CHECKS_FULL_MATCH=false` (with
 `SCORING_ADMISSION_CHECK_ENABLED=false` for the pre-remediation verdicts) or
 `UNVALIDATED_DOMAIN_PACKS_ENABLED=true`.
 
@@ -844,8 +845,9 @@ at a candidate label of the gate's direction(s), compiled to a predicate that
 is always true. The compiler now refuses it, naming the gate, and admission
 withholds the pack. The case that motivated it, `mortgage-brokerage`
 `blacklist_exclusion` (`BorrowerProfile -[:BLACKLISTEDLENDER]-> Lender`), was
-removed by RU-038 and the pack declared dormant until a query-anchored exclusion
-construct exists (DEC-15 "D now, then A"). A
+removed by RU-038; until a query-anchored exclusion construct exists (DEC-15 "D
+now, then A") the blacklist is not enforced, and the pack is served as on main
+(owner decision 2026-10-29) rather than declared dormant. A
 candidate-origin edge (PlasticOS `exclusion_check`) compiles unchanged.
 Rollback: `EXCLUSION_ENDPOINT_VALIDATION=false`.
 

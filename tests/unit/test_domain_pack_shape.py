@@ -670,10 +670,10 @@ async def test_plasticos_active_supply_binds_the_declared_default(supplied: bool
     assert _missing_params(cypher, parameters) == []
 
 
-def _dormant_pack_spec(domain_id: str) -> DomainSpec:
-    """A pack declared dormant (not withheld for defects): validated, never served by default."""
-    spec = _spec(DOMAINS_ROOT / domain_id)
-    assert spec.domain.activation is DomainActivation.DORMANT
+def _clean_served_pack_spec(domain_id: str) -> DomainSpec:
+    """A pack served by default (owner decision 2026-10-29) that compiles with no admission defect."""
+    spec = _admitted_spec(domain_id)
+    assert spec.domain.activation is DomainActivation.ACTIVE
     assert admission_defects(spec) == []
     return spec
 
@@ -695,7 +695,7 @@ _VA_FRAGMENT = (
 def test_mortgage_va_eligibility_is_an_implication() -> None:
     from engine.gates.compiler import GateCompiler
 
-    spec = _dormant_pack_spec("mortgage-brokerage")
+    spec = _clean_served_pack_spec("mortgage-brokerage")
     gate = _gate(spec, "va_eligibility")
     assert (gate.type.value, gate.operator, gate.nullbehavior.value) == ("threshold", "<=", "pass")
     where = GateCompiler(spec).compile_all_gates("borrowertoproduct")
@@ -798,7 +798,8 @@ async def test_queryschema_only_match_binds_every_parameter(
 ) -> None:
     from engine.config import loader as loader_module
 
-    # mortgage-brokerage is dormant (DEC-15); the override serves it only if it admits.
+    # mortgage-brokerage is served by default (owner decision 2026-10-29); the dormant
+    # override keeps this binding check valid if the owner declares it dormant (DEC-15).
     monkeypatch.setattr(loader_module.settings, "dormant_domain_packs_enabled", True)
     monkeypatch.setattr(loader_module.settings, "unvalidated_domain_packs_enabled", False)
     cypher, parameters = await _capture_match(domain_id, direction, dict(query))
