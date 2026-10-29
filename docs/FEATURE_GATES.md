@@ -907,6 +907,21 @@ both states.
 `tests/integration/test_graph_evidence_score.py` (rollback, concurrent
 identity, replay).
 
+### Tenant mapping declarations (QM.POC0.TENANT_ASSOCIATION_MAPPING.004)
+
+`observedfrom` (provider associations a relationship endpoint accepts),
+`refnamespace` (a node label's graph-ref namespace) and `evidencerelevance`
+(approved relevance of an evidence edge type) are tenant-spec declarations, not
+flags. They are validated on every spec load, unconditionally: a malformed,
+ambiguous or conflicting declaration stops the spec from loading
+(`engine/config/tenant_mapping.py`). Writes they describe are still gated by
+`RELATIONSHIP_SYNC_ENABLED`. A declared `refnamespace` refuses node and
+relationship rows whose ids fall outside it, before compliance records the
+request or anything touches the graph. Relevance reaches scoring only from a
+`-reviewed` or `-production` spec. Tests:
+`tests/unit/test_observed_association_schema.py`,
+`tests/integration/test_tenant_mapping_identity.py`.
+
 ### Rollback
 
 Set the flag to `false`. Edges already written keep their stamp and stay
