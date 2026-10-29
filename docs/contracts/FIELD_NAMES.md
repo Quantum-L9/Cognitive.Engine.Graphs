@@ -105,6 +105,18 @@ source.associationcategory  # str — ^[A-Z][A-Z0-9_]{0,63}$
 source.associationtypeid  # int — strict, >= 1
 ```
 
+### EdgeSpec
+
+```python
+edge.type  # str
+edge.from_  # str — YAML key `from`
+edge.to  # str
+edge.direction  # EdgeDirection
+edge.category  # EdgeCategory
+edge.managedby  # ManagedByType
+edge.evidencerelevance  # float | None — approved relevance in [0, 1]; scoring honours it at -reviewed/-production
+```
+
 
 ### TraversalStep
 
