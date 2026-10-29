@@ -33,7 +33,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import ValidationError as PydanticValidationError
 
@@ -45,6 +45,10 @@ from engine.scoring.evidence_priority import (
     EvidenceUnavailableError,
 )
 from engine.sync.generator import RELATIONSHIP_EVIDENCE_SCHEMA
+from engine.utils.security import sanitize_label
+
+if TYPE_CHECKING:
+    from engine.config.schema import DomainSpec
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +57,7 @@ logger = logging.getLogger(__name__)
 MAX_EVIDENCE_EDGES = 1000
 
 _READ_EVIDENCE = """
-MATCH ()-[r]->()
+MATCH ()-[r{types}]->()
 WHERE r._evidence_schema = $schema AND r._tenant = $tenant AND r._subject_ref IN $refs
 RETURN r._subject_ref AS entity_ref, type(r) AS relationship_type, properties(r) AS props
 ORDER BY entity_ref, props.evidence_ref
@@ -101,12 +105,44 @@ def _single_revision(rows: Sequence[dict[str, Any]]) -> str | None:
     return None
 
 
-class GraphEvidenceBinding:
-    """``EvidenceBinding`` over the tenant's Neo4j database, read-only and non-provisioning."""
+def declared_evidence_types(domain_spec: DomainSpec) -> tuple[str, ...]:
+    """The relationship types the tenant spec declares for ``targetedge`` sync endpoints, sanitized."""
+    endpoints = domain_spec.sync.endpoints if domain_spec.sync else []
+    return tuple(sorted({sanitize_label(e.targetedge) for e in endpoints if e.targetedge}))
 
-    def __init__(self, driver: GraphDriver, approved_relevance: Mapping[str, float]) -> None:
+
+def read_evidence_query(relationship_types: Sequence[str] | None) -> str:
+    """The evidence read, type-bounded when ``relationship_types`` is given (labels via ``sanitize_label``)."""
+    if relationship_types is None:
+        return _READ_EVIDENCE.format(types="")
+    if not relationship_types:
+        msg = "a type-bounded evidence read needs at least one relationship type"
+        raise ValueError(msg)
+    return _READ_EVIDENCE.format(types=":" + "|".join(sanitize_label(t) for t in relationship_types))
+
+
+class GraphEvidenceBinding:
+    """``EvidenceBinding`` over the tenant's Neo4j database, read-only and non-provisioning.
+
+    ``relationship_types`` bounds the read to those types (production callers
+    pass ``declared_evidence_types(spec)``; an empty declaration reads nothing).
+    ``None`` keeps the untyped scan, the pre-bound behaviour.
+    """
+
+    def __init__(
+        self,
+        driver: GraphDriver,
+        approved_relevance: Mapping[str, float],
+        *,
+        relationship_types: Sequence[str] | None = None,
+    ) -> None:
+        if isinstance(relationship_types, str):
+            msg = "relationship_types must be a sequence of relationship types, not one string"
+            raise TypeError(msg)
         self._driver = driver
         self._approved_relevance = approved_relevance
+        self._relationship_types = None if relationship_types is None else tuple(relationship_types)
+        self._query = None if self._relationship_types == () else read_evidence_query(self._relationship_types)
 
     @property
     def approved_relevance(self) -> Mapping[str, float]:
@@ -121,6 +157,9 @@ class GraphEvidenceBinding:
         except RuntimeError as exc:
             msg = "graph driver is not connected"
             raise EvidenceUnavailableError(msg) from exc
+        if self._query is None:
+            # The tenant spec declares no evidence relationship type: there is nothing to read.
+            return EvidenceRead(connected=True, database=database)
         params = {
             "schema": RELATIONSHIP_EVIDENCE_SCHEMA,
             "tenant": database,
@@ -128,7 +167,7 @@ class GraphEvidenceBinding:
             "limit": MAX_EVIDENCE_EDGES + 1,
         }
         try:
-            rows = await self._driver.execute_read(_READ_EVIDENCE, params, database=database)
+            rows = await self._driver.execute_read(self._query, params, database=database)
         except DatabaseNotProvisionedError as exc:
             msg = f"tenant database {database!r} does not exist; a score read never creates it"
             raise EvidenceUnavailableError(msg) from exc
