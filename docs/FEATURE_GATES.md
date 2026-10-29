@@ -721,9 +721,8 @@ withheld when:
   (`handle_match` binds it); otherwise it is the unbound-parameter defect above.
 
 Each such pack failed every match (`ValueError` / `ParameterMissing`) or
-silently degraded. With the check on, `freight-matching` is withheld until its
-scoring binds `$lat` / `$lon` / `$target_price` (CEG-COR-011); with the default
-(off) it is served, as on main.
+silently degraded. `freight-matching` is withheld by this check until its
+scoring binds `$lat` / `$lon` / `$target_price` (CEG-COR-011).
 Rollback: `SCORING_ADMISSION_CHECK_ENABLED=false` (gate-only admission, the
 previous wording of the withholding reason), or
 `UNVALIDATED_DOMAIN_PACKS_ENABLED=true` to serve every validated pack.
