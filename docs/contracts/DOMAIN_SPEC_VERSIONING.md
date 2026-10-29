@@ -131,20 +131,18 @@ domain:
 - Minor version bump: New fields, gates, or scoring dimensions added.
 - Patch version bump: Threshold/parameter tuning only.
 
-### Tenant association mapping and approved relevance (QM.POC0.TENANT_ASSOCIATION_MAPPING.004, D-6)
+### Tenant association mapping (QM.POC0.TENANT_ASSOCIATION_MAPPING.004, D-6)
 
 These are semantic changes, never parameter tuning:
 
 | Change | Bump |
 |---|---|
 | Add, change or remove an `observedfrom` entry, or move it to another endpoint | minor |
-| Add, change or remove an edge's `evidencerelevance` | minor (not patch) |
 | Add `refnamespace` to a node label that has no synced nodes yet | minor |
 | Change or remove a label's `refnamespace` once nodes exist under it | major — it renames every node identity of that label |
 | Rename or remove the target edge type of an observed endpoint | major |
 
-`evidencerelevance` reaches scoring only from a `-reviewed` or `-production`
-spec (D-8b). A spec carrying `observedfrom` or `evidencerelevance` is promoted
-to `-production` only after human review.
+A spec carrying `observedfrom` is promoted to `-production` only after human
+review.
 
 ```

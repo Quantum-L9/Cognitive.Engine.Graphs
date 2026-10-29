@@ -11,11 +11,10 @@ status: active
 
 tests/unit/test_observed_association_schema.py
 QM.POC0.TENANT_ASSOCIATION_MAPPING.004 without Neo4j: the tenant spec's
-``observedfrom`` (provider association → relationship), ``refnamespace`` (record
-id → graph ref) and ``evidencerelevance`` (approved relevance) declarations, as
-``DomainSpec`` validates them at load (engine/config/tenant_mapping.py), the
-write-side ref check (engine/sync/generator.py ``ref_namespace_defects``) and the
-stage-gated relevance loader (engine/scoring/graph_evidence.py).
+``observedfrom`` (provider association → relationship) and ``refnamespace`` (record
+id → graph ref) declarations, as ``DomainSpec`` validates them at load
+(engine/config/tenant_mapping.py), and the write-side ref check
+(engine/sync/generator.py ``ref_namespace_defects``).
 
 Vocabulary is synthetic, built at test time from tests/fixtures/domains: the
 provider token, object types, category and type id below are placeholders, not
@@ -34,11 +33,10 @@ import pytest
 import yaml
 from pydantic import ValidationError as PydanticValidationError
 
-from engine.config.schema import DomainSpec, ObservedAssociationSourceSpec, SyncEndpointSpec
+from engine.config.schema import DomainSpec, SyncEndpointSpec
 from engine.config.settings import settings
-from engine.config.tenant_mapping import declared_ref_namespace, relevance_is_active, spec_version_stage
+from engine.config.tenant_mapping import declared_ref_namespace
 from engine.handlers import ValidationError, handle_sync, init_dependencies
-from engine.scoring.graph_evidence import approved_relevance_from_spec
 from engine.state import get_state
 from engine.sync.generator import (
     ref_namespace_defects,
@@ -375,86 +373,3 @@ def test_shipped_specs_still_validate_and_declare_no_mapping() -> None:
         spec = DomainSpec.model_validate(yaml.safe_load(path.read_text()))
         for endpoint in spec.sync.endpoints if spec.sync else []:
             assert (endpoint.observedfrom, endpoint.refnamespace) == (None, None), path
-        assert all(edge.evidencerelevance is None for edge in spec.ontology.edges), path
-
-
-# ── D-8 / D-8b / C-T12 / C-T13: approved relevance ─────────────────────────────
-
-
-def _with_relevance(value: Any, *, version: str = "1.1.0-reviewed") -> dict[str, Any]:
-    raw = _raw(version=version)
-    _edge(raw, "TENDED_BY")["evidencerelevance"] = value
-    return raw
-
-
-@pytest.mark.parametrize("value", [-0.1, 1.1, float("nan"), float("inf"), True, "0.5"])
-def test_relevance_is_a_finite_number_in_the_unit_interval(value: Any) -> None:
-    _refused(_with_relevance(value), "evidencerelevance")
-
-
-def test_relevance_on_an_edge_no_relationship_endpoint_writes_is_refused() -> None:
-    raw = _raw()
-    _edge(raw, "SHARES_CULTURE_WITH")["evidencerelevance"] = 0.5
-    _refused(raw, "no relationship sync endpoint writes it")
-
-
-@pytest.mark.parametrize("second", [0.4, None], ids=["disagreeing", "undeclared"])
-def test_every_signature_of_a_type_declares_the_same_relevance(second: float | None) -> None:
-    raw = _with_relevance(0.9)
-    edge = {
-        "type": "TENDED_BY",
-        "from": "WheelBatch",
-        "to": "Affineur",
-        "direction": "DIRECTED",
-        "category": _edge(raw, "TENDED_BY")["category"],
-        "managedby": "sync",
-    }
-    if second is not None:
-        edge["evidencerelevance"] = second
-    raw["ontology"]["edges"].append(edge)
-    raw["sync"]["endpoints"].append(
-        {
-            "path": "/v1/sync/batch-tended-by",
-            "method": "POST",
-            "targetedge": "TENDED_BY",
-            "fromnode": "WheelBatch",
-            "tonode": "Affineur",
-            "batchstrategy": "UNWINDMERGE",
-        }
-    )
-    _refused(raw, "declares the same evidencerelevance")
-
-
-@pytest.mark.parametrize(
-    ("version", "active"),
-    [
-        ("1.1.0-reviewed", True),
-        ("1.1.0-production", True),
-        ("1.1.0-proposed", False),
-        ("0.4.0-inferred", False),
-        ("1.1.0", False),
-        ("1.1.0-reviewed-hotfix", False),
-    ],
-)
-def test_relevance_reaches_scoring_only_from_a_reviewed_or_production_spec(version: str, active: bool) -> None:
-    spec = DomainSpec.model_validate(_with_relevance(0.75, version=version))
-    assert relevance_is_active(spec) is active
-    relevance = approved_relevance_from_spec(spec)
-    assert dict(relevance) == ({"TENDED_BY": 0.75} if active else {})
-    with pytest.raises(TypeError):
-        relevance["TENDED_BY"] = 1.0  # type: ignore[index]
-
-
-def test_a_spec_without_relevance_yields_an_empty_map() -> None:
-    assert dict(approved_relevance_from_spec(DomainSpec.model_validate(_raw()))) == {}
-
-
-def test_the_version_stage_parser_reads_only_the_declared_grammar() -> None:
-    assert spec_version_stage("2.0.1-production") == "production"
-    assert spec_version_stage("2.0.1-seed") == "seed"
-    assert spec_version_stage("2.0.1-approved") is None
-    assert spec_version_stage("v2.0.1-reviewed") is None
-
-
-def test_observation_and_relevance_models_are_separate() -> None:
-    assert "evidencerelevance" not in ObservedAssociationSourceSpec.model_fields

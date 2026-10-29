@@ -40,8 +40,6 @@ from typing import Any, Literal
 from neo4j.exceptions import ClientError, ServiceUnavailable, SessionExpired, TransientError
 from pydantic import ValidationError as PydanticValidationError
 
-from engine.config.schema import DomainSpec
-from engine.config.tenant_mapping import relevance_is_active
 from engine.graph.circuit_breaker import CircuitOpenError
 from engine.graph.driver import DatabaseNotProvisionedError, GraphDriver
 from engine.scoring.evidence_priority import (
@@ -49,7 +47,6 @@ from engine.scoring.evidence_priority import (
     EvidenceObservation,
     EvidenceRead,
     EvidenceUnavailableError,
-    approved_relevance_map,
 )
 from engine.sync.generator import RELATIONSHIP_EVIDENCE_SCHEMA
 
@@ -66,26 +63,6 @@ RETURN r._subject_ref AS entity_ref, type(r) AS relationship_type, properties(r)
 ORDER BY entity_ref, props.evidence_ref
 LIMIT $limit
 """
-
-
-def approved_relevance_from_spec(domain_spec: DomainSpec) -> Mapping[str, float]:
-    """Approved relevance per evidence edge type, as the tenant spec declares it (D-8).
-
-    Read-only and empty when the spec declares none, or when its version stage is
-    below ``-reviewed`` (D-8b): an unreviewed declaration never reaches scoring,
-    so every entity abstains rather than scoring on an unapproved coefficient.
-    """
-    declared = {
-        edge.type: edge.evidencerelevance for edge in domain_spec.ontology.edges if edge.evidencerelevance is not None
-    }
-    if declared and not relevance_is_active(domain_spec):
-        logger.info(
-            "evidencerelevance declared by %s at version %r is inactive until -reviewed or -production",
-            domain_spec.domain.id,
-            domain_spec.domain.version,
-        )
-        return approved_relevance_map({})
-    return approved_relevance_map(declared)
 
 
 # Two timeouts arrive as ``ClientError``: the server's transaction timeout (by

@@ -213,21 +213,9 @@ class EdgeSpec(BaseModel):
     category: EdgeCategory
     managedby: ManagedByType
     properties: list[PropertySpec] = Field(default_factory=list)
-    # Server-owned approved relevance of this evidence edge type in [0, 1]
-    # (engine/config/tenant_mapping.py; honoured only at -reviewed/-production).
-    evidencerelevance: float | None = Field(default=None, ge=0.0, le=1.0, allow_inf_nan=False)
 
     class Config:
         populate_by_name = True
-
-    @field_validator("evidencerelevance", mode="before")
-    @classmethod
-    def refuse_non_numeric_relevance(cls, value: object) -> object:
-        """A bool or a quoted number is not a relevance coefficient (lax float would coerce both)."""
-        if isinstance(value, bool | str | bytes):
-            msg = f"evidencerelevance must be a number in [0, 1], got {type(value).__name__}"
-            raise ValueError(msg)
-        return value
 
 
 class OntologySpec(BaseModel):
@@ -1268,8 +1256,8 @@ class DomainSpec(BaseModel):
                     strategies.pop(),
                 )
 
-        # Tenant association mapping, node ref namespaces and approved relevance:
-        # unconditional, so a malformed declaration never loads (D-7).
+        # Tenant association mapping and node ref namespaces: unconditional, so a
+        # malformed declaration never loads (D-7).
         from engine.config.tenant_mapping import validate_tenant_mapping
 
         validate_tenant_mapping(self)
