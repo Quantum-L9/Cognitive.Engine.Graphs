@@ -51,7 +51,6 @@ independently of the code default.
 | Confidence Checking | `CONFIDENCE_CHECK_ENABLED` | `True` | `True` | active |
 | Pareto Ensemble | `PARETO_ENABLED` | `True` | `True` | active |
 | Pareto Weight Discovery | `PARETO_WEIGHT_DISCOVERY_ENABLED` | `False` | `True` | active (opt-in) |
-| Evidence Identity Per Type | `EVIDENCE_IDENTITY_PER_TYPE_ENABLED` (`evidence_identity_per_type_enabled`) | `False` | unset | dormant; `graph_evidence_priority_v1` dedupes on `(relationship_type, evidence_ref)` — see §24 |
 | Domain Strict Validation | `DOMAIN_STRICT_VALIDATION` | `True` | `True` | active |
 | Score Clamping | `SCORE_CLAMP_ENABLED` | `True` | `True` | active; a null dimension clamps to `0.0` as well (Stage 2, see §20) |
 | Strict Null Gates | `STRICT_NULL_GATES` | `True` | `True` | active |
@@ -754,31 +753,6 @@ response is unchanged.
 The flag is read when handlers are registered (node app startup), because the
 SDK dispatches on the wrapper's parameter count.
 `INGRESS_PACKET_AUDIT_ENABLED=false` restores the reconstructed request.
-
----
-
-## 24. Evidence Identity Per Type (A1, QM.POC0.CEG.SCORE.001)
-
-**State**: Dormant
-**Flag**: `EVIDENCE_IDENTITY_PER_TYPE_ENABLED=False` (`evidence_identity_per_type_enabled`, default off)
-
-`graph_evidence_priority_v1` (`engine/scoring/evidence_priority.py`) dedupes an
-entity's observations before scoring. Off: the identity is `evidence_ref`
-alone, so one `evidence_ref` recorded under two relationship types is read as
-two disagreeing copies and the entity abstains with `conflicting_evidence`.
-On: the identity is `(relationship_type, evidence_ref)`, the same per-type
-identity relationship sync writes, so each typed observation scores on its
-own. Disagreeing copies within one type are still a conflict in both states.
-
-### Validation
-
-`tests/unit/test_evidence_priority.py::test_identity_per_type_*` (on, on with a
-same-type conflict, off).
-
-### Rollback
-
-Set the flag to `false`. Nothing is persisted; the next score uses
-`evidence_ref`-only identity.
 
 ---
 

@@ -33,7 +33,6 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | monoculture_threshold | 0.70 | Single-dimension dominance cap |
 | ensemble_max_divergence | 0.30 | GDS/KGE score divergence cap |
 | score_normalize | False | Post-query min-max normalization |
-| evidence_identity_per_type_enabled | False | `graph_evidence_priority_v1` dedupes on `(relationship_type, evidence_ref)` instead of `evidence_ref` (A1) |
 
 ## Wave 7 — Explicit Tenant Database Binding
 | Flag | Default | Purpose |

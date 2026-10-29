@@ -157,33 +157,29 @@ def _one_ref_under_two_types() -> EvidenceRead:
     return read(obs(A, "e:1", relationship_type=POSITIVE), obs(A, "e:1", relationship_type=WEAKER, confidence=0.4))
 
 
-def test_identity_per_type_on_one_ref_under_two_types_is_not_a_conflict(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_identity_per_type_on_one_ref_under_two_types_is_not_a_conflict() -> None:
     """A1: evidence identity is (relationship_type, evidence_ref); the sync writes one edge per type."""
-    from engine.config.settings import settings
-
-    monkeypatch.setattr(settings, "evidence_identity_per_type_enabled", True)
-    result = score_cohort(request(A), _one_ref_under_two_types(), RELEVANCE)
+    result = score_cohort(request(A), _one_ref_under_two_types(), RELEVANCE, identity_per_type=True)
     assert result["abstained"] == []
     assert result["scored"][0]["score"] == 87.0
     assert result["scored"][0]["qualifying_evidence_refs"] == ["e:1"]
     assert [factor["relationship_type"] for factor in result["scored"][0]["factors"]] == [POSITIVE]
 
 
-def test_identity_per_type_on_still_conflicts_within_one_type(monkeypatch: pytest.MonkeyPatch) -> None:
-    from engine.config.settings import settings
-
-    monkeypatch.setattr(settings, "evidence_identity_per_type_enabled", True)
-    result = score_cohort(request(A), read(obs(A, "e:1"), obs(A, "e:1", confidence=0.2)), RELEVANCE)
+def test_identity_per_type_on_still_conflicts_within_one_type() -> None:
+    result = score_cohort(
+        request(A), read(obs(A, "e:1"), obs(A, "e:1", confidence=0.2)), RELEVANCE, identity_per_type=True
+    )
     assert result["abstained"][0]["detail"] == "conflicting_evidence"
 
 
-def test_identity_per_type_off_keeps_ref_only_identity(monkeypatch: pytest.MonkeyPatch) -> None:
-    from engine.config.settings import settings
-
-    monkeypatch.setattr(settings, "evidence_identity_per_type_enabled", False)
-    result = score_cohort(request(A), _one_ref_under_two_types(), RELEVANCE)
-    assert result["scored"] == []
-    assert result["abstained"][0]["detail"] == "conflicting_evidence"
+def test_identity_per_type_off_keeps_ref_only_identity() -> None:
+    for result in (
+        score_cohort(request(A), _one_ref_under_two_types(), RELEVANCE),
+        score_cohort(request(A), _one_ref_under_two_types(), RELEVANCE, identity_per_type=False),
+    ):
+        assert result["scored"] == []
+        assert result["abstained"][0]["detail"] == "conflicting_evidence"
 
 
 def test_duplicate_evidence_and_repeated_paths_cannot_raise_score() -> None:
