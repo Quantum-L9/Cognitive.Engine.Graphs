@@ -553,7 +553,8 @@ class Settings(BaseSettings):
     neo4j_circuit_release_cancelled_probes: bool = True
     # RU-093 / CEG-COR-034: neo4j ClientError (syntax, constraint, missing
     # database, null MERGE key) is a per-request fault and no longer counts
-    # toward opening the process-wide Neo4j breaker. Off: every exception counts.
+    # toward opening the process-wide Neo4j breaker; AuthError/TokenExpired/
+    # Forbidden still count. Off: every exception counts.
     neo4j_circuit_ignore_client_errors: bool = True
     # RU-095 / CEG-COR-170: with auto_create_domain_database on, breaker
     # admission happens before first-use provisioning, so an OPEN breaker
