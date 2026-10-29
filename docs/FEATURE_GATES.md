@@ -167,12 +167,15 @@ independently of the code default.
 - Domain spec must have `compliance.pii` section with field declarations.
 - Caller must hold `admin:gdpr` capability (when capability auth is enabled).
 - Recommend running dry-run first (`GDPR_DRY_RUN=True`).
+- Live erasure requires the `POSTGRES_DSN` compliance audit pool: the pre-delete
+  `PII_ERASURE` flush is strict, so without it nothing is deleted (RU-066 follow-up).
 
 ### Activation Steps
 1. Set `GDPR_ERASURE_ENABLED=True` in environment.
 2. Keep `GDPR_DRY_RUN=True` initially for safe validation.
 3. Call `erase_subject` admin subaction with `data_subject_id`.
-4. Review dry-run report: nodes affected, edges affected.
+4. Review dry-run report: `would_affect.graph_nodes` and `would_affect.packets` (the
+   requesting tenant's PacketStore rows; `null` while PacketStore is disabled).
 5. Set `GDPR_DRY_RUN=False` and re-run for actual deletion.
 
 ### Validation
@@ -1192,6 +1195,25 @@ reported 0. `packet_store.sql` drops the two-argument function, so re-apply it
 in Python and an exception in SQL. No new flag: the SQL and Python contracts change
 together (an off path would call the dropped function), and live erasure stays behind
 `GDPR_ERASURE_ENABLED=False` / `GDPR_DRY_RUN=True`.
+
+**Durable pre-delete audit and packet dry-run scope (RU-066 follow-up, plan T13).** The
+`PII_ERASURE` entry is flushed with `ComplianceEngine.flush_audit_before_erasure()`, which
+is strict: `COMPLIANCE_AUDIT_SOFT_SINK` (RU-065, a request continues past a failed flush)
+does not apply to it. With no `POSTGRES_DSN` audit pool, or when the flush raises, the
+admin call fails with `ExecutionError` and **nothing** is deleted (the entry stays
+buffered for the periodic flush). Before, the soft request-path flush logged the failure
+and the packet and graph deletes ran with no durable audit entry. Operator consequence:
+live erasure now requires `POSTGRES_DSN` (the audit pool) in addition to
+`PACKET_STORE_DSN`. The dry run also reports `would_affect.packets`: the requesting
+tenant's PacketStore rows for the subject id (`actor_tenant = tenant`, read in one
+transaction with the tenant GUC set, so the `l9_product` role counts the rows it would
+erase), `null` while `PACKET_STORE_ENABLED` is off (not erasable), `-1` when the count
+fails. No new flag: both changes sit on the same off-by-default path
+(`GDPR_ERASURE_ENABLED=False`) and restore the "audited before deleted" invariant §2
+already states. Verified by `tests/unit/test_wave6_dormant_features.py`
+(`test_erase_subject_failed_audit_flush_blocks_every_delete`,
+`test_erase_subject_without_audit_sink_blocks_every_delete`) and the two-tenant
+PostgreSQL scenarios in `tests/integration/test_packet_store_pg.py`.
 
 ### Causal Attribution Unique Touchpoints (RU-067 / CEG-COR-055)
 
