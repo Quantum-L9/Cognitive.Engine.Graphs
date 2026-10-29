@@ -738,8 +738,8 @@ direction `TraversalAssembler.assemble_traversal` must not raise,
 gate WHERE, the traversal and the scoring clause must be a queryschema field, a
 derived parameter, a scoring `queryprop` (backfilled by `handle_match`), `top_n`
 or a value a compiler binds itself; otherwise the defect names the direction
-and the parameter or step. No Neo4j access. With the check on,
-`mortgage-brokerage` is withheld until its `lenderresolve` step is in the assembler's
+and the parameter or step. No Neo4j access. `mortgage-brokerage` is withheld by
+it until its `lenderresolve` step is in the assembler's
 `(alias:Label)-[:TYPE]->(alias:Label)` grammar (CEG-COR-012); it failed every
 match before. Rollback: `ADMISSION_CHECKS_FULL_MATCH=false` (with
 `SCORING_ADMISSION_CHECK_ENABLED=false` for the pre-remediation verdicts) or
@@ -754,7 +754,7 @@ to `NOT EXISTS { MATCH (candidate)-[:EDGE]->(…) }`, always anchored at the
 matched candidate. A gate that declares `fromnode` / `tonode` (an anchor the
 compiler ignores), or whose ontology edge type is undeclared or does not start
 at a candidate label of the gate's direction(s), compiled to a predicate that
-is always true. With the flag on, the compiler refuses it, naming the gate, and admission
+is always true. The compiler now refuses it, naming the gate, and admission
 withholds the pack (`mortgage-brokerage` `blacklist_exclusion`:
 `BorrowerProfile -[:BLACKLISTEDLENDER]-> Lender`, decision R2-DEC-04). A
 candidate-origin edge (PlasticOS `exclusion_check`) compiles unchanged.
