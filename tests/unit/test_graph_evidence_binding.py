@@ -248,3 +248,24 @@ async def test_handle_score_is_blocked_during_a_graph_outage() -> None:
     result = await handle_score("tenant-a", {"entity_refs": ["a:1"], "top_n": 1}, binding=binding)
     assert result["status"] == "blocked"
     assert result["evidence_reader"]["connected"] is False
+
+
+@pytest.mark.parametrize(("enabled", "scored"), [(True, 1), (False, 0)], ids=["per-type", "ref-only"])
+@pytest.mark.usefixtures("_clean_state")
+async def test_handle_score_evidence_identity_follows_the_flag(
+    monkeypatch: pytest.MonkeyPatch, enabled: bool, scored: int
+) -> None:
+    """A1: one evidence_ref under two relationship types abstains only under ref-only identity."""
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "evidence_identity_per_type_enabled", enabled)
+
+    def edge(relationship_type: str) -> dict[str, Any]:
+        props = {"evidence_ref": "e:1", "source_ref": "s", "confidence": 0.5}
+        props |= {"assertion_status": "observed", "polarity": "positive"}
+        return {"entity_ref": "a:1", "relationship_type": relationship_type, "props": props}
+
+    binding = GraphEvidenceBinding(_driver([edge("R_ONE"), edge("R_TWO")]), approved_relevance_map({"R_ONE": 1.0}))
+    result = await handle_score("tenant-a", {"entity_refs": ["a:1"], "top_n": 1}, binding=binding)
+    assert len(result["scored"]) == scored
+    assert [a["detail"] for a in result["abstained"]] == ([] if enabled else ["conflicting_evidence"])
