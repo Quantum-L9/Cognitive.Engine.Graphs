@@ -29,6 +29,8 @@ from neo4j.exceptions import ConstraintError
 
 import engine.handlers as handlers_module
 from chassis.errors import FeatureNotEnabled
+from engine.compliance.audit import AuditAction
+from engine.compliance.engine import ComplianceEngine
 from engine.config.schema import DomainSpec, SyncEndpointSpec
 from engine.config.settings import Settings, settings
 from engine.handlers import ExecutionError, ValidationError, handle_sync, init_dependencies
@@ -388,6 +390,75 @@ async def test_a_second_identity_conflict_is_a_refusal() -> None:
     _install(driver)
     with pytest.raises(ValidationError, match="already recorded"):
         await handle_sync("cheese-aging", {"entity_type": "tended-by", "batch": [_row()]})
+
+
+# ── T05: audit on commit (RELATIONSHIP_SYNC_AUDIT_ON_COMMIT_ENABLED) ────────────
+
+
+def _sync_records() -> list[str]:
+    """Mutation details buffered by the tenant's shared ComplianceEngine."""
+    return [
+        entry.detail or ""
+        for engine in get_state().compliance_engines.values()
+        for entry in engine._audit._buffer
+        if entry.action == AuditAction.MUTATION
+    ]
+
+
+def _refused_tx() -> _Tx:
+    return _Tx([_check("evidence:1", to_count=0)])
+
+
+def _rolled_back_tx() -> _Tx:
+    tampered = _stored(_row())
+    tampered["stored"]["confidence"] = 0.1
+    return _Tx([_check("evidence:1")], [tampered])
+
+
+@pytest.mark.parametrize(
+    ("make_tx", "error", "match"),
+    [(_refused_tx, ValidationError, "nothing written"), (_rolled_back_tx, ExecutionError, "rolled back")],
+    ids=["refused", "rolled-back"],
+)
+@pytest.mark.usefixtures("_clean_state", "_relationship_sync_on")
+async def test_a_failed_relationship_batch_leaves_no_success_audit_record(
+    make_tx: Any, error: type[Exception], match: str
+) -> None:
+    _install(_graph(make_tx()))
+    with pytest.raises(error, match=match):
+        await handle_sync("cheese-aging", {"entity_type": "tended-by", "batch": [_row()]})
+    assert _sync_records() == []
+
+
+@pytest.mark.usefixtures("_clean_state", "_relationship_sync_on")
+async def test_a_committed_relationship_batch_is_audited_once() -> None:
+    _install(_graph(_Tx([_check("evidence:1")], [_stored(_row())])))
+    await handle_sync("cheese-aging", {"entity_type": "tended-by", "batch": [_row()]})
+    assert _sync_records() == ["Sync tended-by batch_size=1"]
+
+
+@pytest.mark.usefixtures("_clean_state", "_relationship_sync_on")
+async def test_audit_on_commit_off_records_before_the_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "relationship_sync_audit_on_commit_enabled", False)
+    _install(_graph(_refused_tx()))
+    with pytest.raises(ValidationError, match="nothing written"):
+        await handle_sync("cheese-aging", {"entity_type": "tended-by", "batch": [_row()]})
+    assert _sync_records() == ["Sync tended-by batch_size=1"]
+
+
+@pytest.mark.usefixtures("_clean_state", "_relationship_sync_on")
+async def test_compliance_still_refuses_before_any_graph_io(monkeypatch: pytest.MonkeyPatch) -> None:
+    def prohibited(*_args: Any, **_kwargs: Any) -> None:
+        msg = "Sync batch contains prohibited field"
+        raise ValueError(msg)
+
+    monkeypatch.setattr(ComplianceEngine, "check_sync_request", prohibited)
+    driver = _graph()
+    _install(driver)
+    with pytest.raises(ValueError, match="prohibited"):
+        await handle_sync("cheese-aging", {"entity_type": "tended-by", "batch": [_row()]})
+    driver.execute_query.assert_not_awaited()
+    driver.execute_write.assert_not_awaited()
 
 
 # ── Activation flag (RELATIONSHIP_SYNC_ENABLED) ────────────────────────────────

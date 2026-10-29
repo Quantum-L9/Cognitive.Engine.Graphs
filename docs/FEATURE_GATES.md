@@ -69,6 +69,8 @@ independently of the code default.
 | Dormant Domain Packs | `DORMANT_DOMAIN_PACKS_ENABLED` (`dormant_domain_packs_enabled`) | `False` | unset | dormant; serve packs that declare `domain.activation: dormant` (replaces the per-domain `idea_portfolio_enabled`) — see §16 |
 | Graph Inference Feedback | `GRAPH_INFERENCE_FEEDBACK_ENABLED` (`graph_inference_feedback_enabled`) | `False` | unset | dormant; CEG → Gate → EIE `graph-inference-result` — see §13 |
 | Relationship Evidence Sync | `RELATIONSHIP_SYNC_ENABLED` (`relationship_sync_enabled`) | `False` | unset | dormant; `sync` to a `targetedge` endpoint writes typed evidence edges — see §22 |
+| Relationship Sync Audit On Commit | `RELATIONSHIP_SYNC_AUDIT_ON_COMMIT_ENABLED` (`relationship_sync_audit_on_commit_enabled`) | `True` | unset | active (hardening); refused/rolled-back batches leave no success audit record — see §22 |
+| Evidence Identity Per Type | `EVIDENCE_IDENTITY_PER_TYPE_ENABLED` (`evidence_identity_per_type_enabled`) | `False` | unset | dormant; score dedupes on `(relationship_type, evidence_ref)` — see §22 |
 | Domain Database Provisioning | `AUTO_CREATE_DOMAIN_DATABASE` (`auto_create_domain_database`) | `False` | unset | dormant; create the tenant domain database on first use — see §14 |
 | Health API (admin health_* subactions) | `HEALTH_API_ENABLED` (`health_api_enabled`) | `False` | unset | dormant; AI-readiness assess/report surface — see §15 |
 | Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; seven packs whose gates do not compile to executable, faithful Cypher — see §16 |
@@ -924,3 +926,18 @@ request or anything touches the graph. Tests:
 
 Set the flag to `false`. Edges already written keep their stamp and stay
 readable by the scorer; the constraint is left in place.
+
+### Audit on commit (`relationship_sync_audit_on_commit_enabled`, default `True`)
+
+The compliance checks (prohibited fields, field mappings) still run before any
+graph I/O, but the `Sync <type> batch_size=N` mutation record is buffered only
+after the relationship write committed. A refused or rolled-back batch records
+nothing; no audit entry is ever removed. Off: recorded before the write, as for
+node sync. Tests: `tests/unit/test_relationship_sync.py` (refusal, rollback).
+
+### Evidence identity per type (`evidence_identity_per_type_enabled`, default `False`)
+
+On: `handle_score` dedupes on `(relationship_type, evidence_ref)`, the identity
+this sync writes, so one `evidence_ref` under two types is not
+`conflicting_evidence`. Off: `evidence_ref` alone. Tests:
+`tests/unit/test_graph_evidence_binding.py`.

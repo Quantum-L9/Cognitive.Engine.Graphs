@@ -288,6 +288,13 @@ class Settings(BaseSettings):
     # every declaration, tenant and evidence guard still applies.
     # See docs/FEATURE_GATES.md §22.
     relationship_sync_enabled: bool = False
+    # T05: a targetedge sync buffers its compliance mutation record only after the
+    # write committed (checks still run first), so a refused or rolled-back batch
+    # leaves no 'Sync ... batch_size=N' success entry. Off: recorded before the write.
+    relationship_sync_audit_on_commit_enabled: bool = True
+    # A1: graph_evidence_priority_v1 dedupes on (relationship_type, evidence_ref),
+    # the identity relationship sync writes. Off: evidence_ref alone. §22.
+    evidence_identity_per_type_enabled: bool = False
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
