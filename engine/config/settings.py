@@ -123,6 +123,11 @@ class Settings(BaseSettings):
     ensemble_max_divergence: float = 0.30  # W2-03: GDS/KGE divergence cap (Wave 6)
     score_normalize: bool = False  # W2-04: post-query min-max normalization (opt-in)
     outcome_persistence_enabled: bool = False  # W2-02b: persist outcomes to PacketStore (opt-in)
+    # A1 / QM.POC0.CEG.SCORE.001: graph_evidence_priority_v1 dedupes observations
+    # on (relationship_type, evidence_ref), matching the per-type identity the
+    # relationship sync writes. Off: evidence_ref alone, so one ref under two
+    # types abstains as conflicting_evidence. See docs/FEATURE_GATES.md §24.
+    evidence_identity_per_type_enabled: bool = False
     # CEG-FIX-001: a RESULTED_IN edge that CausalEdgeRuntimeValidator (R3) rejects
     # is not written; the outcome node still is. Hardening that restores the R3
     # invariant, so it ships on. See docs/FEATURE_GATES.md §18.
