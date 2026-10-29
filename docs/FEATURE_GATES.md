@@ -99,7 +99,7 @@ independently of the code default.
 | Signal Weight Proportion CI | `SIGNAL_WEIGHT_PROPORTION_CI` (`signal_weight_proportion_ci`) | `True` | unset | active (correctness) for feedback-enabled domains; stored DimensionWeight `ci_width`/`confidence` come from the win-rate proportion, so an early positive lift is dampened; `false` restores the lift-based formula (RU-027 / CEG-COR-116) |
 | Propagation Single Application | `PROPAGATION_SINGLE_APPLICATION` (`propagation_single_application`) | `True` | unset | active (correctness); one outcome event updates each tenant DimensionWeight `boost_factor` once, bounded, and `candidates_affected` counts DimensionWeights; `false` restores the row-multiplying query (RU-028 / CEG-COR-117) |
 | Drift Requires Both Windows | `DRIFT_REQUIRES_BOTH_WINDOWS` (`drift_requires_both_windows`) | `True` | unset | active (correctness); outcomes `metadata.drift` raises no alert unless both a recent and a baseline distribution exist; `false` restores the one-sided divergence (RU-029 / CEG-COR-118) |
-| Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `True` | unset | active (hardening); admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
+| Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
 
 ---
 
@@ -699,7 +699,9 @@ later is served automatically — there is no per-domain list to forget it in.
 
 ### Scoring admission (RU-020 / CEG-COR-027..029)
 
-`SCORING_ADMISSION_CHECK_ENABLED` (default `True`) extends `admission_defects`
+`SCORING_ADMISSION_CHECK_ENABLED` (default `False` — owner decision 2026-10-29:
+withholding stays off, and every pack is served as on main, until the operator
+enables it) extends `admission_defects`
 from gates to scoring. For every declared match direction each applicable
 dimension is compiled as `ScoringAssembler` compiles it, and the pack is
 withheld when:
@@ -719,8 +721,9 @@ withheld when:
   (`handle_match` binds it); otherwise it is the unbound-parameter defect above.
 
 Each such pack failed every match (`ValueError` / `ParameterMissing`) or
-silently degraded. `freight-matching` is withheld by this check until its
-scoring binds `$lat` / `$lon` / `$target_price` (CEG-COR-011).
+silently degraded. With the check on, `freight-matching` is withheld until its
+scoring binds `$lat` / `$lon` / `$target_price` (CEG-COR-011); with the default
+(off) it is served, as on main.
 Rollback: `SCORING_ADMISSION_CHECK_ENABLED=false` (gate-only admission, the
 previous wording of the withholding reason), or
 `UNVALIDATED_DOMAIN_PACKS_ENABLED=true` to serve every validated pack.

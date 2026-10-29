@@ -388,9 +388,10 @@ class Settings(BaseSettings):
     # whose candidate property no node declares (inherit_prior /
     # structural_similarity).
     # Such a pack failed every match (ValueError / ParameterMissing) or silently
-    # degraded. Off: admission checks gates only, as before. Ships on — it
-    # withholds only packs whose matches cannot execute.
-    scoring_admission_check_enabled: bool = True
+    # degraded. Off: admission checks gates only, as before. Ships OFF (owner
+    # decision 2026-10-29): freight-matching keeps being served as on main
+    # until the operator enables withholding.
+    scoring_admission_check_enabled: bool = False
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
