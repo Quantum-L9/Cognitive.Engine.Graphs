@@ -886,18 +886,25 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # Run compliance checks on sync request
     compliance = _get_compliance_engine(domain_spec)
+    from engine.config.settings import settings as _sync_settings
+
+    # T05: a relationship batch can still be refused or rolled back after the
+    # checks, so its mutation record is buffered only once the write committed.
+    audit_on_commit = bool(endpoint_spec.targetedge) and _sync_settings.relationship_sync_audit_on_commit_enabled
+
+    def _check_sync(engine: ComplianceEngine) -> None:
+        engine.check_sync_request(tenant=tenant, entity_type=entity_type, batch=batch, endpoint_spec=endpoint_spec)
+
     if compliance.enabled:
-        compliance.check_sync_request(
-            tenant=tenant,
-            entity_type=entity_type,
-            batch=batch,
-            endpoint_spec=endpoint_spec,
-        )
+        # Audit on commit: the checks run now on a pool-less engine that is never flushed.
+        _check_sync(ComplianceEngine(domain_spec) if audit_on_commit else compliance)
 
     if endpoint_spec.targetedge:
         relationship_result = await _sync_relationships(
             graph_driver, domain_spec, endpoint_spec, entity_type=entity_type, batch=batch, tenant=tenant
         )
+        if audit_on_commit and compliance.enabled:
+            _check_sync(compliance)
         await compliance.flush_audit()
         return relationship_result
 
@@ -2608,7 +2615,14 @@ async def handle_score(
             action=SCORE_ACTION,
             tenant=tenant,
         )
-    return score_cohort(request, read, binding.approved_relevance)
+    from engine.config.settings import settings as _score_settings
+
+    return score_cohort(
+        request,
+        read,
+        binding.approved_relevance,
+        identity_per_type=_score_settings.evidence_identity_per_type_enabled,
+    )
 
 
 # CONTRACT-02: single source of truth for the engine's action surface.

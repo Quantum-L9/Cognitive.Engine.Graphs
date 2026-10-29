@@ -27,7 +27,10 @@ Rules the policy holds, each tested in ``tests/unit/test_evidence_priority.py``:
 * Confidence is reliability, not commercial value. It is never defaulted: an
   observation without an explicit confidence in ``[0, 1]`` does not qualify.
 * Evidence is deduplicated by its canonical identity, so repeating it cannot
-  raise a score. Repeats that disagree are a conflict.
+  raise a score. Repeats that disagree are a conflict. The identity is
+  ``evidence_ref``, or ``(relationship_type, evidence_ref)`` when the caller
+  passes ``identity_per_type=True`` (A1; the server-side switch is the
+  ``evidence_identity_per_type_enabled`` setting, read by the handler).
 * Missing provenance, non-admitted or negative evidence, stale or conflicting
   evidence, and unsupported relationship types abstain with ``score: None``.
   Nothing is zero-filled.
@@ -220,17 +223,20 @@ def _score_entity(
     entity_ref: str,
     observations: Sequence[EvidenceObservation],
     approved_relevance: Mapping[str, float],
+    *,
+    identity_per_type: bool,
 ) -> dict[str, Any]:
     """Score one entity, or return its abstention."""
     if not observations:
         return _abstain(entity_ref, "no_evidence")
 
-    unique: dict[str, EvidenceObservation] = {}
+    unique: dict[tuple[str, str], EvidenceObservation] = {}
     for observation in observations:
-        seen = unique.get(observation.evidence_ref)
+        identity = (observation.relationship_type if identity_per_type else "", observation.evidence_ref)
+        seen = unique.get(identity)
         if seen is not None and seen != observation:
             return _abstain(entity_ref, "conflicting_evidence")
-        unique[observation.evidence_ref] = observation
+        unique[identity] = observation
     if any(observation.conflicted for observation in unique.values()):
         return _abstain(entity_ref, "conflicting_evidence")
 
@@ -261,7 +267,7 @@ def _score_entity(
         "entity_ref": entity_ref,
         "score": score,
         "factors": factors,
-        "qualifying_evidence_refs": sorted(observation.evidence_ref for _, observation in qualified),
+        "qualifying_evidence_refs": sorted({observation.evidence_ref for _, observation in qualified}),
     }
 
 
@@ -269,12 +275,17 @@ def score_cohort(
     request: ScoreRequest,
     read: EvidenceRead,
     approved_relevance: Mapping[str, float],
+    *,
+    identity_per_type: bool = False,
 ) -> dict[str, Any]:
     """Apply ``graph_evidence_priority_v1`` to one evidence read of the requested cohort.
 
     Observations for refs outside the cohort are ignored. Scored entities sort
     by score descending, then entity ref ascending; ``top_n`` truncates the
     scored list. Abstentions are always returned in full, sorted by entity ref.
+    ``identity_per_type`` keys evidence identity on ``(relationship_type,
+    evidence_ref)`` instead of ``evidence_ref`` alone; the default keeps the
+    ref-only identity.
     """
     by_entity: dict[str, list[EvidenceObservation]] = {ref: [] for ref in request.entity_refs}
     for observation in read.observations:
@@ -284,7 +295,7 @@ def score_cohort(
     scored: list[dict[str, Any]] = []
     abstained: list[dict[str, Any]] = []
     for entity_ref, observations in by_entity.items():
-        outcome = _score_entity(entity_ref, observations, approved_relevance)
+        outcome = _score_entity(entity_ref, observations, approved_relevance, identity_per_type=identity_per_type)
         (abstained if outcome["score"] is None else scored).append(outcome)
 
     scored.sort(key=lambda item: (-item["score"], item["entity_ref"]))
