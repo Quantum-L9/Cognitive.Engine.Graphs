@@ -100,8 +100,8 @@ independently of the code default.
 | Propagation Single Application | `PROPAGATION_SINGLE_APPLICATION` (`propagation_single_application`) | `True` | unset | active (correctness); one outcome event updates each tenant DimensionWeight `boost_factor` once, bounded, and `candidates_affected` counts DimensionWeights; `false` restores the row-multiplying query (RU-028 / CEG-COR-117) |
 | Drift Requires Both Windows | `DRIFT_REQUIRES_BOTH_WINDOWS` (`drift_requires_both_windows`) | `True` | unset | active (correctness); outcomes `metadata.drift` raises no alert unless both a recent and a baseline distribution exist; `false` restores the one-sided divergence (RU-029 / CEG-COR-118) |
 | Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `True` | unset | active (hardening); admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
-| Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `True` | unset | active (hardening); admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
-| Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `True` | unset | active (hardening); an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
+| Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
+| Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
 
 ---
 
@@ -729,15 +729,17 @@ previous wording of the withholding reason), or
 
 ### Full-match admission (RU-039)
 
-`ADMISSION_CHECKS_FULL_MATCH` (default `True`) makes admission keep the promise
+`ADMISSION_CHECKS_FULL_MATCH` (default `False` — owner decision 2026-10-29:
+withholding stays off, and every pack is served as on main, until the operator
+enables it) makes admission keep the promise
 that an admitted pack executes for every declared match direction. For each
 direction `TraversalAssembler.assemble_traversal` must not raise,
 `GateCompiler.compile_all_gates` must not raise, and every `$parameter` in the
 gate WHERE, the traversal and the scoring clause must be a queryschema field, a
 derived parameter, a scoring `queryprop` (backfilled by `handle_match`), `top_n`
 or a value a compiler binds itself; otherwise the defect names the direction
-and the parameter or step. No Neo4j access. `mortgage-brokerage` is withheld by
-it until its `lenderresolve` step is in the assembler's
+and the parameter or step. No Neo4j access. With the check on,
+`mortgage-brokerage` is withheld until its `lenderresolve` step is in the assembler's
 `(alias:Label)-[:TYPE]->(alias:Label)` grammar (CEG-COR-012); it failed every
 match before. Rollback: `ADMISSION_CHECKS_FULL_MATCH=false` (with
 `SCORING_ADMISSION_CHECK_ENABLED=false` for the pre-remediation verdicts) or
@@ -745,12 +747,14 @@ match before. Rollback: `ADMISSION_CHECKS_FULL_MATCH=false` (with
 
 ### Exclusion endpoint validation (RU-041 / CEG-COR-019)
 
-`EXCLUSION_ENDPOINT_VALIDATION` (default `True`): the exclusion gate compiles
+`EXCLUSION_ENDPOINT_VALIDATION` (default `False` — owner decision 2026-10-29;
+the legacy fragment below is what ships until the operator enables it): the
+exclusion gate compiles
 to `NOT EXISTS { MATCH (candidate)-[:EDGE]->(…) }`, always anchored at the
 matched candidate. A gate that declares `fromnode` / `tonode` (an anchor the
 compiler ignores), or whose ontology edge type is undeclared or does not start
 at a candidate label of the gate's direction(s), compiled to a predicate that
-is always true. The compiler now refuses it, naming the gate, and admission
+is always true. With the flag on, the compiler refuses it, naming the gate, and admission
 withholds the pack (`mortgage-brokerage` `blacklist_exclusion`:
 `BorrowerProfile -[:BLACKLISTEDLENDER]-> Lender`, decision R2-DEC-04). A
 candidate-origin edge (PlasticOS `exclusion_check`) compiles unchanged.
