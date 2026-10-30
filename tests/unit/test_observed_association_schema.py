@@ -433,7 +433,6 @@ def test_every_signature_of_a_type_declares_the_same_relevance(second: float | N
         ("1.1.0-proposed", False),
         ("0.4.0-inferred", False),
         ("1.1.0", False),
-        ("1.1.0-reviewed-hotfix", False),
     ],
 )
 def test_relevance_reaches_scoring_only_from_a_reviewed_or_production_spec(version: str, active: bool) -> None:
@@ -454,6 +453,10 @@ def test_the_version_stage_parser_reads_only_the_declared_grammar() -> None:
     assert spec_version_stage("2.0.1-seed") == "seed"
     assert spec_version_stage("2.0.1-approved") is None
     assert spec_version_stage("v2.0.1-reviewed") is None
+    # A suffix after the stage is not that stage. Asserted on the parser, not via
+    # DomainSpec: domain.version validation may refuse such a version outright,
+    # which denies relevance too, earlier (RU-057 / CEG-COR-152).
+    assert spec_version_stage("1.1.0-reviewed-hotfix") is None
 
 
 def test_observation_and_relevance_models_are_separate() -> None:
