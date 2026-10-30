@@ -338,6 +338,13 @@ FILE_REGISTRY: list[FileMeta] = [
     FileMeta("tests/unit/test_safe_eval.py", "engine-specific", ["test"], ["test", "unit", "utils"], "engine-team"),
     FileMeta("tests/unit/test_scoring.py", "engine-specific", ["test"], ["test", "unit", "scoring"], "engine-team"),
     FileMeta(
+        "tests/unit/test_scoring_admission_default_off.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "config", "admission"],
+        "engine-team",
+    ),
+    FileMeta(
         "tests/unit/test_scoring_security.py", "engine-specific", ["test"], ["test", "unit", "scoring"], "engine-team"
     ),
     FileMeta("tests/unit/test_settings.py", "engine-specific", ["test"], ["test", "unit", "config"], "engine-team"),
