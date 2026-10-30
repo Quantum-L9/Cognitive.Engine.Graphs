@@ -119,7 +119,9 @@ def test_setup_repo_vars_skips_comments_and_sets_values(tmp_path: Path) -> None:
     """The restored comment-skip regex skips comment lines instead of every line."""
     assert BASH is not None
     shutil.copy(REPO / ".github" / "scripts" / "setup-repo-vars.sh", tmp_path / "setup-repo-vars.sh")
-    (tmp_path / "vars.env").write_text("# COMMENT_ONLY=nope\n\nFOO_BAR=baz\n", encoding="utf-8")
+    (tmp_path / "vars.env").write_text(
+        "\n# COMMENT_ONLY=nope\n\nFOO_BAR=baz\nNEO4J_IMAGE=neo4j:5\nS3_BUCKET_2=b\n", encoding="utf-8"
+    )
     call_log = tmp_path / "gh.log"
     stubs = tmp_path / "stubs"
     stubs.mkdir()
@@ -128,10 +130,38 @@ def test_setup_repo_vars_skips_comments_and_sets_values(tmp_path: Path) -> None:
 
     proc = _run([BASH, "setup-repo-vars.sh", "vars.env"], cwd=tmp_path, env=env)
 
+    assert proc.returncode == 0, proc.stderr
     assert "syntax error" not in proc.stderr
-    calls = call_log.read_text(encoding="utf-8").splitlines()
-    assert "variable set FOO_BAR --body baz" in calls
-    assert not [c for c in calls if "COMMENT_ONLY" in c]
+    calls = [c for c in call_log.read_text(encoding="utf-8").splitlines() if c.startswith("variable set")]
+    # Keys may contain digits (NEO4J_*); the old ^([A-Z_]+)= regex dropped them silently.
+    assert calls == [
+        "variable set FOO_BAR --body baz",
+        "variable set NEO4J_IMAGE --body neo4j:5",
+        "variable set S3_BUCKET_2 --body b",
+    ]
+    assert "Variables Set: 3" in proc.stdout
+
+
+@needs_bash
+def test_setup_repo_vars_sets_every_env_template_value(tmp_path: Path) -> None:
+    """Against the shipped template: rc 0 and one ``gh variable set`` per non-empty KEY=VALUE."""
+    assert BASH is not None
+    template = (REPO / ".github" / "env.template").read_text(encoding="utf-8")
+    expected = [m.group(1) for m in re.finditer(r"^([A-Z0-9_]+)=(.+)$", template, re.MULTILINE)]
+    call_log = tmp_path / "gh.log"
+    _stub(tmp_path, "gh", f'echo "$*" >> "{call_log}"; case "$1" in repo) echo owner/repo;; esac; exit 0')
+    env = {**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}"}
+
+    proc = _run(
+        [BASH, str(REPO / ".github" / "scripts" / "setup-repo-vars.sh"), str(REPO / ".github" / "env.template")],
+        cwd=tmp_path,
+        env=env,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    calls = [c.split()[2] for c in call_log.read_text(encoding="utf-8").splitlines() if c.startswith("variable set")]
+    assert calls == expected
+    assert "NEO4J_IMAGE" in calls
 
 
 # ── RU-150 / RG-186: entrypoint banner reports the effective chassis default ─

@@ -69,20 +69,20 @@ while IFS= read -r line; do
   [[ "$line" =~ ^[[:space:]]*$ ]] && continue
 
   # Parse KEY=VALUE
-  if [[ "$line" =~ ^([A-Z_]+)=(.*)$ ]]; then
+  if [[ "$line" =~ ^([A-Z0-9_]+)=(.*)$ ]]; then
     KEY="${BASH_REMATCH[1]}"
     VALUE="${BASH_REMATCH[2]}"
 
     # Skip if no value
     if [ -z "$VALUE" ]; then
-      ((++SKIPPED))
+      SKIPPED=$((SKIPPED + 1))
       continue
     fi
 
     echo "  Setting: $KEY = $VALUE"
 
     if gh variable set "$KEY" --body "$VALUE" 2>/dev/null; then
-      ((++COUNT))
+      COUNT=$((COUNT + 1))
     else
       echo "  ⚠️  Failed to set $KEY (may already exist or need permissions)"
     fi
