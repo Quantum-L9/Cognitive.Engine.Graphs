@@ -291,8 +291,9 @@ async def test_active_supply_requirement_is_an_implication_with_a_true_default(
 async def test_va_eligibility_fragment_orders_booleans_false_before_true(graph_driver, required, eligible, expected):
     """RU-035 / CEG-COR-005: pins the Cypher boolean ordering the mortgage implication relies on.
 
-    The mortgage pack is dormant (DEC-15), so the compiled fragment is evaluated
-    directly rather than through handle_match.
+    The compiled fragment is evaluated directly rather than through handle_match,
+    so the ordering is pinned whether or not the owner declares the pack dormant
+    (DEC-15; served by default, owner decision 2026-10-29).
     """
     rows = await graph_driver.execute_query(
         cypher=(
