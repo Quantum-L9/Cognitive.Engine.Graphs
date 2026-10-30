@@ -341,6 +341,28 @@ class TestComposedCascades:
         new_op = ("translation", {"offset_x": 0.1, "offset_y": 0.0, "offset_z": 0.0})
         assert _score(depth2, *new_op) != pytest.approx(_score(depth1, *new_op))
 
+    def test_depth_one_isinstance_validator_scores_as_bare_op(self) -> None:
+        engine = BeamSearchEngine(_model_with_embeddings(), BeamSearchConfig())
+        engine.config.constraint_validators = [lambda tx: isinstance(tx, Scale)]
+        depth1 = engine._generate_successors(BeamCandidate("root", "identity", {}, score=1.0, depth=0))
+        for c in depth1:
+            bare = engine._build_transformation(c.transformation_type, c.params)
+            assert c.score == pytest.approx(engine._score_candidate(bare))
+
+    def test_scoring_and_pruning_validators_see_same_cascade(self) -> None:
+        from engine.kge.transformations import Flip
+
+        def _no_flip(tx: object) -> bool:
+            return not any(isinstance(op, Flip) for op in getattr(tx, "ops", [tx]))
+
+        engine = BeamSearchEngine(_model_with_embeddings(), BeamSearchConfig(constraint_validators=[_no_flip]))
+        parent = BeamCandidate("p", "flip", {"axis": 0.0}, score=1.0, depth=1)
+        depth2 = engine._generate_successors(parent)
+        for c in depth2:
+            composed = engine._composed_transformation(c)
+            assert c.score == pytest.approx(engine._score_candidate(composed))
+        assert engine._prune_by_constraint(depth2) == []
+
     def test_search_depth_levels_differ(self) -> None:
         engine = BeamSearchEngine(
             _model_with_embeddings(),
