@@ -388,23 +388,27 @@ class Settings(BaseSettings):
     # whose candidate property no node declares (inherit_prior /
     # structural_similarity).
     # Such a pack failed every match (ValueError / ParameterMissing) or silently
-    # degraded. Off: admission checks gates only, as before. Ships on — it
-    # withholds only packs whose matches cannot execute.
-    scoring_admission_check_enabled: bool = True
+    # degraded. Off: admission checks gates only, as before. Ships OFF (owner
+    # decision 2026-10-29): freight-matching keeps being served as on main
+    # until the operator enables withholding.
+    scoring_admission_check_enabled: bool = False
     # RU-039: a pack admission serves must execute for every declared match
     # direction. On: admission_defects also requires TraversalAssembler to
     # assemble each direction and every $parameter in gates, traversal and
     # scoring to be one handle_match binds (queryschema field, derived
     # parameter, scoring queryprop, top_n or a compiler-bound literal). Off:
-    # the previous checks only. Ships on (fail-closed, Stage-2 precedent).
-    admission_checks_full_match: bool = True
+    # the previous checks only. Ships OFF (owner decision 2026-10-29):
+    # mortgage-brokerage keeps being served as on main until the operator
+    # enables withholding.
+    admission_checks_full_match: bool = False
     # RU-041 / CEG-COR-019: an exclusion gate always anchors its edge at the
     # matched candidate. One declaring fromnode/tonode, or whose ontology edge
     # does not start at a candidate label of its direction(s), compiled to a
     # NOT EXISTS that is always true (mortgage blacklist_exclusion). On: the
     # compiler refuses such a gate, so admission withholds the pack. Off: the
-    # legacy always-true fragment.
-    exclusion_endpoint_validation: bool = True
+    # legacy always-true fragment. Ships OFF (owner decision 2026-10-29), so
+    # mortgage-brokerage is served as on main until the operator enables it.
+    exclusion_endpoint_validation: bool = False
     # RU-042 / CEG-COR-020, CEG-COR-021: a gate's null policy was applied to
     # `candidate.<candidateprop>` and `$<queryparam>` whatever the predicate
     # tested — range FAIL passed NULL bounds, derived-bound range and
