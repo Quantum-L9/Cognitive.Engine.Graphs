@@ -20,8 +20,7 @@ import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from neo4j import READ_ACCESS, AsyncDriver, AsyncGraphDatabase
-from neo4j.exceptions import ConstraintError
+from neo4j import AsyncDriver, AsyncGraphDatabase
 
 from engine.graph.circuit_breaker import BreakerState, CircuitBreaker
 from engine.utils.security import sanitize_database_name
@@ -66,6 +65,8 @@ class ExpectedWriteOutcome(Exception):  # noqa: N818 - an outcome, not an error 
 
 
 def _is_expected_write_outcome(exc: Exception) -> bool:
+    from neo4j.exceptions import ConstraintError
+
     return isinstance(exc, ConstraintError | ExpectedWriteOutcome)
 
 
@@ -97,6 +98,25 @@ class _AnsweredOnProbe:
 
     def __init__(self, cause: Exception) -> None:
         self.cause = cause
+
+
+def _unwrap_breaker_outcomes(
+    method: Callable[..., Awaitable[Any]],
+) -> Callable[..., Awaitable[Any]]:
+    """Re-raise an expected answer that crossed the breaker as ``_BreakerNeutral``
+    or ``_AnsweredOnProbe`` (see ``GraphDriver._classified``)."""
+
+    @functools.wraps(method)
+    async def unwrapped(*args: Any, **kwargs: Any) -> Any:
+        try:
+            result = await method(*args, **kwargs)
+        except _BreakerNeutral as neutral:
+            raise neutral.cause from None
+        if isinstance(result, _AnsweredOnProbe):
+            raise result.cause
+        return result
+
+    return unwrapped
 
 
 class GraphDriver:
@@ -223,6 +243,8 @@ class GraphDriver:
             result = await tx.run(cypher, parameters or {})
             records: list[Any] = await result.data()
             return records
+
+        from neo4j import READ_ACCESS
 
         async with driver.session(database=database, default_access_mode=READ_ACCESS) as session:
             records: list[Any] = await session.execute_read(_read)
@@ -408,6 +430,32 @@ class GraphDriver:
         database: str = "neo4j",
         **kwargs: Any,
     ) -> dict[str, Any] | Any:
+        """The write the breaker runs: ``_write_once`` with expected answers classified.
+
+        A ``ConstraintError`` or ``ExpectedWriteOutcome`` leaves as
+        ``_BreakerNeutral`` (or ``_AnsweredOnProbe`` on a HALF_OPEN probe), so the
+        breaker records neither outcome; ``execute_write`` unwraps it.
+        """
+        return await self._classified(
+            _is_expected_write_outcome,
+            self._write_once,
+            transaction_function,
+            *args,
+            cypher=cypher,
+            parameters=parameters,
+            database=database,
+            **kwargs,
+        )
+
+    async def _write_once(
+        self,
+        transaction_function: Any = None,
+        *args: Any,
+        cypher: str | None = None,
+        parameters: dict[str, Any] | None = None,
+        database: str = "neo4j",
+        **kwargs: Any,
+    ) -> dict[str, Any] | Any:
         """Execute a write without circuit breaker (internal).
 
         Supports two calling conventions:
@@ -448,6 +496,7 @@ class GraphDriver:
 
             return await session.execute_write(_run_statement)
 
+    @_unwrap_breaker_outcomes
     async def execute_write(
         self,
         transaction_function: Any = None,
@@ -471,8 +520,7 @@ class GraphDriver:
         database = self._resolve_database(database, "execute_write")
         await self._provision_on_first_use(database)
         try:
-            return await self._call_breaker_neutral(
-                _is_expected_write_outcome,
+            return await self._circuit_breaker.call(
                 self._raw_execute_write,
                 transaction_function,
                 *args,

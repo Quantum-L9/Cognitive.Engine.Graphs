@@ -759,6 +759,64 @@ SDK dispatches on the wrapper's parameter count.
 
 ---
 
+## 28. Relationship Evidence Sync (QM.POC0.CEG.GRAPH_EVIDENCE.002A)
+
+**State**: Active (default on since 2026-10-30, operator decision)
+**Flag**: `RELATIONSHIP_SYNC_ENABLED=True` (`relationship_sync_enabled`, default on)
+**Requires**: Neo4j Enterprise Edition 5.7+ (relationship property uniqueness constraints)
+
+`sync` to an endpoint that declares `targetedge` / `fromnode` / `tonode` writes
+typed evidence edges (`ceg.relationship_evidence.v1`) that the local
+`graph_evidence_priority_v1` scorer reads. Off: such a request is refused with
+`FeatureNotEnabled` and no edge is written, whatever the tenant spec declares.
+On: the declaration, tenant and evidence guards all still apply, the batch is
+written in one transaction, and a per-type uniqueness constraint on
+`(_tenant, evidence_ref)` is created on first use. Node sync is unaffected in
+both states.
+
+### Enterprise requirement (open operator action)
+
+The `(_tenant, evidence_ref)` uniqueness constraint is what stops two
+concurrent writers both committing one `evidence_ref`; a transaction alone
+cannot, because each writer's MERGE matches only its own endpoint pair. The
+constraint is a relationship property uniqueness constraint, an Enterprise
+Edition 5.7+ feature. On Community Edition creating it fails, and every
+relationship sync is refused with `ExecutionError` before any write ("requires
+Neo4j Enterprise 5.7+; nothing written"). Node sync is unaffected.
+
+**Open:** the production Neo4j account is not yet on Enterprise. Until it is
+upgraded, relationship sync fails closed in production. Tracked in
+`.claude/rules/system-state.md` (Pending Operator Actions).
+
+### Validation
+
+`tests/unit/test_relationship_sync.py` (flag off/on, node sync unchanged,
+constraint unavailable refuses the batch) and
+`tests/integration/test_graph_evidence_score.py` (rollback, concurrent
+identity, replay).
+
+### Rollback
+
+Set the flag to `false`. Edges already written keep their stamp and stay
+readable by the scorer; the constraint is left in place.
+
+### Audit on commit (`relationship_sync_audit_on_commit_enabled`, default `True`)
+
+The compliance checks (prohibited fields, field mappings) still run before any
+graph I/O, but the `Sync <type> batch_size=N` mutation record is buffered only
+after the relationship write committed. A refused or rolled-back batch records
+nothing; no audit entry is ever removed. Off: recorded before the write, as for
+node sync. Tests: `tests/unit/test_relationship_sync.py` (refusal, rollback).
+
+### Evidence identity per type (`evidence_identity_per_type_enabled`, default `False`)
+
+On: `handle_score` dedupes on `(relationship_type, evidence_ref)`, the identity
+this sync writes, so one `evidence_ref` under two types is not
+`conflicting_evidence`. Off: `evidence_ref` alone. Tests:
+`tests/unit/test_graph_evidence_binding.py`.
+
+---
+
 ## Querying Feature Status
 
 Use the `feature_status` admin subaction to get current state of all gates:
@@ -886,61 +944,3 @@ to return to.
 ### Rollback
 
 Set the flag to `false`. The placeholder fragments are emitted again verbatim.
-
----
-
-## 28. Relationship Evidence Sync (QM.POC0.CEG.GRAPH_EVIDENCE.002A)
-
-**State**: Active (default on since 2026-10-30, operator decision)
-**Flag**: `RELATIONSHIP_SYNC_ENABLED=True` (`relationship_sync_enabled`, default on)
-**Requires**: Neo4j Enterprise Edition 5.7+ (relationship property uniqueness constraints)
-
-`sync` to an endpoint that declares `targetedge` / `fromnode` / `tonode` writes
-typed evidence edges (`ceg.relationship_evidence.v1`) that the local
-`graph_evidence_priority_v1` scorer reads. Off: such a request is refused with
-`FeatureNotEnabled` and no edge is written, whatever the tenant spec declares.
-On: the declaration, tenant and evidence guards all still apply, the batch is
-written in one transaction, and a per-type uniqueness constraint on
-`(_tenant, evidence_ref)` is created on first use. Node sync is unaffected in
-both states.
-
-### Enterprise requirement (open operator action)
-
-The `(_tenant, evidence_ref)` uniqueness constraint is what stops two
-concurrent writers both committing one `evidence_ref`; a transaction alone
-cannot, because each writer's MERGE matches only its own endpoint pair. The
-constraint is a relationship property uniqueness constraint, an Enterprise
-Edition 5.7+ feature. On Community Edition creating it fails, and every
-relationship sync is refused with `ExecutionError` before any write ("requires
-Neo4j Enterprise 5.7+; nothing written"). Node sync is unaffected.
-
-**Open:** the production Neo4j account is not yet on Enterprise. Until it is
-upgraded, relationship sync fails closed in production. Tracked in
-`.claude/rules/system-state.md` (Pending Operator Actions).
-
-### Validation
-
-`tests/unit/test_relationship_sync.py` (flag off/on, node sync unchanged,
-constraint unavailable refuses the batch) and
-`tests/integration/test_graph_evidence_score.py` (rollback, concurrent
-identity, replay).
-
-### Rollback
-
-Set the flag to `false`. Edges already written keep their stamp and stay
-readable by the scorer; the constraint is left in place.
-
-### Audit on commit (`relationship_sync_audit_on_commit_enabled`, default `True`)
-
-The compliance checks (prohibited fields, field mappings) still run before any
-graph I/O, but the `Sync <type> batch_size=N` mutation record is buffered only
-after the relationship write committed. A refused or rolled-back batch records
-nothing; no audit entry is ever removed. Off: recorded before the write, as for
-node sync. Tests: `tests/unit/test_relationship_sync.py` (refusal, rollback).
-
-### Evidence identity per type (`evidence_identity_per_type_enabled`, default `False`)
-
-On: `handle_score` dedupes on `(relationship_type, evidence_ref)`, the identity
-this sync writes, so one `evidence_ref` under two types is not
-`conflicting_evidence`. Off: `evidence_ref` alone. Tests:
-`tests/unit/test_graph_evidence_binding.py`.
