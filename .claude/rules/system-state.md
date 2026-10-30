@@ -24,3 +24,8 @@ Update this file when merging PRs.
 | LLM security | FeatureNotEnabled | Set LLM_PROVIDER + LLM_API_KEY |
 | `l9-harness` (Quantum-L9 constellation) | Not adopted — only `l9-ci-core`/`l9-ci-sdk` are wired (baseline ratchet); see `docs/CI_CONSTELLATION_BOUNDARY.md` | Explicit human decision; must layer above `audit.yml`, never replace it |
 | `l9-assurance` (Quantum-L9 constellation) | Not adopted — verdict/fan-in role currently played by `ci.yml` CI Gate + `ci-quality.yml` quality-gate | Explicit human decision; see `docs/CI_CONSTELLATION_BOUNDARY.md` |
+
+## Pending Operator Actions
+| Action | Why | Blocks | Logged |
+|--------|-----|--------|--------|
+| Upgrade the production Neo4j account to Enterprise Edition 5.7+ | Relationship evidence sync creates a per-type `(_tenant, evidence_ref)` relationship uniqueness constraint, which only Enterprise supports; it is what stops two concurrent writers both committing one `evidence_ref` | Relationship evidence sync in production (`relationship_sync_enabled`, default on): fails closed with `ExecutionError`, nothing written, until upgraded. Node sync unaffected | 2026-10-30, QM.POC0 close-out (#343); see `docs/FEATURE_GATES.md` §22 |

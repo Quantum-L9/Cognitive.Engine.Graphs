@@ -52,6 +52,9 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | graph_inference_feedback_enabled | False | Emit `graph-inference-result` to EIE through Gate (EIE-008 / CEG-006) |
 | auto_create_domain_database | False | Provision the tenant domain database on first use (CEG-008; Enterprise-only CREATE DATABASE) |
 | health_api_enabled | False | Expose engine/health/api.py via admin health_* subactions (CEG-006) |
+| relationship_sync_enabled | True | `sync` to a `targetedge` endpoint writes typed evidence edges (QM.POC0 002A); requires Neo4j Enterprise 5.7+ for the per-type uniqueness constraint — fails closed otherwise |
+| relationship_sync_audit_on_commit_enabled | True | Relationship sync records its compliance mutation entry only after the write commits |
+| evidence_identity_per_type_enabled | False | Local score dedupes evidence on `(relationship_type, evidence_ref)` instead of `evidence_ref` alone |
 
 ## Domain Pack Admission (generic; the engine names no domain)
 | Flag | Default | Purpose |

@@ -1077,7 +1077,8 @@ async def _sync_relationships(
         )
     except Exception as exc:
         raise ExecutionError(
-            "Relationship sync could not enforce evidence identity; nothing written",
+            "Relationship sync could not enforce evidence identity (the per-type uniqueness "
+            "constraint requires Neo4j Enterprise 5.7+); nothing written",
             action="sync",
             tenant=tenant,
             detail=str(exc),
