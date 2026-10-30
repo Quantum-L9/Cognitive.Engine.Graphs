@@ -397,6 +397,39 @@ class TestCircuitBreakerCancelledProbes:
         assert cb._half_open_calls == 0
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("outcome", ["success", "failure"])
+    async def test_cancel_while_recording_outcome_releases_slot(self, outcome: str) -> None:
+        """A probe cancelled while _on_success/_on_failure waits on the lock returns its slot."""
+        from engine.graph.circuit_breaker import BreakerState
+
+        cb = await self._tripped(half_open_max_calls=1)
+        entered, finish = asyncio.Event(), asyncio.Event()
+
+        async def _probe() -> str:
+            entered.set()
+            await finish.wait()
+            if outcome == "failure":
+                raise RuntimeError("probe failed")
+            return "ok"
+
+        task = asyncio.ensure_future(cb.call(_probe))
+        await entered.wait()
+        await cb._lock.acquire()  # the outcome recorder will block on this
+        try:
+            finish.set()
+            for _ in range(5):
+                await asyncio.sleep(0)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            cb._lock.release()
+        assert cb.state == BreakerState.HALF_OPEN
+        assert cb._half_open_calls == 0
+        assert await cb.call(AsyncMock(return_value="ok")) == "ok"
+        assert cb.state == BreakerState.CLOSED
+
+    @pytest.mark.asyncio
     async def test_concurrent_probes_still_bounded(self) -> None:
         from engine.graph.circuit_breaker import CircuitOpenError
 
@@ -794,6 +827,43 @@ class TestBreakerFailureClassification:
         assert driver.circuit_breaker.state == BreakerState.OPEN
         with pytest.raises(CircuitOpenError):
             await driver.execute_query("RETURN 1", database="tenant-a")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("error_name", ["AuthError", "TokenExpired", "Forbidden"])
+    async def test_driver_credential_errors_open_breaker(self, error_name: str) -> None:
+        """Owner decision 2026-10-29: credential ClientErrors are breaker failures."""
+        import neo4j.exceptions as nx
+
+        from engine.config.settings import settings
+        from engine.graph.circuit_breaker import BreakerState
+
+        error_cls = getattr(nx, error_name)
+        assert issubclass(error_cls, nx.ClientError)
+        driver = _driver_with_session_errors({"tenant-a": error_cls("credentials rejected")})
+        for _ in range(settings.neo4j_circuit_threshold):
+            with pytest.raises(error_cls):
+                await driver.execute_query("RETURN 1", database="tenant-a")
+        assert driver.circuit_breaker.state == BreakerState.OPEN
+        assert driver.circuit_breaker.get_metrics().total_neutral_errors == 0
+
+    @pytest.mark.parametrize(
+        ("error_name", "counts"),
+        [
+            ("AuthError", True),
+            ("TokenExpired", True),
+            ("Forbidden", True),
+            ("ClientError", False),
+            ("CypherSyntaxError", False),
+            ("CypherTypeError", False),
+            ("ConstraintError", False),
+        ],
+    )
+    def test_classifier_credential_carve_out(self, error_name: str, counts: bool) -> None:
+        import neo4j.exceptions as nx
+
+        from engine.graph.driver import _is_breaker_failure
+
+        assert _is_breaker_failure(getattr(nx, error_name)("x")) is counts
 
     @pytest.mark.asyncio
     async def test_absent_database_client_error_still_translated(self) -> None:

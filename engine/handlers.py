@@ -1556,17 +1556,34 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 node_count = count_result[0]["cnt"] if count_result else 0
             except Exception:
                 node_count = -1
+            # RU-066 follow-up: the dry run also scopes the packet step — the
+            # requesting tenant's PacketStore rows gdpr_erase_subject would
+            # delete. None when PacketStore is disabled (packets not erasable,
+            # as in the real summary); -1 when the count fails, like graph_nodes.
+            packet_count: int | None = None
+            if _gdpr_s.packet_store_enabled:
+                try:
+                    from engine.packet.packet_store import get_packet_store
+
+                    dry_pool = await get_packet_store().get_pool()
+                    packet_count = await pii_handler.count_subject_packets(data_subject_id, dry_pool, tenant=tenant)
+                except Exception:
+                    logger.exception("GDPR dry-run packet-store count failed")
+                    packet_count = -1
             return {
                 "status": "dry_run",
                 "data_subject_id": data_subject_id,
                 "dry_run": True,
-                "would_affect": {"graph_nodes": node_count},
+                "would_affect": {"graph_nodes": node_count, "packets": packet_count},
             }
 
         # Real erasure. RU-066 / DEC-26: packets live in the PacketStore database,
         # so its pool is used when PacketStore is enabled; otherwise packets are
         # reported as not erasable. The erasure is audited in the domain's
-        # ComplianceEngine trail before anything is deleted.
+        # ComplianceEngine trail before anything is deleted, and that flush is
+        # strict (RU-066 follow-up): a missing audit pool or a failed flush
+        # raises here, so nothing is deleted without a durable audit entry —
+        # compliance_audit_soft_sink no longer lets the delete proceed.
         try:
             packet_pool = None
             if _gdpr_s.packet_store_enabled:
@@ -1579,7 +1596,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 data_subject_id=data_subject_id,
                 detail=f"Erasure requested for subject in domain {domain_id} (property {subject_property})",
             )
-            await erasure_audit.flush_audit_for_request()
+            await erasure_audit.flush_audit_before_erasure()
             result = await pii_handler.erase_subject(
                 data_subject_id=data_subject_id,
                 graph_driver=graph_driver,

@@ -245,23 +245,27 @@ class CircuitBreaker:
                 self._half_open_calls += 1
                 probe_cycle = self._half_open_cycle
 
-        # Execute outside lock
+        # Execute outside lock. The slot is released in ``finally`` whenever no
+        # outcome was recorded: a cancellation during ``func`` *or* while
+        # ``_on_success`` / ``_on_failure`` waits on the lock (RU-094).
+        outcome_recorded = False
         try:
-            result = await func(*args, **kwargs)
-        except Exception as exc:
-            if self._is_failure is not None and not self._is_failure(exc):
-                self._on_neutral(probe_cycle)
+            try:
+                result = await func(*args, **kwargs)
+            except Exception as exc:
+                if self._is_failure is not None and not self._is_failure(exc):
+                    self._on_neutral(probe_cycle)
+                    outcome_recorded = True
+                    raise
+                await self._on_failure()
+                outcome_recorded = True
                 raise
-            await self._on_failure()
-            raise
-        except BaseException:
-            # Cancellation (or another non-Exception exit): no outcome to record.
-            if probe_cycle is not None and _release_cancelled_probes():
-                self._release_probe_slot(probe_cycle)
-            raise
-        else:
             await self._on_success()
+            outcome_recorded = True
             return result
+        finally:
+            if not outcome_recorded and probe_cycle is not None and _release_cancelled_probes():
+                self._release_probe_slot(probe_cycle)
 
     # ------------------------------------------------------------------
     # State transitions
