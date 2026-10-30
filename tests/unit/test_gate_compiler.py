@@ -8,6 +8,19 @@ import pytest
 import yaml
 
 
+@pytest.fixture(autouse=True)
+def _admission_hardening_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The admission hardening checks ship off (owner decision 2026-10-29).
+
+    This module asserts what they withhold, so it pins each one on; the
+    test_*_admission_default_off modules assert the shipped defaults.
+    """
+    from engine.config.settings import settings
+
+    for flag in ("scoring_admission_check_enabled", "admission_checks_full_match", "exclusion_endpoint_validation"):
+        monkeypatch.setattr(settings, flag, True)
+
+
 def test_exact_gate_generates_equality_clause():
     from unittest.mock import MagicMock
 
@@ -129,7 +142,7 @@ scoring: {dimensions: []}
 
 # RG-054 (RU-041 / CEG-COR-019): an exclusion gate the compiler cannot honour is
 # refused instead of compiling to an always-true NOT EXISTS. RU-038 (DEC-15)
-# removed the gate from the mortgage pack, which is now dormant; these tests
+# removed the gate from the mortgage pack (served without it, DEC-15); these tests
 # re-create it on the pack as the pre-repair spec declared it.
 _PRE_REPAIR_MORTGAGE_BLACKLIST = {
     "name": "blacklist_exclusion",

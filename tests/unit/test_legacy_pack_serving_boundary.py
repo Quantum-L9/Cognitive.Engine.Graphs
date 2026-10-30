@@ -45,11 +45,14 @@ RETIRED_LEGACY_PACKS = (
 # Served under default settings before the dormant marks; must stay served.
 # freight-matching was withheld by the round-1 admission checks (it failed every
 # match) and is served again since RU-037 bound its scoring (CEG-COR-011).
-SERVED_PACKS = ("freight-matching", "plasticos")
-# Active packs that are not retired legacy packs but are declared dormant by
-# their owner until an open product decision lands. Each names the decision.
-# The pack must compile cleanly (admission_defects == []): dormancy is the only
-# reason it is not served, and the operator's dormant override serves it.
+# mortgage-brokerage stays served, as on main (owner decision 2026-10-29): its
+# DEC-15 dormant declaration is not applied until the owner enables withholding.
+SERVED_PACKS = ("freight-matching", "mortgage-brokerage", "plasticos")
+# Active packs that are not retired legacy packs and that their owner may declare
+# dormant until an open product decision lands. Each names the decision. The pack
+# must compile cleanly (admission_defects == []) so that, once declared dormant
+# (re-created on a copy here), dormancy is the only reason it is not served, and
+# the operator's dormant override serves it.
 DORMANT_PENDING_DECISION = {
     # RU-038 / CEG-COR-012, DEC-15 "D now, then A": no gate construct can
     # enforce Lender-[:OPERATESIN]->State licensing or the borrower's
@@ -119,6 +122,12 @@ def default_admission(monkeypatch: pytest.MonkeyPatch) -> loader_module.DomainPa
     """A loader over the repository's domains/ with both admission overrides at their defaults."""
     monkeypatch.setattr(loader_module.settings, "dormant_domain_packs_enabled", False)
     monkeypatch.setattr(loader_module.settings, "unvalidated_domain_packs_enabled", False)
+    # The admission hardening checks ship off (owner decision 2026-10-29) and this
+    # module asserts what they withhold, so it pins every one that exists on; the
+    # test_*_admission_default_off modules assert the shipped defaults.
+    for flag in ("scoring_admission_check_enabled", "admission_checks_full_match", "exclusion_endpoint_validation"):
+        if flag in Settings.model_fields:
+            monkeypatch.setattr(loader_module.settings, flag, True)
     return loader_module.DomainPackLoader(config_path=str(DOMAINS))
 
 
@@ -169,26 +178,47 @@ def test_served_set_is_exactly_the_previously_served_packs(default_admission: lo
     assert set(default_admission.list_domains()) == set(SERVED_PACKS)
 
 
+def _declared_dormant_root(pack: str, tmp_path: Path) -> Path:
+    """A copy of the pack with the owner's dormant declaration applied (the withholding switch)."""
+    raw = yaml.safe_load((DOMAINS / pack / "spec.yaml").read_text(encoding="utf-8"))
+    raw["domain"]["activation"] = DomainActivation.DORMANT.value
+    (tmp_path / pack).mkdir()
+    (tmp_path / pack / "spec.yaml").write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    return tmp_path
+
+
 @pytest.mark.parametrize("pack", sorted(DORMANT_PENDING_DECISION))
-def test_pending_pack_is_withheld_only_because_it_is_dormant(
+def test_pending_pack_is_served_until_its_owner_declares_it_dormant(
     pack: str, default_admission: loader_module.DomainPackLoader
 ) -> None:
-    """Declared dormant by its owner, compiles cleanly, refused with the dormant reason."""
+    """Owner decision 2026-10-29: active in the repository, compiles cleanly, served by default."""
     raw = yaml.safe_load((DOMAINS / pack / "spec.yaml").read_text(encoding="utf-8"))
-    assert raw["domain"]["activation"] == DomainActivation.DORMANT.value
+    assert raw["domain"].get("activation", "active") == DomainActivation.ACTIVE.value
     assert loader_module.admission_defects(DomainSpec.model_validate(raw)) == []
-    assert pack not in default_admission.list_domains()
+    assert default_admission.load_domain(pack).domain.id == pack
+
+
+@pytest.mark.parametrize("pack", sorted(DORMANT_PENDING_DECISION))
+def test_pending_pack_is_withheld_only_because_it_is_dormant(
+    pack: str, tmp_path: Path, default_admission: loader_module.DomainPackLoader
+) -> None:
+    """Once declared dormant by its owner: compiles cleanly, refused with the dormant reason."""
+    loader = loader_module.DomainPackLoader(config_path=str(_declared_dormant_root(pack, tmp_path)))
+    raw = yaml.safe_load((tmp_path / pack / "spec.yaml").read_text(encoding="utf-8"))
+    assert loader_module.admission_defects(DomainSpec.model_validate(raw)) == []
+    assert pack not in loader.list_domains()
     with pytest.raises(loader_module.DomainNotFoundError, match=r"declared dormant by its pack"):
-        default_admission.load_domain(pack)
+        loader.load_domain(pack)
 
 
 @pytest.mark.parametrize("pack", sorted(DORMANT_PENDING_DECISION))
 def test_pending_pack_is_served_by_the_dormant_override(
-    pack: str, monkeypatch: pytest.MonkeyPatch, default_admission: loader_module.DomainPackLoader
+    pack: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, default_admission: loader_module.DomainPackLoader
 ) -> None:
     monkeypatch.setattr(loader_module.settings, "dormant_domain_packs_enabled", True)
-    assert pack in default_admission.list_domains()
-    assert default_admission.load_domain(pack).domain.id == pack
+    loader = loader_module.DomainPackLoader(config_path=str(_declared_dormant_root(pack, tmp_path)))
+    assert pack in loader.list_domains()
+    assert loader.load_domain(pack).domain.id == pack
 
 
 @pytest.mark.parametrize("pack", sorted(WITHHELD_UNTIL_REPAIRED))
@@ -295,7 +325,10 @@ async def test_every_servable_pack_completes_handle_match_for_each_direction(
 
 @pytest.mark.asyncio
 async def test_mortgage_lender_traversal_is_executable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """RU-038: the lender step is grammar-conforming; licensing and blacklist are absent, hence dormant."""
+    """RU-038: the lender step is grammar-conforming; licensing and blacklist are absent (not enforced).
+
+    Owner decision 2026-10-29: the pack is still served, as on main, until the owner
+    declares it dormant."""
     from engine.traversal.assembler import TraversalAssembler
 
     monkeypatch.setattr(loader_module.settings, "dormant_domain_packs_enabled", True)
@@ -304,4 +337,4 @@ async def test_mortgage_lender_traversal_is_executable(monkeypatch: pytest.Monke
     assert "MATCH (candidate:LoanProduct)-[:OFFEREDBY]->(lender:Lender)" in clauses
     assert not any("OPERATESIN" in c for c in clauses)
     assert not any(g.edgetype == "BLACKLISTEDLENDER" for g in spec.gates)
-    assert spec.domain.activation is DomainActivation.DORMANT
+    assert spec.domain.activation is DomainActivation.ACTIVE
