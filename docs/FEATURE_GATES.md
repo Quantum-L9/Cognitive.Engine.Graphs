@@ -99,9 +99,9 @@ independently of the code default.
 | Signal Weight Proportion CI | `SIGNAL_WEIGHT_PROPORTION_CI` (`signal_weight_proportion_ci`) | `True` | unset | active (correctness) for feedback-enabled domains; stored DimensionWeight `ci_width`/`confidence` come from the win-rate proportion, so an early positive lift is dampened; `false` restores the lift-based formula (RU-027 / CEG-COR-116) |
 | Propagation Single Application | `PROPAGATION_SINGLE_APPLICATION` (`propagation_single_application`) | `True` | unset | active (correctness); one outcome event updates each tenant DimensionWeight `boost_factor` once, bounded, and `candidates_affected` counts DimensionWeights; `false` restores the row-multiplying query (RU-028 / CEG-COR-117) |
 | Drift Requires Both Windows | `DRIFT_REQUIRES_BOTH_WINDOWS` (`drift_requires_both_windows`) | `True` | unset | active (correctness); outcomes `metadata.drift` raises no alert unless both a recent and a baseline distribution exist; `false` restores the one-sided divergence (RU-029 / CEG-COR-118) |
-| Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `True` | unset | active (hardening); admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
-| Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `True` | unset | active (hardening); admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
-| Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `True` | unset | active (hardening); an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
+| Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
+| Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
+| Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
 | Gate Null Operands From Predicate | `GATE_NULL_OPERANDS_FROM_PREDICATE` (`gate_null_operands_from_predicate`) | `True` | unset | active; a gate's `nullbehavior` applies to exactly the operands its predicate tests (range FAIL rejects NULL bounds; temporalrange null-handles its window per side) — see §21 |
 | Composite Subgate Scoping | `COMPOSITE_SUBGATE_SCOPING` (`composite_subgate_scoping`) | `True` | unset | active; a composite's subgates contribute only through the composite (an OR composite is no longer AND-ed with its own subgates) and a subgate scoped to another direction is refused — see §21 |
 | Freshness Max-age Validated | `FRESHNESS_MAXAGEDAYS_VALIDATED` (`freshness_maxagedays_validated`) | `True` | unset | active (hardening); a freshness gate defaults `maxagedays` to 1 only when absent and refuses a value < 1 (0 became 1 day, a negative age a future cutoff) — see §21 |
@@ -706,7 +706,9 @@ later is served automatically — there is no per-domain list to forget it in.
 
 ### Scoring admission (RU-020 / CEG-COR-027..029)
 
-`SCORING_ADMISSION_CHECK_ENABLED` (default `True`) extends `admission_defects`
+`SCORING_ADMISSION_CHECK_ENABLED` (default `False` — owner decision 2026-10-29:
+withholding stays off, and every pack is served as on main, until the operator
+enables it) extends `admission_defects`
 from gates to scoring. For every declared match direction each applicable
 dimension is compiled as `ScoringAssembler` compiles it, and the pack is
 withheld when:
@@ -734,7 +736,9 @@ previous wording of the withholding reason), or
 
 ### Full-match admission (RU-039)
 
-`ADMISSION_CHECKS_FULL_MATCH` (default `True`) makes admission keep the promise
+`ADMISSION_CHECKS_FULL_MATCH` (default `False` — owner decision 2026-10-29:
+withholding stays off, and every pack is served as on main, until the operator
+enables it) makes admission keep the promise
 that an admitted pack executes for every declared match direction. For each
 direction `TraversalAssembler.assemble_traversal` must not raise,
 `GateCompiler.compile_all_gates` must not raise, and every `$parameter` in the
@@ -750,7 +754,9 @@ match before. Rollback: `ADMISSION_CHECKS_FULL_MATCH=false` (with
 
 ### Exclusion endpoint validation (RU-041 / CEG-COR-019)
 
-`EXCLUSION_ENDPOINT_VALIDATION` (default `True`): the exclusion gate compiles
+`EXCLUSION_ENDPOINT_VALIDATION` (default `False` — owner decision 2026-10-29;
+the legacy fragment below is what ships until the operator enables it): the
+exclusion gate compiles
 to `NOT EXISTS { MATCH (candidate)-[:EDGE]->(…) }`, always anchored at the
 matched candidate. A gate that declares `fromnode` / `tonode` (an anchor the
 compiler ignores), or whose ontology edge type is undeclared or does not start
