@@ -781,166 +781,6 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     return response
 
 
-async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Batch UNWIND MERGE/MATCH SET for graph entities."""
-    graph_driver, domain_loader = _require_deps()
-    _validate_tenant_access(tenant, "sync")
-
-    entity_type = _require_key(payload, "entity_type", "sync", tenant)
-    batch = _require_key(payload, "batch", "sync", tenant)
-
-    if not isinstance(batch, list) or len(batch) == 0:
-        raise ValidationError(
-            "Sync batch must be a non-empty list",
-            action="sync",
-            tenant=tenant,
-        )
-
-    # --- W2-02: Outcome record type via sync ---
-    # FEEDBACK-01: global flag AND domain opt-in; otherwise "outcome" is an
-    # ordinary entity type and falls through to the configured sync path.
-    if entity_type == "outcome" and _feedback_effective(domain_loader.load_domain(tenant)):
-        domain_spec = domain_loader.load_domain(tenant)
-        _enforce_capability(tenant, "sync", domain_spec)
-        synced = 0
-        for item in batch:
-            if not isinstance(item, dict):
-                continue
-            match_id = item.get("match_id")
-            candidate_id = item.get("chosen_candidate_id")
-            outcome_val = item.get("outcome")
-            if outcome_val not in ("positive", "negative", "neutral"):
-                continue
-            outcome_id = f"out_{uuid.uuid4().hex[:12]}"
-            cypher = """
-            CREATE (o:Outcome {
-                outcome_id: $outcome_id, match_id: $match_id,
-                candidate_id: $candidate_id, outcome: $outcome,
-                created_at: datetime(), tenant: $tenant
-            })
-            WITH o
-            OPTIONAL MATCH (c {entity_id: $candidate_id})
-            FOREACH (_ IN CASE WHEN c IS NOT NULL THEN [1] ELSE [] END |
-                CREATE (c)-[:HAS_OUTCOME]->(o)
-            )
-            """
-            try:
-                await graph_driver.execute_query(
-                    cypher=cypher,
-                    parameters={
-                        "outcome_id": outcome_id,
-                        "match_id": match_id,
-                        "candidate_id": candidate_id,
-                        "outcome": outcome_val,
-                        "tenant": tenant,
-                    },
-                    database=domain_spec.domain.id,
-                )
-                synced += 1
-            except Exception:
-                logger.warning("Failed to sync outcome for match_id=%s", match_id, exc_info=True)
-        return {"status": "success", "entity_type": "outcome", "synced_count": synced}
-
-    domain_spec = domain_loader.load_domain(tenant)
-    _enforce_capability(tenant, "sync", domain_spec)
-    if not domain_spec.sync:
-        raise ValidationError("No sync endpoints configured", action="sync", tenant=tenant)
-
-    endpoint_spec = next(
-        (e for e in domain_spec.sync.endpoints if e.path.rstrip("/").rsplit("/", 1)[-1] == entity_type),
-        None,
-    )
-    if not endpoint_spec:
-        raise ValidationError(
-            f"No sync endpoint for entity type {entity_type!r}",
-            action="sync",
-            tenant=tenant,
-        )
-
-    if endpoint_spec.targetedge:
-        from chassis.errors import FeatureNotEnabled
-
-        # Imported at call time: tests patch ``engine.config.settings.settings``.
-        from engine.config.settings import settings as _relationship_settings
-
-        # Refused before compliance logs the request: the audit trail must not
-        # record a mutation the gate never let happen.
-        if not _relationship_settings.relationship_sync_enabled:
-            raise FeatureNotEnabled(
-                "Relationship evidence sync",
-                flag="RELATIONSHIP_SYNC_ENABLED",
-                action="sync",
-                tenant=tenant,
-            )
-
-    # Run compliance checks on sync request
-    compliance = _get_compliance_engine(domain_spec)
-    from engine.config.settings import settings as _sync_settings
-
-    # T05: a relationship batch can still be refused or rolled back after the
-    # checks, so its mutation record is buffered only once the write committed.
-    audit_on_commit = bool(endpoint_spec.targetedge) and _sync_settings.relationship_sync_audit_on_commit_enabled
-
-    def _check_sync(engine: ComplianceEngine) -> None:
-        engine.check_sync_request(tenant=tenant, entity_type=entity_type, batch=batch, endpoint_spec=endpoint_spec)
-
-    if compliance.enabled:
-        # Audit on commit: the checks run now on a pool-less engine that is never flushed.
-        _check_sync(ComplianceEngine(domain_spec) if audit_on_commit else compliance)
-
-    if endpoint_spec.targetedge:
-        relationship_result = await _sync_relationships(
-            graph_driver, domain_spec, endpoint_spec, entity_type=entity_type, batch=batch, tenant=tenant
-        )
-        if audit_on_commit and compliance.enabled:
-            _check_sync(compliance)
-        await compliance.flush_audit()
-        return relationship_result
-
-    # R3: Causal edge validation when domain has causal edges enabled
-    rejected_count = 0
-    if domain_spec.causal.enabled and payload.get("edge_type"):
-        from engine.causal.causal_validator import CausalEdgeRuntimeValidator
-
-        validator = CausalEdgeRuntimeValidator(domain_spec.causal)
-        batch, rejected = validator.validate_batch(batch, payload["edge_type"])
-        rejected_count = len(rejected)
-        if not batch:
-            return {
-                "status": "all_rejected",
-                "entity_type": entity_type,
-                "synced_count": 0,
-                "rejected_count": rejected_count,
-            }
-
-    generator = SyncGenerator(domain_spec)
-    cypher = generator.generate_sync_query(endpoint_spec, batch)
-
-    try:
-        await graph_driver.execute_query(
-            cypher=cypher,
-            parameters={"batch": batch, "tenant": tenant},
-            database=domain_spec.domain.id,
-        )
-    except Exception as exc:
-        raise ExecutionError(
-            "Sync query execution failed",
-            action="sync",
-            tenant=tenant,
-            detail=str(exc),
-        ) from exc
-
-    await compliance.flush_audit()
-    result: dict[str, Any] = {
-        "status": "success",
-        "entity_type": entity_type,
-        "synced_count": len(batch),
-    }
-    if rejected_count > 0:
-        result["rejected_count"] = rejected_count
-    return result
-
-
 def _relationship_row_defect(check: dict[str, Any], row: dict[str, Any]) -> str | None:
     """Why one relationship row cannot be written, from its precheck result, else None."""
     if check["from_any"] > check["from_count"] or check["to_any"] > check["to_count"]:
@@ -1115,6 +955,166 @@ async def _sync_relationships(
         "created_count": len(rows) - replayed,
         "replayed_count": replayed,
     }
+
+
+async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Batch UNWIND MERGE/MATCH SET for graph entities."""
+    graph_driver, domain_loader = _require_deps()
+    _validate_tenant_access(tenant, "sync")
+
+    entity_type = _require_key(payload, "entity_type", "sync", tenant)
+    batch = _require_key(payload, "batch", "sync", tenant)
+
+    if not isinstance(batch, list) or len(batch) == 0:
+        raise ValidationError(
+            "Sync batch must be a non-empty list",
+            action="sync",
+            tenant=tenant,
+        )
+
+    # --- W2-02: Outcome record type via sync ---
+    # FEEDBACK-01: global flag AND domain opt-in; otherwise "outcome" is an
+    # ordinary entity type and falls through to the configured sync path.
+    if entity_type == "outcome" and _feedback_effective(domain_loader.load_domain(tenant)):
+        domain_spec = domain_loader.load_domain(tenant)
+        _enforce_capability(tenant, "sync", domain_spec)
+        synced = 0
+        for item in batch:
+            if not isinstance(item, dict):
+                continue
+            match_id = item.get("match_id")
+            candidate_id = item.get("chosen_candidate_id")
+            outcome_val = item.get("outcome")
+            if outcome_val not in ("positive", "negative", "neutral"):
+                continue
+            outcome_id = f"out_{uuid.uuid4().hex[:12]}"
+            cypher = """
+            CREATE (o:Outcome {
+                outcome_id: $outcome_id, match_id: $match_id,
+                candidate_id: $candidate_id, outcome: $outcome,
+                created_at: datetime(), tenant: $tenant
+            })
+            WITH o
+            OPTIONAL MATCH (c {entity_id: $candidate_id})
+            FOREACH (_ IN CASE WHEN c IS NOT NULL THEN [1] ELSE [] END |
+                CREATE (c)-[:HAS_OUTCOME]->(o)
+            )
+            """
+            try:
+                await graph_driver.execute_query(
+                    cypher=cypher,
+                    parameters={
+                        "outcome_id": outcome_id,
+                        "match_id": match_id,
+                        "candidate_id": candidate_id,
+                        "outcome": outcome_val,
+                        "tenant": tenant,
+                    },
+                    database=domain_spec.domain.id,
+                )
+                synced += 1
+            except Exception:
+                logger.warning("Failed to sync outcome for match_id=%s", match_id, exc_info=True)
+        return {"status": "success", "entity_type": "outcome", "synced_count": synced}
+
+    domain_spec = domain_loader.load_domain(tenant)
+    _enforce_capability(tenant, "sync", domain_spec)
+    if not domain_spec.sync:
+        raise ValidationError("No sync endpoints configured", action="sync", tenant=tenant)
+
+    endpoint_spec = next(
+        (e for e in domain_spec.sync.endpoints if e.path.rstrip("/").rsplit("/", 1)[-1] == entity_type),
+        None,
+    )
+    if not endpoint_spec:
+        raise ValidationError(
+            f"No sync endpoint for entity type {entity_type!r}",
+            action="sync",
+            tenant=tenant,
+        )
+
+    if endpoint_spec.targetedge:
+        from chassis.errors import FeatureNotEnabled
+
+        # Imported at call time: tests patch ``engine.config.settings.settings``.
+        from engine.config.settings import settings as _relationship_settings
+
+        # Refused before compliance logs the request: the audit trail must not
+        # record a mutation the gate never let happen.
+        if not _relationship_settings.relationship_sync_enabled:
+            raise FeatureNotEnabled(
+                "Relationship evidence sync",
+                flag="RELATIONSHIP_SYNC_ENABLED",
+                action="sync",
+                tenant=tenant,
+            )
+
+    # Run compliance checks on sync request
+    compliance = _get_compliance_engine(domain_spec)
+    from engine.config.settings import settings as _sync_settings
+
+    # T05: a relationship batch can still be refused or rolled back after the
+    # checks, so its mutation record is buffered only once the write committed.
+    audit_on_commit = bool(endpoint_spec.targetedge) and _sync_settings.relationship_sync_audit_on_commit_enabled
+
+    def _check_sync(engine: ComplianceEngine) -> None:
+        engine.check_sync_request(tenant=tenant, entity_type=entity_type, batch=batch, endpoint_spec=endpoint_spec)
+
+    if compliance.enabled:
+        # Audit on commit: the checks run now on a pool-less engine that is never flushed.
+        _check_sync(ComplianceEngine(domain_spec) if audit_on_commit else compliance)
+
+    if endpoint_spec.targetedge:
+        relationship_result = await _sync_relationships(
+            graph_driver, domain_spec, endpoint_spec, entity_type=entity_type, batch=batch, tenant=tenant
+        )
+        if audit_on_commit and compliance.enabled:
+            _check_sync(compliance)
+        await compliance.flush_audit()
+        return relationship_result
+
+    # R3: Causal edge validation when domain has causal edges enabled
+    rejected_count = 0
+    if domain_spec.causal.enabled and payload.get("edge_type"):
+        from engine.causal.causal_validator import CausalEdgeRuntimeValidator
+
+        validator = CausalEdgeRuntimeValidator(domain_spec.causal)
+        batch, rejected = validator.validate_batch(batch, payload["edge_type"])
+        rejected_count = len(rejected)
+        if not batch:
+            return {
+                "status": "all_rejected",
+                "entity_type": entity_type,
+                "synced_count": 0,
+                "rejected_count": rejected_count,
+            }
+
+    generator = SyncGenerator(domain_spec)
+    cypher = generator.generate_sync_query(endpoint_spec, batch)
+
+    try:
+        await graph_driver.execute_query(
+            cypher=cypher,
+            parameters={"batch": batch, "tenant": tenant},
+            database=domain_spec.domain.id,
+        )
+    except Exception as exc:
+        raise ExecutionError(
+            "Sync query execution failed",
+            action="sync",
+            tenant=tenant,
+            detail=str(exc),
+        ) from exc
+
+    await compliance.flush_audit()
+    result: dict[str, Any] = {
+        "status": "success",
+        "entity_type": entity_type,
+        "synced_count": len(batch),
+    }
+    if rejected_count > 0:
+        result["rejected_count"] = rejected_count
+    return result
 
 
 async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:

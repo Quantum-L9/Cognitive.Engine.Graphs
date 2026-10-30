@@ -68,9 +68,9 @@ independently of the code default.
 | PostgreSQL Audit Pool | `POSTGRES_DSN` | unset (`None`) | set | active (opt-in, soft dependency — see §7) |
 | Dormant Domain Packs | `DORMANT_DOMAIN_PACKS_ENABLED` (`dormant_domain_packs_enabled`) | `False` | unset | dormant; serve packs that declare `domain.activation: dormant` (replaces the per-domain `idea_portfolio_enabled`) — see §16 |
 | Graph Inference Feedback | `GRAPH_INFERENCE_FEEDBACK_ENABLED` (`graph_inference_feedback_enabled`) | `False` | unset | dormant; CEG → Gate → EIE `graph-inference-result` — see §13 |
-| Relationship Evidence Sync | `RELATIONSHIP_SYNC_ENABLED` (`relationship_sync_enabled`) | `True` | unset | active; `sync` to a `targetedge` endpoint writes typed evidence edges; requires Neo4j Enterprise 5.7+ — see §22 |
-| Relationship Sync Audit On Commit | `RELATIONSHIP_SYNC_AUDIT_ON_COMMIT_ENABLED` (`relationship_sync_audit_on_commit_enabled`) | `True` | unset | active (hardening); refused/rolled-back batches leave no success audit record — see §22 |
-| Evidence Identity Per Type | `EVIDENCE_IDENTITY_PER_TYPE_ENABLED` (`evidence_identity_per_type_enabled`) | `False` | unset | dormant; score dedupes on `(relationship_type, evidence_ref)` — see §22 |
+| Relationship Evidence Sync | `RELATIONSHIP_SYNC_ENABLED` (`relationship_sync_enabled`) | `True` | unset | active; `sync` to a `targetedge` endpoint writes typed evidence edges; requires Neo4j Enterprise 5.7+ — see §28 |
+| Relationship Sync Audit On Commit | `RELATIONSHIP_SYNC_AUDIT_ON_COMMIT_ENABLED` (`relationship_sync_audit_on_commit_enabled`) | `True` | unset | active (hardening); refused/rolled-back batches leave no success audit record — see §28 |
+| Evidence Identity Per Type | `EVIDENCE_IDENTITY_PER_TYPE_ENABLED` (`evidence_identity_per_type_enabled`) | `False` | unset | dormant; score dedupes on `(relationship_type, evidence_ref)` — see §28 |
 | Domain Database Provisioning | `AUTO_CREATE_DOMAIN_DATABASE` (`auto_create_domain_database`) | `False` | unset | dormant; create the tenant domain database on first use — see §14 |
 | Health API (admin health_* subactions) | `HEALTH_API_ENABLED` (`health_api_enabled`) | `False` | unset | dormant; AI-readiness assess/report surface — see §15 |
 | Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; seven packs whose gates do not compile to executable, faithful Cypher — see §16 |
@@ -889,7 +889,7 @@ Set the flag to `false`. The placeholder fragments are emitted again verbatim.
 
 ---
 
-## 22. Relationship Evidence Sync (QM.POC0.CEG.GRAPH_EVIDENCE.002A)
+## 28. Relationship Evidence Sync (QM.POC0.CEG.GRAPH_EVIDENCE.002A)
 
 **State**: Active (default on since 2026-10-30, operator decision)
 **Flag**: `RELATIONSHIP_SYNC_ENABLED=True` (`relationship_sync_enabled`, default on)
