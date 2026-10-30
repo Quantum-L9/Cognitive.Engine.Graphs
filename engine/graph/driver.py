@@ -56,7 +56,9 @@ def _is_breaker_failure(exc: BaseException) -> bool:
     The Neo4j breaker is process-wide, so one tenant's client errors
     (CypherSyntaxError, ConstraintError, DatabaseNotFound, a null MERGE key)
     must not fail every other tenant fast. ``neo4j.exceptions.ClientError`` and
-    its subclasses are per-request faults: not failures. Infrastructure and
+    its subclasses are per-request faults: not failures — except the credential
+    classes ``AuthError`` (incl. ``TokenExpired``) and ``Forbidden``, which are
+    process-wide and count (owner decision 2026-10-29). Infrastructure and
     transient faults (ServiceUnavailable, SessionExpired, TransientError,
     DatabaseError, OSError, anything else) still count. With
     ``neo4j_circuit_ignore_client_errors`` off every exception counts.
@@ -65,7 +67,13 @@ def _is_breaker_failure(exc: BaseException) -> bool:
 
     if not settings.neo4j_circuit_ignore_client_errors:
         return True
+    if isinstance(exc, _CREDENTIAL_CLIENT_ERRORS):
+        return True
     return not isinstance(exc, neo4j_exceptions.ClientError)
+
+
+# ClientError subclasses that are not per-request faults (TokenExpired is an AuthError).
+_CREDENTIAL_CLIENT_ERRORS = (neo4j_exceptions.AuthError, neo4j_exceptions.Forbidden)
 
 
 def _provision_inside_breaker() -> bool:
