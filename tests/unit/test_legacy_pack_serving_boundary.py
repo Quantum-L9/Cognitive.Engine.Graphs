@@ -122,6 +122,12 @@ def default_admission(monkeypatch: pytest.MonkeyPatch) -> loader_module.DomainPa
     """A loader over the repository's domains/ with both admission overrides at their defaults."""
     monkeypatch.setattr(loader_module.settings, "dormant_domain_packs_enabled", False)
     monkeypatch.setattr(loader_module.settings, "unvalidated_domain_packs_enabled", False)
+    # The admission hardening checks ship off (owner decision 2026-10-29) and this
+    # module asserts what they withhold, so it pins every one that exists on; the
+    # test_*_admission_default_off modules assert the shipped defaults.
+    for flag in ("scoring_admission_check_enabled", "admission_checks_full_match", "exclusion_endpoint_validation"):
+        if flag in Settings.model_fields:
+            monkeypatch.setattr(loader_module.settings, flag, True)
     return loader_module.DomainPackLoader(config_path=str(DOMAINS))
 
 

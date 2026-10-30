@@ -413,6 +413,8 @@ class TestScoringAdmission:
 
         monkeypatch.setattr(loader_module.settings, "unvalidated_domain_packs_enabled", False)
         monkeypatch.setattr(loader_module.settings, "dormant_domain_packs_enabled", False)
+        # The check ships off (owner decision 2026-10-29); this class tests it on.
+        monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", True)
 
     def test_community_bridge_without_query_field_names_the_parameter(self) -> None:
         from engine.config.loader import withholding_reason
