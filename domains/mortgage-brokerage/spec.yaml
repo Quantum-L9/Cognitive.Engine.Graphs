@@ -17,16 +17,15 @@ domain:
     ECOA-compliant scoring and outcome feedback loops.
   version: 1.1.0
   alternatedomains: []
-  # Dormant until state licensing and the borrower's lender blacklist can be
-  # enforced (CEG-COR-012, decision DEC-15 "D now, then A"). Both constrain the
-  # LoanProduct's Lender — Lender-[:OPERATESIN]->State with statecode =
-  # $propertystate, and BorrowerProfile-[:BLACKLISTEDLENDER]->Lender — and no
-  # existing gate can constrain a non-candidate alias or a query-anchored edge.
-  # Serving without them would rank products from lenders unlicensed in the
-  # borrower's state. The pack compiles cleanly; only this declaration withholds
-  # it. DORMANT_DOMAIN_PACKS_ENABLED=true serves it WITHOUT licensing and
-  # blacklist enforcement.
-  activation: dormant
+  # Served, as on main (owner decision 2026-10-29: withholding of this pack
+  # stays off until the owner enables it). State licensing and the borrower's
+  # lender blacklist are NOT enforced (CEG-COR-012, DEC-15 "D now, then A"):
+  # both constrain the LoanProduct's Lender — Lender-[:OPERATESIN]->State with
+  # statecode = $propertystate, and BorrowerProfile-[:BLACKLISTEDLENDER]->Lender
+  # — and no existing gate can constrain a non-candidate alias or a
+  # query-anchored edge, so served rankings can include products from lenders
+  # unlicensed in the borrower's state. To withhold the pack, uncomment:
+  # activation: dormant
 
 ontology:
   nodes:

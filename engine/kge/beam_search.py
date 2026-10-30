@@ -332,14 +332,15 @@ class BeamSearchEngine:
 
         # A successor is the parent's cascade plus one new op, and is scored as
         # that composed cascade (CEG-COR-108); scoring the new op alone made
-        # every depth level repeat depth 1.
+        # every depth level repeat depth 1. Validators see exactly what
+        # _prune_by_constraint shows them (the bare op at depth 1).
         parent_ops = candidate.ops()
         parent_txs = [self._build_transformation(t, p) for t, p in parent_ops]
 
         for tx_type, factory in transform_factories:
             for params in factory():
                 tx = self._build_transformation(tx_type, params)
-                score = self._score_candidate(_CascadeTransformation([*parent_txs, tx]))
+                score = self._score_candidate(self._compose([*parent_txs, tx]))
                 successor = BeamCandidate(
                     transformation_id=self._gen_id(),
                     transformation_type=tx_type,
@@ -497,10 +498,12 @@ class BeamSearchEngine:
         (RU-121 follow-up: validating only the terminal op accepted a cascade
         whose earlier op violated the constraint).
         """
-        txs = [self._build_transformation(t, p) for t, p in candidate.ops()]
-        if len(txs) == 1:
-            return txs[0]
-        return _CascadeTransformation(txs)
+        return self._compose([self._build_transformation(t, p) for t, p in candidate.ops()])
+
+    @staticmethod
+    def _compose(txs: list[Transformation3D]) -> Transformation3D:
+        """Validator contract for scoring and pruning alike: one op is itself; more is a cascade."""
+        return txs[0] if len(txs) == 1 else _CascadeTransformation(txs)
 
     @staticmethod
     def _candidate_similarity(a: BeamCandidate, b: BeamCandidate) -> float:
