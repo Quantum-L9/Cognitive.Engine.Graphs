@@ -99,9 +99,9 @@ independently of the code default.
 | Signal Weight Proportion CI | `SIGNAL_WEIGHT_PROPORTION_CI` (`signal_weight_proportion_ci`) | `True` | unset | active (correctness) for feedback-enabled domains; stored DimensionWeight `ci_width`/`confidence` come from the win-rate proportion, so an early positive lift is dampened; `false` restores the lift-based formula (RU-027 / CEG-COR-116) |
 | Propagation Single Application | `PROPAGATION_SINGLE_APPLICATION` (`propagation_single_application`) | `True` | unset | active (correctness); one outcome event updates each tenant DimensionWeight `boost_factor` once, bounded, and `candidates_affected` counts DimensionWeights; `false` restores the row-multiplying query (RU-028 / CEG-COR-117) |
 | Drift Requires Both Windows | `DRIFT_REQUIRES_BOTH_WINDOWS` (`drift_requires_both_windows`) | `True` | unset | active (correctness); outcomes `metadata.drift` raises no alert unless both a recent and a baseline distribution exist; `false` restores the one-sided divergence (RU-029 / CEG-COR-118) |
-| Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `True` | unset | active (hardening); admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
-| Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `True` | unset | active (hardening); admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
-| Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `True` | unset | active (hardening); an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
+| Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
+| Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
+| Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
 | Gate Null Operands From Predicate | `GATE_NULL_OPERANDS_FROM_PREDICATE` (`gate_null_operands_from_predicate`) | `True` | unset | active; a gate's `nullbehavior` applies to exactly the operands its predicate tests (range FAIL rejects NULL bounds; temporalrange null-handles its window per side) — see §21 |
 | Composite Subgate Scoping | `COMPOSITE_SUBGATE_SCOPING` (`composite_subgate_scoping`) | `True` | unset | active; a composite's subgates contribute only through the composite (an OR composite is no longer AND-ed with its own subgates) and a subgate scoped to another direction is refused — see §21 |
 | Freshness Max-age Validated | `FRESHNESS_MAXAGEDAYS_VALIDATED` (`freshness_maxagedays_validated`) | `True` | unset | active (hardening); a freshness gate defaults `maxagedays` to 1 only when absent and refuses a value < 1 (0 became 1 day, a negative age a future cutoff) — see §21 |
@@ -726,7 +726,9 @@ later is served automatically — there is no per-domain list to forget it in.
 
 ### Scoring admission (RU-020 / CEG-COR-027..029)
 
-`SCORING_ADMISSION_CHECK_ENABLED` (default `True`) extends `admission_defects`
+`SCORING_ADMISSION_CHECK_ENABLED` (default `False` — owner decision 2026-10-29:
+withholding stays off, and every pack is served as on main, until the operator
+enables it) extends `admission_defects`
 from gates to scoring. For every declared match direction each applicable
 dimension is compiled as `ScoringAssembler` compiles it, and the pack is
 withheld when:
@@ -754,7 +756,9 @@ previous wording of the withholding reason), or
 
 ### Full-match admission (RU-039)
 
-`ADMISSION_CHECKS_FULL_MATCH` (default `True`) makes admission keep the promise
+`ADMISSION_CHECKS_FULL_MATCH` (default `False` — owner decision 2026-10-29:
+withholding stays off, and every pack is served as on main, until the operator
+enables it) makes admission keep the promise
 that an admitted pack executes for every declared match direction. For each
 direction `TraversalAssembler.assemble_traversal` must not raise,
 `GateCompiler.compile_all_gates` must not raise, and every `$parameter` in the
@@ -770,7 +774,9 @@ match before. Rollback: `ADMISSION_CHECKS_FULL_MATCH=false` (with
 
 ### Exclusion endpoint validation (RU-041 / CEG-COR-019)
 
-`EXCLUSION_ENDPOINT_VALIDATION` (default `True`): the exclusion gate compiles
+`EXCLUSION_ENDPOINT_VALIDATION` (default `False` — owner decision 2026-10-29;
+the legacy fragment below is what ships until the operator enables it): the
+exclusion gate compiles
 to `NOT EXISTS { MATCH (candidate)-[:EDGE]->(…) }`, always anchored at the
 matched candidate. A gate that declares `fromnode` / `tonode` (an anchor the
 compiler ignores), or whose ontology edge type is undeclared or does not start
@@ -1265,7 +1271,7 @@ invariant the code already claimed, so each ships `True`; set the env var to
 
 | Flag (env var) | Default | Unit | On | Off |
 | `neo4j_circuit_release_cancelled_probes` (`NEO4J_CIRCUIT_RELEASE_CANCELLED_PROBES`) | `true` | RU-094 / CEG-COR-035 | A HALF_OPEN probe that ends in `asyncio.CancelledError` returns its probe slot (only within the HALF_OPEN cycle it was taken in) and records neither success nor failure | The slot leaks; `half_open_max_calls` cancelled probes leave the breaker rejecting every call until process restart |
-| `neo4j_circuit_ignore_client_errors` (`NEO4J_CIRCUIT_IGNORE_CLIENT_ERRORS`) | `true` | RU-093 / CEG-COR-034 | `neo4j.exceptions.ClientError` and subclasses are a neutral breaker outcome: re-raised unchanged (absent-database translation still applies), not counted, streak not reset, HALF_OPEN probe slot returned; counted in `BreakerMetrics.total_neutral_errors`. ServiceUnavailable, SessionExpired, TransientError, DatabaseError, OSError and everything else still count. Note `AuthError` is a `ClientError`: bad credentials no longer open the breaker (calls still fail immediately) | Every exception counts; five consecutive client errors from one tenant open the breaker for all tenants |
+| `neo4j_circuit_ignore_client_errors` (`NEO4J_CIRCUIT_IGNORE_CLIENT_ERRORS`) | `true` | RU-093 / CEG-COR-034 | `neo4j.exceptions.ClientError` and subclasses are a neutral breaker outcome: re-raised unchanged (absent-database translation still applies), not counted, streak not reset, HALF_OPEN probe slot returned; counted in `BreakerMetrics.total_neutral_errors`. ServiceUnavailable, SessionExpired, TransientError, DatabaseError, OSError and everything else still count. Exception: the credential classes `AuthError` (incl. `TokenExpired`) and `Forbidden` are `ClientError` subclasses but still count as failures, so bad or expired credentials open the breaker (owner decision 2026-10-29) | Every exception counts; five consecutive client errors from one tenant open the breaker for all tenants |
 | `neo4j_provision_inside_breaker` (`NEO4J_PROVISION_INSIDE_BREAKER`) | `true` | RU-095 / CEG-COR-170 | The coroutine admitted by the breaker provisions on first use and then runs the query/write, so an OPEN breaker raises `CircuitOpenError` with no `system` call; provisioning semantics (once per database per process, shielded shared task, failed CREATE retried later) unchanged; a malformed database name is still refused before admission as a `ValueError` | Every call for a not-yet-ensured database awaits a `CREATE DATABASE` on `system` (up to the 60 s acquisition timeout) before the breaker can reject it |
 | `gds_dag_job_identity_by_name` (`GDS_DAG_JOB_IDENTITY_BY_NAME`) | `true` | RU-096 / CEG-COR-036 | `GDSScheduler._build_execution_dag` keys nodes by `job.name` in declaration order; a `depends_on` entry (an algorithm name, per the schema) depends on every job with that algorithm; unknown dependencies are ignored with a warning and cycle members land in a final fallback wave as before. Every declared cron job is registered with APScheduler, and the registration log reports the number actually registered. Job-name uniqueness is not enforced (DEC-42, pending decision) | The DAG is keyed by algorithm: of two `louvain` jobs only the last declared is scheduled |
 | `gds_temporal_recency_decay_existing` (`GDS_TEMPORAL_RECENCY_DECAY_EXISTING`) | `true` | RU-097 / CEG-COR-037 | Three statements per run: create aggregates per (src, dst) — `max(t.<timestamp_property>)` is `last_event_date`, its age drives `recency_score`, and (when `count_property` is declared) `recent_count` sums `coalesce(t.<count_property>, 1)` over the pair's interactions within `half_life_days`; refresh recomputes `recency_score` of every existing overlay edge from its `last_event_date`; prune deletes edges with `recency_score < prune_below` or age `> max_age_days`. The first run prunes stale overlay edges accumulated so far (derived data) | The overlay edge carries whichever matching interaction row was SET last, and an edge whose interactions aged out is never re-scored, so the defaults never prune it |
