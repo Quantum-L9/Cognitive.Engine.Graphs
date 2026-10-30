@@ -461,16 +461,31 @@ async def test_compliance_still_refuses_before_any_graph_io(monkeypatch: pytest.
     driver.execute_write.assert_not_awaited()
 
 
+@pytest.mark.usefixtures("_clean_state", "_relationship_sync_on")
+async def test_a_database_that_cannot_enforce_the_constraint_writes_nothing() -> None:
+    # Community Edition cannot create a relationship property uniqueness
+    # constraint; without it two concurrent writers could both commit one
+    # evidence_ref, so the batch is refused instead of written unguarded.
+    driver = _graph()
+    driver.execute_query = AsyncMock(side_effect=RuntimeError("Enterprise Edition required"))
+    _install(driver)
+    with pytest.raises(ExecutionError, match=r"Enterprise 5\.7\+"):
+        await handle_sync("cheese-aging", {"entity_type": "tended-by", "batch": [_row()]})
+    driver.execute_write.assert_not_awaited()
+
+
 # ── Activation flag (RELATIONSHIP_SYNC_ENABLED) ────────────────────────────────
 
 
-def test_relationship_sync_ships_disabled() -> None:
-    assert Settings.model_fields["relationship_sync_enabled"].default is False
+def test_relationship_sync_ships_enabled() -> None:
+    assert Settings.model_fields["relationship_sync_enabled"].default is True
 
 
 @pytest.mark.usefixtures("_clean_state")
-async def test_flag_off_writes_no_evidence_edge_even_when_the_spec_declares_one() -> None:
-    assert settings.relationship_sync_enabled is False
+async def test_flag_off_writes_no_evidence_edge_even_when_the_spec_declares_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "relationship_sync_enabled", False)
     driver = _graph()
     _install(driver)
     with pytest.raises(FeatureNotEnabled, match="RELATIONSHIP_SYNC_ENABLED"):
@@ -481,6 +496,7 @@ async def test_flag_off_writes_no_evidence_edge_even_when_the_spec_declares_one(
 
 @pytest.mark.usefixtures("_clean_state")
 async def test_flag_off_is_refused_before_compliance_records_the_mutation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "relationship_sync_enabled", False)
     compliance = MagicMock(enabled=True)
     monkeypatch.setattr(handlers_module, "_get_compliance_engine", lambda _spec: compliance)
     _install(_graph())
