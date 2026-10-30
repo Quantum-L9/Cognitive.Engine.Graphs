@@ -952,181 +952,6 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _relationship_row_defect(check: dict[str, Any], row: dict[str, Any]) -> str | None:
-    """Why one relationship row cannot be written, from its precheck result, else None."""
-    if check["from_any"] > check["from_count"] or check["to_any"] > check["to_count"]:
-        return "an endpoint id resolves to a node outside this tenant"
-    if check["from_count"] != 1 or check["to_count"] != 1:
-        return (
-            f"endpoints must each resolve to exactly one existing node "
-            f"(from: {check['from_count']}, to: {check['to_count']})"
-        )
-    for existing in check["existing"]:
-        same = (
-            existing["from_id"] == row["from_id"]
-            and existing["to_id"] == row["to_id"]
-            and stored_evidence(existing["props"]) == row["props"]
-        )
-        if not same:
-            return (
-                "evidence_ref is already recorded with different endpoints or evidence; provenance is not overwritten"
-            )
-    return None
-
-
-class _RelationshipNotRecordedError(ExpectedWriteOutcome):
-    """The write did not record exactly the submitted evidence.
-
-    Raised inside the managed write transaction so the driver rolls the whole
-    batch back; converted to ``ExecutionError`` outside it.
-    """
-
-    def __init__(self, detail: str) -> None:
-        super().__init__(detail)
-        self.detail = detail
-
-
-def _relationship_defects(checks: list[dict[str, Any]], by_ref: dict[str, dict[str, Any]]) -> tuple[list[str], int]:
-    """Per-row refusals from the precheck, and how many rows replay an identical stored edge."""
-    defects = []
-    replayed = 0
-    for check in checks:
-        row = by_ref[check["evidence_ref"]]
-        defect = _relationship_row_defect(check, row)
-        if defect is not None:
-            defects.append(f"{check['evidence_ref']}: {defect}")
-        elif check["existing"]:
-            replayed += 1
-    return sorted(defects), replayed
-
-
-RelationshipWrite = Callable[[Any], Awaitable[tuple[list[str], int]]]
-
-
-async def _run_relationship_write(
-    graph_driver: GraphDriver, write: RelationshipWrite, database: str, tenant: str
-) -> tuple[list[str], int]:
-    """One managed write transaction; a constraint failure propagates for the caller to classify."""
-    try:
-        # The callable form returns whatever the transaction function returns.
-        result = cast("tuple[list[str], int]", await graph_driver.execute_write(write, database=database))
-    except ConstraintError:
-        raise
-    except _RelationshipNotRecordedError as exc:
-        raise ExecutionError(
-            "Relationship sync did not record the submitted evidence; rolled back",
-            action="sync",
-            tenant=tenant,
-            detail=exc.detail,
-        ) from exc
-    except Exception as exc:
-        raise ExecutionError("Relationship sync failed", action="sync", tenant=tenant, detail=str(exc)) from exc
-    return result
-
-
-async def _write_relationships_once_retried(
-    graph_driver: GraphDriver, write: RelationshipWrite, database: str, tenant: str
-) -> tuple[list[str], int]:
-    """Run the relationship write transaction; retry once if a concurrent writer won the identity race.
-
-    The uniqueness constraint refuses the losing commit (rolled back whole).
-    The retry's precheck then sees the winner's edge: an identical assertion
-    replays, a different one is refused. A second constraint failure means the
-    evidence_ref is held by an edge the precheck cannot see (the same type
-    between other labels), which is a refusal, not an outage.
-    """
-    try:
-        return await _run_relationship_write(graph_driver, write, database, tenant)
-    except ConstraintError:
-        logger.info("Relationship sync lost an evidence identity race in %s; re-checking once", database)
-    try:
-        return await _run_relationship_write(graph_driver, write, database, tenant)
-    except ConstraintError as exc:
-        raise ValidationError(
-            f"Relationship sync refused, nothing written: an evidence_ref is already recorded ({exc.code})",
-            action="sync",
-            tenant=tenant,
-        ) from exc
-
-
-async def _sync_relationships(
-    graph_driver: GraphDriver,
-    domain_spec: DomainSpec,
-    endpoint_spec: SyncEndpointSpec,
-    *,
-    entity_type: str,
-    batch: list[Any],
-    tenant: str,
-) -> dict[str, Any]:
-    """Relationship evidence sync for a `targetedge` endpoint (QM.POC0.CEG.GRAPH_EVIDENCE.002A).
-
-    All-or-nothing: the declaration and every row are validated before any
-    graph I/O; then the precheck, the write and the post-write comparison run in
-    ONE managed write transaction, so a refused or unrecorded batch leaves the
-    graph unchanged. The tenant-scoped ``(type, evidence_ref)`` identity is a
-    database uniqueness constraint, so two concurrent writers can never both
-    commit one ``evidence_ref``: the loser's commit fails, and its single retry
-    re-reads the winner's edge and answers replay or conflict like any other.
-    Endpoints must already exist under this tenant; no node is created here.
-    """
-    try:
-        declaration = resolve_relationship_declaration(domain_spec, endpoint_spec)
-        rows = normalize_relationship_rows(batch)
-    except ValueError as exc:
-        raise ValidationError(str(exc), action="sync", tenant=tenant) from exc
-
-    database = domain_spec.domain.id
-    params = {"batch": rows, "tenant": tenant, "schema": RELATIONSHIP_EVIDENCE_SCHEMA}
-    by_ref = {row["evidence_ref"]: row for row in rows}
-    precheck = relationship_precheck_query(declaration)
-    merge = relationship_merge_query(declaration)
-
-    try:
-        # Schema statements cannot share a transaction with data writes.
-        await graph_driver.execute_query(
-            cypher=relationship_uniqueness_constraint_query(declaration), database=database
-        )
-    except Exception as exc:
-        raise ExecutionError(
-            "Relationship sync could not enforce evidence identity; nothing written",
-            action="sync",
-            tenant=tenant,
-            detail=str(exc),
-        ) from exc
-
-    async def _write(tx: Any) -> tuple[list[str], int]:
-        checks = await (await tx.run(precheck, params)).data()
-        defects, replayed = _relationship_defects(checks, by_ref)
-        if defects:
-            # Nothing has been written; the empty transaction commits.
-            return defects, 0
-        written = await (await tx.run(merge, params)).data()
-        mismatched = sorted(
-            entry["evidence_ref"]
-            for entry in written
-            if stored_evidence(entry["stored"]) != by_ref[entry["evidence_ref"]]["props"]
-        )
-        if mismatched or len(written) != len(rows):
-            detail = f"mismatched={mismatched} written={len(written)} expected={len(rows)}"
-            raise _RelationshipNotRecordedError(detail)
-        return [], replayed
-
-    defects, replayed = await _write_relationships_once_retried(graph_driver, _write, database, tenant)
-    if defects:
-        raise ValidationError(
-            f"Relationship sync refused, nothing written: {'; '.join(defects)}",
-            action="sync",
-            tenant=tenant,
-        )
-    return {
-        "status": "success",
-        "entity_type": entity_type,
-        "synced_count": len(batch),
-        "created_count": len(rows) - replayed,
-        "replayed_count": replayed,
-    }
-
-
 async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Admin: introspection, schema init, GDS trigger, capability delegation."""
     graph_driver, domain_loader = _require_deps()
@@ -2629,6 +2454,182 @@ async def handle_score(
 # Both chassis implementations (legacy chassis/actions.py and the SDK-native
 # chassis/handler_registration.py) route off this dict rather than each
 # maintaining their own action list, so the two chassis can't drift apart.
+def _relationship_row_defect(check: dict[str, Any], row: dict[str, Any]) -> str | None:
+    """Why one relationship row cannot be written, from its precheck result, else None."""
+    if check["from_any"] > check["from_count"] or check["to_any"] > check["to_count"]:
+        return "an endpoint id resolves to a node outside this tenant"
+    if check["from_count"] != 1 or check["to_count"] != 1:
+        return (
+            f"endpoints must each resolve to exactly one existing node "
+            f"(from: {check['from_count']}, to: {check['to_count']})"
+        )
+    for existing in check["existing"]:
+        same = (
+            existing["from_id"] == row["from_id"]
+            and existing["to_id"] == row["to_id"]
+            and stored_evidence(existing["props"]) == row["props"]
+        )
+        if not same:
+            return (
+                "evidence_ref is already recorded with different endpoints or evidence; provenance is not overwritten"
+            )
+    return None
+
+
+class _RelationshipNotRecordedError(ExpectedWriteOutcome):
+    """The write did not record exactly the submitted evidence.
+
+    Raised inside the managed write transaction so the driver rolls the whole
+    batch back; converted to ``ExecutionError`` outside it.
+    """
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
+def _relationship_defects(checks: list[dict[str, Any]], by_ref: dict[str, dict[str, Any]]) -> tuple[list[str], int]:
+    """Per-row refusals from the precheck, and how many rows replay an identical stored edge."""
+    defects = []
+    replayed = 0
+    for check in checks:
+        row = by_ref[check["evidence_ref"]]
+        defect = _relationship_row_defect(check, row)
+        if defect is not None:
+            defects.append(f"{check['evidence_ref']}: {defect}")
+        elif check["existing"]:
+            replayed += 1
+    return sorted(defects), replayed
+
+
+RelationshipWrite = Callable[[Any], Awaitable[tuple[list[str], int]]]
+
+
+async def _run_relationship_write(
+    graph_driver: GraphDriver, write: RelationshipWrite, database: str, tenant: str
+) -> tuple[list[str], int]:
+    """One managed write transaction; a constraint failure propagates for the caller to classify."""
+    try:
+        # The callable form returns whatever the transaction function returns.
+        result = cast("tuple[list[str], int]", await graph_driver.execute_write(write, database=database))
+    except ConstraintError:
+        raise
+    except _RelationshipNotRecordedError as exc:
+        raise ExecutionError(
+            "Relationship sync did not record the submitted evidence; rolled back",
+            action="sync",
+            tenant=tenant,
+            detail=exc.detail,
+        ) from exc
+    except Exception as exc:
+        raise ExecutionError("Relationship sync failed", action="sync", tenant=tenant, detail=str(exc)) from exc
+    return result
+
+
+async def _write_relationships_once_retried(
+    graph_driver: GraphDriver, write: RelationshipWrite, database: str, tenant: str
+) -> tuple[list[str], int]:
+    """Run the relationship write transaction; retry once if a concurrent writer won the identity race.
+
+    The uniqueness constraint refuses the losing commit (rolled back whole).
+    The retry's precheck then sees the winner's edge: an identical assertion
+    replays, a different one is refused. A second constraint failure means the
+    evidence_ref is held by an edge the precheck cannot see (the same type
+    between other labels), which is a refusal, not an outage.
+    """
+    try:
+        return await _run_relationship_write(graph_driver, write, database, tenant)
+    except ConstraintError:
+        logger.info("Relationship sync lost an evidence identity race in %s; re-checking once", database)
+    try:
+        return await _run_relationship_write(graph_driver, write, database, tenant)
+    except ConstraintError as exc:
+        raise ValidationError(
+            f"Relationship sync refused, nothing written: an evidence_ref is already recorded ({exc.code})",
+            action="sync",
+            tenant=tenant,
+        ) from exc
+
+
+async def _sync_relationships(
+    graph_driver: GraphDriver,
+    domain_spec: DomainSpec,
+    endpoint_spec: SyncEndpointSpec,
+    *,
+    entity_type: str,
+    batch: list[Any],
+    tenant: str,
+) -> dict[str, Any]:
+    """Relationship evidence sync for a `targetedge` endpoint (QM.POC0.CEG.GRAPH_EVIDENCE.002A).
+
+    All-or-nothing: the declaration and every row are validated before any
+    graph I/O; then the precheck, the write and the post-write comparison run in
+    ONE managed write transaction, so a refused or unrecorded batch leaves the
+    graph unchanged. The tenant-scoped ``(type, evidence_ref)`` identity is a
+    database uniqueness constraint, so two concurrent writers can never both
+    commit one ``evidence_ref``: the loser's commit fails, and its single retry
+    re-reads the winner's edge and answers replay or conflict like any other.
+    Endpoints must already exist under this tenant; no node is created here.
+    """
+    try:
+        declaration = resolve_relationship_declaration(domain_spec, endpoint_spec)
+        rows = normalize_relationship_rows(batch)
+    except ValueError as exc:
+        raise ValidationError(str(exc), action="sync", tenant=tenant) from exc
+
+    database = domain_spec.domain.id
+    params = {"batch": rows, "tenant": tenant, "schema": RELATIONSHIP_EVIDENCE_SCHEMA}
+    by_ref = {row["evidence_ref"]: row for row in rows}
+    precheck = relationship_precheck_query(declaration)
+    merge = relationship_merge_query(declaration)
+
+    try:
+        # Schema statements cannot share a transaction with data writes.
+        await graph_driver.execute_query(
+            cypher=relationship_uniqueness_constraint_query(declaration), database=database
+        )
+    except Exception as exc:
+        raise ExecutionError(
+            "Relationship sync could not enforce evidence identity (the per-type uniqueness "
+            "constraint requires Neo4j Enterprise 5.7+); nothing written",
+            action="sync",
+            tenant=tenant,
+            detail=str(exc),
+        ) from exc
+
+    async def _write(tx: Any) -> tuple[list[str], int]:
+        checks = await (await tx.run(precheck, params)).data()
+        defects, replayed = _relationship_defects(checks, by_ref)
+        if defects:
+            # Nothing has been written; the empty transaction commits.
+            return defects, 0
+        written = await (await tx.run(merge, params)).data()
+        mismatched = sorted(
+            entry["evidence_ref"]
+            for entry in written
+            if stored_evidence(entry["stored"]) != by_ref[entry["evidence_ref"]]["props"]
+        )
+        if mismatched or len(written) != len(rows):
+            detail = f"mismatched={mismatched} written={len(written)} expected={len(rows)}"
+            raise _RelationshipNotRecordedError(detail)
+        return [], replayed
+
+    defects, replayed = await _write_relationships_once_retried(graph_driver, _write, database, tenant)
+    if defects:
+        raise ValidationError(
+            f"Relationship sync refused, nothing written: {'; '.join(defects)}",
+            action="sync",
+            tenant=tenant,
+        )
+    return {
+        "status": "success",
+        "entity_type": entity_type,
+        "synced_count": len(batch),
+        "created_count": len(rows) - replayed,
+        "replayed_count": replayed,
+    }
+
+
 ActionHandler = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
 
 ACTION_HANDLERS: dict[str, ActionHandler] = {

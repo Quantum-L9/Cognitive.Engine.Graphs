@@ -199,7 +199,7 @@ async def test_healthy_tenant_read_recovers_and_an_absent_probe_closes_a_half_op
 async def test_constraint_conflicts_and_rolled_back_writes_never_count_against_the_breaker() -> None:
     driver = _breaker_driver(threshold=2)
     answers = [ConstraintError("duplicate evidence_ref"), ExpectedWriteOutcome("rolled back"), ConstraintError("dup")]
-    driver._raw_execute_write = AsyncMock(side_effect=answers)  # type: ignore[method-assign]
+    driver._write_once = AsyncMock(side_effect=answers)  # type: ignore[method-assign]
     for answer in answers:
         with pytest.raises(type(answer)):
             await driver.execute_write(AsyncMock(), database="tenant-a")
@@ -209,7 +209,7 @@ async def test_constraint_conflicts_and_rolled_back_writes_never_count_against_t
 
 async def test_a_real_write_outage_still_trips_the_breaker() -> None:
     driver = _breaker_driver(threshold=2)
-    driver._raw_execute_write = AsyncMock(side_effect=ServiceUnavailable("down"))  # type: ignore[method-assign]
+    driver._write_once = AsyncMock(side_effect=ServiceUnavailable("down"))  # type: ignore[method-assign]
     for _ in range(2):
         with pytest.raises(ServiceUnavailable):
             await driver.execute_write(AsyncMock(), database="tenant-a")
