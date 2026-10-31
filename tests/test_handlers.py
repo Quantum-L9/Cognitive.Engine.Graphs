@@ -126,6 +126,11 @@ def _make_domain_spec() -> MagicMock:
 
     spec.derivedparameters = []
     spec.compliance = None
+    # RU-010 (R1a-DEC-03): the gate reads $min_grade, so the query schema declares
+    # it (optional); an undeclared gate parameter is refused before the query.
+    grade_field = MagicMock(required=False, default=None)
+    grade_field.name = "min_grade"
+    spec.queryschema.fields = [grade_field]
 
     endpoint = MagicMock()
     endpoint.path = "/v1/sync/facility"
@@ -681,6 +686,33 @@ async def test_declared_pii_id_property_does_not_change_pareto_ids() -> None:
 
     assert result["pareto"]["non_dominated_ids"] == ["F-1"]
     assert result["candidates"][0]["candidate"]["facility_id"] == PIIHandler.hash_value("F-1")
+
+
+@pytest.mark.asyncio
+async def test_sync_rejects_inverted_causal_records_by_batch_edge_type() -> None:
+    """RU-069 / CEG-COR-058: sync rows carry no `edge_type`; the batch's edge type decides."""
+    from engine.config.schema import CausalEdgeSpec, CausalSubgraphSpec
+    from engine.state import get_state
+
+    spec = get_state().domain_loader.load_domain.return_value
+    spec.causal = CausalSubgraphSpec(
+        enabled=True,
+        causal_edges=[CausalEdgeSpec(edge_type="RESULTED_IN", source_label="Facility", target_label="Outcome")],
+    )
+    result = await handle_sync(
+        "t",
+        {
+            "entity_type": "facility",
+            "edge_type": "RESULTED_IN",
+            "batch": [
+                {"facility_id": "F1", "source_ts": "2026-03-01T00:00:00", "target_ts": "2026-03-02T00:00:00"},
+                {"facility_id": "F2", "source_ts": "2026-03-02T00:00:00", "target_ts": "2026-03-01T00:00:00"},
+            ],
+        },
+    )
+    assert result["status"] == "success"
+    assert result["synced_count"] == 1
+    assert result["rejected_count"] == 1
 
 
 @pytest.mark.asyncio

@@ -28,6 +28,13 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+# GDPR packet erasure (packet_store.sql gdpr_erase_subject). The tenant GUC
+# is transaction-local, the same statement PacketStore uses (RU-079).
+_SET_TENANT_SQL = "SELECT set_config('app.current_tenant', $1, true)"
+_GDPR_ERASE_SQL = "SELECT gdpr_erase_subject($1, $2, $3)"
+# Dry-run scope of the packet step: the same rows gdpr_erase_subject deletes.
+_GDPR_COUNT_SQL = "SELECT count(*) FROM packet_store WHERE data_subject_id = $1 AND actor_tenant = $2"
+
 
 # ── PII Field Classification ──────────────────────────────
 
@@ -569,6 +576,26 @@ class PIIHandler:
 
     # ── GDPR Right-to-Erasure ──────────────────────────────
 
+    async def count_subject_packets(self, data_subject_id: str, db_pool: Any, *, tenant: str | None) -> int:
+        """Dry-run count of the packets ``erase_subject`` would delete.
+
+        Same scope as ``gdpr_erase_subject``: the requesting tenant's rows for
+        the subject id, read in one transaction with the transaction-local
+        ``app.current_tenant`` set (while
+        ``packet_store_rls_tenant_session_enabled``), so the RLS-enforced
+        ``l9_product`` role counts the rows it would erase instead of 0.
+        """
+        if not tenant:
+            msg = "GDPR packet erasure requires the requesting tenant"
+            raise ValueError(msg)
+        from engine.config.settings import settings
+
+        async with db_pool.acquire() as conn, conn.transaction():
+            if settings.packet_store_rls_tenant_session_enabled:
+                await conn.fetchval(_SET_TENANT_SQL, tenant)
+            count = await conn.fetchval(_GDPR_COUNT_SQL, data_subject_id, tenant)
+        return int(count or 0)
+
     async def erase_subject(
         self,
         data_subject_id: str,
@@ -576,54 +603,88 @@ class PIIHandler:
         db_pool: Any = None,
         *,
         database: str | None = None,
+        subject_property: str = "data_subject_id",
+        performed_by: str = "system",
+        tenant: str | None = None,
     ) -> dict[str, Any]:
         """
         GDPR right-to-erasure: delete all data for a data subject.
 
-        Steps:
-        1. Log the erasure request to audit (before deletion)
-        2. Delete from PostgreSQL packet_store WHERE data_subject_id = ?
-        3. Delete from Neo4j WHERE entity.data_subject_id = ?
-        4. Delete from memory_embeddings via FK cascade
-        5. Return summary of what was deleted
+        Steps (the caller records the audit entry BEFORE calling this):
+        1. Delete the requesting tenant's rows from PostgreSQL packet_store via
+           ``gdpr_erase_subject($1, $2, $3)`` (subject id, performed_by,
+           tenant) — the function also writes its own packet_audit_log rows
+           before deleting
+        2. Delete from Neo4j WHERE entity.<subject_property> = $dsid
+        3. Delete from memory_embeddings via FK cascade
+        4. Return summary of what was deleted
+
+        ``subject_property`` is the domain's ``compliance.gdpr_subject_id_field``
+        (RU-066); it is interpolated only after ``sanitize_label``, so an invalid
+        name raises ``ValueError`` before any query. ``db_pool`` is the
+        PacketStore pool; when it is ``None`` packets cannot be erased and the
+        summary says so (``packets_deleted: None``, ``packets_erasable: False``)
+        rather than reporting 0.
+
+        ``tenant`` scopes the packet erasure (RU-066 follow-up, PR #352
+        review): a subject id is not unique across tenants, so only rows whose
+        ``actor_tenant`` is ``tenant`` are erased, and a packet erasure without
+        a tenant raises ``ValueError`` before any query. The call runs in one
+        transaction with the transaction-local ``app.current_tenant`` set to
+        ``tenant`` (while ``packet_store_rls_tenant_session_enabled``, as
+        PacketStore does since RU-079), so it also works on the RLS-enforced
+        ``l9_product`` role, whose policies otherwise hide every row.
 
         ``database`` is the tenant's Neo4j database (tenant id == domain spec
         id == database name). DB-STRICT-01: ``GraphDriver.execute_query`` no
         longer falls back to the shared ``neo4j`` database when it is omitted,
         so the caller names the subject's domain database explicitly — the same
         ``domain_id`` the dry-run count in ``handle_admin`` already uses.
-
-        NOTE: Actual DB calls depend on injected drivers. This method
-        provides the orchestration contract.
         """
+        from engine.utils.security import sanitize_label
+
+        prop = sanitize_label(subject_property)
         summary: dict[str, Any] = {
             "data_subject_id": data_subject_id,
-            "packets_deleted": 0,
+            "packets_deleted": None,
+            "packets_erasable": db_pool is not None,
             "graph_nodes_deleted": 0,
             "embeddings_deleted": 0,
         }
 
         if db_pool:
+            if not tenant:
+                msg = "GDPR packet erasure requires the requesting tenant"
+                raise ValueError(msg)
+            from engine.config.settings import settings
+
             try:
-                async with db_pool.acquire() as conn:
-                    result = await conn.execute("SELECT gdpr_erase_subject($1)", data_subject_id)
-                    summary["packets_deleted"] = result
+                async with db_pool.acquire() as conn, conn.transaction():
+                    if settings.packet_store_rls_tenant_session_enabled:
+                        await conn.fetchval(_SET_TENANT_SQL, tenant)
+                    deleted = await conn.fetchval(_GDPR_ERASE_SQL, data_subject_id, performed_by, tenant)
+                    summary["packets_deleted"] = int(deleted or 0)
             except Exception:
-                logger.exception(f"GDPR erasure DB error for {data_subject_id}")
+                logger.exception("GDPR erasure packet-store error")
                 raise
 
         if graph_driver:
             try:
                 result = await graph_driver.execute_query(
-                    "MATCH (n {data_subject_id: $dsid}) DETACH DELETE n RETURN count(n) AS deleted",
+                    f"MATCH (n {{{prop}: $dsid}}) DETACH DELETE n RETURN count(n) AS deleted",
                     parameters={"dsid": data_subject_id},
                     database=database,
                 )
                 if result:
                     summary["graph_nodes_deleted"] = result[0].get("deleted", 0)
             except Exception:
-                logger.exception(f"GDPR erasure graph error for {data_subject_id}")
+                logger.exception("GDPR erasure graph error")
                 raise
 
-        logger.info(f"GDPR erasure complete for data_subject_id={data_subject_id}: {summary}")
+        logger.info(
+            "GDPR erasure complete: subject_property=%s packets_deleted=%s graph_nodes_deleted=%s",
+            prop,
+            summary["packets_deleted"],
+            summary["graph_nodes_deleted"],
+        )
         return summary

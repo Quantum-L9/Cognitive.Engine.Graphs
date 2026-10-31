@@ -18,6 +18,17 @@ incoming payloads against these schemas before processing.
 ## match
 
 > TASK-040 / ADR-106: prefer `engine.models.payloads.MatchRequest` / `MatchResponse` (payload-only; no transport fields; no ungoverned weights).
+>
+> RU-012 (`MATCH_REQUEST_CONTRACT_ADMISSION`, default on, R1a-DEC-04 "admit both"): the
+> match action accepts both shapes. A payload carrying `contract_version` is admitted as
+> `MatchRequest` against `DomainContract.from_spec(<tenant's pack>)` (its `domain` must be
+> the tenant's, its `direction` declared, unknown and transport fields refused; any failure is
+> a `ValidationError`) and mapped onto the legacy internals: `direction` -> `match_direction`,
+> `query.facts` -> `query`, `top_n` -> `top_n`. `query_id`, `query_entity_ref`,
+> `evidence_summary`, `governed_filters`, `projection_version`, `policy_ref` and
+> `field_dictionary_version` are validated but not used by the match. A payload without
+> `contract_version` is the legacy `MatchPayload` below, unchanged. The response is the legacy
+> `MatchResponse` in both cases (`MatchResponse` emission is not implemented).
 ```python
 class MatchPayload(BaseModel):
     query: dict[str, Any]  # Entity attributes to match against
@@ -56,6 +67,40 @@ endpoint updates only rows whose node already exists, so its statement ends
 `RETURN count(n) AS synced_count` and the response reports that count plus
 `unmatched_count`. `UNWINDMERGE` creates missing nodes; its `synced_count`
 stays `len(batch)` and it carries no `unmatched_count`.
+
+
+## outcomes
+
+```python
+class OutcomeFingerprint(BaseModel):
+    active_dimensions: list[str] = []
+    dimension_weights: dict[str, float] = {}  # stored as sorted-key JSON (RU-005)
+    gates_passed: list[str] = []
+    match_direction: str | None = None  # scopes the RESULTED_IN candidate lookup (RU-002)
+    candidate_count: int = 0
+    dimension_scores: dict[str, float] | None = None  # RU-006: per-dimension scores of the match
+    was_selected: bool | None = None  # RU-006: whether the caller selected this candidate
+
+
+class OutcomesPayload(BaseModel):
+    match_id: str
+    candidate_id: str
+    outcome: Literal["success", "failure", "partial"]
+    value: Any | None = None
+    fingerprint: OutcomeFingerprint = OutcomeFingerprint()
+```
+
+RU-006 (`OUTCOME_SCHEMA_UNIFIED`, default on, R1a-DEC-02): `handle_outcomes` is
+the canonical outcome writer. It creates one `feedbackloop.outcome_node_label`
+node (default `TransactionOutcome`) carrying the fingerprint, plus
+`dimension_scores` (JSON; null when omitted) and `was_selected`, which feed
+`admin score_feedback` and `admin discover_weights`. A `dimension_scores` that
+is not a map of finite numbers, or a non-boolean `was_selected`, raises
+`ValidationError`. The sync `outcome` entity type (feedback-effective domains
+only) writes each batch item — `match_id`, `chosen_candidate_id`, `outcome`,
+optional `value` and `fingerprint` — through the same writer, mapping
+`positive`/`negative`/`neutral` to `success`/`failure`/`partial`; items with any
+other outcome or a malformed fingerprint are skipped.
 
 
 ## admin

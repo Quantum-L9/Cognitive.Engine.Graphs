@@ -229,3 +229,53 @@ class TestDeclaredIdProperty:
         with pytest.raises(ValueError, match="Invalid label"):
             await serializer.serialize_neighborhood("F-1", "Facility", id_property="id} RETURN 1 //")
         driver.execute_query.assert_not_called()
+
+
+class TestVariableDepth:
+    """RU-074 / CEG-COR-121: the pattern is variable-length up to max_depth."""
+
+    async def _cypher(self, max_depth, spec=None) -> tuple[str, dict]:
+        driver = AsyncMock()
+        driver.execute_query = AsyncMock(return_value=[])
+        await CausalSubgraphSerializer(driver, spec or _spec_with_causal()).serialize_neighborhood(
+            "F-1", "Facility", max_depth=max_depth, id_property="facility_id"
+        )
+        return driver.execute_query.call_args.args[0], driver.execute_query.call_args.kwargs["parameters"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("depth", [1, 2, 3])
+    async def test_pattern_is_variable_length(self, depth: int) -> None:
+        cypher, params = await self._cypher(depth)
+        assert f"(start)-[:RESULTED_IN*1..{depth}]->(neighbor)" in cypher
+        assert "[r:" not in cypher
+        assert params["max_depth"] == depth
+        assert "LIMIT $max_nodes" in cypher
+
+    @pytest.mark.asyncio
+    async def test_depth_is_bounded_by_chain_depth_limit(self) -> None:
+        cypher, params = await self._cypher(5)  # chain_depth_limit=3 in the fixture
+        assert "*1..3]" in cypher
+        assert params["max_depth"] == 3
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("depth", [0, -4])
+    async def test_non_positive_depth_clamps_to_one(self, depth: int) -> None:
+        cypher, _params = await self._cypher(depth)
+        assert "*1..1]" in cypher
+        assert "*1..0" not in cypher
+        assert "*1..-" not in cypher
+
+    @pytest.mark.asyncio
+    async def test_no_causal_edges_uses_untyped_variable_length(self) -> None:
+        spec = _spec_with_causal()
+        spec = spec.model_copy(update={"causal": spec.causal.model_copy(update={"causal_edges": []})})
+        cypher, _params = await self._cypher(2, spec)
+        assert "(start)-[*1..2]->(neighbor)" in cypher
+
+    @pytest.mark.asyncio
+    async def test_flag_off_restores_fixed_pattern(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "causal_serializer_variable_depth", False)
+        cypher, _params = await self._cypher(2)
+        assert "(start)-[r:RESULTED_IN]->(neighbor)" in cypher

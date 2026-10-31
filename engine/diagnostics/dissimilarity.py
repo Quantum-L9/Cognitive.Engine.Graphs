@@ -27,7 +27,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from engine.diagnostics.fingerprint import AlgorithmicFingerprint
+from engine.diagnostics.fingerprint import DEFAULT_BUCKET_LABELS, AlgorithmicFingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,21 @@ def _euclidean_distance(vec_a: list[float], vec_b: list[float]) -> float:
         vec_b = vec_b + [0.0] * (max_len - len(vec_b))
 
     return float(sum((a - b) ** 2 for a, b in zip(vec_a, vec_b, strict=True)) ** 0.5)
+
+
+def _shared_vector_keys(
+    baseline: AlgorithmicFingerprint, current: AlgorithmicFingerprint
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Union of both fingerprints' bucket labels and dimension keys, in a stable order.
+
+    Bucket labels: DEFAULT_BUCKET_LABELS order first, then any other label
+    alphabetically. Dimension keys: alphabetical.
+    """
+    present = set(baseline.score_distribution) | set(current.score_distribution)
+    default_order = {label: idx for idx, label in enumerate(DEFAULT_BUCKET_LABELS)}
+    buckets = tuple(sorted(present, key=lambda label: (default_order.get(label, len(default_order)), label)))
+    dims = tuple(sorted(set(baseline.dimension_dominance) | set(current.dimension_dominance)))
+    return buckets, dims
 
 
 # ── Drift Detection ─────────────────────────────────────────
@@ -178,8 +193,11 @@ def detect_drift(
     score_dissim = chi_squared_dissimilarity(baseline.score_distribution, current.score_distribution)
     dim_dissim = chi_squared_dissimilarity(baseline.dimension_dominance, current.dimension_dominance)
 
-    vec_a = baseline.to_vector()
-    vec_b = current.to_vector()
+    # RU-104 / CEG-COR-127: vectorise both over one shared key order so each
+    # index holds the same quantity (and the padding path is never needed).
+    bucket_labels, dimension_keys = _shared_vector_keys(baseline, current)
+    vec_a = baseline.to_vector(bucket_labels=bucket_labels, dimension_keys=dimension_keys)
+    vec_b = current.to_vector(bucket_labels=bucket_labels, dimension_keys=dimension_keys)
     vec_dist = _euclidean_distance(vec_a, vec_b)
 
     entropy_delta = current.entropy - baseline.entropy

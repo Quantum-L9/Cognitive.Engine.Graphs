@@ -21,7 +21,7 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 |------|---------|---------|
 | domain_strict_validation | True | Cross-reference validation at domain load |
 | score_clamp_enabled | True | Clamp dimension scores to [0, 1] |
-| strict_null_gates | True | Reject gates with null-resolved parameters |
+| strict_null_gates | True | `handle_match` runs the W1-03 `validate_gates` pre-pass on the final resolved parameters for the direction's gates: a null gate parameter that is undeclared or a `required` queryschema field is rejected (ValidationError naming the gate); a null optional or derived one follows the gate's `nullbehavior` and is logged (RU-010 / CEG-COR-023, R1a-DEC-03); off = no pre-pass |
 | max_hop_hard_cap | 10 | Maximum traversal hops |
 | param_strict_mode | True | Raise on derived parameter resolution failures |
 
@@ -52,6 +52,17 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | graph_inference_feedback_enabled | False | Emit `graph-inference-result` to EIE through Gate (EIE-008 / CEG-006) |
 | auto_create_domain_database | False | Provision the tenant domain database on first use (CEG-008; Enterprise-only CREATE DATABASE) |
 | health_api_enabled | False | Expose engine/health/api.py via admin health_* subactions (CEG-006) |
+| packet_store_packet_identity_dedup_enabled | True | PacketStore `content_hash` = SDK `transport_hash`; a duplicate-skipped packet writes no child rows (RU-078) |
+| packet_store_rls_tenant_session_enabled | True | PacketStore sets transaction-local `app.current_tenant` before each write so the RLS policies admit an `l9_product` DSN (RU-079) |
+| inference_geo_usps_zones_enabled | True | Postal-code region follows USPS first-digit zones; declared non-US `country` yields no region (RU-084) |
+| inference_persona_token_match_enabled | True | Buyer-persona keywords match whole job-title tokens, not substrings (RU-088) |
+| inference_input_parsing_strict_enabled | True | Company-size per-field parsing with is-None fallback; email domain from the URL hostname (RU-089) |
+| packet_audit_on_cancel_enabled | True | SDK audit wrapper persists a failed pair for a timeout-cancelled handler, then re-raises (RU-086) |
+| capability_record_binding_enabled | True | `validate_action` binds to the registered capability record; `expires_at` enters `proof_hash` (RU-090) |
+| health_absent_confidence_counts_enabled | True | Readiness counts a populated field unless an explicit confidence < 0.70 discounts it; batch/report forward `field_confidences`; blocking_fields = uncounted gate fields (RU-108 / CEG-COR-044); off restores None→0 coercion |
+| health_range_gate_fields_enabled | True | Health marks every candidate property a gate reads (candidateprop, candidateprop_min/max/start/end) gate-critical (RU-109 / CEG-COR-045); off restores candidateprop only |
+| health_blocked_score_scale_enabled | True | A blocked readiness (gate completeness < 0.50) scores the 60% gate component `round(gc*60, 2)`, keeping readiness monotonic (RU-110 / CEG-COR-046); off restores `gc*100` |
+| health_priority_staleness_enabled | True | compute_enrichment_priority's 10% staleness term is computed from the entity's field health (RU-111 / CEG-COR-047); off restores the always-zero term |
 
 ## Domain Pack Admission (generic; the engine names no domain)
 | Flag | Default | Purpose |
@@ -113,3 +124,46 @@ were industry-specific and had no caller).
 | compliance_audit_soft_sink | True | Compliance audit buffer bounded by `compliance_buffer_max` (oldest dropped, count logged, every entry still in the `l9.audit` log), JSONB metadata bound as JSON text, and a request-path flush failure in `handle_match`/`handle_sync` logged instead of raised (RU-065 / CEG-COR-052/053); off restores unbounded retention and propagation |
 | prohibited_factor_violation_audit | True | Every prohibited-factor violation raised through `ComplianceEngine` first emits one CRITICAL `denied` audit entry (regimes, subject, field name — never a value) when the domain's `auditonviolation` is true (RU-063 / CEG-COR-050); off emits none |
 | pii_declared_fields_enforced | True | With `compliance.pii.enabled`, declared `fields` + `candidatefields` are PII by exact case-insensitive key at any depth and every detected field is transformed per `handling` (hash → SHA-256 digest, redact → `[REDACTED]`, encrypt/tokenize fail closed to `[REDACTED]`) (RU-064 / CEG-COR-051); requires `pii_redaction_recursive`; off restores built-in inference with key deletion |
+| causal_attribution_unique_touchpoints | True | Attribution collapses trace rows to unique touchpoint ids (minimum-distance row kept, its ages feed temporal decay) so weights sum to 1.0 on diamonds/parallel edges (RU-067 / CEG-COR-055); off restores per-path-row weighting |
+| causal_edge_declared_identity | True | `CausalCompiler` matches source/target by declared identity (`outcome_id` for the outcome label, else sync `idproperty` / first required property, else `entity_id`), joins predicates under one WHERE with `$confidence_threshold`, and MERGEs on the relationship type with ON CREATE/ON MATCH SET; `AttributionCalculator` reads each touchpoint's declared id per label (RU-068 / CEG-COR-057, PO-04); off restores the legacy Cypher |
+| causal_validator_batch_edge_type | True | `CausalEdgeRuntimeValidator` resolves a `CausalSubgraphSpec` edge's `temporal_validation` from the batch `edge_type`, so sync records (no `edge_type` key) are checked (RU-069 / CEG-COR-058); off restores the record-key lookup |
+| safe_eval_reject_keywords | True | `safe_eval` raises `ValueError` for a call with keyword arguments instead of silently dropping them (RU-076 / CEG-COR-125); off restores the silent drop |
+| causal_serializer_variable_depth | True | `CausalSubgraphSerializer` uses `[:T1|T2*1..N]` with N = `max_depth` clamped to [1, `causal.chain_depth_limit`] so match explanations reach the requested depth (RU-074 / CEG-COR-121); off restores the one-hop `[r:T]` pattern |
+| counterfactual_dedupe_and_spec_label | True | `CounterfactualGenerator` emits at most one scenario per (intervention, key_difference) and reads fingerprints from the domain's `feedbackloop.outcome_node_label` instead of `:TransactionOutcome` (RU-075 / CEG-COR-122); off restores duplicates and the literal label |
+
+## Correctness remediation lane F (plan 0d84ec8)
+| neo4j_circuit_release_cancelled_probes | True | A HALF_OPEN probe cancelled before producing a result (SDK `wait_for` timeout) returns its slot, so the breaker re-probes instead of wedging until restart (RU-094 / CEG-COR-035); off restores the leaking slot accounting |
+| neo4j_circuit_ignore_client_errors | True | `neo4j.exceptions.ClientError` (syntax, constraint, missing database, null MERGE key) re-raises unchanged without counting toward the process-wide Neo4j breaker; infrastructure errors and the credential classes `AuthError`/`TokenExpired`/`Forbidden` still count (RU-093 / CEG-COR-034); off counts every exception |
+| neo4j_provision_inside_breaker | True | With `auto_create_domain_database` on, breaker admission precedes first-use provisioning, so an OPEN breaker rejects before any CREATE DATABASE (RU-095 / CEG-COR-170); off restores provision-then-admit |
+| gds_dag_job_identity_by_name | True | GDS execution DAG nodes are jobs keyed by name; `depends_on` (algorithm names) resolves to every job of that algorithm, so same-algorithm jobs all schedule (RU-096 / CEG-COR-036); off restores the algorithm-keyed DAG |
+| gds_temporal_recency_decay_existing | True | Temporal-recency overlay aggregates per (src, dst) (newest interaction is `last_event_date`), re-scores every existing overlay edge each run, and prunes on score OR age > `max_age_days` (RU-097 / CEG-COR-037); off restores per-row create + score-only prune |
+| gds_cooccurrence_deterministic_prune | True | Co-occurrence power-law pruning orders each node's edges by `r.weight` DESC (`elementId` tie-break) and deletes an edge only when both endpoints have degree > 10 and neither keeps it, so no node drops below `floor(d^0.86)` and the result is deterministic (RU-098 / CEG-COR-168); off restores the unordered per-endpoint prune |
+| gds_history_utc_timestamps | True | GDS job history `timestamp` (and job start/duration) use `datetime.now(tz=UTC)`, so `gds_health` / boot staleness is correct under any process TZ (RU-100 / CEG-COR-086); off restores naive local time |
+| entity_resolution_merge_integrity | True | Entity resolution validates and threads the batch `threshold`, verifies each member against the chosen canonical, MERGEs `RESOLVED_FROM` (one per pair, no cycles, deterministic canonical) and skips batch entities by entity id (RU-101 / CEG-COR-059..061); also gated per domain by `semantic_registry.enabled`; off restores the previous merge behaviour |
+| resolution_behavioral_label_scoped | True | Behavioral similarity matches both entities as `(a:<label> {<declared id>: $a_id})`, so same-id nodes of other labels contribute nothing (RU-103 / CEG-COR-177); the declared id (PO-04) also follows `spec_declared_candidate_id`; off restores the label-less `entity_id` match |
+
+## Correctness remediation lane I (plan 0d84ec8, round 2) — domain spec validation
+| Flag | Default | Purpose |
+|------|---------|---------|
+| weight_ceiling_includes_unscoped | True | With `domain_strict_validation`, the default-weight ceiling (C-22) for each declared direction counts unscoped dimensions plus the dimensions scoped to it; `{'*': 0.6, 'd1': 0.6}` is refused (RU-044 / CEG-COR-024); off restores the per-scope-bucket check |
+| traversal_open_range_rejected | True | `TraversalSpec` parses the whole `*[min][..[max]]` token: a `..` without an upper bound (`*1..`, `*2..`, `*..`) is refused and explicit bounds are checked against `max_hop_hard_cap`; the assembler grammar accepts only `*N` / `*[M]..N` (RU-045 / CEG-COR-038); off restores the parse that read `*1..` as one hop |
+| gate_name_uniqueness | True | `DomainSpec` refuses two gates with the same `name` (ValueError `Duplicate gate name(s): [...]`) (RU-049 / CEG-COR-076); off restores acceptance, where the second literal overwrites the first |
+| domain_undeclared_param_rejected | True | With `domain_strict_validation`, a gate whose string `queryparam` is neither a queryschema field, a derived parameter, a `_min/_max/_start/_end` suffix of one, nor (temporalrange) a `<q>` whose `<q>_start` and `<q>_end` are both declared raises `Gate '<g>' references undeclared parameter '<q>'` (RU-050 / CEG-COR-077); literal operands exempt; off restores the warning |
+| gate_spec_forbid_unknown_keys | True | `GateSpec` refuses a key that is not one of its fields (ValidationError `Gate '<g>' has unknown key(s) [...]`, with a `did you mean` hint), so `null_behavior: fail` no longer compiles as `pass` (RU-053 / CEG-COR-081); off restores Pydantic's silent ignore |
+| domain_version_semver_enforced | True | `domain.version` must be `<major>.<minor>.<patch>` with an optional `-<stage>` suffix (seed, discovered, inferred, proposed, reviewed, production) per DOMAIN_SPEC_VERSIONING.md; `latest`, `v2`, `2026-03-01` are refused (RU-057 / CEG-COR-152); off accepts any string |
+## Correctness remediation lane L (plan 0d84ec8)
+| Flag | Default | Purpose |
+|------|---------|---------|
+| legacy_chassis_auth_enabled | True | Legacy dict chassis (dev/test only): with `L9_API_KEY` set, `create_app` registers `BearerAuthMiddleware` (`/v1/health` public) and POST `/v1/execute` returns 403 for a tenant outside the token's `allowed_tenants` (with `tenant_auth_enabled`); the factory refuses to build outside dev/local/test while `require_sdk_chassis_in_prod` (RU-082 / CEG-COR-039); off restores the unauthenticated factory |
+| legacy_chassis_status_mapping_enabled | True | Legacy dict chassis (dev/test only): `execute_action` attaches an HTTP status hint — circuit open → 503 + `Retry-After`, `ChassisError` → its `status_code`, engine `ValidationError` → 422, other `EngineError` → 500 with its message, else 500 `Internal server error` (no raw exception text) (RU-083 / CEG-COR-087 / CEG-COR-088); off restores 200-for-circuit-open and the keyword mapping |
+## Correctness remediation lane J (plan 0d84ec8)
+| Flag | Default | Purpose |
+|------|---------|---------|
+| geodecay_declared_longitude | True | A `geodecay` dimension's declared `candidateprop_lon` / `queryprop_lon` name the longitude operands (default `candidate.lon` / `$lon`, byte-identical when undeclared); freight `deadhead_distance` binds Carrier `currentlon` to Load `pickuplon` (RU-037 / CEG-COR-011); off ignores the declarations |
+## Correctness remediation lane K (plan 0d84ec8)
+| Flag | Default | Purpose |
+|------|---------|---------|
+| gds_shared_scheduler_registry | True | Boot registers each started GDS scheduler in `EngineState.gds_schedulers` (the W6-03 health probe reads it); admin `trigger_gds`/`gds_status`/`gds_trigger`/`gds_health` reuse it instead of starting a duplicate, and with `gds_enabled` False register jobs without starting APScheduler (manual trigger only); `EngineState.shutdown` stops every scheduler (RU-007 / CEG-COR-016); off restores the boot-local list and the admin duplicate |
+| outcome_schema_unified | True | One outcome record schema (R1a-DEC-02): sync `entity_type=outcome` writes through the `handle_outcomes` writer (domain `feedbackloop.outcome_node_label`, `positive`/`negative`/`neutral` → `success`/`failure`/`partial`, RESULTED_IN, same causal check); outcomes persist optional `fingerprint.dimension_scores` (JSON) and `was_selected`; `score_feedback` projects decoded `dimension_scores` and `OutcomeFeedback` counts success/failure (RU-006 / CEG-COR-015); off restores `:Outcome` + HAS_OUTCOME, no scores, positive/negative classes |
+| match_request_contract_admission | True | `handle_match` admits a payload carrying `contract_version` as `MatchRequest` against the tenant's `DomainContract` and maps `direction`/`query.facts`/`top_n` onto the legacy internals; legacy `MatchPayload` unchanged (RU-012 / CEG-COR-063, R1a-DEC-04); off rejects such a payload (no `match_direction`) |
+| gate_role_exemption | True | `admission_defects` reports a gate declaring `roleexempt` or `relaxedpenalty` (accepted by the schema, ignored by match: no request role, no relaxed mode), so the loader withholds the pack until a domain needs roles (RU-015 / CEG-COR-080, R1a-DEC-05); no served pack declares them; off admits them (ignored) |

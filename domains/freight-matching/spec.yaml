@@ -15,7 +15,7 @@ domain:
   description: >
     Match freight loads to optimal carriers with ELD integration, backhaul
     optimization, and FMCSA compliance.
-  version: 1.1.0
+  version: 1.2.0
 
 ontology:
   nodes:
@@ -46,6 +46,9 @@ ontology:
         - {name: maxweightlbs, type: float, unit: weight}
         - {name: ontimeratingpct, type: float, unit: percentage}
         - {name: safetyscore, type: float}
+        # The carrier's quoted rate per mile, compared with the load's
+        # ratepermile by rate_alignment (CEG-COR-011, DEC-14 option A).
+        - {name: ratepermile, type: float, unit: rate_per_distance}
 
   edges:
     - {type: COMPLETED_LOAD, from: Carrier, to: Load, direction: DIRECTED, category: transaction, managedby: sync}
@@ -78,26 +81,49 @@ gates:
     queryparam: weightlbs
     operator: ">="
   - name: equipment_match
-    type: enummap
+    # Scalar equality (CEG-COR-164): enummap compiled `candidate.equipmenttypes
+    # IN $equipmenttype`, IN over a scalar string. A carrier stores one
+    # equipment type string; a multi-type carrier would need list storage and
+    # enummap `invertible: true` ($equipmenttype IN candidate.equipmenttypes).
+    type: threshold
     candidateprop: equipmenttypes
     queryparam: equipmenttype
+    operator: "="
+    nullbehavior: pass
   - name: availability_window
-    type: temporalrange
-    candidateprop_start: availabledate
-    candidateprop_end: availabledate
-    queryparam_start: pickupdate
-    queryparam_end: pickupdate
+    # The carrier is available on or before pickup (CEG-COR-069). A
+    # temporalrange window whose start and end were both availabledate and
+    # pickupdate admitted only carriers available exactly at pickup.
+    # nullbehavior pass: a carrier with no recorded availability is not
+    # excluded (as before).
+    type: threshold
+    candidateprop: availabledate
+    queryparam: pickupdate
+    operator: "<="
+    nullbehavior: pass
 
 scoring:
   dimensions:
+    # Both dimensions declare their operands (CEG-COR-011, DEC-14 option A).
+    # Undeclared, geodecay read candidate.lat/lon vs $lat/$lon and
+    # pricealignment candidate.price_per_unit vs $target_price: no Carrier
+    # property and no query field, so every freight match failed.
     - name: deadhead_distance
+      # Distance from the carrier's current position to the load's pickup.
       source: computed
       computation: geodecay
+      candidateprop: currentlat
+      candidateprop_lon: currentlon
+      queryprop: pickuplat
+      queryprop_lon: pickuplon
       weightkey: wdeadhead
       defaultweight: 0.40
     - name: rate_alignment
+      # The carrier's quoted rate per mile against the load's offered rate.
       source: computed
       computation: pricealignment
+      candidateprop: ratepermile
+      queryprop: ratepermile
       weightkey: wrate
       defaultweight: 0.25
     - name: ontime_rating
