@@ -188,3 +188,151 @@ class TestHealthEndpoint:
 
         assert response.status_code == 503
         assert response.json()["status"] == "unhealthy"
+
+
+# ── RU-083 / CEG-COR-087 / CEG-COR-088 (RG-112) ─────────────────────────────
+# Fake engine handlers routed through the real chassis.actions.execute_action,
+# mirroring the planner repro r3_legacy_chassis.py / r3b_feature_flag.py.
+
+
+class _ActionsHook(LifecycleHook):
+    """LifecycleHook that delegates to chassis.actions.execute_action, as GraphLifecycle does."""
+
+    async def startup(self) -> None:
+        return
+
+    async def shutdown(self) -> None:
+        return
+
+    async def execute(self, action: str, payload: dict, tenant: str, trace_id: str) -> dict:
+        from chassis.actions import execute_action
+
+        return await execute_action(action=action, payload=payload, tenant=tenant, trace_id=trace_id)
+
+
+def _raiser(exc: Exception):
+    async def handler(tenant: str, payload: dict) -> dict:
+        raise exc
+
+    return handler
+
+
+async def _ok_handler(tenant: str, payload: dict) -> dict:
+    return {"ok": True, "tenant": tenant}
+
+
+@pytest.fixture
+def actions_client(monkeypatch: pytest.MonkeyPatch):
+    """TestClient over the legacy chassis with fake ACTION_HANDLERS; records persisted engine_data."""
+    from chassis import actions
+    from chassis.errors import FeatureNotEnabled
+    from engine.graph.circuit_breaker import CircuitOpenError
+    from engine.handlers import ExecutionError as EngineExecutionError
+    from engine.handlers import ValidationError as EngineValidationError
+
+    actions._init_engine()
+    handlers = {
+        "ok": _ok_handler,
+        "circuit": _raiser(CircuitOpenError("neo4j", 12.5)),
+        "feature": _raiser(FeatureNotEnabled("kge", flag="KGE_ENABLED", action="admin", tenant="t1")),
+        "denied": _raiser(
+            EngineValidationError("Tenant 'evil' not in authorized allowlist", action="match", tenant="evil")
+        ),
+        "engine_exec": _raiser(EngineExecutionError("Neo4j query failed", action="match", tenant="t1")),
+        "internal": _raiser(
+            RuntimeError("neo4j://admin:s3cret@10.0.0.5:7687 connection refused; query=MATCH (n:Secret) RETURN n")
+        ),
+    }
+    monkeypatch.setattr(actions, "_engine_handlers", handlers)
+    persisted: list[dict] = []
+    real_deflate = actions._deflate_egress
+
+    def recording_deflate(**kwargs):
+        persisted.append({"status": kwargs["status"], "engine_data": dict(kwargs["engine_data"])})
+        return real_deflate(**kwargs)
+
+    monkeypatch.setattr(actions, "_deflate_egress", recording_deflate)
+    app = create_app(lifecycle_hook=_ActionsHook(), settings=ChassisSettings(cors_origins=[]))
+    client = TestClient(app)
+    client.persisted = persisted  # type: ignore[attr-defined]
+    return client
+
+
+def _post(client: TestClient, action: str):
+    return client.post("/v1/execute", json={"action": action, "tenant": "t1", "payload": {}})
+
+
+class TestLegacyChassisStatusMapping:
+    """RG-112: execute_action's failure class reaches the HTTP status (flag on, default)."""
+
+    def test_success_unchanged(self, actions_client: TestClient) -> None:
+        response = _post(actions_client, "ok")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "success"
+        assert body["data"] == {"ok": True, "tenant": "t1"}
+        assert "http_status" not in body
+
+    def test_circuit_open_returns_503_with_retry_after(self, actions_client: TestClient) -> None:
+        response = _post(actions_client, "circuit")
+        assert response.status_code == 503
+        assert response.headers["Retry-After"] == "13"
+        assert "Circuit breaker 'neo4j' is OPEN" in response.json()["detail"]
+
+    def test_feature_not_enabled_returns_422(self, actions_client: TestClient) -> None:
+        response = _post(actions_client, "feature")
+        assert response.status_code == 422
+        assert "KGE_ENABLED" in response.json()["detail"]
+
+    def test_engine_validation_error_returns_422(self, actions_client: TestClient) -> None:
+        response = _post(actions_client, "denied")
+        assert response.status_code == 422
+        assert "not in authorized allowlist" in response.json()["detail"]
+
+    def test_other_engine_error_returns_500_with_its_message(self, actions_client: TestClient) -> None:
+        response = _post(actions_client, "engine_exec")
+        assert response.status_code == 500
+        assert response.json()["detail"] == "Neo4j query failed"
+
+    def test_unexpected_exception_returns_generic_500(self, actions_client: TestClient) -> None:
+        response = _post(actions_client, "internal")
+        assert response.status_code == 500
+        assert response.json()["detail"] == "Internal server error"
+        assert "s3cret" not in response.text
+        assert "Secret" not in response.text
+
+    def test_persisted_response_packet_keeps_the_error_detail(self, actions_client: TestClient) -> None:
+        _post(actions_client, "internal")
+        assert actions_client.persisted[-1]["status"] == "failed"  # type: ignore[attr-defined]
+        assert "s3cret" in actions_client.persisted[-1]["engine_data"]["error"]  # type: ignore[attr-defined]
+        assert "http_status" not in actions_client.persisted[-1]["engine_data"]  # type: ignore[attr-defined]
+
+    def test_unknown_action_still_400(self, actions_client: TestClient) -> None:
+        response = _post(actions_client, "nope")
+        assert response.status_code == 400
+        assert "Unknown action" in response.json()["detail"]
+
+
+class TestLegacyChassisStatusMappingFlagOff:
+    """LEGACY_CHASSIS_STATUS_MAPPING_ENABLED=false restores the previous mapping."""
+
+    @pytest.fixture(autouse=True)
+    def _flag_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "legacy_chassis_status_mapping_enabled", False)
+
+    def test_circuit_open_returns_200(self, actions_client: TestClient) -> None:
+        response = _post(actions_client, "circuit")
+        assert response.status_code == 200
+        assert response.json()["status"] == "circuit_open"
+        assert response.json()["data"]["status_code"] == 503
+        assert "http_status" not in response.json()
+
+    def test_feature_not_enabled_returns_500(self, actions_client: TestClient) -> None:
+        assert _post(actions_client, "feature").status_code == 500
+
+    def test_unexpected_exception_detail_is_the_raw_message(self, actions_client: TestClient) -> None:
+        response = _post(actions_client, "internal")
+        assert response.status_code == 500
+        assert "s3cret" in response.json()["detail"]

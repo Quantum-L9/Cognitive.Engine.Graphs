@@ -1026,18 +1026,23 @@ class GDSScheduler:
         return {"algorithm": "causal_chain_scoring", "nodes_scored": scored}
 
     async def _run_stable_louvain(self, job_spec: GDSJobSpec, runs: int) -> dict[str, Any]:
-        """S2-15: Run Louvain multiple times and use majority-vote consensus.
+        """S2-15: Run Louvain N times and report averaged stability metrics.
 
         HGKR paper runs each experiment 16 times and averages results.
-        Louvain is non-deterministic — running N times and taking the
-        majority community label per node eliminates random noise.
+        Louvain is non-deterministic, so each of the N runs writes its own
+        community labels to the same ``writeproperty``: the persisted labels
+        are from the last successful run. No per-node consensus is computed
+        (community ids are not aligned across runs), and the result says so
+        with ``consensus=False`` (RU-099 / CEG-COR-085, DEC-39 option A).
 
         Args:
             job_spec: GDS job specification.
             runs: Number of stability runs (default from job_spec.stability_runs).
 
         Returns:
-            Result dict with consensus community assignments + stability metrics.
+            Result dict with the averaged ``communities`` and ``modularity``,
+            ``stability_runs`` (successful runs), ``stability_coefficient``
+            (1 - modularity range) and ``consensus`` (always False).
         """
         logger.info(f"Running stable Louvain with {runs} runs for {job_spec.name}")
         all_results: list[dict[str, Any]] = []
@@ -1068,6 +1073,8 @@ class GDSScheduler:
                 ),
                 6,
             ),
+            # Labels on the graph are the last successful run's, not a consensus.
+            "consensus": False,
         }
 
     # ── Lifecycle ──────────────────────────────────────────

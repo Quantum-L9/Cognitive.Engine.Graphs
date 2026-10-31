@@ -10,6 +10,12 @@ Schemas:
 
 Native models: `engine.models.payloads`. See ADR-106 / ADR-108 / ADR-112.
 
+The `match` action admits `match-request` payloads (those carrying
+`contract_version`) through `admit_payload(MatchRequest, ...)` against the
+tenant's pack and maps them onto the legacy match internals; the legacy
+`match_direction` + flat `query` shape stays accepted (RU-012, flag
+`MATCH_REQUEST_CONTRACT_ADMISSION`; see `docs/contracts/HANDLER_PAYLOADS.md`).
+
 ## Domain neutrality (Stage 2, R03)
 
 The schemas pin no domain. Every payload root carries a `domain`, and the
