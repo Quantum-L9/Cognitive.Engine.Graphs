@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from packaging.requirements import InvalidRequirement, Requirement
+from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -67,10 +67,7 @@ def _source_requirements(name: str) -> list[Requirement]:
         line = raw.split(" #")[0].strip()
         if not line or line.startswith(("#", "-r")):
             continue
-        try:
-            reqs.append(Requirement(line))
-        except InvalidRequirement:
-            pytest.fail(f"{name}: unparseable requirement {line!r}")
+        reqs.append(Requirement(line))
     return reqs
 
 
