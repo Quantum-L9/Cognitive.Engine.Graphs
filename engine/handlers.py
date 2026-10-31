@@ -59,6 +59,7 @@ from engine.sync.generator import (
     RELATIONSHIP_EVIDENCE_SCHEMA,
     SyncGenerator,
     normalize_relationship_rows,
+    ref_namespace_defects,
     relationship_merge_query,
     relationship_precheck_query,
     relationship_uniqueness_constraint_query,
@@ -872,6 +873,16 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 action="sync",
                 tenant=tenant,
             )
+
+    # D-13: node ids outside the tenant's declared ref namespaces are refused
+    # before compliance records the request or anything touches the graph.
+    identity_defects = ref_namespace_defects(domain_spec, endpoint_spec, batch)
+    if identity_defects:
+        raise ValidationError(
+            f"Sync refused, nothing written: {'; '.join(identity_defects[:10])}",
+            action="sync",
+            tenant=tenant,
+        )
 
     # Run compliance checks on sync request
     compliance = _get_compliance_engine(domain_spec)

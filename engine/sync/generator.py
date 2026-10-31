@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any
 
 from engine.config.schema import DomainSpec, EdgeDirection, ManagedByType, SyncEndpointSpec, SyncStrategy
+from engine.config.tenant_mapping import declared_ref_namespace
 from engine.utils.security import sanitize_label
 
 logger = logging.getLogger(__name__)
@@ -200,6 +201,9 @@ class RelationshipDeclaration:
     from_id_property: str
     to_label: str
     to_id_property: str
+    # Declared graph-ref namespaces of the endpoint labels (D-13); None when undeclared.
+    from_ref_namespace: str | None = None
+    to_ref_namespace: str | None = None
 
 
 def _declared_id_property(domain_spec: DomainSpec, label: str, path: str) -> str:
@@ -364,7 +368,53 @@ def resolve_relationship_declaration(domain_spec: DomainSpec, spec: SyncEndpoint
         from_id_property=sanitize_label(_declared_id_property(domain_spec, spec.fromnode, spec.path)),
         to_label=sanitize_label(spec.tonode),
         to_id_property=sanitize_label(_declared_id_property(domain_spec, spec.tonode, spec.path)),
+        from_ref_namespace=declared_ref_namespace(domain_spec, spec.fromnode),
+        to_ref_namespace=declared_ref_namespace(domain_spec, spec.tonode),
     )
+
+
+# Same bound as a scoring entity ref (engine/scoring/evidence_priority.py).
+MAX_GRAPH_REF_LENGTH = 256
+
+
+def _ref_defect(value: Any, namespace: str) -> str | None:
+    """Why ``value`` is not a graph ref ``<namespace>:<id>``, else None."""
+    if (
+        not isinstance(value, str)
+        or len(value) > MAX_GRAPH_REF_LENGTH
+        or not value.startswith(f"{namespace}:")
+        or not value[len(namespace) + 1 :]
+        or any(char.isspace() for char in value)
+    ):
+        return f"{value!r} is not a graph ref {namespace}:<id> (max {MAX_GRAPH_REF_LENGTH} chars, no whitespace)"
+    return None
+
+
+def ref_namespace_defects(domain_spec: DomainSpec, spec: SyncEndpointSpec, batch: list[Any]) -> list[str]:
+    """Rows whose node ids fall outside the tenant's declared ref namespaces (D-13).
+
+    A node endpoint with a ``refnamespace`` writes only ids in it; a relationship
+    endpoint's ``from_id``/``to_id`` must be in its labels' namespaces. Labels
+    without a declaration are unconstrained. Non-mapping rows are left to the
+    row validators that already refuse them.
+    """
+    checks: list[tuple[str, str]] = []
+    if spec.targetnode and spec.refnamespace and spec.idproperty:
+        checks.append((spec.idproperty, spec.refnamespace))
+    if spec.targetedge and spec.fromnode and spec.tonode:
+        for key, label in (("from_id", spec.fromnode), ("to_id", spec.tonode)):
+            namespace = declared_ref_namespace(domain_spec, label)
+            if namespace:
+                checks.append((key, namespace))
+    defects = []
+    for index, row in enumerate(batch):
+        if not isinstance(row, dict):
+            continue
+        for key, namespace in checks:
+            defect = _ref_defect(row.get(key), namespace)
+            if defect is not None:
+                defects.append(f"row {index}: {key} {defect}")
+    return defects
 
 
 def relationship_precheck_query(declaration: RelationshipDeclaration) -> str:
