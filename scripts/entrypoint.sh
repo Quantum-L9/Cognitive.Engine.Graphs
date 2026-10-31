@@ -39,8 +39,9 @@ print('Neo4j ready')
 fi
 
 # Launch uvicorn — chassis.entrypoint:create_app dispatches on L9_CHASSIS
-# (legacy default resolves engine via L9_LIFECYCLE_HOOK; sdk uses create_node_app)
-echo "Chassis: ${L9_CHASSIS:-legacy}"
+# (sdk is the default, chassis.entrypoint.DEFAULT_CHASSIS -> chassis.node_app;
+# legacy is the dict chassis, refused outside dev/local/test)
+echo "Chassis: ${L9_CHASSIS:-sdk}"
 exec uvicorn chassis.entrypoint:create_app \
     --factory \
     --host 0.0.0.0 \

@@ -58,6 +58,19 @@ _TRAVERSAL_PATTERN_RE = re.compile(
     r"\s*$"
 )
 
+# RU-045 / CEG-COR-038 (`traversal_open_range_rejected`): the same grammar, but a
+# variable-length step must carry an explicit upper bound — `*N` or `*[M]..N`.
+# `*`, `*N..` and `*..` do not match (defence in depth behind TraversalSpec).
+_BOUNDED_TRAVERSAL_PATTERN_RE = re.compile(
+    r"^\s*"
+    r"\([a-zA-Z_][a-zA-Z0-9_]*(?::[a-zA-Z_][a-zA-Z0-9_]*)?\)"  # (alias:Label)
+    r"\s*<?-\s*"  # <- or -
+    r"\[:[a-zA-Z_][a-zA-Z0-9_|]*(?:\*(?:\d+|\d*\.\.\d+))?\]"  # [:EDGE_TYPE*1..3]
+    r"\s*-?>?\s*"  # -> or -
+    r"\([a-zA-Z_][a-zA-Z0-9_]*(?::[a-zA-Z_][a-zA-Z0-9_]*)?\)"  # (alias:Label)
+    r"\s*$"
+)
+
 
 def _validate_traversal_pattern(pattern: str, step_name: str) -> str:
     """
@@ -96,7 +109,10 @@ def _validate_traversal_pattern(pattern: str, step_name: str) -> str:
         raise ValueError(msg)
 
     # Validate pattern structure
-    if not _TRAVERSAL_PATTERN_RE.match(pattern):
+    from engine.config.settings import settings
+
+    structure_re = _BOUNDED_TRAVERSAL_PATTERN_RE if settings.traversal_open_range_rejected else _TRAVERSAL_PATTERN_RE
+    if not structure_re.match(pattern):
         msg = f"Traversal step '{step_name}': pattern does not match allowed structure"
         raise ValueError(msg)
 
