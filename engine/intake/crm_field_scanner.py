@@ -63,6 +63,10 @@ def _gate_critical_fields(gates: list[GateSpec]) -> set[str]:
             critical.add(gate.candidateprop_min)
         if gate.candidateprop_max:
             critical.add(gate.candidateprop_max)
+        if gate.candidateprop_start:
+            critical.add(gate.candidateprop_start)
+        if gate.candidateprop_end:
+            critical.add(gate.candidateprop_end)
     return critical
 
 
