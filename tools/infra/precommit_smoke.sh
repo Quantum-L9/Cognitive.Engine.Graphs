@@ -37,7 +37,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || { cd "$SCRIPT_DIR/../.." && pwd; })"
 ENV_FILE="${1:-}"
 
 if [[ -z "$ENV_FILE" ]]; then
@@ -108,6 +108,25 @@ trap cleanup EXIT INT TERM
 # Health wait loop
 # ---------------------------------------------------------------------------
 
+# Print one field of `docker compose ps --format json` read from stdin. The
+# output is a JSON object, an array of objects, or one object per line
+# depending on the compose version; anything unparsable prints "unknown".
+_compose_ps_field() {
+    python3 -c '
+import json, sys
+field = sys.argv[1]
+raw = sys.stdin.read().strip()
+try:
+    data = json.loads(raw) if raw else {}
+except ValueError:
+    rows = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    data = rows[0] if rows else {}
+if isinstance(data, list):
+    data = data[0] if data else {}
+print(data.get(field, "unknown") if isinstance(data, dict) else "unknown")
+' "$1" 2>/dev/null || echo "unknown"
+}
+
 wait_for_healthy() {
     local service="$1"
     local timeout="${2:-$HEALTH_TIMEOUT}"
@@ -118,14 +137,14 @@ wait_for_healthy() {
     while [[ $elapsed -lt $timeout ]]; do
         local health
         health=$(docker compose -p "$PROJECT_NAME" $COMPOSE_FILES $ENV_FLAG ps --format json "$service" 2>/dev/null \
-            | python3 -c "import sys, json; data=json.load(sys.stdin) if sys.stdin.read(1) else {}; print(data.get('Health', 'unknown'))" 2>/dev/null || echo "unknown")
+            | _compose_ps_field Health)
 
         [[ "$health" == "healthy" ]] && { log_success "$service is healthy"; return 0; }
 
         # Check if container exited
         local state
         state=$(docker compose -p "$PROJECT_NAME" $COMPOSE_FILES $ENV_FLAG ps --format json "$service" 2>/dev/null \
-            | python3 -c "import sys, json; data=json.load(sys.stdin) if sys.stdin.read(1) else {}; print(data.get('State', 'unknown'))" 2>/dev/null || echo "unknown")
+            | _compose_ps_field State)
 
         if [[ "$state" == "exited" ]]; then
             log_error "$service exited unexpectedly"
@@ -212,12 +231,20 @@ log_success "Services are healthy"
 # Gate 4: Smoke tests
 log_info "Gate 4: Running smoke tests..."
 
+# The HTTP fallback is only for a container without pytest. A pytest run that
+# fails is a failed gate; it must not fall through to a health check.
 if docker compose -p "$PROJECT_NAME" $COMPOSE_FILES $ENV_FLAG exec -T "$API_CONTAINER" \
-    python -m pytest "$SMOKE_TEST_PATH" -v --tb=short 2>/dev/null; then
-    log_success "Smoke tests passed"
+    python -c "import pytest" 2>/dev/null; then
+    if docker compose -p "$PROJECT_NAME" $COMPOSE_FILES $ENV_FLAG exec -T "$API_CONTAINER" \
+        python -m pytest "$SMOKE_TEST_PATH" -v --tb=short 2>/dev/null; then
+        log_success "Smoke tests passed"
+    else
+        log_error "Smoke tests failed"
+        exit 4
+    fi
 else
     # Fallback: basic HTTP health check
-    log_warn "Pytest not available or failed, trying HTTP health check..."
+    log_warn "Pytest not available, trying HTTP health check..."
     api_status=$(run_container_health_check "http://${API_CONTAINER}:${APP_PORT}/health")
     if [[ "$api_status" == "200" ]]; then
         log_success "API health check OK"

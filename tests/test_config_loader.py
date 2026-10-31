@@ -45,7 +45,7 @@ def domains_dir(tmp_path: Path) -> Path:
     domain_dir = tmp_path / "testdomain"
     domain_dir.mkdir()
     minimal_spec = {
-        "domain": {"id": "testdomain", "name": "Test", "version": "1.0"},
+        "domain": {"id": "testdomain", "name": "Test", "version": "1.0.0"},
         "ontology": {
             "nodes": [
                 {
@@ -82,7 +82,7 @@ def test_cache_invalidation_on_mtime(domains_dir: Path) -> None:
     loader = DomainPackLoader(str(domains_dir))
     spec1 = loader.load_domain("testdomain")
     raw = yaml.safe_load((domains_dir / "testdomain" / "spec.yaml").read_text())
-    raw["domain"]["version"] = "2.0"
+    raw["domain"]["version"] = "2.0.0"
     (domains_dir / "testdomain" / "spec.yaml").write_text(yaml.dump(raw))
     assert loader.load_domain("testdomain") is not spec1
 

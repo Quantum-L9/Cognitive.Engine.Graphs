@@ -1,4 +1,15 @@
-"""RU-020 scoring admission ships off (owner decision 2026-10-29): both packs are served as on main.
+"""
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [test, unit, config, admission]
+owner: engine-team
+status: active
+--- /L9_META ---
+
+RU-020 scoring admission ships off (owner decision 2026-10-29): both packs are served as on main.
 
 The check itself stays covered with it pinned on (test_domain_pack_loader.TestScoringAdmission).
 """

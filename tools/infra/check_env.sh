@@ -31,7 +31,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 # Resolve repo root from git or script location
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || { cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd; })"
 ENV_FILE="${1:-$REPO_ROOT/.env}"
 
 if [[ -f "$ENV_FILE" ]]; then
@@ -87,7 +87,13 @@ if [[ ${#REQUIRED_VARS[@]} -gt 0 ]]; then
             echo -e "  ${RED}✗${NC} $var — PLACEHOLDER (needs real value)"
             ERRORS=$((ERRORS + 1))
         else
-            masked="${value:0:4}****${value: -4}"
+            # Never reveal more than a fixed 2-char prefix, and nothing of a
+            # value of 8 chars or fewer (a 4+4 window exposed short secrets whole).
+            if [[ ${#value} -le 8 ]]; then
+                masked="****"
+            else
+                masked="${value:0:2}****"
+            fi
             echo -e "  ${GREEN}✓${NC} $var = $masked"
         fi
     done

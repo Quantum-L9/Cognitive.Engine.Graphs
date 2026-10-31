@@ -28,7 +28,17 @@ Scenarios:
   D. (RG-105) Connected as a login role in l9_product (RLS enforced): persist
      succeeds, and a row whose actor_tenant differs from the session tenant
      is still rejected.
-  E. (RU-078) A packet stored under the legacy payload_hash key, re-delivered
+  C. (RG-109, RU-081) record_outcome() for a persisted match request returns
+     True as the owner and as an l9_product member; the l9_product UPDATE
+     grant covers outcome_jsonb only, and another tenant's row is not updated.
+  F. (RU-066 follow-up, PR #352 review) PIIHandler.erase_subject erases the
+     requesting tenant's packets for a subject id and nothing of another
+     tenant's that reuses the id, as the owner and as an l9_product member;
+     the dry-run packet count has the same scope; through handle_admin the
+     erasure's PII_ERASURE audit row is durable before any delete.
+  E. (RG-107, RU-080) packet_store.sql applied a second time to a populated
+     database exits cleanly and keeps every row, foreign key and policy.
+  G. (RU-078) A packet stored under the legacy payload_hash key, re-delivered
      with the flag on: skipped, and the new response is stored.
 """
 
@@ -225,10 +235,284 @@ async def test_l9_product_cannot_write_another_tenants_row(product_dsn: str) -> 
         await conn.close()
 
 
+async def _fresh_database() -> tuple[str, str]:
+    assert _ADMIN_DSN is not None
+    name = f"ceg_packet_store_{uuid.uuid4().hex[:12]}"
+    admin = await asyncpg.connect(_ADMIN_DSN)
+    try:
+        await admin.execute(f'CREATE DATABASE "{name}"')
+    finally:
+        await admin.close()
+    return name, _with_database(_ADMIN_DSN, name)
+
+
+async def _drop_database(name: str) -> None:
+    assert _ADMIN_DSN is not None
+    admin = await asyncpg.connect(_ADMIN_DSN)
+    try:
+        await admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+    finally:
+        await admin.close()
+
+
+async def test_reapplying_ddl_preserves_rows() -> None:
+    """Scenario E: before RU-080 the second apply dropped packet_store and
+    packet_audit_log, then aborted with 'relation "hop_trace" already exists'."""
+    name, dsn = await _fresh_database()
+    try:
+        conn = await asyncpg.connect(dsn)
+        try:
+            await conn.execute(_DDL)
+            await conn.execute(
+                "INSERT INTO packet_store (packet_type, action, source_node, actor_tenant,"
+                " originator_tenant, envelope, content_hash, trace_id)"
+                " VALUES ('request', 'match', 'n', 'acme', 'acme', '{}', 'h-reapply', 't-reapply')"
+            )
+            await conn.execute(
+                "INSERT INTO packet_audit_log (packet_id, action, actor, tenant)"
+                " SELECT packet_id, 'INSERT', 'n', 'acme' FROM packet_store"
+            )
+            await conn.execute(
+                "INSERT INTO hop_trace (packet_id, node_id, action, entered_at, seq)"
+                " SELECT packet_id, 'n', 'match', now(), 1 FROM packet_store"
+            )
+            before = {
+                "fks": await conn.fetchval("SELECT count(*) FROM pg_constraint WHERE contype = 'f'"),
+                "policies": await conn.fetchval("SELECT count(*) FROM pg_policies"),
+            }
+
+            await conn.execute(_DDL)
+
+            for count_sql in (
+                "SELECT count(*) FROM packet_store",
+                "SELECT count(*) FROM packet_audit_log",
+                "SELECT count(*) FROM hop_trace",
+            ):
+                assert await conn.fetchval(count_sql) == 1, count_sql
+            assert await conn.fetchval("SELECT count(*) FROM pg_constraint WHERE contype = 'f'") == before["fks"]
+            assert await conn.fetchval("SELECT count(*) FROM pg_policies") == before["policies"]
+        finally:
+            await conn.close()
+    finally:
+        await _drop_database(name)
+
+
+async def _record(store: ps_mod.PacketStore, packet_id: str, tenant: str) -> bool:
+    return await store.record_outcome(
+        match_packet_id=packet_id,
+        tenant=tenant,
+        outcome_id=f"out-{uuid.uuid4().hex[:8]}",
+        outcome="success",
+        match_id="m-1",
+        candidate_id="c-1",
+        value=1.0,
+        feedback_metadata=None,
+    )
+
+
+async def _outcome_of(dsn: str, packet_id: str) -> Any:
+    conn = await asyncpg.connect(dsn)
+    try:
+        return await conn.fetchval("SELECT outcome_jsonb FROM packet_store WHERE packet_id = $1::uuid", packet_id)
+    finally:
+        await conn.close()
+
+
+async def test_record_outcome_as_owner(owner_store: ps_mod.PacketStore, packet_db: str) -> None:
+    """Scenario C: before RU-081 the UPDATE failed ('column "outcome_jsonb" ... does not exist')."""
+    tenant = f"tenant-{uuid.uuid4().hex[:8]}"
+    req, resp = _pair({"query": {"x": 5}}, tenant, "tr-c1")
+    await owner_store.persist(req, resp)
+    packet_id = str(req.header.packet_id)
+
+    assert await _record(owner_store, packet_id, tenant) is True
+    assert await _outcome_of(packet_db, packet_id) is not None
+
+
+async def test_record_outcome_as_l9_product_member(product_store: ps_mod.PacketStore, packet_db: str) -> None:
+    """Scenario C as the RLS-enforced role: needs the column grant and the UPDATE policy."""
+    tenant = f"tenant-{uuid.uuid4().hex[:8]}"
+    req, resp = _pair({"query": {"x": 6}}, tenant, "tr-c2")
+    await product_store.persist(req, resp)
+    packet_id = str(req.header.packet_id)
+
+    assert await _record(product_store, packet_id, tenant) is True
+    assert await _outcome_of(packet_db, packet_id) is not None
+    # Another tenant cannot annotate this row (WHERE actor_tenant + RLS).
+    assert await _record(product_store, packet_id, "tenant-other") is False
+
+
+async def test_l9_product_cannot_update_other_packet_columns(product_dsn: str, packet_db: str) -> None:
+    """The column-level grant keeps the envelope and every other column immutable."""
+    tenant = f"tenant-{uuid.uuid4().hex[:8]}"
+    req, _resp = _pair({"query": {"x": 7}}, tenant, "tr-c3")
+    conn = await asyncpg.connect(packet_db)
+    try:
+        await conn.execute(ps_mod._INSERT_PACKET_SQL, *ps_mod._extract_packet_row(req))
+    finally:
+        await conn.close()
+    conn = await asyncpg.connect(product_dsn)
+    try:
+        async with conn.transaction():
+            await conn.fetchval(ps_mod._SET_TENANT_SQL, tenant)
+            with pytest.raises(asyncpg.exceptions.InsufficientPrivilegeError):
+                await conn.execute(
+                    "UPDATE packet_store SET envelope = '{}'::jsonb WHERE packet_id = $1::uuid",
+                    str(req.header.packet_id),
+                )
+    finally:
+        await conn.close()
+
+
+async def _seed_subject_packets(dsn: str, subject: str) -> None:
+    conn = await asyncpg.connect(dsn)
+    try:
+        for tenant in ("tenant-gdpr-a", "tenant-gdpr-b"):
+            await conn.execute(
+                "INSERT INTO packet_store (packet_type, action, source_node, actor_tenant,"
+                " originator_tenant, envelope, content_hash, trace_id, data_subject_id)"
+                " VALUES ('request', 'match', 'n', $1, $1, '{}', $2, 't-gdpr', $3)",
+                tenant,
+                f"h-{tenant}-{subject}",
+                subject,
+            )
+    finally:
+        await conn.close()
+
+
+async def _tenants_with_subject(dsn: str, subject: str) -> list[str]:
+    conn = await asyncpg.connect(dsn)
+    try:
+        rows = await conn.fetch(
+            "SELECT actor_tenant FROM packet_store WHERE data_subject_id = $1 ORDER BY actor_tenant", subject
+        )
+        return [r["actor_tenant"] for r in rows]
+    finally:
+        await conn.close()
+
+
+@pytest.mark.parametrize("role", ["owner", "l9_product"])
+async def test_gdpr_erase_is_tenant_scoped(role: str, packet_db: str, product_dsn: str) -> None:
+    """Scenario F: before the fix the owner call deleted both tenants' packets
+    (returned 2) and the l9_product call saw no row (returned 0)."""
+    from engine.compliance.pii import PIIHandler
+
+    subject = f"subj-{uuid.uuid4().hex[:8]}"
+    await _seed_subject_packets(packet_db, subject)
+    pool = await asyncpg.create_pool(packet_db if role == "owner" else product_dsn, min_size=1, max_size=1)
+    try:
+        summary = await PIIHandler().erase_subject(
+            subject, db_pool=pool, tenant="tenant-gdpr-a", performed_by="tenant-gdpr-a"
+        )
+    finally:
+        await pool.close()
+
+    assert summary["packets_deleted"] == 1
+    assert await _tenants_with_subject(packet_db, subject) == ["tenant-gdpr-b"]
+    assert (
+        await _count(
+            packet_db,
+            "SELECT count(*) FROM packet_audit_log WHERE action = 'GDPR_DELETE' AND metadata->>'data_subject_id' = $1",
+            subject,
+        )
+        == 1
+    )
+
+
+@pytest.mark.parametrize("role", ["owner", "l9_product"])
+async def test_gdpr_dry_run_counts_only_the_requesting_tenants_packets(
+    role: str, packet_db: str, product_dsn: str
+) -> None:
+    """Scenario F (dry run): the packet count covers exactly the rows the live
+    erasure would delete — tenant A's, not tenant B's for the same subject id,
+    and not 0 under the RLS-enforced role."""
+    from engine.compliance.pii import PIIHandler
+
+    subject = f"subj-{uuid.uuid4().hex[:8]}"
+    await _seed_subject_packets(packet_db, subject)
+    pool = await asyncpg.create_pool(packet_db if role == "owner" else product_dsn, min_size=1, max_size=1)
+    try:
+        count = await PIIHandler().count_subject_packets(subject, pool, tenant="tenant-gdpr-a")
+    finally:
+        await pool.close()
+
+    assert count == 1
+    assert await _tenants_with_subject(packet_db, subject) == ["tenant-gdpr-a", "tenant-gdpr-b"]
+
+
+def _erasure_spec(tenant: str) -> Any:
+    from unittest.mock import MagicMock
+
+    from engine.config.schema import ComplianceSpec
+
+    spec = MagicMock()
+    spec.domain.id = tenant
+    spec.compliance = ComplianceSpec()
+    return spec
+
+
+@pytest.mark.parametrize("role", ["owner", "l9_product"])
+async def test_gdpr_admin_erase_is_tenant_scoped_and_audited_before_delete(
+    role: str, packet_db: str, product_dsn: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Scenario F end to end through handle_admin: tenant A's erase of a subject
+    id that tenant B reuses deletes only tenant A's packet, and the domain's
+    PII_ERASURE entry is durable in packet_audit_log by the time a delete runs
+    (asserted at the graph step; the unit suite asserts it precedes the packet
+    step too)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from engine.handlers import handle_admin, init_dependencies
+    from engine.state import get_state
+
+    subject = f"subj-{uuid.uuid4().hex[:8]}"
+    tenant = "tenant-gdpr-a"
+    await _seed_subject_packets(packet_db, subject)
+
+    audit_rows_at_delete: list[int] = []
+
+    async def execute_query(cypher: str, parameters: Any = None, database: Any = None) -> list[dict[str, int]]:
+        audit_rows_at_delete.append(
+            await _count(
+                packet_db,
+                "SELECT count(*) FROM packet_audit_log WHERE action = 'pii_erasure' AND data_subject_id = $1",
+                subject,
+            )
+        )
+        return [{"deleted": 0}]
+
+    driver = MagicMock()
+    driver.execute_query = AsyncMock(side_effect=execute_query)
+    loader = MagicMock()
+    loader.load_domain.return_value = _erasure_spec(tenant)
+    monkeypatch.setattr(settings, "gdpr_erasure_enabled", True)
+    monkeypatch.setattr(settings, "gdpr_dry_run", False)
+    monkeypatch.setattr(settings, "packet_store_enabled", True)
+    audit_pool = await asyncpg.create_pool(packet_db, min_size=1, max_size=1)
+    init_dependencies(driver, loader, db_pool=audit_pool)
+    get_state().compliance_engines.pop(tenant, None)
+    try:
+        # the PacketStore pool (get_packet_store().get_pool()) connects as `role`
+        async for _store in _store_for(monkeypatch, packet_db if role == "owner" else product_dsn):
+            result = await handle_admin(
+                tenant, {"subaction": "erase_subject", "data_subject_id": subject, "domain_id": tenant}
+            )
+    finally:
+        get_state().compliance_engines.pop(tenant, None)
+        get_state()._db_pool = None
+        await audit_pool.close()
+
+    assert result["status"] == "erased"
+    assert result["summary"]["packets_deleted"] == 1
+    assert await _tenants_with_subject(packet_db, subject) == ["tenant-gdpr-b"]
+    # the graph step (after the packet step) already saw the durable entry
+    assert audit_rows_at_delete == [1]
+
+
 async def test_redelivered_legacy_packet_is_skipped(
     owner_store: ps_mod.PacketStore, packet_db: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Scenario E: a row written before RU-078 carries payload_hash in content_hash.
+    """Scenario G: a row written before RU-078 carries payload_hash in content_hash.
 
     Re-delivering that packet with the flag on hashes it by transport_hash, so
     (content_hash, actor_tenant) does not match. Before the fix the INSERT then

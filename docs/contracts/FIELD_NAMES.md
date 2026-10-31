@@ -18,6 +18,13 @@ There are NO aliases, NO camelCase, NO flatcase fields anywhere in the engine.
 When accessing a Pydantic model attribute in Python, the attribute name is IDENTICAL
 to the YAML key name. No transformation occurs.
 
+> **Gate keys (RU-053 / CEG-COR-081).** The authority is the field list of
+> `GateSpec` in `engine/config/schema.py`, and those names are flatcase where the
+> schema says so: `candidateprop`, `queryparam`, `matchdirections`,
+> `nullbehavior`. A gate key that is not a `GateSpec` field fails validation
+> (`gate_spec_forbid_unknown_keys`); before that, a re-spelled key such as
+> `null_behavior: fail` was silently ignored and the gate compiled as `pass`.
+
 ## Canonical Field Names (DomainSpec)
 
 These are the EXACT attribute names. Use these and ONLY these.
@@ -51,12 +58,15 @@ domain_spec.compliance.prohibited_factors  # list[str]
 ### GateSpec
 
 ```python
+gate.name  # str — unique within the spec
 gate.type  # GateType enum value
-gate.field  # str — property name on candidate node
-gate.query_param  # str — key in query dict
-gate.match_direction  # str — which direction this gate applies to
-gate.null_behavior  # str — "pass" or "fail"
-gate.params  # dict[str, Any] — gate-type-specific parameters
+gate.candidateprop  # str | None — property name on the candidate node
+gate.queryparam  # str | int | float | bool | None — query parameter name, or a literal operand
+gate.matchdirections  # list[str] | None — directions this gate applies to (None = all)
+gate.nullbehavior  # NullBehavior — "pass" (default) or "fail"
+# Type-specific keys are also top-level GateSpec fields: operator, mapping, edgetype,
+# maxagedays, subgates, pattern, candidateprop_min/_max/_start/_end,
+# queryparam_min/_max/_start/_end. There is no nested `params` dict.
 ```
 
 
@@ -100,8 +110,9 @@ domain_spec.matchentities  # WRONG: missing underscore
 domain_spec.match_entities.candidates  # WRONG: not plural 's'... wait yes it is
 domain_spec.nodelabels  # WRONG: not a field
 domain_spec.matchdirections  # WRONG: not a top-level field
-gate.candidateprop  # WRONG: field is called 'field'
-gate.null_semantics  # WRONG: field is called 'null_behavior'
+gate.field  # WRONG: field is called 'candidateprop'
+gate.null_semantics  # WRONG: field is called 'nullbehavior'
+gate.null_behavior  # WRONG: field is called 'nullbehavior' (as a YAML key it fails validation)
 dim.computation_type  # WRONG: field is called 'type'
 endpoint.targetnode  # WRONG: missing underscore
 endpoint.idproperty  # WRONG: missing underscore

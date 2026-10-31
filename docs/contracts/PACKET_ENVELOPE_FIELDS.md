@@ -154,22 +154,39 @@ original.payload["new_field"] = "value"  # FROZEN — will crash
 
 ## content_hash Computation
 
+This is the formula `engine/packet/packet_envelope.py:_compute_hash` implements
+(DEC-34: the document is aligned to the code; no hash value changed). It covers
+the envelope's own `action` field and the full `TenantContext` and
+`PacketAddress`, not `payload.get("action")` or `tenant.actor` alone.
+
 ```python
-# Deterministic: sorted keys, canonical JSON
-import hashlib, json
+# Deterministic: sorted keys, compact separators, canonical JSON
+import hashlib
+import json
 
 hash_input = json.dumps(
     {
-        "packet_type": envelope.packet_type,
-        "action": envelope.payload.get("action"),
+        "packet_type": envelope.packet_type.value,
+        "action": envelope.action.value,
         "payload": envelope.payload,
-        "tenant": envelope.tenant.actor,
-        "address": envelope.address.dict() if envelope.address else None,
+        "tenant": json.loads(envelope.tenant.model_dump_json()),
+        "address": json.loads(envelope.address.model_dump_json()),
     },
     sort_keys=True,
+    separators=(",", ":"),
+    default=str,
 )
-content_hash = hashlib.sha256(hash_input.encode()).hexdigest()
+content_hash = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
 ```
+
+`PacketEnvelope.verify_integrity()` recomputes it, and `PacketEnvelope.from_wire()`
+raises `ValueError` when it does not match (RU-092), so a tampered or forged
+packet is rejected at deserialization.
+
+This is the legacy `PacketEnvelope` hash. It is not what `packet_store` persists:
+for SDK `TransportPacket`s the `packet_store.content_hash` column holds
+`security.transport_hash` (RU-078, `PACKET_STORE_PACKET_IDENTITY_DEDUP_ENABLED`;
+`security.payload_hash` with that flag off) — see `docs/FEATURE_GATES.md` §7.
 
 
 ## WRONG Field Names (agents generate these — they're all wrong)
