@@ -3057,6 +3057,7 @@ def _require_score_grant(tenant: str, domain_spec: DomainSpec) -> None:
     cap_set = _build_capability_set(domain_spec)
     if cap_set is None or not cap_set.grants_explicitly(tenant, PERM_SCORE_READ):
         msg = f"Tenant '{tenant}' holds no explicit '{PERM_SCORE_READ}' grant; a wildcard never grants score"
+        logger.warning("score refused: %s", msg)
         raise AuthorizationError(msg, action=SCORE_ACTION, tenant=tenant)
 
 
@@ -3074,9 +3075,12 @@ async def handle_score_remote(tenant: str, payload: dict[str, Any]) -> dict[str,
     """
     from engine.config.settings import settings as _score_settings
 
+    # The SDK returns only the error type to the caller; these lines are the operator's diagnosis.
     if not _score_settings.remote_score_enabled:
+        logger.info("score refused for tenant %s: REMOTE_SCORE_ENABLED is false", tenant)
         raise FeatureNotEnabled("Remote score", flag="REMOTE_SCORE_ENABLED", action=SCORE_ACTION, tenant=tenant)
     if not _score_settings.evidence_identity_per_type_enabled:
+        logger.warning("score refused for tenant %s: EVIDENCE_IDENTITY_PER_TYPE_ENABLED is false", tenant)
         raise FeatureNotEnabled(
             "Remote score typed evidence identity",
             flag="EVIDENCE_IDENTITY_PER_TYPE_ENABLED",
@@ -3101,6 +3105,7 @@ async def handle_score_remote(tenant: str, payload: dict[str, Any]) -> dict[str,
     relevance = approved_relevance_from_spec(domain_spec)
     evidence_types = declared_evidence_types(domain_spec)
     if not relevance or not evidence_types:
+        logger.info("score blocked for tenant %s: spec has no approved relevance or evidence type", tenant)
         return blocked_result(
             request,
             "tenant spec is not admissible for scoring: it needs approved evidencerelevance at "
