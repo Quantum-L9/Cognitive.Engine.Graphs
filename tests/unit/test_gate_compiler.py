@@ -141,11 +141,31 @@ scoring: {dimensions: []}
 
 
 # RG-054 (RU-041 / CEG-COR-019): an exclusion gate the compiler cannot honour is
-# refused instead of compiling to an always-true NOT EXISTS.
+# refused instead of compiling to an always-true NOT EXISTS. RU-038 (DEC-15)
+# removed the gate from the mortgage pack (served without it, DEC-15); these tests
+# re-create it on the pack as the pre-repair spec declared it.
+_PRE_REPAIR_MORTGAGE_BLACKLIST = {
+    "name": "blacklist_exclusion",
+    "type": "exclusion",
+    "edgetype": "BLACKLISTEDLENDER",
+    "fromnode": "query",
+    "tonode": "lender",
+}
+
+
+def _mortgage_with_query_anchored_blacklist():  # type: ignore[no-untyped-def]
+    from engine.config.schema import DomainSpec
+
+    raw = yaml.safe_load((_DOMAINS / "mortgage-brokerage" / "spec.yaml").read_text())
+    assert not any(g["name"] == "blacklist_exclusion" for g in raw["gates"])
+    raw["gates"].append(dict(_PRE_REPAIR_MORTGAGE_BLACKLIST))
+    return DomainSpec.model_validate(raw)
+
+
 def test_mortgage_blacklist_exclusion_is_refused_by_name() -> None:
     from engine.gates.compiler import GateCompiler
 
-    spec = _pack("mortgage-brokerage")
+    spec = _mortgage_with_query_anchored_blacklist()
     gate = next(g for g in spec.gates if g.name == "blacklist_exclusion")
     with pytest.raises(ValueError, match="blacklist_exclusion"):
         GateCompiler(spec).compile(gate)
@@ -154,7 +174,11 @@ def test_mortgage_blacklist_exclusion_is_refused_by_name() -> None:
 def test_mortgage_admission_lists_the_blacklist_exclusion() -> None:
     from engine.config.loader import admission_defects
 
-    assert any(d.startswith("blacklist_exclusion:") for d in admission_defects(_pack("mortgage-brokerage")))
+    assert any(
+        d.startswith("blacklist_exclusion:") for d in admission_defects(_mortgage_with_query_anchored_blacklist())
+    )
+    # The repository pack no longer declares it (RU-038).
+    assert not any(d.startswith("blacklist_exclusion:") for d in admission_defects(_pack("mortgage-brokerage")))
 
 
 @pytest.mark.parametrize(
@@ -233,7 +257,7 @@ def test_exclusion_endpoint_validation_off_restores_the_no_op(monkeypatch: pytes
     from engine.gates.compiler import GateCompiler
 
     monkeypatch.setattr(settings, "exclusion_endpoint_validation", False)
-    spec = _pack("mortgage-brokerage")
+    spec = _mortgage_with_query_anchored_blacklist()
     gate = next(g for g in spec.gates if g.name == "blacklist_exclusion")
     assert GateCompiler(spec).compile(gate) == "NOT EXISTS { MATCH (candidate)-[:BLACKLISTEDLENDER]->() }"
 
@@ -497,3 +521,169 @@ def test_freshness_validation_off_restores_the_legacy_coercion(monkeypatch: pyte
     negative = _two_label_spec([_freshness(-30)])
     assert "duration({days: 1})" in GateCompiler(zero).compile(zero.gates[0])
     assert "duration({days: -30})" in GateCompiler(negative).compile(negative.gates[0])
+
+
+# ── RG-012 (RU-010 / CEG-COR-023, R1a-DEC-03 third alternative) ──────────────
+# strict_null_gates: W1-03 validation runs inside handle_match on the final
+# resolved parameters for the direction's gates. A null undeclared or required
+# gate parameter is rejected; a null optional one follows the gate's
+# nullbehavior in Cypher and is only warned about.
+
+
+def _gate(name: str, param: object, **extra: object) -> dict:
+    return {"name": name, "type": "threshold", "candidateprop": "score", "queryparam": param, "operator": ">=", **extra}
+
+
+def test_validate_gates_rejects_null_required_and_undeclared_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config.settings import settings
+    from engine.gates.compiler import GateCompiler, UnboundGateParameterError
+
+    # RU-050 rejects an undeclared gate parameter at spec load; this test covers the
+    # match-time defence for specs loaded with that validation off.
+    monkeypatch.setattr(settings, "domain_undeclared_param_rejected", False)
+    spec = _two_label_spec(
+        [_gate("req_gate", "req"), _gate("undeclared_gate", "ghost"), _gate("opt_gate", "opt")],
+        [{"name": "req", "type": "float", "required": True}, {"name": "opt", "type": "float"}],
+    )
+    with pytest.raises(UnboundGateParameterError) as info:
+        GateCompiler(spec).validate_gates({"req": None, "opt": None}, match_direction="d1", reject_unbound=True)
+    assert info.value.problems == [
+        "gate 'req_gate' needs required parameter 'req'",
+        "gate 'undeclared_gate' needs undeclared parameter 'ghost'",
+    ]
+
+
+def test_validate_gates_leaves_null_optional_and_derived_to_nullbehavior(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config.schema import DerivedParameterSpec
+    from engine.config.settings import settings
+    from engine.gates.compiler import GateCompiler
+
+    # The derived parameter is attached after construction (model_copy), so the
+    # RU-050 load-time check would see 'half' as undeclared; it is off for the build.
+    monkeypatch.setattr(settings, "domain_undeclared_param_rejected", False)
+    spec = _two_label_spec(
+        [_gate("opt_gate", "opt"), _gate("derived_gate", "half"), _gate("literal_gate", 0.5)],
+        [{"name": "opt", "type": "float"}],
+    )
+    spec = spec.model_copy(
+        update={"derivedparameters": [DerivedParameterSpec(name="half", expression="opt / 2.0", type="float")]}
+    )
+    warnings = GateCompiler(spec).validate_gates({"opt": None, "half": None}, match_direction="d1", reject_unbound=True)
+    assert warnings == [
+        "Gate 'opt_gate': parameter '$opt' resolved to null",
+        "Gate 'derived_gate': parameter '$half' resolved to null",
+    ]
+
+
+def test_validate_gates_direction_filter() -> None:
+    from engine.gates.compiler import GateCompiler
+
+    spec = _two_label_spec(
+        [_gate("d2_only", "req", matchdirections=["d2"])],
+        [{"name": "req", "type": "float", "required": True}],
+    )
+    assert GateCompiler(spec).validate_gates({"req": None}, match_direction="d1", reject_unbound=True) == []
+
+
+class _MatchCapture:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    async def execute_query(self, *, cypher: str, parameters: dict, database: str) -> list[dict]:
+        self.calls.append((cypher, parameters))
+        return []
+
+
+async def _plasticos_match(query: dict, direction: str = "supply_opportunity_to_buyer_facility") -> _MatchCapture:
+    from unittest.mock import MagicMock
+
+    from engine.handlers import handle_match, init_dependencies
+
+    spec = _pack("plasticos")
+    driver = _MatchCapture()
+    loader = MagicMock()
+    loader.load_domain.return_value = spec
+    init_dependencies(driver, loader)  # type: ignore[arg-type]
+    await handle_match("plasticos", {"query": query, "match_direction": direction})
+    return driver
+
+
+@pytest.mark.finding("CEG-COR-023")
+async def test_match_omitting_optional_density_succeeds_with_one_warning_per_null_gate(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING", logger="engine.gates.compiler"):
+        driver = await _plasticos_match({"polymer_type": "HDPE"})
+    assert len(driver.calls) == 1
+    null_gate_warnings = [r.getMessage() for r in caplog.records if "resolved to null" in r.getMessage()]
+    assert "Gate 'density_range': parameter '$density' resolved to null" in null_gate_warnings
+    assert len(null_gate_warnings) == len(set(null_gate_warnings))
+    # Gates of the other direction are not validated.
+    assert not [m for m in null_gate_warnings if "active_supply" in m]
+
+
+@pytest.mark.finding("CEG-COR-023")
+async def test_match_with_null_required_gate_parameter_is_rejected() -> None:
+    from engine.handlers import ValidationError
+
+    with pytest.raises(ValidationError, match="polymer_capability_gate") as info:
+        await _plasticos_match({"density": 0.95})
+    assert "fulfills_polymer_gate" not in str(info.value)  # other direction's gate
+
+
+@pytest.mark.finding("CEG-COR-023")
+async def test_strict_null_gates_off_runs_no_pre_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "strict_null_gates", False)
+    driver = await _plasticos_match({"density": 0.95})
+    assert len(driver.calls) == 1
+
+
+# ── RG-019 (RU-015 / CEG-COR-080, R1a-DEC-05 "withhold") ─────────────────────
+# GateSpec.roleexempt / relaxedpenalty are accepted by the schema and ignored by
+# the match path (handle_match passes no role and never compiles relaxed). Until
+# a domain needs roles, a pack declaring either is withheld with a named defect.
+
+
+def _boolean_gate(**extra: object) -> dict:
+    return {"name": "flag_gate", "type": "boolean", "candidateprop": "active", "queryparam": "active", **extra}
+
+
+@pytest.mark.finding("CEG-COR-080")
+@pytest.mark.parametrize(
+    ("extra", "field"),
+    [({"roleexempt": ["broker"]}, "roleexempt"), ({"relaxedpenalty": 0.3}, "relaxedpenalty")],
+)
+def test_pack_declaring_role_fields_is_withheld_with_a_named_defect(extra: dict, field: str) -> None:
+    from engine.config.loader import admission_defects, withholding_reason
+
+    spec = _two_label_spec([_boolean_gate(**extra)], [{"name": "active", "type": "bool"}])
+    defects = admission_defects(spec)
+    assert [d for d in defects if d.startswith(f"flag_gate: {field}")], defects
+    reason = withholding_reason(spec)
+    assert reason is not None
+    assert field in reason
+
+
+def test_pack_without_role_fields_has_no_role_defect() -> None:
+    from engine.config.loader import admission_defects
+
+    spec = _two_label_spec([_boolean_gate()], [{"name": "active", "type": "bool"}])
+    assert not [d for d in admission_defects(spec) if "roleexempt" in d or "relaxedpenalty" in d]
+
+
+@pytest.mark.parametrize("domain_id", ["plasticos", "freight-matching", "mortgage-brokerage"])
+def test_served_packs_declare_no_role_fields(domain_id: str) -> None:
+    from engine.config.loader import admission_defects
+
+    assert not [d for d in admission_defects(_pack(domain_id)) if "roleexempt" in d or "relaxedpenalty" in d]
+
+
+def test_gate_role_exemption_off_admits_role_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config.loader import admission_defects
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "gate_role_exemption", False)
+    spec = _two_label_spec([_boolean_gate(roleexempt=["broker"])], [{"name": "active", "type": "bool"}])
+    assert not [d for d in admission_defects(spec) if "roleexempt" in d]

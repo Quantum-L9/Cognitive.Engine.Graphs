@@ -57,6 +57,7 @@ def _rule(
     include_dirs: list[str] | None = None,
     exclude_dirs: list[str] | None = None,
     ast_check: AstCheck | None = None,
+    path_ast_check: PathAstCheck | None = None,
 ) -> dict:
     r = {
         "id": rule_id,
@@ -72,6 +73,8 @@ def _rule(
         r["exclude_dirs"] = exclude_dirs
     if ast_check is not None:
         r["ast_check"] = ast_check
+    if path_ast_check is not None:
+        r["path_ast_check"] = path_ast_check
     return r
 
 
@@ -83,6 +86,8 @@ def _rule(
 # fallback for a file that does not parse.
 
 AstCheck = Callable[[ast.Module], list[int]]
+# Same, for rules whose result also depends on the repo-relative path.
+PathAstCheck = Callable[[ast.Module, str], list[int]]
 
 _HTTP_METHODS = frozenset({"post", "get", "put", "delete", "patch"})
 _SAFE_YAML_LOADERS = frozenset({"SafeLoader", "CSafeLoader"})
@@ -125,6 +130,54 @@ def _check_yaml_load(tree: ast.Module) -> list[int]:
         if loader is None or not _is_member_ref(loader, modules, members, _SAFE_YAML_LOADERS):
             lines.append(node.lineno)
     return lines
+
+
+# ERR-002 (ERROR_HANDLING.md, "swallowed exception"): a typed ``except`` whose
+# body is nothing but ``pass``. Enforced in engine/ only (DEC-51). An
+# intentional handler is exempted here, by (path, enclosing qualname,
+# exception expression) so the key survives line moves, with its reason.
+ERR_002_EXEMPTIONS: dict[tuple[str, str, str], str] = {
+    ("engine/boot.py", "GraphLifecycle.shutdown", "asyncio.CancelledError"): (
+        "awaiting the compliance flush task this method just cancelled re-raises CancelledError; "
+        "swallowing it is what lets shutdown continue to close the Neo4j pool"
+    ),
+    ("engine/handlers.py", "_try_safe_literal", "ValueError"): (
+        "float() is a parse probe: ValueError means 'not a numeric literal' and the function "
+        "goes on to the quoted-string checks, which raise ValidationError on injection"
+    ),
+    ("engine/inference_rule_registry.py", "infer_icp_fit_score", "(TypeError, ValueError)"): (
+        "a malformed optional firmographic signal (annual_revenue_usd) drops that one factor "
+        "from the score instead of failing the whole scoring pass (documented at the handler)"
+    ),
+}
+
+
+def swallowed_handlers(tree: ast.Module) -> list[tuple[str, str, int]]:
+    """(enclosing qualname, exception expression, line) of every typed pass-only handler."""
+    found: list[tuple[str, str, int]] = []
+
+    def visit(node: ast.AST, scope: list[str]) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                visit(child, [*scope, child.name])
+                continue
+            if (
+                isinstance(child, ast.ExceptHandler)
+                and child.type is not None
+                and child.body
+                and all(isinstance(stmt, ast.Pass) for stmt in child.body)
+            ):
+                found.append((".".join(scope) or "<module>", ast.unparse(child.type), child.lineno))
+            visit(child, scope)
+
+    visit(tree, [])
+    return found
+
+
+def _check_swallowed_exception(tree: ast.Module, rel_path: str) -> list[int]:
+    return [
+        line for qualname, exc, line in swallowed_handlers(tree) if (rel_path, qualname, exc) not in ERR_002_EXEMPTIONS
+    ]
 
 
 def _import_check(top_level: str) -> AstCheck:
@@ -447,9 +500,11 @@ RULES: list[dict] = [
         "ERR-002",
         "ERROR_HANDLING.md",
         "HIGH",
-        r"except\s+\w+.*:\s*\n\s*pass",
+        r"^\s*except\s+[^:]+:\s*pass\s*(#.*)?$",  # fallback for unparsable files: one-line form only
         "Swallowed exception - except + pass",
-        remediation="Log and re-raise",
+        remediation="Log and re-raise, or add a reasoned ERR_002_EXEMPTIONS entry for an intentional case",
+        include_dirs=[ENGINE_DIR],
+        path_ast_check=_check_swallowed_exception,
     ),
     # -- CONTRACT 10: BANNED_PATTERNS.md (Architecture) --
     _rule(
@@ -673,7 +728,8 @@ def scan_file(file_path: Path, content: str, root: Path) -> list[Violation]:
         if not _path_matches_rule(Path(rel_str), rule):
             continue
         ast_check = rule.get("ast_check")
-        if ast_check is not None and not parsed:
+        path_ast_check = rule.get("path_ast_check")
+        if (ast_check is not None or path_ast_check is not None) and not parsed:
             parsed = True
             try:
                 tree = ast.parse(content)
@@ -681,6 +737,8 @@ def scan_file(file_path: Path, content: str, root: Path) -> list[Violation]:
                 tree = None  # unparsable: AST rules fall back to their line regex
         if ast_check is not None and tree is not None:
             hit_lines = sorted(set(ast_check(tree)))
+        elif path_ast_check is not None and tree is not None:
+            hit_lines = sorted(set(path_ast_check(tree, rel_str)))
         else:
             try:
                 pat = re.compile(rule["pattern"], re.MULTILINE | re.DOTALL)

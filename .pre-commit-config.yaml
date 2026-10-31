@@ -195,7 +195,6 @@ repos:
         exclude: >
           (?x)^(
             docs/PlasticOS.*\.yaml|
-            domains/MASTER-SPEC.*\.yaml|
             setup-new-workspace\.yaml|
             telemetry/.*\.yml|
             tools/l9_template_manifest\.yaml|
