@@ -46,13 +46,9 @@ rules:
     severity: "CRITICAL"
     description: "All f-string Cypher that interpolates labels/types must use sanitize_label()."
     include_globs: ["engine/**/*.py"]
-    patterns_regex:
-      - 'f""".*MATCH\s*\(.*:.*\{.*\}.*"""'
-      - 'f".*MATCH\s*\(.*:.*\{.*\}.*"'
-      - 'f""".*MERGE\s*\(.*:.*\{.*\}.*"""'
-      - 'f".*MERGE\s*\(.*:.*\{.*\}.*"'
-    allow_if_contains:
-      - "sanitize_label("
+    # Evaluated by tools/cypher_lint.py (the C-009 owner, AST provenance per
+    # interpolated expression); every blocking finding is reported here.
+    check: "cypher_lint"
 
   - id: "TRACE_MATCH_FLOW_ANCHORS"
     severity: "MEDIUM"

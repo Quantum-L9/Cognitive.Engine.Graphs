@@ -279,3 +279,118 @@ def test_declared_vocabulary_with_hyphens_or_dots_is_admitted() -> None:
     assert re.fullmatch(IDENTIFIER_PATTERN, "window-to-depot")
     assert re.fullmatch(IDENTIFIER_PATTERN, "Orbital.Depot")
     assert not re.fullmatch(IDENTIFIER_PATTERN, "two words")
+
+
+# ── RG-015 (RU-012 / CEG-COR-063, R1a-DEC-04 "admit both") ───────────────────
+# HANDLER_PAYLOADS.md names MatchRequest for the match action, but handle_match
+# only read the legacy MatchPayload shape and rejected the example with
+# "Missing required field match_direction". With
+# match_request_contract_admission a payload carrying contract_version is
+# admitted as MatchRequest against the tenant's DomainContract and mapped onto
+# the legacy internals (direction, query.facts, top_n).
+
+
+class _MatchDriver:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict]] = []
+
+    async def execute_query(self, *, cypher: str, parameters: dict, database: str) -> list[dict]:
+        self.calls.append((cypher, parameters))
+        return [{"candidate": {"facility_id": "F-1"}, "score": 0.8, "dimension_scores": {}}]
+
+
+def _plasticos_spec():  # type: ignore[no-untyped-def]
+    from engine.config.schema import DomainSpec
+
+    return DomainSpec.model_validate(yaml.safe_load((ROOT / "domains" / "plasticos" / "spec.yaml").read_text()))
+
+
+def _wire_plasticos() -> _MatchDriver:
+    from unittest.mock import MagicMock
+
+    from engine.handlers import init_dependencies
+
+    driver = _MatchDriver()
+    loader = MagicMock()
+    loader.load_domain.return_value = _plasticos_spec()
+    init_dependencies(driver, loader)  # type: ignore[arg-type]
+    return driver
+
+
+def _example_match_request() -> dict:
+    return _load_json(EXAMPLES / "match-request.json")
+
+
+@pytest.mark.finding("CEG-COR-063")
+async def test_match_request_example_is_admitted_and_mapped() -> None:
+    """repro I/match_contract: the verbatim example returns candidates under default flags.
+
+    query.facts becomes the pack query, so the example's facts use the plasticos
+    queryschema vocabulary (``polymer_type``, the pack's required field; C-12).
+    """
+    from engine.handlers import handle_match
+
+    driver = _wire_plasticos()
+    payload = _example_match_request()
+    result = await handle_match("plasticos", payload)
+
+    assert result["candidates"]
+    _cypher, params = driver.calls[0]
+    assert params["polymer_type"] == "HDPE"  # query.facts became the query
+    assert params["top_n"] == payload["top_n"]
+    assert result["match_direction"] == payload["direction"]
+
+
+@pytest.mark.finding("CEG-COR-063")
+async def test_match_request_missing_required_fact_is_named() -> None:
+    """RU-010: a contract request that omits the pack's required field is rejected, naming it."""
+    from engine.handlers import ValidationError, handle_match
+
+    _wire_plasticos()
+    payload = _example_match_request()
+    payload["query"]["facts"] = {"polymer_code": "HDPE"}
+    with pytest.raises(ValidationError, match="polymer_type"):
+        await handle_match("plasticos", payload)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "needle"),
+    [
+        (lambda p: p.update(direction="buyer_to_seller"), "match direction"),
+        (lambda p: p.update(domain="freight-matching"), "admitted domain"),
+        (lambda p: p.update(packet_uuid="00000000-0000-0000-0000-000000000000"), "transport fields"),
+        (lambda p: p.update(weights={"geo": 0.5}), "Extra inputs"),
+    ],
+    ids=["undeclared-direction", "other-domain", "transport-field", "extra-field"],
+)
+async def test_match_request_admission_failures_are_validation_errors(mutate, needle: str) -> None:  # type: ignore[no-untyped-def]
+    from engine.handlers import ValidationError, handle_match
+
+    driver = _wire_plasticos()
+    payload = _example_match_request()
+    mutate(payload)
+    with pytest.raises(ValidationError, match=needle):
+        await handle_match("plasticos", payload)
+    assert driver.calls == []
+
+
+async def test_legacy_match_payload_is_unaffected() -> None:
+    from engine.handlers import handle_match
+
+    driver = _wire_plasticos()
+    result = await handle_match(
+        "plasticos",
+        {"query": {"polymer_type": "HDPE"}, "match_direction": "supply_opportunity_to_buyer_facility", "top_n": 3},
+    )
+    assert result["candidates"]
+    assert len(driver.calls) == 1
+
+
+async def test_match_request_admission_off_restores_the_rejection(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config.settings import settings
+    from engine.handlers import ValidationError, handle_match
+
+    monkeypatch.setattr(settings, "match_request_contract_admission", False)
+    _wire_plasticos()
+    with pytest.raises(ValidationError, match="match_direction"):
+        await handle_match("plasticos", _example_match_request())

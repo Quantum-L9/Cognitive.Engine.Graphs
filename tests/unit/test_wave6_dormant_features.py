@@ -904,6 +904,19 @@ class TestGDPRSchemaExtension:
 # ═══════════════════════════════════════════════════════════════
 
 
+def _place_scheduler(monkeypatch, lifecycle, scheduler, *, shared_registry: bool) -> None:
+    """Put a scheduler where the probe reads it (RU-007 / gds_shared_scheduler_registry)."""
+    from engine.config.settings import settings
+    from engine.state import get_state
+
+    monkeypatch.setattr(settings, "gds_shared_scheduler_registry", shared_registry)
+    monkeypatch.setattr(get_state(), "_gds_schedulers", {})
+    if shared_registry:
+        get_state().gds_schedulers["test_domain"] = scheduler
+    else:
+        lifecycle._schedulers = [scheduler]
+
+
 @pytest.mark.unit
 class TestGDSHealthProbeRegistration:
     """Test that boot.py registers the GDS health probe."""
@@ -915,7 +928,8 @@ class TestGDSHealthProbeRegistration:
         assert hasattr(lifecycle, "_register_gds_health_probe")
 
     @pytest.mark.asyncio
-    async def test_health_probe_returns_ok(self):
+    @pytest.mark.parametrize("shared_registry", [True, False], ids=["registry", "boot_list"])
+    async def test_health_probe_returns_ok(self, monkeypatch, shared_registry):
         from engine.boot import GraphLifecycle
 
         lifecycle = GraphLifecycle()
@@ -927,14 +941,15 @@ class TestGDSHealthProbeRegistration:
                 {"algorithm": "louvain", "timestamp": recent_ts, "status": "success"},
             ]
         )
-        lifecycle._schedulers = [scheduler]
+        _place_scheduler(monkeypatch, lifecycle, scheduler, shared_registry=shared_registry)
         lifecycle._register_gds_health_probe()
 
         result = await lifecycle._gds_health_check()
         assert result["gds"] == "ok"
 
     @pytest.mark.asyncio
-    async def test_health_probe_returns_degraded(self):
+    @pytest.mark.parametrize("shared_registry", [True, False], ids=["registry", "boot_list"])
+    async def test_health_probe_returns_degraded(self, monkeypatch, shared_registry):
         from engine.boot import GraphLifecycle
 
         lifecycle = GraphLifecycle()
@@ -945,7 +960,7 @@ class TestGDSHealthProbeRegistration:
                 {"algorithm": "louvain", "timestamp": old_ts, "status": "success"},
             ]
         )
-        lifecycle._schedulers = [scheduler]
+        _place_scheduler(monkeypatch, lifecycle, scheduler, shared_registry=shared_registry)
         lifecycle._register_gds_health_probe()
 
         result = await lifecycle._gds_health_check()

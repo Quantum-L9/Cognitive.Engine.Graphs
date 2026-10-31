@@ -21,7 +21,7 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 |------|---------|---------|
 | domain_strict_validation | True | Cross-reference validation at domain load |
 | score_clamp_enabled | True | Clamp dimension scores to [0, 1] |
-| strict_null_gates | True | Reject gates with null-resolved parameters |
+| strict_null_gates | True | `handle_match` runs the W1-03 `validate_gates` pre-pass on the final resolved parameters for the direction's gates: a null gate parameter that is undeclared or a `required` queryschema field is rejected (ValidationError naming the gate); a null optional or derived one follows the gate's `nullbehavior` and is logged (RU-010 / CEG-COR-023, R1a-DEC-03); off = no pre-pass |
 | max_hop_hard_cap | 10 | Maximum traversal hops |
 | param_strict_mode | True | Raise on derived parameter resolution failures |
 
@@ -156,3 +156,14 @@ were industry-specific and had no caller).
 |------|---------|---------|
 | legacy_chassis_auth_enabled | True | Legacy dict chassis (dev/test only): with `L9_API_KEY` set, `create_app` registers `BearerAuthMiddleware` (`/v1/health` public) and POST `/v1/execute` returns 403 for a tenant outside the token's `allowed_tenants` (with `tenant_auth_enabled`); the factory refuses to build outside dev/local/test while `require_sdk_chassis_in_prod` (RU-082 / CEG-COR-039); off restores the unauthenticated factory |
 | legacy_chassis_status_mapping_enabled | True | Legacy dict chassis (dev/test only): `execute_action` attaches an HTTP status hint — circuit open → 503 + `Retry-After`, `ChassisError` → its `status_code`, engine `ValidationError` → 422, other `EngineError` → 500 with its message, else 500 `Internal server error` (no raw exception text) (RU-083 / CEG-COR-087 / CEG-COR-088); off restores 200-for-circuit-open and the keyword mapping |
+## Correctness remediation lane J (plan 0d84ec8)
+| Flag | Default | Purpose |
+|------|---------|---------|
+| geodecay_declared_longitude | True | A `geodecay` dimension's declared `candidateprop_lon` / `queryprop_lon` name the longitude operands (default `candidate.lon` / `$lon`, byte-identical when undeclared); freight `deadhead_distance` binds Carrier `currentlon` to Load `pickuplon` (RU-037 / CEG-COR-011); off ignores the declarations |
+## Correctness remediation lane K (plan 0d84ec8)
+| Flag | Default | Purpose |
+|------|---------|---------|
+| gds_shared_scheduler_registry | True | Boot registers each started GDS scheduler in `EngineState.gds_schedulers` (the W6-03 health probe reads it); admin `trigger_gds`/`gds_status`/`gds_trigger`/`gds_health` reuse it instead of starting a duplicate, and with `gds_enabled` False register jobs without starting APScheduler (manual trigger only); `EngineState.shutdown` stops every scheduler (RU-007 / CEG-COR-016); off restores the boot-local list and the admin duplicate |
+| outcome_schema_unified | True | One outcome record schema (R1a-DEC-02): sync `entity_type=outcome` writes through the `handle_outcomes` writer (domain `feedbackloop.outcome_node_label`, `positive`/`negative`/`neutral` → `success`/`failure`/`partial`, RESULTED_IN, same causal check); outcomes persist optional `fingerprint.dimension_scores` (JSON) and `was_selected`; `score_feedback` projects decoded `dimension_scores` and `OutcomeFeedback` counts success/failure (RU-006 / CEG-COR-015); off restores `:Outcome` + HAS_OUTCOME, no scores, positive/negative classes |
+| match_request_contract_admission | True | `handle_match` admits a payload carrying `contract_version` as `MatchRequest` against the tenant's `DomainContract` and maps `direction`/`query.facts`/`top_n` onto the legacy internals; legacy `MatchPayload` unchanged (RU-012 / CEG-COR-063, R1a-DEC-04); off rejects such a payload (no `match_direction`) |
+| gate_role_exemption | True | `admission_defects` reports a gate declaring `roleexempt` or `relaxedpenalty` (accepted by the schema, ignored by match: no request role, no relaxed mode), so the loader withholds the pack until a domain needs roles (RU-015 / CEG-COR-080, R1a-DEC-05); no served pack declares them; off admits them (ignored) |
