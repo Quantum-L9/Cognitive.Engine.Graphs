@@ -69,12 +69,15 @@ def _list_files_cached(
     include_globs: tuple[str, ...],
     exclude_globs: tuple[str, ...],
 ) -> tuple[Path, ...]:
+    # Path.glob implements "**" as "this directory and every subdirectory", so
+    # "engine/**/*.py" selects every module under engine/ at any depth. Include
+    # and exclude patterns resolve the same way.
     included: set[Path] = set()
     for pat in include_globs:
-        included |= set(root.glob(pat)) if "**" not in pat else set(root.rglob(pat.replace("**/", "")))
+        included |= set(root.glob(pat))
     excluded: set[Path] = set()
     for pat in exclude_globs:
-        excluded |= set(root.glob(pat)) if "**" not in pat else set(root.rglob(pat.replace("**/", "")))
+        excluded |= set(root.glob(pat))
     files = [p for p in included if p.is_file() and p not in excluded]
     return tuple(sorted(files))
 
@@ -110,6 +113,64 @@ def find_regex_lines(text: str, pattern: str) -> list[int]:
         idx = text[: m.start()].count("\n") + 1
         hits.append(idx)
     return hits
+
+
+def _cypher_lint() -> Any:
+    """tools/cypher_lint.py, the C-009 owner, whether this runs as a script or as tools.audit_engine."""
+    try:
+        from tools import cypher_lint
+    except ImportError:  # run as `python tools/audit_engine.py`: tools/ is sys.path[0]
+        import cypher_lint  # type: ignore[import-not-found,no-redef]
+    return cypher_lint
+
+
+def cypher_lint_findings(root: Path, files: list[Path], rule: dict[str, Any]) -> list[Finding]:
+    """Blocking tools/cypher_lint.py findings in *files*, as findings of *rule*.
+
+    The label check is cypher_lint's AST provenance analysis (DEC-50 option A),
+    so it is evaluated per interpolated expression: it never matches across
+    lines, and a sanitize_label() call elsewhere in a file exempts nothing.
+    Findings waived with ``# cypher-lint: allow <reason>`` are not reported. A
+    module that cannot be parsed is reported, never skipped.
+    """
+    lint = _cypher_lint()
+    findings: list[Finding] = []
+    for f in files:
+        text = read_text(f)
+        rel = f.relative_to(root).as_posix()
+        try:
+            results = lint.scan_source(text, rel_path=rel)
+        except SyntaxError as exc:
+            findings.append(
+                Finding(
+                    severity=rule["severity"],
+                    rule_id=rule["id"],
+                    file=str(f),
+                    line_start=exc.lineno,
+                    line_end=exc.lineno,
+                    issue=rule["description"],
+                    evidence=f"cypher_lint could not parse the module: {exc.msg}",
+                    fix="Fix the syntax error so the C-009 label check can run.",
+                )
+            )
+            continue
+        for item in results:
+            if not item.blocking:
+                continue
+            s, e, snip = snippet_with_lines(text, item.line_no)
+            findings.append(
+                Finding(
+                    severity=rule["severity"],
+                    rule_id=rule["id"],
+                    file=str(f),
+                    line_start=s,
+                    line_end=e,
+                    issue=rule["description"],
+                    evidence=f"{item.kind}: {{{item.expression}}}\n{snip}",
+                    fix="Wrap labels/types with sanitize_label() before Cypher interpolation.",
+                )
+            )
+    return findings
 
 
 def ensure_template_manifest(root: Path) -> list[Finding]:
@@ -167,6 +228,9 @@ def audit_rules(root: Path, rules: dict[str, Any]) -> list[Finding]:
 
             required_all = rule.get("required_all", [])
             required_any = rule.get("required_any", [])
+
+            if rule.get("check") == "cypher_lint":
+                findings += cypher_lint_findings(root, files, rule)
 
             for f in files:
                 text = read_text(f)

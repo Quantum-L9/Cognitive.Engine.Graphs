@@ -1,10 +1,3 @@
-## Issue unblock (session reference)
-
-**Cluster:** Quantum-L9/Cognitive.Engine.Graphs#273 (+ #274 leftover, #275, #276, #277 duplicate of #276, #279)
-**Owning fix:** leftover consumer `.l9/ci.json` (`repo_class: python`) stacked on PR 280
-**Next:** do not merge from this skill; leftover issues already CLOSED; remaining CEG HUMAN issues stay OPEN
-**Pickup:** Graphiti PICKUP written 2026-09-19
-
 <!-- L9_META
 l9_schema: 1
 origin: engine-specific
@@ -14,6 +7,14 @@ tags: [todo, planning]
 owner: engine-team
 status: active
 /L9_META -->
+
+## Issue unblock (session reference)
+
+**Cluster:** Quantum-L9/Cognitive.Engine.Graphs#273 (+ #274 leftover, #275, #276, #277 duplicate of #276, #279)
+**Owning fix:** leftover consumer `.l9/ci.json` (`repo_class: python`) stacked on PR 280
+**Next:** do not merge from this skill; leftover issues already CLOSED; remaining CEG HUMAN issues stay OPEN
+**Pickup:** Graphiti PICKUP written 2026-09-19
+
 
 # TODO — Graph Cognitive Engine
 

@@ -35,6 +35,19 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DOMAINS_ROOT = REPO_ROOT / "domains"
 
 
+@pytest.fixture(autouse=True)
+def _admission_hardening_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The admission hardening checks ship off (owner decision 2026-10-29).
+
+    This module asserts what they withhold, so it pins each one on; the
+    test_*_admission_default_off modules assert the shipped defaults.
+    """
+    from engine.config.settings import settings
+
+    for flag in ("scoring_admission_check_enabled", "admission_checks_full_match", "exclusion_endpoint_validation"):
+        monkeypatch.setattr(settings, flag, True)
+
+
 def _domain_dirs() -> list[Path]:
     return sorted(p for p in DOMAINS_ROOT.iterdir() if p.is_dir())
 
@@ -444,3 +457,556 @@ def test_plasticos_recency_uses_the_declared_180_day_horizon() -> None:
     expression = _dimension_expression("plasticos", "recency")
     assert "duration.inDays(candidate.last_transaction_date, datetime()).days / 180.0" in expression
     assert "/ 90.0" not in expression
+
+
+# RG-070 (RU-056 / CEG-COR-152): the authoring template is a spec the loader
+# would admit and every direction of which assembles. It stays non-served: it is
+# a file under domains/, not domains/<id>/spec.yaml.
+TEMPLATE_PATH = DOMAINS_ROOT / "_template.yaml"
+
+
+def _template_spec() -> DomainSpec:
+    raw = yaml.safe_load(TEMPLATE_PATH.read_text(encoding="utf-8"))
+    raw["domain"]["id"] = "template-check"
+    return DomainSpec.model_validate(raw)
+
+
+def test_template_is_not_a_served_pack() -> None:
+    assert TEMPLATE_PATH.is_file()
+    assert "_template" not in DomainPackLoader(str(DOMAINS_ROOT)).list_domains()
+
+
+def test_template_validates_and_assembles_for_every_direction() -> None:
+    from engine.scoring.assembler import ScoringAssembler
+    from engine.traversal.assembler import TraversalAssembler
+
+    spec = _template_spec()
+    assert admission_defects(spec) == []
+    for direction in spec.queryschema.matchdirections:
+        traversal = TraversalAssembler(spec).assemble_traversal(direction)
+        assert all(not clause.startswith("OPTIONAL MATCH") for clause in traversal[-1:]), traversal
+        ScoringAssembler(spec).assemble_scoring_clause(direction, {})
+    exclusion = next(g for g in spec.gates if g.type.value == "exclusion")
+    assert (exclusion.fromnode, exclusion.tonode) == (None, None)
+
+
+# RG-051 (RU-039): a pack the loader admits is executable for every declared match
+# direction — its traversal assembles and every $parameter in gates, traversal and
+# scoring is one handle_match binds.
+def _synthetic_raw() -> dict[str, object]:
+    return yaml.safe_load(
+        """
+domain: {id: synthetic-check, name: Synthetic, version: 0.1.0}
+ontology:
+  nodes:
+    - label: Widget
+      managedby: sync
+      candidate: true
+      matchdirection: d1
+      properties: [{name: widget_id, type: string, required: true}, {name: size, type: float}]
+    - label: Ask
+      managedby: api
+      queryentity: true
+      matchdirection: d1
+      properties: [{name: ask_id, type: string, required: true}]
+    - label: Maker
+      managedby: sync
+      properties: [{name: maker_id, type: string, required: true}]
+  edges:
+    - {type: MADE_BY, from: Widget, to: Maker, direction: DIRECTED, category: capability, managedby: sync}
+matchentities:
+  candidate: [{label: Widget, matchdirection: d1}]
+  queryentity: [{label: Ask, matchdirection: d1}]
+queryschema:
+  matchdirections: [d1]
+  fields: [{name: size, type: float}]
+traversal:
+  steps: []
+gates:
+  - {name: size_floor, type: threshold, candidateprop: size, queryparam: size, operator: '>=', nullbehavior: pass}
+scoring:
+  dimensions: []
+"""
+    )
+
+
+def test_synthetic_baseline_pack_is_admitted() -> None:
+    assert admission_defects(DomainSpec.model_validate(_synthetic_raw())) == []
+
+
+def test_pack_with_an_off_grammar_traversal_step_is_withheld() -> None:
+    raw = _synthetic_raw()
+    raw["traversal"] = {"steps": [{"name": "maker_hop", "pattern": "candidate-[:MADE_BY]->m:Maker", "required": True}]}
+    spec = DomainSpec.model_validate(raw)
+    defects = admission_defects(spec)
+    assert any("traversal[d1]" in d and "maker_hop" in d for d in defects), defects
+    assert withholding_reason(spec) is not None
+
+
+def test_pack_with_an_unbound_scoring_default_is_withheld_by_the_full_match_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """pricealignment defaults its query parameter to $target_price, which this pack does not declare."""
+    from engine.config import loader as loader_module
+
+    monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", False)
+    raw = _synthetic_raw()
+    raw["scoring"] = {
+        "dimensions": [
+            {
+                "name": "price",
+                "source": "candidateproperty",
+                "candidateprop": "size",
+                "computation": "pricealignment",
+                "weightkey": "wp",
+                "defaultweight": 0.5,
+            }
+        ]
+    }
+    spec = DomainSpec.model_validate(raw)
+    defects = admission_defects(spec)
+    assert any("d1" in d and "'target_price'" in d for d in defects), defects
+    assert withholding_reason(spec) is not None
+
+
+def test_pack_whose_gate_references_an_undeclared_parameter_is_withheld(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw = _synthetic_raw()
+    raw["gates"].append(
+        {"name": "size_cap", "type": "threshold", "candidateprop": "size", "queryparam": "max_size", "operator": "<="}
+    )
+    # RU-050: validation now refuses the undeclared reference before admission.
+    with pytest.raises(ValueError, match="Gate 'size_cap' references undeclared parameter 'max_size'"):
+        DomainSpec.model_validate(raw)
+    # Admission remains the backstop when that validation is switched off.
+    from engine.config import loader as loader_module
+
+    monkeypatch.setattr(loader_module.settings, "domain_undeclared_param_rejected", False)
+    defects = admission_defects(DomainSpec.model_validate(raw))
+    assert any("match[d1]" in d and "'max_size'" in d for d in defects), defects
+
+
+def test_pre_repair_mortgage_step_is_withheld_naming_its_unassemblable_step() -> None:
+    """RU-039 coverage on the mortgage shape RU-038 repaired: the off-grammar lender step is named."""
+    raw = _raw("mortgage-brokerage")
+    raw["traversal"] = {
+        "steps": [{"name": "lenderresolve", "pattern": "candidate-[:OFFEREDBY]->lender:Lender", "required": True}]
+    }
+    defects = admission_defects(DomainSpec.model_validate(raw))
+    assert any("traversal[borrowertoproduct]" in d and "lenderresolve" in d for d in defects), defects
+    # The repository pack's lender step assembles (RU-038).
+    assert admission_defects(_spec(DOMAINS_ROOT / "mortgage-brokerage")) == []
+
+
+def test_pre_repair_freight_pack_is_withheld_naming_its_unbound_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """RU-039 coverage on the freight shape RU-037 repaired: dims without operand declarations."""
+    from engine.config import loader as loader_module
+
+    monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", False)
+    raw = _raw("freight-matching")
+    for dim in raw["scoring"]["dimensions"]:
+        if dim["name"] in ("deadhead_distance", "rate_alignment"):
+            for key in ("candidateprop", "candidateprop_lon", "queryprop", "queryprop_lon"):
+                dim.pop(key, None)
+    defects = "\n".join(admission_defects(DomainSpec.model_validate(raw)))
+    for param in ("'lat'", "'lon'", "'target_price'"):
+        assert param in defects
+    assert admission_defects(_spec(DOMAINS_ROOT / "freight-matching")) == []
+
+
+def test_full_match_check_off_restores_previous_admission(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config import loader as loader_module
+
+    monkeypatch.setattr(loader_module.settings, "admission_checks_full_match", False)
+    monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", False)
+    raw = _synthetic_raw()
+    raw["traversal"] = {"steps": [{"name": "maker_hop", "pattern": "candidate-[:MADE_BY]->m:Maker", "required": True}]}
+    assert admission_defects(DomainSpec.model_validate(raw)) == []
+
+
+# --------------------------------------------------------------------------
+# Correctness remediation lane J (plan 0d84ec8, round 2): served-pack
+# re-expressions with existing gate types.
+# --------------------------------------------------------------------------
+
+
+def _fail_wrapped_ge(candidate: bool | None, param: bool | None) -> bool:
+    """`(c IS NOT NULL AND $p IS NOT NULL AND (c >= $p))` — the FAIL wrap of a threshold gate."""
+    return candidate is not None and param is not None and bool(_three_valued_ge(candidate, param))
+
+
+# RG-042 (RU-033 / CEG-COR-004, DEC-12 option A'): "when true, only active
+# SupplyOpportunity candidates pass" is an implication with a declared default of
+# true. Omitting the field bound NULL and the FAIL wrap emptied every result;
+# false admitted inactive supply only.
+_ACTIVE_SUPPLY_FRAGMENT = (
+    "(candidate.active IS NOT NULL AND $requires_active_supply IS NOT NULL AND "
+    "(candidate.active >= $requires_active_supply))"
+)
+
+
+def test_plasticos_active_supply_gate_is_an_implication_with_a_true_default() -> None:
+    from engine.gates.compiler import GateCompiler
+
+    spec = _admitted_spec("plasticos")
+    gate = _gate(spec, "active_supply_available")
+    assert (gate.type.value, gate.operator, gate.nullbehavior.value) == ("threshold", ">=", "fail")
+    field = next(f for f in spec.queryschema.fields if f.name == "requires_active_supply")
+    assert field.default is True
+    where = GateCompiler(spec).compile_all_gates(_DIR2)
+    assert _ACTIVE_SUPPLY_FRAGMENT in where
+    assert "candidate.active = $requires_active_supply" not in where
+    # Direction 1 never sees the gate.
+    assert "requires_active_supply" not in GateCompiler(spec).compile_all_gates(_DIR1)
+    assert admission_defects(spec) == []
+    assert "plasticos" in DomainPackLoader(str(DOMAINS_ROOT)).list_domains()
+
+
+def test_plasticos_active_supply_truth_table() -> None:
+    """p=true admits active only; p=false admits active and inactive; NULL active never passes."""
+    table = {p: {c: _fail_wrapped_ge(c, p) for c in (None, False, True)} for p in (False, True)}
+    assert table == {
+        False: {None: False, False: True, True: True},
+        True: {None: False, False: False, True: True},
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("supplied", "bound"), [(None, True), (True, True), (False, False)])
+async def test_plasticos_active_supply_binds_the_declared_default(supplied: bool | None, bound: bool) -> None:
+    """handle_match without requires_active_supply binds the declared default, not None."""
+    query = dict(_PLASTICOS_QUERIES[_DIR2])
+    if supplied is not None:
+        query["requires_active_supply"] = supplied
+    cypher, parameters = await _capture_match("plasticos", _DIR2, query)
+    assert parameters["requires_active_supply"] is bound
+    assert _ACTIVE_SUPPLY_FRAGMENT in cypher
+    assert _missing_params(cypher, parameters) == []
+
+
+def _clean_served_pack_spec(domain_id: str) -> DomainSpec:
+    """A pack served by default (owner decision 2026-10-29) that compiles with no admission defect."""
+    spec = _admitted_spec(domain_id)
+    assert spec.domain.activation is DomainActivation.ACTIVE
+    assert admission_defects(spec) == []
+    return spec
+
+
+def _le_pass_wrapped(candidate: bool | None, param: bool | None) -> bool:
+    """`(c IS NULL OR $p IS NULL OR (c <= $p))` over booleans (false < true)."""
+    return candidate is None or param is None or candidate <= param
+
+
+# RG-046 (RU-035 / CEG-COR-005, DEC-13 option A): "a product requiring VA
+# eligibility needs a VA-eligible borrower" is an implication. Equality dropped
+# every non-VA product for a VA-eligible borrower.
+_VA_FRAGMENT = (
+    "(candidate.requiresvaeligibility IS NULL OR $vaeligible IS NULL OR "
+    "(candidate.requiresvaeligibility <= $vaeligible))"
+)
+
+
+def test_mortgage_va_eligibility_is_an_implication() -> None:
+    from engine.gates.compiler import GateCompiler
+
+    spec = _clean_served_pack_spec("mortgage-brokerage")
+    gate = _gate(spec, "va_eligibility")
+    assert (gate.type.value, gate.operator, gate.nullbehavior.value) == ("threshold", "<=", "pass")
+    where = GateCompiler(spec).compile_all_gates("borrowertoproduct")
+    assert _VA_FRAGMENT in where
+    assert "candidate.requiresvaeligibility = $vaeligible" not in where
+    table = {p: {c: _le_pass_wrapped(c, p) for c in (None, False, True)} for p in (None, False, True)}
+    assert table == {
+        None: {None: True, False: True, True: True},
+        False: {None: True, False: True, True: False},
+        True: {None: True, False: True, True: True},
+    }
+
+
+# RG-061 (RU-047 / CEG-COR-070, DEC-18): no dimension of a servable pack is
+# constant across candidates by construction — neither the `candidate.value`
+# fallback of a dimension that names no property, nor a query-side value no
+# caller can supply (a queryprop that is not a queryschema field or derived
+# parameter, backfilled NULL by handle_match on every request).
+_SERVABLE_PACKS = ("freight-matching", "mortgage-brokerage", "plasticos")
+
+
+@pytest.mark.parametrize("domain_id", _SERVABLE_PACKS)
+def test_no_servable_dimension_is_candidate_independent(domain_id: str) -> None:
+    from engine.scoring.assembler import ScoringAssembler
+
+    spec = _spec(DOMAINS_ROOT / domain_id)
+    suppliable = {f.name for f in spec.queryschema.fields} | {p.name for p in spec.derivedparameters}
+    flagged = []
+    for dim in spec.scoring.dimensions:
+        expression = ScoringAssembler(spec)._compile_dimension(dim)
+        if "candidate.value" in expression:
+            flagged.append(f"{dim.name}: candidate.value fallback")
+        if dim.queryprop and dim.queryprop not in suppliable:
+            flagged.append(f"{dim.name}: queryprop {dim.queryprop!r} no caller can supply")
+    assert flagged == []
+
+
+def test_mortgage_approval_rate_reads_the_lender_percentage_normalised() -> None:
+    expression = _dimension_expression("mortgage-brokerage", "approval_rate")
+    assert "lender.approvalratepct" in expression
+    # approvalratepct is a 0-100 percentage: 85% scores 0.85, not the clamp ceiling.
+    assert expression == "coalesce(lender.approvalratepct, 0.0) / 100.0"
+    assert not any(
+        d.computation.value == "communitymatch" for d in _spec(DOMAINS_ROOT / "mortgage-brokerage").scoring.dimensions
+    )
+
+
+def test_plasticos_community_match_reads_a_caller_supplied_community() -> None:
+    spec = _admitted_spec("plasticos")
+    dim = next(d for d in spec.scoring.dimensions if d.name == "community_match")
+    field = next(f for f in spec.queryschema.fields if f.name == dim.queryprop)
+    assert (field.type.value, field.required) == ("int", False)
+    expression = _dimension_expression("plasticos", "community_match")
+    assert "candidate.community_id = $community_id" in expression
+
+
+# RG-049 (RU-037 / CEG-COR-011, DEC-14 option A): every admitted pack's full match
+# Cypher, compiled by handle_match from a query carrying only queryschema fields,
+# binds every $parameter. Freight scored with geodecay's hardcoded
+# candidate.lat/lon vs $lat/$lon and pricealignment's $target_price.
+_FREIGHT_QUERY = {
+    "loadid": "L1",
+    "pickuplat": 41.8,
+    "pickuplon": -87.6,
+    "deliverylat": 39.7,
+    "deliverylon": -104.9,
+    "weightlbs": 30000.0,
+    "equipmenttype": "van",
+    "pickupdate": "2026-11-01T08:00:00Z",
+    "deliverydate": "2026-11-03T08:00:00Z",
+    "ratepermile": 2.5,
+}
+_MORTGAGE_QUERY = {
+    "borrowerid": "B1",
+    "creditscore": 720,
+    "annualincomeusd": 120000.0,
+    "monthlydebtusd": 2000.0,
+    "loanamountusd": 400000.0,
+    "propertyvalueusd": 500000.0,
+    "downpaymentusd": 100000.0,
+    "propertystate": "TX",
+    "loanpurpose": "purchase",
+    "vaeligible": True,
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("domain_id", "direction", "query"),
+    [
+        ("freight-matching", "loadtocarrier", _FREIGHT_QUERY),
+        ("mortgage-brokerage", "borrowertoproduct", _MORTGAGE_QUERY),
+        ("plasticos", _DIR1, _PLASTICOS_QUERIES[_DIR1]),
+        ("plasticos", _DIR2, _PLASTICOS_QUERIES[_DIR2]),
+    ],
+    ids=["freight", "mortgage", "plasticos-dir1", "plasticos-dir2"],
+)
+async def test_queryschema_only_match_binds_every_parameter(
+    domain_id: str, direction: str, query: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from engine.config import loader as loader_module
+
+    # mortgage-brokerage is served by default (owner decision 2026-10-29); the dormant
+    # override keeps this binding check valid if the owner declares it dormant (DEC-15).
+    monkeypatch.setattr(loader_module.settings, "dormant_domain_packs_enabled", True)
+    monkeypatch.setattr(loader_module.settings, "unvalidated_domain_packs_enabled", False)
+    cypher, parameters = await _capture_match(domain_id, direction, dict(query))
+    assert _missing_params(cypher, parameters) == []
+
+
+def test_freight_deadhead_measures_carrier_position_to_pickup() -> None:
+    expression = _dimension_expression("freight-matching", "deadhead_distance")
+    assert expression == (
+        "1.0 / (1.0 + point.distance(point({latitude: candidate.currentlat, longitude: candidate.currentlon}),"
+        " point({latitude: $pickuplat, longitude: $pickuplon})) / 50000.0)"
+    )
+
+
+def test_freight_dimensions_read_only_declared_carrier_properties() -> None:
+    import re
+
+    spec = _admitted_spec("freight-matching")
+    carrier = {p.name for n in spec.ontology.nodes if n.label == "Carrier" for p in n.properties}
+    for dim in spec.scoring.dimensions:
+        read = set(
+            re.findall(r"candidate\.([A-Za-z_][A-Za-z0-9_]*)", _dimension_expression("freight-matching", dim.name))
+        )
+        assert read, dim.name
+        assert read <= carrier, (dim.name, read - carrier)
+    rate = _dimension_expression("freight-matching", "rate_alignment")
+    assert "candidate.ratepermile" in rate
+    assert "$ratepermile" in rate
+
+
+def test_geodecay_declared_longitude_flag_defaults_on() -> None:
+    from engine.config.settings import Settings
+
+    assert Settings.model_fields["geodecay_declared_longitude"].default is True
+
+
+@pytest.mark.parametrize("flag", [True, False])
+@pytest.mark.parametrize("dim_name", ["geo_proximity", "active_supply_geo"])
+def test_plasticos_geodecay_is_byte_identical_under_the_flag(
+    dim_name: str, flag: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Plasticos declares no longitude operands: candidate.lon / $lon either way."""
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "geodecay_declared_longitude", flag)
+    assert _dimension_expression("plasticos", dim_name) == (
+        "1.0 / (1.0 + point.distance(point({latitude: candidate.lat, longitude: candidate.lon}),"
+        " point({latitude: $lat, longitude: $lon})) / 800000.0)"
+    )
+
+
+def test_geodecay_declared_longitude_off_restores_the_hardcoded_operands(monkeypatch: pytest.MonkeyPatch) -> None:
+    """C-21 rollback: the declarations are ignored, so freight is withheld again for its unbound $lon."""
+    from engine.config import loader as loader_module
+
+    monkeypatch.setattr(loader_module.settings, "geodecay_declared_longitude", False)
+    expression = _dimension_expression("freight-matching", "deadhead_distance")
+    assert "longitude: candidate.lon}" in expression
+    assert "longitude: $lon}" in expression
+    defects = "\n".join(admission_defects(_spec(DOMAINS_ROOT / "freight-matching")))
+    assert "deadhead_distance" in defects
+    assert "'lon'" in defects
+
+
+# RG-060 (RU-046 / CEG-COR-069): a carrier available on or before the pickup date
+# qualifies. The temporalrange window with start == end == availabledate and
+# pickupdate on both sides admitted only availabledate == pickupdate exactly.
+def test_freight_availability_admits_carriers_available_on_or_before_pickup() -> None:
+    from engine.gates.compiler import GateCompiler
+
+    spec = _admitted_spec("freight-matching")
+    gate = _gate(spec, "availability_window")
+    assert (gate.type.value, gate.operator, gate.nullbehavior.value) == ("threshold", "<=", "pass")
+    where = GateCompiler(spec).compile_all_gates("loadtocarrier")
+    assert (
+        "(candidate.availabledate IS NULL OR $pickupdate IS NULL OR (candidate.availabledate <= $pickupdate))"
+    ) in where
+    assert ">= $pickupdate" not in where
+
+
+# RG-073 (RU-059 / CEG-COR-164): scalar enum matching is equality. Every
+# queryschema field type is scalar (PropertyType has no list type), so
+# `candidate.<p> IN $<field>` is `IN` over a non-list operand.
+@pytest.mark.parametrize("domain_id", _SERVABLE_PACKS)
+def test_no_servable_gate_tests_membership_in_a_scalar_parameter(domain_id: str) -> None:
+    import re
+
+    from engine.gates.compiler import GateCompiler
+
+    spec = _spec(DOMAINS_ROOT / domain_id)
+    assert withholding_reason(spec) is None or spec.domain.activation is DomainActivation.DORMANT
+    scalar = {f.name for f in spec.queryschema.fields} | {p.name for p in spec.derivedparameters}
+    flagged = []
+    for direction in spec.queryschema.matchdirections:
+        where = GateCompiler(spec).compile_all_gates(direction)
+        flagged += [m for m in re.findall(r"candidate\.\w+ IN \$(\w+)", where) if m in scalar]
+    assert flagged == []
+
+
+@pytest.mark.parametrize(
+    ("domain_id", "gate_name", "fragment"),
+    [
+        (
+            "freight-matching",
+            "equipment_match",
+            "(candidate.equipmenttypes IS NULL OR $equipmenttype IS NULL OR (candidate.equipmenttypes = $equipmenttype))",
+        ),
+        (
+            "mortgage-brokerage",
+            "loanpurpose_match",
+            "(candidate.loanpurpose IS NULL OR $loanpurpose IS NULL OR (candidate.loanpurpose = $loanpurpose))",
+        ),
+    ],
+)
+def test_scalar_enum_gates_compile_to_equality(domain_id: str, gate_name: str, fragment: str) -> None:
+    from engine.gates.compiler import GateCompiler
+
+    spec = _spec(DOMAINS_ROOT / domain_id)
+    gate = _gate(spec, gate_name)
+    assert (gate.type.value, gate.operator, gate.nullbehavior.value) == ("threshold", "=", "pass")
+    assert GateCompiler(spec).compile(gate) == fragment
+    assert admission_defects(spec) == []
+
+
+# RG-072 (RU-058 / CEG-COR-153, DEC-20 option A): dormant packs express "current
+# load below maximum" as a threshold over an ingested remaining-capacity property
+# (maximum - current), and compare response hours with an hours-typed query field.
+# Validated without serving: the packs stay dormant.
+def _eval_threshold_ge(fragment: str, prop: str, value: int | None, literal: int) -> bool:
+    """Evaluate `(candidate.<prop> IS NULL OR (candidate.<prop> >= $<literal>))` for one candidate.
+
+    The literal operand is compiler-bound and never NULL, so only the candidate side is null-checked.
+    """
+    import re
+
+    match = re.fullmatch(rf"\(candidate\.{prop} IS NULL OR \(candidate\.{prop} >= \$gate_\w+_value\)\)", fragment)
+    assert match, fragment
+    return value is None or value >= literal
+
+
+@pytest.mark.parametrize(
+    ("domain_id", "gate_name", "prop", "current", "maximum"),
+    [
+        ("healthcare-referral", "panel_capacity", "remainingpanelcapacity", "currentpanelsize", "maxpanelsize"),
+        (
+            "roofing-company",
+            "capacity_check",
+            "remainingprojectcapacity",
+            "currentprojectcount",
+            "maxconcurrentprojects",
+        ),
+    ],
+)
+def test_dormant_capacity_gates_admit_only_candidates_below_maximum(
+    domain_id: str, gate_name: str, prop: str, current: str, maximum: str
+) -> None:
+    from engine.gates.compiler import GateCompiler
+
+    spec = _spec(DOMAINS_ROOT / domain_id)
+    assert spec.domain.activation is DomainActivation.DORMANT
+    node = next(n for n in spec.ontology.nodes if n.candidate)
+    declared = {p.name: p for p in node.properties}
+    assert {prop, current, maximum} <= set(declared)
+    assert declared[prop].type.value == "int"
+    gate = _gate(spec, gate_name)
+    assert (gate.type.value, gate.operator, gate.queryparam) == ("threshold", ">=", 1)
+    compiler = GateCompiler(spec)
+    fragment = compiler.compile(gate)
+    assert compiler.last_query_params == {f"gate_{gate_name}_value": 1}
+    # The ingestion contract: remaining = maximum - current.
+    assert _eval_threshold_ge(fragment, prop, 10 - 5, 1) is True
+    assert _eval_threshold_ge(fragment, prop, 10 - 10, 1) is False
+    assert "<= $gate_" not in fragment
+
+
+def test_executive_assistant_response_time_compares_hours_with_hours() -> None:
+    spec = _spec(DOMAINS_ROOT / "executive-assistant")
+    assert spec.domain.activation is DomainActivation.DORMANT
+    gate = _gate(spec, "deadline_feasibility")
+    expert = {p.name: p for n in spec.ontology.nodes if n.label == "Expert" for p in n.properties}
+    field = next(f for f in spec.queryschema.fields if f.name == gate.queryparam)
+    assert expert[gate.candidateprop].type.value == field.type.value == "float"
+    assert (gate.type.value, gate.operator) == ("threshold", "<=")
+
+
+# RU-054 / CEG-COR-150 (DEC-19 option A): the consolidated master spec and its
+# extractor are retired. The extractor wrote domains/<id>/spec.yaml
+# unconditionally, so a working copy would have overwritten the curated served
+# packs with stale content; packs are folder-shaped and curated individually.
+def test_consolidated_master_spec_workflow_is_retired() -> None:
+    assert not (DOMAINS_ROOT / "MASTER-SPEC-ALL-DOMAINS.yaml").exists()
+    assert not (REPO_ROOT / "tools" / "domain_extractor.py").exists()
+    live = [REPO_ROOT / ".yamllint.yml", REPO_ROOT / ".pre-commit-config.yaml", REPO_ROOT / "README.md"]
+    live += sorted((REPO_ROOT / "tools").rglob("*.py")) + sorted(DOMAINS_ROOT.rglob("*.md"))
+    stale = [str(p.relative_to(REPO_ROOT)) for p in live if "MASTER-SPEC" in p.read_text(encoding="utf-8")]
+    stale += [str(p.relative_to(REPO_ROOT)) for p in live if "tools/domain_extractor" in p.read_text(encoding="utf-8")]
+    assert stale == []

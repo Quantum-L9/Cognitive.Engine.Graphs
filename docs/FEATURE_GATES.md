@@ -1,9 +1,10 @@
 <!-- L9_META
-l9_schema: 2
+l9_schema: 1
 origin: engine-specific
 engine: graph
 layer: [docs]
-tags: [platform]
+tags: [feature-gates, activation, runbook]
+owner: engine-team
 status: active
 /L9_META -->
 
@@ -100,6 +101,35 @@ independently of the code default.
 | Propagation Single Application | `PROPAGATION_SINGLE_APPLICATION` (`propagation_single_application`) | `True` | unset | active (correctness); one outcome event updates each tenant DimensionWeight `boost_factor` once, bounded, and `candidates_affected` counts DimensionWeights; `false` restores the row-multiplying query (RU-028 / CEG-COR-117) |
 | Drift Requires Both Windows | `DRIFT_REQUIRES_BOTH_WINDOWS` (`drift_requires_both_windows`) | `True` | unset | active (correctness); outcomes `metadata.drift` raises no alert unless both a recent and a baseline distribution exist; `false` restores the one-sided divergence (RU-029 / CEG-COR-118) |
 | Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
+| Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
+| Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
+| Gate Null Operands From Predicate | `GATE_NULL_OPERANDS_FROM_PREDICATE` (`gate_null_operands_from_predicate`) | `True` | unset | active; a gate's `nullbehavior` applies to exactly the operands its predicate tests (range FAIL rejects NULL bounds; temporalrange null-handles its window per side) — see §21 |
+| Composite Subgate Scoping | `COMPOSITE_SUBGATE_SCOPING` (`composite_subgate_scoping`) | `True` | unset | active; a composite's subgates contribute only through the composite (an OR composite is no longer AND-ed with its own subgates) and a subgate scoped to another direction is refused — see §21 |
+| Freshness Max-age Validated | `FRESHNESS_MAXAGEDAYS_VALIDATED` (`freshness_maxagedays_validated`) | `True` | unset | active (hardening); a freshness gate defaults `maxagedays` to 1 only when absent and refuses a value < 1 (0 became 1 day, a negative age a future cutoff) — see §21 |
+| Prohibited Factor Full Coverage | `PROHIBITED_FACTOR_FULL_COVERAGE` (`prohibited_factor_full_coverage`) | `True` | unset | active (hardening); every gate property field, scoring dimension and sync-row key at any depth is checked, casefolded — see lane D |
+| PII Redaction Recursive | `PII_REDACTION_RECURSIVE` (`pii_redaction_recursive`) | `True` | unset | active (hardening); PII detection/redaction/masking reaches list elements (match `candidates`) without mutating the input — see lane D |
+| Compliance Audit Soft Sink | `COMPLIANCE_AUDIT_SOFT_SINK` (`compliance_audit_soft_sink`) | `True` | unset | active (hardening); bounded audit buffer, JSON-encoded JSONB metadata, request never fails on audit persistence — see lane D |
+| Prohibited Factor Violation Audit | `PROHIBITED_FACTOR_VIOLATION_AUDIT` (`prohibited_factor_violation_audit`) | `True` | unset | active; a blocked attempt leaves one `denied` audit entry before the error propagates (domain `auditonviolation`) — see lane D |
+| PII Declared Fields Enforced | `PII_DECLARED_FIELDS_ENFORCED` (`pii_declared_fields_enforced`) | `True` | unset | active; the domain's declared `compliance.pii` fields and `handling` mode apply on the response path — see lane D |
+| Causal Attribution Unique Touchpoints | `CAUSAL_ATTRIBUTION_UNIQUE_TOUCHPOINTS` (`causal_attribution_unique_touchpoints`) | `True` | unset | active; attribution weights are computed over unique touchpoints and sum to 1.0 — see lane D |
+| Causal Edge Declared Identity | `CAUSAL_EDGE_DECLARED_IDENTITY` (`causal_edge_declared_identity`) | `True` | unset | active; causal edges match declared node identities, anchor predicates in one WHERE with a bound threshold, MERGE on a stable key — see lane D |
+| Causal Validator Batch Edge Type | `CAUSAL_VALIDATOR_BATCH_EDGE_TYPE` (`causal_validator_batch_edge_type`) | `True` | unset | active; declared per-edge temporal validation applies to sync batches — see lane D |
+| safe_eval Rejects Keywords | `SAFE_EVAL_REJECT_KEYWORDS` (`safe_eval_reject_keywords`) | `True` | unset | active; keyword arguments in derived-parameter / unit expressions raise instead of being dropped — see lane D |
+| Causal Serializer Variable Depth | `CAUSAL_SERIALIZER_VARIABLE_DEPTH` (`causal_serializer_variable_depth`) | `True` | unset | active; causal match explanations follow chains up to the requested depth — see lane D |
+| Counterfactual Dedupe and Spec Label | `COUNTERFACTUAL_DEDUPE_AND_SPEC_LABEL` (`counterfactual_dedupe_and_spec_label`) | `True` | unset | active; no duplicate counterfactual scenarios, fingerprints read from the domain's outcome label — see lane D |
+| PacketStore Packet-Identity Dedup | `PACKET_STORE_PACKET_IDENTITY_DEDUP_ENABLED` (`packet_store_packet_identity_dedup_enabled`) | `True` | unset | active (hardening, RU-078); `packet_store.content_hash` is the SDK `transport_hash`, so distinct packets with equal payloads are both stored, and a packet whose INSERT is skipped as a duplicate writes no hop/delegation/lineage rows; off restores the `payload_hash` key and unconditional child rows — see §7 |
+| PacketStore RLS Tenant Session | `PACKET_STORE_RLS_TENANT_SESSION_ENABLED` (`packet_store_rls_tenant_session_enabled`) | `True` | unset | active (hardening, RU-079); `persist` and `record_outcome` set the transaction-local `app.current_tenant` GUC to the packet's / call's tenant before writing, so an `l9_product` DSN satisfies the DDL's RLS policies; off issues no `set_config` — see §7 |
+| Inference Geography USPS Zones | `INFERENCE_GEO_USPS_ZONES_ENABLED` (`inference_geo_usps_zones_enabled`) | `True` | unset | active (correctness, RU-084); `infer_geography_from_postal_code` maps the ZIP first digit to its USPS zone (0-1 Northeast, 2-3 Southeast, 4-6 Midwest, 7 South, 8-9 West) and emits nothing when the entity declares a non-US `country`; off restores the five-digit threshold ladder. The rule also needs `graph_inference_feedback_enabled` and domain authorization — see §13 |
+| Inference Persona Token Match | `INFERENCE_PERSONA_TOKEN_MATCH_ENABLED` (`inference_persona_token_match_enabled`) | `True` | unset | active (correctness, RU-088); `infer_buyer_persona` matches a keyword only as a whole job-title token (split on `[^a-z0-9&]+`), so "Marketing Coordinator" is no longer executive; keyword sets, precedence and confidences unchanged; off restores substring matching — see §13 |
+| Inference Input Parsing Strict | `INFERENCE_INPUT_PARSING_STRICT_ENABLED` (`inference_input_parsing_strict_enabled`) | `True` | unset | active (correctness, RU-089); `infer_company_size_tier` falls back to `employees`/`revenue` only when the primary field is absent and parses each value separately (an unparseable employee count falls back to revenue), and `infer_email_domain_from_website` emits the URL hostname without port, userinfo or `www.`; off restores the legacy parsing — see §13 |
+| Packet Audit on Cancel | `PACKET_AUDIT_ON_CANCEL_ENABLED` (`packet_audit_on_cancel_enabled`) | `True` | unset | active (correctness, RU-086); a handler the SDK cancels on timeout persists one failed request/response pair (`engine_data={"error": "handler_cancelled"}`) under `asyncio.shield` before the cancellation is re-raised; off records no pair for a cancelled handler — see §19 |
+| Capability Record Binding | `CAPABILITY_RECORD_BINDING_ENABLED` (`capability_record_binding_enabled`) | `True` | unset | active (hardening, RU-090); `CapabilityValidator.validate_action` authorizes only an object equal to the registered record (incl. `proof_hash`) and reads revocation, expiry, tenant and actions from that record; `expires_at` is part of `proof_hash`, so the admin `delegate_capability` response carries a different `proof_hash` value; off restores the legacy checks and hash input — see §12 |
+| Health Absent Confidence Counts | `HEALTH_ABSENT_CONFIDENCE_COUNTS_ENABLED` (`health_absent_confidence_counts_enabled`) | `True` | unset | active (hardening); an absent field confidence is "no signal", only an explicit confidence < 0.70 discounts a populated field; batch/report forward `field_confidences` (RU-108 / CEG-COR-044) — see §15 |
+| Health Range Gate Fields | `HEALTH_RANGE_GATE_FIELDS_ENABLED` (`health_range_gate_fields_enabled`) | `True` | unset | active (hardening); range/window bound properties (`candidateprop_min/max/start/end`) are gate-critical in health readiness (RU-109 / CEG-COR-045) — see §15 |
+| Health Blocked Score Scale | `HEALTH_BLOCKED_SCORE_SCALE_ENABLED` (`health_blocked_score_scale_enabled`) | `True` | unset | active (hardening); a blocked readiness reports the 60% gate component `round(gc*60, 2)` so the score is monotonic in gate completeness (RU-110 / CEG-COR-046) — see §15 |
+| Health Priority Staleness | `HEALTH_PRIORITY_STALENESS_ENABLED` (`health_priority_staleness_enabled`) | `True` | unset | active (hardening); the 10% staleness term of the enrichment priority is computed from field staleness instead of always 0 (RU-111 / CEG-COR-047) — see §15 |
+| Legacy Chassis Auth | `LEGACY_CHASSIS_AUTH_ENABLED` (`legacy_chassis_auth_enabled`) | `True` | unset | active (hardening, dev/test-only legacy chassis); with `L9_API_KEY` set, `chassis_app.create_app` registers `BearerAuthMiddleware` (`/v1/health` public) and POST `/v1/execute` returns 403 for a tenant outside the token's `allowed_tenants` while `TENANT_AUTH_ENABLED`; the factory also refuses to build outside dev/local/test while `REQUIRE_SDK_CHASSIS_IN_PROD` (RU-082 / CEG-COR-039); off restores the unauthenticated factory — see §11 |
+| Legacy Chassis Status Mapping | `LEGACY_CHASSIS_STATUS_MAPPING_ENABLED` (`legacy_chassis_status_mapping_enabled`) | `True` | unset | active (correctness, dev/test-only legacy chassis); `chassis.actions.execute_action` attaches an HTTP status hint that POST `/v1/execute` honours: circuit open → 503 + `Retry-After`, `ChassisError` (e.g. `FeatureNotEnabled`) → its `status_code`, engine `ValidationError` → 422, other `EngineError` → 500 with its message, anything else → 500 `Internal server error` (the exception text stays in logs and the persisted response packet) (RU-083 / CEG-COR-087 / CEG-COR-088); off restores 200 for circuit open and the keyword mapping with the raw exception text — see §11 |
 
 ---
 
@@ -140,12 +170,15 @@ independently of the code default.
 - Domain spec must have `compliance.pii` section with field declarations.
 - Caller must hold `admin:gdpr` capability (when capability auth is enabled).
 - Recommend running dry-run first (`GDPR_DRY_RUN=True`).
+- Live erasure requires the `POSTGRES_DSN` compliance audit pool: the pre-delete
+  `PII_ERASURE` flush is strict, so without it nothing is deleted (RU-066 follow-up).
 
 ### Activation Steps
 1. Set `GDPR_ERASURE_ENABLED=True` in environment.
 2. Keep `GDPR_DRY_RUN=True` initially for safe validation.
 3. Call `erase_subject` admin subaction with `data_subject_id`.
-4. Review dry-run report: nodes affected, edges affected.
+4. Review dry-run report: `would_affect.graph_nodes` and `would_affect.packets` (the
+   requesting tenant's PacketStore rows; `null` while PacketStore is disabled).
 5. Set `GDPR_DRY_RUN=False` and re-run for actual deletion.
 
 ### Validation
@@ -247,10 +280,22 @@ Enabling persistence in production requires, in this order:
 1. A PostgreSQL instance reachable from the engine with
    `engine/packet/packet_store.sql` applied (the docker-compose `postgres`
    service applies it on first init only; a managed instance needs it run by
-   hand), including migration `0001_outcome_jsonb` for `record_outcome()`.
+   hand). `record_outcome()` needs the `packet_store.outcome_jsonb` column,
+   which the file declares (`ADD COLUMN IF NOT EXISTS`, RU-081); a database
+   created from an older version of the file gets it by re-applying
+   `packet_store.sql` (safe since RU-080, see Schema below). There is no
+   separate migration: the `0001_outcome_jsonb` migration this step used to
+   name never existed.
 2. `PACKET_STORE_DSN` set to that instance with a role that can `INSERT` into
    `packet_store`, `lineage_graph`, `hop_trace`, `delegation_chain` and
-   `UPDATE packet_store.outcome_jsonb`. The DSN is a secret: provide it from the
+   `UPDATE packet_store.outcome_jsonb`. A login role that is a member of
+   `l9_product` has exactly that: the file grants `UPDATE (outcome_jsonb)` at
+   column level, so the envelope and every other packet column stay
+   non-updatable, and the `tenant_isolation_update_outcome` RLS policy limits
+   the update to rows whose `actor_tenant` is the transaction's
+   `app.current_tenant` (set by `PacketStore` since RU-079). Before RU-081 the
+   column, the grant and the policy were all absent, so `record_outcome()`
+   always returned `False`. The DSN is a secret: provide it from the
    deployment's secret store, never from a committed file.
 3. `asyncpg` installed in the image (`PacketStore` raises `RuntimeError`
    naming the package otherwise).
@@ -287,6 +332,20 @@ Single source of truth: `engine/packet/packet_store.sql` — defines
 `packet_audit_log` tables. Mounted into the `postgres` docker-compose
 service at `/docker-entrypoint-initdb.d/01_packet_store.sql` (applied
 automatically on first container init only).
+
+The file is safe to re-apply (RU-080 / CEG-COR-096): it drops no table, every
+`CREATE TABLE` / `CREATE INDEX` is `IF NOT EXISTS`, each policy is dropped and
+re-created with the same definition, roles are created only when absent, and
+functions are `CREATE OR REPLACE`. The whole script runs in one transaction,
+so a failure leaves the database as it was. Re-apply it with
+`psql -v ON_ERROR_STOP=1 -f engine/packet/packet_store.sql` to bring an existing
+database up to the shipped schema; existing rows, including the append-only
+`packet_audit_log`, are kept. Before RU-080 the file began with
+`DROP TABLE ... CASCADE` of `packet_store`, `lineage_graph` and
+`packet_audit_log`, so a re-apply deleted every packet and audit row and then
+aborted on `CREATE TABLE hop_trace`, leaving `hop_trace` / `delegation_chain`
+without their foreign keys and the `hop_tenant` policy. A database damaged that
+way is not repaired by re-applying the file; it needs an operator-run repair.
 
 ### Validation
 - `feature_status` / `EngineState.health_check()` reports `db_pool_present: true`.
@@ -388,8 +447,42 @@ bypass key. It does **not** compare the claim against the request tenant — the
 middleware defers that "to the handler layer", and no caller ever forwarded the
 claim into the engine. The engine-side branch of `_validate_tenant_access` that
 would have compared it was therefore unreachable; CEG-AUTH-01 removed it rather
-than keep code that documented an enforcement which did not exist. Wiring the
-claim through the execute route is a chassis change and is not done here.
+than keep code that documented an enforcement which did not exist.
+
+**Legacy chassis (RU-082 / CEG-COR-039, DEC-29/DEC-30).** The legacy dict chassis
+(`chassis/chassis_app.py`, dev/test only) now enforces the claim at the chassis,
+where it belongs:
+
+- `create_app` refuses to build (`ValueError`) outside `dev`/`local`/`test` while
+  `REQUIRE_SDK_CHASSIS_IN_PROD` is on — the same predicate as
+  `chassis.entrypoint.resolve_chassis` (`legacy_chassis_refusal`), so
+  `uvicorn chassis.chassis_app:create_app --factory` cannot bypass the entrypoint.
+- With `L9_API_KEY` set (`ChassisSettings.l9_api_key`) and
+  `LEGACY_CHASSIS_AUTH_ENABLED=True` (default), `BearerAuthMiddleware` is
+  registered: no `Authorization` → 401, wrong key → 403, `/v1/health` public.
+- With `TENANT_AUTH_ENABLED`, POST `/v1/execute` compares `ExecuteRequest.tenant`
+  with the token's `allowed_tenants` and returns 403 on a mismatch; a valid
+  `X-Internal-Bypass-Key` skips the comparison. A string claim names one tenant.
+- Without `L9_API_KEY` the legacy chassis stays auth-free, which is acceptable
+  only because it cannot start outside dev/local/test.
+
+Rollback in dev: `LEGACY_CHASSIS_AUTH_ENABLED=false` and/or
+`TENANT_AUTH_ENABLED=false`; the factory guard is relaxed only by
+`REQUIRE_SDK_CHASSIS_IN_PROD=false`. The SDK chassis (`chassis/node_app.py`) is
+unaffected.
+
+**Legacy chassis status mapping (RU-083 / CEG-COR-087 / CEG-COR-088).** With
+`LEGACY_CHASSIS_STATUS_MAPPING_ENABLED=True` (default), the legacy POST
+`/v1/execute` keeps the failure class: an open Neo4j circuit is HTTP 503 with a
+`Retry-After` header (seconds, rounded up) instead of 200 with `status_code: 503`
+inside `data`; `FeatureNotEnabled` and other `ChassisError`s use their
+`status_code` (422 for a disabled feature) and an engine `ValidationError` (e.g.
+the tenant allowlist rejection) is 422, where both were 500; other `EngineError`s
+are 500 with their message; any other exception is 500 with the detail
+`Internal server error` — before, its raw text (connection URIs, query text)
+was the response body. The persisted response packet is unchanged and still
+carries the error text. An unknown action stays 400 and success responses are
+unchanged. Off restores the previous mapping.
 
 The control that is enforced on every action is `TENANT_ALLOWLIST`
 (comma-separated tenant ids, resolved into `EngineState` at startup):
@@ -721,11 +814,51 @@ withheld when:
   (`handle_match` binds it); otherwise it is the unbound-parameter defect above.
 
 Each such pack failed every match (`ValueError` / `ParameterMissing`) or
-silently degraded. `freight-matching` is withheld by this check until its
-scoring binds `$lat` / `$lon` / `$target_price` (CEG-COR-011).
+silently degraded. `freight-matching` was withheld by this check while its
+scoring referenced `$lat` / `$lon` / `$target_price` (CEG-COR-011); since RU-037
+its dimensions declare their operands and it is served.
 Rollback: `SCORING_ADMISSION_CHECK_ENABLED=false` (gate-only admission, the
 previous wording of the withholding reason), or
 `UNVALIDATED_DOMAIN_PACKS_ENABLED=true` to serve every validated pack.
+
+### Full-match admission (RU-039)
+
+`ADMISSION_CHECKS_FULL_MATCH` (default `False` — owner decision 2026-10-29:
+withholding stays off, and every pack is served as on main, until the operator
+enables it) makes admission keep the promise
+that an admitted pack executes for every declared match direction. For each
+direction `TraversalAssembler.assemble_traversal` must not raise,
+`GateCompiler.compile_all_gates` must not raise, and every `$parameter` in the
+gate WHERE, the traversal and the scoring clause must be a queryschema field, a
+derived parameter, a scoring `queryprop` (backfilled by `handle_match`), `top_n`
+or a value a compiler binds itself; otherwise the defect names the direction
+and the parameter or step. No Neo4j access. `mortgage-brokerage` was withheld
+by it until RU-038 rewrote its `lenderresolve` step in the assembler's
+`(alias:Label)-[:TYPE]->(alias:Label)` grammar (CEG-COR-012); it failed every
+match before. The repaired pack compiles cleanly. It is served, as on main
+(owner decision 2026-10-29), without state-licensing or lender-blacklist
+enforcement; its DEC-15 `domain.activation: dormant` declaration is left
+commented in the pack until the owner enables withholding. Rollback: `ADMISSION_CHECKS_FULL_MATCH=false` (with
+`SCORING_ADMISSION_CHECK_ENABLED=false` for the pre-remediation verdicts) or
+`UNVALIDATED_DOMAIN_PACKS_ENABLED=true`.
+
+### Exclusion endpoint validation (RU-041 / CEG-COR-019)
+
+`EXCLUSION_ENDPOINT_VALIDATION` (default `False` — owner decision 2026-10-29;
+the legacy fragment below is what ships until the operator enables it): the
+exclusion gate compiles
+to `NOT EXISTS { MATCH (candidate)-[:EDGE]->(…) }`, always anchored at the
+matched candidate. A gate that declares `fromnode` / `tonode` (an anchor the
+compiler ignores), or whose ontology edge type is undeclared or does not start
+at a candidate label of the gate's direction(s), compiled to a predicate that
+is always true. The compiler now refuses it, naming the gate, and admission
+withholds the pack. The case that motivated it, `mortgage-brokerage`
+`blacklist_exclusion` (`BorrowerProfile -[:BLACKLISTEDLENDER]-> Lender`), was
+removed by RU-038; until a query-anchored exclusion construct exists (DEC-15 "D
+now, then A") the blacklist is not enforced, and the pack is served as on main
+(owner decision 2026-10-29) rather than declared dormant. A
+candidate-origin edge (PlasticOS `exclusion_check`) compiles unchanged.
+Rollback: `EXCLUSION_ENDPOINT_VALIDATION=false`.
 
 ---
 
@@ -915,8 +1048,9 @@ the query window). `GateCompiler` ignored all four, so:
 
 `$value` is a parameter nothing supplies and `candidate.timestamp` a property
 no such candidate carries, so neither legacy fragment ever matched what the
-spec author wrote. `freight-matching`'s `availability_window` is the live case:
-it compared `candidate.timestamp` and therefore rejected every candidate.
+spec author wrote. `freight-matching`'s `availability_window` was the live case:
+it compared `candidate.timestamp` and therefore rejected every candidate (since
+RU-046 it is a `threshold` gate, `availabledate <= $pickupdate`).
 
 Off: the legacy fragments, for C-21 rollback only. The surrounding CEG-009b
 change — a scalar `queryparam` (`85.0`, `true`) is bound as a generated
@@ -933,3 +1067,353 @@ to return to.
 ### Rollback
 
 Set the flag to `false`. The placeholder fragments are emitted again verbatim.
+
+### Null operands from the predicate (RU-042 / CEG-COR-020, CEG-COR-021)
+
+`GATE_NULL_OPERANDS_FROM_PREDICATE` (default `True`): each gate handler reports
+the operands its predicate tests and `NullHandler.wrap_operands` applies the
+declared policy to exactly those — `pass`: a NULL operand imposes no
+constraint on its side; `fail`: any NULL tested operand rejects. Before, the
+wrap always used `candidate.<candidateprop>` and `$<queryparam>`:
+
+| Gate | Before | Now |
+|---|---|---|
+| `range` `fail`, candidate bounds | NULL `min_`/`max_` bound passed | NULL bound rejects (`candidate.min_x IS NOT NULL AND …`) |
+| `range` with `candidateprop` and derived bounds | null-checked `candidate.<prop>`, which it never reads | only the bounds and `$<queryparam>` |
+| `range` query window | a NULL `$min`/`$max` rejected under `pass` | each NULL bound is unconstrained on its side |
+| `temporalrange` window forms | no null handling | per-side handling of both candidate props and both params |
+| `temporalrange` with derived names | null-checked undeclared `$<queryparam>` | `$<queryparam>_start` / `_end` |
+| `exclusion` with `candidateprop` | null-checked `candidate.<candidateprop>` (a target-node property) | `$<queryparam>` only |
+
+Compiled fragments of `plasticos` and `mortgage-brokerage` are byte-identical
+(they declare `pass` with explicit bounds); of the shipped packs only
+temporalrange window gates change (dormant `legal-discovery`
+`temporal_relevance`; `freight-matching` `availability_window` until RU-046
+re-expressed it as a threshold gate). Rollback:
+`GATE_NULL_OPERANDS_FROM_PREDICATE=false`.
+
+### Composite subgate scoping (RU-043 / CEG-COR-022)
+
+`COMPOSITE_SUBGATE_SCOPING` (default `True`): `compile_all_gates` and
+`compile_relaxed` skip, at top level, every gate referenced as a subgate by a
+composite applicable to the direction, so `logic: OR` over `ga`, `gb` compiles
+to `((ga) OR (gb))` instead of `(ga) AND (gb) AND ((ga) OR (gb))`. A subgate
+whose `matchdirections` exclude the direction being compiled is refused (it was
+silently compiled inside the composite). Cycle and missing-subgate refusal
+(CEG-009c) are unchanged; specs without composites compile byte-identically
+(no shipped pack declares one). Rollback: `COMPOSITE_SUBGATE_SCOPING=false`.
+
+### Freshness max-age validation (RU-052 / CEG-COR-079)
+
+`FRESHNESS_MAXAGEDAYS_VALIDATED` (default `True`): a freshness gate without
+`maxagedays` still compiles as 1 day; `maxagedays: 0` (formerly coerced to 1)
+and negative values (formerly a cutoff in the future) raise at compile, so
+admission withholds the pack naming the gate. No shipped pack is affected
+(the template declares 90). Rollback: `FRESHNESS_MAXAGEDAYS_VALIDATED=false`.
+
+---
+
+## Correctness remediation — lane D (plan 0d84ec8)
+
+Safety fixes from the correctness remediation plan, lane D (compliance, PII,
+prohibited factors, causal, safe_eval). Each ships on and each flag restores the
+previous behaviour when set to `false`.
+
+### Prohibited Factor Full Coverage (RU-061 / CEG-COR-008)
+
+**Flag**: `PROHIBITED_FACTOR_FULL_COVERAGE=True` (default on)
+
+On: `ProhibitedFactorValidator` compares, casefolded, every gate property field
+(`candidateprop`, `candidateprop_min/_max/_start/_end`, str `queryparam`,
+`queryparam_min/_max/_start/_end`), every scoring dimension `candidateprop` /
+`queryprop` (`ComplianceEngine.validate_scoring`, called by `handle_match` next to
+`validate_gates`) and every key at any depth of a sync row
+(`validate_sync_row`, nested dicts and lists of dicts). Off: the legacy check of
+gate `candidateprop` / `queryparam` and top-level sync keys, exact-case.
+Contract: `docs/contracts/PROHIBITED_FACTORS.md`.
+
+Rollback: set the flag to `false` while a spec is corrected.
+
+### PII Redaction Recursive (RU-062 / CEG-COR-009)
+
+**Flag**: `PII_REDACTION_RECURSIVE=True` (default on)
+
+`engine/compliance/pii.py` `PIIHandler.detect_pii` descended only into dicts, so the
+match response's `candidates` list was opaque and `ComplianceEngine.redact_response`
+returned candidate PII unchanged; `redact()` / `mask_fields()` shallow-copied and then
+edited nested caller dicts in place. On: detection descends into dicts and
+lists/tuples at any depth with index-aware paths (`candidates[0].candidate.contact_email`;
+dict-only payloads keep their dotted paths), and redaction/masking copy every container
+on the edited path, so the input is never mutated. `redact_response` reaches
+`candidates` only for a domain whose `compliance.pii.enabled` is `true`; a domain that
+opts out (`enabled: false`, or no `pii` section — `PIISpec.enabled` defaults to `false`)
+keeps the pre-RU-062 reach: dict paths only, candidate fields untouched.
+`check_sync_request` records the detected field paths (never values) in the access audit
+entry. Off: the legacy dict-only traversal.
+
+Rollback: set the flag to `false`.
+
+### Compliance Audit Soft Sink (RU-065 / CEG-COR-052, CEG-COR-053)
+
+**Flag**: `COMPLIANCE_AUDIT_SOFT_SINK=True` (default on)
+
+The PostgreSQL audit pool (`POSTGRES_DSN`, §7) is a soft dependency, but without it
+`AuditLogger` retained every entry forever, and with it every flush failed (the
+`metadata` dict was bound to the JSONB column) and `handle_match` / `handle_sync`
+re-raised the failure after their Neo4j work had succeeded. On:
+
+- `ComplianceEngine` builds its `AuditLogger` with `buffer_size=COMPLIANCE_BUFFER_MAX`
+  (default 100; a value < 1 is refused at Settings load and by `AuditLogger`, since 0
+  would drop every entry meant for persistence). Metadata is bound as the JSON text of
+  the entry's Pydantic JSON form (datetimes, UUIDs and decimals become strings, NaN
+  becomes `null`), and the rows are built inside the protected block, so a batch that
+  fails to serialize or persist is re-buffered rather than lost. `_emit`, `emit_async` and the re-buffer after a failed
+  `flush_to_store` keep the newest `buffer_size` entries; dropped entries are counted
+  (`AuditLogger.dropped_count`) and logged at WARNING once per `buffer_size` drops.
+  Every entry is still emitted to the `l9.audit` logger when it is created.
+- `flush_to_store` binds `metadata` as `json.dumps(...)` text.
+- `handle_match` / `handle_sync` call `ComplianceEngine.flush_audit_for_request()`,
+  which logs a failure and returns 0; the entries stay buffered for the boot periodic
+  flush loop (`engine/boot.py` `_compliance_flush_loop`), which is unchanged.
+
+Off: unbounded retention, dict-bound metadata, and request-path propagation.
+
+Rollback: set the flag to `false`.
+
+### Prohibited Factor Violation Audit (RU-063 / CEG-COR-050)
+
+**Flag**: `PROHIBITED_FACTOR_VIOLATION_AUDIT=True` (default on)
+
+`ProhibitedFactorsSpec.auditonviolation` was read nowhere. On: when the domain's
+`prohibitedfactors.auditonviolation` is true, `ComplianceEngine.validate_gates`,
+`validate_scoring` and `check_sync_request` (endpoint and rows) catch the violation,
+emit one entry through `AuditLogger.log_violation` (severity `critical`,
+`outcome: denied`, regimes as `compliance_tags`, the subject and field name — never a
+value) and re-raise the same error. `handle_match` passes the tenant as the actor. Off:
+no entry. The `enforcement` mode value is still not interpreted (DEC-23 pending).
+
+Rollback: set the flag to `false`.
+
+### PII Declared Fields Enforced (RU-064 / CEG-COR-051)
+
+**Flag**: `PII_DECLARED_FIELDS_ENFORCED=True` (default on; takes effect while
+`PII_REDACTION_RECURSIVE` is also on)
+
+`ComplianceEngine` probed `compliance.pii.additional_fields`, which `PIISpec` does not
+have, so declared fields no built-in hint matched survived raw (healthcare-referral
+`name`, `patientid`; legal-discovery `clientname`), `handling: hash` became deletion, and
+`PIISpec.enabled` was ignored. On, when `compliance.pii` is present and `enabled: true`:
+`PIISpec.fields` + `candidatefields` are PII by exact, case-insensitive key at any depth
+in addition to built-in inference, and `redact_response` transforms every detected field
+per `PIISpec.handling`:
+
+| `handling` | Response value |
+|---|---|
+| `hash` | `PIIHandler.hash_value` SHA-256 hex digest of the value's string form |
+| `redact` | `[REDACTED]` (`engine.compliance.pii.REDACTION_MARKER`) |
+| `encrypt`, `tokenize`, other | fail closed to `[REDACTED]`, with a WARNING naming the mode and field paths (decision DEC-22 (a); no key sourcing or token store exists) |
+
+`compliance.pii.enabled: false` (or no `pii` section): built-in inference with key
+deletion over dict paths only (never into `candidates`), as `pii_redaction_recursive`
+documents for opted-out domains. Ingest-time hashing of stored PII is out of scope. Off: built-in
+inference with key deletion for every domain.
+
+Rollback: set the flag to `false`.
+
+### GDPR Erasure correctness (RU-066 / CEG-COR-054) — no new flag
+
+Still gated by `GDPR_ERASURE_ENABLED=False` / `GDPR_DRY_RUN=True` (§2). With erasure
+enabled, `erase_subject` now uses the domain's `compliance.gdpr_subject_id_field`
+(sanitized; default `data_subject_id`) for both the dry-run count and the deletion, calls
+`gdpr_erase_subject($1, $2)` with `performed_by` = tenant on the PacketStore pool
+(`PacketStore.get_pool()`, only while `PACKET_STORE_ENABLED`; otherwise the summary
+reports `packets_deleted: null`, `packets_erasable: false`), stores an integer count, and
+records the `PII_ERASURE` CRITICAL entry in the domain's `ComplianceEngine` audit trail
+before any deletion. **Release gate:** do not enable live erasure in any environment
+before the admin tenant-binding fix (RU-003, CEG-COR-003) is deployed with it — until
+then `domain_id` is caller-supplied.
+
+**Tenant-scoped packet erasure (RU-066 follow-up, PR #352 review).** The packet step
+erases only the requesting tenant's packets: `gdpr_erase_subject(subject_id,
+performed_by, tenant)` filters both its audit insert and its delete on
+`actor_tenant = tenant`, and `PIIHandler.erase_subject` runs it in one transaction
+after `set_config('app.current_tenant', tenant, true)` (while
+`PACKET_STORE_RLS_TENANT_SESSION_ENABLED`, as `PacketStore` does since RU-079). Before,
+the two-argument function filtered on the subject id only, so on an owner/admin DSN a
+subject id reused by another tenant deleted that tenant's packets too, and on the
+RLS-enforced `l9_product` DSN the unset `app.current_tenant` hid every row and the call
+reported 0. `packet_store.sql` drops the two-argument function, so re-apply it
+(§7) together with this release; a packet erasure without a tenant raises `ValueError`
+in Python and an exception in SQL. No new flag: the SQL and Python contracts change
+together (an off path would call the dropped function), and live erasure stays behind
+`GDPR_ERASURE_ENABLED=False` / `GDPR_DRY_RUN=True`.
+
+**Durable pre-delete audit and packet dry-run scope (RU-066 follow-up, plan T13).** The
+`PII_ERASURE` entry is flushed with `ComplianceEngine.flush_audit_before_erasure()`, which
+is strict: `COMPLIANCE_AUDIT_SOFT_SINK` (RU-065, a request continues past a failed flush)
+does not apply to it. With no `POSTGRES_DSN` audit pool, or when the flush raises, the
+admin call fails with `ExecutionError` and **nothing** is deleted (the entry stays
+buffered for the periodic flush). Before, the soft request-path flush logged the failure
+and the packet and graph deletes ran with no durable audit entry. Operator consequence:
+live erasure now requires `POSTGRES_DSN` (the audit pool) in addition to
+`PACKET_STORE_DSN`. The dry run also reports `would_affect.packets`: the requesting
+tenant's PacketStore rows for the subject id (`actor_tenant = tenant`, read in one
+transaction with the tenant GUC set, so the `l9_product` role counts the rows it would
+erase), `null` while `PACKET_STORE_ENABLED` is off (not erasable), `-1` when the count
+fails. No new flag: both changes sit on the same off-by-default path
+(`GDPR_ERASURE_ENABLED=False`) and restore the "audited before deleted" invariant §2
+already states. Verified by `tests/unit/test_wave6_dormant_features.py`
+(`test_erase_subject_failed_audit_flush_blocks_every_delete`,
+`test_erase_subject_without_audit_sink_blocks_every_delete`) and the two-tenant
+PostgreSQL scenarios in `tests/integration/test_packet_store_pg.py`.
+
+### Causal Attribution Unique Touchpoints (RU-067 / CEG-COR-055)
+
+**Flag**: `CAUSAL_ATTRIBUTION_UNIQUE_TOUCHPOINTS=True` (default on)
+
+`AttributionCalculator` received one row per causal PATH (`ORDER BY distance ASC`) and
+weighted rows, so a touchpoint reached by several paths split mass or had its credit
+overwritten (diamond: linear summed to 0.6, first_touch to 0). On: rows are collapsed to
+unique touchpoint ids keeping the first (minimum-distance) occurrence before weighting,
+and that row's link ages feed temporal decay; `total_touchpoints` counts unique ids.
+Model ordering semantics are unchanged (DEC-27 pending). Off: per-row weighting.
+
+Rollback: set the flag to `false`.
+
+### Causal Edge Declared Identity (RU-068 / CEG-COR-057, PO-04)
+
+**Flag**: `CAUSAL_EDGE_DECLARED_IDENTITY=True` (default on)
+
+`CausalCompiler.compile_causal_edge_create` matched both ends by `entity_id` (an outcome
+node carries only `outcome_id`, so the edge never matched), emitted
+`AND $confidence >= <literal>` with no `WHERE` when `temporal_validation` was false, and
+MERGEd on `{confidence, mechanism, created_at: datetime()}` so every repeat created a
+parallel edge. On:
+
+- identity per label from `engine/causal/identity.py`: `outcome_id` for
+  `feedbackloop.outcome_node_label`, else the sync endpoint `idproperty`, else the node's
+  first required property, else `entity_id` (same rule as `handle_match`, honouring
+  `SPEC_DECLARED_CANDIDATE_ID`); `handle_outcomes` passes the candidate's id property
+  explicitly;
+- one `WHERE` (only when non-empty) joining `source.created_at < target.created_at` and
+  `$confidence >= $confidence_threshold` (bound by `handle_outcomes`);
+- `MERGE (source)-[r:TYPE]->(target)` with `ON CREATE SET` created_at / confidence /
+  mechanism and `ON MATCH SET` confidence / mechanism;
+- `AttributionCalculator` (PO-04) returns `CASE WHEN touchpoint:<Label> THEN
+  coalesce(touchpoint.<declared id>, touchpoint.entity_id) … ELSE touchpoint.entity_id END`
+  over the causal-edge source labels instead of `touchpoint.entity_id`.
+
+Off: the legacy Cypher, kept for rollback although it cannot match outcome nodes.
+
+Rollback: set the flag to `false`.
+
+### Causal Validator Batch Edge Type (RU-069 / CEG-COR-058)
+
+**Flag**: `CAUSAL_VALIDATOR_BATCH_EDGE_TYPE=True` (default on)
+
+With a `CausalSubgraphSpec` (the production type), `CausalEdgeRuntimeValidator` found
+the edge spec via `record["edge_type"]`; `handle_sync` records carry no such key, so a
+declared `temporal_validation: true` was never enforced on sync batches. On:
+`validate_batch` passes its `edge_type` to `_validate_record`, and enforcement is
+`CausalSpec.enforce_temporal_precedence` when present, else the matching
+`CausalEdgeSpec.temporal_validation`. Tenants syncing inverted timestamps now see
+`rejected_count` / `all_rejected`. Off: the record-key lookup.
+
+Rollback: set the flag to `false`.
+
+### safe_eval Rejects Keyword Arguments (RU-076 / CEG-COR-125)
+
+**Flag**: `SAFE_EVAL_REJECT_KEYWORDS=True` (default on)
+
+`engine/utils/safe_eval.py` evaluated only positional arguments of a whitelisted call,
+so `round(2.567, ndigits=2)` returned `3`. On: any `ast.Call` with keywords raises
+`ValueError("keyword arguments not allowed")`. No shipped expression uses keywords.
+The companion resource bounds (RU-070: `_MAX_INT_BITS`, `_MAX_ROUND_NDIGITS`, overflow
+as `ValueError`) are guard-only and carry no flag. Off: keywords silently dropped.
+
+Rollback: set the flag to `false`.
+
+### Causal Serializer Variable Depth (RU-074 / CEG-COR-121)
+
+**Flag**: `CAUSAL_SERIALIZER_VARIABLE_DEPTH=True` (default on)
+
+`CausalSubgraphSerializer.serialize_neighborhood` matched `(start)-[r:T]->(neighbor)`, a
+single hop, so `match_explanation.depth_reached` never exceeded 1. On: the pattern is
+`[:T1|T2*1..N]` (`[*1..N]` without declared causal edges) where N is `max_depth` as an
+integer clamped to `[1, causal.chain_depth_limit]` and interpolated as a literal — Cypher
+does not accept a parameter as a variable-length bound; `$max_depth` carries N and
+`LIMIT $max_nodes` still bounds the result. `handle_match` keeps its depth policy
+(`min(chain_depth_limit, 2)`). Off: the one-hop pattern.
+
+Rollback: set the flag to `false`.
+
+### Counterfactual Dedupe and Spec Label (RU-075 / CEG-COR-122)
+
+**Flag**: `COUNTERFACTUAL_DEDUPE_AND_SPEC_LABEL=True` (default on)
+
+`CounterfactualGenerator._diff_fingerprints` appended
+`(change_weight, <dim>_weight_increase)` once per qualifying positive outcome, so
+duplicates consumed `max_scenarios_per_outcome` slots, and both fingerprint queries
+hardcoded `:TransactionOutcome`. On: a seen-set on `(intervention_type, key_difference)`
+suppresses duplicates, and `handle_outcomes` passes
+`sanitize_label(feedbackloop.outcome_node_label)` (default `TransactionOutcome`) as the
+queried label. Off: duplicates and the literal label.
+
+Rollback: set the flag to `false`.
+## 24. Correctness remediation lane F (plan 0d84ec8)
+
+Hardening fixes from the CEG correctness remediation plan. Each restores an
+invariant the code already claimed, so each ships `True`; set the env var to
+`false` to restore the previous behaviour verbatim.
+
+| Flag (env var) | Default | Unit | On | Off |
+| `neo4j_circuit_release_cancelled_probes` (`NEO4J_CIRCUIT_RELEASE_CANCELLED_PROBES`) | `true` | RU-094 / CEG-COR-035 | A HALF_OPEN probe that ends in `asyncio.CancelledError` returns its probe slot (only within the HALF_OPEN cycle it was taken in) and records neither success nor failure | The slot leaks; `half_open_max_calls` cancelled probes leave the breaker rejecting every call until process restart |
+| `neo4j_circuit_ignore_client_errors` (`NEO4J_CIRCUIT_IGNORE_CLIENT_ERRORS`) | `true` | RU-093 / CEG-COR-034 | `neo4j.exceptions.ClientError` and subclasses are a neutral breaker outcome: re-raised unchanged (absent-database translation still applies), not counted, streak not reset, HALF_OPEN probe slot returned; counted in `BreakerMetrics.total_neutral_errors`. ServiceUnavailable, SessionExpired, TransientError, DatabaseError, OSError and everything else still count. Exception: the credential classes `AuthError` (incl. `TokenExpired`) and `Forbidden` are `ClientError` subclasses but still count as failures, so bad or expired credentials open the breaker (owner decision 2026-10-29) | Every exception counts; five consecutive client errors from one tenant open the breaker for all tenants |
+| `neo4j_provision_inside_breaker` (`NEO4J_PROVISION_INSIDE_BREAKER`) | `true` | RU-095 / CEG-COR-170 | The coroutine admitted by the breaker provisions on first use and then runs the query/write, so an OPEN breaker raises `CircuitOpenError` with no `system` call; provisioning semantics (once per database per process, shielded shared task, failed CREATE retried later) unchanged; a malformed database name is still refused before admission as a `ValueError` | Every call for a not-yet-ensured database awaits a `CREATE DATABASE` on `system` (up to the 60 s acquisition timeout) before the breaker can reject it |
+| `gds_dag_job_identity_by_name` (`GDS_DAG_JOB_IDENTITY_BY_NAME`) | `true` | RU-096 / CEG-COR-036 | `GDSScheduler._build_execution_dag` keys nodes by `job.name` in declaration order; a `depends_on` entry (an algorithm name, per the schema) depends on every job with that algorithm; unknown dependencies are ignored with a warning and cycle members land in a final fallback wave as before. Every declared cron job is registered with APScheduler, and the registration log reports the number actually registered. Job-name uniqueness is not enforced (DEC-42, pending decision) | The DAG is keyed by algorithm: of two `louvain` jobs only the last declared is scheduled |
+| `gds_temporal_recency_decay_existing` (`GDS_TEMPORAL_RECENCY_DECAY_EXISTING`) | `true` | RU-097 / CEG-COR-037 | Three statements per run: create aggregates per (src, dst) — `max(t.<timestamp_property>)` is `last_event_date`, its age drives `recency_score`, and (when `count_property` is declared) `recent_count` sums `coalesce(t.<count_property>, 1)` over the pair's interactions within `half_life_days`; refresh recomputes `recency_score` of every existing overlay edge from its `last_event_date`; prune deletes edges with `recency_score < prune_below` or age `> max_age_days`. The first run prunes stale overlay edges accumulated so far (derived data) | The overlay edge carries whichever matching interaction row was SET last, and an edge whose interactions aged out is never re-scored, so the defaults never prune it |
+| `gds_cooccurrence_deterministic_prune` (`GDS_COOCCURRENCE_DETERMINISTIC_PRUNE`) | `true` | RU-098 / CEG-COR-168 | Per-node keep sets are computed from edges ordered by `r.weight` DESC, `elementId(r)`; a node with degree > 10 keeps its `floor(degree^0.86)` strongest edges, a node with degree <= 10 keeps all of them, and an edge is deleted only when it is outside the keep set of both endpoints. Identical input gives an identical surviving edge set. Alpha 0.86, the > 10 floor and the Step-1 MERGE are unchanged | Unordered `collect` on pre-deletion degree with deletion from either endpoint: K15 hubs end with 1-5 edges instead of 9, leaves of a hub lose their only edge, and the survivors differ run to run |
+| `gds_history_utc_timestamps` (`GDS_HISTORY_UTC_TIMESTAMPS`) | `true` | RU-100 / CEG-COR-086 | `GDSScheduler.execute_job` takes start, duration and the history `timestamp` from `datetime.now(tz=UTC)`; the ISO-8601 timestamp gains a `+00:00` offset and still parses with `datetime.fromisoformat`. Consumers (`handlers.py` gds_health, `boot.py`) are unchanged and keep their naive-as-UTC fallback | Naive local time read as UTC by consumers: a just-run job looks 7 h old under America/Los_Angeles and -9 h under Asia/Tokyo |
+| `entity_resolution_merge_integrity` (`ENTITY_RESOLUTION_MERGE_INTEGRITY`) | `true` | RU-101 / CEG-COR-059, -060, -061 | `resolve_batch` rejects a `threshold` that is not a number in [0, 1] (`ValueError`) and threads it to `resolve_entity` (new optional `threshold` kwarg); already-resolved entities are neither candidates nor canonical; the canonical is the highest-degree entity with `RESOLVED_FROM` excluded from degree and ties broken by `entity_id` ascending; a member is merged only when its similarity to the canonical meets the threshold and the edge stores that measured similarity; the edge is `MERGE`d with `ON CREATE SET`; batch runs skip merged entity ids and the canonical and count only new edges. Responses gain `merged_entity_ids`. Only reachable when a domain enables `semantic_registry` (none shipped) | Batch over three identical entities writes six edges (`total_merged` 6); a degree tie can produce an e1<->e2 cycle; the batch `threshold` is ignored; a member is merged into a canonical it is 0.33 similar to, with confidence defaulting to 1.0 |
+| `resolution_behavioral_label_scoped` (`RESOLUTION_BEHAVIORAL_LABEL_SCOPED`) | `true` | RU-103 / CEG-COR-177 (+ PO-04 extension of RU-002) | `SimilarityScorer._behavioral_similarity(a, b, label)` matches `(a:<label> {<id>: $a_id})` / `(b:<label> {<id>: $b_id})`, label and id property through `sanitize_label`, ids as `$params`. The id property is the label's declared id (sync `idproperty`, else first required property, else `entity_id`; `entity_id` while `spec_declared_candidate_id` is off), read from the `DomainSpec` passed to `EntityResolver` / `SimilarityScorer` (new optional `domain_spec` kwarg) or, when none is passed, from the engine's domain loader for the domain id. Only reachable when a domain enables `semantic_registry` | `(a {entity_id: $a_id})` matches nodes of any label, so `RESULTED_IN` outcomes of a same-id node of another label are counted |
+
+### Rollback
+
+Set the flag's env var to `false` and restart the process. A process already
+wedged by the pre-fix behaviour needs a restart either way.
+
+## 25. Correctness remediation lane I (plan 0d84ec8, round 2) — domain spec validation
+
+Every flag below tightens `engine/config/schema.py` validation, so a spec that
+violates the rule stops loading (`DomainSpec.model_validate` raises). All default
+`true`; every shipped pack and `domains/_template.yaml` validate with all of them on.
+
+| Flag (env var) | Default | Unit | On | Off |
+|---|---|---|---|---|
+| `weight_ceiling_includes_unscoped` (`WEIGHT_CEILING_INCLUDES_UNSCOPED`) | `true` | RU-044 / CEG-COR-024 | Under `domain_strict_validation`, for each `queryschema.matchdirections` entry (and any direction a dimension is scoped to) the default weights of unscoped dimensions plus the dimensions scoped to it must be <= 1.0; the error names the direction | Each scope bucket (`*` and every direction) is summed alone, so `{'*': 0.6, 'd1': 0.6}` loads with an effective `d1` sum of 1.2 |
+| `traversal_open_range_rejected` (`TRAVERSAL_OPEN_RANGE_REJECTED`) | `true` | RU-045 / CEG-COR-038 | `TraversalSpec.validate_traversal_hops` matches `\*(\d*)(\.\.)?(\d*)`: a min < 1 is refused (`hop count must be >= 1`), a `..` with no upper bound is refused (`has no explicit upper bound`), an explicit upper bound (or the fixed count) above `max_hop_hard_cap` is refused, bare `*` stays refused (`exceeds hard cap`). `_validate_traversal_pattern` additionally requires `*N` or `*[M]..N` in the relationship, so `*`, `*N..`, `*..` fail `pattern does not match allowed structure`. No shipped pack declares a variable-length step | `*1..` / `*2..` load (the regex matched `*1` and read one hop) and the assembler emits them unbounded |
+| `gate_name_uniqueness` (`GATE_NAME_UNIQUENESS`) | `true` | RU-049 / CEG-COR-076 | `DomainSpec.validate_cross_references` raises `Duplicate gate name(s): [<names>]` (sorted) when any gate name repeats; independent of `domain_strict_validation`. No shipped pack repeats a gate name | Duplicates load; the second gate's compiled literal overwrites the first |
+| `domain_undeclared_param_rejected` (`DOMAIN_UNDECLARED_PARAM_REJECTED`) | `true` | RU-050 / CEG-COR-077 | Under `domain_strict_validation`, when the spec declares any queryschema field or derived parameter, a gate whose string `queryparam` is undeclared raises `ValueError("Gate '<g>' references undeclared parameter '<q>'")`. Declared means: the name itself, its base after stripping `_min`/`_max`/`_start`/`_end`, or, for a `temporalrange` gate, both `<q>_start` and `<q>_end` (the names the compiler derives). Literal (scalar) operands are exempt | The same message is a WARNING log and the spec loads; admission (`admission_defects`) is the only refusal |
+| `gate_spec_forbid_unknown_keys` (`GATE_SPEC_FORBID_UNKNOWN_KEYS`) | `true` | RU-053 / CEG-COR-081 | A `GateSpec` `model_validator(mode="before")` raises `Gate '<name>' has unknown key(s) [<keys>]` for any input key outside `GateSpec.model_fields`, adding `'<key>' (did you mean '<field>'?)` when the key matches a field with underscores removed (e.g. `null_behavior` → `nullbehavior`). No aliases are introduced. Fields added to `GateSpec` later are accepted automatically | Unknown keys are ignored: `null_behavior: fail` leaves `nullbehavior` at its `pass` default and the gate admits NULL operands |
+| `domain_version_semver_enforced` (`DOMAIN_VERSION_SEMVER_ENFORCED`) | `true` | RU-057 / CEG-COR-152 | `DomainMetadata.version` must fully match `(0\|[1-9]\d*)\.(0\|[1-9]\d*)\.(0\|[1-9]\d*)` optionally followed by `-seed`, `-discovered`, `-inferred`, `-proposed`, `-reviewed` or `-production` (DOMAIN_SPEC_VERSIONING.md); anything else raises `domain.version '<v>' is not semver`. `TemplateProvenance.version` is unchanged. Shipped pack versions (0.1.0, 1.0.0, 1.0.1, 1.1.0, 1.2.0) validate | Any string, including `latest`, `v2` and dates, is accepted |
+## 26. Correctness remediation lane J (plan 0d84ec8, round 2)
+
+|---|---|---|---|---|
+| `geodecay_declared_longitude` (`GEODECAY_DECLARED_LONGITUDE`) | `true` | RU-037 / CEG-COR-011 (DEC-14 option A) | A `geodecay` dimension's declared `candidateprop_lon` / `queryprop_lon` name the longitude operands (`point({latitude: candidate.<candidateprop>, longitude: candidate.<candidateprop_lon>})` vs `point({latitude: $<queryprop>, longitude: $<queryprop_lon>})`); undeclared they default to `candidate.lon` / `$lon`, so dimensions without them (PlasticOS `geo_proximity`, `active_supply_geo`) compile byte-identically. `freight-matching` `deadhead_distance` measures Carrier `currentlat`/`currentlon` to Load `pickuplat`/`pickuplon` | The declarations are ignored and `candidate.lon` / `$lon` are emitted; `freight-matching` is withheld again by the scoring admission check for its unbound `$lon` |
+
+### Rollback
+
+Set `GEODECAY_DECLARED_LONGITUDE=false` and restart. Domain-spec changes of this
+lane (plasticos 1.3.0, mortgage-brokerage 1.1.0, freight-matching 1.2.0) roll
+back by restoring the previous spec file; the loader hot-reloads on mtime.
+## 27. Correctness remediation lane K (plan 0d84ec8)
+
+Round-2 fixes from the CEG correctness remediation plan. Each ships `True`; set
+the env var to `false` to restore the previous behaviour verbatim.
+
+|---|---|---|---|---|
+| `gds_shared_scheduler_registry` (`GDS_SHARED_SCHEDULER_REGISTRY`) | `true` | RU-007 / CEG-COR-016 | `GraphLifecycle.startup` registers each started scheduler in `get_state().gds_schedulers[domain_id]` (one per domain id); the W6-03 GDS health probe reads that registry at probe time; `_get_or_create_scheduler` (admin `trigger_gds`, `gds_status`, `gds_trigger`, `gds_health`) reuses the registered instance, and for a domain boot did not start it registers the jobs and starts APScheduler only when `gds_enabled` is true, so `GDS_ENABLED=false` runs no cron job anywhere while manual triggers still execute; `EngineState.shutdown` (called by `GraphLifecycle.shutdown`) stops every started scheduler and skips one that never started | Boot keeps its schedulers in `GraphLifecycle._schedulers`, which nothing stops; the first admin `gds_*` call starts a second scheduler for the same domain (cron jobs run twice, `gds_status` reports the duplicate's empty history) and starts it even with `GDS_ENABLED=false` |
+| `outcome_schema_unified` (`OUTCOME_SCHEMA_UNIFIED`) | `true` | RU-006 / CEG-COR-015 (R1a-DEC-02 first alternative) | `_build_outcome_write` is the one outcome writer: `handle_outcomes` and sync `entity_type=outcome` both create the domain's `feedbackloop.outcome_node_label` node with the canonical `success`/`failure`/`partial` (sync maps `positive`→`success`, `negative`→`failure`, `neutral`→`partial`; canonical values pass through; anything else is skipped), link it by RESULTED_IN from the candidate's declared id, and apply the R3 causal check per item (sync reports `rejected_count` when edges were suppressed). The node carries `dimension_scores` (sorted-key JSON of the optional `fingerprint.dimension_scores` map; null when absent) and `was_selected` (optional bool); a malformed value is a `ValidationError` on `outcomes` and a skipped item on sync. `score_feedback` RETURNs `o.dimension_scores`, decoded with `decode_outcome_map`, and `OutcomeFeedback` treats `success` as positive and `failure` as negative (`partial` is neither). `discover_weights` already reads `dimension_scores` / `was_selected`. Existing `:Outcome` nodes are not migrated | Sync writes `:Outcome` with `positive`/`negative`/`neutral` and HAS_OUTCOME; `handle_outcomes` writes no `dimension_scores` / `was_selected`; `score_feedback` and `discover_weights` therefore never produce output |
+| `strict_null_gates` (`STRICT_NULL_GATES`, existing W1-03 flag; meaning fixed by R1a-DEC-03) | `true` | RU-010 / CEG-COR-023 | `handle_match` calls `GateCompiler.validate_gates(resolved_query, match_direction=…, reject_unbound=True)` after defaults backfill and derived resolution, over the gates active for the direction (`matchdirections` empty or containing it). A gate whose named `queryparam` is missing/null and is undeclared (neither a queryschema field nor a derived parameter) or a `required` queryschema field raises `ValidationError` naming every such gate; a null optional or derived parameter is left to the gate's `nullbehavior` (C-14) and logged as a WARNING once per gate. Literal operands and gates without a named parameter are not checked. Required queryschema fields are therefore enforced for gates that read them (e.g. plasticos `polymer_type`) | `validate_gates` is never called on the match path; a null undeclared parameter reaches Neo4j as a missing parameter |
+| `match_request_contract_admission` (`MATCH_REQUEST_CONTRACT_ADMISSION`) | `true` | RU-012 / CEG-COR-063 (R1a-DEC-04 "admit both") | `handle_match` validates a payload that carries `contract_version` with `admit_payload(MatchRequest, payload, DomainContract.from_spec(<tenant's pack>))` — tenant-bound `domain`, declared `direction`, `extra=forbid`, transport fields refused, failures raised as `ValidationError` before any query — and continues with `{query: query.facts, match_direction: direction, top_n}`. Payloads without `contract_version` (legacy `MatchPayload`) are unchanged. The response stays the legacy shape | The `MatchRequest` example is rejected with `Missing required field 'match_direction'` |
+| `gate_role_exemption` (`GATE_ROLE_EXEMPTION`) | `true` | RU-015 / CEG-COR-080 (R1a-DEC-05 "withhold") | `engine.config.loader.admission_defects` adds `<gate>: roleexempt … is not consumed — match takes no request role` for a gate whose `roleexempt` is set and `<gate>: relaxedpenalty … is not consumed — relaxed matching is not exposed` for a gate that declares `relaxedpenalty` (explicitly, any value), so `withholding_reason` withholds the pack unless `UNVALIDATED_DOMAIN_PACKS_ENABLED`. No shipped pack declares either field. `schema.py`, the compiler's `role` / `compile_relaxed` support and the match payload are unchanged | The fields are accepted and silently ignored by every match |

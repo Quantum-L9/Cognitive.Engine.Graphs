@@ -295,7 +295,10 @@ class TestCausalCompiler:
         cypher = compiler.compile_causal_edge_create(edge_spec)
 
         assert "RESULTED_IN" in cypher
-        assert "$confidence >= 0.5" in cypher
+        # RU-068: the threshold is bound as a parameter (C-9); the former literal
+        # `$confidence >= 0.5` assertion encoded the interpolation defect.
+        assert "$confidence >= $confidence_threshold" in cypher
+        assert "0.5" not in cypher
 
     def test_compile_edge_without_temporal_validation(self):
         spec = _spec_with_causal(
@@ -587,3 +590,163 @@ class TestAttributionCalculator:
         assert result["total_touchpoints"] == 2
         assert "tp1" in result["touchpoints"]
         assert "tp2" in result["touchpoints"]
+
+
+# ── RU-067 / CEG-COR-055: weights over unique touchpoints ──
+
+# A diamond: tp1 reaches the outcome directly and via tp2; tp3 via two parallel paths.
+_DIAMOND_ROWS = [
+    {"touchpoint_id": "tp1", "distance": 1, "confidences": [0.9], "ages_days": [1]},
+    {"touchpoint_id": "tp2", "distance": 1, "confidences": [0.8], "ages_days": [2]},
+    {"touchpoint_id": "tp1", "distance": 2, "confidences": [0.9, 0.8], "ages_days": [400, 2]},
+    {"touchpoint_id": "tp3", "distance": 2, "confidences": [0.7, 0.8], "ages_days": [3, 2]},
+    {"touchpoint_id": "tp3", "distance": 3, "confidences": [0.7, 0.6, 0.9], "ages_days": [3, 5, 1]},
+]
+
+
+class TestAttributionUniqueTouchpoints:
+    @pytest.mark.parametrize("model", ["linear", "first_touch", "last_touch", "position_based"])
+    def test_diamond_weights_sum_to_one(self, model: str) -> None:
+        weights = AttributionCalculator._assign_weights(_DIAMOND_ROWS, model)
+        assert set(weights) == {"tp1", "tp2", "tp3"}
+        # Each weight is rounded to 6 decimals (unchanged behaviour), so three
+        # linear shares sum to 0.999999: allow n * 0.5e-6 of rounding.
+        assert sum(weights.values()) == pytest.approx(1.0, abs=1.5e-6)
+        assert all(0.0 <= w <= 1.0 for w in weights.values())
+
+    def test_first_touch_recurring_touchpoint_keeps_credit(self) -> None:
+        rows = [
+            {"touchpoint_id": "tp1", "distance": 1, "confidences": [0.9]},
+            {"touchpoint_id": "tp2", "distance": 2, "confidences": [0.9, 0.8]},
+            {"touchpoint_id": "tp1", "distance": 3, "confidences": [0.9, 0.8, 0.7]},
+        ]
+        weights = AttributionCalculator._assign_weights(rows, "first_touch")
+        assert weights == {"tp1": 1.0, "tp2": 0.0}
+
+    def test_linear_chain_without_duplicates_is_unchanged(self) -> None:
+        rows = [
+            {"touchpoint_id": "tp1", "distance": 1, "confidences": [0.9]},
+            {"touchpoint_id": "tp2", "distance": 2, "confidences": [0.8]},
+            {"touchpoint_id": "tp3", "distance": 3, "confidences": [0.7]},
+        ]
+        assert AttributionCalculator._assign_weights(rows, "position_based") == {"tp1": 0.4, "tp2": 0.2, "tp3": 0.4}
+
+    @pytest.mark.asyncio
+    async def test_compute_attribution_counts_unique_ids_and_ages_from_retained_row(self) -> None:
+        from engine.config.schema import CausalSubgraphSpec
+
+        spec = _spec_with_attribution()
+        causal = spec.causal.model_copy(update={"temporal_decay_enabled": True})
+        spec = spec.model_copy(update={"causal": causal})
+        assert isinstance(spec.causal, CausalSubgraphSpec)
+        driver = AsyncMock()
+        driver.execute_query = AsyncMock(return_value=_DIAMOND_ROWS)
+        result = await AttributionCalculator(driver, spec).compute_attribution("out_1", model="linear")
+        assert result["total_touchpoints"] == 3
+        assert sum(result["touchpoints"].values()) == pytest.approx(1.0, abs=1e-5)
+        # tp1's retained (distance-1) row is 1 day old, so it is not decayed below tp2/tp3.
+        assert result["touchpoints"]["tp1"] >= result["touchpoints"]["tp3"]
+
+    def test_flag_off_restores_per_row_weighting(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "causal_attribution_unique_touchpoints", False)
+        weights = AttributionCalculator._assign_weights(_DIAMOND_ROWS, "linear")
+        assert sum(weights.values()) == pytest.approx(0.6, abs=1e-6)  # legacy: 3 of 5 row shares
+
+
+# ── RU-068 / CEG-COR-057: declared identities, anchored WHERE, stable MERGE ──
+
+
+def _edge(**kw) -> CausalEdgeSpec:
+    base = {"edge_type": "RESULTED_IN", "source_label": "Facility", "target_label": "TransactionOutcome"}
+    return CausalEdgeSpec(**{**base, **kw})
+
+
+class TestCausalCompilerIdentity:
+    @pytest.mark.parametrize(("temporal", "threshold"), [(True, 0.0), (True, 0.5), (False, 0.5), (False, 0.0)])
+    def test_predicates_share_one_where(self, temporal: bool, threshold: float) -> None:
+        spec = _spec_with_causal(causal_edges=[_edge(temporal_validation=temporal, confidence_threshold=threshold)])
+        cypher = CausalCompiler(spec).compile_causal_edge_create(spec.causal.causal_edges[0])
+        expected_where = 1 if (temporal or threshold > 0) else 0
+        assert cypher.count("WHERE") == expected_where
+        assert "\nAND " not in cypher
+        assert ("source.created_at < target.created_at" in cypher) is temporal
+        assert ("$confidence >= $confidence_threshold" in cypher) is (threshold > 0)
+        if expected_where:
+            assert cypher.index("WHERE") < cypher.index("MERGE")
+
+    def test_target_outcome_matched_by_outcome_id_source_by_declared_id(self) -> None:
+        spec = _spec_with_causal(causal_edges=[_edge()])
+        cypher = CausalCompiler(spec).compile_causal_edge_create(spec.causal.causal_edges[0])
+        assert "MATCH (target:TransactionOutcome {outcome_id: $target_id})" in cypher
+        assert "MATCH (source:Facility {facility_id: $source_id})" in cypher
+        assert "entity_id" not in cypher
+
+    def test_explicit_id_properties_win_and_are_sanitized(self) -> None:
+        spec = _spec_with_causal(causal_edges=[_edge()])
+        compiler = CausalCompiler(spec)
+        cypher = compiler.compile_causal_edge_create(spec.causal.causal_edges[0], source_id_property="depot_code")
+        assert "{depot_code: $source_id}" in cypher
+        with pytest.raises(ValueError):
+            compiler.compile_causal_edge_create(spec.causal.causal_edges[0], source_id_property="x}) DETACH DELETE (n")
+
+    def test_merge_has_no_properties_and_sets_on_create_and_match(self) -> None:
+        spec = _spec_with_causal(causal_edges=[_edge()])
+        cypher = CausalCompiler(spec).compile_causal_edge_create(spec.causal.causal_edges[0])
+        assert "MERGE (source)-[r:RESULTED_IN]->(target)" in cypher
+        assert "ON CREATE SET" in cypher
+        assert "ON MATCH SET" in cypher
+        merge_line = next(line for line in cypher.splitlines() if line.startswith("MERGE"))
+        assert "datetime()" not in merge_line
+
+    def test_label_without_declaration_falls_back_to_entity_id(self) -> None:
+        spec = _spec_with_causal(
+            causal_edges=[_edge(edge_type="CAUSED_BY", source_label="Unknown", target_label="Facility")]
+        )
+        cypher = CausalCompiler(spec).compile_causal_edge_create(spec.causal.causal_edges[0])
+        assert "MATCH (source:Unknown {entity_id: $source_id})" in cypher
+        assert "MATCH (target:Facility {facility_id: $target_id})" in cypher
+
+    def test_flag_off_restores_legacy_cypher(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "causal_edge_declared_identity", False)
+        spec = _spec_with_causal(causal_edges=[_edge(temporal_validation=False, confidence_threshold=0.5)])
+        cypher = CausalCompiler(spec).compile_causal_edge_create(spec.causal.causal_edges[0])
+        assert cypher == (
+            "MATCH (source:Facility {entity_id: $source_id})\n"
+            "MATCH (target:TransactionOutcome {entity_id: $target_id})\n"
+            "AND $confidence >= 0.5\n"
+            "MERGE (source)-[r:RESULTED_IN {\n"
+            "    confidence: $confidence,\n"
+            "    mechanism: $mechanism,\n"
+            "    created_at: datetime()\n"
+            "}]->(target)\n"
+            "RETURN r"
+        )
+
+
+class TestAttributionTouchpointIdentity:
+    """PO-04 (folded into CEG-COR-002 / RU-068): the trace reads the declared id, not entity_id."""
+
+    @pytest.mark.asyncio
+    async def test_trace_returns_declared_id_per_source_label(self) -> None:
+        driver = AsyncMock()
+        driver.execute_query = AsyncMock(return_value=[])
+        await AttributionCalculator(driver, _spec_with_attribution()).compute_attribution("out_1")
+        cypher = driver.execute_query.call_args.args[0]
+        assert (
+            "RETURN CASE WHEN touchpoint:Facility THEN coalesce(touchpoint.facility_id, touchpoint.entity_id) "
+            "ELSE touchpoint.entity_id END AS touchpoint_id" in cypher
+        )
+
+    @pytest.mark.asyncio
+    async def test_flag_off_reads_entity_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "causal_edge_declared_identity", False)
+        driver = AsyncMock()
+        driver.execute_query = AsyncMock(return_value=[])
+        await AttributionCalculator(driver, _spec_with_attribution()).compute_attribution("out_1")
+        assert "RETURN touchpoint.entity_id AS touchpoint_id" in driver.execute_query.call_args.args[0]

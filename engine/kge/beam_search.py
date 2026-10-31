@@ -41,6 +41,7 @@ from enum import StrEnum
 from typing import Any
 
 import numpy as np
+import numpy.typing as npt
 
 from engine.config.schema import KGEBeamSearchSpec
 from engine.config.settings import settings
@@ -102,6 +103,17 @@ class BeamCandidate:
     score: float
     depth: int
     parent_id: str | None = None
+    # Ordered op cascade this candidate represents: its parent's chain plus its
+    # own op (CEG-COR-108). Empty for the identity root.
+    chain: list[tuple[str, dict[str, float]]] = field(default_factory=list)
+
+    def ops(self) -> list[tuple[str, dict[str, float]]]:
+        """The cascade as (type, params) ops; a chain-less candidate is its own op."""
+        if self.chain:
+            return list(self.chain)
+        if self.transformation_type == "identity":
+            return []
+        return [(self.transformation_type, dict(self.params))]
 
     def __lt__(self, other: BeamCandidate) -> bool:
         """Enable min-heap ordering (negated for max-heap)."""
@@ -119,7 +131,27 @@ class BeamCandidate:
             "score": float(self.score),  # nosemgrep: float-requires-try-except
             "depth": self.depth,
             "parent_id": self.parent_id,
+            "chain": [{"type": t, "params": p} for t, p in self.ops()],
         }
+
+
+class _CascadeTransformation(Transformation3D):
+    """Ordered composition of transformations: ops[0] is applied first."""
+
+    def __init__(self, ops: list[Transformation3D]) -> None:
+        self.ops = list(ops)
+
+    def apply(self, embedding: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        out = embedding
+        for op in self.ops:
+            out = op.apply(out)
+        return out
+
+    def inverse(self) -> Transformation3D:
+        return _CascadeTransformation([op.inverse() for op in reversed(self.ops)])
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"type": "cascade", "ops": [op.to_dict() for op in self.ops]}
 
 
 @dataclass
@@ -131,7 +163,9 @@ class BeamSearchConfig:
         config = BeamSearchConfig.from_spec(domain_spec.kge.beamsearch)
     """
 
-    beam_width: int = 5
+    # C-20 (CEG-COR-110): defaults equal KGEBeamSearchSpec() (beamwidth=10,
+    # maxdepth=3) so BeamSearchConfig() and from_spec(None) agree with the schema.
+    beam_width: int = 10
     max_depth: int = 3
     prune_strategy: PruneStrategy = PruneStrategy.COMBINED
     score_threshold: float = 0.3
@@ -143,7 +177,7 @@ class BeamSearchConfig:
     def from_spec(cls, spec: KGEBeamSearchSpec | None) -> BeamSearchConfig:
         """Construct from domain-pack KGEBeamSearchSpec."""
         if spec is None:
-            return cls()
+            return cls.from_spec(KGEBeamSearchSpec())
         return cls(
             beam_width=spec.beamwidth,
             max_depth=spec.maxdepth,
@@ -296,10 +330,17 @@ class BeamSearchEngine:
             ("hyperplane", self._make_hyperplane_variants),
         ]
 
+        # A successor is the parent's cascade plus one new op, and is scored as
+        # that composed cascade (CEG-COR-108); scoring the new op alone made
+        # every depth level repeat depth 1. Validators see exactly what
+        # _prune_by_constraint shows them (the bare op at depth 1).
+        parent_ops = candidate.ops()
+        parent_txs = [self._build_transformation(t, p) for t, p in parent_ops]
+
         for tx_type, factory in transform_factories:
             for params in factory():
                 tx = self._build_transformation(tx_type, params)
-                score = self._score_candidate(tx)
+                score = self._score_candidate(self._compose([*parent_txs, tx]))
                 successor = BeamCandidate(
                     transformation_id=self._gen_id(),
                     transformation_type=tx_type,
@@ -307,6 +348,7 @@ class BeamSearchEngine:
                     score=score,
                     depth=candidate.depth + 1,
                     parent_id=candidate.transformation_id,
+                    chain=[*parent_ops, (tx_type, dict(params))],
                 )
                 successors.append(successor)
 
@@ -425,7 +467,7 @@ class BeamSearchEngine:
         pruned: list[BeamCandidate] = []
 
         for candidate in sorted_cands[1:]:
-            min_sim = min(self._param_similarity(candidate.params, k.params) for k in kept)
+            min_sim = min(self._candidate_similarity(candidate, k) for k in kept)
             if min_sim < self.config.diversity_threshold:
                 kept.append(candidate)
             else:
@@ -441,12 +483,46 @@ class BeamSearchEngine:
         kept: list[BeamCandidate] = []
         pruned: list[BeamCandidate] = []
         for candidate in candidates:
-            tx = self._build_transformation(candidate.transformation_type, candidate.params)
+            tx = self._composed_transformation(candidate)
             valid = all(v(tx) for v in self.config.constraint_validators)
             (kept if valid else pruned).append(candidate)
         if self.config.log_pruned and pruned:
             self.pruned_candidates.extend(pruned)
         return kept
+
+    def _composed_transformation(self, candidate: BeamCandidate) -> Transformation3D:
+        """The transformation a candidate represents: its whole op chain, composed.
+
+        A single-op chain is that op itself (so depth-1 validators see the same
+        object as before); a longer chain is the ordered ``_CascadeTransformation``
+        (RU-121 follow-up: validating only the terminal op accepted a cascade
+        whose earlier op violated the constraint).
+        """
+        return self._compose([self._build_transformation(t, p) for t, p in candidate.ops()])
+
+    @staticmethod
+    def _compose(txs: list[Transformation3D]) -> Transformation3D:
+        """Validator contract for scoring and pruning alike: one op is itself; more is a cascade."""
+        return txs[0] if len(txs) == 1 else _CascadeTransformation(txs)
+
+    @staticmethod
+    def _candidate_similarity(a: BeamCandidate, b: BeamCandidate) -> float:
+        """Similarity in [0, 1] between two candidates' complete op chains.
+
+        Chains of different length, or with a different transformation type at
+        any position, are 0.0-similar: bare parameter dicts of different types
+        share no keys, so comparing them treated, e.g., translation(x=0.1) and
+        flip(axis=0) as 0.91-similar (CEG-COR-109), and comparing only the
+        terminal op pruned two different cascades that end in the same op
+        (RU-122 follow-up). Same-type chains compare all their parameters,
+        position by position; a single-op chain compares exactly as before.
+        """
+        ops_a, ops_b = a.ops(), b.ops()
+        if len(ops_a) != len(ops_b) or any(ta != tb for (ta, _), (tb, _) in zip(ops_a, ops_b, strict=True)):
+            return 0.0
+        params_a = {f"{i}:{k}": v for i, (_, p) in enumerate(ops_a) for k, v in p.items()}
+        params_b = {f"{i}:{k}": v for i, (_, p) in enumerate(ops_b) for k, v in p.items()}
+        return BeamSearchEngine._param_similarity(params_a, params_b)
 
     @staticmethod
     def _param_similarity(

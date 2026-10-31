@@ -23,6 +23,8 @@ Coverage (16 tests):
   - asyncpg exception never propagates
   - Idempotent: repeated calls return True, row count == 2
   - value=None, 0.0, 1.0, 100.5 serialize correctly
+  - RU-079 / RG-104: transaction-local set_config('app.current_tenant')
+    with the tenant arg precedes the UPDATE in the same transaction
 """
 
 from __future__ import annotations
@@ -43,11 +45,24 @@ def _make_store_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ps_mod, "_PACKET_STORE_ENABLED", True)
 
 
+def _mock_transaction(conn: AsyncMock) -> None:
+    """Model asyncpg ``Connection.transaction()``: a plain call returning an async CM.
+
+    An AsyncMock attribute would return a coroutine, which ``async with``
+    rejects; the real method is synchronous.
+    """
+    tx = MagicMock()
+    tx.__aenter__ = AsyncMock(return_value=tx)
+    tx.__aexit__ = AsyncMock(return_value=False)
+    conn.transaction = MagicMock(return_value=tx)
+
+
 def _mock_pool(execute_result: str = "UPDATE 1") -> tuple[Any, AsyncMock]:
     conn = AsyncMock()
     conn.execute = AsyncMock(return_value=execute_result)
     conn.__aenter__ = AsyncMock(return_value=conn)
     conn.__aexit__ = AsyncMock(return_value=False)
+    _mock_transaction(conn)
 
     acquire_ctx = MagicMock()
     acquire_ctx.__aenter__ = AsyncMock(return_value=conn)
@@ -251,6 +266,7 @@ class TestRecordOutcomeNonFatal:
         conn.execute = AsyncMock(side_effect=Exception("connection reset by peer"))
         conn.__aenter__ = AsyncMock(return_value=conn)
         conn.__aexit__ = AsyncMock(return_value=False)
+        _mock_transaction(conn)
         acq = MagicMock()
         acq.__aenter__ = AsyncMock(return_value=conn)
         acq.__aexit__ = AsyncMock(return_value=False)
@@ -327,3 +343,74 @@ class TestRecordOutcomeValueTypes:
 
         payload = json.loads(captured[0])
         assert payload["value"] == expected
+
+
+@pytest.mark.unit
+class TestRecordOutcomeRlsTenantSession:
+    """RU-079 / RG-104: the UPDATE runs under the DDL's tenant GUC."""
+
+    @staticmethod
+    def _recording_pool() -> tuple[Any, list[tuple[str, str, tuple[Any, ...]]]]:
+        events: list[tuple[str, str, tuple[Any, ...]]] = []
+        pool_mgr, conn = _mock_pool()
+
+        async def execute(sql: str, *args: Any) -> str:
+            events.append(("execute", sql, args))
+            return "UPDATE 1"
+
+        async def fetchval(sql: str, *args: Any) -> Any:
+            events.append(("fetchval", sql, args))
+            return args[0] if args else None
+
+        tx = MagicMock()
+
+        async def enter(*_a: Any) -> Any:
+            events.append(("tx_begin", "", ()))
+            return tx
+
+        async def leave(*_a: Any) -> bool:
+            events.append(("tx_end", "", ()))
+            return False
+
+        tx.__aenter__ = AsyncMock(side_effect=enter)
+        tx.__aexit__ = AsyncMock(side_effect=leave)
+        conn.transaction = MagicMock(return_value=tx)
+        conn.execute = AsyncMock(side_effect=execute)
+        conn.fetchval = AsyncMock(side_effect=fetchval)
+        return pool_mgr, events
+
+    @pytest.mark.asyncio
+    async def test_set_config_then_update_in_one_transaction(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import engine.packet.packet_store as ps_mod
+
+        _make_store_enabled(monkeypatch)
+        pool_mgr, events = self._recording_pool()
+        monkeypatch.setattr(ps_mod, "_pool_manager", pool_mgr)
+
+        kwargs = dict(_BASE_KWARGS, tenant="rls-tenant")
+        result = await ps_mod.PacketStore().record_outcome(**kwargs)
+
+        assert result is True
+        kinds = [kind for kind, _sql, _args in events]
+        assert kinds == ["tx_begin", "fetchval", "execute", "tx_end"]
+        _, set_sql, set_args = events[1]
+        assert set_sql.strip() == "SELECT set_config('app.current_tenant', $1, true)"
+        assert set_args == ("rls-tenant",)
+        _, update_sql, update_args = events[2]
+        assert update_sql is ps_mod._UPDATE_OUTCOME_SQL
+        assert update_args[2] == "rls-tenant"  # C-3: tenant still in the WHERE clause
+
+    @pytest.mark.asyncio
+    async def test_flag_off_no_set_config_no_transaction(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import engine.packet.packet_store as ps_mod
+        from engine.config.settings import settings
+
+        _make_store_enabled(monkeypatch)
+        monkeypatch.setattr(settings, "packet_store_rls_tenant_session_enabled", False)
+        pool_mgr, events = self._recording_pool()
+        monkeypatch.setattr(ps_mod, "_pool_manager", pool_mgr)
+
+        result = await ps_mod.PacketStore().record_outcome(**_BASE_KWARGS)
+
+        assert result is True
+        assert [kind for kind, _sql, _args in events] == ["execute"]

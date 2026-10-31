@@ -57,3 +57,30 @@ def test_unknown_impl_does_not_dump_unit_dir() -> None:
 def test_infer_parent_stem_mapping() -> None:
     hits = infer_unit_tests("engine/gates/compiler.py", REPO)
     assert "tests/unit/test_gate_compiler.py" in hits
+
+
+@pytest.mark.unit
+def test_helper_only_staging_selects_nothing() -> None:
+    """RG-177 (RU-141): conftest/fixture helpers are not test modules (pytest.ini python_files = test_*.py)."""
+    assert select_unit_tests(["tests/conftest.py"], REPO) == []
+    assert select_unit_tests(["tests/unit/conftest.py", "tests/fixtures/__init__.py"], REPO) == []
+
+
+@pytest.mark.unit
+def test_helper_only_staging_main_exits_ok_without_pytest(monkeypatch: pytest.MonkeyPatch) -> None:
+    import run_precommit_pytest_unit as hook
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(hook, "_run_pytest", lambda args: calls.append(args) or 5)
+    assert hook.main(["tests/conftest.py"]) == 0
+    assert calls == []
+
+
+@pytest.mark.unit
+def test_staged_test_module_still_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    import run_precommit_pytest_unit as hook
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(hook, "_run_pytest", lambda args: calls.append(args) or 0)
+    assert hook.main(["tests/unit/test_settings.py", "tests/conftest.py"]) == 0
+    assert calls == [["tests/unit/test_settings.py"]]

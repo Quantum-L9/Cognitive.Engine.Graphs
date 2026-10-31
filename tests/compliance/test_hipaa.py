@@ -201,3 +201,67 @@ class TestCustomPIIFields:
         assert len(detections) == 1
         assert detections[0].field_path == "mrn"
         assert detections[0].sensitivity == PIISensitivity.HIGH
+
+
+# ── RU-062 / CEG-COR-009: lists are traversed, input is never mutated ──
+
+
+@pytest.mark.compliance
+@pytest.mark.unit
+class TestPIIRecursiveTraversal:
+    def test_detect_pii_descends_into_list_of_dicts(self) -> None:
+        handler = PIIHandler()
+        paths = handler.get_pii_field_paths({"entity_id": "b1", "coborrowers": [{"email": "x@y.com"}]})
+        assert paths == ("coborrowers[0].email",)
+
+    def test_detect_pii_descends_into_list_of_strings(self) -> None:
+        handler = PIIHandler()
+        detections = handler.detect_pii({"notes": ["clean", "SSN is 123-45-6789"]})
+        assert [(d.field_path, d.category) for d in detections] == [("notes[1]", PIICategory.SSN)]
+
+    def test_detect_pii_nested_lists_and_tuples(self) -> None:
+        handler = PIIHandler()
+        payload = {"a": [[{"phone": "555-123-4567"}]], "b": ({"contact_email": "a@b.com"},)}
+        assert handler.get_pii_field_paths(payload) == ("a[0][0].phone", "b[0].contact_email")
+
+    def test_dict_only_paths_unchanged(self) -> None:
+        handler = PIIHandler()
+        payload = {"patient": {"first_name": "John", "contact": {"phone": "555-123-4567"}}, "id": 1}
+        assert handler.get_pii_field_paths(payload) == ("patient.first_name", "patient.contact.phone")
+
+    def test_redact_does_not_mutate_nested_input(self) -> None:
+        import copy
+
+        handler = PIIHandler()
+        payload = {"customer": {"email": "a@b.com", "tier": "gold"}, "rows": [{"ssn": "123-45-6789"}], "id": 7}
+        before = copy.deepcopy(payload)
+        out = handler.redact(payload, ["customer.email", "rows[0].ssn"])
+        assert payload == before
+        assert out == {"customer": {"tier": "gold"}, "rows": [{}], "id": 7}
+
+    def test_mask_fields_does_not_mutate_nested_input(self) -> None:
+        import copy
+
+        handler = PIIHandler()
+        payload = {"customer": {"email": "a@b.com"}, "rows": [{"phone": "555-123-4567"}]}
+        before = copy.deepcopy(payload)
+        out = handler.mask_fields(payload, mask_all_detected=True)
+        assert payload == before
+        assert out["customer"]["email"] == "***@***.com"
+        assert out["rows"][0]["phone"] != "555-123-4567"
+
+    def test_redact_all_detected_reaches_list_elements(self) -> None:
+        handler = PIIHandler()
+        out = handler.redact({"notes": ["keep", "SSN 123-45-6789", "also keep"]}, redact_all_detected=True)
+        assert out == {"notes": ["keep", "also keep"]}
+
+    def test_query_id_not_detected_inside_lists(self) -> None:
+        handler = PIIHandler()
+        assert handler.detect_pii({"ids": ["q_5c9382647927"], "query_id": "q_5c9382647927"}) == []
+
+    def test_flag_off_restores_dict_only_traversal(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "pii_redaction_recursive", False)
+        handler = PIIHandler()
+        assert handler.get_pii_field_paths({"entity_id": "b1", "coborrowers": [{"email": "x@y.com"}]}) == ()

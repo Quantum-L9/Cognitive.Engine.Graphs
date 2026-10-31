@@ -16,6 +16,7 @@ These tests verify that the engine correctly blocks prohibited factors at
 compile-time, preventing discriminatory matching criteria.
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -189,3 +190,129 @@ class TestEnforcementModes:
 
         # Should not raise
         validator.validate_gate(gate)
+
+
+# ============================================================================
+# RU-061 / CEG-COR-008: every compiled property reference, casefolded
+# ============================================================================
+
+_MORTGAGE_SPEC_PATH = "domains/mortgage-brokerage/spec.yaml"
+
+
+def _mortgage_spec() -> DomainSpec:
+    import yaml
+
+    return DomainSpec.model_validate(yaml.safe_load(Path(_MORTGAGE_SPEC_PATH).read_text(encoding="utf-8")))
+
+
+def _gate(**fields: object) -> GateSpec:
+    return GateSpec.model_validate({"name": "g", **fields})
+
+
+def _dim(**fields: object):
+    from engine.config.schema import ScoringDimensionSpec
+
+    base = {
+        "name": "d",
+        "source": "candidateproperty",
+        "computation": "candidateproperty",
+        "weightkey": "w_d",
+        "defaultweight": 0.1,
+    }
+    return ScoringDimensionSpec.model_validate({**base, **fields})
+
+
+@pytest.mark.compliance
+@pytest.mark.unit
+class TestFullPropertyCoverage:
+    """Mortgage-brokerage blocks `age`/`race`/`gender`: no compiled field may reference them."""
+
+    @pytest.mark.parametrize(
+        "gate_fields",
+        [
+            {"type": "selfrange", "candidateprop_min": "age", "candidateprop_max": "maxloan"},
+            {"type": "range", "candidateprop": "loanamount", "queryparam_max": "age"},
+            {"type": "range", "candidateprop": "loanamount", "queryparam_min": "AGE"},
+            {"type": "temporalrange", "candidateprop_start": "age", "candidateprop_end": "x_end"},
+            {"type": "temporalrange", "queryparam_start": "Age", "queryparam_end": "x_end"},
+            {"type": "temporalrange", "queryparam_start": "x_start", "queryparam_end": "age"},
+            {"type": "selfrange", "candidateprop_min": "minx", "candidateprop_max": "age"},
+            {"type": "temporalrange", "candidateprop_start": "s", "candidateprop_end": "Age"},
+            {"type": "threshold", "candidateprop": "Race", "queryparam": "x"},
+            {"type": "threshold", "candidateprop": "x", "queryparam": "GENDER"},
+        ],
+    )
+    def test_compliance_engine_blocks_every_property_reference(self, gate_fields: dict) -> None:
+        from engine.compliance.engine import ComplianceEngine
+
+        engine = ComplianceEngine(_mortgage_spec())
+        with pytest.raises(ValueError, match="prohibited field") as exc_info:
+            engine.validate_gates([_gate(**gate_fields)])
+        assert "'g'" in str(exc_info.value)
+
+    def test_literal_queryparam_is_not_a_field_name(self) -> None:
+        validator = ProhibitedFactorValidator(_mortgage_spec())
+        validator.validate_gate(_gate(type="threshold", candidateprop="creditscore", queryparam=85.0))
+        validator.validate_gate(_gate(type="boolean", candidateprop="active", queryparam=True))
+
+    def test_allowed_gates_still_pass(self) -> None:
+        validator = ProhibitedFactorValidator(_mortgage_spec())
+        validator.validate_gate(_gate(type="threshold", candidateprop="mincreditscore", queryparam="creditscore"))
+        validator.validate_gate(_gate(type="threshold", candidateprop="annualincome", queryparam="income"))
+        validator.validate_gate(_gate(type="selfrange", candidateprop_min="minloan", candidateprop_max="maxloan"))
+
+    @pytest.mark.parametrize(
+        ("dim_fields", "named"),
+        [({"candidateprop": "age"}, "age"), ({"source": "queryproperty", "queryprop": "Gender"}, "Gender")],
+    )
+    def test_scoring_dimension_on_blocked_field_raises(self, dim_fields: dict, named: str) -> None:
+        from engine.compliance.engine import ComplianceEngine
+
+        engine = ComplianceEngine(_mortgage_spec())
+        with pytest.raises(ValueError, match="prohibited field") as exc_info:
+            engine.validate_scoring([_dim(**dim_fields)])
+        assert "'d'" in str(exc_info.value)
+        assert named in str(exc_info.value)
+
+    def test_shipped_mortgage_dimensions_pass(self) -> None:
+        from engine.compliance.engine import ComplianceEngine
+
+        spec = _mortgage_spec()
+        engine = ComplianceEngine(spec)
+        engine.validate_gates(spec.gates)
+        engine.validate_scoring(spec.scoring.dimensions)
+
+    def test_plasticos_with_empty_blockedfields_passes(self) -> None:
+        import yaml
+
+        from engine.compliance.engine import ComplianceEngine
+
+        spec = DomainSpec.model_validate(
+            yaml.safe_load(Path("domains/plasticos/spec.yaml").read_text(encoding="utf-8"))
+        )
+        engine = ComplianceEngine(spec)
+        engine.validate_gates(spec.gates)
+        engine.validate_scoring(spec.scoring.dimensions)
+
+    def test_disabled_prohibitedfactors_leaves_every_check_dormant(self) -> None:
+        spec = _mortgage_spec()
+        pf = spec.compliance.prohibitedfactors.model_copy(update={"enabled": False})
+        spec = spec.model_copy(update={"compliance": spec.compliance.model_copy(update={"prohibitedfactors": pf})})
+        validator = ProhibitedFactorValidator(spec)
+        validator.validate_gate(_gate(type="threshold", candidateprop="race", queryparam="age"))
+        validator.validate_scoring_dimension(_dim(candidateprop="age"))
+        validator.validate_sync_row({"race": "x"})
+
+    def test_flag_off_restores_two_field_exact_case_check(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "prohibited_factor_full_coverage", False)
+        validator = ProhibitedFactorValidator(_mortgage_spec())
+        # legacy: case variants and min/max/start/end fields pass, dimensions and rows are unchecked
+        validator.validate_gate(_gate(type="threshold", candidateprop="Race", queryparam="x"))
+        validator.validate_gate(_gate(type="selfrange", candidateprop_min="age", candidateprop_max="y"))
+        validator.validate_scoring_dimension(_dim(candidateprop="age"))
+        validator.validate_sync_row({"Race": "x", "kids": [{"race": "y"}]})
+        # legacy: exact-case candidateprop/queryparam still block
+        with pytest.raises(ValueError, match="prohibited field 'race'"):
+            validator.validate_gate(_gate(type="threshold", candidateprop="race", queryparam="x"))

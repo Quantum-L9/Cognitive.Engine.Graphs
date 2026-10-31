@@ -358,6 +358,24 @@ def _repo_spec(domain_id: str):  # type: ignore[no-untyped-def]
     return DomainSpec.model_validate(yaml.safe_load((_REPO_DOMAINS / domain_id / "spec.yaml").read_text()))
 
 
+def _pre_repair_freight_spec():  # type: ignore[no-untyped-def]
+    """freight-matching as it was before RU-037: deadhead/rate dims declare no operands.
+
+    geodecay then reads candidate.lat/lon vs $lat/$lon and pricealignment
+    candidate.price_per_unit vs $target_price (CEG-COR-011).
+    """
+    import yaml
+
+    from engine.config.schema import DomainSpec
+
+    raw = yaml.safe_load((_REPO_DOMAINS / "freight-matching" / "spec.yaml").read_text())
+    for dim in raw["scoring"]["dimensions"]:
+        if dim["name"] in ("deadhead_distance", "rate_alignment"):
+            for key in ("candidateprop", "candidateprop_lon", "queryprop", "queryprop_lon"):
+                dim.pop(key, None)
+    return DomainSpec.model_validate(raw)
+
+
 _BRIDGE = {
     "name": "bridge",
     "source": "computed",
@@ -526,25 +544,103 @@ class TestScoringAdmission:
         )
 
     def test_freight_matching_is_withheld_for_its_unbound_scoring_parameters(self) -> None:
-        """CEG-COR-011 has not landed: geodecay/pricealignment reference $lat, $lon, $target_price."""
+        """The pre-RU-037 freight shape: geodecay/pricealignment reference $lat, $lon, $target_price."""
         from engine.config.loader import admission_defects, withholding_reason
 
-        spec = _repo_spec("freight-matching")
+        spec = _pre_repair_freight_spec()
         defects = "\n".join(admission_defects(spec))
         for param in ("'lat'", "'lon'", "'target_price'"):
             assert param in defects
         assert withholding_reason(spec) is not None
+        # RU-037 declared the operands: the repository pack is admitted.
+        assert admission_defects(_repo_spec("freight-matching")) == []
 
     def test_flag_off_restores_gate_only_admission(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from engine.config import loader as loader_module
 
         monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", False)
-        for spec in (_spec_with_dimensions([_BRIDGE, _ATTENTION, _POPMEAN, _PRIOR]), _repo_spec("freight-matching")):
+        # RU-039's full-match check also compiles scoring; isolate this unit's flag.
+        monkeypatch.setattr(loader_module.settings, "admission_checks_full_match", False)
+        for spec in (_spec_with_dimensions([_BRIDGE, _ATTENTION, _POPMEAN, _PRIOR]), _pre_repair_freight_spec()):
             assert loader_module.admission_defects(spec) == []
             assert loader_module.withholding_reason(spec) is None
+
+    @pytest.mark.parametrize("domain_id", ["plasticos", "mortgage-brokerage", "freight-matching"])
+    def test_served_packs_have_no_scoring_defect(self, domain_id: str) -> None:
+        """The scoring check alone withholds neither served pack (p_param_binding.py: unbound={})."""
+        from engine.config.loader import admission_defects
+
+        assert [d for d in admission_defects(_repo_spec(domain_id)) if d.startswith("scoring")] == []
 
     def test_unvalidated_override_still_serves(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from engine.config import loader as loader_module
 
         monkeypatch.setattr(loader_module.settings, "unvalidated_domain_packs_enabled", True)
         assert loader_module.withholding_reason(_spec_with_dimensions([_BRIDGE])) is None
+
+
+# ============================================================================
+# RG-065 (RU-051 / CEG-COR-078): the loader cache is bounded by Settings, read
+# from the contract variable names DOMAIN_CACHE_MAXSIZE / DOMAIN_CACHE_TTL_SECONDS.
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestCacheBoundsFromSettings:
+    @pytest.fixture
+    def fresh_settings(self, monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
+        """Rebuild the Settings the loader reads after the test has set its environment."""
+        from engine.config import loader as loader_module
+        from engine.config.settings import Settings
+
+        def _apply() -> None:
+            monkeypatch.setattr(loader_module, "settings", Settings())
+
+        for name in ("DOMAIN_CACHE_MAXSIZE", "DOMAIN_CACHE_MAX_SIZE", "DOMAIN_CACHE_TTL_SECONDS"):
+            monkeypatch.delenv(name, raising=False)
+        return _apply
+
+    def test_contract_variable_bounds_the_cache(self, monkeypatch: pytest.MonkeyPatch, fresh_settings) -> None:  # type: ignore[no-untyped-def]
+        monkeypatch.setenv("DOMAIN_CACHE_MAXSIZE", "2")
+        monkeypatch.setenv("DOMAIN_CACHE_TTL_SECONDS", "7")
+        fresh_settings()
+        loader = DomainPackLoader()
+        assert loader._max_size == 2
+        assert loader._ttl_seconds == 7.0
+
+    def test_defaults_come_from_settings(self, fresh_settings) -> None:  # type: ignore[no-untyped-def]
+        fresh_settings()
+        loader = DomainPackLoader()
+        assert (loader._max_size, loader._ttl_seconds) == (100, 30.0)
+
+    def test_legacy_spelling_is_honoured_only_when_the_contract_variable_is_unset(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        fresh_settings,  # type: ignore[no-untyped-def]
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        monkeypatch.setenv("DOMAIN_CACHE_MAX_SIZE", "5")
+        fresh_settings()
+        with caplog.at_level("WARNING", logger="engine.config.loader"):
+            assert DomainPackLoader()._max_size == 5
+        assert "deprecated" in caplog.text
+
+        monkeypatch.setenv("DOMAIN_CACHE_MAXSIZE", "3")
+        fresh_settings()
+        assert DomainPackLoader()._max_size == 3
+
+    def test_cache_eviction_honours_the_bound(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        fresh_settings,  # type: ignore[no-untyped-def]
+    ) -> None:
+        monkeypatch.setenv("DOMAIN_CACHE_MAXSIZE", "2")
+        fresh_settings()
+        for name in ("pack-a", "pack-b", "pack-c"):
+            (tmp_path / name).mkdir()
+            (tmp_path / name / "spec.yaml").write_text(_minimal_spec_yaml(name))
+        loader = DomainPackLoader(config_path=str(tmp_path))
+        for name in ("pack-a", "pack-b", "pack-c"):
+            loader.load_domain(name)
+        assert len(loader._cache) == 2

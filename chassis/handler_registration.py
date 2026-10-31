@@ -1,10 +1,11 @@
 """
 --- L9_META ---
-l9_schema: 2
+l9_schema: 1
 origin: chassis
 engine: graph
 layer: [api]
 tags: [platform, chassis]
+owner: platform-team
 status: active
 --- /L9_META ---
 
@@ -21,6 +22,7 @@ lineage root, and the audited response derives from it (CEG-FIX-002).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -64,6 +66,26 @@ def _with_packet_audit(
         try:
             engine_data = await fn(tenant, payload)
             status = "success"
+        except asyncio.CancelledError:
+            # The SDK cancels a handler that exceeds its timeout. CancelledError
+            # is not an Exception, so without this branch the cancelled call
+            # left no audit pair (RU-086). Record it, shielded from a second
+            # cancellation (persist is bounded by the pool's command_timeout),
+            # then always re-raise the cancellation.
+            if settings.packet_audit_on_cancel_enabled:
+                try:
+                    response_packet = deflate_egress(
+                        request=request_packet,
+                        engine_data={"error": "handler_cancelled"},
+                        status="failed",
+                        processing_ms=(time.time() - start) * 1000,
+                        engine_version=_ENGINE_VERSION,
+                        responding_node=_RESPONDING_NODE,
+                    )
+                    await asyncio.shield(_persist(request_packet, response_packet))
+                except Exception as audit_exc:
+                    logger.warning("Cancelled-handler audit failed (non-fatal): %s", audit_exc)
+            raise
         except Exception:
             # Re-raise so the SDK builds a failure TransportPacket, but record
             # the failed pair first so the audit trail is not lossy.

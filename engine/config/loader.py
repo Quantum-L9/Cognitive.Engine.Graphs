@@ -26,7 +26,7 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError as PydanticValidationError
 
-from engine.config.schema import DomainActivation, DomainSpec
+from engine.config.schema import DomainActivation, DomainSpec, GateSpec
 from engine.config.settings import settings
 from engine.utils.security import tenant_id_defect
 
@@ -88,6 +88,7 @@ def admission_defects(spec: DomainSpec) -> list[str]:
     for gate in spec.gates:
         if gate.strictwhen:
             defects.append(f"{gate.name}: strictwhen {gate.strictwhen!r} is not consumed by any compiler")
+        defects.extend(_role_field_defects(gate))
         try:
             cypher = compiler.compile(gate)
         except (ValueError, KeyError) as exc:
@@ -108,8 +109,66 @@ def admission_defects(spec: DomainSpec) -> list[str]:
         for rule_name in spec.plugins.inference_rules:
             if rule_name not in registered:
                 defects.append(f"plugins.inference_rules: {rule_name!r} is not a registered inference rule")
-    if settings.scoring_admission_check_enabled:
-        defects.extend(_scoring_defects(spec, check_producers=True))
+    if settings.scoring_admission_check_enabled or settings.admission_checks_full_match:
+        defects.extend(_scoring_defects(spec, check_producers=settings.scoring_admission_check_enabled))
+    if settings.admission_checks_full_match:
+        defects.extend(_match_defects(spec))
+    return list(dict.fromkeys(defects))
+
+
+def _role_field_defects(gate: GateSpec) -> list[str]:
+    """RU-015 / CEG-COR-080 (R1a-DEC-05): role exemption and relaxed mode are not served.
+
+    ``handle_match`` passes no request role to ``compile_all_gates`` and never
+    calls ``compile_relaxed``, so a gate's ``roleexempt`` and ``relaxedpenalty``
+    are accepted and ignored. Until a domain needs roles, a pack declaring
+    either is withheld with this named defect. Gated by
+    ``settings.gate_role_exemption``.
+    """
+    if not settings.gate_role_exemption:
+        return []
+    defects: list[str] = []
+    if gate.roleexempt is not None:
+        defects.append(f"{gate.name}: roleexempt {gate.roleexempt!r} is not consumed — match takes no request role")
+    if "relaxedpenalty" in gate.model_fields_set:
+        defects.append(
+            f"{gate.name}: relaxedpenalty {gate.relaxedpenalty!r} is not consumed — relaxed matching is not exposed"
+        )
+    return defects
+
+
+def _match_defects(spec: DomainSpec) -> list[str]:
+    """Per declared match direction: the traversal assembles and the gate WHERE binds.
+
+    ``handle_match`` assembles ``TraversalAssembler.assemble_traversal`` and
+    ``GateCompiler.compile_all_gates`` for the requested direction and sends
+    the result with the parameters it binds; a step the assembler refuses or a
+    ``$parameter`` nothing binds fails every match in that direction. Scoring
+    is covered by ``_scoring_defects``. No Neo4j access.
+    """
+    from engine.gates.compiler import GateCompiler
+    from engine.traversal.assembler import TraversalAssembler
+
+    defects: list[str] = []
+    bindable = _bindable_parameters(spec)
+    for direction in spec.queryschema.matchdirections:
+        cypher_parts: list[str] = []
+        try:
+            cypher_parts.extend(TraversalAssembler(spec).assemble_traversal(direction))
+        except (ValueError, KeyError) as exc:
+            defects.append(f"traversal[{direction}]: refused by the traversal assembler — {exc}")
+        compiler = GateCompiler(spec)
+        try:
+            cypher_parts.append(compiler.compile_all_gates(direction))
+        except (ValueError, KeyError) as exc:
+            defects.append(f"match[{direction}]: gates refused by the compiler — {exc}")
+        bound = bindable | set(compiler.last_query_params)
+        unbound = sorted({p for part in cypher_parts for p in _PARAM_IDENTIFIER_REF.findall(part) if p not in bound})
+        if unbound:
+            names = ", ".join(repr(p) for p in unbound)
+            defects.append(
+                f"match[{direction}]: gates or traversal reference parameter(s) {names}, which nothing binds"
+            )
     return defects
 
 
@@ -247,7 +306,29 @@ def withholding_reason(spec: DomainSpec) -> str | None:
 
 def _match_admission_checks_enabled() -> bool:
     """Whether admission checks more than gates (the pre-remediation wording applies otherwise)."""
-    return settings.scoring_admission_check_enabled
+    return settings.scoring_admission_check_enabled or settings.admission_checks_full_match
+
+
+_LEGACY_CACHE_MAX_SIZE_ENV = "DOMAIN_CACHE_MAX_SIZE"
+
+
+def _domain_cache_max_size() -> int:
+    """``settings.domain_cache_maxsize``, honouring the legacy spelling only when the contract one is unset.
+
+    The loader used to read ``DOMAIN_CACHE_MAX_SIZE`` directly, so the
+    documented contract variable ``DOMAIN_CACHE_MAXSIZE`` had no effect. An
+    operator who set the old name keeps that bound until they rename it.
+    """
+    legacy = os.getenv(_LEGACY_CACHE_MAX_SIZE_ENV)
+    if legacy is not None and "domain_cache_maxsize" not in settings.model_fields_set:
+        logger.warning(
+            "%s is deprecated; set DOMAIN_CACHE_MAXSIZE instead (honouring %s=%s)",
+            _LEGACY_CACHE_MAX_SIZE_ENV,
+            _LEGACY_CACHE_MAX_SIZE_ENV,
+            legacy,
+        )
+        return int(legacy)
+    return int(settings.domain_cache_maxsize)
 
 
 class DomainPackLoader:
@@ -258,8 +339,10 @@ class DomainPackLoader:
         self._base_path = Path(raw).resolve()
         self._cache: dict[str, tuple[DomainSpec, float, float]] = {}
         self._lock = threading.Lock()
-        self._max_size = int(os.getenv("DOMAIN_CACHE_MAX_SIZE", "100"))
-        self._ttl_seconds = float(os.getenv("DOMAIN_CACHE_TTL_SECONDS", "30"))
+        # C-24 bounded cache, sized by Settings (contract variables
+        # DOMAIN_CACHE_MAXSIZE / DOMAIN_CACHE_TTL_SECONDS, CEG-COR-078).
+        self._max_size = _domain_cache_max_size()
+        self._ttl_seconds: float = settings.domain_cache_ttl_seconds
 
     def load_domain(self, domain_id: str) -> DomainSpec:
         """Load a domain only when the generic admission policy admits it.

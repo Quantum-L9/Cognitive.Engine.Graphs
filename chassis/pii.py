@@ -114,43 +114,71 @@ class PIIHandler:
                 return PIIDetection(field_path=path, category=cat, sensitivity=sens, detected_by="pattern")
         return None
 
-    def detect(self, payload: dict[str, Any], prefix: str = "") -> list[PIIDetection]:
-        """Recursively detect PII fields in a payload."""
-        results: list[PIIDetection] = []
-        for key, value in payload.items():
-            path = f"{prefix}.{key}" if prefix else key
-            if isinstance(value, dict):
-                results.extend(self.detect(value, prefix=path))
-                continue
-            hit = self._detect_by_key(key, path)
-            if hit is not None:
-                results.append(hit)
-            elif isinstance(value, str):
-                hit = self._detect_by_pattern(value, path)
-                if hit is not None:
-                    results.append(hit)
-        return results
+    def detect(self, payload: dict[str, Any] | list[Any], prefix: str = "") -> list[PIIDetection]:
+        """Recursively detect PII fields in a payload (dicts and lists/tuples, any depth).
 
-    def get_pii_paths(self, payload: dict[str, Any]) -> tuple[str, ...]:
+        A key matching a PII hint is flagged whatever its value type (a
+        dict-valued ``address`` included). Paths are unambiguous: ``a.b[0].c``,
+        with ``.``, ``[``, ``]``, ``"`` and ``\\`` inside a key escaped by a
+        backslash (``user\\.email``) and the empty key written ``""``, so every
+        detected path is addressable by ``mask`` / ``redact``. Simple
+        nested-dict paths are unchanged.
+        """
+        base = _parse_path(prefix) if prefix else ()
+        return [d for _, d in self._detect(payload, base)]
+
+    def _detect(self, node: Any, path: tuple[_Part, ...]) -> list[tuple[tuple[_Part, ...], PIIDetection]]:
+        found: list[tuple[tuple[_Part, ...], PIIDetection]] = []
+        if isinstance(node, dict):
+            for key, value in node.items():
+                key_path = (*path, str(key))
+                hit = self._detect_by_key(str(key), _format_path(key_path))
+                if hit is not None:
+                    found.append((key_path, hit))
+                elif isinstance(value, (dict, list, tuple)):
+                    found.extend(self._detect(value, key_path))
+                elif isinstance(value, str):
+                    hit = self._detect_by_pattern(value, _format_path(key_path))
+                    if hit is not None:
+                        found.append((key_path, hit))
+        elif isinstance(node, (list, tuple)):
+            for index, item in enumerate(node):
+                item_path = (*path, index)
+                if isinstance(item, (dict, list, tuple)):
+                    found.extend(self._detect(item, item_path))
+                elif isinstance(item, str):
+                    hit = self._detect_by_pattern(item, _format_path(item_path))
+                    if hit is not None:
+                        found.append((item_path, hit))
+        return found
+
+    def get_pii_paths(self, payload: dict[str, Any] | list[Any]) -> tuple[str, ...]:
         """For TransportPacket.security.pii_fields."""
         return tuple(d.field_path for d in self.detect(payload))
 
-    def mask(self, payload: dict[str, Any], fields: list[str] | None = None) -> dict[str, Any]:
-        """Mask specified (or all detected) PII fields. Returns new dict."""
-        result = dict(payload)
+    def _paths(self, payload: Any, fields: list[str] | None) -> list[tuple[_Part, ...]]:
         if fields is None:
-            fields = [d.field_path for d in self.detect(payload)]
-        for path in fields:
-            self._set_at_path(result, path.split("."), masked=True)
+            return [path for path, _ in self._detect(payload, ())]
+        return [_parse_path(f) for f in fields]
+
+    def mask(self, payload: Any, fields: list[str] | None = None) -> Any:
+        """Mask specified (or all detected) PII fields. Returns a new structure; the input is not mutated."""
+        result = _shallow(payload)
+        for path in self._paths(payload, fields):
+            if path:
+                result = _edit(result, path, lambda v: self._mask_char * min(len(str(v)), 12))
         return result
 
-    def redact(self, payload: dict[str, Any], fields: list[str] | None = None) -> dict[str, Any]:
-        """Remove PII fields entirely. Returns new dict."""
-        result = dict(payload)
-        if fields is None:
-            fields = [d.field_path for d in self.detect(payload)]
-        for path in fields:
-            self._del_at_path(result, path.split("."))
+    def redact(self, payload: Any, fields: list[str] | None = None) -> Any:
+        """Remove PII fields entirely. Returns a new structure; the input is not mutated.
+
+        Deepest / highest-index paths are removed first so deleting a list
+        element never shifts another path still to be applied.
+        """
+        result = _shallow(payload)
+        paths = {p for p in self._paths(payload, fields) if p}
+        for path in sorted(paths, key=_sort_key, reverse=True):
+            result = _edit(result, path, lambda _v: _DELETE)
         return result
 
     @staticmethod
@@ -158,15 +186,111 @@ class PIIHandler:
         """SHA-256 pseudonymization."""
         return hashlib.sha256(f"{salt}{value}".encode()).hexdigest()
 
-    def _set_at_path(self, data: dict, parts: list[str], masked: bool) -> None:
-        if len(parts) == 1:
-            if parts[0] in data:
-                data[parts[0]] = self._mask_char * min(len(str(data[parts[0]])), 12)
-        elif parts[0] in data and isinstance(data[parts[0]], dict):
-            self._set_at_path(data[parts[0]], parts[1:], masked)
 
-    def _del_at_path(self, data: dict, parts: list[str]) -> None:
-        if len(parts) == 1:
-            data.pop(parts[0], None)
-        elif parts[0] in data and isinstance(data[parts[0]], dict):
-            self._del_at_path(data[parts[0]], parts[1:])
+# ── Structured, escaped paths (RU-071) ────────────────────
+
+_Part = str | int
+_DELETE = object()
+_ESCAPE_RE = re.compile(r'([.\[\]\\"])')
+# The empty key has no characters to escape; it is written as an unescaped
+# `""` (a literal `"` in a key is always escaped, so this cannot collide).
+_EMPTY_KEY = '""'
+
+
+def _format_path(path: tuple[_Part, ...]) -> str:
+    out = ""
+    for part in path:
+        if isinstance(part, int):
+            out += f"[{part}]"
+        else:
+            escaped = _ESCAPE_RE.sub(r"\\\1", part) if part else _EMPTY_KEY
+            out += f".{escaped}" if out else escaped
+    return out
+
+
+def _malformed(path: str) -> ValueError:
+    msg = f"Malformed PII field path {path!r}: empty key component (write the empty key as {_EMPTY_KEY})"
+    return ValueError(msg)
+
+
+def _parse_path(path: str) -> tuple[_Part, ...]:
+    parts: list[_Part] = []
+    key: list[str] = []
+    have_key = False
+    escaped = False
+    after_dot = False
+
+    def close_key() -> None:
+        raw = "".join(key)
+        parts.append("" if raw == _EMPTY_KEY and not escaped else raw)
+
+    i = 0
+    while i < len(path):
+        ch = path[i]
+        if ch == "\\" and i + 1 < len(path):
+            key.append(path[i + 1])
+            have_key = escaped = True
+            after_dot = False
+            i += 2
+            continue
+        if ch in ".[":
+            if have_key:
+                close_key()
+            elif after_dot or (ch == "." and not parts):
+                raise _malformed(path)
+            key, have_key, escaped = [], False, False
+            after_dot = ch == "."
+            if ch == "[":
+                end = path.index("]", i)
+                parts.append(int(path[i + 1 : end]))
+                i = end
+        else:
+            key.append(ch)
+            have_key = True
+            after_dot = False
+        i += 1
+    if have_key:
+        close_key()
+    elif after_dot:
+        raise _malformed(path)
+    return tuple(parts)
+
+
+def _sort_key(path: tuple[_Part, ...]) -> tuple[tuple[int, Any], ...]:
+    return tuple((0, p) if isinstance(p, int) else (1, p) for p in path)
+
+
+def _shallow(payload: Any) -> Any:
+    if isinstance(payload, dict):
+        return dict(payload)
+    if isinstance(payload, list):
+        return list(payload)
+    return payload
+
+
+def _edit(node: Any, path: tuple[_Part, ...], transform: Any) -> Any:
+    """Return ``node`` with ``transform`` applied at ``path``, copying containers on the path."""
+    if not path:
+        return transform(node)
+    head, rest = path[0], path[1:]
+    if isinstance(node, dict) and isinstance(head, str):
+        if head not in node:
+            return node
+        new_value = _edit(node[head], rest, transform)
+        copied = dict(node)
+        if new_value is _DELETE:
+            copied.pop(head)
+        else:
+            copied[head] = new_value
+        return copied
+    if isinstance(node, (list, tuple)) and isinstance(head, int):
+        if head >= len(node):
+            return node
+        new_value = _edit(node[head], rest, transform)
+        items = list(node)
+        if new_value is _DELETE:
+            del items[head]
+        else:
+            items[head] = new_value
+        return tuple(items) if isinstance(node, tuple) else items
+    return node

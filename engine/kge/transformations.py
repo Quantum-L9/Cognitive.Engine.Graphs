@@ -224,17 +224,14 @@ class Shear(Transformation3D):
             out[i : i + 3] = mat @ embedding[i : i + 3]
         return out
 
-    def inverse(self) -> Shear:
-        """Inverse shear via matrix inverse (exists if det != 0)."""
-        mat_inv = np.linalg.inv(self._matrix())
-        return Shear(
-            shxy=-mat_inv[0, 1],
-            shxz=-mat_inv[0, 2],
-            shyx=-mat_inv[1, 0],
-            shyz=-mat_inv[1, 2],
-            shzx=-mat_inv[2, 0],
-            shzy=-mat_inv[2, 1],
-        )
+    def inverse(self) -> Transformation3D:
+        """Inverse shear: the 3x3 matrix inverse (exists if det != 0).
+
+        A Shear has a fixed unit diagonal and cannot represent a general M^-1
+        (CEG-COR-107: negating the off-diagonals of M^-1 is not an inverse), so
+        the inverse is a LinearMap3D applied per 3-block like Shear.apply.
+        """
+        return LinearMap3D.from_array(np.linalg.inv(self._matrix()))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -246,3 +243,41 @@ class Shear(Transformation3D):
             "shzx": self.shzx,
             "shzy": self.shzy,
         }
+
+
+@dataclass(frozen=True)
+class LinearMap3D(Transformation3D):
+    """General invertible 3x3 linear map applied per 3-element block.
+
+    Represents ``Shear.inverse()``: a shear's inverse matrix generally has a
+    non-unit diagonal, which no Shear can hold. Trailing coordinates beyond the
+    last complete 3-block are left untouched, as in ``Shear.apply``.
+    """
+
+    matrix: tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]
+
+    @classmethod
+    def from_array(cls, mat: npt.NDArray[np.float64]) -> LinearMap3D:
+        m = np.asarray(mat, dtype=np.float64)
+        if m.shape != (3, 3):
+            msg = f"LinearMap3D needs a 3x3 matrix, got shape {m.shape}"
+            raise ValueError(msg)
+        rows: list[list[float]] = m.tolist()
+        r0, r1, r2 = ((row[0], row[1], row[2]) for row in rows)
+        return cls(matrix=(r0, r1, r2))
+
+    def _matrix(self) -> npt.NDArray[np.float64]:
+        return np.array(self.matrix, dtype=np.float64)
+
+    def apply(self, embedding: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        mat = self._matrix()
+        out = np.copy(embedding)
+        for i in range(0, len(embedding) - 2, 3):
+            out[i : i + 3] = mat @ embedding[i : i + 3]
+        return out
+
+    def inverse(self) -> LinearMap3D:
+        return LinearMap3D.from_array(np.linalg.inv(self._matrix()))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"type": "linear", "matrix": [list(row) for row in self.matrix]}

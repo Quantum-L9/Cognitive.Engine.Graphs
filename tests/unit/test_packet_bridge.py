@@ -76,3 +76,33 @@ def test_packet_bridge_derive_preserves_lineage():
     assert derived.lineage.root_id == root.lineage.root_id
     assert derived.lineage.parent_id == root.header.packet_id
     assert derived.lineage.generation == 1
+
+
+# -- RU-091 / RG-120: build_request_packet advertises only what it honours ----
+
+
+def test_build_request_packet_signature_has_no_ignored_parameters():
+    import inspect
+
+    from engine.packet_bridge import build_request_packet
+
+    params = inspect.signature(build_request_packet).parameters
+    assert "packet_type" not in params
+    assert "intent" not in params
+
+
+@pytest.mark.parametrize("kwarg", [{"packet_type": "event"}, {"intent": "custom-intent"}])
+def test_build_request_packet_rejects_ignored_parameters(kwarg: dict[str, str]):
+    from engine.packet_bridge import build_request_packet
+
+    with pytest.raises(TypeError):
+        build_request_packet(action="match", payload={}, tenant="t", trace_id="trace-1", **kwarg)
+
+
+def test_build_request_packet_is_a_request_with_action_intent():
+    from engine.packet_bridge import build_request_packet
+
+    packet = build_request_packet(action="match", payload={}, tenant="t", trace_id="trace-1")
+    assert packet.header.packet_type == "request"
+    assert packet.governance.intent == "match"
+    assert packet.address.destination_node == "gate"
