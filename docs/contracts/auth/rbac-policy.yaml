@@ -1,0 +1,111 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: engine-specific
+# engine: graph
+# layer: [docs, contracts]
+# tags: [contracts, authorization]
+# owner: engine-team
+# status: active
+# --- /L9_META ---
+
+contract_id: CEG-AUTH-RBAC-POLICY-v1
+campaign_id: CEG-CONTRACT-COMPLETE-2026-10-30
+baseline:
+  repository: Quantum-L9/Cognitive.Engine.Graphs
+  commit: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+authority: candidate_extracted_from_source
+schema: l9.ceg.auth.rbac-policy/v1
+owner: Gate identity/ingress owner plus CEG action-capability owner
+status: source_controls_verified_locally
+source_refs:
+- path: engine/auth/capabilities.py
+  symbol: ACTION_PERMISSION_MAP, CapabilitySet.has_capability, check_action_permission
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+- path: engine/handlers.py
+  symbol: _enforce_capability, _validate_tenant_access, handle_resolve, handle_admin
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+- path: engine/spec.yaml
+  symbol: node.actions
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+- path: chassis/handler_registration.py
+  symbol: register_engine_handlers
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+observed:
+  role_based_access_control_proven: false
+  gate_verified_signing_key_policy: source_present_but_current_live_deployment_unverified
+  gate_caller_tenant_and_actions_scopes: source_present_but_current_live_deployment_unverified
+  ceg_tenant_allowlist: true
+  ceg_domain_spec_capability_set: production_write_fail_closed
+  ceg_capability_guard_is_conditional: dev_local_test_bypass_only
+  delegated_root_minting_from_payload: denied
+  sdk_handler_registration_includes_local_actions: true
+action_permission_current:
+  match: match:read
+  sync: sync:write
+  admin: admin:write
+  outcomes: sync:write
+  resolve: sync:write
+  enrich: sync:write
+inconsistency:
+  id: AUTH-RESOLVE-01
+  action: resolve
+  side_effect: Creates RESOLVED_FROM edges, optionally performs batch resolution
+  declared_permission: sync:write
+  required_disposition: implemented with existing graph-write capability; read-only actor denial covered by native unit test
+  status: source_remediated_local
+policy_requirements:
+- Authenticated Gate ingress with explicit caller-kind/tenant/action allowlist
+- CEG tenant allowlist must authorize target DB; no caller database override
+- Writes must demand a write permission even if handler is named resolve
+- A production domain with no capability declaration, or no matching write grant, must deny the write
+- CAPABILITY_AUTH_ENABLED=false is permitted only in dev, local, or test environments
+- Local admin/enrich are not remotely exposed via Gate node-spec
+required_proof:
+- read-only caller denied resolve before graph query
+- write-authorized caller can resolve in correct tenant
+- wrong-tenant refusal
+- Gate worker and consumer caller policies pass
+- existing match permission not expanded
+- unconfigured CapabilitySet cannot authorize untrusted writes in production
+- missing permission entry cannot authorize untrusted writes
+- SDK direct ingress for admin/enrich denied in production
+- Gate main vs PR #31 acceptance evidence separately bound
+- delegate_capability rejects forged source_tenant and unauthorized root synthesis
+- revoke/capability_audit restricted to authorized operator
+release_ready: false
+operational_proof:
+  observed_in_this_pack: false
+  runtime_test_receipt: null
+  CI_run_id: null
+  blocked_until: Gate/SDK and Neo4j integration evidence, not this file presence
+contract_status_is_not_runtime_status: true
+additional_inconsistencies:
+- id: AUTH-CAPSET-02
+  source: engine/auth/capabilities.py:CapabilitySet.has_capability
+  mechanism: Unconfigured or missing capability entries retain only approved public reads; write capabilities fail closed in production.
+  required_disposition: source_remediated_local; retain explicit per-domain write grants and prove production ingress behavior
+  status: source_remediated_local
+- id: AUTH-GATE-03
+  source: engine/spec.yaml vs chassis/handler_registration.py
+  mechanism: Gate node spec advertises 5 actions, SDK wrapper registers all ACTION_HANDLERS including local admin/enrich. Registration is not equivalent to Gate routing authorization.
+  required_disposition: prove direct-ingress refusal and owner-admitted route policy for every action
+  status: unverified
+- id: AUTH-DELEGATE-04
+  source: engine/handlers.py:handle_admin delegate_capability branch
+  mechanism: Delegation now requires source_tenant to equal the packet tenant and an existing active registered parent whose actions and domain scope cover the child. Payload input cannot synthesize a root.
+  required_disposition: source_remediated_local; bind root registration and caller identity to canonical ingress for operational closure
+  status: source_remediated_local
+gate_dependency:
+  main: cfeb81fa4d11eb8c106314fa27310f660a1dfad7
+  pr29: open_at_inspection
+  pr31: open_at_inspection
+  health_assess_canonical_ownership_on_main: not_proven
+policy_authority_boundary:
+  observed_permissions: engine/auth/capabilities.py only; not proof of suitable Gate policy
+  desired_policy: proposed_pending_canonical_owner_approval
+  source_of_runtime_authorization: engine handlers + SDK ingress + Gate policy, not this YAML
+  must_not_claim:
+  - strict_RBAC_implemented_end_to_end
+  - resolve_is_read_only
+  - SDK_registered_actions_are_Gate_authorized
+  - root_delegation_has_been_safely_admitted_by_canonical_ingress

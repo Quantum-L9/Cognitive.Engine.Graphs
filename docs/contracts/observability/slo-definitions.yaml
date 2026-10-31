@@ -1,0 +1,72 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: engine-specific
+# engine: graph
+# layer: [docs, contracts]
+# tags: [contracts, observability]
+# owner: engine-team
+# status: active
+# --- /L9_META ---
+
+contract_id: CEG-OBS-SLO-DEFINITIONS-v1
+campaign_id: CEG-CONTRACT-COMPLETE-2026-10-30
+baseline:
+  repository: Quantum-L9/Cognitive.Engine.Graphs
+  commit: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+authority: candidate_extracted_from_source
+schema: l9.ceg.observability.slo-definitions/v1
+owner: CEG SRE/service owner with chassis metrics owner
+status: slo_targets_not_approved_or_measured
+source_refs:
+- path: chassis/handler_registration.py
+  symbol: audit/status
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+- path: tests/performance/test_query_latency.py
+  symbol: test-specific thresholds
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+- path: chassis/chassis_app.py
+  symbol: _execute_route
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+observed:
+  fixture_latency_tests: true
+  observed_production_sli_stream_proven: false
+  approved_slo: false
+  metric_names_are_not_verified_from_chassis_source: true
+slis:
+- name: authorized_execute_success
+  source: Gate -> CEG validated execution
+  numerator: authorized eligible requests with correct terminal outcome
+  denominator: all authorized eligible requests
+  target: null
+  window: null
+  status: unapproved
+- name: execute_latency
+  source: actual request latency histogram
+  percentile: p95
+  target_ms: null
+  window: null
+  status: unapproved
+- name: score_blocked_ratio
+  source: future score route after approval
+  target: null
+  window: null
+  status: not_active
+required_proof:
+- real metric owner wired
+- sample measurements from staging
+- operator-approved target/window
+- alert ownership
+- release rollback threshold
+anti_claim: 100ms/200ms seeded benchmark assertions are not production service objectives.
+operational_proof:
+  observed_in_this_pack: false
+  runtime_test_receipt: null
+  CI_run_id: null
+  blocked_until: owner-native executable and integration evidence, not this file presence
+contract_status_is_not_runtime_status: true
+eligibility_rule: Do not count denied ingress as an authorized execution success. Determine denominator at
+  Gate/SDK instrumentation owner before approval.
+blocked_on:
+- chassis/SDK source telemetry owner verification
+- staging sample distribution
+- owner-approved SLO percentiles and windows

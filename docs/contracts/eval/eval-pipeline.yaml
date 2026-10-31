@@ -1,0 +1,59 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: engine-specific
+# engine: graph
+# layer: [docs, contracts]
+# tags: [contracts, evaluation]
+# owner: engine-team
+# status: active
+# --- /L9_META ---
+
+contract_id: CEG-EVAL-PIPELINE-v1
+campaign_id: CEG-CONTRACT-COMPLETE-2026-10-30
+baseline:
+  repository: Quantum-L9/Cognitive.Engine.Graphs
+  commit: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+authority: candidate_extracted_from_source
+schema: l9.ceg.eval.pipeline/v1
+owner: CEG evaluation owner
+status: not_implemented_as_release_pipeline
+source_refs:
+- path: tools/hoprag_benchmark.py
+  symbol: benchmark entry
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+- path: tests/performance/test_query_latency.py
+  symbol: fixture assertion
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+- path: tests/performance/test_sync_throughput.py
+  symbol: fixture assertion
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+- path: engine/scoring/evidence_priority.py
+  symbol: score/abstention semantics
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+observed:
+  benchmarks_exist: true
+  end_to_end_release_eval_runner_proven: false
+  reproducible_dataset_proven: false
+  scoring_baseline_gate_proven: false
+  legacy_admin_evaluate_exists: true
+  legacy_admin_evaluate_is_not_release_gate: true
+release_gate:
+  operational: false
+  dataset_revision: null
+  evaluation_command: null
+  acceptance_thresholds: null
+  required_proof:
+  - versioned non-sensitive dataset
+  - deterministic baseline comparisons
+  - scorer positive/negative/abstention outputs
+  - CI execution receipt
+blocking_reason: No verified evaluator/promotion gate has been bound to the current source; performance test
+  is not a release evaluation.
+operational_proof:
+  observed_in_this_pack: false
+  runtime_test_receipt: null
+  CI_run_id: null
+  blocked_until: owner-native executable and integration evidence, not this file presence
+contract_status_is_not_runtime_status: true
+source_code_note: engine/handlers.py:_handle_evaluate computes ranking metrics from test_set; no observed versioned
+  production dataset or CI promotion integration.

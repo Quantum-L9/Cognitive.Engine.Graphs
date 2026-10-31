@@ -1,0 +1,131 @@
+{
+  "_l9_meta": {
+    "l9_schema": 1,
+    "origin": "engine-specific",
+    "engine": "graph",
+    "layer": [
+      "docs",
+      "contracts"
+    ],
+    "tags": [
+      "contracts",
+      "tool-schema"
+    ],
+    "owner": "engine-team",
+    "status": "active"
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Quantum-L9/Cognitive.Engine.Graphs/docs/contracts/agents/tool-schemas/enrich.schema.json",
+  "title": "EnrichActionPayload",
+  "description": "CEG-local graph property expression enrichment. Gate canonical enrich belongs to EIE and this action MUST NOT be registered as routable. Source: engine/handlers.py:handle_enrich() at bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0. Packet tenant is supplied by the chassis, not by this payload.",
+  "type": "object",
+  "properties": {
+    "entity_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Graph entity label. Sanitized by sanitize_label at runtime."
+    },
+    "entity_ids": {
+      "type": "array",
+      "description": "Optional entity ids; omission means all eligible rows.",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Existing entity id."
+      },
+      "default": []
+    },
+    "enrichments": {
+      "type": "array",
+      "description": "Derived properties. Each expression must pass the CEG strict Cypher-expression sanitizer.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "property": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Graph property name, sanitized at runtime."
+          },
+          "expression": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Safe expression whitelist; cannot include arbitrary Cypher or procedure calls."
+          }
+        },
+        "required": [
+          "property",
+          "expression"
+        ],
+        "additionalProperties": false
+      },
+      "default": []
+    }
+  },
+  "required": [
+    "entity_type"
+  ],
+  "additionalProperties": false,
+  "examples": [
+    {
+      "entity_type": "Supplier",
+      "entity_ids": [
+        "supplier-1"
+      ],
+      "enrichments": [
+        {
+          "property": "rank",
+          "expression": "n.score + 1"
+        }
+      ]
+    },
+    {
+      "entity_type": "Supplier",
+      "enrichments": []
+    }
+  ],
+  "x-negative-examples": [
+    {
+      "enrichments": []
+    },
+    {
+      "entity_type": "Supplier",
+      "enrichments": [
+        {
+          "property": "rank"
+        }
+      ]
+    }
+  ],
+  "x-source-file": "engine/handlers.py:handle_enrich",
+  "x-source-revision": "bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0",
+  "x-required-capability-current": "sync:write",
+  "x-exposure": "local_only_not_gate_advertised",
+  "x-side-effects": "write: sets computed Neo4j entity properties",
+  "x-schema-role": "bounded public client contract; the legacy handler may ignore extra keys",
+  "x-unsafe-expression-note": "The JSON schema validates expression shape only; engine._sanitize_expression() is the actual injection enforcement.",
+  "x-source-code-refs": [
+    "engine/handlers.py:handle_enrich (2912-2989)",
+    "engine/handlers.py:_sanitize_expression (415-441)",
+    "engine/spec.yaml:node.actions (45-50)",
+    "chassis/handler_registration.py:register_engine_handlers (144-152)"
+  ],
+  "x-runtime-validator-applies-this-json-schema": false,
+  "x-exposure-warning": "Gate node spec excludes enrich (EIE owns the routed enrich name); SDK still registers this CEG handler locally from ACTION_HANDLERS. Caller reachability needs an ingress test, not a comment.",
+  "x-runtime-validation-boundary": "The SDK routes payload dict to handler; no observed loader validates this JSON Schema. additionalProperties:false and example rejection are candidate client contracts, NOT runtime rejection proofs.",
+  "x-contract-status": "candidate_unenforced_not_release_admitted",
+  "x-source-trace": "Code at engine/handlers.py and declared payload models; see alignment/FILE_LEDGER.yaml for source revision, owner and remaining proof.",
+  "x-authorization-is-runtime-owned": true,
+  "x-prohibited-claim": "Passing this schema proves only candidate JSON Schema validity, not Gate reachability, handler validation, authorization, or safe writes.",
+  "x-runtime-negative-examples": [
+    {
+      "entity_type": "Supplier",
+      "enrichments": [
+        {
+          "property": "rank",
+          "expression": "MATCH (n) DETACH DELETE n"
+        }
+      ]
+    }
+  ],
+  "x-expression-safety-boundary": "JSON schema rejects unknown field shapes, NOT unsafe Cypher expressions. engine.handlers._sanitize_expression is authoritative; separate negative execution tests required."
+}

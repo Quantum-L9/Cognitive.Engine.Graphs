@@ -1,0 +1,90 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: engine-specific
+# engine: graph
+# layer: [docs, contracts]
+# tags: [contracts, api, schema]
+# owner: engine-team
+# status: active
+# --- /L9_META ---
+
+schema: l9.ceg.api.shared-models/v1
+contract_id: CEG-API-SHARED-MODELS-v1
+campaign_id: CEG-CONTRACT-COMPLETE-2026-10-30
+baseline:
+  repository: Quantum-L9/Cognitive.Engine.Graphs
+  commit: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+authority: candidate_extracted_from_source
+not_a_runtime_feature_flag: true
+artifact: docs/contracts/api/schemas/shared-models.yaml
+owner: CEG API/contract owner, subject to Gate_SDK transport owner
+status: derived_contract_with_unverified_live_sdk_semantics
+source_refs:
+- path: chassis/chassis_app.py
+  symbols:
+  - ExecuteRequest
+  - ExecuteResponse
+  - _execute_route
+- path: chassis/handler_registration.py
+  symbols:
+  - register_engine_handlers
+  - _with_packet_audit
+- path: engine/models/payloads.py
+  symbols:
+  - MatchRequest
+  - PayloadBase
+- repository: Quantum-L9/Gate_SDK
+  symbol: TransportPacket
+  status: independently_owned_not_reimplemented
+models:
+  sdk_transport_packet:
+    schema_owner: Quantum-L9/Gate_SDK
+    mode: production_sdk
+    reuse: import from canonical SDK; do not redefine or copy packet model
+    payload_is_transport_packet: true
+    source_in_ceg: chassis/handler_registration.py
+    live_model_fields_verified_at_source_sha: false
+  legacy_execute_request:
+    schema_owner: CEG legacy chassis
+    mode: dev_local_test_only
+    reference: docs/contracts/api/openapi.yaml#/components/schemas/ExecuteRequest
+    tenant_location: legacy envelope tenant; SDK tenant is packet.tenant.org_id
+    declared_fields:
+      action: str required
+      tenant: str required
+      payload: dict default empty
+      trace_id: str|null default null
+  legacy_execute_response:
+    schema_owner: CEG legacy chassis
+    mode: dev_local_test_only
+    reference: docs/contracts/api/openapi.yaml#/components/schemas/ExecuteResponse
+    declared_fields:
+      status: str required
+      action: str required
+      tenant: str required
+      data: dict required
+      meta: dict required
+  health_response:
+    schema_owner: CEG
+    reference: docs/contracts/api/openapi.yaml#/components/schemas/HealthResponse
+  typed_match_request:
+    owner: engine/models/payloads.py:MatchRequest
+    active_when: settings.match_request_contract_admission=True and contract_version present
+    domain_admission: DomainContract.from_spec + PayloadBase reject transport fields
+    must_not_be_recast_as_legacy_envelope: true
+pagination:
+  status: not_present_in_chassis_routes_inspected
+  paginated_model: null
+  proof: chassis/chassis_app.py exposes POST /v1/execute, GET /v1/health, not a paginated resource; no positive
+    pagination witness
+acceptance:
+  required:
+  - references_resolve
+  - sdk_and_legacy_shapes_are_not_conflated
+  - no_duplicate_transport_model
+  - legacy_request_response_fields_match_pydantic_models
+  - typed_match_model_not_omitted
+  - SDK_packet_semantics_remain_external_owner
+  not_proven:
+  - live_sdk_response_parity
+  - all_Gate_SDK_model_export_fields

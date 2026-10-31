@@ -1,0 +1,60 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: engine-specific
+# engine: graph
+# layer: [docs, contracts]
+# tags: [contracts, evaluation]
+# owner: engine-team
+# status: active
+# --- /L9_META ---
+
+contract_id: CEG-EVAL-BENCHMARKS-v1
+campaign_id: CEG-CONTRACT-COMPLETE-2026-10-30
+baseline:
+  repository: Quantum-L9/Cognitive.Engine.Graphs
+  commit: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+authority: candidate_extracted_from_source
+schema: l9.ceg.eval.benchmarks/v1
+owner: CEG evaluation/quality owner
+status: partial_test_coverage_not_release_benchmark
+source_refs:
+- path: tests/performance/test_query_latency.py
+  symbol: fixture p95 tests
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+- path: tests/performance/test_sync_throughput.py
+  symbol: throughput tests
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+- path: tools/hoprag_benchmark.py
+  symbol: standalone benchmark
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+observed:
+  scenario_tests:
+  - source: tests/performance/test_query_latency.py
+    scenario: seeded graph match query
+    check: p95 less than 100ms for strict and 200ms for relaxed path in existing test
+    environment: test fixture, not production telemetry
+  - source: tests/performance/test_sync_throughput.py
+    scenario: graph sync throughput
+    check: test-defined threshold; not independently rerun for this pack
+    environment: test fixture
+  release_benchmark_runner_proven: false
+  runtime_measurements_in_this_pack: false
+  test_environment_fixture_is_not_service_SLO: true
+required_proof:
+- controlled dataset
+- hardware and Neo4j version
+- sample count, warm/cold path
+- p50/p95/p99 and confidence
+- regression threshold owner signoff
+- CI receipt
+blocked_on:
+- validated release evaluation pipeline
+- approved benchmark cohort and thresholds
+operational_proof:
+  observed_in_this_pack: false
+  runtime_test_receipt: null
+  CI_run_id: null
+  blocked_until: owner-native executable and integration evidence, not this file presence
+contract_status_is_not_runtime_status: true
+source_code_note: tests/performance/test_query_latency.py contains fixture p95 assertions; they do not measure
+  end-to-end Gate score action (not routed).

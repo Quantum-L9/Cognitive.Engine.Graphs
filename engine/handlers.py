@@ -35,7 +35,6 @@ from chassis.errors import FeatureNotEnabled  # noqa: F401
 # chassis directly.
 from engine.auth.capabilities import (
     ACTION_PERMISSION_MAP,
-    Capability,
     CapabilitySet,
     check_action_permission,
     get_capability_validator,
@@ -74,6 +73,8 @@ from engine.utils.security import sanitize_label, tenant_id_defect
 __all_chassis_reexports__ = ["FeatureNotEnabled"]
 
 logger = logging.getLogger(__name__)
+
+_CAPABILITY_AUTH_BYPASS_ENVS = frozenset({"dev", "local", "test"})
 
 
 class EngineError(Exception):
@@ -222,20 +223,28 @@ def _build_capability_set(domain_spec: DomainSpec) -> CapabilitySet | None:
 def _enforce_capability(tenant: str, action: str, domain_spec: DomainSpec) -> None:
     """W3-02/W3-03: Check capability-based access control.
 
-    Only enforced when CAPABILITY_AUTH_ENABLED is True and the domain spec
-    declares capabilities. Raises ValidationError on denial.
+    Production and other deployed environments require explicit grants for
+    writes. Development, local, and test environments retain the established
+    compatibility bypass; production and staging never fall back.
     """
     from engine.config.settings import settings as _cap_settings
 
     if not _cap_settings.capability_auth_enabled:
+        if _cap_settings.l9_env not in _CAPABILITY_AUTH_BYPASS_ENVS:
+            raise ValidationError(
+                "CAPABILITY_AUTH_ENABLED=False is permitted only in dev, local, or test environments",
+                action=action,
+                tenant=tenant,
+            )
+        return
+
+    if _cap_settings.l9_env in _CAPABILITY_AUTH_BYPASS_ENVS:
         return
 
     cap_set = _build_capability_set(domain_spec)
-    if cap_set is None:
-        return
-
+    required = ACTION_PERMISSION_MAP.get(action)
     if not check_action_permission(tenant, action, cap_set):
-        required = ACTION_PERMISSION_MAP.get(action, action)
+        required = required or action
         raise ValidationError(
             f"Tenant '{tenant}' lacks capability '{required}' for action '{action}'",
             action=action,
@@ -1431,9 +1440,39 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         actions = _require_key(payload, "actions", "admin", tenant)
         expires_in = payload.get("expires_in_seconds", 0.0)
 
+        if not all(isinstance(value, str) and value for value in (source_tenant, target_tenant, domain_id)):
+            raise ValidationError(
+                "Capability delegation tenant and domain identifiers must be non-empty strings",
+                action="admin",
+                tenant=tenant,
+            )
+        if source_tenant != tenant:
+            raise ValidationError(
+                "Capability delegation source_tenant must equal the packet tenant",
+                action="admin",
+                tenant=tenant,
+            )
+        if (
+            not isinstance(actions, list)
+            or not actions
+            or not all(isinstance(action, str) and action for action in actions)
+        ):
+            raise ValidationError(
+                "Capability delegation actions must be a non-empty list of capability strings",
+                action="admin",
+                tenant=tenant,
+            )
+        if isinstance(expires_in, bool) or not isinstance(expires_in, (int, float)) or expires_in < 0:
+            raise ValidationError(
+                "Capability delegation expires_in_seconds must be a non-negative number",
+                action="admin",
+                tenant=tenant,
+            )
+
         validator = get_capability_validator()
 
-        # Find or create a root capability for the source tenant
+        # Only a previously registered, active capability owned by the packet
+        # tenant may delegate. Payload values must never synthesize a root.
         parent_cap = None
         for cap in validator._registry.values():
             if cap.tenant_id == source_tenant and cap.is_active():
@@ -1442,25 +1481,28 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                     break
 
         if parent_cap is None:
-            # Create root capability for source tenant
-            parent_cap = Capability(
-                tenant_id=source_tenant,
-                domain_id="*",
-                allowed_actions=frozenset(actions),
+            raise ValidationError(
+                "Capability delegation requires an existing active parent grant owned by the packet tenant",
+                action="admin",
+                tenant=tenant,
             )
-            validator.register(parent_cap)
 
-        child_cap = validator.derive_capability(
-            parent_cap,
-            scope_restriction={
-                "domain_id": domain_id,
-                "allowed_actions": actions,
-            },
-            expires_in_seconds=expires_in,
-        )
-        # Override tenant on child to target
-        object.__setattr__(child_cap, "tenant_id", target_tenant)
-        child_cap.proof_hash = child_cap._compute_proof_hash()
+        try:
+            child_cap = validator.derive_capability(
+                parent_cap,
+                scope_restriction={
+                    "domain_id": domain_id,
+                    "allowed_actions": actions,
+                },
+                expires_in_seconds=expires_in,
+                target_tenant=target_tenant,
+            )
+        except PermissionError as exc:
+            raise ValidationError(
+                f"Capability delegation exceeds parent authority: {exc}",
+                action="admin",
+                tenant=tenant,
+            ) from exc
 
         # Audit the delegation
         domain_spec_for_audit = domain_loader.load_domain(domain_id) if domain_id != "*" else None

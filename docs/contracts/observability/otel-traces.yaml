@@ -1,0 +1,70 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: engine-specific
+# engine: graph
+# layer: [docs, contracts]
+# tags: [contracts, observability]
+# owner: engine-team
+# status: active
+# --- /L9_META ---
+
+contract_id: CEG-OBS-OTEL-TRACES-v1
+campaign_id: CEG-CONTRACT-COMPLETE-2026-10-30
+baseline:
+  repository: Quantum-L9/Cognitive.Engine.Graphs
+  commit: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+authority: candidate_extracted_from_source
+schema: l9.ceg.observability.otel-traces/v1
+owner: Gate_SDK/chassis instrumentation owner; CEG consumer
+status: otel_export_not_verified
+source_refs:
+- path: chassis/handler_registration.py
+  symbol: _with_packet_audit, reconstructed vs original
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+- path: engine/packet/chassis_contract.py
+  symbol: inflate_ingress/deflate_egress
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+- path: chassis/actions.py
+  symbol: legacy trace_id execution
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+observed:
+  transport_trace_id: legacy_trace_id_present; sdk_original_packet_when_flag_true_else_reconstructed
+  packet_hop_lineage: conditional_not_an_otel_span
+  otel_span_emission_verified: false
+  exporter_config_verified: false
+  sampling_policy_verified: false
+  collector_endpoint_verified: false
+  sdk_packet_reconstruction_can_create_new_trace_id: true
+span_contract:
+  status: pending_owner_implementation
+  required_context:
+  - trace_id
+  - packet_id
+  - tenant-protected attribution
+  - action
+  - status
+  - duration
+  forbidden_attributes:
+  - PII payload contents
+  - access tokens
+  - credentials
+  correlation_requirement: original request trace_id retained across Gate and CEG without generating a second
+    root
+required_proof:
+- SDK/chassis owner instrumented spans
+- propagation integration test
+- sampled collector export
+- failure-path trace retained
+- redaction check
+operational_proof:
+  observed_in_this_pack: false
+  runtime_test_receipt: null
+  CI_run_id: null
+  blocked_until: owner-native executable and integration evidence, not this file presence
+contract_status_is_not_runtime_status: true
+root_correlation_risk:
+  source: chassis/handler_registration.py:_with_packet_audit (116-132)
+  condition: ingress_packet_audit_enabled=False
+  mechanism: reconstructed path calls inflate_ingress(trace_id=str(uuid.uuid4()))
+  required_proof: original transport packet and trace context propagated with flag enabled; no invented root
+    in actual Gate request

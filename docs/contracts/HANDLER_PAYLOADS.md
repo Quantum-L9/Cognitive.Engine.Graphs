@@ -127,7 +127,14 @@ subaction (`get_domain`, `init_schema`, `trigger_gds`, `calibration_run`,
 `evaluate`) takes `domain_id` absent (where optional; it defaults to the
 tenant) or equal to the packet tenant. Anything else raises `ValidationError`
 before any domain load or query. `evaluate` runs its matches as the packet
-tenant. `list_domains` and `delegate_capability` are unchanged.
+tenant. `list_domains` is unchanged.
+
+`delegate_capability` binds `source_tenant` to the packet tenant. It requires a
+previously registered, active parent capability owned by that tenant; the
+requested actions and domain remain a monotonic subset of that parent, and a
+negative expiry is refused. Payload fields cannot create a root capability.
+The target tenant is recorded while the child capability is derived, before it
+is registered and hashed.
 
 
 ## health-assess (HEALTH-01)

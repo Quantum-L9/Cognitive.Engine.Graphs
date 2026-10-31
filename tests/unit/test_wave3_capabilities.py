@@ -401,9 +401,10 @@ class TestCapabilityValidator:
 
 class TestCapabilitySet:
     def test_empty_capabilities(self):
-        """No capabilities defined → open access."""
+        """An empty policy keeps public reads but denies graph writes."""
         cs = CapabilitySet([])
         assert cs.has_capability("any_tenant", "match:read")
+        assert not cs.has_capability("any_tenant", "sync:write")
 
     def test_wildcard_subjects(self):
         """Wildcard '*' allows any tenant."""
@@ -418,9 +419,10 @@ class TestCapabilitySet:
         assert not cs.has_capability("evil_corp", "sync:write")
 
     def test_action_not_in_set(self):
-        """Unrestricted actions allow any tenant."""
+        """A missing policy entry cannot implicitly grant a write."""
         cs = CapabilitySet([{"actions": ["match:read"], "allowed_subjects": ["acme"]}])
-        assert cs.has_capability("any_tenant", "admin:write")
+        assert cs.has_capability("any_tenant", "health:read")
+        assert not cs.has_capability("any_tenant", "admin:write")
 
     def test_multiple_capabilities(self):
         caps = [
@@ -449,7 +451,7 @@ class TestCapabilitySet:
 class TestActionPermissions:
     def test_permission_map_coverage(self):
         """All main engine actions are in ACTION_PERMISSION_MAP."""
-        required_actions = {"match", "sync", "enrich", "outcomes", "admin"}
+        required_actions = {"match", "sync", "enrich", "outcomes", "resolve", "admin"}
         assert required_actions.issubset(ACTION_PERMISSION_MAP.keys())
 
     def test_check_action_permission_authorized(self):
@@ -461,8 +463,16 @@ class TestActionPermissions:
         assert not check_action_permission("evil_corp", "match", cs)
 
     def test_check_action_permission_no_capability_set(self):
-        """No capability set → all authorized."""
+        """No domain policy retains reads but cannot grant graph writes."""
         assert check_action_permission("any", "match", None)
+        assert not check_action_permission("any", "resolve", None)
+
+    def test_resolve_requires_sync_write(self):
+        """A read-only capability cannot authorize the resolve graph mutation."""
+        read_only = CapabilitySet([{"actions": ["match:read"], "allowed_subjects": ["acme"]}])
+        write_authorized = CapabilitySet([{"actions": ["sync:write"], "allowed_subjects": ["acme"]}])
+        assert not check_action_permission("acme", "resolve", read_only)
+        assert check_action_permission("acme", "resolve", write_authorized)
 
     def test_check_action_permission_unknown_action(self):
         """Unknown action denied by default."""
@@ -489,16 +499,17 @@ class TestActionPermissions:
             _enforce_capability("acme", "sync", minimal_domain_spec_with_caps)
 
     def test_enforce_capability_disabled(self, minimal_domain_spec_with_caps: DomainSpec):
-        """When capability_auth_enabled is False, skip check."""
+        """The explicit bypass remains available only in an authorized test environment."""
         from engine.handlers import _enforce_capability
 
         with patch("engine.config.settings.settings") as mock_settings:
             mock_settings.capability_auth_enabled = False
+            mock_settings.l9_env = "test"
             _enforce_capability("evil_corp", "sync", minimal_domain_spec_with_caps)
 
     def test_enforce_capability_no_caps_in_spec(self):
-        """No capabilities in spec → open access."""
-        from engine.handlers import _enforce_capability
+        """Production requires explicit write grants even when a pack has no policy."""
+        from engine.handlers import ValidationError, _enforce_capability
 
         raw = {
             "domain": {"id": "test", "name": "Test", "version": "0.0.1"},
@@ -533,7 +544,40 @@ class TestActionPermissions:
 
         with patch("engine.config.settings.settings") as mock_settings:
             mock_settings.capability_auth_enabled = True
+            mock_settings.l9_env = "prod"
             _enforce_capability("any_tenant", "match", spec)
+            with pytest.raises(ValidationError, match="lacks capability 'sync:write'"):
+                _enforce_capability("any_tenant", "sync", spec)
+            with pytest.raises(ValidationError, match="lacks capability 'sync:write'"):
+                _enforce_capability("any_tenant", "resolve", spec)
+
+    def test_undeclared_action_is_dev_compatible_but_prod_denied(
+        self, minimal_domain_spec_with_caps: DomainSpec
+    ) -> None:
+        """Partial legacy packs do not grant production writes by omission."""
+        from engine.handlers import ValidationError, _enforce_capability
+
+        read_only_spec = minimal_domain_spec_with_caps.model_copy(
+            update={"capabilities": [CapabilitySpec(name="match_read", actions=["match:read"], allowed_subjects=["*"])]}
+        )
+        with patch("engine.config.settings.settings") as mock_settings:
+            mock_settings.capability_auth_enabled = True
+            mock_settings.l9_env = "test"
+            _enforce_capability("any_tenant", "resolve", read_only_spec)
+
+            mock_settings.l9_env = "prod"
+            with pytest.raises(ValidationError, match="lacks capability 'sync:write'"):
+                _enforce_capability("any_tenant", "resolve", read_only_spec)
+
+    def test_capability_auth_bypass_is_refused_outside_dev_test(self, minimal_domain_spec_with_caps: DomainSpec):
+        """A production deployment cannot disable the capability guard."""
+        from engine.handlers import ValidationError, _enforce_capability
+
+        with patch("engine.config.settings.settings") as mock_settings:
+            mock_settings.capability_auth_enabled = False
+            mock_settings.l9_env = "prod"
+            with pytest.raises(ValidationError, match="permitted only in dev, local, or test"):
+                _enforce_capability("evil_corp", "sync", minimal_domain_spec_with_caps)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -688,6 +732,7 @@ def _admin_wired(capabilities: list[CapabilitySpec]) -> MagicMock:
     from unittest.mock import AsyncMock
 
     from engine.handlers import init_dependencies
+    from engine.state import get_state
     from tests.fixtures.domain_contracts import synthetic_loader
 
     spec = synthetic_loader().load_domain("orbital-logistics").model_copy(update={"capabilities": capabilities})
@@ -697,6 +742,7 @@ def _admin_wired(capabilities: list[CapabilitySpec]) -> MagicMock:
     loader.load_domain.return_value = spec
     loader.list_domains.return_value = ["orbital-logistics"]
     init_dependencies(driver, loader)
+    get_state()._tenant_allowlist = {"orbital-logistics"}
     return driver
 
 
@@ -704,9 +750,11 @@ def _admin_wired(capabilities: list[CapabilitySpec]) -> MagicMock:
 class TestAdminCapabilityEnforcement:
     """Mirrors the sync cases: a spec that restricts admin:write denies other subjects."""
 
-    async def test_admin_denied_when_spec_restricts_admin_write(self):
+    async def test_admin_denied_when_spec_restricts_admin_write(self, monkeypatch: pytest.MonkeyPatch):
+        from engine.config.settings import settings
         from engine.handlers import ValidationError, handle_admin
 
+        monkeypatch.setattr(settings, "l9_env", "prod")
         driver = _admin_wired(
             [CapabilitySpec(name="admin_ops", actions=["admin:write"], allowed_subjects=["ops-only"])]
         )
@@ -738,6 +786,91 @@ class TestAdminCapabilityEnforcement:
         _admin_wired([CapabilitySpec(name="admin_ops", actions=["admin:write"], allowed_subjects=["ops-only"])])
         result = await handle_admin("orbital-logistics", {"subaction": "list_domains"})
         assert result["domains"] == ["orbital-logistics"]
+
+
+@pytest.mark.finding("AUTH-RESOLVE-01")
+class TestResolveCapabilityEnforcement:
+    """Resolve is a graph write and must not run for a read-only actor."""
+
+    async def test_read_only_tenant_cannot_create_resolution_edge(self, monkeypatch: pytest.MonkeyPatch):
+        from engine.config.settings import settings
+        from engine.handlers import ValidationError, handle_resolve
+
+        monkeypatch.setattr(settings, "l9_env", "prod")
+        driver = _admin_wired(
+            [CapabilitySpec(name="match_read", actions=["match:read"], allowed_subjects=["orbital-logistics"])]
+        )
+        with pytest.raises(ValidationError, match="lacks capability 'sync:write'"):
+            await handle_resolve(
+                "orbital-logistics",
+                {"entity_type": "Company", "source_id": "source", "target_id": "target"},
+            )
+        driver.execute_query.assert_not_called()
+
+
+@pytest.mark.finding("AUTH-DELEGATE-04")
+class TestDelegatedCapabilityAuthorization:
+    """Delegation derives from a packet-tenant-owned registered parent only."""
+
+    _CALLER = "orbital-logistics"
+    _ADMIN_CAP = CapabilitySpec(name="admin_ops", actions=["admin:write"], allowed_subjects=[_CALLER])
+
+    @staticmethod
+    def _payload(**overrides):
+        payload = {
+            "subaction": "delegate_capability",
+            "source_tenant": "orbital-logistics",
+            "target_tenant": "consumer-a",
+            "domain_id": "*",
+            "actions": ["sync:write"],
+            "expires_in_seconds": 60,
+        }
+        payload.update(overrides)
+        return payload
+
+    async def test_forged_source_tenant_is_rejected_before_root_lookup(self):
+        from engine.handlers import ValidationError, handle_admin
+
+        _admin_wired([self._ADMIN_CAP])
+        validator = get_capability_validator()
+        with pytest.raises(ValidationError, match="source_tenant must equal the packet tenant"):
+            await handle_admin(self._CALLER, self._payload(source_tenant="forged-source"))
+        assert validator.audit_summary()["total_registered"] == 0
+
+    async def test_missing_parent_cannot_mint_a_root_capability(self):
+        from engine.handlers import ValidationError, handle_admin
+
+        _admin_wired([self._ADMIN_CAP])
+        validator = get_capability_validator()
+        with pytest.raises(ValidationError, match="requires an existing active parent grant"):
+            await handle_admin(self._CALLER, self._payload())
+        assert validator.audit_summary()["total_registered"] == 0
+
+    async def test_registered_parent_can_delegate_a_strict_subset_to_target(self):
+        from engine.handlers import handle_admin
+
+        _admin_wired([self._ADMIN_CAP])
+        validator = get_capability_validator()
+        parent = Capability(
+            tenant_id=self._CALLER,
+            domain_id="*",
+            allowed_actions=frozenset({"sync:write", "match:read"}),
+        )
+        validator.register(parent)
+
+        result = await handle_admin(self._CALLER, self._payload())
+
+        child = validator._registry[result["capability"]["capability_id"]]
+        assert child.granted_by == parent.capability_id
+        assert child.tenant_id == "consumer-a"
+        assert validator.validate_action(child, "sync:write", "consumer-a")
+
+    async def test_negative_expiry_is_rejected(self):
+        from engine.handlers import ValidationError, handle_admin
+
+        _admin_wired([self._ADMIN_CAP])
+        with pytest.raises(ValidationError, match="non-negative number"):
+            await handle_admin(self._CALLER, self._payload(expires_in_seconds=-1))
 
 
 class TestCapabilityRecordBinding:
@@ -799,13 +932,14 @@ class TestCapabilityRecordBinding:
         assert validator.validate_action(twin, "match:read", "acme")
 
     def test_delegate_tenant_override_stays_valid(self, validator: CapabilityValidator, root_capability: Capability):
-        """Mirrors handlers.py delegate_capability: tenant override then hash recompute."""
+        """A delegated target tenant is recorded before the child is registered."""
         validator.register(root_capability)
         child = validator.derive_capability(
-            root_capability, {"allowed_actions": frozenset({"match:read"})}, expires_in_seconds=600
+            root_capability,
+            {"allowed_actions": frozenset({"match:read"})},
+            expires_in_seconds=600,
+            target_tenant="globex",
         )
-        object.__setattr__(child, "tenant_id", "globex")
-        child.proof_hash = child._compute_proof_hash()
         assert validator.validate_action(child, "match:read", "globex")
 
     def test_flag_off_restores_legacy_checks(

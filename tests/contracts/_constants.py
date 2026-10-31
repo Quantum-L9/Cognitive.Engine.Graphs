@@ -33,6 +33,6 @@ ACTION_PERMISSION_MAP: dict[str, str] = {
     "sync": "sync:write",
     "admin": "admin:write",
     "outcomes": "sync:write",
-    "resolve": "match:read",
+    "resolve": "sync:write",
     "enrich": "sync:write",
 }

@@ -54,6 +54,7 @@ def _mock_domain_spec():
     spec.feedbackloop.outcome_node_label = "TransactionOutcome"
     spec.feedbackloop.outcome_edge_type = "RESULTED_IN"
     spec.causal.enabled = False
+    spec.capabilities = []
     spec.model_dump.return_value = {"domain": {"id": "test_db"}}
     return spec
 
