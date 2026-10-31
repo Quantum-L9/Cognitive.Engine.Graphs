@@ -162,3 +162,54 @@ class TestDriftDetectorCheckAndAlert:
         result = await detector.check_and_alert(threshold=0.15, window_days=30)
         assert result["status"] == "insufficient_data"
         assert result["divergence"] == 0.0
+
+
+class TestDriftRequiresBothWindows:
+    """RU-029 / CEG-COR-118 (RG-037): no drift alert without both a baseline and a recent window."""
+
+    @pytest.mark.asyncio
+    async def test_empty_baseline_is_insufficient_data(self) -> None:
+        driver = AsyncMock()
+        detector = DriftDetector(driver, _minimal_spec())
+        driver.execute_query = AsyncMock(
+            side_effect=[
+                [{"dimension": "geo", "frequency": 0.5}, {"dimension": "price", "frequency": 0.5}],
+                [],
+            ]
+        )
+
+        result = await detector.check_and_alert(threshold=0.15, window_days=30)
+
+        assert result["status"] == "insufficient_data"
+        assert result.get("alert") is not True
+        assert result["recent_dimensions"] == 2
+        assert result["baseline_dimensions"] == 0
+
+    @pytest.mark.asyncio
+    async def test_empty_recent_is_insufficient_data(self) -> None:
+        driver = AsyncMock()
+        detector = DriftDetector(driver, _minimal_spec())
+        driver.execute_query = AsyncMock(side_effect=[[], [{"dimension": "geo", "frequency": 1.0}]])
+
+        result = await detector.check_and_alert(threshold=0.15, window_days=30)
+
+        assert result["status"] == "insufficient_data"
+        assert result.get("alert") is not True
+        assert result["recent_dimensions"] == 0
+        assert result["baseline_dimensions"] == 1
+
+    @pytest.mark.asyncio
+    async def test_flag_off_restores_one_sided_alert(self, monkeypatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "drift_requires_both_windows", False)
+        driver = AsyncMock()
+        detector = DriftDetector(driver, _minimal_spec())
+        driver.execute_query = AsyncMock(
+            side_effect=[[{"dimension": "geo", "frequency": 0.5}, {"dimension": "price", "frequency": 0.5}], []]
+        )
+
+        result = await detector.check_and_alert(threshold=0.15, window_days=30)
+
+        assert result["status"] == "computed"
+        assert result["alert"] is True

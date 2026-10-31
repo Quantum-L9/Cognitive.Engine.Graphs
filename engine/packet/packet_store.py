@@ -11,7 +11,8 @@ status: active
 
 engine/packet/packet_store.py
 PacketStore — async persistence layer for TransportPacket audit trail
-plus outcome_jsonb feedback-loop linkage (migration 0001_outcome_jsonb).
+plus outcome_jsonb feedback-loop linkage (column, column-level UPDATE grant
+and tenant UPDATE policy declared in packet_store.sql; RU-081).
 Writes immutable request/response pairs to the packet_store PostgreSQL
 schema defined in engine/packet/packet_store.sql.
 
@@ -55,7 +56,7 @@ _PACKET_STORE_ENABLED: bool = settings.packet_store_enabled
 
 # ── SQL ──────────────────────────────────────────────────────
 
-_INSERT_PACKET_SQL = """
+_INSERT_PACKET_VALUES_SQL = """
     INSERT INTO packet_store (
         packet_id, packet_type, action, schema_version,
         source_node, destination_node, reply_to,
@@ -81,8 +82,18 @@ _INSERT_PACKET_SQL = """
         $33, $34,
         $35, $36
     )
-    ON CONFLICT (content_hash, actor_tenant) DO NOTHING
 """
+
+# Legacy key (flag off): skip a packet whose (content_hash, actor_tenant) is stored.
+_INSERT_PACKET_SQL = _INSERT_PACKET_VALUES_SQL + "    ON CONFLICT (content_hash, actor_tenant) DO NOTHING\n"
+
+# Packet-identity key (packet_store_packet_identity_dedup_enabled): skip a packet
+# whose packet_id is stored. transport_hash covers header.packet_id, so every
+# (content_hash, actor_tenant) conflict of a transport_hash row is also a
+# packet_id conflict; keying on packet_id additionally skips a re-delivery of a
+# row written under the legacy key, whose content_hash is the payload_hash and
+# which would otherwise raise on packet_store_pkey and roll back the pair.
+_INSERT_PACKET_IDENTITY_SQL = _INSERT_PACKET_VALUES_SQL + "    ON CONFLICT (packet_id) DO NOTHING\n"
 
 _INSERT_LINEAGE_SQL = """
     INSERT INTO lineage_graph (parent_id, child_id, generation, derivation_type, created_at)
@@ -100,6 +111,14 @@ _INSERT_DELEGATION_SQL = """
         packet_id, delegator, delegatee, scope, granted_at, expires_at, proof_hash, seq
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 """
+# RLS (packet_store.sql): every policy compares against the
+# app.current_tenant GUC. is_local=true scopes it to the current transaction,
+# so a pooled connection never carries one tenant's setting into the next
+# write (RU-079).
+_SET_TENANT_SQL = """
+    SELECT set_config('app.current_tenant', $1, true)
+"""
+
 # NEW: Outcome feedback-loop linkage
 _UPDATE_OUTCOME_SQL = """
     UPDATE packet_store
@@ -164,6 +183,29 @@ class _PoolManager:
 _pool_manager = _PoolManager()
 
 
+async def _set_session_tenant(conn: Any, tenant: str) -> None:
+    """Set the transaction-local tenant GUC the RLS policies check.
+
+    Must run inside ``conn.transaction()``: with is_local=true the setting
+    outside a transaction block would end with the statement.
+    """
+    await conn.fetchval(_SET_TENANT_SQL, tenant)
+
+
+def _insert_wrote_row(status: Any) -> bool:
+    """Return False only when asyncpg reports the INSERT as skipped (``INSERT 0 0``).
+
+    Uses the ``status.split()[-1]`` row-count convention record_outcome uses.
+    An unrecognised status keeps the child rows (the pre-RU-078 behaviour).
+    """
+    if not isinstance(status, str):
+        return True
+    try:
+        return int(status.split()[-1]) > 0
+    except (IndexError, ValueError):
+        return True
+
+
 # ── Extraction Helpers ───────────────────────────────────────
 
 
@@ -196,8 +238,13 @@ def _extract_packet_row(packet: TransportPacket) -> tuple[Any, ...]:
         getattr(ten, "user_id", None),
         # payload (full packet as JSONB)
         json.dumps(json.loads(packet.model_dump_json()), default=str),
-        # security
-        sec.payload_hash,
+        # security. content_hash is the (content_hash, actor_tenant) dedup key
+        # (C-7): the SDK transport_hash covers the packet's identity (header
+        # incl. packet_id/packet_type/action, address, tenant, payload,
+        # governance, lineage, provenance), so only a re-delivery of the same
+        # packet collides. payload_hash alone made distinct packets that carry
+        # equal payloads collide (RU-078).
+        sec.transport_hash if settings.packet_store_packet_identity_dedup_enabled else sec.payload_hash,
         "sha256",
         sec.signature,
         sec.signing_key_id,
@@ -248,6 +295,18 @@ class PacketStore:
         Writes both packets to packet_store, their lineage to lineage_graph,
         hop entries to hop_trace, and delegation links to delegation_chain.
         All writes are wrapped in a single transaction.
+
+        With ``packet_store_packet_identity_dedup_enabled`` a packet whose INSERT
+        is skipped by ``ON CONFLICT (packet_id) DO NOTHING`` is a re-delivery of
+        a stored packet (including a row stored under the legacy payload_hash
+        key), so its hop_trace, delegation_chain and lineage_graph rows are
+        already stored and are not written again. With the flag off the legacy
+        ``ON CONFLICT (content_hash, actor_tenant) DO NOTHING`` applies.
+
+        With ``packet_store_rls_tenant_session_enabled`` each packet INSERT is
+        preceded by a transaction-local ``app.current_tenant`` = the packet's
+        ``tenant.actor``, which the DDL's RLS policies require for an
+        ``l9_product`` connection. Owner/superuser connections are unaffected.
         """
         if not _PACKET_STORE_ENABLED:
             logger.debug(
@@ -258,11 +317,18 @@ class PacketStore:
 
         pool = await _pool_manager.get_pool()
 
+        identity_dedup = settings.packet_store_packet_identity_dedup_enabled
+        insert_sql = _INSERT_PACKET_IDENTITY_SQL if identity_dedup else _INSERT_PACKET_SQL
+
         async with pool.acquire() as conn, conn.transaction():
             # Insert both packets
             for packet in (request, response):
                 row = _extract_packet_row(packet)
-                await conn.execute(_INSERT_PACKET_SQL, *row)
+                if settings.packet_store_rls_tenant_session_enabled:
+                    await _set_session_tenant(conn, packet.tenant.actor)
+                status = await conn.execute(insert_sql, *row)
+                if identity_dedup and not _insert_wrote_row(status):
+                    continue
 
                 # Insert hop trace entries
                 for seq, hop in enumerate(packet.hop_trace):
@@ -372,12 +438,22 @@ class PacketStore:
         try:
             pool = await _pool_manager.get_pool()
             async with pool.acquire() as conn:
-                result = await conn.execute(
-                    _UPDATE_OUTCOME_SQL,
-                    json.dumps(outcome_payload),
-                    match_packet_id,
-                    tenant,
-                )
+                if settings.packet_store_rls_tenant_session_enabled:
+                    async with conn.transaction():
+                        await _set_session_tenant(conn, tenant)
+                        result = await conn.execute(
+                            _UPDATE_OUTCOME_SQL,
+                            json.dumps(outcome_payload),
+                            match_packet_id,
+                            tenant,
+                        )
+                else:
+                    result = await conn.execute(
+                        _UPDATE_OUTCOME_SQL,
+                        json.dumps(outcome_payload),
+                        match_packet_id,
+                        tenant,
+                    )
             rows_affected = int(result.split()[-1]) if result else 0
             if rows_affected == 1:
                 logger.info(
@@ -409,6 +485,10 @@ class PacketStore:
                 exc,
             )
             return False
+
+    async def get_pool(self) -> Any:
+        """Return the PacketStore asyncpg pool (lazily created; RU-066 GDPR erasure)."""
+        return await _pool_manager.get_pool()
 
     async def close(self) -> None:
         """Close the underlying connection pool."""

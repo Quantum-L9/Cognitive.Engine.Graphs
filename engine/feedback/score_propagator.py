@@ -79,11 +79,45 @@ class ScorePropagator:
         Apply boost factor to DimensionWeight nodes linked to the candidate's pattern.
 
         Uses MERGE to create or update DimensionWeight boost nodes.
-        """
-        outcome_label = sanitize_label(self._spec.feedbackloop.outcome_node_label)
 
-        # Find similar candidates and boost their dimension weights
-        cypher = f"""
+        RU-028 / CEG-COR-117: while ``settings.propagation_single_application``
+        is on (default) the candidate's outcomes are collapsed to one existence
+        row (``WITH count(o) AS outcomes WHERE outcomes > 0``) before the
+        DimensionWeight MATCH, so SET runs once per DimensionWeight per event
+        and ``affected`` == |DimensionWeight|; the product is clamped to the
+        spec's ``signal_weights`` [min_weight, max_weight]. Off: the legacy
+        query, whose rows multiply (factor^k for k prior outcomes, unbounded).
+        """
+        from engine.config.settings import settings
+
+        outcome_label = sanitize_label(self._spec.feedbackloop.outcome_node_label)
+        parameters: dict[str, Any] = {
+            "candidate_id": candidate_id,
+            "tenant": self._db,
+            "factor": factor,
+        }
+
+        if settings.propagation_single_application:
+            sw_spec = self._spec.feedbackloop.signal_weights
+            parameters["min_weight"] = sw_spec.min_weight
+            parameters["max_weight"] = sw_spec.max_weight
+            cypher = f"""
+        MATCH (o:{outcome_label} {{candidate_id: $candidate_id, tenant: $tenant}})
+        WITH count(o) AS outcomes
+        WHERE outcomes > 0
+        MATCH (dw:DimensionWeight {{tenant: $tenant}})
+        WITH dw, coalesce(dw.boost_factor, 1.0) * $factor AS boosted
+        SET dw.boost_factor = CASE
+                WHEN boosted > $max_weight THEN $max_weight
+                WHEN boosted < $min_weight THEN $min_weight
+                ELSE boosted
+            END,
+            dw.last_propagation_at = datetime()
+        RETURN count(dw) AS affected
+        """
+        else:
+            # Find similar candidates and boost their dimension weights
+            cypher = f"""
         MATCH (o:{outcome_label} {{candidate_id: $candidate_id, tenant: $tenant}})
         WITH o
         MATCH (dw:DimensionWeight {{tenant: $tenant}})
@@ -93,11 +127,7 @@ class ScorePropagator:
         """
         result = await self._driver.execute_query(
             cypher,
-            parameters={
-                "candidate_id": candidate_id,
-                "tenant": self._db,
-                "factor": factor,
-            },
+            parameters=parameters,
             database=self._db,
         )
 

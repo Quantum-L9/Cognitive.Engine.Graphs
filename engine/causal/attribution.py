@@ -19,6 +19,7 @@ import logging
 import math
 from typing import Any
 
+from engine.causal.identity import FALLBACK_ID_PROPERTY, node_id_property
 from engine.config.schema import DomainSpec
 from engine.config.settings import settings
 from engine.graph.driver import GraphDriver
@@ -28,6 +29,27 @@ logger = logging.getLogger(__name__)
 
 # Valid attribution model names
 VALID_MODELS = frozenset({"first_touch", "last_touch", "linear", "position_based"})
+
+
+def _unique_touchpoint_rows(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """RU-067: one row per touchpoint id, keeping its first (minimum-distance) occurrence.
+
+    The trace query returns one row per PATH ordered by ``distance ASC``; in a
+    diamond or with parallel edges a touchpoint appears once per path. With
+    ``causal_attribution_unique_touchpoints`` on, weights and temporal-decay
+    ages are computed over the retained rows only. Off: rows as returned.
+    """
+    if not settings.causal_attribution_unique_touchpoints:
+        return results
+    seen: set[Any] = set()
+    unique: list[dict[str, Any]] = []
+    for row in results:
+        tp_id = row.get("touchpoint_id")
+        if not tp_id or tp_id in seen:
+            continue
+        seen.add(tp_id)
+        unique.append(row)
+    return unique
 
 
 def _temporal_decay_factor(age_days: float, halflife_days: float) -> float:
@@ -88,7 +110,7 @@ class AttributionCalculator:
         cypher = (
             f"MATCH (outcome:{outcome_label} {{outcome_id: $outcome_id}})\n"
             f"MATCH path = (touchpoint)-{rel_pattern}->(outcome)\n"
-            f"RETURN touchpoint.entity_id AS touchpoint_id,\n"
+            f"RETURN {self._touchpoint_id_expression()} AS touchpoint_id,\n"
             f"       length(path) AS distance,\n"
             f"       [r IN relationships(path) | r.confidence] AS confidences,\n"
             f"       [r IN relationships(path) | duration.inDays(coalesce(r.created_at, datetime()), datetime()).days] AS ages_days\n"
@@ -105,6 +127,7 @@ class AttributionCalculator:
             return {"touchpoints": {}, "model": model, "chain_depth": 0}
 
         touchpoints = self._assign_weights(results, model)
+        retained = _unique_touchpoint_rows(results)
 
         response: dict[str, Any] = {
             "touchpoints": touchpoints,
@@ -119,7 +142,7 @@ class AttributionCalculator:
         if self._spec.causal.temporal_decay_enabled:
             halflife = settings.decay_transaction_halflife
             ages_by_touchpoint: dict[str, float] = {}
-            for r in results:
+            for r in retained:
                 tp_id = r["touchpoint_id"]
                 if not tp_id:
                     continue
@@ -137,13 +160,40 @@ class AttributionCalculator:
 
         return response
 
+    def _touchpoint_id_expression(self) -> str:
+        """The touchpoint's identity, per label (PO-04 / RU-068).
+
+        ``touchpoint`` may carry any causal-edge source label; each label's
+        declared id property is read via a CASE over those labels (sanitized,
+        ``engine.causal.identity``), falling back to ``entity_id`` for labels the
+        spec gives no declaration and for nodes that lack the declared property.
+        Flag off: ``entity_id``.
+        """
+        if not settings.causal_edge_declared_identity:
+            return "touchpoint.entity_id"
+        branches: list[str] = []
+        seen: set[str] = set()
+        for edge in self._spec.causal.causal_edges:
+            label = sanitize_label(edge.source_label)
+            if label in seen:
+                continue
+            seen.add(label)
+            prop = sanitize_label(node_id_property(self._spec, edge.source_label))
+            if prop != FALLBACK_ID_PROPERTY:
+                # Legacy nodes carrying only entity_id still resolve (as
+                # handlers._candidate_id does for match candidates).
+                branches.append(f"WHEN touchpoint:{label} THEN coalesce(touchpoint.{prop}, touchpoint.entity_id)")
+        if not branches:
+            return "touchpoint.entity_id"
+        return f"CASE {' '.join(branches)} ELSE touchpoint.entity_id END"
+
     @staticmethod
     def _assign_weights(
         results: list[dict[str, Any]],
         model: str,
     ) -> dict[str, float]:
         """Assign attribution weights based on the selected model."""
-        touchpoint_ids = [r["touchpoint_id"] for r in results if r["touchpoint_id"]]
+        touchpoint_ids = [r["touchpoint_id"] for r in _unique_touchpoint_rows(results) if r["touchpoint_id"]]
         n = len(touchpoint_ids)
 
         if n == 0:

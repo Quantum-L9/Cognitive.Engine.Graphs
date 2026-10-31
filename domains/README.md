@@ -1,12 +1,3 @@
-> **Domain neutrality (ADR-112, Stage 2):** CEG is a domain-agnostic graph engine. No pack in this
-> directory is privileged; `DomainPackLoader` admits every pack through one generic, fail-closed
-> policy (validates, gates compile, not declared `activation: dormant`). The packs here are
-> **examples and verification inputs**, not a required part of the core.
->
-> **PlasticOS example (ADR-103 / TASK-015):** the executable PlasticOS example source is
-> `domains/plasticos/spec.yaml` only. Alternate PlasticOS YAML lives under `docs/archive/plasticos/`
-> and is non-authoritative.
-
 <!-- L9_META
 l9_schema: 1
 origin: domain-specific
@@ -16,6 +7,16 @@ tags: [domains, docs]
 owner: domain-team
 status: active
 /L9_META -->
+
+> **Domain neutrality (ADR-112, Stage 2):** CEG is a domain-agnostic graph engine. No pack in this
+> directory is privileged; `DomainPackLoader` admits every pack through one generic, fail-closed
+> policy (validates, gates compile, not declared `activation: dormant`). The packs here are
+> **examples and verification inputs**, not a required part of the core.
+>
+> **PlasticOS example (ADR-103 / TASK-015):** the executable PlasticOS example source is
+> `domains/plasticos/spec.yaml` only. Alternate PlasticOS YAML lives under `docs/archive/plasticos/`
+> and is non-authoritative.
+
 
 # domains/README.md
 """
@@ -43,7 +44,10 @@ PlasticOS historical flat/docs specs are archived under `docs/archive/plasticos/
 
 ### Production Domains (Stress-Tested)
 1. **plasticos** - Recycled plastic buyer-supplier matching (29 edge types, 22 gates)
-2. **mortgage-brokerage** - Borrower-lender-product matching (ECOA-compliant)
+2. **mortgage-brokerage** - Borrower-lender-product matching (ECOA-compliant).
+   Served as on main (owner decision 2026-10-29) without state-licensing or
+   lender-blacklist enforcement (DEC-15); uncomment `activation: dormant` in its
+   spec to withhold it.
 3. **healthcare-referral** - Provider-patient-specialist matching (HIPAA-compliant)
 4. **freight-matching** - Load-carrier matching with ELD integration
 

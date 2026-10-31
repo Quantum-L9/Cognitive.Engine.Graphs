@@ -31,9 +31,6 @@ from engine.health.readiness_scorer import compute_readiness_score_v2
 
 logger = logging.getLogger(__name__)
 
-# Track scanned entities to prevent re-scan within same run
-_scanned_this_run: set[str] = set()
-
 # Default cost ceiling per nightly run (USD)
 DEFAULT_COST_CEILING_USD = 50.0
 
@@ -58,7 +55,9 @@ async def run_nightly_health_scan(
     Produces ROI-sorted enrichment queue (top 100).
     Enforces cost ceiling.
     """
-    _scanned_this_run.clear()
+    # De-dup state is local to this call (C-24, CEG-COR-101): a module-level
+    # set was cleared by a concurrent run and shared its ids with it.
+    scanned_this_run: set[str] = set()
     profile = scan_profile or HealthScanProfile()
 
     domain_loader = DomainPackLoader()
@@ -84,12 +83,12 @@ async def run_nightly_health_scan(
     for entity_data in entities:
         entity_id = entity_data.get("entity_id", "unknown")
 
-        if entity_id in _scanned_this_run:
+        if entity_id in scanned_this_run:
             continue
         if entity_id in profile.exclude_entity_ids:
             continue
 
-        _scanned_this_run.add(entity_id)
+        scanned_this_run.add(entity_id)
         node_label = entity_data.get("node_label", "")
 
         try:
@@ -133,6 +132,7 @@ async def run_nightly_health_scan(
     total_cost = 0.0
     total_enriched = 0
     total_skipped = 0
+    ceiling_reached = False
 
     for entity_health, priority_score in assessments[:MAX_ENRICHMENT_QUEUE]:
         priority = compute_enrichment_priority(entity_health, domain_spec)
@@ -143,6 +143,7 @@ async def run_nightly_health_scan(
 
         if total_cost + priority.estimated_cost_usd > cost_ceiling_usd:
             total_skipped += len(assessments) - total_enriched - total_skipped
+            ceiling_reached = True
             logger.info(
                 "Cost ceiling reached: $%.2f / $%.2f",
                 total_cost,
@@ -166,6 +167,12 @@ async def run_nightly_health_scan(
 
         total_cost += priority.estimated_cost_usd
         total_enriched += 1
+
+    # Entities beyond MAX_ENRICHMENT_QUEUE were assessed but never queued: count
+    # them as skipped, as the ceiling branch already does, so enriched +
+    # skipped == assessed (CEG-COR-102, R6-DEC-06).
+    if not ceiling_reached:
+        total_skipped += max(0, len(assessments) - MAX_ENRICHMENT_QUEUE)
 
     scan_result = {
         "domain": domain,

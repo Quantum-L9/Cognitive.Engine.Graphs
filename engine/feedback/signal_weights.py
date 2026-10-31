@@ -20,10 +20,29 @@ import logging
 import math
 
 from engine.config.schema import DomainSpec
+from engine.config.settings import settings
 from engine.graph.driver import GraphDriver
 from engine.utils.security import sanitize_label
 
 logger = logging.getLogger(__name__)
+
+_Z_95 = 1.96
+
+
+def _lift_ci_width(wins: int, n: int, base_win_rate: float) -> float:
+    """95% CI width of the dimension win rate, expressed on the lift scale.
+
+    RU-027 / CEG-COR-116: the interval belongs to the proportion
+    ``p = wins / n``, not to the lift. It uses the Agresti-Coull form of
+    ``1.96 * sqrt(p (1 - p) / n)`` (``z^2 / 2`` pseudo-wins and pseudo-losses),
+    so it is non-zero at ``p`` = 0 or 1 and shrinks as ``n`` grows for any lift,
+    including lift >= 1; dividing by ``base_win_rate`` maps it onto the lift scale.
+    """
+    z2 = _Z_95 * _Z_95
+    n_adj = n + z2
+    p_adj = (wins + z2 / 2.0) / n_adj
+    proportion_width = _Z_95 * math.sqrt(p_adj * (1.0 - p_adj) / n_adj)
+    return proportion_width / base_win_rate
 
 
 class SignalWeightCalculator:
@@ -148,7 +167,10 @@ class SignalWeightCalculator:
 
         # Confidence interval calculation (95% CI)
         sample_size = max(dim_total, 1)
-        ci_width = 1.96 * math.sqrt(lift * (1.0 - min(lift, 1.0)) / sample_size)
+        if settings.signal_weight_proportion_ci:
+            ci_width = _lift_ci_width(dim_wins, sample_size, base_win_rate)
+        else:
+            ci_width = 1.96 * math.sqrt(lift * (1.0 - min(lift, 1.0)) / sample_size)
         confidence = 1.0 - min(ci_width, 1.0)
 
         # Dampening: blend toward 1.0 when confidence is low

@@ -12,9 +12,11 @@ status: active
 RU-011 / CEG-COR-033 (RG-014): a gate-failing candidate is excluded even when
 the final traversal step is ``required: false``.
 
-Uses the plasticos pack with its PROCESSES step made optional. Without the
-``WITH *`` row boundary the contamination gate binds to the OPTIONAL MATCH and
-the failing facility is returned with a null polymer.
+Uses a copy of the plasticos pack with a trailing optional PROCESSES step. The
+served pack constrains polymers with an EXISTS gate since RU-040 (CEG-COR-013),
+so the step is added back here and both facilities process the requested
+polymer. Without the ``WITH *`` row boundary the contamination gate binds to the
+OPTIONAL MATCH and the failing facility is returned with a null polymer.
 """
 
 from __future__ import annotations
@@ -31,23 +33,24 @@ SEED_CYPHER = """
 UNWIND $batch AS row
 MERGE (n:Facility {facility_id: row.facility_id})
 SET n += row
+WITH n
+MERGE (p:PolymerFamily {code: 'PET'})
+MERGE (n)-[:PROCESSES]->(p)
 """
 
 DIRECTION = "supply_opportunity_to_buyer_facility"
 
 
 def _optional_last_step(spec):
-    steps = [
-        TraversalStepSpec(
-            name=s.name,
-            description=s.description,
-            pattern=s.pattern,
-            required=False,
-            matchdirections=s.matchdirections,
-        )
-        for s in spec.traversal.steps
-    ]
-    return spec.model_copy(update={"traversal": spec.traversal.model_copy(update={"steps": steps})})
+    from engine.config.schema import TraversalSpec
+
+    step = TraversalStepSpec(
+        name="polymer_capability",
+        pattern="(candidate:Facility)-[:PROCESSES]->(polymer:PolymerFamily)",
+        required=False,
+        matchdirections=[DIRECTION],
+    )
+    return spec.model_copy(update={"traversal": TraversalSpec(steps=[step])})
 
 
 @pytest.mark.asyncio

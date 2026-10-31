@@ -47,8 +47,6 @@ def build_request_packet(
     trace_id: str,
     destination_node: str = _GATE_NODE,
     reply_to: str = _GRAPH_NODE,
-    packet_type: str = "request",
-    intent: str = "graph-engine-request",
     priority: int = 2,
     idempotency_key: str | None = None,
     timeout_ms: int = 30_000,
@@ -58,6 +56,12 @@ def build_request_packet(
 
     trace_id is required and must be propagated from the inbound request.
     Raises ValueError on blank trace_id, tenant, or action.
+
+    The packet type and intent are not parameters: the SDK
+    ``create_transport_packet`` always builds a ``request`` packet whose
+    governance intent is the action. The former ``packet_type`` and
+    ``intent`` parameters were accepted and silently dropped, so they were
+    removed and passing either now raises TypeError (RU-091).
     """
     if not trace_id or not trace_id.strip():
         msg = "trace_id must be provided for all outbound packets"

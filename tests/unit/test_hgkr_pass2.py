@@ -331,6 +331,33 @@ class TestAutoCalibrationPairs:
         pairs = generate_calibration_pairs(records)
         assert len(pairs) == 0
 
+    def test_out_of_range_score_is_skipped_not_raised(self, caplog) -> None:
+        """RU-026 / CEG-COR-084 (RG-033): one score outside [0, 1] must not abort the batch."""
+        from engine.scoring.hgkr_utils import generate_calibration_pairs
+
+        records = [
+            {"match_id": "m1", "candidate_id": "c1", "outcome": "success", "score": 0.7},
+            {"match_id": "m2", "candidate_id": "c2", "outcome": "success", "score": 42.5},
+        ]
+        with caplog.at_level("INFO", logger="engine.scoring.hgkr_utils"):
+            pairs = generate_calibration_pairs(records)
+        assert len(pairs) == 1
+        assert pairs[0].node_a == "m1"
+        assert "1 skipped" in caplog.text
+        assert "42.5" not in caplog.text  # count only, never the value
+
+    def test_non_finite_and_negative_scores_are_skipped(self) -> None:
+        from engine.scoring.hgkr_utils import generate_calibration_pairs
+
+        records = [
+            {"match_id": "m1", "candidate_id": "c1", "outcome": "success", "score": float("nan")},
+            {"match_id": "m2", "candidate_id": "c2", "outcome": "failure", "score": float("inf")},
+            {"match_id": "m3", "candidate_id": "c3", "outcome": "success", "score": -0.2},
+            {"match_id": "m4", "candidate_id": "c4", "outcome": "failure", "score": 0.4},
+        ]
+        pairs = generate_calibration_pairs(records)
+        assert [p.node_a for p in pairs] == ["m4"]
+
 
 # ═══════════════════════════════════════════════════════════
 # S2-09: Score drift detection
@@ -797,3 +824,86 @@ class TestSchemaIntegration:
         assert spec.preference_sample_size == 28
         assert spec.adaptive_sample_size.enabled is False
         assert spec.preference_attention_feedback_blend == 0.7
+
+
+# ── RG-027 (RU-021 / CEG-COR-082): preference_attention samples once ─────────
+
+
+def _preference_dim() -> MagicMock:
+    dim = _make_dim(name="pref", computation="preference_attention", candidateprop="community_id")
+    dim.metadata = {"success_value": "success"}
+    return dim
+
+
+def _compile_preference(sample_size: int = 28) -> tuple[str, dict]:
+    spec = _make_minimal_domain_spec(preference_sample_size=sample_size)
+    spec.feedbackloop.outcome_edge_type = "RESULTED_IN"
+    spec.feedbackloop.outcome_node_label = "TransactionOutcome"
+    assembler = ScoringAssembler(spec)
+    expr = assembler._compile_preference_attention(_preference_dim())
+    return expr, dict(assembler._query_params)
+
+
+def _simulate(expr: str, params: dict, outcomes: list[dict], candidate_community: int) -> float:
+    """Evaluate the compiled sample-then-filter shape over in-memory outcomes.
+
+    The ordering key, sample size parameter, success parameter and community
+    property are read from the compiled text, so a regression in any of them
+    changes the simulated value.
+    """
+    import re
+
+    sample = re.search(
+        r"COLLECT \{ MATCH \(qe\)-\[:RESULTED_IN\]->\((\w+):TransactionOutcome\) "
+        r"WHERE \1\.(\w+) = \$(\w+) RETURN \1 ORDER BY \1\.created_at IS NULL, \1\.created_at DESC, "
+        r"elementId\(\1\) LIMIT \$(\w+) \}",
+        expr,
+    )
+    assert sample, expr
+    _var, success_prop, success_key, sample_key = sample.groups()
+    member = re.search(r"\[(\w+) IN (\w+) WHERE \1\.community_id = candidate\.(\w+)\]", expr)
+    assert member, expr
+    successes = [o for o in outcomes if o[success_prop] == params[success_key]]
+    ranked = sorted(successes, key=lambda o: (o["created_at"] is None, -(o["created_at"] or 0), o["id"]))
+    picked = ranked[: params[sample_key]]
+    if not picked:
+        return params[next(k for k in params if k.startswith("pref_default_"))]
+    return sum(1 for o in picked if o["community_id"] == candidate_community) / len(picked)
+
+
+@pytest.mark.finding("CEG-COR-082")
+class TestPreferenceAttentionSampleOnce:
+    def test_expression_slices_the_success_list_once_and_filters_within_it(self) -> None:
+        expr, params = _compile_preference()
+        assert expr.count("COLLECT {") == 1
+        assert "[0..$" not in expr  # no per-list slicing after filtering
+        assert params["pref_sample_k_pref"] == 28
+        assert params["pref_success_pref"] == "success"
+        assert "$pref_default_pref" in expr
+
+    def test_hundred_successes_fifty_matching_k28_scores_half(self) -> None:
+        expr, params = _compile_preference()
+        outcomes = [
+            {"id": i, "outcome_type": "success", "created_at": 1000 - i, "community_id": 7 if i % 2 == 0 else 9}
+            for i in range(100)
+        ]
+        assert _simulate(expr, params, outcomes, candidate_community=7) == pytest.approx(0.5)
+
+    def test_recency_decides_the_sample(self) -> None:
+        expr, params = _compile_preference(sample_size=10)
+        old_matches = [{"id": i, "outcome_type": "success", "created_at": i, "community_id": 7} for i in range(50)]
+        recent_others = [
+            {"id": 100 + i, "outcome_type": "success", "created_at": 1000 + i, "community_id": 9} for i in range(10)
+        ]
+        assert _simulate(expr, params, old_matches + recent_others, candidate_community=7) == 0.0
+
+    def test_no_successes_returns_defaultwhennull(self) -> None:
+        expr, params = _compile_preference()
+        failures = [{"id": i, "outcome_type": "failure", "created_at": i, "community_id": 7} for i in range(5)]
+        assert _simulate(expr, params, failures, candidate_community=7) == params["pref_default_pref"]
+        assert "THEN $pref_default_pref" in expr
+
+    def test_values_are_bound_as_parameters(self) -> None:
+        expr, _params = _compile_preference()
+        assert "'success'" not in expr
+        assert "28" not in expr
