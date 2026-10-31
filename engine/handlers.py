@@ -2989,7 +2989,7 @@ async def handle_enrich(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 SCORE_ACTION = "score"
 _SCORE_READER_BLOCKED = (
     "no evidence binding supplied: a local caller passes a GraphEvidenceBinding with a "
-    "server-approved relevance map; score is not registered for any remote route"
+    "server-approved relevance map; the remote route is handle_score_remote"
 )
 
 
@@ -3001,9 +3001,10 @@ async def handle_score(
 ) -> dict[str, Any]:
     """Local ``graph_evidence_priority_v1`` cohort scoring (QM.POC0.CEG.SCORE.001).
 
-    Deliberately NOT in ``ACTION_HANDLERS`` and not advertised in
-    ``engine/spec.yaml``: no chassis or Gate route reaches it until Gate owns
-    ``score`` and a CEG capability binds it. It loads no domain pack and calls
+    Deliberately NOT in ``ACTION_HANDLERS``: the Gate-routed ``score`` action
+    is ``handle_score_remote``, which checks activation and the tenant's
+    ``score:read`` grant and then calls this with the binding it built from the
+    admitted spec (SCORING-GATE-01). It loads no domain pack and calls
     nothing on the match path. ``tenant`` comes from the caller's context only;
     by HEALTH-05 it is also the Neo4j database the binding may read. The request
     is validated in full before any read. With no ``binding``, or one that
