@@ -327,6 +327,18 @@ class TestEnsembleController:
         ctrl = EnsembleController.from_spec(spec)
         assert ctrl.default_strategy == FusionStrategy.RANK_AGGREGATION
 
+    def test_from_spec_unknown_strategy_is_not_swallowed(self) -> None:
+        """An unknown configured strategy is never silently swallowed (ERR-002).
+
+        RU-124 (DEC-46 option 1) supersedes RU-136's log-and-default here: the
+        unknown name raises, naming the accepted values.
+        """
+        spec = MagicMock()
+        spec.strategy = "no-such-strategy"
+        ctrl = EnsembleController.from_spec(spec)
+        with pytest.raises(ValueError, match="no-such-strategy"):
+            _ = ctrl.default_strategy
+
     def test_from_spec_none(self) -> None:
         """from_spec(None) defaults to WDS."""
         ctrl = EnsembleController.from_spec(None)

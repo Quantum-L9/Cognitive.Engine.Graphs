@@ -645,6 +645,57 @@ class Settings(BaseSettings):
     # 'v2', dates). On: `<major>.<minor>.<patch>[-<stage>]` per
     # DOMAIN_SPEC_VERSIONING.md. Off: any string.
     domain_version_semver_enforced: bool = True
+    # Correctness remediation lane L (plan 0d84ec8, RU-082..RU-083)
+    # RU-082 / CEG-COR-039: the legacy dict chassis (chassis/chassis_app.py,
+    # dev/test only) registered no authentication, so any caller executed for
+    # any tenant, and W3-01 stored the token's allowed_tenants without ever
+    # comparing it. On: when L9_API_KEY is configured, create_app registers
+    # BearerAuthMiddleware (/v1/health stays public) and, with
+    # tenant_auth_enabled, POST /v1/execute returns 403 for a tenant outside
+    # the token's allowed_tenants. Off: the unauthenticated factory.
+    legacy_chassis_auth_enabled: bool = True
+    # RU-083 / CEG-COR-087 / CEG-COR-088: the legacy chassis returned 200 for an
+    # open circuit, 500 for FeatureNotEnabled and engine ValidationError, and the
+    # raw str(exception) of unexpected errors in the 500 body. On:
+    # chassis.actions.execute_action attaches an HTTP status hint (503 +
+    # Retry-After, ChassisError.status_code, 422, 500 with the EngineError
+    # message, else 500 "Internal server error"). Off: the keyword mapping.
+    legacy_chassis_status_mapping_enabled: bool = True
+    # Correctness remediation lane J (plan 0d84ec8, RU-037)
+    # RU-037 / CEG-COR-011 (DEC-14 option A): geodecay hardcoded the longitude
+    # operands `candidate.lon` / `$lon`, so a pack whose coordinates are not
+    # named lat/lon (freight Carrier currentlat/currentlon vs Load
+    # pickuplat/pickuplon) could not bind them. On: a dimension's declared
+    # `candidateprop_lon` / `queryprop_lon` name the longitude operands; a
+    # dimension declaring neither compiles byte-identically. Off: the fields
+    # are ignored and `candidate.lon` / `$lon` are emitted as before.
+    geodecay_declared_longitude: bool = True
+    # Correctness remediation lane K (plan 0d84ec8, RU-006..RU-025)
+    # RU-007 / CEG-COR-016: boot registers each started GDS scheduler in
+    # EngineState.gds_schedulers (the W6-03 health probe reads it), admin gds_*
+    # reuses that instance instead of starting a duplicate and, with gds_enabled
+    # False, registers jobs without starting APScheduler (manual trigger only);
+    # EngineState.shutdown stops them all. Off: boot-local list, admin duplicate.
+    gds_shared_scheduler_registry: bool = True
+    # RU-006 / CEG-COR-015 (R1a-DEC-02): one outcome record schema. Sync
+    # entity_type=outcome writes through handle_outcomes' writer (domain
+    # outcome_node_label, positive|negative|neutral -> success|failure|partial,
+    # RESULTED_IN); outcomes persist optional fingerprint.dimension_scores (JSON)
+    # and was_selected; score_feedback projects dimension_scores and
+    # OutcomeFeedback counts success/failure. Off: :Outcome + HAS_OUTCOME with
+    # the sync vocabulary, no dimension_scores, positive/negative classes.
+    outcome_schema_unified: bool = True
+    # RU-012 / CEG-COR-063 (R1a-DEC-04 "admit both"): a match payload carrying
+    # contract_version is admitted as engine.models.payloads.MatchRequest against
+    # the tenant's DomainContract and mapped onto the legacy internals (direction
+    # -> match_direction, query.facts -> query, top_n). Legacy MatchPayload is
+    # unchanged. Off: such a payload is rejected (no match_direction).
+    match_request_contract_admission: bool = True
+    # RU-015 / CEG-COR-080 (R1a-DEC-05 "withhold"): a gate's roleexempt and
+    # relaxedpenalty are accepted by the schema and ignored by the match path, so
+    # engine.config.loader.admission_defects reports a pack declaring either and
+    # the loader withholds it until a domain needs roles. Off: accepted, ignored.
+    gate_role_exemption: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
