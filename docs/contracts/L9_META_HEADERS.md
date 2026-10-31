@@ -81,11 +81,22 @@ status: active
 # --- /L9_META ---
 ```
 
-**JSON** uses an `"_l9_meta"` object key; **TOML** uses an `[l9_meta]` table.
+**JSON** uses an `"_l9_meta"` object key; **TOML** uses a `[tool.l9_meta]` table.
+
+## New files
+
+Add a `FileMeta` entry for the file to `FILE_REGISTRY` in `tools/l9_meta_injector.py`, then
+run `python tools/l9_meta_injector.py --apply`. A tracked file that is not registered must
+still carry a canonical schema-1 header, or the check reports it as `NOHEADER`/`INVALID`.
 
 ## Exemptions
 
-`__init__.py` files are exempt from the engine header check.
+- `__init__.py` files may have no header (one that is present is still verified).
+- `artifacts/**` is not eligible: those files are regenerated without a header by
+  `tools/audit_engine.py`, `tools/spec_extract.py` and `tools/audit_harness.py`.
+- `EXCLUDED_PATTERNS` and `HEADERLESS_BASELINE` in `tools/l9_meta_injector.py` list the
+  remaining exceptions with their reasons. The baseline is a ratchet of files that predate
+  the check; new files are never added to it.
 
 ## Wrong
 
@@ -99,4 +110,8 @@ file is missing a header, run the injector rather than pasting one in.
 ## Verified by
 
 - `tests/contracts/test_contracts.py::TestContract18L9Meta`
-- `tools/l9_meta_injector.py`
+- `python tools/l9_meta_injector.py check` (the default dry-run is the same check) — run by
+  `.github/workflows/contracts.yml` (`meta-headers`) and the `l9-meta-check` pre-commit hook.
+  It considers every `FILE_REGISTRY` entry plus every git-tracked file in the
+  `contracts/contract_18.yaml` scope, and exits 1 when any is `PENDING` (would change),
+  `MISSING`, `NOHEADER`, `INVALID` (not schema 1) or `ERROR`.

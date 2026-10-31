@@ -131,12 +131,17 @@ def test_missing_or_unadmitted_domain_is_rejected(tmp_path: Path) -> None:
         loader.load_domain("does-not-exist")
     # A pack with a gate that cannot compile is withheld, never served. A scalar
     # (`queryparam: 90`) is a literal operand since CEG-009b; a parameter name
-    # that is not an identifier is still refused by the compiler (C-009).
+    # that is not an identifier is still refused by the compiler (C-009). The
+    # name is renamed in the queryschema too, so the gate references a declared
+    # parameter (RU-050 rejects undeclared ones at validation) and the refusal
+    # under test is the compiler's.
     broken = tmp_path / "broken-domain"
     broken.mkdir()
     raw = (SYNTHETIC_DOMAINS_ROOT / "cheese-aging" / "spec.yaml").read_text()
-    raw = raw.replace("id: cheese-aging", "id: broken-domain").replace(
-        "queryparam: max_turnover_days", 'queryparam: "max turnover days"'
+    raw = (
+        raw.replace("id: cheese-aging", "id: broken-domain")
+        .replace("queryparam: max_turnover_days", 'queryparam: "max turnover days"')
+        .replace("- name: max_turnover_days", '- name: "max turnover days"')
     )
     (broken / "spec.yaml").write_text(raw)
     with pytest.raises(DomainNotFoundError, match="do not compile"):

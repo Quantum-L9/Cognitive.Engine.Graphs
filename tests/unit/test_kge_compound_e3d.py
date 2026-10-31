@@ -227,3 +227,204 @@ class TestCompoundE3DScores:
         assert "beta_compounding" in scores
         assert "gamma_mrf" in scores
         assert all(0.0 <= s <= 1.0 for s in scores.values())
+
+
+# ============================================================================
+# CORRECTNESS REMEDIATION (lane G)
+# ============================================================================
+
+DISJOINT_TRIPLES = [(f"h{i}", "R", f"t{i}") for i in range(20)]
+
+
+def _seeded_rng(monkeypatch: pytest.MonkeyPatch, seed: int = 1234) -> None:
+    """train() draws from an unseeded default_rng(); pin it for a deterministic test."""
+    real = np.random.default_rng
+    monkeypatch.setattr(np.random, "default_rng", lambda *_a, **_k: real(seed))
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-049")
+class TestCompoundE3DTrainingDescendsMarginLoss:
+    """RU-113: train() follows the TransE margin-loss gradient instead of collapsing."""
+
+    def _train(self, monkeypatch: pytest.MonkeyPatch) -> CompoundE3D:
+        _seeded_rng(monkeypatch)
+        model = CompoundE3D(CompoundE3DConfig(embedding_dim=16, learning_rate=0.05, margin=1.0))
+        with patch("engine.kge.compound_e3d.settings") as mock_settings:
+            mock_settings.kge_enabled = True
+            model.train(list(DISJOINT_TRIPLES), epochs=200)
+        return model
+
+    def test_true_tails_outscore_corrupted_tails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        model = self._train(monkeypatch)
+        wins = total = 0
+        for i in range(20):
+            true_score = model.score_triple(f"h{i}", "R", f"t{i}")
+            for j in range(20):
+                if i == j:
+                    continue
+                total += 1
+                wins += true_score > model.score_triple(f"h{i}", "R", f"t{j}")
+        assert wins / total >= 0.90, f"{wins}/{total}"
+
+    def test_entities_do_not_collapse(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        model = self._train(monkeypatch)
+        vecs = np.stack([model._entity_embeddings[f"t{i}"] for i in range(20)])
+        dists = [np.linalg.norm(vecs[a] - vecs[b]) for a in range(20) for b in range(a + 1, 20)]
+        assert float(np.mean(dists)) > 0.5
+        for i in range(20):
+            score = model.score_triple(f"h{i}", "R", f"t{i}")
+            assert 0.0 <= score <= 1.0
+            assert model._entity_embeddings[f"h{i}"].shape == (16,)
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-112")
+class TestScoreAgainstIcpDoesNotMutate:
+    """RU-125: the ICP centroid is registered only for the duration of one _distance call."""
+
+    def test_centroid_not_left_in_entity_table(self, trained_model: CompoundE3D) -> None:
+        trained_model.build_icp_centroid(["alpha_recycling", "beta_compounding"])
+        before = set(trained_model._entity_embeddings)
+        trained_model.score_against_icp("gamma_mrf", "SUPPLIES_TO")
+        assert "__ICP_CENTROID__" not in trained_model._entity_embeddings
+        assert set(trained_model._entity_embeddings) == before
+        pool = [eid for eid, _ in trained_model.predict_tail("alpha_recycling", "SUPPLIES_TO", top_k=100)]
+        assert "__ICP_CENTROID__" not in pool
+
+    def test_score_unchanged(self, trained_model: CompoundE3D) -> None:
+        from engine.kge.beam_search import _CascadeTransformation
+
+        centroid = trained_model.build_icp_centroid(["alpha_recycling", "beta_compounding"])
+        h = trained_model._entity_embeddings["gamma_mrf"]
+        r = trained_model._relation_embeddings["SUPPLIES_TO"]
+        # RU-119: the trained relation scores through its operator cascade,
+        # ||H_r(h) + r - T_r(ICP)||; with no operators this is ||h + r - ICP||.
+        head = _CascadeTransformation(trained_model._head_ops.get("SUPPLIES_TO", []))
+        tail = _CascadeTransformation(trained_model._tail_ops.get("SUPPLIES_TO", []))
+        dist = float(np.linalg.norm(head.apply(h) + r - tail.apply(centroid)))
+        logit = -(trained_model._platt_alpha * dist - trained_model._platt_beta)
+        expected = 1.0 / (1.0 + np.exp(-logit))
+        score = trained_model.score_against_icp("gamma_mrf", "SUPPLIES_TO")
+        assert score == pytest.approx(float(expected))
+        assert 0.0 <= score <= 1.0
+
+    def test_prior_entity_under_the_key_is_restored(self, trained_model: CompoundE3D) -> None:
+        trained_model.build_icp_centroid(["alpha_recycling"])
+        prior = np.full(trained_model.dim, 7.0)
+        trained_model._entity_embeddings["__ICP_CENTROID__"] = prior
+        trained_model.score_against_icp("gamma_mrf", "SUPPLIES_TO")
+        assert trained_model._entity_embeddings["__ICP_CENTROID__"] is prior
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-113")
+class TestTrainDoesNotReorderInput:
+    """RU-126: train() shuffles a local copy, never the caller's list."""
+
+    def test_triples_list_unchanged(self) -> None:
+        triples = [(f"h{i}", "R", f"t{i}") for i in range(50)]
+        original = list(triples)
+        model = CompoundE3D(CompoundE3DConfig(embedding_dim=6))
+        with patch("engine.kge.compound_e3d.settings") as mock_settings:
+            mock_settings.kge_enabled = True
+            result = model.train(triples, epochs=3)
+        assert result["status"] == "completed"
+        assert triples == original
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-106")
+class TestRelationOperatorCascades:
+    """RG-154 (RU-119, DEC-45 "implement"): train() builds a per-relation operator
+    cascade, and _distance scores ||H_r(h) + r - T_r(t)|| through it."""
+
+    RELATIONS = {"SUPPLIES_TO", "ACCEPTS_POLYMER", "LOCATED_IN"}
+
+    @staticmethod
+    def _transe(model: CompoundE3D, h: str, r: str, t: str) -> float:
+        emb = model._entity_embeddings
+        return float(np.linalg.norm(emb[h] + model._relation_embeddings[r] - emb[t]))
+
+    def test_train_builds_operators_for_each_training_relation(self, trained_model: CompoundE3D) -> None:
+        assert set(trained_model._head_ops) == self.RELATIONS
+        assert set(trained_model._tail_ops) == self.RELATIONS
+        for relation in self.RELATIONS:
+            assert trained_model._head_ops[relation], relation
+
+    def test_distance_uses_a_non_identity_cascade(self, trained_model: CompoundE3D) -> None:
+        from engine.kge.transformations import Rotation, Scale
+
+        relation = "SUPPLIES_TO"
+        trained_model._head_ops[relation] = [Rotation(angle=30.0, axis=(0.0, 0.0, 1.0)), Scale(factor=1.5)]
+        trained_model._tail_ops[relation] = []
+        h = trained_model._entity_embeddings["alpha_recycling"]
+        t = trained_model._entity_embeddings["beta_compounding"]
+        r = trained_model._relation_embeddings[relation]
+        expected = float(np.linalg.norm(Scale(1.5).apply(Rotation(30.0, (0.0, 0.0, 1.0)).apply(h)) + r - t))
+
+        dist = trained_model._distance("alpha_recycling", relation, "beta_compounding")
+
+        assert dist == pytest.approx(expected)
+        assert dist != pytest.approx(self._transe(trained_model, "alpha_recycling", relation, "beta_compounding"))
+
+    def test_trained_cascade_is_not_transe(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _seeded_rng(monkeypatch)
+        model = CompoundE3D(CompoundE3DConfig(embedding_dim=16, learning_rate=0.05))
+        with patch("engine.kge.compound_e3d.settings") as mock_settings:
+            mock_settings.kge_enabled = True
+            model.train(list(DISJOINT_TRIPLES), epochs=50)
+        rotation, scale = model._head_ops["R"]
+        assert (rotation.angle, scale.factor) != (0.0, 1.0)  # parameters were trained
+        assert model._distance("h0", "R", "t0") != pytest.approx(self._transe(model, "h0", "R", "t0"))
+
+    def test_transe_fallback_for_relation_without_operators(self, trained_model: CompoundE3D) -> None:
+        del trained_model._head_ops["LOCATED_IN"]
+        del trained_model._tail_ops["LOCATED_IN"]
+        dist = trained_model._distance("gamma_mrf", "LOCATED_IN", "new_york")
+        assert dist == pytest.approx(self._transe(trained_model, "gamma_mrf", "LOCATED_IN", "new_york"))
+
+    def test_scores_stay_in_unit_interval(self, trained_model: CompoundE3D) -> None:
+        for h, r, t in TRAINING_TRIPLES:
+            assert 0.0 <= trained_model.score_triple(h, r, t) <= 1.0
+
+    def test_retraining_keeps_existing_operators(self, trained_model: CompoundE3D) -> None:
+        before = {r: list(ops) for r, ops in trained_model._head_ops.items()}
+        with patch("engine.kge.compound_e3d.settings") as mock_settings:
+            mock_settings.kge_enabled = True
+            trained_model.train(TRAINING_TRIPLES, epochs=1)
+        for relation, ops in before.items():
+            assert [type(op) for op in trained_model._head_ops[relation]] == [type(op) for op in ops]
+            assert trained_model._head_ops[relation][0].axis == ops[0].axis
+
+    def test_cascade_gradients_match_finite_differences(self) -> None:
+        from engine.kge.transformations import Rotation, Scale
+
+        rng = np.random.default_rng(7)
+        ops = [Rotation(angle=20.0, axis=(0.3, 0.5, 0.81)), Scale(factor=1.3)]
+        x = rng.normal(size=8)
+        upstream = rng.normal(size=8)
+
+        def objective(ops_: list, x_: np.ndarray) -> float:
+            out = x_
+            for op in ops_:
+                out = op.apply(out)
+            return float(np.dot(upstream, out))
+
+        grad_x, (g_angle, g_factor) = CompoundE3D._cascade_backward(ops, x, upstream)
+        eps = 1e-6
+        num_x = np.array(
+            [
+                (objective(ops, x + eps * np.eye(8)[i]) - objective(ops, x - eps * np.eye(8)[i])) / (2 * eps)
+                for i in range(8)
+            ]
+        )
+        d_rad = np.degrees(eps)
+        num_angle = (
+            objective([Rotation(20.0 + d_rad, ops[0].axis), ops[1]], x)
+            - objective([Rotation(20.0 - d_rad, ops[0].axis), ops[1]], x)
+        ) / (2 * eps)
+        num_factor = (objective([ops[0], Scale(1.3 + eps)], x) - objective([ops[0], Scale(1.3 - eps)], x)) / (2 * eps)
+        assert np.allclose(grad_x, num_x, atol=1e-5)
+        assert g_angle == pytest.approx(num_angle, abs=1e-5)
+        assert g_factor == pytest.approx(num_factor, abs=1e-5)

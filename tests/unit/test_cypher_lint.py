@@ -270,6 +270,245 @@ def test_helper_is_validated_only_by_its_own_returns() -> None:
     assert [f.expression for f in findings] == ["node_label"]
 
 
+# ── RU-138 / RG-174: false negatives closed ─────────────────────────────────
+
+
+def test_raw_overwrite_after_sanitize_is_raw() -> None:
+    """reassigned: a later raw binding wins over an earlier validated one."""
+    src = (
+        "def reassigned(spec):\n"
+        "    label = sanitize_label('Safe')\n"
+        "    label = spec.target_node\n"
+        "    cypher = f'MATCH (n:{label}) RETURN n'\n"
+        "    return cypher\n"
+    )
+    findings = _blocking(src)
+    assert [(f.line_no, f.expression) for f in findings] == [(4, "label")]
+    assert findings[0].kind.startswith("label / relationship type is not validated")
+
+
+def test_sanitize_after_raw_binding_passes() -> None:
+    """The legitimate inverse: raw then sanitized in the same block is validated."""
+    src = (
+        "def q(spec):\n"
+        "    label = spec.target_node\n"
+        "    label = sanitize_label(label)\n"
+        "    return f'MATCH (n:{label}) RETURN n'\n"
+    )
+    assert _blocking(src) == []
+
+
+def test_conditional_raw_binding_wins_on_conflict() -> None:
+    src = (
+        "def q(spec, flag):\n"
+        "    label = sanitize_label(spec.a)\n"
+        "    if flag:\n"
+        "        label = spec.b\n"
+        "    return f'MATCH (n:{label}) RETURN n'\n"
+    )
+    assert [f.expression for f in _blocking(src)] == ["label"]
+
+
+def test_cypher_assigned_to_message_named_variable_is_scanned() -> None:
+    """text_named: a message-like name does not hide a query-shaped f-string."""
+    src = "def text_named(spec):\n    text = f'MATCH (n:{spec.target_node}) RETURN n'\n    return text\n"
+    assert [f.expression for f in _blocking(src)] == ["spec.target_node"]
+
+
+def test_query_shaped_message_used_only_in_an_exception_is_not_cypher() -> None:
+    """A query-shaped error message that only reaches ``raise X(msg)`` is a diagnostic, not Cypher."""
+    src = (
+        "def check(spec, matches):\n"
+        "    if len(matches) != 1:\n"
+        "        msg = (\n"
+        "            f\"Endpoint '{spec.path}': ontology must declare exactly one edge \"\n"
+        '            f"({spec.fromnode})-[:{spec.targetedge}]->({spec.tonode}), found {len(matches)}"\n'
+        "        )\n"
+        "        raise ValueError(msg)\n"
+    )
+    assert _blocking(src) == []
+
+
+def test_query_shaped_message_reaching_a_sink_is_still_scanned() -> None:
+    """The diagnostic exemption needs every use to be diagnostic; one sink use keeps it scanned."""
+    src = (
+        "async def run(driver, spec):\n"
+        "    msg = f'MATCH (n:{spec.target_node}) RETURN n'\n"
+        "    if spec.strict:\n"
+        "        raise ValueError(msg)\n"
+        "    return await driver.execute_query(msg)\n"
+    )
+    assert [f.expression for f in _blocking(src)] == ["spec.target_node"]
+
+
+def test_shadowed_method_name_does_not_validate_spec_get() -> None:
+    """shadow: a same-module ``get`` method does not certify ``spec.get(...)``."""
+    src = (
+        "class Helper:\n"
+        "    def get(self, key):\n"
+        "        return 'Literal'\n"
+        "\n"
+        "\n"
+        "def lookup(spec):\n"
+        "    cypher = f\"MATCH (n:{spec.get('target_node')}) RETURN n\"\n"
+        "    return cypher\n"
+    )
+    assert [f.expression for f in _blocking(src)] == ["spec.get('target_node')"]
+
+
+def test_safe_func_still_resolves_for_direct_and_self_calls() -> None:
+    src = (
+        "def _label(x):\n"
+        "    return sanitize_label(x)\n"
+        "class S:\n"
+        "    def _lbl(self, x):\n"
+        "        return sanitize_label(x)\n"
+        "    def q(self, spec):\n"
+        "        a = _label(spec.a)\n"
+        "        b = self._lbl(spec.b)\n"
+        "        return f'MATCH (n:{a})-[:{b}]->(m) RETURN n'\n"
+    )
+    assert _blocking(src) == []
+
+
+def test_string_concatenation_is_scanned() -> None:
+    src = "def concat_case(spec):\n    cypher = 'MATCH (n:' + spec.target_node + ') RETURN n'\n    return cypher\n"
+    findings = _blocking(src)
+    assert [(f.line_no, f.expression) for f in findings] == [(2, "spec.target_node")]
+    assert findings[0].kind.startswith("label / relationship type is not validated")
+
+
+def test_str_format_is_scanned() -> None:
+    src = (
+        "def format_case(spec):\n"
+        "    cypher = 'MATCH (n:{}) RETURN n'.format(spec.target_node)\n"
+        "    other = 'MATCH (n:{lbl}) WHERE n.{0} IS NULL'.format(spec.prop, lbl=spec.label)\n"
+        "    return cypher, other\n"
+    )
+    assert [f.expression for f in _blocking(src)] == ["spec.target_node", "spec.label", "spec.prop"]
+
+
+def test_percent_format_is_scanned() -> None:
+    src = (
+        "def percent_case(spec):\n"
+        "    cypher = 'MATCH (n:%s) RETURN n' % spec.target_node\n"
+        "    pair = 'MATCH (n:%s)-[:%s]->(m)' % (spec.a, spec.b)\n"
+        "    return cypher, pair\n"
+    )
+    assert [f.expression for f in _blocking(src)] == ["spec.target_node", "spec.a", "spec.b"]
+
+
+def test_str_format_field_access_is_classified_as_the_accessed_value() -> None:
+    """RU-138 review: `{0.threshold}` interpolates spec.threshold, not the bare argument."""
+    src = (
+        "def format_access(spec):\n"
+        "    a = 'MATCH (n) WHERE n.score > {0.threshold} RETURN n'.format(spec)\n"
+        "    b = 'MATCH (n:{0.target_node}) RETURN n'.format(spec)\n"
+        "    c = 'MATCH (n:{0[label]}) RETURN n'.format(spec.labels)\n"
+        "    return a, b, c\n"
+    )
+    findings = _blocking(src)
+    assert [f.expression for f in findings] == ["spec.threshold", "spec.target_node", "spec.labels['label']"]
+    assert findings[0].kind.startswith("raw domain-spec value")
+
+
+def test_str_format_field_access_on_a_validated_attribute_passes() -> None:
+    src = (
+        "class C:\n"
+        "    def __init__(self, spec):\n"
+        "        self.lbl = sanitize_label(spec.label)\n"
+        "    def compile_q(self):\n"
+        "        return 'MATCH (n:{0.lbl}) RETURN n'.format(self)\n"
+    )
+    assert _blocking(src) == []
+
+
+def test_percent_format_over_a_runtime_mapping_is_scanned() -> None:
+    """RU-138 review: `%(key)s % params` interpolates params[key]; it is not dropped."""
+    src = (
+        "def percent_mapping(params, m, spec):\n"
+        "    a = 'MATCH (n) WHERE n.score > %(threshold)s RETURN n' % params\n"
+        "    b = 'MATCH (n:%(label)s) RETURN n' % m\n"
+        "    c = 'MATCH (n:%(label)s) RETURN n' % {'other': 1, **spec.labels}\n"
+        "    return a, b, c\n"
+    )
+    findings = _blocking(src)
+    assert [(f.line_no, f.expression) for f in findings] == [
+        (2, "params['threshold']"),
+        (3, "m['label']"),
+        (4, "spec.labels['label']"),
+    ]
+    assert findings[0].kind.startswith("raw domain-spec value")
+
+
+def test_str_format_over_unpacked_mapping_is_scanned() -> None:
+    src = (
+        "def format_mapping(params, m):\n"
+        "    a = 'MATCH (n) WHERE n.score > {threshold} RETURN n'.format(**params)\n"
+        "    b = 'MATCH (n:{label}) RETURN n'.format(**m)\n"
+        "    return a, b\n"
+    )
+    assert [f.expression for f in _blocking(src)] == ["params['threshold']", "m['label']"]
+
+
+def test_mapping_placeholders_with_validated_values_pass() -> None:
+    src = (
+        "def q(spec):\n"
+        "    label = sanitize_label(spec.label)\n"
+        "    a = 'MATCH (n:%(label)s) RETURN n' % {'label': label}\n"
+        "    b = 'MATCH (n:%(label)s) RETURN n' % {**spec.labels, 'label': label}\n"
+        "    c = 'MATCH (n) WHERE n.score > %(t)s RETURN n' % {'t': 0.5}\n"
+        "    d = 'MATCH (n:{label}) RETURN n'.format(**{'label': label})\n"
+        "    return a, b, c, d\n"
+    )
+    assert _blocking(src) == []
+
+
+def test_concat_and_format_with_validated_operands_pass() -> None:
+    src = (
+        "def q(spec):\n"
+        "    label = sanitize_label(spec.label)\n"
+        "    a = 'MATCH (n:' + label + ') RETURN n'\n"
+        "    b = 'MATCH (n:{}) RETURN n'.format(sanitize_label(spec.x))\n"
+        "    c = 'MATCH (n:%s) RETURN n' % label\n"
+        "    d = 'WHERE n.score > $' + 'min_score'\n"
+        "    return a, b, c, d\n"
+    )
+    assert _blocking(src) == []
+
+
+def test_non_cypher_concatenation_and_format_ignored() -> None:
+    src = (
+        "def key(tenant, spec):\n"
+        "    a = 'ceg:' + tenant + ':' + spec.name\n"
+        "    b = '{}/{}'.format(tenant, spec.name)\n"
+        "    c = 'total %d' % spec.count\n"
+        "    return a, b, c, 1 + 2\n"
+    )
+    assert _blocking(src) == []
+
+
+def test_unvalidated_bare_value_stays_out_of_scope() -> None:
+    """Documented design: a bare non-spec value in a fragment position is not reported."""
+    src = (
+        "def unvalidated_value(value):\n    cypher = f'MATCH (n) WHERE n.score > {value} RETURN n'\n    return cypher\n"
+    )
+    assert _blocking(src) == []
+
+
+def test_concat_waiver_applies_on_operand_line() -> None:
+    src = (
+        "def q(spec):\n"
+        "    return ('MATCH (n:' +\n"
+        "        spec.label  # cypher-lint: allow spec-authored label checked upstream\n"
+        "        + ') RETURN n')\n"
+    )
+    findings = scan_source(src, rel_path="engine/x.py")
+    assert len(findings) == 1
+    assert findings[0].line_no == 3
+    assert not findings[0].blocking
+
+
 # ── waivers are explicit and visible ────────────────────────────────────────
 
 
