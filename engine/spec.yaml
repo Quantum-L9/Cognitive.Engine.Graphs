@@ -7,7 +7,6 @@
 # owner: engine-team
 # status: active
 # --- /L9_META ---
-
 # engine/spec.yaml — Node registration contract for Cognitive.Engine.Graphs
 # Read by: constellation_node_sdk.registration.build_registration_payload
 # Consumed by: Gate /v1/admin/register at node startup

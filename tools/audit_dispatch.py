@@ -45,14 +45,17 @@ from tools.auditors.base import (
     get_auditors_for_tier,
 )
 
-# Auto-discover auditor modules
+# Auto-discover auditor modules. Import failures are kept so --strict can fail
+# on them instead of silently auditing with a partial registry.
 AUDITORS_DIR = REPO_ROOT / "tools" / "auditors"
+IMPORT_ERRORS: dict[str, str] = {}
 for py_file in AUDITORS_DIR.glob("*.py"):
     if py_file.name.startswith("_") or py_file.name == "base.py":
         continue
     try:
         importlib.import_module(f"tools.auditors.{py_file.stem}")
     except ImportError as e:
+        IMPORT_ERRORS[py_file.stem] = str(e)
         print(f"WARN: Could not load auditor {py_file.stem}: {e}", file=sys.stderr)
 
 
@@ -250,6 +253,9 @@ def main():
 
     if not runnable:
         print("No runnable auditors. Use --list to see all.")
+        if args.strict:
+            print("\nFAIL: --strict and no auditor could run.", file=sys.stderr)
+            sys.exit(2)
         sys.exit(0)
 
     results, indexes = [], {}
@@ -263,6 +269,10 @@ def main():
     if args.strict or args.pr_comment:
         _save_report(results, REPO_ROOT)
 
+    if args.strict and IMPORT_ERRORS:
+        names = ", ".join(sorted(IMPORT_ERRORS))
+        print(f"\nFAIL: --strict and auditor module(s) failed to import: {names}", file=sys.stderr)
+        sys.exit(2)
     if args.strict and any(r.has_blocking for r in results):
         print("\nFAIL: Blocking findings detected.", file=sys.stderr)
         sys.exit(1)
