@@ -45,7 +45,7 @@ Enforced by `tools/contract_scanner.py` and `tools/verify_contracts.py`.
 | # | Name | Rule |
 |---|------|------|
 | 17 | Test Requirements | Unit for pure functions, integration with testcontainers-neo4j, compliance for prohibited factors, <200ms p95. |
-| 18 | L9_META Headers | Every tracked file carries an L9_META header (schema v2). Values resolve from `l9-meta.yaml` by path — write with `tools/l9_meta_injector.py apply`, verify with `check`, never hand-edit a header. |
+| 18 | L9_META Headers | Every tracked file carries an L9_META header (schema v1, fields incl. `owner`). Values come from `FILE_REGISTRY` in `tools/l9_meta_injector.py` — register the file, write with `tools/l9_meta_injector.py --apply`, verify with `tools/l9_meta_injector.py check` (exit 1 on any finding); never hand-edit a header. |
 
 ## Layer 6 — Graph Intelligence (19–20)
 | # | Name | Rule |

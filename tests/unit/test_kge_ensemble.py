@@ -161,6 +161,44 @@ class TestRankAggregationEnsemble:
         result = rae.fuse(_scores(2))
         assert result.rank == 1
 
+    # RU-112 / CEG-COR-048 (DEC-44): the fused score depends on the components.
+
+    @staticmethod
+    def _pair(a: float, b: float) -> list[VariantScore]:
+        return [VariantScore("v1", "r", score=a), VariantScore("v2", "r", score=b)]
+
+    def test_borda_final_score_monotone_in_component_scores(self) -> None:
+        """RG-146: low component scores fuse lower than high ones."""
+        rae = RankAggregationEnsemble()
+        low = rae.fuse(self._pair(0.01, 0.02))
+        high = rae.fuse(self._pair(0.99, 0.98))
+        assert low.final_score < high.final_score
+        assert 0.0 <= low.final_score <= 1.0
+        assert 0.0 <= high.final_score <= 1.0
+
+    def test_borda_is_rank_weighted_mean(self) -> None:
+        """weight_i = (n - rank_i) / sum(1..n); final = sum weight_i * score_i."""
+        rae = RankAggregationEnsemble(method=RankAggregationMethod.BORDA)
+        scores = [
+            VariantScore("a", "r", score=0.2),
+            VariantScore("b", "r", score=0.8),
+            VariantScore("c", "r", score=0.5),
+        ]
+        result = rae.fuse(scores)
+        # ranks: b (0) -> 3/6, c (1) -> 2/6, a (2) -> 1/6
+        assert result.weights == pytest.approx({"b": 3 / 6, "c": 2 / 6, "a": 1 / 6})
+        assert sum(result.weights.values()) == pytest.approx(1.0)
+        assert result.final_score == pytest.approx((3 * 0.8 + 2 * 0.5 + 1 * 0.2) / 6)
+        assert result.rank == 1
+        assert "Borda" in result.explanation
+
+    def test_plurality_returns_top_variant_score(self) -> None:
+        rae = RankAggregationEnsemble(method=RankAggregationMethod.PLURALITY)
+        result = rae.fuse(self._pair(0.3, 0.6))
+        assert result.final_score == pytest.approx(0.6)
+        assert result.weights == {"v2": 1.0, "v1": 0.0}
+        assert "Plurality" in result.explanation
+
 
 @pytest.mark.unit
 class TestMixtureOfExpertsEnsemble:
@@ -289,6 +327,18 @@ class TestEnsembleController:
         ctrl = EnsembleController.from_spec(spec)
         assert ctrl.default_strategy == FusionStrategy.RANK_AGGREGATION
 
+    def test_from_spec_unknown_strategy_is_not_swallowed(self) -> None:
+        """An unknown configured strategy is never silently swallowed (ERR-002).
+
+        RU-124 (DEC-46 option 1) supersedes RU-136's log-and-default here: the
+        unknown name raises, naming the accepted values.
+        """
+        spec = MagicMock()
+        spec.strategy = "no-such-strategy"
+        ctrl = EnsembleController.from_spec(spec)
+        with pytest.raises(ValueError, match="no-such-strategy"):
+            _ = ctrl.default_strategy
+
     def test_from_spec_none(self) -> None:
         """from_spec(None) defaults to WDS."""
         ctrl = EnsembleController.from_spec(None)
@@ -305,3 +355,65 @@ class TestEnsembleController:
             mock_settings.kge_confidence_threshold = 0.0
             result = ctrl.predict(_scores(3))
             assert result.fusion_strategy == "fallback_mean"
+
+
+@pytest.mark.unit
+class TestEnsembleStrategyResolution:
+    """RG-159 (RU-124 / CEG-COR-111, DEC-46 option 1): a configured strategy is
+    applied or rejected; nothing silently becomes the weighted mean."""
+
+    @staticmethod
+    def _spec(strategy: str):
+        from engine.config.schema import KGEEnsembleSpec
+
+        return KGEEnsembleSpec(strategy=strategy)
+
+    @pytest.mark.parametrize("strategy", ["rank_aggregation", "weighted_average", "bogus", "median", "max"])
+    def test_unknown_or_unimplemented_spec_strategy_raises(self, strategy: str) -> None:
+        ctrl = EnsembleController(self._spec(strategy))
+        with pytest.raises(ValueError, match="weightedaverage, rankaggregation, mixtureofexperts"):
+            _ = ctrl.default_strategy
+
+    @pytest.mark.parametrize(
+        ("spelling", "expected"),
+        [
+            ("weightedaverage", FusionStrategy.WEIGHTED_MEAN),
+            ("rankaggregation", FusionStrategy.RANK_AGGREGATION),
+            ("mixtureofexperts", FusionStrategy.MIXTURE_EXPERTS),
+        ],
+    )
+    def test_code_spellings_resolve(self, spelling: str, expected: FusionStrategy) -> None:
+        assert EnsembleController(self._spec(spelling)).default_strategy == expected
+
+    def test_rankaggregation_spec_fuses_with_rank_aggregation(self) -> None:
+        ctrl = EnsembleController(self._spec("rankaggregation"))
+        with patch("engine.kge.ensemble.settings") as mock_settings:
+            mock_settings.kge_enabled = True
+            mock_settings.kge_confidence_threshold = 0.0
+            result = ctrl.predict(_scores(3))
+        assert result.fusion_strategy == "borda"
+
+    @pytest.mark.parametrize("strategy", [FusionStrategy.MEDIAN, FusionStrategy.MAX])
+    def test_predict_rejects_enum_member_without_implementation(self, strategy: FusionStrategy) -> None:
+        ctrl = EnsembleController()
+        with patch("engine.kge.ensemble.settings") as mock_settings:
+            mock_settings.kge_enabled = True
+            mock_settings.kge_confidence_threshold = 0.0
+            with pytest.raises(ValueError, match="no implementation"):
+                ctrl.predict(_scores(3), strategy=strategy)
+        assert ctrl.get_audit_log() == []
+
+    def test_predict_with_bad_spec_strategy_raises(self) -> None:
+        ctrl = EnsembleController(self._spec("rank_aggregation"))
+        with patch("engine.kge.ensemble.settings") as mock_settings:
+            mock_settings.kge_enabled = True
+            mock_settings.kge_confidence_threshold = 0.0
+            with pytest.raises(ValueError, match="rank_aggregation"):
+                ctrl.predict(_scores(3))
+
+    def test_kge_disabled_guard_still_short_circuits(self) -> None:
+        ctrl = EnsembleController(self._spec("bogus"))
+        with patch("engine.kge.ensemble.settings") as mock_settings:
+            mock_settings.kge_enabled = False
+            result = ctrl.predict(_scores(3), strategy=FusionStrategy.MEDIAN)
+        assert result.fusion_strategy == "disabled"

@@ -34,9 +34,10 @@ same weight ceiling.
 | Confidence threshold | 0.3 (`kge_confidence_threshold`) |
 | Training relations | Derived from `spec.ontology.edges` |
 | Link prediction | Beam search, width 10, depth 3 |
+| Triple scoring | `d = ‖H_r(h) + r − T_r(t)‖`: per-relation operator cascades built by `CompoundE3D._build_relation_operators` at train time (head `[Rotation, Scale]`, learned jointly with the embeddings; tail identity); TransE `‖h + r − t‖` for a relation without operators |
 | Vector index | Neo4j, cosine similarity |
 
-Ensemble strategies: `weighted_average`, `rank_aggregation`, `mixture_of_experts`.
+Ensemble strategies (`KGEEnsembleSpec.strategy`, spelled as `FusionStrategy` values): `weightedaverage`, `rankaggregation`, `mixtureofexperts`. Any other value — including the unimplemented `median` and `max` — is rejected with a `ValueError`, never replaced by the weighted mean.
 
 ## Tenant isolation
 

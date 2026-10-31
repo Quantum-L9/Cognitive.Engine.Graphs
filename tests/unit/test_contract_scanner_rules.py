@@ -161,6 +161,49 @@ def test_del_rules_ignore_unrelated_get_calls() -> None:
     assert _rule_lines(src, "DEL-002") == []
 
 
+@pytest.mark.parametrize(
+    "src",
+    [
+        # a parameter of another function that shares the client's name
+        "import httpx\ndef make():\n    client = httpx.Client()\n    return client\ndef read(client):\n    return client.get('k')\n",
+        # rebound to a non-HTTP object before the call
+        "import httpx\ndef f():\n    client = httpx.Client()\n    client.close()\n    client = {}\n    return client.get('k')\n",
+        # a same-named local in a sibling function
+        "import httpx\ndef a():\n    client = httpx.Client()\n    return client\ndef b():\n    client = {'k': 1}\n    return client.get('k')\n",
+        # a loop target that shadows a module-level client
+        "import httpx\nclient = httpx.Client()\ndef f(caches):\n    for client in caches:\n        client.get('k')\n",
+        # a class attribute is not visible to its methods as a bare name
+        "import httpx\nclass A:\n    client = httpx.Client()\n    def f(self, client):\n        return client.get('k')\n",
+    ],
+)
+def test_del001_client_names_are_scoped_to_their_bindings(src: str) -> None:
+    """RU-137 review: a client binding certifies only the uses it can reach."""
+    assert _rule_lines(src, "DEL-001") == []
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        # module-level client used inside a function
+        "import httpx\nclient = httpx.Client()\ndef f(u):\n    return client.get(u)\n",
+        # module singleton assigned through `global`
+        "import httpx\nclient = None\ndef init():\n    global client\n    client = httpx.Client()\ndef f(u):\n    return client.get(u)\n",
+        # closure over an enclosing function's client
+        "import httpx\ndef outer(u):\n    client = httpx.Client()\n    def inner():\n        return client.get(u)\n    return inner\n",
+        # a conditional client binding still reaches the call
+        "import httpx\ndef f(flag, u):\n    client = {}\n    if flag:\n        client = httpx.Client()\n    return client.get(u)\n",
+        # an annotated binding, and a later use in the same block
+        "import httpx\ndef f(u):\n    client: httpx.Client = httpx.Client()\n    x = 1\n    return client.get(u)\n",
+        # bound in a loop body and called on a later iteration
+        "import httpx\ndef f(us):\n    for u in us:\n        if u:\n            client.get(u)\n        client = httpx.Client()\n",
+    ],
+)
+def test_del001_scoped_client_names_still_flag(src: str) -> None:
+    lines = src.splitlines()
+    expected = [i for i, line in enumerate(lines, start=1) if "client.get(" in line]
+    assert _rule_lines(src, "DEL-001") == expected
+
+
 def test_del_rules_scoped_to_engine() -> None:
     assert _rule_lines(ARCH_CASES, "DEL-001", path="tools/x.py") == []
 
@@ -189,3 +232,116 @@ def test_main_exits_one_on_violation(tmp_path: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cs.sys, "argv", ["contract_scanner.py"])
     assert cs.main() == 1
+
+
+# ── ERR-002 (RU-136, RG-172; DEC-51: enforced in engine/ only) ──────────────
+
+ERR002_FIXTURE = """def swallow():
+    try:
+        risky()
+    except ValueError:
+        pass
+"""
+
+ERR002_CASES = """def a():
+    try:
+        x()
+    except (TypeError, ValueError):
+        pass
+
+
+def b():
+    try:
+        x()
+    except KeyError:
+        pass
+        pass
+
+
+def c():
+    try:
+        x()
+    except ValueError as exc:
+        log_and_raise(exc)
+
+
+def d():
+    try:
+        x()
+    except ValueError:
+        # documented, but still nothing but pass
+        pass
+    finally:
+        pass
+
+
+def e():
+    try:
+        x()
+    {BARE_EXCEPT}
+        pass
+
+
+def f():
+    try:
+        x()
+    except OSError: pass
+""".replace("{BARE_EXCEPT}", "except" + ":")  # spelled apart so ERR-001 does not flag this test file
+
+
+def test_err002_fixture_produces_one_violation_at_the_except_line() -> None:
+    assert _rule_lines(ERR002_FIXTURE, "ERR-002", path="engine/err002.py") == [4]
+
+
+def test_err002_flags_only_pass_only_typed_handlers() -> None:
+    # a(): tuple type, b(): several passes, d(): comment + pass, f(): one-line form.
+    # c() handles the error; e() is a bare except (ERR-001's finding, not ERR-002's).
+    assert _rule_lines(ERR002_CASES, "ERR-002", path="engine/cases.py") == [4, 11, 26, 43]
+
+
+def test_err002_scoped_to_engine() -> None:
+    assert _rule_lines(ERR002_FIXTURE, "ERR-002", path="tools/err002.py") == []
+    assert _rule_lines(ERR002_FIXTURE, "ERR-002", path="tests/test_err002.py") == []
+
+
+def test_err002_unparsable_file_falls_back_to_one_line_form() -> None:
+    src = "def broken(:\n    try:\n        x()\n    except OSError: pass\n"
+    assert _rule_lines(src, "ERR-002", path="engine/broken.py") == [4]
+
+
+def test_err002_exemption_is_keyed_on_path_function_and_type() -> None:
+    src = (
+        "class GraphLifecycle:\n"
+        "    async def shutdown(self):\n"
+        "        try:\n"
+        "            await task\n"
+        "        except asyncio.CancelledError:\n"
+        "            pass\n"
+        "        try:\n"
+        "            await other\n"
+        "        except ValueError:\n"
+        "            pass\n"
+    )
+    # The CancelledError handler in GraphLifecycle.shutdown is exempt; ValueError is not.
+    assert _rule_lines(src, "ERR-002", path="engine/boot.py") == [9]
+    # The same code in another module has no exemption.
+    assert _rule_lines(src, "ERR-002", path="engine/other.py") == [5, 9]
+
+
+def test_err002_every_exemption_has_a_reason_and_a_live_handler() -> None:
+    import ast
+
+    live = set()
+    for rel, qualname, exc in cs.ERR_002_EXEMPTIONS:
+        tree = ast.parse((REPO / rel).read_text(encoding="utf-8"))
+        live |= {(rel, q, e) for q, e, _ in cs.swallowed_handlers(tree) if (rel, q, e) == (rel, qualname, exc)}
+    assert live == set(cs.ERR_002_EXEMPTIONS)
+    assert all(reason.strip() for reason in cs.ERR_002_EXEMPTIONS.values())
+
+
+def test_err002_engine_tree_is_clean() -> None:
+    hits = []
+    for path in sorted((REPO / "engine").rglob("*.py")):
+        source = path.read_text(encoding="utf-8")
+        hits += [(v.file, v.line) for v in cs.scan_file(path, source, REPO) if v.rule_id == "ERR-002"]
+    assert hits == []

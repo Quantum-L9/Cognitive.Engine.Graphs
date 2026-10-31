@@ -15,7 +15,7 @@ domain:
   description: >
     AI-first executive assistant matching tasks to optimal experts, resources,
     and workflows with calendar integration and priority routing.
-  version: 1.0.0
+  version: 1.1.0
   # Legacy matching pack, retired from serving (operator decision 2026-10-25:
   # domain-specific runtime architecture is retired). Withheld by the generic
   # loader admission policy whatever its gates compile to.
@@ -91,6 +91,9 @@ queryschema:
     - {name: priority, type: enum, required: true}
     - {name: estimatedhours, type: float}
     - {name: deadline, type: datetime}
+    # Hours the task allows for the expert's first response (CEG-COR-153): the
+    # response-time gate compares hours with hours, not with the deadline.
+    - {name: maxresponsehours, type: float}
     - {name: requiredskills, type: string}
 
 gates:
@@ -104,9 +107,11 @@ gates:
     queryparam: estimatedhours
     operator: ">="
   - name: deadline_feasibility
+    # avgresponsetimehours (float hours) was compared with $deadline (a
+    # datetime), which Cypher never orders (CEG-COR-153).
     type: threshold
     candidateprop: avgresponsetimehours
-    queryparam: deadline
+    queryparam: maxresponsehours
     operator: "<="
   - name: utilization_gate
     type: threshold
