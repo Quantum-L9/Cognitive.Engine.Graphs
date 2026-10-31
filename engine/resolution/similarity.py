@@ -19,11 +19,37 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from engine.config.schema import SemanticRegistrySpec
+from engine.config.schema import DomainSpec, SemanticRegistrySpec
 from engine.graph.driver import GraphDriver
 from engine.utils.security import sanitize_label
 
 logger = logging.getLogger(__name__)
+
+_FALLBACK_ID_PROPERTY = "entity_id"
+
+
+def declared_id_property(domain_spec: DomainSpec | None, label: str) -> str:
+    """The property that identifies a node of ``label``, as the domain declares it.
+
+    Same rule the match path applies to candidates (CEG-COR-002 / PO-04): the
+    sync endpoint's ``idproperty`` for this label (the key the engine MERGEs
+    on), else the node's first ``required`` property, else ``entity_id``.
+    ``spec_declared_candidate_id`` off, or no domain spec, keeps ``entity_id``.
+    """
+    from engine.config.settings import settings
+
+    if domain_spec is None or not settings.spec_declared_candidate_id:
+        return _FALLBACK_ID_PROPERTY
+    if domain_spec.sync:
+        for endpoint in domain_spec.sync.endpoints:
+            if endpoint.targetnode == label and endpoint.idproperty:
+                return endpoint.idproperty
+    for node in domain_spec.ontology.nodes:
+        if node.label == label:
+            for prop in node.properties:
+                if prop.required:
+                    return prop.name
+    return _FALLBACK_ID_PROPERTY
 
 
 class SimilarityScorer:
@@ -42,10 +68,15 @@ class SimilarityScorer:
         registry_spec: SemanticRegistrySpec,
         graph_driver: GraphDriver,
         domain_id: str,
+        domain_spec: DomainSpec | None = None,
     ) -> None:
         self._spec = registry_spec
         self._graph_driver = graph_driver
         self._db = domain_id
+        # RU-103 / PO-04: the domain spec declares each label's id property.
+        # None: resolved on first use from the engine's domain loader (the
+        # tenant id is the domain id), else ``entity_id``.
+        self._domain_spec = domain_spec
 
     async def compute_similarity(
         self,
@@ -67,7 +98,7 @@ class SimilarityScorer:
 
         property_sim = await self._property_similarity(entity_a_id, entity_b_id, label)
         structural_sim = await self._structural_similarity(entity_a_id, entity_b_id, label)
-        behavioral_sim = await self._behavioral_similarity(entity_a_id, entity_b_id)
+        behavioral_sim = await self._behavioral_similarity(entity_a_id, entity_b_id, label)
 
         score = (
             self._spec.property_weight * property_sim
@@ -189,12 +220,44 @@ class SimilarityScorer:
         union = row.get("union_count", 0)
         return shared / union if union > 0 else 0.0
 
+    def _resolved_domain_spec(self) -> DomainSpec | None:
+        if self._domain_spec is None:
+            from engine.state import get_state
+
+            state = get_state()
+            if state.is_initialized:
+                self._domain_spec = state.domain_loader.load_domain(self._db)
+        return self._domain_spec
+
     async def _behavioral_similarity(
         self,
         entity_a_id: str,
         entity_b_id: str,
+        label: str | None = None,
     ) -> float:
-        """Shared TransactionOutcome pattern similarity."""
+        """Shared TransactionOutcome pattern similarity.
+
+        RU-103 / CEG-COR-177: both entities are matched with ``label`` and the
+        label's declared id property, so a same-id node of another label never
+        contributes outcomes. ``resolution_behavioral_label_scoped`` off (or no
+        label) restores the label-less ``entity_id`` match.
+        """
+        from engine.config.settings import settings
+
+        if label is not None and settings.resolution_behavioral_label_scoped:
+            safe_label = sanitize_label(label)
+            id_prop = sanitize_label(declared_id_property(self._resolved_domain_spec(), safe_label))
+            cypher = f"""
+        OPTIONAL MATCH (a:{safe_label} {{{id_prop}: $a_id}})-[:RESULTED_IN]->(oa:TransactionOutcome)
+        WITH collect(DISTINCT oa.match_id) AS matches_a
+        OPTIONAL MATCH (b:{safe_label} {{{id_prop}: $b_id}})-[:RESULTED_IN]->(ob:TransactionOutcome)
+        WITH matches_a, collect(DISTINCT ob.match_id) AS matches_b
+        WITH matches_a, matches_b,
+             [x IN matches_a WHERE x IN matches_b] AS shared
+        RETURN size(shared) AS shared_count,
+               size(matches_a) + size(matches_b) - size(shared) AS union_count
+        """
+            return await self._shared_outcome_ratio(cypher, entity_a_id, entity_b_id)
         cypher = """
         OPTIONAL MATCH (a {entity_id: $a_id})-[:RESULTED_IN]->(oa:TransactionOutcome)
         WITH collect(DISTINCT oa.match_id) AS matches_a
@@ -205,6 +268,9 @@ class SimilarityScorer:
         RETURN size(shared) AS shared_count,
                size(matches_a) + size(matches_b) - size(shared) AS union_count
         """
+        return await self._shared_outcome_ratio(cypher, entity_a_id, entity_b_id)
+
+    async def _shared_outcome_ratio(self, cypher: str, entity_a_id: str, entity_b_id: str) -> float:
         results = await self._graph_driver.execute_query(
             cypher=cypher,
             parameters={"a_id": entity_a_id, "b_id": entity_b_id},

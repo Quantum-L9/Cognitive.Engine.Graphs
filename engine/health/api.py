@@ -224,6 +224,7 @@ async def handle_health_batch_assess(tenant: str, payload: dict[str, Any]) -> di
             entity=entity_data.get("data", {}),
             domain_spec=domain_spec,
             node_label=node_label,
+            field_confidences=_forwarded_confidences(entity_data.get("field_confidences")),
         )
         readiness = compute_readiness_score_v2(field_health, domain_spec)
         field_map = build_field_map(domain_spec, node_label)
@@ -312,6 +313,7 @@ async def handle_health_report(tenant: str, payload: dict[str, Any]) -> dict[str
         entity=entity_data,
         domain_spec=domain_spec,
         node_label=node_label,
+        field_confidences=_forwarded_confidences(payload.get("field_confidences")),
     )
     readiness = compute_readiness_score_v2(field_health, domain_spec)
     field_map = build_field_map(domain_spec, node_label)
@@ -341,6 +343,31 @@ async def handle_health_report(tenant: str, payload: dict[str, Any]) -> dict[str
                 track_conversion_event(tenant, entity_id, "upgrade_prompted")
 
     return report.model_dump()
+
+
+def _forwarded_confidences(raw: Any) -> dict[str, float] | None:
+    """A caller-supplied confidence map for batch/report (CEG-COR-044).
+
+    ``health_assess`` has always passed ``field_confidences``; batch entities
+    and the report payload dropped it, so the same entity scored differently
+    per subaction. With ``health_absent_confidence_counts_enabled`` off the map
+    is ignored on these two paths, as before.
+    """
+    from engine.config.settings import settings
+
+    if not settings.health_absent_confidence_counts_enabled or not raw:
+        return None
+    if not isinstance(raw, dict):
+        msg = f"field_confidences must be a mapping of field name to confidence, got {type(raw).__name__}"
+        raise ValueError(msg)
+    confidences: dict[str, float] = {}
+    for key, value in raw.items():
+        try:
+            confidences[str(key)] = float(value)
+        except (TypeError, ValueError) as exc:
+            msg = f"field_confidences[{key!r}] must be a number, got {type(value).__name__}"
+            raise ValueError(msg) from exc
+    return confidences
 
 
 def _build_action_strings(critical_gaps: list[str], caps: EffectiveHealthCapabilities) -> list[str]:

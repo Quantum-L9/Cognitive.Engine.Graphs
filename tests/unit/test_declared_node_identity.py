@@ -47,6 +47,13 @@ PACKS = {
     "freight-matching": ("Carrier", "carrierid", "loadtocarrier"),
 }
 
+# RU-010 (R1a-DEC-03): each pack's required gate parameters for its direction.
+_REQUIRED_QUERY: dict[str, dict[str, Any]] = {
+    "plasticos": {"polymer_type": "HDPE"},
+    # pickupdate: required since RU-046 made availability_window read it.
+    "freight-matching": {"weightlbs": 1000.0, "equipmenttype": "van", "pickupdate": "2026-11-02T08:00:00Z"},
+}
+
 
 class _Capture:
     def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
@@ -69,19 +76,6 @@ def _wire(spec: DomainSpec, rows: list[dict[str, Any]] | None = None) -> _Captur
     loader.list_domains.return_value = [spec.domain.id]
     init_dependencies(driver, loader)  # type: ignore[arg-type]
     return driver
-
-
-@pytest.fixture(autouse=True)
-def _load_withheld_pack_as_fixture_data(monkeypatch: pytest.MonkeyPatch) -> None:
-    """These tests load freight-matching only as fixture data for a mocked loader.
-
-    Since RU-020/RU-039 the loader withholds that pack (its scoring references
-    unbound $lat/$lon/$target_price, CEG-COR-011 — GATED on RU-037). Admission
-    itself is covered by tests/unit/test_legacy_pack_serving_boundary.py.
-    """
-    from engine.config.settings import settings as _settings
-
-    monkeypatch.setattr(_settings, "unvalidated_domain_packs_enabled", True)
 
 
 @pytest.fixture(params=sorted(PACKS), ids=str)
@@ -169,7 +163,9 @@ class TestDeclaredNodeIdentity:
                 "subaction": "evaluate",
                 "domain_id": domain,
                 "k": 2,
-                "test_set": [{"query": {}, "match_direction": direction, "expected_ids": ["GOOD"]}],
+                "test_set": [
+                    {"query": _REQUIRED_QUERY[domain], "match_direction": direction, "expected_ids": ["GOOD"]}
+                ],
             },
         )
         assert result["per_case"][0].get("error") is None, result["per_case"][0]

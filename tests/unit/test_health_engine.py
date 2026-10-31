@@ -179,6 +179,107 @@ class TestReadinessScorer:
         # Only g2 counts → 50% gate completeness → exactly at threshold
         assert result.gate_completeness == 0.5
 
+    # -- RU-108 / CEG-COR-044: an absent confidence is "no signal", not "unreliable" --
+
+    def test_absent_confidence_counts_populated_gate_fields(self):
+        """confidence=None on populated fields → counted; readiness is not 0.0/F."""
+        fields = [
+            _make_field_health("g1", populated=True, confidence=None, gate_critical=True),
+            _make_field_health("g2", populated=True, confidence=None, gate_critical=True),
+            _make_field_health("s1", populated=True, confidence=None, scoring_weight=0.5),
+        ]
+        result = compute_readiness_score_v2(fields, _make_domain_spec())
+
+        assert result.gate_completeness == 1.0
+        assert result.scoring_dimension_coverage == 1.0
+        assert result.blocking_reason is None
+        assert result.blocking_fields == []
+        assert result.overall_score > 0.0
+        assert result.grade != "F"
+
+    def test_explicit_low_confidence_still_discounts_with_absent_elsewhere(self):
+        """An explicit 0.5 lowers gate_completeness even when other fields carry no confidence."""
+        fields = [
+            _make_field_health("g1", populated=True, confidence=0.5, gate_critical=True),
+            _make_field_health("g2", populated=True, confidence=None, gate_critical=True),
+        ]
+        result = compute_readiness_score_v2(fields, _make_domain_spec())
+
+        assert result.gate_completeness == 0.5
+        assert result.blocking_fields == ["g1"]
+
+    def test_blocked_result_lists_every_uncounted_gate_field(self):
+        """Whenever blocking_reason is set, blocking_fields names the uncounted gate fields."""
+        fields = [
+            _make_field_health("g1", populated=True, confidence=0.5, gate_critical=True),
+            _make_field_health("g2", populated=True, confidence=0.3, gate_critical=True),
+            _make_field_health("g3", populated=False, confidence=None, gate_critical=True),
+        ]
+        result = compute_readiness_score_v2(fields, _make_domain_spec())
+
+        assert result.blocking_reason == "gate_critical_fields_missing"
+        assert sorted(result.blocking_fields) == ["g1", "g2", "g3"]
+
+    def test_absent_confidence_flag_off_restores_legacy(self, monkeypatch):
+        """health_absent_confidence_counts_enabled=False → None coerces to 0 (legacy outputs)."""
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "health_absent_confidence_counts_enabled", False)
+        fields = [
+            _make_field_health("g1", populated=True, confidence=None, gate_critical=True),
+            _make_field_health("g2", populated=True, confidence=None, gate_critical=True),
+        ]
+        result = compute_readiness_score_v2(fields, _make_domain_spec())
+
+        assert result.overall_score == 0.0
+        assert result.grade == "F"
+        assert result.gate_completeness == 0.0
+        assert result.blocking_reason == "gate_critical_fields_missing"
+        assert result.blocking_fields == []
+
+    # -- RU-110 / CEG-COR-046: the blocked score sits on the same 60% gate scale --
+
+    @staticmethod
+    def _score_at(gate_completeness: float) -> float:
+        """Readiness with 100 gate fields, ``round(gc*100)`` of them counted; all else fixed.
+
+        One unpopulated scoring field keeps scoring coverage at 0, so the unblocked
+        score at gc=0.50 is 40.0 — below the legacy blocked 49.0 at gc=0.49.
+        """
+        populated = round(gate_completeness * 100)
+        fields = [
+            _make_field_health(f"g{i}", populated=i < populated, confidence=0.9, gate_critical=True) for i in range(100)
+        ]
+        fields.append(_make_field_health("s1", populated=False, scoring_weight=0.5))
+        return compute_readiness_score_v2(fields, _make_domain_spec()).overall_score
+
+    def test_readiness_is_monotonic_across_the_block_threshold(self):
+        scores = [self._score_at(gc) for gc in (0.40, 0.49, 0.50, 0.60)]
+        assert scores == sorted(scores), scores
+        assert self._score_at(0.49) <= self._score_at(0.50)
+
+    def test_blocked_score_is_the_60_percent_gate_component(self):
+        fields = [
+            _make_field_health("g1", populated=True, confidence=0.9, gate_critical=True),
+            _make_field_health("g2", populated=False, gate_critical=True),
+            _make_field_health("g3", populated=False, gate_critical=True),
+        ]
+        result = compute_readiness_score_v2(fields, _make_domain_spec())
+
+        assert result.overall_score == round((1 / 3) * 60, 2)
+        assert result.overall_score <= 30
+        assert result.grade == "F"
+        assert result.blocking_reason == "gate_critical_fields_missing"
+        assert result.recommended_action == "enrich_gates_first"
+        assert self._score_at(0.49) == 29.4
+
+    def test_blocked_score_scale_flag_off_restores_gate_score_times_100(self, monkeypatch):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "health_blocked_score_scale_enabled", False)
+        assert self._score_at(0.49) == 49.0
+        assert self._score_at(0.50) == 40.0
+
     def test_get_grade_boundaries(self):
         assert get_grade(0.95) == "A"
         assert get_grade(0.85) == "B"
@@ -343,6 +444,44 @@ class TestEnrichmentPriority:
 
         assert priority.recommendation in ("enrich_low_priority", "skip")
 
+    # -- RU-111 / CEG-COR-047: the 10% staleness term is computed from field health --
+
+    @staticmethod
+    def _entity(staleness_days: int | None) -> EntityHealth:
+        return EntityHealth(
+            entity_id="e1",
+            domain="test",
+            readiness_score=60.0,
+            grade="D",
+            field_health=[
+                _make_field_health("g1", populated=True, gate_critical=True, staleness_days=staleness_days),
+                _make_field_health("g2", populated=False, gate_critical=True, staleness_days=staleness_days),
+                _make_field_health("s1", populated=True, scoring_weight=0.3, staleness_days=staleness_days),
+            ],
+            critical_gaps=["g2"],
+            gate_completeness=0.5,
+            scoring_dimension_coverage=1.0,
+        )
+
+    def test_stale_entity_priority_is_ten_points_higher(self):
+        spec = _make_domain_spec()
+        fresh = compute_enrichment_priority(self._entity(0), spec)
+        stale = compute_enrichment_priority(self._entity(365), spec)
+
+        assert stale.priority_score == pytest.approx(fresh.priority_score + 10.0, abs=0.01)
+        assert stale.roi == fresh.roi
+        assert stale.estimated_cost_usd == fresh.estimated_cost_usd
+
+    def test_staleness_flag_off_restores_zero_term(self, monkeypatch):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "health_priority_staleness_enabled", False)
+        spec = _make_domain_spec()
+        fresh = compute_enrichment_priority(self._entity(0), spec)
+        stale = compute_enrichment_priority(self._entity(365), spec)
+
+        assert stale.priority_score == fresh.priority_score
+
     def test_estimate_match_probability_sigmoid(self):
         """Sigmoid approximation should increase with readiness score."""
         low = estimate_match_probability(30.0)
@@ -373,6 +512,87 @@ class TestMatchQualityDelta:
         assert delta.gate_pass_improvement == pytest.approx(0.6, abs=0.01)
         assert delta.roi is not None
         assert delta.roi > 0
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  DOMAIN FIELD MAP — gate-critical set (RU-109 / CEG-COR-045)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+def _plasticos_with_window_gate():
+    """Checked-in plasticos pack plus a TEMPORALRANGE gate reading two Facility window bounds."""
+    from engine.config.loader import DomainPackLoader
+    from engine.config.schema import GateSpec, GateType, PropertySpec, PropertyType
+
+    spec = DomainPackLoader().load_domain("plasticos")
+    nodes = []
+    for node in spec.ontology.nodes:
+        if node.label == "Facility":
+            extra = [
+                PropertySpec(name="available_from", type=PropertyType.DATETIME),
+                PropertySpec(name="available_until", type=PropertyType.DATETIME),
+            ]
+            nodes.append(node.model_copy(update={"properties": [*node.properties, *extra]}))
+        else:
+            nodes.append(node)
+    window_gate = GateSpec(
+        name="availability_window",
+        type=GateType.TEMPORALRANGE,
+        candidateprop_start="available_from",
+        candidateprop_end="available_until",
+        queryparam="pickup_date",
+    )
+    return spec.model_copy(
+        update={
+            "ontology": spec.ontology.model_copy(update={"nodes": nodes}),
+            "gates": [*spec.gates, window_gate],
+        }
+    )
+
+
+_RANGE_AND_WINDOW_BOUNDS = ("min_density", "max_density", "min_mfi", "max_mfi", "available_from", "available_until")
+
+
+class TestDomainFieldMapGateCritical:
+    def test_range_and_window_bounds_are_gate_critical(self):
+        from engine.health.domain_field_mapper import build_field_map
+
+        field_map = build_field_map(_plasticos_with_window_gate(), "Facility")
+        for name in _RANGE_AND_WINDOW_BOUNDS:
+            assert field_map.fields[name].gate_critical is True, name
+            assert field_map.fields[name].impact_tier == "critical", name
+        # candidateprop-only gates unchanged
+        assert field_map.fields["contamination_tolerance"].gate_critical is True
+        assert field_map.fields["name"].gate_critical is False
+
+    def test_entity_missing_range_bounds_is_not_gate_complete(self):
+        from engine.health.field_analyzer import analyze_entity_fields
+
+        spec = _plasticos_with_window_gate()
+        entity = {
+            "facility_id": "fac-1",
+            "contamination_tolerance": 0.05,
+            "food_grade_certified": True,
+            "capacity_tons_month": 400,
+        }
+        field_health = analyze_entity_fields(entity, spec, "Facility")
+        readiness = compute_readiness_score_v2(field_health, spec)
+        critical_gaps = [f.field_name for f in field_health if f.is_gate_critical and not f.is_populated]
+
+        assert readiness.gate_completeness < 1.0
+        for name in _RANGE_AND_WINDOW_BOUNDS:
+            assert name in critical_gaps, name
+
+    def test_range_gate_fields_flag_off_restores_candidateprop_only(self, monkeypatch):
+        from engine.config.settings import settings
+        from engine.health.domain_field_mapper import build_field_map
+
+        monkeypatch.setattr(settings, "health_range_gate_fields_enabled", False)
+        field_map = build_field_map(_plasticos_with_window_gate(), "Facility")
+        for name in _RANGE_AND_WINDOW_BOUNDS:
+            assert field_map.fields[name].gate_critical is False, name
+            assert field_map.fields[name].impact_tier == "low", name
+        assert field_map.fields["contamination_tolerance"].gate_critical is True
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

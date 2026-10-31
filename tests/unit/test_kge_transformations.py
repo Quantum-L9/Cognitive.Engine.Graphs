@@ -23,6 +23,7 @@ from engine.kge.transformations import (
     Hyperplane,
     Rotation,
     Scale,
+    Shear,
     Translation,
 )
 
@@ -275,3 +276,44 @@ class TestHyperplane:
         assert d["type"] == "hyperplane"
         assert d["normal"] == [1.0, 0.0, 0.0]
         assert d["d"] == 0.5
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-107")
+class TestShear:
+    """RU-120: Shear.inverse is the true matrix inverse."""
+
+    def test_inverse_shear(self) -> None:
+        """Inverse shear restores the original vector (mirrors test_inverse_rotation)."""
+        sh = Shear(shxy=0.5)
+        v = np.array([1.0, 2.0, 3.0])
+        restored = sh.inverse().apply(sh.apply(v))
+        np.testing.assert_allclose(restored, v, atol=1e-9)
+
+    def test_inverse_round_trips_random_invertible_shears(self) -> None:
+        rng = np.random.default_rng(7)
+        for _ in range(50):
+            params = rng.uniform(-0.9, 0.9, size=6)
+            sh = Shear(*params)
+            if abs(np.linalg.det(sh._matrix())) < 1e-3:
+                continue
+            v = rng.normal(size=8)  # two 3-blocks and a 2-coordinate remainder
+            inv = sh.inverse()
+            np.testing.assert_allclose(inv.apply(sh.apply(v)), v, atol=1e-9)
+            np.testing.assert_allclose(sh.apply(inv.apply(v)), v, atol=1e-9)
+            # the trailing remainder is untouched in both directions
+            np.testing.assert_allclose(inv.apply(v)[6:], v[6:])
+
+    def test_inverse_of_inverse_is_the_original_matrix(self) -> None:
+        sh = Shear(shxy=0.5, shzy=-0.25)
+        back = sh.inverse().inverse()
+        v = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+        np.testing.assert_allclose(back.apply(v), sh.apply(v), atol=1e-12)
+
+    def test_inverse_serialises_as_linear(self) -> None:
+        d = Shear(shxy=0.5).inverse().to_dict()
+        assert d["type"] == "linear"
+        np.testing.assert_allclose(np.array(d["matrix"]), np.linalg.inv(Shear(shxy=0.5)._matrix()))
+
+    def test_apply_unchanged(self) -> None:
+        np.testing.assert_allclose(Shear(shxy=0.5).apply(np.array([1.0, 2.0, 3.0])), [2.0, 2.0, 3.0])

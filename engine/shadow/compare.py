@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-MismatchClass = Literal["rank", "score", "missing", "extra"]
+MismatchClass = Literal["rank", "score", "missing", "extra", "duplicate"]
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,49 @@ def _normalize(rows: list[RankedCandidate]) -> list[RankedCandidate]:
     return [RankedCandidate(candidate_id=r.candidate_id, score=float(r.score), rank=int(r.rank)) for r in ordered]
 
 
+def _first_by_id(
+    rows: list[RankedCandidate], side: Literal["primary", "shadow"], mismatches: list[Mismatch]
+) -> dict[str, RankedCandidate]:
+    """Index rows by candidate_id, keeping the first (best-ranked) occurrence.
+
+    RU-105 / CEG-COR-128: every further occurrence of an id is reported as a
+    ``duplicate`` mismatch instead of silently replacing the earlier row.
+    """
+    by_id: dict[str, RankedCandidate] = {}
+    for row in rows:
+        if row.candidate_id not in by_id:
+            by_id[row.candidate_id] = row
+            continue
+        mismatches.append(
+            Mismatch(
+                mismatch_class="duplicate",
+                candidate_id=row.candidate_id,
+                primary_rank=row.rank if side == "primary" else None,
+                shadow_rank=row.rank if side == "shadow" else None,
+                primary_score=row.score if side == "primary" else None,
+                shadow_score=row.score if side == "shadow" else None,
+                detail=f"candidate_id repeated in {side} ranking",
+            )
+        )
+    return by_id
+
+
+def _scores_differ(primary_score: float, shadow_score: float, epsilon: float) -> bool:
+    """A non-finite score on either side is always a mismatch (NaN compares false)."""
+    if not (math.isfinite(primary_score) and math.isfinite(shadow_score)):
+        return True
+    return abs(primary_score - shadow_score) > epsilon
+
+
+def _mismatch_sort_key(m: Mismatch) -> tuple[str, str, int, int]:
+    return (
+        m.mismatch_class,
+        m.candidate_id,
+        -1 if m.primary_rank is None else m.primary_rank,
+        -1 if m.shadow_rank is None else m.shadow_rank,
+    )
+
+
 def emit_shadow_comparison(
     *,
     packet_id: str,
@@ -85,9 +129,9 @@ def emit_shadow_comparison(
     """
     primary_n = _normalize(primary)
     shadow_n = _normalize(shadow)
-    primary_by_id = {r.candidate_id: r for r in primary_n}
-    shadow_by_id = {r.candidate_id: r for r in shadow_n}
     mismatches: list[Mismatch] = []
+    primary_by_id = _first_by_id(primary_n, "primary", mismatches)
+    shadow_by_id = _first_by_id(shadow_n, "shadow", mismatches)
 
     for cid, prow in primary_by_id.items():
         srow = shadow_by_id.get(cid)
@@ -114,7 +158,7 @@ def emit_shadow_comparison(
                     detail="rank differs",
                 )
             )
-        if abs(prow.score - srow.score) > score_epsilon:
+        if _scores_differ(prow.score, srow.score, score_epsilon):
             mismatches.append(
                 Mismatch(
                     mismatch_class="score",
@@ -139,7 +183,7 @@ def emit_shadow_comparison(
                 )
             )
 
-    mismatches.sort(key=lambda m: (m.mismatch_class, m.candidate_id))
+    mismatches.sort(key=_mismatch_sort_key)
     return ShadowComparison(
         packet_id=packet_id,
         primary=primary_n,

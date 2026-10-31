@@ -155,3 +155,38 @@ class TestSelectPersonas:
         active = select_personas(fv, [])
 
         assert active == []
+
+    # -- RU-127 / CEG-COR-114: a zero-signal query still yields a composite --
+
+    @pytest.mark.finding("CEG-COR-114")
+    def test_zero_feature_vector_yields_one_composite(self) -> None:
+        p1 = _make_persona("p1", "Analyst", analytical_depth=0.9)
+        p2 = _make_persona("p2", "Creative", creativity=0.8)
+        p3 = _make_persona("p3", "Critic", skepticism=0.6)
+
+        active = select_personas(FeatureVector(), [p1, p2, p3])
+
+        assert len(active) == 1
+        assert active[0].is_composite is True
+        # equal-weight blend of the selected personas
+        tv = active[0].trait_vector
+        assert tv.analytical_depth == pytest.approx(0.3)
+        assert tv.creativity == pytest.approx(0.8 / 3)
+        assert tv.skepticism == pytest.approx(0.2)
+
+    @pytest.mark.finding("CEG-COR-114")
+    def test_orthogonal_feature_vector_yields_one_composite(self) -> None:
+        p1 = _make_persona("p1", "Analyst", analytical_depth=0.9)
+        p2 = _make_persona("p2", "Creative", creativity=0.8)
+
+        active = select_personas(FeatureVector(empathy=1.0), [p1, p2])
+
+        assert len(active) == 1
+        assert active[0].is_composite is True
+
+    def test_blend_personas_still_rejects_all_zero_weights(self) -> None:
+        from engine.personas.composer import blend_personas
+
+        p1 = _make_persona("p1", "Analyst", analytical_depth=0.9)
+        with pytest.raises(ValueError, match="all-zero weights"):
+            blend_personas([{"persona": p1, "weight": 0.0}])

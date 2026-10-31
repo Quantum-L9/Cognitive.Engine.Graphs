@@ -50,6 +50,24 @@ _GATE_PROPERTY_FIELDS: tuple[str, ...] = (
 _DIMENSION_PROPERTY_FIELDS: tuple[str, ...] = ("candidateprop", "queryprop")
 
 
+class ProhibitedFactorViolationError(ValueError):
+    """A spec or payload references a blocked field.
+
+    A ``ValueError`` (callers catching ``ValueError`` are unaffected) that also
+    carries what was blocked, so ``ComplianceEngine`` can audit the violation
+    (RU-063) without re-deriving it: ``subject_kind`` (gate | scoring_dimension
+    | sync_row | sync_endpoint), ``subject`` (gate/dimension/endpoint name or
+    the key path inside a sync row) and ``field`` (the blocked field name as
+    written — never a value).
+    """
+
+    def __init__(self, message: str, *, subject_kind: str, subject: str, field: str) -> None:
+        super().__init__(message)
+        self.subject_kind = subject_kind
+        self.subject = subject
+        self.field = field
+
+
 def _full_coverage() -> bool:
     from engine.config.settings import settings
 
@@ -105,7 +123,9 @@ class ProhibitedFactorValidator:
                     f"Gate '{gate_spec.name}' references prohibited field '{value}'{via}. "
                     f"Blocked fields: {self.blocked_fields}"
                 )
-                raise ValueError(msg)
+                raise ProhibitedFactorViolationError(
+                    msg, subject_kind="gate", subject=str(gate_spec.name), field=str(value)
+                )
 
         logger.debug("Gate '%s' passed prohibited factor validation", gate_spec.name)
 
@@ -126,7 +146,9 @@ class ProhibitedFactorValidator:
                     f"Scoring dimension '{dimension.name}' references prohibited field '{value}' "
                     f"(via {attr}). Blocked fields: {self.blocked_fields}"
                 )
-                raise ValueError(msg)
+                raise ProhibitedFactorViolationError(
+                    msg, subject_kind="scoring_dimension", subject=str(dimension.name), field=str(value)
+                )
 
     def validate_sync_row(self, row: Any) -> None:
         """Validate every key at any depth of a sync batch row.
@@ -149,7 +171,9 @@ class ProhibitedFactorValidator:
                             f"Sync batch contains prohibited field '{field_name}'. "
                             f"Blocked fields: {self.blocked_fields}"
                         )
-                        raise ValueError(msg)
+                        raise ProhibitedFactorViolationError(
+                            msg, subject_kind="sync_row", subject=str(field_name), field=str(field_name)
+                        )
             return
         self._scan_row(row, "")
 
@@ -162,7 +186,7 @@ class ProhibitedFactorValidator:
                         f"Sync batch contains prohibited field '{key}' at '{key_path}'. "
                         f"Blocked fields: {self.blocked_fields}"
                     )
-                    raise ValueError(msg)
+                    raise ProhibitedFactorViolationError(msg, subject_kind="sync_row", subject=key_path, field=str(key))
                 self._scan_row(value, key_path)
         elif isinstance(node, (list, tuple)):
             for index, item in enumerate(node):

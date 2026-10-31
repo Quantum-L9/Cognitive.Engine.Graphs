@@ -124,9 +124,8 @@ validate_build_contexts() {
         log "Checking build contexts in: $compose"
         local compose_dir=$(dirname "$compose")
 
-        docker compose -f "$compose" config 2>/dev/null | \
-        grep -A 5 "build:" | \
-        grep -E "(context|dockerfile):" | \
+        # The loop reads from process substitution, not a pipe, so it runs in
+        # this shell and error() increments VALIDATION_ERRORS for the summary.
         while read -r line; do
             path=$(echo "$line" | sed 's/.*context: //g' | tr -d " " | tr -d "'" | tr -d '"')
 
@@ -143,7 +142,7 @@ validate_build_contexts() {
                     success "Build context exists: $full_path"
                 fi
             fi
-        done
+        done < <(docker compose -f "$compose" config 2>/dev/null | grep -A 5 "build:" | grep -E "(context|dockerfile):")
     done
     return 0
 }

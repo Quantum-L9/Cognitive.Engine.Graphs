@@ -34,6 +34,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from engine.config.settings import settings
+
 logger = logging.getLogger(__name__)
 
 # Capability action strings (constants avoid duplicated literals).
@@ -111,11 +113,17 @@ class Capability:
         self.proof_hash = self._compute_proof_hash()
 
     def _compute_proof_hash(self) -> str:
-        """Deterministic integrity hash over immutable fields."""
+        """Deterministic integrity hash over immutable fields.
+
+        With ``capability_record_binding_enabled`` the input includes
+        ``expires_at``, so an in-place expiry edit fails integrity (RU-090).
+        """
         payload = (
             f"{self.capability_id}:{self.tenant_id}:{self.domain_id}:"
             f"{sorted(self.allowed_actions)}:{self.granted_by}:{self.granted_at}"
         )
+        if settings.capability_record_binding_enabled:
+            payload = f"{payload}:{self.expires_at}"
         return hashlib.sha256(payload.encode()).hexdigest()
 
     def is_valid_hash(self) -> bool:
@@ -185,11 +193,26 @@ class CapabilityValidator:
         """Return True if capability authorises ``action`` for ``tenant``.
 
         Checks: registered, integrity, active, tenant match, action allowed.
+
+        With ``capability_record_binding_enabled`` the presented object must
+        equal the registered record field for field (proof_hash included), and
+        activity, tenant and actions are read from that registered record, so
+        a forged object reusing a registered id, or an unexpired copy of an
+        expired record, does not validate (RU-090).
         """
         # Defensive: fail closed if a caller passes the wrong runtime type
         # despite the `Capability` type hint (Python does not enforce it).
         if not isinstance(capability, Capability):
             return False  # type: ignore[unreachable]
+        if settings.capability_record_binding_enabled:
+            record = self._registry.get(capability.capability_id)
+            if record is None or record != capability:
+                return False
+            if not record.is_active():
+                return False
+            if record.tenant_id not in (tenant, "*"):
+                return False
+            return action in record.allowed_actions
         if not capability.is_valid_hash():
             return False
         if not capability.is_active():

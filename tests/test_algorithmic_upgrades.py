@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -20,6 +22,7 @@ from chassis.audit import (
     AuditAction,
     AuditEntry,
     AuditLogger,
+    AuditSink,
     LogSink,
     PostgresSink,
 )
@@ -206,6 +209,39 @@ class TestDetectDrift:
         assert "persona_id" in d
         assert "drift_detected" in d
 
+    # RU-104 / CEG-COR-127: vectors are aligned over a shared key set.
+
+    def test_disjoint_dominant_dimensions_have_nonzero_distance(self):
+        buckets = {"low": 0.5, "high": 0.5}
+        baseline = self._make_fp("p1", "w1", buckets, {"alpha": 1.0}, entropy=1.0, concentration=0.5)
+        current = self._make_fp("p1", "w2", buckets, {"zeta": 1.0}, entropy=1.0, concentration=0.5)
+        report = detect_drift(baseline, current)
+        assert report.vector_distance > 0
+        assert report.vector_distance == pytest.approx(2**0.5)
+
+    def test_different_dimension_counts_compare_entropy_to_entropy(self):
+        buckets = {"low": 0.5, "high": 0.5}
+        baseline = self._make_fp("p1", "w1", buckets, {"a": 1.0}, entropy=0.8, concentration=0.5)
+        current = self._make_fp("p1", "w2", buckets, {"a": 1.0, "b": 0.0}, entropy=0.8, concentration=0.5)
+        report = detect_drift(baseline, current)
+        assert report.vector_distance == pytest.approx(0.0)
+
+    def test_custom_bucket_labels_are_compared(self):
+        baseline = self._make_fp("p1", "w1", {"cold": 1.0, "hot": 0.0}, {"a": 1.0}, entropy=0.0, concentration=1.0)
+        current = self._make_fp("p1", "w2", {"cold": 0.0, "hot": 1.0}, {"a": 1.0}, entropy=0.0, concentration=1.0)
+        report = detect_drift(baseline, current)
+        assert report.vector_distance == pytest.approx(2**0.5)
+
+    def test_to_vector_default_layout_unchanged(self):
+        fp = self._make_fp(
+            "p1", "w1", {"low": 0.25, "high": 0.75}, {"b": 0.4, "a": 0.6}, entropy=0.9, concentration=0.75
+        )
+        assert fp.to_vector() == [0.0, 0.25, 0.0, 0.75, 0.6, 0.4, 0.9, 0.75]
+
+    def test_to_vector_explicit_key_order(self):
+        fp = self._make_fp("p1", "w1", {"cold": 0.3, "hot": 0.7}, {"a": 1.0}, entropy=0.5, concentration=0.7)
+        assert fp.to_vector(bucket_labels=("hot", "cold"), dimension_keys=("z", "a")) == [0.7, 0.3, 0.0, 1.0, 0.5, 0.7]
+
 
 # ── PacketStore (unit-level, no DB) ──────────────────────────
 
@@ -254,6 +290,86 @@ class TestValidateLlmJson:
         )
         with pytest.raises(ValidationError, match="Destructive keyword rejected"):
             validate_llm_json(raw, CypherQueryOutput)
+
+
+class TestCypherQueryOutputReadOnly:
+    """RU-073 / CEG-COR-120: generated Cypher is read-only, matched by whole keyword."""
+
+    @staticmethod
+    def _raw(query: str) -> str:
+        return json.dumps({"cypher_query": query, "parameters": {}, "explanation": "generated", "confidence": 0.5})
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "MATCH (n) SET n.flag = true RETURN n",
+            "CREATE (n:Facility {id: 1}) RETURN n",
+            "MERGE (n:Facility {id: 1}) RETURN n",
+            "LOAD CSV FROM 'file:///x.csv' AS row RETURN row",
+            "MATCH (n) FOREACH (x IN [1] | SET n.a = x) RETURN n",
+            "CALL apoc.periodic.iterate('MATCH (n) RETURN n', 'DELETE n', {})",
+            "MATCH (n) REMOVE n.a RETURN n",
+            "match (n) detach  delete n",
+            "MATCH (n) DROP INDEX x",
+        ],
+    )
+    def test_write_and_admin_clauses_rejected(self, query: str) -> None:
+        with pytest.raises(ValidationError, match="Destructive keyword rejected"):
+            validate_llm_json(self._raw(query), CypherQueryOutput)
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "MATCH (n) WHERE n.deleted_at IS NULL RETURN n",
+            "MATCH (n) WHERE n.created_by = $u RETURN n.settings, n.callsign",
+        ],
+    )
+    def test_identifiers_containing_keywords_accepted(self, query: str) -> None:
+        assert validate_llm_json(self._raw(query), CypherQueryOutput).cypher_query == query
+
+
+class TestCypherQueryOutputLexicalContext:
+    """RU-073 follow-up: keywords inside literals, comments, parameter and
+    property names are not clauses; real clauses around them still are."""
+
+    @staticmethod
+    def _raw(query: str) -> str:
+        return json.dumps({"cypher_query": query, "parameters": {}, "explanation": "generated", "confidence": 0.5})
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "MATCH (n) WHERE n.status = $set RETURN n",
+            "MATCH (n) WHERE n.status = 'CREATE' RETURN n",
+            'MATCH (n) WHERE n.action IN ["DELETE", "MERGE"] RETURN n',
+            "MATCH (n) RETURN n.set, n.merge, n {.call}",
+            "MATCH (n) // create a report\nRETURN n",
+            "MATCH (n) /* merge later */ RETURN n",
+            "MATCH (n:`Create`) RETURN n",
+        ],
+    )
+    def test_non_clause_keywords_accepted(self, query: str) -> None:
+        assert validate_llm_json(self._raw(query), CypherQueryOutput).cypher_query == query
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "MATCH (n) WHERE n.x = 'a' CREATE (m) RETURN m",
+            "MATCH (n) WHERE n.x = 'it\\'s' CREATE (m) RETURN m",
+            'MATCH (n) WHERE n.x = "a" SET n.y = 1 RETURN n',
+            "MATCH (n) WHERE n.x = 'unterminated CREATE (m) RETURN m",
+            "MATCH (n) /* unterminated CREATE (m) RETURN m",
+            "MATCH (n) // comment\rCREATE (m) RETURN m",
+            "MATCH (n) // comment\u2028CREATE (m) RETURN m",
+            "MATCH (n) RETURN n.x AS `a``b` CREATE (m)",
+            "MATCH (n) WITH n /* c */ DETACH DELETE n",
+            "MATCH (n) SET n.x = $set RETURN n",
+            "LOAD/**/CSV FROM 'https://example.com/x.csv' AS row RETURN row",
+        ],
+    )
+    def test_real_clauses_still_rejected(self, query: str) -> None:
+        with pytest.raises(ValidationError, match="Destructive keyword rejected"):
+            validate_llm_json(self._raw(query), CypherQueryOutput)
 
 
 class TestValidatedLLMClientNoProvider:
@@ -340,3 +456,102 @@ class TestAuditLoggerWithSink:
         count = asyncio.run(audit_logger.flush())
         assert count == 2
         assert audit_logger.buffer_count == 0
+
+
+class _RecordingSink(AuditSink):
+    def __init__(self) -> None:
+        self.ids: list[str] = []
+
+    async def write_batch(self, entries: list[AuditEntry]) -> int:
+        self.ids.extend(e.audit_id for e in entries)
+        return len(entries)
+
+
+class _FailOnceSink(_RecordingSink):
+    def __init__(self) -> None:
+        super().__init__()
+        self.failed = False
+
+    async def write_batch(self, entries: list[AuditEntry]) -> int:
+        if not self.failed:
+            self.failed = True
+            msg = "sink unavailable"
+            raise RuntimeError(msg)
+        return await super().write_batch(entries)
+
+
+class TestAuditLoggerDelivery:
+    """RU-085 / RG-114: per-sink retry, bounded buffer, no lost concurrent entry."""
+
+    def test_retry_goes_only_to_the_failed_sink(self):
+        healthy, flaky = _RecordingSink(), _FailOnceSink()
+        audit_logger = AuditLogger(sinks=[healthy, flaky])
+        entry = audit_logger.log(AuditAction.ACCESS, actor="user1", tenant="t1")
+
+        with pytest.raises(RuntimeError, match="sink unavailable"):
+            asyncio.run(audit_logger.flush())
+        assert audit_logger.buffer_count == 1  # still owed to the failed sink
+        asyncio.run(audit_logger.flush())
+
+        assert healthy.ids == [entry.audit_id]  # exactly once across both flushes
+        assert flaky.ids == [entry.audit_id]
+        assert audit_logger.buffer_count == 0
+
+    def test_failed_sink_does_not_starve_later_sinks(self):
+        flaky, healthy = _FailOnceSink(), _RecordingSink()
+        audit_logger = AuditLogger(sinks=[flaky, healthy])
+        entry = audit_logger.log(AuditAction.QUERY, actor="user1", tenant="t1")
+
+        with pytest.raises(RuntimeError):
+            asyncio.run(audit_logger.flush())
+        assert healthy.ids == [entry.audit_id]
+        asyncio.run(audit_logger.flush())
+        assert healthy.ids == [entry.audit_id]
+        assert flaky.ids == [entry.audit_id]
+
+    def test_buffer_size_is_enforced_drop_oldest(self, caplog: pytest.LogCaptureFixture):
+        sink = _RecordingSink()
+        audit_logger = AuditLogger(buffer_size=3, sinks=[sink])
+        entries = [audit_logger.log(AuditAction.ACCESS, actor=f"u{i}", tenant="t1") for i in range(10)]
+
+        assert audit_logger.buffer_count <= 3
+        assert audit_logger.dropped_count == 7
+        assert "dropped" in caplog.text
+        asyncio.run(audit_logger.flush())
+        assert sink.ids == [e.audit_id for e in entries[-3:]]  # the newest survive
+
+    def test_entry_logged_during_flush_is_not_lost(self):
+        """Port of r2_audit.py scenario C: a worker-thread log() races flush()."""
+        sink = _RecordingSink()
+        audit_logger = AuditLogger(sinks=[sink])
+        audit_logger.log(AuditAction.ACCESS, actor="first", tenant="t1")
+        raced: list[AuditEntry] = []
+        workers: list[threading.Thread] = []
+
+        class _RacingList(list):
+            """Logs from another thread right after flush finishes reading the buffer.
+
+            That is the window between the snapshot and the reset. A log()
+            that lands there must end up in the next batch, not be discarded.
+            """
+
+            def __iter__(self) -> Any:
+                yield from list.__iter__(self)
+                if not workers:
+                    worker = threading.Thread(
+                        target=lambda: raced.append(audit_logger.log(AuditAction.SYNC, actor="racer", tenant="t1"))
+                    )
+                    workers.append(worker)
+                    worker.start()
+                    worker.join(timeout=0.2)  # blocks while flush holds the buffer lock
+
+        audit_logger._buffer = _RacingList(audit_logger._buffer)
+        asyncio.run(audit_logger.flush())
+        workers[0].join(timeout=5)
+        assert raced, "worker never logged"
+
+        racer_id = raced[0].audit_id
+        buffered = {e.audit_id for e in audit_logger._buffer}
+        assert racer_id in sink.ids or racer_id in buffered
+        asyncio.run(audit_logger.flush())
+        assert sink.ids.count(racer_id) == 1

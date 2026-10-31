@@ -60,6 +60,31 @@ def test_event_order_does_not_change_hash() -> None:
     assert replay_outcomes(doc)["outcome_set_hash"] == replay_outcomes(_fixture())["outcome_set_hash"]
 
 
+# RU-106 / CEG-COR-129: events tying on (packet_id, action, tenant) are ordered
+# by their own digest, so the outcome set hash is permutation-invariant.
+_BASELINE_FIXTURE_HASH = "sha256:e2c19ff51df59ddee9384e5d2fbbe92affc69197235b20b002fc3ee0e6065cf0"
+
+
+@pytest.mark.unit
+def test_event_order_with_key_ties_does_not_change_hash() -> None:
+    doc = _fixture()
+    tied = [
+        {"tenant": "plasticos", "action": "match", "packet_id": "pkt-t", "payload": {"score": 0.1}},
+        {"tenant": "plasticos", "action": "match", "packet_id": "pkt-t", "payload": {"score": 0.7}},
+    ]
+    doc["events"] = [*doc["events"], *tied]
+    doc["event_count"] = len(doc["events"])
+    swapped = _fixture()
+    swapped["events"] = [*swapped["events"], *reversed(tied)]
+    swapped["event_count"] = len(swapped["events"])
+    assert replay_outcomes(doc)["outcome_set_hash"] == replay_outcomes(swapped)["outcome_set_hash"]
+
+
+@pytest.mark.unit
+def test_hash_for_inputs_without_ties_is_unchanged() -> None:
+    assert replay_outcomes(_fixture())["outcome_set_hash"] == _BASELINE_FIXTURE_HASH
+
+
 @pytest.mark.unit
 def test_rejects_gate_mutation_and_wrong_schema() -> None:
     bad = _fixture()

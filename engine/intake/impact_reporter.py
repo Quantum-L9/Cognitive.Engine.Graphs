@@ -188,7 +188,11 @@ def analyse_impact(
     -------
     ImpactAnalysis with coverage, gate/edge counts, and tier recommendation.
     """
-    total_spec_fields = sum(len(n.properties) for n in spec.ontology.nodes)
+    # One counting unit (CEG-COR-104): the numerators count unique property
+    # names, so the denominator does too; summing per-node property lists
+    # counted a name shared by two nodes twice and full coverage read < 100%.
+    all_spec_field_names = {p.name for n in spec.ontology.nodes for p in n.properties}
+    total_spec_fields = len(all_spec_field_names)
     total_gates = len(spec.gates)
     total_edge_types = len(spec.ontology.edges)
 
@@ -208,7 +212,6 @@ def analyse_impact(
     # After discovery (all fields)
     all_fields = {m.canonical_name for m in mappings}
     # Projected discovery: assume 97% coverage for fields in spec
-    all_spec_field_names = {p.name for n in spec.ontology.nodes for p in n.properties}
     discovered_fields = all_fields | all_spec_field_names
 
     # Coverage percentages
