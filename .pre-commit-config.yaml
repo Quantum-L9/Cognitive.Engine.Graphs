@@ -72,8 +72,9 @@ repos:
           bash -c 'files=$(git diff --cached --name-only | grep "\.py$");
           [ -z "$files" ] && exit 0;
           if command -v rg >/dev/null 2>&1; then
-          echo "$files" | xargs rg -l "f\".*MATCH.*\\(.*:\\{" 2>/dev/null |
-          xargs grep -L "sanitize_label" 2>/dev/null | grep -v "test" | grep -q . &&
+          matches=$(echo "$files" | xargs rg -l "f\".*MATCH.*\\(.*:\\{" 2>/dev/null);
+          [ -z "$matches" ] && exit 0;
+          echo "$matches" | xargs grep -L "sanitize_label" 2>/dev/null | grep -v "test" | grep -q . &&
           { echo "ERROR: Cypher label interpolation without sanitize_label()"; exit 1; };
           fi; exit 0'
         language: system
