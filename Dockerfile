@@ -14,18 +14,19 @@
 # ─────────────────────────────────────────────────────────────
 
 # ── Stage 1: Dependencies ──────────────────────────────────
-FROM python:3.12-slim AS deps
+FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS deps
 
 # git is required to resolve the git+https constellation-node-sdk dependency
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
-COPY requirements.txt requirements.txt
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+COPY requirements-runtime.lock requirements-runtime.lock
+COPY tools/deps/install_locked.sh tools/deps/install_locked.sh
+RUN PIP_PREFIX=/install bash tools/deps/install_locked.sh runtime
 
 # ── Stage 2: Runtime ───────────────────────────────────────
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS runtime
 
 WORKDIR /app
 

@@ -23,12 +23,18 @@
 # source archive. Regenerate locks with tools/deps/lock_requirements.py.
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
 case "${1:-}" in
-  ci) lock=requirements-ci.lock ;;
-  full) lock=requirements-full.lock ;;
-  runtime) lock=requirements-runtime.lock ;;
-  tools) lock=requirements-tools.lock ;;
+  ci) lock="$ROOT/requirements-ci.lock" ;;
+  full) lock="$ROOT/requirements-full.lock" ;;
+  runtime) lock="$ROOT/requirements-runtime.lock" ;;
+  tools) lock="$ROOT/requirements-tools.lock" ;;
   *) echo "usage: $0 ci|full|runtime|tools" >&2; exit 2 ;;
 esac
 
-python -m pip install --only-binary :all: --no-binary constellation-node-sdk --require-hashes -r "$lock"
+args=(--only-binary :all: --no-binary constellation-node-sdk --require-hashes -r "$lock")
+if [[ -n "${PIP_PREFIX:-}" ]]; then
+  args=(--prefix "$PIP_PREFIX" "${args[@]}")
+fi
+python -m pip install "${args[@]}"

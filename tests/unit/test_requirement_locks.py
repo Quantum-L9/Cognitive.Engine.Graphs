@@ -152,11 +152,21 @@ def test_the_gate_sdk_is_poetry_locks_commit_as_a_hashed_archive(lock: str) -> N
     assert lock_requirements.sdk_archive_line(commit) in body
 
 
+def test_full_lock_covers_runtime_development_and_ci_sources() -> None:
+    assert lock_requirements.LOCKS["requirements-full.lock"] == (
+        "requirements.txt",
+        "requirements-dev.txt",
+        "requirements-ci.txt",
+    )
+
+
 def test_installs_are_wheel_only_and_hash_checked() -> None:
     script = (ROOT / "tools" / "deps" / "install_locked.sh").read_text()
     installs = [
         line.strip() for line in script.splitlines() if "pip install" in line and not line.lstrip().startswith("#")
     ]
-    assert installs == [
-        'python -m pip install --only-binary :all: --no-binary constellation-node-sdk --require-hashes -r "$lock"',
-    ]
+    assert installs == ['python -m pip install "${args[@]}"']
+    assert 'ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"' in script
+    assert "--only-binary :all:" in script
+    assert "--no-binary constellation-node-sdk" in script
+    assert "--require-hashes" in script

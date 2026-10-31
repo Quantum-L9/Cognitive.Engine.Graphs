@@ -21,7 +21,7 @@ Pinned-Dependencies), through tools/deps/install_locked.sh.
 | Lock | Sources |
 |---|---|
 | requirements-ci.lock | requirements-ci.txt |
-| requirements-full.lock | requirements.txt + requirements-ci.txt |
+| requirements-full.lock | requirements.txt + requirements-dev.txt + requirements-ci.txt |
 | requirements-runtime.lock | requirements.txt + pip-licenses (supply-chain license report) |
 | requirements-tools.lock | pyyaml + yamllint (small workflow steps) |
 
@@ -57,7 +57,7 @@ PYTHON_VERSION = "3.12"
 COMMAND = "python tools/deps/lock_requirements.py"
 LOCKS: dict[str, tuple[str, ...]] = {
     "requirements-ci.lock": ("requirements-ci.txt",),
-    "requirements-full.lock": ("requirements.txt", "requirements-ci.txt"),
+    "requirements-full.lock": ("requirements.txt", "requirements-dev.txt", "requirements-ci.txt"),
     "requirements-runtime.lock": ("requirements.txt",),
     "requirements-tools.lock": (),
 }

@@ -62,20 +62,17 @@ else
 fi
 
 # --- Install Python dependencies ---
-if command -v poetry >/dev/null 2>&1; then
-  echo "📦 Installing via Poetry..."
-  cd "$ROOT_DIR" && poetry install
-elif [[ -f "$ROOT_DIR/requirements.txt" ]]; then
-  echo "📦 Installing via pip..."
-  python3 -m pip install -r "$ROOT_DIR/requirements.txt"
+if [[ -f "$ROOT_DIR/requirements-full.lock" ]]; then
+  echo "📦 Installing hash-locked development dependencies..."
+  bash "$ROOT_DIR/tools/deps/install_locked.sh" full
 else
-  echo "⚠️  No poetry.lock or requirements.txt found — skipping Python deps"
+  echo "⚠️  No requirements-full.lock found — skipping Python deps"
 fi
 
 # --- Pull Docker images ---
 echo "🐳 Pulling Docker images..."
-docker pull neo4j:5.15-enterprise 2>/dev/null || docker pull neo4j:5.15
-docker pull redis:7-alpine
+docker pull neo4j:5.15-enterprise@sha256:b8491b6dcf998f216079d4793dde4b7d81759d8c05792fa48787c810e9e21e52
+docker pull redis:7-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
 
 # --- Create Docker network ---
 docker network create l9-net 2>/dev/null || true

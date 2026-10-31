@@ -21,12 +21,10 @@
 #   PYTHON_VERSION       — Python version (e.g. "3.12")
 #
 # Optional GitHub Variables:
-#   TEST_DB_IMAGE        — Postgres image (default: postgres:16)
 #   TEST_DB_USER         — Test DB user (default: test)
 #   TEST_DB_PASSWORD     — Test DB password (default: test)
 #   TEST_DB_NAME         — Test DB name (default: test_db)
 #   COVERAGE_THRESHOLD   — Min coverage % (default: 75)
-#   TEST_EXTRA_DEPS      — Extra pip deps for tests (space-separated)
 #   SOURCE_DIRS          — Directories to scan (default: ".")
 #   SEMGREP_RULES_PATH   — Path to custom semgrep rules (default: .semgrep/)
 #
@@ -59,12 +57,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
@@ -92,7 +90,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
 
       - name: Run Semgrep
         uses: returntocorp/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v1
@@ -111,7 +109,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         with:
           fetch-depth: 0
 
@@ -141,7 +139,7 @@ jobs:
             -e GITHUB_PULL_BASE_SHA \
             -e GITHUB_DEFAULT_BRANCH \
             -v "$PWD:/src" -w /src \
-            gitguardian/ggshield:v1.53.0 \
+            gitguardian/ggshield:v1.53.0@sha256:387ad1467f110ce759a97dc4b25c978e7df58181f8e4793df55d40f89ce7142d \
             secret scan ci 2>&1)
           RC=$?
           set -e
@@ -167,7 +165,7 @@ jobs:
 
     services:
       postgres:
-        image: ${{ vars.TEST_DB_IMAGE || 'postgres:16' }}
+        image: postgres:16@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
         env:
           POSTGRES_USER: ${{ vars.TEST_DB_USER || 'test' }}
           POSTGRES_PASSWORD: ${{ vars.TEST_DB_PASSWORD || 'test' }}
@@ -184,21 +182,16 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
 
       - name: Set up Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
 
       - name: Install dependencies
-        run: |
-          bash tools/deps/install_locked.sh full
-          # Install any project-specific test deps
-          if [ -n "${{ vars.TEST_EXTRA_DEPS }}" ]; then
-            pip install ${{ vars.TEST_EXTRA_DEPS }}
-          fi
+        run: bash tools/deps/install_locked.sh full
 
       - name: Run tests with coverage
         env:
@@ -225,7 +218,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
 
       - name: Validate YAML files
         # Fail-closed: no `|| true`, no continue-on-error. Severity policy

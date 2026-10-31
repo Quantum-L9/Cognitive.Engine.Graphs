@@ -17,7 +17,7 @@
 
 services:
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:latest@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
     container_name: l9-prometheus
     ports:
       - "9090:9090"
@@ -28,7 +28,7 @@ services:
       - l9-net
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:latest@sha256:488984b716c0862639f91a698adbe2862677a5a07bad42da5f03f3030883b205
     container_name: l9-grafana
     ports:
       - "3000:3000"
