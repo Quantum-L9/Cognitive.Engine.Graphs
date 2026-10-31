@@ -519,3 +519,184 @@ def test_sdk_default_attachment_caps_construct() -> None:
     assert cfg.max_packet_bytes > 0
     assert cfg.max_attachment_size_bytes >= 0
     assert cfg.max_attachment_size_bytes <= cfg.max_packet_bytes
+
+
+# ── GATE-KEY-01: a Gate claim must be signed under a Gate key id ─────────────
+
+GATE_KEY_ID = "gate-e2e"
+PEER_KEY_ID = "eie-e2e"
+GATE_HMAC = "gate-secret-0123456789abcdef0123456789"
+PEER_HMAC = "eie-secret-0123456789abcdef01234567890"
+
+
+def _ed25519_pair() -> tuple[str, str]:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    private = Ed25519PrivateKey.generate()
+    private_pem = private.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+    public_pem = (
+        private.public_key()
+        .public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
+        .decode()
+    )
+    return private_pem, public_pem
+
+
+def _signed_gate_claim(tenant: str, *, key: str, key_id: str, algorithm: str = "hmac-sha256") -> dict[str, Any]:
+    """A packet claiming Gate authorship, signed by whoever holds ``key``."""
+    from constellation_node_sdk.security.signing import sign_transport_packet
+
+    packet = create_transport_packet(
+        action="match",
+        payload={"query": {}},
+        tenant=tenant,
+        source_node=GATE_NODE,
+        destination_node=NODE_NAME,
+        reply_to=GATE_NODE,
+        provenance=RoutingProvenance(
+            origin_kind="gate",
+            requested_action="match",
+            resolved_by_gate=True,
+            route_kind="external_ingress",
+        ),
+    )
+    return sign_transport_packet(packet, key=key, key_id=key_id, algorithm=algorithm).model_dump_json_dict()
+
+
+def _bound_app(verifying_keys: dict[str, str], *, refuse_symmetric: bool = False) -> Any:
+    config = _config(
+        require_signature=True,
+        signing_algorithm="hmac-sha256",
+        signing_key="ceg-secret-0123456789abcdef01234567890",
+        signing_key_id="ceg-e2e",
+        verifying_keys=verifying_keys,
+    )
+    app = create_node_app(config=config, auto_register_with_gate=False)
+    _install_gate_only_ingress(
+        app,
+        gate_node=GATE_NODE,
+        gate_key_ids=frozenset({GATE_KEY_ID}),
+        refuse_symmetric=refuse_symmetric,
+    )
+    return app
+
+
+def _tenant_spy() -> list[str]:
+    seen: list[str] = []
+
+    async def spy(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
+        seen.append(tenant)
+        return {"status": "completed"}
+
+    register_handler("match", spy)
+    return seen
+
+
+def test_peer_key_cannot_claim_gate_and_choose_tenant() -> None:
+    """U-TRANSPORT: a peer key CEG verifies, claiming Gate, never reaches a handler."""
+    seen = _tenant_spy()
+    keys = {GATE_KEY_ID: GATE_HMAC, PEER_KEY_ID: PEER_HMAC}
+    with TestClient(_bound_app(keys)) as client:
+        forged = client.post("/v1/execute", json=_signed_gate_claim("victim", key=PEER_HMAC, key_id=PEER_KEY_ID))
+        genuine = client.post("/v1/execute", json=_signed_gate_claim("acme", key=GATE_HMAC, key_id=GATE_KEY_ID))
+
+    assert forged.status_code == 403
+    assert "not a Gate signing key" in forged.json()["detail"]
+    assert genuine.status_code == 200
+    assert seen == ["acme"]
+
+
+def test_unsigned_gate_claim_refused_when_bound() -> None:
+    seen = _tenant_spy()
+    with TestClient(_bound_app({GATE_KEY_ID: GATE_HMAC})) as client:
+        response = client.post("/v1/execute", json=_gate_packet())
+
+    assert response.status_code == 403
+    assert seen == []
+
+
+def test_symmetric_gate_signature_refused_when_trust_required() -> None:
+    """Every verifier of a shared HMAC key can mint it, so staging/prod refuse it."""
+    seen = _tenant_spy()
+    with TestClient(_bound_app({GATE_KEY_ID: GATE_HMAC}, refuse_symmetric=True)) as client:
+        response = client.post("/v1/execute", json=_signed_gate_claim("victim", key=GATE_HMAC, key_id=GATE_KEY_ID))
+
+    assert response.status_code == 403
+    assert "ed25519" in response.json()["detail"]
+    assert seen == []
+
+
+def test_ed25519_gate_signature_accepted_when_trust_required() -> None:
+    private_pem, public_pem = _ed25519_pair()
+    seen = _tenant_spy()
+    with TestClient(_bound_app({GATE_KEY_ID: public_pem}, refuse_symmetric=True)) as client:
+        response = client.post(
+            "/v1/execute",
+            json=_signed_gate_claim("acme", key=private_pem, key_id=GATE_KEY_ID, algorithm="ed25519"),
+        )
+
+    assert response.status_code == 200
+    assert seen == ["acme"]
+
+
+def test_gate_key_violation_needs_security_block() -> None:
+    reason = _gate_ingress_violation(
+        {k: v for k, v in _gate_packet().items() if k != "security"},
+        GATE_NODE,
+        gate_key_ids=frozenset({GATE_KEY_ID}),
+    )
+    assert reason == "packet must carry security"
+
+
+@pytest.mark.parametrize(
+    ("sdk_env", "l9_env", "raw", "expected"),
+    [
+        ("local", "dev", "", (None, False)),
+        ("local", "dev", " gate-a , gate-b ", (frozenset({"gate-a", "gate-b"}), False)),
+        ("staging", "dev", "gate-a", (frozenset({"gate-a"}), True)),
+        ("local", "prod", "gate-a", (frozenset({"gate-a"}), True)),
+    ],
+)
+def test_gate_key_binding_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+    sdk_env: str,
+    l9_env: str,
+    raw: str,
+    expected: tuple[frozenset[str] | None, bool],
+) -> None:
+    from chassis.node_app import _gate_key_binding
+    from engine.config.settings import settings
+
+    monkeypatch.setenv("L9_ENVIRONMENT", sdk_env)
+    monkeypatch.setenv("L9_GATE_SIGNING_KEY_IDS", raw)
+    monkeypatch.setattr(settings, "l9_env", l9_env)
+    assert _gate_key_binding() == expected
+
+
+@pytest.mark.parametrize(("sdk_env", "l9_env"), [("staging", "dev"), ("prod", "dev"), ("local", "prod")])
+def test_gate_key_binding_required_in_trust_environments(
+    monkeypatch: pytest.MonkeyPatch, sdk_env: str, l9_env: str
+) -> None:
+    from chassis.node_app import _gate_key_binding
+    from engine.config.settings import settings
+
+    monkeypatch.setenv("L9_ENVIRONMENT", sdk_env)
+    monkeypatch.delenv("L9_GATE_SIGNING_KEY_IDS", raising=False)
+    monkeypatch.setattr(settings, "l9_env", l9_env)
+    with pytest.raises(RuntimeError, match="L9_GATE_SIGNING_KEY_IDS is required"):
+        _gate_key_binding()
+
+
+def test_gate_key_binding_flag_off_restores_claim_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    from chassis.node_app import _gate_key_binding
+    from engine.config.settings import settings
+
+    monkeypatch.setenv("L9_ENVIRONMENT", "prod")
+    monkeypatch.delenv("L9_GATE_SIGNING_KEY_IDS", raising=False)
+    monkeypatch.setattr(settings, "gate_signing_key_binding_enabled", False)
+    assert _gate_key_binding() == (None, False)
