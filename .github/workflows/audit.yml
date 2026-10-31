@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install pyyaml
+      - run: bash tools/deps/install_locked.sh tools
 
       - name: Run audit harness
         run: python tools/audit_harness.py --json

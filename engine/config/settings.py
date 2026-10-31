@@ -150,6 +150,11 @@ class Settings(BaseSettings):
     domain_cache_maxsize: int = 100  # W4-03: max entries in domain pack cache
     compliance_flush_interval: int = 60  # W4-04: seconds between compliance audit flushes
     compliance_buffer_max: int = 100  # W4-04: max buffered audit entries before forced flush
+    # SonarCloud python:S7497. On: the compliance flush task ends cancelled when
+    # cancelled, and shutdown() lets a cancellation of shutdown() itself propagate.
+    # Off: the loop returns normally on cancel and shutdown() swallows the
+    # CancelledError raised while it waits on the flush task (previous behavior).
+    boot_cancellation_propagates: bool = True
     # L9-PARTICIPATION-01. On: Gate_SDK owns registration, re-registration, and
     # /v1/ready. Off: CEG's register_from_env loop owns registration so an
     # operator can roll the cutover back. Ships on — the SDK path is what
