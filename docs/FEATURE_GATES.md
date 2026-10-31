@@ -69,6 +69,9 @@ independently of the code default.
 | Boot Cancellation Propagates | `BOOT_CANCELLATION_PROPAGATES` (`boot_cancellation_propagates`) | `True` | unset | active (hardening); the compliance flush task ends cancelled and a cancelled `shutdown()` is not swallowed (SonarCloud python:S7497); off restores the previous swallowing |
 | Dormant Domain Packs | `DORMANT_DOMAIN_PACKS_ENABLED` (`dormant_domain_packs_enabled`) | `False` | unset | dormant; serve packs that declare `domain.activation: dormant` (replaces the per-domain `idea_portfolio_enabled`) — see §16 |
 | Graph Inference Feedback | `GRAPH_INFERENCE_FEEDBACK_ENABLED` (`graph_inference_feedback_enabled`) | `False` | unset | dormant; CEG → Gate → EIE `graph-inference-result` — see §13 |
+| Relationship Evidence Sync | `RELATIONSHIP_SYNC_ENABLED` (`relationship_sync_enabled`) | `True` | unset | active; `sync` to a `targetedge` endpoint writes typed evidence edges; requires Neo4j Enterprise 5.7+ — see §28 |
+| Relationship Sync Audit On Commit | `RELATIONSHIP_SYNC_AUDIT_ON_COMMIT_ENABLED` (`relationship_sync_audit_on_commit_enabled`) | `True` | unset | active (hardening); refused/rolled-back batches leave no success audit record — see §28 |
+| Evidence Identity Per Type | `EVIDENCE_IDENTITY_PER_TYPE_ENABLED` (`evidence_identity_per_type_enabled`) | `False` | unset | dormant; score dedupes on `(relationship_type, evidence_ref)` — see §28 |
 | Domain Database Provisioning | `AUTO_CREATE_DOMAIN_DATABASE` (`auto_create_domain_database`) | `False` | unset | dormant; create the tenant domain database on first use — see §14 |
 | Health API (admin health_* subactions) | `HEALTH_API_ENABLED` (`health_api_enabled`) | `False` | unset | dormant; AI-readiness assess/report surface — see §15 |
 | Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; seven packs whose gates do not compile to executable, faithful Cypher — see §16 |
@@ -754,6 +757,79 @@ response is unchanged.
 The flag is read when handlers are registered (node app startup), because the
 SDK dispatches on the wrapper's parameter count.
 `INGRESS_PACKET_AUDIT_ENABLED=false` restores the reconstructed request.
+
+---
+
+## 28. Relationship Evidence Sync (QM.POC0.CEG.GRAPH_EVIDENCE.002A)
+
+**State**: Active (default on since 2026-10-30, operator decision)
+**Flag**: `RELATIONSHIP_SYNC_ENABLED=True` (`relationship_sync_enabled`, default on)
+**Requires**: Neo4j Enterprise Edition 5.7+ (relationship property uniqueness constraints)
+
+`sync` to an endpoint that declares `targetedge` / `fromnode` / `tonode` writes
+typed evidence edges (`ceg.relationship_evidence.v1`) that the local
+`graph_evidence_priority_v1` scorer reads. Off: such a request is refused with
+`FeatureNotEnabled` and no edge is written, whatever the tenant spec declares.
+On: the declaration, tenant and evidence guards all still apply, the batch is
+written in one transaction, and a per-type uniqueness constraint on
+`(_tenant, evidence_ref)` is created on first use. Node sync is unaffected in
+both states.
+
+### Enterprise requirement (open operator action)
+
+The `(_tenant, evidence_ref)` uniqueness constraint is what stops two
+concurrent writers both committing one `evidence_ref`; a transaction alone
+cannot, because each writer's MERGE matches only its own endpoint pair. The
+constraint is a relationship property uniqueness constraint, an Enterprise
+Edition 5.7+ feature. On Community Edition creating it fails, and every
+relationship sync is refused with `ExecutionError` before any write ("requires
+Neo4j Enterprise 5.7+; nothing written"). Node sync is unaffected.
+
+**Open:** the production Neo4j account is not yet on Enterprise. Until it is
+upgraded, relationship sync fails closed in production. Tracked in
+`.claude/rules/system-state.md` (Pending Operator Actions).
+
+### Validation
+
+`tests/unit/test_relationship_sync.py` (flag off/on, node sync unchanged,
+constraint unavailable refuses the batch) and
+`tests/integration/test_graph_evidence_score.py` (rollback, concurrent
+identity, replay).
+
+### Tenant mapping declarations (QM.POC0.TENANT_ASSOCIATION_MAPPING.004)
+
+`observedfrom` (provider associations a relationship endpoint accepts),
+`refnamespace` (a node label's graph-ref namespace) and `evidencerelevance`
+(approved relevance of an evidence edge type) are tenant-spec declarations, not
+flags. They are validated on every spec load, unconditionally: a malformed,
+ambiguous or conflicting declaration stops the spec from loading
+(`engine/config/tenant_mapping.py`). Writes they describe are still gated by
+`RELATIONSHIP_SYNC_ENABLED`. A declared `refnamespace` refuses node and
+relationship rows whose ids fall outside it, before compliance records the
+request or anything touches the graph. Relevance reaches scoring only from a
+`-reviewed` or `-production` spec. Tests:
+`tests/unit/test_observed_association_schema.py`,
+`tests/integration/test_tenant_mapping_identity.py`.
+
+### Rollback
+
+Set the flag to `false`. Edges already written keep their stamp and stay
+readable by the scorer; the constraint is left in place.
+
+### Audit on commit (`relationship_sync_audit_on_commit_enabled`, default `True`)
+
+The compliance checks (prohibited fields, field mappings) still run before any
+graph I/O, but the `Sync <type> batch_size=N` mutation record is buffered only
+after the relationship write committed. A refused or rolled-back batch records
+nothing; no audit entry is ever removed. Off: recorded before the write, as for
+node sync. Tests: `tests/unit/test_relationship_sync.py` (refusal, rollback).
+
+### Evidence identity per type (`evidence_identity_per_type_enabled`, default `False`)
+
+On: `handle_score` dedupes on `(relationship_type, evidence_ref)`, the identity
+this sync writes, so one `evidence_ref` under two types is not
+`conflicting_evidence`. Off: `evidence_ref` alone. Tests:
+`tests/unit/test_graph_evidence_binding.py`.
 
 ---
 

@@ -287,6 +287,20 @@ class Settings(BaseSettings):
     # for the same reason as auto_enrich_via_gate — each emission queues
     # re-enrichment targets and so spends EIE budget.
     graph_inference_feedback_enabled: bool = False
+    # QM.POC0.CEG.GRAPH_EVIDENCE.002A: relationship evidence sync for `targetedge`
+    # endpoints. On (default, operator decision 2026-10-30): every declaration,
+    # tenant and evidence guard still applies, and the per-type uniqueness
+    # constraint requires Neo4j Enterprise 5.7+. Off: such an endpoint is refused
+    # and no evidence edge is written, whatever the tenant spec declares; node
+    # sync is unaffected either way. See docs/FEATURE_GATES.md §28.
+    relationship_sync_enabled: bool = True
+    # T05: a targetedge sync buffers its compliance mutation record only after the
+    # write committed (checks still run first), so a refused or rolled-back batch
+    # leaves no 'Sync ... batch_size=N' success entry. Off: recorded before the write.
+    relationship_sync_audit_on_commit_enabled: bool = True
+    # A1: graph_evidence_priority_v1 dedupes on (relationship_type, evidence_ref),
+    # the identity relationship sync writes. Off: evidence_ref alone. §28.
+    evidence_identity_per_type_enabled: bool = False
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

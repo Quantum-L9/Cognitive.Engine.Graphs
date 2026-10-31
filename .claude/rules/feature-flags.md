@@ -64,6 +64,13 @@ Entity resolution is tuned per domain in `DomainSpec.semantic_registry`; there a
 engine-wide resolution tolerances (the former melt-flow-index / density tolerances
 were industry-specific and had no caller).
 
+## Relationship Evidence (QM.POC0.CEG.GRAPH_EVIDENCE.002A)
+| Flag | Default | Purpose |
+|------|---------|---------|
+| relationship_sync_enabled | True | `sync` to a `targetedge` endpoint writes typed evidence edges (QM.POC0 002A); requires Neo4j Enterprise 5.7+ for the per-type uniqueness constraint — fails closed otherwise |
+| relationship_sync_audit_on_commit_enabled | True | Relationship sync records its compliance mutation entry only after the write commits |
+| evidence_identity_per_type_enabled | False | Local score dedupes evidence on `(relationship_type, evidence_ref)` instead of `evidence_ref` alone |
+
 ## Scoring Weights (Contract 22: sum ≤ 1.0)
 | Weight | Default | Enforced by |
 |--------|---------|-------------|

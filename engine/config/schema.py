@@ -18,7 +18,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 
 class ManagedByType(StrEnum):
@@ -213,9 +213,21 @@ class EdgeSpec(BaseModel):
     category: EdgeCategory
     managedby: ManagedByType
     properties: list[PropertySpec] = Field(default_factory=list)
+    # Server-owned approved relevance of this evidence edge type in [0, 1]
+    # (engine/config/tenant_mapping.py; honoured only at -reviewed/-production).
+    evidencerelevance: float | None = Field(default=None, ge=0.0, le=1.0, allow_inf_nan=False)
 
     class Config:
         populate_by_name = True
+
+    @field_validator("evidencerelevance", mode="before")
+    @classmethod
+    def refuse_non_numeric_relevance(cls, value: object) -> object:
+        """A bool or a quoted number is not a relevance coefficient (lax float would coerce both)."""
+        if isinstance(value, bool | str | bytes):
+            msg = f"evidencerelevance must be a number in [0, 1], got {type(value).__name__}"
+            raise ValueError(msg)
+        return value
 
 
 class OntologySpec(BaseModel):
@@ -518,6 +530,43 @@ class ChildSyncSpec(BaseModel):
     edgedirection: str  # parenttochild, childtoparent
 
 
+PROVIDER_TOKEN_PATTERN = r"^[a-z][a-z0-9_-]{1,31}$"
+PROVIDER_OBJECT_TYPE_PATTERN = r"^(?:[a-z][a-z0-9_]{0,63}|\d+-\d+)$"
+PROVIDER_ASSOCIATION_CATEGORY_PATTERN = r"^[A-Z][A-Z0-9_]{0,63}$"
+REF_NAMESPACE_PATTERN = r"^[a-z0-9_.-]{1,64}$"
+
+
+class ObservedAssociationSourceSpec(BaseModel):
+    """A provider association a relationship endpoint accepts as an observation.
+
+    Records of ``fromobjecttype`` are the endpoint's ``fromnode`` (subject),
+    records of ``toobjecttype`` its ``tonode`` (object). The block names the
+    provider-side identity of the observation only; the relationship type and
+    labels come from the enclosing endpoint, and relevance is never declared here.
+    Object types are provider-native (D-4); the category is pattern-checked, not
+    enumerated (D-5); the provider is a neutral token (D-3).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    provider: str = Field(pattern=PROVIDER_TOKEN_PATTERN)
+    fromobjecttype: str = Field(pattern=PROVIDER_OBJECT_TYPE_PATTERN)
+    toobjecttype: str = Field(pattern=PROVIDER_OBJECT_TYPE_PATTERN)
+    associationcategory: str = Field(pattern=PROVIDER_ASSOCIATION_CATEGORY_PATTERN)
+    associationtypeid: StrictInt = Field(ge=1)
+
+    @property
+    def key(self) -> tuple[str, str, str, str, int]:
+        """The association identity; unique across a spec (one observation, one relationship)."""
+        return (
+            self.provider,
+            self.fromobjecttype,
+            self.toobjecttype,
+            self.associationcategory,
+            self.associationtypeid,
+        )
+
+
 class SyncEndpointSpec(BaseModel):
     """Sync endpoint definition."""
 
@@ -532,6 +581,10 @@ class SyncEndpointSpec(BaseModel):
     taxonomyedges: list[TaxonomyEdgeSpec] | None = None
     childsync: list[ChildSyncSpec] | None = None
     fieldsupdated: list[str] | None = None  # For PATCH operations
+    # Node endpoints only: node ids are graph refs ``<refnamespace>:<record id>`` (D-13).
+    refnamespace: str | None = Field(default=None, pattern=REF_NAMESPACE_PATTERN)
+    # Relationship endpoints only: provider associations this edge accepts as observations.
+    observedfrom: list[ObservedAssociationSourceSpec] | None = None
 
 
 class SyncSpec(BaseModel):
@@ -1214,5 +1267,11 @@ class DomainSpec(BaseModel):
                     "strategies per edge category.",
                     strategies.pop(),
                 )
+
+        # Tenant association mapping, node ref namespaces and approved relevance:
+        # unconditional, so a malformed declaration never loads (D-7).
+        from engine.config.tenant_mapping import validate_tenant_mapping
+
+        validate_tenant_mapping(self)
 
         return self
