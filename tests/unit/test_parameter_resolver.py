@@ -11,19 +11,6 @@ from __future__ import annotations
 import pytest
 
 
-@pytest.fixture(autouse=True)
-def _load_withheld_pack_as_fixture_data(monkeypatch: pytest.MonkeyPatch) -> None:
-    """These tests load freight-matching only as fixture data for a mocked loader.
-
-    Since RU-020/RU-039 the loader withholds that pack (its scoring references
-    unbound $lat/$lon/$target_price, CEG-COR-011 — GATED on RU-037). Admission
-    itself is covered by tests/unit/test_legacy_pack_serving_boundary.py.
-    """
-    from engine.config.settings import settings as _settings
-
-    monkeypatch.setattr(_settings, "unvalidated_domain_packs_enabled", True)
-
-
 @pytest.fixture
 def plasticos_spec():
     """Load plasticos spec, skip if not loadable."""
@@ -120,6 +107,10 @@ async def _match_freight(query: dict) -> dict:
     loader = MagicMock()
     loader.load_domain.return_value = spec
     init_dependencies(driver, loader)  # type: ignore[arg-type]
+    # RU-010 (R1a-DEC-03): the pack's required gate fields must be supplied;
+    # the defaulted derivation under test is unaffected by them.
+    # pickupdate: required since RU-046 made availability_window read it.
+    query = {"weightlbs": 1000.0, "equipmenttype": "van", "pickupdate": "2026-11-02T08:00:00Z", **query}
     await handle_match(spec.domain.id, {"query": query, "match_direction": spec.queryschema.matchdirections[0]})
     return driver.parameters[0]
 

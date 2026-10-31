@@ -814,8 +814,9 @@ withheld when:
   (`handle_match` binds it); otherwise it is the unbound-parameter defect above.
 
 Each such pack failed every match (`ValueError` / `ParameterMissing`) or
-silently degraded. `freight-matching` is withheld by this check until its
-scoring binds `$lat` / `$lon` / `$target_price` (CEG-COR-011).
+silently degraded. `freight-matching` was withheld by this check while its
+scoring referenced `$lat` / `$lon` / `$target_price` (CEG-COR-011); since RU-037
+its dimensions declare their operands and it is served.
 Rollback: `SCORING_ADMISSION_CHECK_ENABLED=false` (gate-only admission, the
 previous wording of the withholding reason), or
 `UNVALIDATED_DOMAIN_PACKS_ENABLED=true` to serve every validated pack.
@@ -831,10 +832,13 @@ direction `TraversalAssembler.assemble_traversal` must not raise,
 gate WHERE, the traversal and the scoring clause must be a queryschema field, a
 derived parameter, a scoring `queryprop` (backfilled by `handle_match`), `top_n`
 or a value a compiler binds itself; otherwise the defect names the direction
-and the parameter or step. No Neo4j access. `mortgage-brokerage` is withheld by
-it until its `lenderresolve` step is in the assembler's
+and the parameter or step. No Neo4j access. `mortgage-brokerage` was withheld
+by it until RU-038 rewrote its `lenderresolve` step in the assembler's
 `(alias:Label)-[:TYPE]->(alias:Label)` grammar (CEG-COR-012); it failed every
-match before. Rollback: `ADMISSION_CHECKS_FULL_MATCH=false` (with
+match before. The repaired pack compiles cleanly. It is served, as on main
+(owner decision 2026-10-29), without state-licensing or lender-blacklist
+enforcement; its DEC-15 `domain.activation: dormant` declaration is left
+commented in the pack until the owner enables withholding. Rollback: `ADMISSION_CHECKS_FULL_MATCH=false` (with
 `SCORING_ADMISSION_CHECK_ENABLED=false` for the pre-remediation verdicts) or
 `UNVALIDATED_DOMAIN_PACKS_ENABLED=true`.
 
@@ -848,8 +852,11 @@ matched candidate. A gate that declares `fromnode` / `tonode` (an anchor the
 compiler ignores), or whose ontology edge type is undeclared or does not start
 at a candidate label of the gate's direction(s), compiled to a predicate that
 is always true. The compiler now refuses it, naming the gate, and admission
-withholds the pack (`mortgage-brokerage` `blacklist_exclusion`:
-`BorrowerProfile -[:BLACKLISTEDLENDER]-> Lender`, decision R2-DEC-04). A
+withholds the pack. The case that motivated it, `mortgage-brokerage`
+`blacklist_exclusion` (`BorrowerProfile -[:BLACKLISTEDLENDER]-> Lender`), was
+removed by RU-038; until a query-anchored exclusion construct exists (DEC-15 "D
+now, then A") the blacklist is not enforced, and the pack is served as on main
+(owner decision 2026-10-29) rather than declared dormant. A
 candidate-origin edge (PlasticOS `exclusion_check`) compiles unchanged.
 Rollback: `EXCLUSION_ENDPOINT_VALIDATION=false`.
 
@@ -1041,8 +1048,9 @@ the query window). `GateCompiler` ignored all four, so:
 
 `$value` is a parameter nothing supplies and `candidate.timestamp` a property
 no such candidate carries, so neither legacy fragment ever matched what the
-spec author wrote. `freight-matching`'s `availability_window` is the live case:
-it compared `candidate.timestamp` and therefore rejected every candidate.
+spec author wrote. `freight-matching`'s `availability_window` was the live case:
+it compared `candidate.timestamp` and therefore rejected every candidate (since
+RU-046 it is a `threshold` gate, `availabledate <= $pickupdate`).
 
 Off: the legacy fragments, for C-21 rollback only. The surrounding CEG-009b
 change — a scalar `queryparam` (`85.0`, `true`) is bound as a generated
@@ -1079,8 +1087,9 @@ wrap always used `candidate.<candidateprop>` and `$<queryparam>`:
 
 Compiled fragments of `plasticos` and `mortgage-brokerage` are byte-identical
 (they declare `pass` with explicit bounds); of the shipped packs only
-temporalrange window gates change (`freight-matching` `availability_window`,
-dormant `legal-discovery` `temporal_relevance`). Rollback:
+temporalrange window gates change (dormant `legal-discovery`
+`temporal_relevance`; `freight-matching` `availability_window` until RU-046
+re-expressed it as a threshold gate). Rollback:
 `GATE_NULL_OPERANDS_FROM_PREDICATE=false`.
 
 ### Composite subgate scoping (RU-043 / CEG-COR-022)
@@ -1387,3 +1396,24 @@ violates the rule stops loading (`DomainSpec.model_validate` raises). All defaul
 | `domain_undeclared_param_rejected` (`DOMAIN_UNDECLARED_PARAM_REJECTED`) | `true` | RU-050 / CEG-COR-077 | Under `domain_strict_validation`, when the spec declares any queryschema field or derived parameter, a gate whose string `queryparam` is undeclared raises `ValueError("Gate '<g>' references undeclared parameter '<q>'")`. Declared means: the name itself, its base after stripping `_min`/`_max`/`_start`/`_end`, or, for a `temporalrange` gate, both `<q>_start` and `<q>_end` (the names the compiler derives). Literal (scalar) operands are exempt | The same message is a WARNING log and the spec loads; admission (`admission_defects`) is the only refusal |
 | `gate_spec_forbid_unknown_keys` (`GATE_SPEC_FORBID_UNKNOWN_KEYS`) | `true` | RU-053 / CEG-COR-081 | A `GateSpec` `model_validator(mode="before")` raises `Gate '<name>' has unknown key(s) [<keys>]` for any input key outside `GateSpec.model_fields`, adding `'<key>' (did you mean '<field>'?)` when the key matches a field with underscores removed (e.g. `null_behavior` → `nullbehavior`). No aliases are introduced. Fields added to `GateSpec` later are accepted automatically | Unknown keys are ignored: `null_behavior: fail` leaves `nullbehavior` at its `pass` default and the gate admits NULL operands |
 | `domain_version_semver_enforced` (`DOMAIN_VERSION_SEMVER_ENFORCED`) | `true` | RU-057 / CEG-COR-152 | `DomainMetadata.version` must fully match `(0\|[1-9]\d*)\.(0\|[1-9]\d*)\.(0\|[1-9]\d*)` optionally followed by `-seed`, `-discovered`, `-inferred`, `-proposed`, `-reviewed` or `-production` (DOMAIN_SPEC_VERSIONING.md); anything else raises `domain.version '<v>' is not semver`. `TemplateProvenance.version` is unchanged. Shipped pack versions (0.1.0, 1.0.0, 1.0.1, 1.1.0, 1.2.0) validate | Any string, including `latest`, `v2` and dates, is accepted |
+## 26. Correctness remediation lane J (plan 0d84ec8, round 2)
+
+|---|---|---|---|---|
+| `geodecay_declared_longitude` (`GEODECAY_DECLARED_LONGITUDE`) | `true` | RU-037 / CEG-COR-011 (DEC-14 option A) | A `geodecay` dimension's declared `candidateprop_lon` / `queryprop_lon` name the longitude operands (`point({latitude: candidate.<candidateprop>, longitude: candidate.<candidateprop_lon>})` vs `point({latitude: $<queryprop>, longitude: $<queryprop_lon>})`); undeclared they default to `candidate.lon` / `$lon`, so dimensions without them (PlasticOS `geo_proximity`, `active_supply_geo`) compile byte-identically. `freight-matching` `deadhead_distance` measures Carrier `currentlat`/`currentlon` to Load `pickuplat`/`pickuplon` | The declarations are ignored and `candidate.lon` / `$lon` are emitted; `freight-matching` is withheld again by the scoring admission check for its unbound `$lon` |
+
+### Rollback
+
+Set `GEODECAY_DECLARED_LONGITUDE=false` and restart. Domain-spec changes of this
+lane (plasticos 1.3.0, mortgage-brokerage 1.1.0, freight-matching 1.2.0) roll
+back by restoring the previous spec file; the loader hot-reloads on mtime.
+## 27. Correctness remediation lane K (plan 0d84ec8)
+
+Round-2 fixes from the CEG correctness remediation plan. Each ships `True`; set
+the env var to `false` to restore the previous behaviour verbatim.
+
+|---|---|---|---|---|
+| `gds_shared_scheduler_registry` (`GDS_SHARED_SCHEDULER_REGISTRY`) | `true` | RU-007 / CEG-COR-016 | `GraphLifecycle.startup` registers each started scheduler in `get_state().gds_schedulers[domain_id]` (one per domain id); the W6-03 GDS health probe reads that registry at probe time; `_get_or_create_scheduler` (admin `trigger_gds`, `gds_status`, `gds_trigger`, `gds_health`) reuses the registered instance, and for a domain boot did not start it registers the jobs and starts APScheduler only when `gds_enabled` is true, so `GDS_ENABLED=false` runs no cron job anywhere while manual triggers still execute; `EngineState.shutdown` (called by `GraphLifecycle.shutdown`) stops every started scheduler and skips one that never started | Boot keeps its schedulers in `GraphLifecycle._schedulers`, which nothing stops; the first admin `gds_*` call starts a second scheduler for the same domain (cron jobs run twice, `gds_status` reports the duplicate's empty history) and starts it even with `GDS_ENABLED=false` |
+| `outcome_schema_unified` (`OUTCOME_SCHEMA_UNIFIED`) | `true` | RU-006 / CEG-COR-015 (R1a-DEC-02 first alternative) | `_build_outcome_write` is the one outcome writer: `handle_outcomes` and sync `entity_type=outcome` both create the domain's `feedbackloop.outcome_node_label` node with the canonical `success`/`failure`/`partial` (sync maps `positive`→`success`, `negative`→`failure`, `neutral`→`partial`; canonical values pass through; anything else is skipped), link it by RESULTED_IN from the candidate's declared id, and apply the R3 causal check per item (sync reports `rejected_count` when edges were suppressed). The node carries `dimension_scores` (sorted-key JSON of the optional `fingerprint.dimension_scores` map; null when absent) and `was_selected` (optional bool); a malformed value is a `ValidationError` on `outcomes` and a skipped item on sync. `score_feedback` RETURNs `o.dimension_scores`, decoded with `decode_outcome_map`, and `OutcomeFeedback` treats `success` as positive and `failure` as negative (`partial` is neither). `discover_weights` already reads `dimension_scores` / `was_selected`. Existing `:Outcome` nodes are not migrated | Sync writes `:Outcome` with `positive`/`negative`/`neutral` and HAS_OUTCOME; `handle_outcomes` writes no `dimension_scores` / `was_selected`; `score_feedback` and `discover_weights` therefore never produce output |
+| `strict_null_gates` (`STRICT_NULL_GATES`, existing W1-03 flag; meaning fixed by R1a-DEC-03) | `true` | RU-010 / CEG-COR-023 | `handle_match` calls `GateCompiler.validate_gates(resolved_query, match_direction=…, reject_unbound=True)` after defaults backfill and derived resolution, over the gates active for the direction (`matchdirections` empty or containing it). A gate whose named `queryparam` is missing/null and is undeclared (neither a queryschema field nor a derived parameter) or a `required` queryschema field raises `ValidationError` naming every such gate; a null optional or derived parameter is left to the gate's `nullbehavior` (C-14) and logged as a WARNING once per gate. Literal operands and gates without a named parameter are not checked. Required queryschema fields are therefore enforced for gates that read them (e.g. plasticos `polymer_type`) | `validate_gates` is never called on the match path; a null undeclared parameter reaches Neo4j as a missing parameter |
+| `match_request_contract_admission` (`MATCH_REQUEST_CONTRACT_ADMISSION`) | `true` | RU-012 / CEG-COR-063 (R1a-DEC-04 "admit both") | `handle_match` validates a payload that carries `contract_version` with `admit_payload(MatchRequest, payload, DomainContract.from_spec(<tenant's pack>))` — tenant-bound `domain`, declared `direction`, `extra=forbid`, transport fields refused, failures raised as `ValidationError` before any query — and continues with `{query: query.facts, match_direction: direction, top_n}`. Payloads without `contract_version` (legacy `MatchPayload`) are unchanged. The response stays the legacy shape | The `MatchRequest` example is rejected with `Missing required field 'match_direction'` |
+| `gate_role_exemption` (`GATE_ROLE_EXEMPTION`) | `true` | RU-015 / CEG-COR-080 (R1a-DEC-05 "withhold") | `engine.config.loader.admission_defects` adds `<gate>: roleexempt … is not consumed — match takes no request role` for a gate whose `roleexempt` is set and `<gate>: relaxedpenalty … is not consumed — relaxed matching is not exposed` for a gate that declares `relaxedpenalty` (explicitly, any value), so `withholding_reason` withholds the pack unless `UNVALIDATED_DOMAIN_PACKS_ENABLED`. No shipped pack declares either field. `schema.py`, the compiler's `role` / `compile_relaxed` support and the match payload are unchanged | The fields are accepted and silently ignored by every match |
