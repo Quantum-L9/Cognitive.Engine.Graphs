@@ -14,6 +14,7 @@ Unit tests for R8 entity resolution / semantic registry.
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -223,10 +224,12 @@ class TestEntityResolver:
             [{"a_name": "Acme", "b_name": "Acme", "a_region": "US", "b_region": "US"}],
             [{"shared_count": 8, "union_count": 10}],
             [{"shared_count": 3, "union_count": 4}],
+            # RU-101: already-resolved lookup over e1 + candidates (none resolved)
+            [],
             # find_canonical: e1 has more connections
             [{"entity_id": "e1"}],
-            # create_resolution
-            [],
+            # create_resolution (RU-101: MERGE returns the edge's id and whether it is new)
+            [{"resolution_id": "res_000000000001", "created": True}],
         ]
 
         resolver = EntityResolver(spec, driver, "test_domain")
@@ -259,3 +262,394 @@ class TestEntityResolver:
         assert result["total_entities"] == 2
         assert result["total_merged"] == 0
         assert result["resolution_groups"] == 0
+
+
+# ── RU-101 / CEG-COR-059..061: merge integrity ─────────────────────────────
+
+
+class _FakeGraph:
+    """In-memory emulation of the resolver's Cypher (RESOLVED_FROM bookkeeping).
+
+    Dispatches on the shape of each statement the resolver sends: the batch
+    entity listing, the already-resolved lookup, canonical selection, and the
+    RESOLVED_FROM write (CREATE, or MERGE + ON CREATE SET).
+    """
+
+    def __init__(self, entities: dict[str, int]) -> None:
+        # entity_id -> number of non-RESOLVED_FROM relationships
+        self.other_degree = dict(entities)
+        self.edges: dict[tuple[Any, ...], dict[str, Any]] = {}
+        self.writes: list[tuple[str, str]] = []
+
+    def _has_outgoing(self, eid: str) -> bool:
+        return any(key[0] == eid for key in self.edges)
+
+    def _rf_degree(self, eid: str) -> int:
+        return sum(1 for key in self.edges if eid in key[:2])
+
+    async def execute_query(self, cypher: str, parameters: dict[str, Any], database: str) -> list[dict[str, Any]]:
+        assert database == "test_domain"
+        if "RESOLVED_FROM" in cypher and ("CREATE (source)" in cypher or "MERGE (source)" in cypher):
+            key: tuple[Any, ...] = (parameters["source_id"], parameters["canonical_id"])
+            self.writes.append(key)
+            if "MERGE (source)" in cypher and key in self.edges:
+                existing = self.edges[key]["resolution_id"]
+                return [{"resolution_id": existing, "created": existing == parameters["resolution_id"]}]
+            if "MERGE (source)" not in cypher:  # legacy CREATE: a duplicate edge is a new edge
+                key = (*key, len(self.edges))
+            self.edges[key] = {"resolution_id": parameters["resolution_id"], "confidence": parameters["similarity"]}
+            return [{"resolution_id": parameters["resolution_id"], "created": True}]
+        if "AS resolved_id" in cypher:
+            return [{"resolved_id": eid} for eid in parameters["entity_ids"] if self._has_outgoing(eid)]
+        if "ORDER BY degree DESC" in cypher:
+            ids = list(parameters["entity_ids"])
+            if "NOT EXISTS" in cypher:
+                ids = [eid for eid in ids if not self._has_outgoing(eid)]
+            exclude_rf = "type(r) <> 'RESOLVED_FROM'" in cypher
+            degree = {eid: self.other_degree[eid] + (0 if exclude_rf else self._rf_degree(eid)) for eid in ids}
+            if "entity_id ASC" in cypher:
+                ranked = sorted(ids, key=lambda eid: (-degree[eid], eid))
+            else:  # unspecified order among ties: emulate as reverse input order
+                position = {eid: idx for idx, eid in enumerate(ids)}
+                ranked = sorted(ids, key=lambda eid: (-degree[eid], -position[eid]))
+            return [{"entity_id": ranked[0]}] if ranked else []
+        if "RETURN e.entity_id AS entity_id" in cypher:
+            return [{"entity_id": eid} for eid in self.other_degree if not self._has_outgoing(eid)]
+        raise AssertionError(f"unexpected Cypher: {cypher}")
+
+    def resolved_from(self) -> list[tuple[str, str, float]]:
+        return [(key[0], key[1], props["confidence"]) for key, props in self.edges.items()]
+
+
+class _FakeScorer:
+    """Similarity from a fixed matrix; find_candidates honours the threshold."""
+
+    def __init__(self, graph: _FakeGraph, sims: dict[frozenset[str], float], default_threshold: float) -> None:
+        self._graph = graph
+        self._sims = sims
+        self._default = default_threshold
+        self.find_thresholds: list[float | None] = []
+
+    async def compute_similarity(self, a: str, b: str, entity_label: str) -> float:
+        return self._sims.get(frozenset((a, b)), 0.0)
+
+    async def find_candidates(
+        self, entity_id: str, entity_label: str, threshold: float | None = None, limit: int | None = None
+    ) -> list[dict[str, Any]]:
+        self.find_thresholds.append(threshold)
+        effective = threshold if threshold is not None else self._default
+        out = [
+            {"entity_id": other, "similarity": round(self._sims.get(frozenset((entity_id, other)), 0.0), 4)}
+            for other in self._graph.other_degree
+            if other != entity_id and self._sims.get(frozenset((entity_id, other)), 0.0) >= effective
+        ]
+        out.sort(key=lambda c: -c["similarity"])
+        return out
+
+
+def _resolver(
+    entities: dict[str, int], sims: dict[tuple[str, str], float], threshold: float = 0.6
+) -> tuple[EntityResolver, _FakeGraph, _FakeScorer]:
+    graph = _FakeGraph(entities)
+    resolver = EntityResolver(_make_spec(threshold=threshold), graph, "test_domain")  # type: ignore[arg-type]
+    scorer = _FakeScorer(graph, {frozenset(k): v for k, v in sims.items()}, threshold)
+    resolver._scorer = scorer  # type: ignore[assignment]
+    return resolver, graph, scorer
+
+
+_IDENTICAL = {("e1", "e2"): 1.0, ("e1", "e3"): 1.0, ("e2", "e3"): 1.0}
+
+
+@pytest.mark.unit
+class TestMergeIntegrity:
+    @pytest.mark.asyncio
+    async def test_batch_of_three_identical_entities_creates_two_edges(self) -> None:
+        resolver, graph, _ = _resolver({"e1": 0, "e2": 0, "e3": 0}, _IDENTICAL)
+        result = await resolver.resolve_batch("Supplier")
+        assert sorted((s, c) for s, c, _ in graph.resolved_from()) == [("e2", "e1"), ("e3", "e1")]
+        assert result["total_merged"] == 2
+        assert result["resolution_groups"] == 1
+        assert result["total_entities"] == 3
+
+    @pytest.mark.asyncio
+    async def test_rerunning_the_batch_creates_nothing(self) -> None:
+        resolver, graph, _ = _resolver({"e1": 0, "e2": 0, "e3": 0}, _IDENTICAL)
+        await resolver.resolve_batch("Supplier")
+        edges_before = graph.resolved_from()
+        again = await resolver.resolve_batch("Supplier")
+        assert graph.resolved_from() == edges_before
+        assert again["total_merged"] == 0
+        assert again["resolution_groups"] == 0
+
+    @pytest.mark.asyncio
+    async def test_degree_tie_never_forms_a_cycle(self) -> None:
+        resolver, graph, _ = _resolver({"e1": 2, "e2": 2}, {("e1", "e2"): 0.9})
+        await resolver.resolve_entity("e1", "Supplier")
+        await resolver.resolve_entity("e2", "Supplier")
+        edges = {(s, c) for s, c, _ in graph.resolved_from()}
+        assert edges == {("e2", "e1")}  # deterministic tie-break: entity_id ASC
+        assert not any((c, s) in edges for s, c in edges)
+
+    @pytest.mark.asyncio
+    async def test_batch_threshold_override_is_honoured(self) -> None:
+        sims = {("e1", "e2"): 0.75, ("e1", "e3"): 0.75, ("e2", "e3"): 0.75}
+        resolver, graph, scorer = _resolver({"e1": 0, "e2": 0, "e3": 0}, sims)
+        result = await resolver.resolve_batch("Supplier", threshold=0.99)
+        assert graph.resolved_from() == []
+        assert result["total_merged"] == 0
+        assert scorer.find_thresholds
+        assert all(t == 0.99 for t in scorer.find_thresholds)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("bad", ["x", 1.5, -0.1, True, float("nan")])
+    async def test_invalid_batch_threshold_raises(self, bad: object) -> None:
+        resolver, graph, _ = _resolver({"e1": 0, "e2": 0}, {("e1", "e2"): 1.0})
+        with pytest.raises(ValueError, match="threshold"):
+            await resolver.resolve_batch("Supplier", threshold=bad)  # type: ignore[arg-type]
+        assert graph.writes == []
+
+    @pytest.mark.asyncio
+    async def test_members_are_verified_against_the_canonical(self) -> None:
+        """Scenario 3: e2 (higher degree) becomes canonical for e1's group.
+
+        e3 is similar to e1 (0.9) but only 0.33 to the canonical, so it is not
+        merged; e1 -> e2 carries the measured 0.67, not a default 1.0.
+        """
+        sims = {("e1", "e2"): 0.67, ("e1", "e3"): 0.9, ("e2", "e3"): 0.33}
+        resolver, graph, _ = _resolver({"e1": 0, "e2": 5, "e3": 0}, sims, threshold=0.6)
+        result = await resolver.resolve_entity("e1", "Supplier")
+        assert graph.resolved_from() == [("e1", "e2", 0.67)]
+        assert result["canonical_id"] == "e2"
+        assert result["merged_count"] == 1
+        assert result["merged_entity_ids"] == ["e1"]
+        assert len(result["resolution_ids"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_already_resolved_candidates_are_excluded(self) -> None:
+        resolver, graph, _ = _resolver({"e1": 0, "e2": 0, "e3": 9}, _IDENTICAL)
+        await resolver.resolve_entity("e2", "Supplier")  # e2 -> e3, e1 -> e3
+        assert {(s, c) for s, c, _ in graph.resolved_from()} == {("e1", "e3"), ("e2", "e3")}
+        result = await resolver.resolve_entity("e1", "Supplier")  # e1 already resolved
+        assert result["merged_count"] == 0
+        assert len(graph.resolved_from()) == 2
+
+    @pytest.mark.asyncio
+    async def test_flag_off_restores_legacy_merge(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "entity_resolution_merge_integrity", False)
+        resolver, graph, scorer = _resolver({"e1": 0, "e2": 0, "e3": 0}, _IDENTICAL)
+        result = await resolver.resolve_batch("Supplier", threshold=0.99)
+        # Legacy: threshold ignored, CREATE per call, resolution ids in the skip set.
+        assert result["total_merged"] == 6
+        assert len(graph.resolved_from()) == 6
+        assert all(t is None for t in scorer.find_thresholds)
+
+    def test_flag_default_on(self) -> None:
+        from engine.config.settings import Settings
+
+        assert Settings().entity_resolution_merge_integrity is True
+
+
+# ── RU-103 / CEG-COR-177: behavioral similarity scoped to the entity label ──
+
+
+def _supplier_domain(id_property: str = "supplier_id") -> Any:
+    from engine.config.schema import DomainSpec
+
+    raw: dict[str, Any] = {
+        "domain": {"id": "test_domain", "name": "Test", "version": "0.0.1"},
+        "ontology": {
+            "nodes": [
+                {
+                    "label": "Supplier",
+                    "managedby": "sync",
+                    "candidate": True,
+                    "matchdirection": "d1",
+                    "properties": [{"name": id_property, "type": "string", "required": True}],
+                },
+                {
+                    "label": "Query",
+                    "managedby": "api",
+                    "queryentity": True,
+                    "matchdirection": "d1",
+                    "properties": [{"name": "query_id", "type": "int", "required": True}],
+                },
+            ],
+            "edges": [],
+        },
+        "matchentities": {
+            "candidate": [{"label": "Supplier", "matchdirection": "d1"}],
+            "queryentity": [{"label": "Query", "matchdirection": "d1"}],
+        },
+        "queryschema": {"matchdirections": ["d1"], "fields": []},
+        "traversal": {"steps": []},
+        "gates": [],
+        "scoring": {"dimensions": []},
+    }
+    return DomainSpec(**raw)
+
+
+class _BehavioralGraph:
+    """Fake driver evaluating the behavioral-similarity statement over a node list.
+
+    nodes: (label, properties, outcome match_ids reached via RESULTED_IN).
+    A node pattern without a label matches every label, as Cypher does.
+    """
+
+    def __init__(self, nodes: list[tuple[str, dict[str, Any], set[str]]]) -> None:
+        self._nodes = nodes
+        self.cyphers: list[str] = []
+
+    def _matches(self, cypher: str, var: str, key: str) -> set[str]:
+        import re
+
+        pattern = re.search(rf"\({var}(?::(\w+))?\s*\{{(\w+): \${key}\}}\)", cypher)
+        assert pattern, cypher
+        label, prop = pattern.group(1), pattern.group(2)
+        out: set[str] = set()
+        for node_label, props, outcomes in self._nodes:
+            if (label is None or node_label == label) and props.get(prop) == self._params[key]:
+                out |= outcomes
+        return out
+
+    async def execute_query(self, cypher: str, parameters: dict[str, Any], database: str) -> list[dict[str, Any]]:
+        self.cyphers.append(cypher)
+        self._params = parameters
+        a = self._matches(cypher, "a", "a_id")
+        b = self._matches(cypher, "b", "b_id")
+        return [{"shared_count": len(a & b), "union_count": len(a | b)}]
+
+
+@pytest.mark.unit
+class TestBehavioralLabelScope:
+    @pytest.mark.asyncio
+    async def test_behavioral_cypher_carries_the_label_on_both_nodes(self) -> None:
+        spec = _make_spec(property_weight=0.0, structural_weight=0.0, behavioral_weight=1.0)
+        driver = _mock_driver()
+        driver.execute_query.side_effect = [
+            [{"a_name": "A", "b_name": "B", "a_region": "US", "b_region": "EU"}],
+            [{"shared_count": 0, "union_count": 0}],
+            [{"shared_count": 3, "union_count": 6}],
+        ]
+        scorer = SimilarityScorer(spec, driver, "test_domain")
+        assert abs(await scorer.compute_similarity("e1", "e2", "Supplier") - 0.5) < 0.01
+        behavioral = str(driver.execute_query.call_args_list[2].kwargs["cypher"])
+        assert "(a:Supplier {entity_id: $a_id})" in behavioral
+        assert "(b:Supplier {entity_id: $b_id})" in behavioral
+
+    @pytest.mark.asyncio
+    async def test_same_id_node_of_another_label_does_not_change_the_score(self) -> None:
+        graph = _BehavioralGraph(
+            [
+                ("Supplier", {"entity_id": "e1"}, {"m1", "m2"}),
+                ("Supplier", {"entity_id": "e2"}, {"m1", "m2"}),
+                # Same id, different label, unrelated outcomes.
+                ("Buyer", {"entity_id": "e1"}, {"m7", "m8", "m9"}),
+            ]
+        )
+        scorer = SimilarityScorer(_make_spec(), graph, "test_domain")  # type: ignore[arg-type]
+        assert await scorer._behavioral_similarity("e1", "e2", "Supplier") == 1.0
+
+    @pytest.mark.asyncio
+    async def test_behavioral_lookup_uses_the_declared_id_property(self) -> None:
+        """PO-04 extension of RU-002: the node is found by the label's declared id."""
+        graph = _BehavioralGraph(
+            [
+                ("Supplier", {"supplier_id": "s1"}, {"m1"}),
+                ("Supplier", {"supplier_id": "s2"}, {"m1", "m2"}),
+            ]
+        )
+        scorer = SimilarityScorer(_make_spec(), graph, "test_domain", domain_spec=_supplier_domain())  # type: ignore[arg-type]
+        assert await scorer._behavioral_similarity("s1", "s2", "Supplier") == 0.5
+        assert "(a:Supplier {supplier_id: $a_id})" in graph.cyphers[-1]
+        assert "entity_id" not in graph.cyphers[-1]
+
+    @pytest.mark.asyncio
+    async def test_resolver_passes_the_domain_spec_to_its_scorer(self) -> None:
+        graph = _BehavioralGraph([("Supplier", {"supplier_id": "s1"}, {"m1"})])
+        resolver = EntityResolver(_make_spec(), graph, "test_domain", domain_spec=_supplier_domain())  # type: ignore[arg-type]
+        await resolver._scorer._behavioral_similarity("s1", "s1", "Supplier")
+        assert "(a:Supplier {supplier_id: $a_id})" in graph.cyphers[-1]
+
+    @pytest.mark.asyncio
+    async def test_flag_off_restores_label_less_entity_id_query(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "resolution_behavioral_label_scoped", False)
+        graph = _BehavioralGraph(
+            [
+                ("Supplier", {"entity_id": "e1"}, {"m1", "m2"}),
+                ("Supplier", {"entity_id": "e2"}, {"m1", "m2"}),
+                ("Buyer", {"entity_id": "e1"}, {"m7", "m8", "m9"}),
+            ]
+        )
+        scorer = SimilarityScorer(_make_spec(), graph, "test_domain", domain_spec=_supplier_domain())  # type: ignore[arg-type]
+        assert await scorer._behavioral_similarity("e1", "e2", "Supplier") == pytest.approx(2 / 5)
+        assert "(a {entity_id: $a_id})" in graph.cyphers[-1]
+
+    def test_flag_default_on(self) -> None:
+        from engine.config.settings import Settings
+
+        assert Settings().resolution_behavioral_label_scoped is True
+
+
+class _StructuralFakeScorer(_FakeScorer):
+    """Like _FakeScorer, but a pair scored after a RESOLVED_FROM edge already
+    touches either entity drops by ``penalty`` -- the effect of the new edge on
+    the real structural (neighbor-overlap) signal."""
+
+    def __init__(self, *args: Any, penalty: float, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._penalty = penalty
+
+    async def compute_similarity(self, a: str, b: str, entity_label: str) -> float:
+        base = await super().compute_similarity(a, b, entity_label)
+        touched = any(a in key[:2] or b in key[:2] for key in self._graph.edges)
+        return base - self._penalty if touched else base
+
+
+@pytest.mark.unit
+class TestMergeIntegrityReviewFollowUp:
+    """PR #367 review: score every member before writing, compare unrounded scores."""
+
+    @pytest.mark.asyncio
+    async def test_members_are_scored_before_any_resolution_edge_is_written(self) -> None:
+        # e2 is canonical (highest degree); the subject e1 is linked first. e3's
+        # canonical-relative similarity (0.9) must be measured on the graph as it
+        # was, not after e1 -> e2 has changed e2's neighbor set.
+        sims = {("e1", "e2"): 0.9, ("e1", "e3"): 0.9, ("e2", "e3"): 0.9}
+        graph = _FakeGraph({"e1": 0, "e2": 5, "e3": 0})
+        resolver = EntityResolver(_make_spec(threshold=0.85), graph, "test_domain")  # type: ignore[arg-type]
+        resolver._scorer = _StructuralFakeScorer(  # type: ignore[assignment]
+            graph, {frozenset(k): v for k, v in sims.items()}, 0.85, penalty=0.1
+        )
+        result = await resolver.resolve_entity("e1", "Supplier")
+        assert {(s, c) for s, c, _ in graph.resolved_from()} == {("e1", "e2"), ("e3", "e2")}
+        assert sorted(result["merged_entity_ids"]) == ["e1", "e3"]
+        assert result["merged_count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_subject_candidate_passing_unrounded_threshold_is_merged(self) -> None:
+        # 0.850041 >= 0.85004 passes find_candidates, but rounds to 0.85 < 0.85004.
+        resolver, graph, _ = _resolver({"e1": 5, "e2": 0}, {("e1", "e2"): 0.850041}, threshold=0.85004)
+        result = await resolver.resolve_entity("e1", "Supplier")
+        assert graph.resolved_from() == [("e2", "e1", 0.85)]
+        assert result["merged_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_batch_override_compares_unrounded_canonical_similarity(self) -> None:
+        # e2 is canonical; e3 is verified against e2 with compute_similarity.
+        sims = {("e1", "e2"): 0.9, ("e1", "e3"): 0.9, ("e2", "e3"): 0.850041}
+        resolver, graph, _ = _resolver({"e1": 0, "e2": 5, "e3": 0}, sims, threshold=0.6)
+        await resolver.resolve_batch("Supplier", threshold=0.85004)
+        assert {(s, c) for s, c, _ in graph.resolved_from()} == {("e1", "e2"), ("e3", "e2")}
+
+    @pytest.mark.asyncio
+    async def test_unrounded_canonical_similarity_below_threshold_is_not_merged(self) -> None:
+        # 0.849996 rounds up to 0.85 but is below the 0.85 threshold.
+        sims = {("e1", "e2"): 0.9, ("e1", "e3"): 0.9, ("e2", "e3"): 0.849996}
+        resolver, graph, _ = _resolver({"e1": 0, "e2": 5, "e3": 0}, sims, threshold=0.85)
+        result = await resolver.resolve_entity("e1", "Supplier")
+        assert graph.resolved_from() == [("e1", "e2", 0.9)]
+        assert result["merged_entity_ids"] == ["e1"]

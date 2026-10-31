@@ -301,3 +301,80 @@ async def test_in_flight_provisioning_is_forgotten_once_settled() -> None:
     assert await task is True
     await asyncio.sleep(0)  # done callbacks run on the next loop iteration
     assert driver._provisioning == {}
+
+
+# ── RU-095 / CEG-COR-170: breaker admission before first-use provisioning ───
+
+
+def _system_calls(driver: _RecordingDriver) -> list[tuple[str, str]]:
+    return [(c, db) for c, db in driver.calls if db == "system"]
+
+
+@pytest.mark.asyncio
+async def test_open_breaker_rejects_query_before_any_create(auto_create) -> None:
+    import time
+
+    from engine.graph.circuit_breaker import CircuitOpenError
+
+    driver = _RecordingDriver()
+    await driver.circuit_breaker.force_open()
+    started = time.monotonic()
+    with pytest.raises(CircuitOpenError):
+        await driver.execute_query("MATCH (n) RETURN n", database="plasticos")
+    assert time.monotonic() - started < 0.05
+    assert _system_calls(driver) == []
+    assert driver.calls == []
+
+
+@pytest.mark.asyncio
+async def test_open_breaker_rejects_write_before_any_create(auto_create) -> None:
+    from engine.graph.circuit_breaker import CircuitOpenError
+
+    driver = _RecordingDriver()
+    await driver.circuit_breaker.force_open()
+    with pytest.raises(CircuitOpenError):
+        await driver.execute_write(cypher="MERGE (n:X)", database="plasticos")
+    assert driver.calls == []
+
+
+@pytest.mark.asyncio
+async def test_closed_breaker_still_provisions_once_inside_admission(auto_create) -> None:
+    driver = _RecordingDriver()
+    await driver.execute_query("MATCH (n) RETURN n", database="plasticos")
+    await driver.execute_write(cypher="MERGE (n:X)", database="plasticos")
+    assert driver.calls == [
+        ("CREATE DATABASE `plasticos` IF NOT EXISTS WAIT", "system"),
+        ("MATCH (n) RETURN n", "plasticos"),
+        ("WRITE MERGE (n:X)", "plasticos"),
+    ]
+    # One admitted call per operation; the CREATE is not a separate breaker call.
+    assert driver.circuit_breaker.get_metrics().total_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_flag_off_provisions_before_admission(auto_create, monkeypatch) -> None:
+    from engine.config import settings as settings_module
+    from engine.graph.circuit_breaker import CircuitOpenError
+
+    monkeypatch.setattr(settings_module.settings, "neo4j_provision_inside_breaker", False)
+    driver = _RecordingDriver()
+    await driver.circuit_breaker.force_open()
+    with pytest.raises(CircuitOpenError):
+        await driver.execute_query("MATCH (n) RETURN n", database="plasticos")
+    assert _system_calls(driver) == [("CREATE DATABASE `plasticos` IF NOT EXISTS WAIT", "system")]
+
+
+def test_provision_inside_breaker_flag_default_on() -> None:
+    from engine.config.settings import Settings
+
+    assert Settings().neo4j_provision_inside_breaker is True
+
+
+@pytest.mark.asyncio
+async def test_unsafe_name_is_a_caller_error_not_a_breaker_failure(auto_create) -> None:
+    driver = _RecordingDriver()
+    for _ in range(10):
+        with pytest.raises(ValueError, match="refusing to provision"):
+            await driver.execute_query("RETURN 1", database="has space")
+    assert driver.circuit_breaker.get_metrics().total_failures == 0
+    assert driver.calls == []

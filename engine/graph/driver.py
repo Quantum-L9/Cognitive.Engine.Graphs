@@ -20,6 +20,7 @@ import os
 from typing import Any
 
 from neo4j import AsyncDriver, AsyncGraphDatabase
+from neo4j import exceptions as neo4j_exceptions
 
 from engine.graph.circuit_breaker import CircuitBreaker
 from engine.utils.security import sanitize_database_name
@@ -47,6 +48,43 @@ class DatabaseNotProvisionedError(RuntimeError):
     until an operator happened to run CREATE DATABASE by hand. This names the
     missing database and the command that provides it.
     """
+
+
+def _is_breaker_failure(exc: BaseException) -> bool:
+    """RU-093 / CEG-COR-034: does this exception count toward opening the breaker?
+
+    The Neo4j breaker is process-wide, so one tenant's client errors
+    (CypherSyntaxError, ConstraintError, DatabaseNotFound, a null MERGE key)
+    must not fail every other tenant fast. ``neo4j.exceptions.ClientError`` and
+    its subclasses are per-request faults: not failures — except the credential
+    classes ``AuthError`` (incl. ``TokenExpired``) and ``Forbidden``, which are
+    process-wide and count (owner decision 2026-10-29). Infrastructure and
+    transient faults (ServiceUnavailable, SessionExpired, TransientError,
+    DatabaseError, OSError, anything else) still count. With
+    ``neo4j_circuit_ignore_client_errors`` off every exception counts.
+    """
+    from engine.config.settings import settings
+
+    if not settings.neo4j_circuit_ignore_client_errors:
+        return True
+    if isinstance(exc, _CREDENTIAL_CLIENT_ERRORS):
+        return True
+    return not isinstance(exc, neo4j_exceptions.ClientError)
+
+
+# ClientError subclasses that are not per-request faults (TokenExpired is an AuthError).
+_CREDENTIAL_CLIENT_ERRORS = (neo4j_exceptions.AuthError, neo4j_exceptions.Forbidden)
+
+
+def _provision_inside_breaker() -> bool:
+    """RU-095 / CEG-COR-170 flag: admit through the breaker before provisioning.
+
+    On: an OPEN breaker rejects in O(1) before any CREATE DATABASE is issued.
+    Off: the legacy provision-then-admit ordering.
+    """
+    from engine.config.settings import settings
+
+    return settings.neo4j_provision_inside_breaker
 
 
 def _looks_like_absent_database(exc: Exception) -> bool:
@@ -93,6 +131,7 @@ class GraphDriver:
             failure_threshold=settings.neo4j_circuit_threshold,
             recovery_timeout=settings.neo4j_circuit_cooldown,
             half_open_max_calls=settings.neo4j_circuit_half_open_max,
+            is_failure=_is_breaker_failure,
         )
 
     async def connect(self) -> None:
@@ -159,9 +198,14 @@ class GraphDriver:
         Raises CircuitOpenError (maps to 503) if breaker is OPEN.
         """
         database = self._resolve_database(database, "execute_query")
-        await self._provision_on_first_use(database)
+        if _provision_inside_breaker():
+            self._precheck_provisionable(database)
+            query = self._provisioned_raw_execute_query
+        else:
+            await self._provision_on_first_use(database)
+            query = self._raw_execute_query
         try:
-            return await self._circuit_breaker.call(self._raw_execute_query, cypher, parameters, database)
+            return await self._circuit_breaker.call(query, cypher, parameters, database)
         except Exception as exc:
             raise self._translate_absent_database(exc, database) from exc
 
@@ -200,6 +244,52 @@ class GraphDriver:
 
         if _db_settings.auto_create_domain_database:
             await self.ensure_database(database)
+
+    def _precheck_provisionable(self, database: str) -> None:
+        """RU-095: refuse an unprovisionable name before breaker admission.
+
+        Pure validation, no I/O. It keeps a malformed database name a caller
+        error (``ValueError``, raised exactly as before) rather than a failure
+        counted by the breaker now that provisioning runs inside admission.
+        """
+        from engine.config.settings import settings as _db_settings
+
+        if (
+            _db_settings.auto_create_domain_database
+            and database not in _BUILTIN_DATABASES
+            and database not in self._ensured_databases
+        ):
+            sanitize_database_name(database)
+
+    async def _provisioned_raw_execute_query(
+        self,
+        cypher: str,
+        parameters: dict[str, Any] | None = None,
+        database: str = "neo4j",
+    ) -> list[Any]:
+        """RU-095: first-use provisioning, then the query — both inside breaker admission."""
+        await self._provision_on_first_use(database)
+        return await self._raw_execute_query(cypher, parameters, database)
+
+    async def _provisioned_raw_execute_write(
+        self,
+        transaction_function: Any = None,
+        *args: Any,
+        cypher: str | None = None,
+        parameters: dict[str, Any] | None = None,
+        database: str = "neo4j",
+        **kwargs: Any,
+    ) -> dict[str, Any] | Any:
+        """RU-095: first-use provisioning, then the write — both inside breaker admission."""
+        await self._provision_on_first_use(database)
+        return await self._raw_execute_write(
+            transaction_function,
+            *args,
+            cypher=cypher,
+            parameters=parameters,
+            database=database,
+            **kwargs,
+        )
 
     @staticmethod
     def _translate_absent_database(exc: Exception, database: str) -> Exception:
@@ -339,10 +429,15 @@ class GraphDriver:
         dict. Raises CircuitOpenError (maps to 503) if breaker is OPEN.
         """
         database = self._resolve_database(database, "execute_write")
-        await self._provision_on_first_use(database)
+        if _provision_inside_breaker():
+            self._precheck_provisionable(database)
+            write = self._provisioned_raw_execute_write
+        else:
+            await self._provision_on_first_use(database)
+            write = self._raw_execute_write
         try:
             return await self._circuit_breaker.call(
-                self._raw_execute_write,
+                write,
                 transaction_function,
                 *args,
                 cypher=cypher,

@@ -47,6 +47,13 @@ PACKS = {
     "freight-matching": ("Carrier", "carrierid", "loadtocarrier"),
 }
 
+# RU-010 (R1a-DEC-03): each pack's required gate parameters for its direction.
+_REQUIRED_QUERY: dict[str, dict[str, Any]] = {
+    "plasticos": {"polymer_type": "HDPE"},
+    # pickupdate: required since RU-046 made availability_window read it.
+    "freight-matching": {"weightlbs": 1000.0, "equipmenttype": "van", "pickupdate": "2026-11-02T08:00:00Z"},
+}
+
 
 class _Capture:
     def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
@@ -156,7 +163,9 @@ class TestDeclaredNodeIdentity:
                 "subaction": "evaluate",
                 "domain_id": domain,
                 "k": 2,
-                "test_set": [{"query": {}, "match_direction": direction, "expected_ids": ["GOOD"]}],
+                "test_set": [
+                    {"query": _REQUIRED_QUERY[domain], "match_direction": direction, "expected_ids": ["GOOD"]}
+                ],
             },
         )
         assert result["per_case"][0].get("error") is None, result["per_case"][0]
