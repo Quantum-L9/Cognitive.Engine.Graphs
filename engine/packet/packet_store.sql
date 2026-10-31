@@ -81,6 +81,13 @@ CREATE TABLE IF NOT EXISTS packet_store (
     CONSTRAINT uq_content_hash UNIQUE (content_hash, actor_tenant)
 );
 
+-- Outcome feedback linkage written by PacketStore.record_outcome()
+-- (RU-081 / CEG-COR-041, DEC-31 option 1). The one packet column that may be
+-- updated after insert: an annotation linking the Neo4j TransactionOutcome
+-- back to the match packet. ADD COLUMN IF NOT EXISTS so re-applying this file
+-- brings an existing database up to date.
+ALTER TABLE packet_store ADD COLUMN IF NOT EXISTS outcome_jsonb JSONB;
+
 -- ════════════════════════════════════════════════════════════════
 --  LINEAGE GRAPH (materialized derivation chains)
 -- ════════════════════════════════════════════════════════════════
@@ -206,8 +213,17 @@ CREATE POLICY tenant_isolation_delete ON packet_store
         actor_tenant = current_setting('app.current_tenant', true)
     );
 
--- No UPDATE policy: packets are immutable. No updates allowed.
--- If you need to change data, derive() a new packet.
+-- Packets are immutable except for the outcome_jsonb annotation (RU-081,
+-- DEC-31 option 1). The l9_product UPDATE grant is column-level on
+-- outcome_jsonb, so this policy cannot be used to change any other column.
+-- To change packet data, derive() a new packet.
+DROP POLICY IF EXISTS tenant_isolation_update_outcome ON packet_store;
+CREATE POLICY tenant_isolation_update_outcome ON packet_store
+    FOR UPDATE USING (
+        actor_tenant = current_setting('app.current_tenant', true)
+    ) WITH CHECK (
+        actor_tenant = current_setting('app.current_tenant', true)
+    );
 
 -- Hop trace inherits packet tenant isolation
 DROP POLICY IF EXISTS hop_tenant ON hop_trace;
@@ -260,6 +276,9 @@ DO $$ BEGIN
 END $$;
 
 GRANT SELECT, INSERT, DELETE ON packet_store TO l9_product;
+-- Column-level: record_outcome() may set outcome_jsonb and nothing else; the
+-- envelope and every other packet column stay non-updatable (RU-081).
+GRANT UPDATE (outcome_jsonb) ON packet_store TO l9_product;
 GRANT SELECT, INSERT ON hop_trace TO l9_product;
 GRANT SELECT, INSERT ON delegation_chain TO l9_product;
 GRANT INSERT, SELECT ON packet_audit_log TO l9_product;
@@ -409,7 +428,9 @@ $$;
 -- unique across tenants, so both the audit insert and the delete filter on
 -- actor_tenant = p_tenant. The old two-argument form filtered on the subject
 -- id only (an owner/admin connection deleted every tenant's packets for a
--- reused id); it is dropped so nothing can still call it.
+-- reused id); it is dropped so nothing can still call it. Callers on the
+-- RLS-enforced l9_product role also set the transaction-local
+-- app.current_tenant to p_tenant, or the policies hide every row.
 DROP FUNCTION IF EXISTS gdpr_erase_subject(TEXT, TEXT);
 CREATE OR REPLACE FUNCTION gdpr_erase_subject(p_subject_id TEXT, p_performed_by TEXT, p_tenant TEXT)
 RETURNS INT LANGUAGE plpgsql AS $$

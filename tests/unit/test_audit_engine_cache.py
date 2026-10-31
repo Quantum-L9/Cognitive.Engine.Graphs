@@ -112,3 +112,134 @@ def test_audit_engine_does_not_own_coverage_matrix() -> None:
     # Regression guard for the collision fix: coverage_matrix.json belongs to
     # spec_extract.py. audit_engine must not define a writer for it.
     assert not hasattr(ae, "write_coverage")
+
+
+# ── RU-132 / RG-167: recursive globs and the C-009 label check ──────────────
+
+
+def _write(root: Path, rel: str, text: str) -> None:
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def _repo_rules() -> dict:
+    return ae.load_yaml(REPO_ROOT / "tools" / "audit_rules.yaml")
+
+
+def _rule(rule_id: str) -> dict:
+    return {"rules": [r for r in _repo_rules()["rules"] if r["id"] == rule_id]}
+
+
+def _clear() -> None:
+    ae.read_text.cache_clear()
+    ae._list_files_cached.cache_clear()
+
+
+@pytest.mark.unit
+def test_list_files_recurses_double_star(tmp_path: Path) -> None:
+    for rel in ("engine/a.py", "engine/gates/b.py", "engine/gates/types/c.py", "other/d.py"):
+        _write(tmp_path, rel, "x = 1\n")
+    _clear()
+
+    result = ae.list_files(tmp_path, ["engine/**/*.py"], [])
+
+    assert [p.relative_to(tmp_path).as_posix() for p in result] == [
+        "engine/a.py",
+        "engine/gates/b.py",
+        "engine/gates/types/c.py",
+    ]
+
+
+@pytest.mark.unit
+def test_exclude_double_star(tmp_path: Path) -> None:
+    for rel in ("engine/a.py", "engine/legacy/b.py", "engine/legacy/deep/c.py"):
+        _write(tmp_path, rel, "x = 1\n")
+    _clear()
+
+    result = ae.list_files(tmp_path, ["engine/**/*.py"], ["engine/legacy/**/*.py"])
+
+    assert [p.relative_to(tmp_path).as_posix() for p in result] == ["engine/a.py"]
+
+
+@pytest.mark.unit
+def test_list_files_covers_every_engine_module() -> None:
+    _clear()
+    expected = sorted(p for p in (REPO_ROOT / "engine").rglob("*.py") if p.is_file())
+    assert ae.list_files(REPO_ROOT, ["engine/**/*.py"], []) == expected
+
+
+@pytest.mark.unit
+def test_nested_fastapi_import_is_critical(tmp_path: Path) -> None:
+    _write(tmp_path, "engine/gates/x.py", "from fastapi import APIRouter\n")
+    _write(tmp_path, "engine/handlers.py", "from fastapi import APIRouter\n")
+    _clear()
+
+    findings = ae.audit_rules(tmp_path, _rule("ARCH_NO_FASTAPI_IN_ENGINE"))
+
+    assert [(f.severity, Path(f.file).relative_to(tmp_path).as_posix()) for f in findings] == [
+        ("CRITICAL", "engine/gates/x.py")
+    ]
+
+
+SANITIZED_ELSEWHERE = """from engine.utils.security import sanitize_label
+
+
+async def query(driver, spec):
+    sanitize_label(spec.other_label)
+    cypher = f"MATCH (n:{spec.target_node}) RETURN n"
+    return await driver.execute_query(cypher)
+"""
+
+# engine/compliance/pii.py shape: an f-string with braces, then (many lines
+# later) a plain Cypher string. Neither line interpolates a label.
+CROSS_LINE = """def path_of(prefix, key):
+    return f"{prefix}.{key}"
+
+
+QUERY = "MATCH (n:Person {id: $id}) RETURN n"
+"""
+
+
+@pytest.mark.unit
+def test_sec_label_no_cross_line_or_whole_file_exemption(tmp_path: Path) -> None:
+    _write(tmp_path, "engine/sub/x.py", SANITIZED_ELSEWHERE)
+    _write(tmp_path, "engine/compliance/pii.py", CROSS_LINE)
+    _clear()
+
+    findings = ae.audit_rules(tmp_path, _rule("SEC_LABEL_SANITIZATION_REQUIRED"))
+
+    located = [(f.severity, f.rule_id, Path(f.file).relative_to(tmp_path).as_posix()) for f in findings]
+    assert located == [("CRITICAL", "SEC_LABEL_SANITIZATION_REQUIRED", "engine/sub/x.py")]
+    assert findings[0].line_start is not None
+    assert findings[0].line_start <= 6 <= (findings[0].line_end or 0)
+    assert "spec.target_node" in findings[0].evidence
+
+
+@pytest.mark.unit
+def test_sec_label_waived_cypher_lint_finding_is_not_reported(tmp_path: Path) -> None:
+    src = (
+        'def q(spec):\n    return f"MATCH (n:{spec.label}) RETURN n"  # cypher-lint: allow label from validated spec\n'
+    )
+    _write(tmp_path, "engine/sub/w.py", src)
+    _clear()
+
+    assert ae.audit_rules(tmp_path, _rule("SEC_LABEL_SANITIZATION_REQUIRED")) == []
+
+
+@pytest.mark.unit
+def test_sec_label_unparsable_module_fails_closed(tmp_path: Path) -> None:
+    _write(tmp_path, "engine/sub/broken.py", "def f(:\n")
+    _clear()
+
+    findings = ae.audit_rules(tmp_path, _rule("SEC_LABEL_SANITIZATION_REQUIRED"))
+
+    assert [f.severity for f in findings] == ["CRITICAL"]
+
+
+@pytest.mark.unit
+def test_current_tree_has_no_critical_or_high_findings() -> None:
+    _clear()
+    findings = ae.audit_rules(REPO_ROOT, _repo_rules())
+    blocking = [(f.severity, f.rule_id, f.file, f.line_start) for f in findings if f.severity in {"CRITICAL", "HIGH"}]
+    assert blocking == []

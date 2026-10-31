@@ -95,6 +95,7 @@ async def execute_action(
 
     # Execute engine logic
     engine_error_cls = _get_engine_error_class()
+    http_hint: dict[str, Any] | None = None
     try:
         engine_data = await handler(tenant, payload)
         status = "success"
@@ -114,6 +115,7 @@ async def execute_action(
             logger.exception(f"Handler {action} failed for tenant={tenant}")
             engine_data = {"error": str(e)}
             status = "failed"
+        http_hint = _http_status_hint(e, engine_error_cls)
 
     # Deflate response into PacketEnvelope
     processing_ms = (time.time() - start_time) * 1000
@@ -135,7 +137,7 @@ async def execute_action(
         logger.warning("PacketStore.persist failed (non-fatal): %s", store_exc)
 
     # Return outbound envelope as JSON
-    return {
+    result: dict[str, Any] = {
         "status": status,
         "action": action,
         "tenant": tenant,
@@ -147,3 +149,44 @@ async def execute_action(
             "timestamp": datetime.now(UTC).isoformat(),
         },
     }
+    if http_hint is not None:
+        # Outside "data" and not persisted: chassis_app pops these before it
+        # builds the HTTP response (RU-083).
+        result.update(http_hint)
+    return result
+
+
+# HTTP status hint keys (RU-083). Top-level, never inside "data".
+HTTP_STATUS_KEY = "http_status"
+HTTP_DETAIL_KEY = "http_detail"
+HTTP_RETRY_AFTER_KEY = "http_retry_after"
+_GENERIC_500_DETAIL = "Internal server error"
+
+
+def _http_status_hint(exc: Exception, engine_error_cls: type | None) -> dict[str, Any] | None:
+    """Map a handler exception to the HTTP status and client-safe detail (RU-083).
+
+    CircuitOpenError -> 503 (+ retry_after); ChassisError -> its status_code;
+    engine ValidationError -> 422; other EngineError -> 500 with its message;
+    anything else -> 500 "Internal server error" (the exception text stays in
+    the log and in the persisted response packet, never in the HTTP body).
+    Returns None when LEGACY_CHASSIS_STATUS_MAPPING_ENABLED is off.
+    """
+    from engine.config.settings import settings
+
+    if not settings.legacy_chassis_status_mapping_enabled:
+        return None
+
+    from chassis.errors import ChassisError
+    from engine.graph.circuit_breaker import CircuitOpenError
+
+    if isinstance(exc, CircuitOpenError):
+        return {HTTP_STATUS_KEY: 503, HTTP_DETAIL_KEY: str(exc), HTTP_RETRY_AFTER_KEY: exc.retry_after}
+    if isinstance(exc, ChassisError):
+        return {HTTP_STATUS_KEY: exc.status_code, HTTP_DETAIL_KEY: str(exc)}
+    if engine_error_cls is not None and isinstance(exc, engine_error_cls):
+        from engine.handlers import ValidationError as EngineValidationError
+
+        status = 422 if isinstance(exc, EngineValidationError) else 500
+        return {HTTP_STATUS_KEY: status, HTTP_DETAIL_KEY: str(exc)}
+    return {HTTP_STATUS_KEY: 500, HTTP_DETAIL_KEY: _GENERIC_500_DETAIL}

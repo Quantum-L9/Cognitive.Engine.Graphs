@@ -1,9 +1,10 @@
 # --- L9_META ---
-# l9_schema: 2
+# l9_schema: 1
 # origin: l9-template
 # engine: graph
 # layer: [agent-rules]
 # tags: [governance]
+# owner: platform
 # status: active
 # --- /L9_META ---
 # ============================================================================
@@ -286,11 +287,12 @@ contracts:
     - id: C18
       name: L9_META ON EVERY FILE
       rule: >
-        Every tracked file carries an L9_META header (schema version 2).
-        Fields: l9_schema, origin, engine, layer, tags, status (owner dropped in v2).
-        Values resolve from l9-meta.yaml by path, not per file: write with
-        `tools/l9_meta_injector.py apply`, verify with `check`. To change a value,
-        edit the l9-meta.yaml rule — never the header.
+        Every tracked file carries an L9_META header (schema version 1).
+        Fields: l9_schema, origin, engine, layer, tags, owner, status.
+        Values come from FILE_REGISTRY in tools/l9_meta_injector.py: register the
+        file, write with `tools/l9_meta_injector.py --apply`, verify with
+        `tools/l9_meta_injector.py check` (exit 1 on any finding). To change a
+        value, edit the FILE_REGISTRY entry — never the header.
       scanner_ids: []
 
   layer_6_graph_intelligence:

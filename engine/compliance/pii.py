@@ -28,8 +28,12 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-# GDPR packet erasure (packet_store.sql gdpr_erase_subject), tenant-scoped.
+# GDPR packet erasure (packet_store.sql gdpr_erase_subject). The tenant GUC
+# is transaction-local, the same statement PacketStore uses (RU-079).
+_SET_TENANT_SQL = "SELECT set_config('app.current_tenant', $1, true)"
 _GDPR_ERASE_SQL = "SELECT gdpr_erase_subject($1, $2, $3)"
+# Dry-run scope of the packet step: the same rows gdpr_erase_subject deletes.
+_GDPR_COUNT_SQL = "SELECT count(*) FROM packet_store WHERE data_subject_id = $1 AND actor_tenant = $2"
 
 
 # ── PII Field Classification ──────────────────────────────
@@ -572,6 +576,26 @@ class PIIHandler:
 
     # ── GDPR Right-to-Erasure ──────────────────────────────
 
+    async def count_subject_packets(self, data_subject_id: str, db_pool: Any, *, tenant: str | None) -> int:
+        """Dry-run count of the packets ``erase_subject`` would delete.
+
+        Same scope as ``gdpr_erase_subject``: the requesting tenant's rows for
+        the subject id, read in one transaction with the transaction-local
+        ``app.current_tenant`` set (while
+        ``packet_store_rls_tenant_session_enabled``), so the RLS-enforced
+        ``l9_product`` role counts the rows it would erase instead of 0.
+        """
+        if not tenant:
+            msg = "GDPR packet erasure requires the requesting tenant"
+            raise ValueError(msg)
+        from engine.config.settings import settings
+
+        async with db_pool.acquire() as conn, conn.transaction():
+            if settings.packet_store_rls_tenant_session_enabled:
+                await conn.fetchval(_SET_TENANT_SQL, tenant)
+            count = await conn.fetchval(_GDPR_COUNT_SQL, data_subject_id, tenant)
+        return int(count or 0)
+
     async def erase_subject(
         self,
         data_subject_id: str,
@@ -605,7 +629,11 @@ class PIIHandler:
         ``tenant`` scopes the packet erasure (RU-066 follow-up, PR #352
         review): a subject id is not unique across tenants, so only rows whose
         ``actor_tenant`` is ``tenant`` are erased, and a packet erasure without
-        a tenant raises ``ValueError`` before any query.
+        a tenant raises ``ValueError`` before any query. The call runs in one
+        transaction with the transaction-local ``app.current_tenant`` set to
+        ``tenant`` (while ``packet_store_rls_tenant_session_enabled``, as
+        PacketStore does since RU-079), so it also works on the RLS-enforced
+        ``l9_product`` role, whose policies otherwise hide every row.
 
         ``database`` is the tenant's Neo4j database (tenant id == domain spec
         id == database name). DB-STRICT-01: ``GraphDriver.execute_query`` no
@@ -628,8 +656,12 @@ class PIIHandler:
             if not tenant:
                 msg = "GDPR packet erasure requires the requesting tenant"
                 raise ValueError(msg)
+            from engine.config.settings import settings
+
             try:
-                async with db_pool.acquire() as conn:
+                async with db_pool.acquire() as conn, conn.transaction():
+                    if settings.packet_store_rls_tenant_session_enabled:
+                        await conn.fetchval(_SET_TENANT_SQL, tenant)
                     deleted = await conn.fetchval(_GDPR_ERASE_SQL, data_subject_id, performed_by, tenant)
                     summary["packets_deleted"] = int(deleted or 0)
             except Exception:

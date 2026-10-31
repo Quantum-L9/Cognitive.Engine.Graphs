@@ -102,19 +102,18 @@ repos:
         pass_filenames: false
         always_run: true
 
-  # L9_META headers (Contract C-018) — resolves every tracked file against
-  # l9-meta.yaml. always_run because a rule edit changes the expected values
-  # for files that are not themselves staged.
+  # L9_META headers (Contract C-018) — verifies every git-tracked file in the
+  # contract's scope against FILE_REGISTRY in tools/l9_meta_injector.py.
+  # always_run because a registry edit changes the expected values for files
+  # that are not themselves staged.
   - repo: local
     hooks:
       - id: l9-meta-check
         name: L9_META Header Check
-        # Dry-run is the default (no --apply); there is no `check` subcommand.
+        # Dry-run verification (same as `check`); exits 1 on any finding.
+        # Stdlib only, so the isolated hook venv needs no extra dependencies.
         entry: python tools/l9_meta_injector.py
         language: python
-        # pre-commit builds an isolated venv, so l9-meta.yaml parsing needs
-        # pyyaml declared here — it is not inherited from the repo environment.
-        additional_dependencies: [pyyaml]
         pass_filenames: false
         always_run: true
 
@@ -196,7 +195,6 @@ repos:
         exclude: >
           (?x)^(
             docs/PlasticOS.*\.yaml|
-            domains/MASTER-SPEC.*\.yaml|
             setup-new-workspace\.yaml|
             telemetry/.*\.yml|
             tools/l9_template_manifest\.yaml|
