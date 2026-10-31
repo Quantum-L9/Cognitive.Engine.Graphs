@@ -30,7 +30,7 @@ import asyncio
 import json
 import logging
 from collections import defaultdict, deque
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -38,7 +38,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from engine.config.schema import AggregationStrategy, DomainSpec, EdgeCategory, GDSJobSpec
 from engine.graph.driver import GraphDriver
-from engine.utils.security import sanitize_label
+from engine.utils.security import cypher_number, sanitize_label
 
 # S2-10: EdgeCategory → recommended GDS configuration mapping.
 # Paper: different relation types benefit from different algorithms/aggregation.
@@ -360,7 +360,16 @@ class GDSScheduler:
         """
         resolved_agg = self.resolve_aggregation_strategy(job_spec)
         logger.info(f"Starting GDS job {job_spec.name} — algorithm={job_spec.algorithm}, aggregation={resolved_agg}")
-        start = datetime.now()
+        from engine.config.settings import settings
+
+        # RU-100 / CEG-COR-086: start, duration and the history timestamp share
+        # one clock — timezone-aware UTC unless the flag restores naive local.
+        utc = settings.gds_history_utc_timestamps
+
+        def _now() -> datetime:
+            return datetime.now(tz=UTC) if utc else datetime.now()
+
+        start = _now()
         result = {}
 
         try:
@@ -390,7 +399,7 @@ class GDSScheduler:
                     logger.warning(f"Unknown algorithm: {algo}")
                     result = {"status": "skipped", "reason": f"unknown algorithm: {algo}"}
 
-            duration = (datetime.now() - start).total_seconds()
+            duration = (_now() - start).total_seconds()
             logger.info(f"Completed job {job_spec.name} in {duration:.2f}s")
             result["duration_sec"] = duration
             result["status"] = result.get("status", "success")
@@ -405,7 +414,7 @@ class GDSScheduler:
                 {
                     "job": job_spec.name,
                     "algorithm": job_spec.algorithm,
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": _now().isoformat(),
                     **result,
                 }
             )
@@ -497,16 +506,12 @@ class GDSScheduler:
 
         # Step 2: Power-law pruning — prune high-degree nodes to d^0.86 edges
         # Only prune nodes with >10 co-occurrence edges to avoid over-pruning
-        prune_cypher = f"""
-        MATCH (n)-[r:{write_edge}]-()
-        WITH n, collect(r) AS edges, count(r) AS degree
-        WHERE degree > 10
-        WITH n, edges, degree, toInteger(degree ^ {pruning_alpha}) AS keep_count
-        WITH n, edges[keep_count..] AS to_prune
-        UNWIND to_prune AS r
-        DELETE r
-        RETURN count(r) AS pruned_edges
-        """
+        from engine.config.settings import settings
+
+        if settings.gds_cooccurrence_deterministic_prune:
+            prune_cypher = self._deterministic_cooccurrence_prune_cypher(write_edge, pruning_alpha)
+        else:
+            prune_cypher = self._legacy_cooccurrence_prune_cypher(write_edge, pruning_alpha)
         try:
             prune_result = await self.graph_driver.execute_query(prune_cypher, database=db)
             pruned = prune_result[0]["pruned_edges"] if prune_result else 0
@@ -516,6 +521,51 @@ class GDSScheduler:
 
         logger.info(f"Co-occurrence: {edges} edges created/updated, {pruned} pruned (alpha={pruning_alpha})")
         return {"edges_created": edges, "edges_pruned": pruned, "pruning_alpha": pruning_alpha}
+
+    @staticmethod
+    def _deterministic_cooccurrence_prune_cypher(write_edge: str, pruning_alpha: float) -> str:
+        """RU-098 / CEG-COR-168: weight-ordered, deterministic power-law pruning.
+
+        Every node with degree > 10 keeps its strongest
+        ``keep_count = floor(degree ^ alpha)`` edges, ordered by ``r.weight``
+        DESC with ``elementId(r)`` as the tie-break. An edge is deleted only
+        when *both* endpoints prune and neither keeps it (two rejection votes),
+        so a node never ends below its keep count and a node with degree <= 10
+        keeps all of its edges. Identical input gives an identical result.
+        ``write_edge`` arrives sanitized and is re-validated here.
+        """
+        edge = sanitize_label(write_edge)
+        alpha = cypher_number(pruning_alpha)
+        return f"""
+        MATCH (n)-[r:{edge}]-()
+        WITH n, r
+        ORDER BY r.weight DESC, elementId(r)
+        WITH n, collect(r) AS edges
+        WITH n, edges, size(edges) AS degree
+        WHERE degree > 10
+        WITH n, edges[toInteger(degree ^ {alpha})..] AS rejected
+        UNWIND rejected AS r
+        WITH r, count(*) AS votes
+        WHERE votes = 2
+        DELETE r
+        RETURN count(r) AS pruned_edges
+        """
+
+    @staticmethod
+    def _legacy_cooccurrence_prune_cypher(write_edge: str, pruning_alpha: float) -> str:
+        """Pre-RU-098 prune: unordered collect, per-endpoint deletion."""
+        edge = sanitize_label(write_edge)
+        alpha = cypher_number(pruning_alpha)
+        return f"""
+        MATCH (n)-[r:{edge}]-()
+        WITH n, collect(r) AS edges, count(r) AS degree
+        WHERE degree > 10
+        WITH n, edges, degree, toInteger(degree ^ {alpha}) AS keep_count
+        WITH n, edges[keep_count..] AS to_prune
+        UNWIND to_prune AS r
+        DELETE r
+        RETURN count(r) AS pruned_edges
+        """
 
     async def _run_reinforcement(self, job_spec: GDSJobSpec) -> dict[str, Any]:
         """
@@ -976,18 +1026,23 @@ class GDSScheduler:
         return {"algorithm": "causal_chain_scoring", "nodes_scored": scored}
 
     async def _run_stable_louvain(self, job_spec: GDSJobSpec, runs: int) -> dict[str, Any]:
-        """S2-15: Run Louvain multiple times and use majority-vote consensus.
+        """S2-15: Run Louvain N times and report averaged stability metrics.
 
         HGKR paper runs each experiment 16 times and averages results.
-        Louvain is non-deterministic — running N times and taking the
-        majority community label per node eliminates random noise.
+        Louvain is non-deterministic, so each of the N runs writes its own
+        community labels to the same ``writeproperty``: the persisted labels
+        are from the last successful run. No per-node consensus is computed
+        (community ids are not aligned across runs), and the result says so
+        with ``consensus=False`` (RU-099 / CEG-COR-085, DEC-39 option A).
 
         Args:
             job_spec: GDS job specification.
             runs: Number of stability runs (default from job_spec.stability_runs).
 
         Returns:
-            Result dict with consensus community assignments + stability metrics.
+            Result dict with the averaged ``communities`` and ``modularity``,
+            ``stability_runs`` (successful runs), ``stability_coefficient``
+            (1 - modularity range) and ``consensus`` (always False).
         """
         logger.info(f"Running stable Louvain with {runs} runs for {job_spec.name}")
         all_results: list[dict[str, Any]] = []
@@ -1018,6 +1073,8 @@ class GDSScheduler:
                 ),
                 6,
             ),
+            # Labels on the graph are the last successful run's, not a consensus.
+            "consensus": False,
         }
 
     # ── Lifecycle ──────────────────────────────────────────

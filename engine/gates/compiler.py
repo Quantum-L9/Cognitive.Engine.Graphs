@@ -137,6 +137,15 @@ def _declared(gate: GateSpec, field: str) -> str | None:
     return None
 
 
+class UnboundGateParameterError(ValueError):
+    """RU-010: an active gate's undeclared or required parameter resolved to null."""
+
+    def __init__(self, problems: list[str]) -> None:
+        self.problems = problems
+        msg = "Gate parameter resolved to null: " + "; ".join(problems)
+        super().__init__(msg)
+
+
 class GateCompiler:
     """
     Compiles GateSpec objects from a domain spec into Cypher WHERE clause fragments.
@@ -184,23 +193,39 @@ class GateCompiler:
     def validate_gates(
         self,
         resolved_params: dict[str, object] | None = None,
+        *,
+        match_direction: str | None = None,
+        reject_unbound: bool = False,
     ) -> list[str]:
         """W1-03: Pre-compilation gate validation.
 
         Checks:
         (a) Every required gate field has a corresponding parameter in the resolved set.
         (b) No gate uses an operator incompatible with the field's declared type.
-        (c) Post-compilation: if a resolved parameter is None, log WARNING and
-            reject if STRICT_NULL_GATES is enabled.
+        (c) Post-compilation: if a resolved parameter is None, log WARNING
+            (STRICT_NULL_GATES) and, with ``reject_unbound``, reject it when the
+            parameter is undeclared or a required queryschema field.
 
         A literal `queryparam` is bound by the compiler itself and therefore
         never looked up in the resolved set.
+
+        RU-010 / CEG-COR-023 (R1a-DEC-03, third alternative): ``match_direction``
+        restricts the check to the gates active for that direction (the same
+        filter compile_all_gates applies). ``reject_unbound`` raises
+        UnboundGateParameterError for every active gate whose parameter is
+        missing or null and is either not declared (neither a queryschema field
+        nor a derived parameter) or a ``required`` queryschema field; a null
+        declared optional parameter is left to the gate's ``nullbehavior`` in
+        the compiled Cypher (C-14) and only warned about.
 
         Returns list of warning messages (empty = all clear).
         """
         from engine.config.settings import settings
 
         warnings: list[str] = []
+        unbound: list[str] = []
+        field_required = {f.name: f.required for f in self.domain_spec.queryschema.fields}
+        declared = set(field_required) | {p.name for p in self.domain_spec.derivedparameters}
         # Build a property type index from ontology
         prop_types: dict[str, str] = {}
         for node in self.domain_spec.ontology.nodes:
@@ -212,6 +237,8 @@ class GateCompiler:
         numeric_types = frozenset({"int", "float", "datetime", "date", "duration"})
 
         for gate in self._gates:
+            if match_direction is not None and gate.matchdirections and match_direction not in gate.matchdirections:
+                continue
             named_param = gate.queryparam if isinstance(gate.queryparam, str) else None
 
             # (a) Check that required gate params exist in resolved set
@@ -240,7 +267,12 @@ class GateCompiler:
                     if settings.strict_null_gates:
                         warnings.append(msg)
                         logger.warning(msg)
+                    if reject_unbound and (named_param not in declared or field_required.get(named_param, False)):
+                        kind = "required" if named_param in declared else "undeclared"
+                        unbound.append(f"gate '{gate.name}' needs {kind} parameter '{named_param}'")
 
+        if unbound:
+            raise UnboundGateParameterError(unbound)
         return warnings
 
     # ── Public API ─────────────────────────────────────────

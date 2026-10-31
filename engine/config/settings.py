@@ -573,6 +573,129 @@ class Settings(BaseSettings):
     # edge each run, and prunes on score OR age > max_age_days. Off: the
     # per-row create and score-only prune, under which aged edges never decay.
     gds_temporal_recency_decay_existing: bool = True
+    # RU-098 / CEG-COR-168: co-occurrence power-law pruning orders each node's
+    # edges by weight (elementId tie-break) and deletes an edge only when both
+    # endpoints prune and neither keeps it. Off: unordered per-endpoint prune
+    # that can leave hubs below their keep count and differs run to run.
+    gds_cooccurrence_deterministic_prune: bool = True
+    # RU-100 / CEG-COR-086: GDS job history timestamps (and the job start /
+    # duration clock) are timezone-aware UTC, so staleness is the same under
+    # any process TZ. Off: naive local time, which consumers read as UTC.
+    gds_history_utc_timestamps: bool = True
+    # RU-101 / CEG-COR-059..061: entity resolution threads and validates the
+    # batch threshold, verifies each member against the chosen canonical,
+    # MERGEs RESOLVED_FROM (at most one per pair, no cycles) and skips batch
+    # entities by entity id. Off: the previous merge behaviour. The path is also
+    # gated per domain by semantic_registry.enabled (default False).
+    entity_resolution_merge_integrity: bool = True
+    # RU-103 / CEG-COR-177: behavioral similarity matches both entities with
+    # the entity label and the label's declared id property (PO-04; that part
+    # also follows spec_declared_candidate_id). Off: label-less entity_id match,
+    # which counts outcomes of same-id nodes of other labels.
+    resolution_behavioral_label_scoped: bool = True
+    # Correctness remediation lane G (plan 0d84ec8, RU-108..)
+    # RU-108 / CEG-COR-044: readiness coerced an absent field confidence to 0,
+    # so a fully populated entity with no confidence map scored 0.0/F, and
+    # health_batch_assess / health_report dropped a supplied map. On: a
+    # populated field counts unless an explicit confidence < 0.70 discounts
+    # it, batch/report forward `field_confidences`, and blocking_fields names
+    # exactly the uncounted gate fields. Off: the legacy coercion.
+    health_absent_confidence_counts_enabled: bool = True
+    # RU-109 / CEG-COR-045: build_field_map marked only `candidateprop` as
+    # gate-critical, so a range gate's candidateprop_min/max (and a
+    # temporalrange's candidateprop_start/end) were "low" and an entity missing
+    # every bound scored 95/A. On: all five declared keys are gate-critical.
+    # Off: candidateprop only.
+    health_range_gate_fields_enabled: bool = True
+    # RU-110 / CEG-COR-046: a blocked readiness (gate completeness < 0.50)
+    # reported gate_score * 100, so gc=0.49 scored 49.0 while gc=0.50 could
+    # score 40.0. On: the blocked score is the 60% gate component
+    # round(gate_score * 60, 2), always < 30. Off: gate_score * 100.
+    health_blocked_score_scale_enabled: bool = True
+    # RU-111 / CEG-COR-047: compute_enrichment_priority's documented 10%
+    # staleness term read a staleness_penalty attribute EntityHealth does not
+    # have, so it was always 0. On: the term is
+    # compute_staleness_penalty(entity_health.field_health). Off: the zero term.
+    health_priority_staleness_enabled: bool = True
+    # Correctness remediation lane I (plan 0d84ec8, RU-044..RU-057)
+    # RU-044 / CEG-COR-024: the default-weight ceiling summed each scope bucket
+    # alone, so {'*': 0.6, 'd1': 0.6} loaded with an effective d1 sum of 1.2.
+    # On (with domain_strict_validation): every direction's sum includes the
+    # unscoped dimensions. Off: per-bucket check.
+    weight_ceiling_includes_unscoped: bool = True
+    # RU-045 / CEG-COR-038: the hop validator read `*1..` as one hop, so `*1..`
+    # and `*2..` loaded and were emitted unbounded. On: a `..` needs an explicit
+    # upper bound (checked against max_hop_hard_cap) and the assembler grammar
+    # requires `*N` or `*[M]..N`. Off: legacy parse and grammar.
+    traversal_open_range_rejected: bool = True
+    # RU-049 / CEG-COR-076: a spec with two gates of the same name loaded and
+    # the second literal overwrote the first. On: ValueError naming the
+    # duplicated name(s). Off: accepted.
+    gate_name_uniqueness: bool = True
+    # RU-050 / CEG-COR-077: a gate naming an undeclared parameter only logged
+    # a warning and the spec loaded. On (with domain_strict_validation): the
+    # same message is a ValueError; a temporalrange whose derived
+    # `<q>_start` and `<q>_end` are both declared is valid. Off: warning only.
+    domain_undeclared_param_rejected: bool = True
+    # RU-053 / CEG-COR-081: GateSpec ignored unknown keys, so the documented
+    # snake_case `null_behavior: fail` compiled as PASS. On: a gate key that is
+    # not a GateSpec field is a ValidationError naming it. Off: ignored.
+    gate_spec_forbid_unknown_keys: bool = True
+    # RU-057 / CEG-COR-152: domain.version accepted any string ('latest',
+    # 'v2', dates). On: `<major>.<minor>.<patch>[-<stage>]` per
+    # DOMAIN_SPEC_VERSIONING.md. Off: any string.
+    domain_version_semver_enforced: bool = True
+    # Correctness remediation lane L (plan 0d84ec8, RU-082..RU-083)
+    # RU-082 / CEG-COR-039: the legacy dict chassis (chassis/chassis_app.py,
+    # dev/test only) registered no authentication, so any caller executed for
+    # any tenant, and W3-01 stored the token's allowed_tenants without ever
+    # comparing it. On: when L9_API_KEY is configured, create_app registers
+    # BearerAuthMiddleware (/v1/health stays public) and, with
+    # tenant_auth_enabled, POST /v1/execute returns 403 for a tenant outside
+    # the token's allowed_tenants. Off: the unauthenticated factory.
+    legacy_chassis_auth_enabled: bool = True
+    # RU-083 / CEG-COR-087 / CEG-COR-088: the legacy chassis returned 200 for an
+    # open circuit, 500 for FeatureNotEnabled and engine ValidationError, and the
+    # raw str(exception) of unexpected errors in the 500 body. On:
+    # chassis.actions.execute_action attaches an HTTP status hint (503 +
+    # Retry-After, ChassisError.status_code, 422, 500 with the EngineError
+    # message, else 500 "Internal server error"). Off: the keyword mapping.
+    legacy_chassis_status_mapping_enabled: bool = True
+    # Correctness remediation lane J (plan 0d84ec8, RU-037)
+    # RU-037 / CEG-COR-011 (DEC-14 option A): geodecay hardcoded the longitude
+    # operands `candidate.lon` / `$lon`, so a pack whose coordinates are not
+    # named lat/lon (freight Carrier currentlat/currentlon vs Load
+    # pickuplat/pickuplon) could not bind them. On: a dimension's declared
+    # `candidateprop_lon` / `queryprop_lon` name the longitude operands; a
+    # dimension declaring neither compiles byte-identically. Off: the fields
+    # are ignored and `candidate.lon` / `$lon` are emitted as before.
+    geodecay_declared_longitude: bool = True
+    # Correctness remediation lane K (plan 0d84ec8, RU-006..RU-025)
+    # RU-007 / CEG-COR-016: boot registers each started GDS scheduler in
+    # EngineState.gds_schedulers (the W6-03 health probe reads it), admin gds_*
+    # reuses that instance instead of starting a duplicate and, with gds_enabled
+    # False, registers jobs without starting APScheduler (manual trigger only);
+    # EngineState.shutdown stops them all. Off: boot-local list, admin duplicate.
+    gds_shared_scheduler_registry: bool = True
+    # RU-006 / CEG-COR-015 (R1a-DEC-02): one outcome record schema. Sync
+    # entity_type=outcome writes through handle_outcomes' writer (domain
+    # outcome_node_label, positive|negative|neutral -> success|failure|partial,
+    # RESULTED_IN); outcomes persist optional fingerprint.dimension_scores (JSON)
+    # and was_selected; score_feedback projects dimension_scores and
+    # OutcomeFeedback counts success/failure. Off: :Outcome + HAS_OUTCOME with
+    # the sync vocabulary, no dimension_scores, positive/negative classes.
+    outcome_schema_unified: bool = True
+    # RU-012 / CEG-COR-063 (R1a-DEC-04 "admit both"): a match payload carrying
+    # contract_version is admitted as engine.models.payloads.MatchRequest against
+    # the tenant's DomainContract and mapped onto the legacy internals (direction
+    # -> match_direction, query.facts -> query, top_n). Legacy MatchPayload is
+    # unchanged. Off: such a payload is rejected (no match_direction).
+    match_request_contract_admission: bool = True
+    # RU-015 / CEG-COR-080 (R1a-DEC-05 "withhold"): a gate's roleexempt and
+    # relaxedpenalty are accepted by the schema and ignored by the match path, so
+    # engine.config.loader.admission_defects reports a pack declaring either and
+    # the loader withholds it until a domain needs roles. Off: accepted, ignored.
+    gate_role_exemption: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

@@ -87,21 +87,47 @@ def compute_synthesis_weights(
         equal_w = 1.0 / n
         return [{"output": output, "weight": equal_w} for output in persona_outputs]
 
-    # Initial proportional weights
-    weights = [s / total_raw for s in raw_scores]
-
-    # Apply minimum floor
-    weights = [max(w, min_w) for w in weights]
-
-    # Re-normalize to sum to 1.0
-    w_sum = sum(weights)
-    weights = [w / w_sum for w in weights]
+    weights = _floored_proportions(raw_scores, min_w)
 
     result: list[WeightedOutput] = []
     for output, weight in zip(persona_outputs, weights, strict=True):
         result.append({"output": output, "weight": weight})
 
     return result
+
+
+def _floored_proportions(raw_scores: list[float], min_w: float) -> list[float]:
+    """Proportional weights summing to 1 with every weight >= ``min_w``.
+
+    Flooring and then renormalising pushed floored entries back below the
+    floor ([1, 0, 0] -> [0.833, 0.083, 0.083], CEG-COR-115). Instead, entries
+    that fall below the floor are fixed at ``min_w`` and the remaining
+    ``1 - k * min_w`` is distributed proportionally among the rest, repeating
+    until no free entry falls below the floor. When ``n * min_w > 1`` the floor
+    is infeasible and the weights are equal. Weights stay monotone in the raw
+    alignment scores.
+    """
+    n = len(raw_scores)
+    if n * min_w > 1.0:
+        return [1.0 / n] * n
+
+    fixed: set[int] = set()
+    weights = [0.0] * n
+    while True:
+        free = [i for i in range(n) if i not in fixed]
+        remaining = 1.0 - len(fixed) * min_w
+        free_total = sum(raw_scores[i] for i in free)
+        for i in fixed:
+            weights[i] = min_w
+        for i in free:
+            if math.isclose(free_total, 0.0, abs_tol=1e-9):
+                weights[i] = remaining / len(free)
+            else:
+                weights[i] = remaining * raw_scores[i] / free_total
+        below = {i for i in free if weights[i] < min_w}
+        if not below:
+            return weights
+        fixed |= below
 
 
 def build_synthesis_prompt(

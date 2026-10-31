@@ -241,6 +241,34 @@ class TestAlgorithmDispatch:
 
         result = await scheduler.execute_job(job)
         assert result["status"] == "success"
+        # RU-098 / CEG-COR-168: per-node keep sets are ordered by weight (with a
+        # deterministic tie-break) before collect; an edge is deleted only when
+        # both endpoints prune (degree > 10) and neither keeps it.
+        prune = str(driver.execute_query.call_args_list[1].args[0])
+        assert "ORDER BY r.weight DESC, elementId(r)" in prune
+        assert prune.index("ORDER BY r.weight DESC") < prune.index("collect(r)")
+        assert "WHERE degree > 10" in prune
+        assert "WHERE votes = 2" in prune
+        assert ":CO_PROCESSES" in prune
+
+    @pytest.mark.asyncio
+    async def test_cooccurrence_flag_off_restores_legacy_prune(self, monkeypatch):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gds_cooccurrence_deterministic_prune", False)
+        driver = _mock_driver([{"edges_created": 15}])
+        job = _job("test_cooc", "cooccurrence", sourceedge="ACCEPTS_POLYMER", writeedge="CO_PROCESSES")
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+        result = await scheduler.execute_job(job)
+        assert result["pruning_alpha"] == 0.86
+        prune = str(driver.execute_query.call_args_list[1].args[0])
+        assert "ORDER BY" not in prune
+        assert "edges[keep_count..] AS to_prune" in prune
+
+    def test_cooccurrence_flag_default_on(self):
+        from engine.config.settings import Settings
+
+        assert Settings().gds_cooccurrence_deterministic_prune is True
 
     @pytest.mark.asyncio
     async def test_reinforcement_creates_accepted_and_rejected(self):
@@ -570,3 +598,107 @@ class TestLifecycle:
             mock_start.assert_called_once()
             scheduler.shutdown()
             mock_stop.assert_called_once()
+
+
+# ── RU-100 / CEG-COR-086: history timestamps in timezone-aware UTC ────────
+
+
+@pytest.fixture
+def process_tz(monkeypatch):
+    """Set the process timezone for one test and restore it afterwards."""
+    import time
+
+    def _set(tz: str) -> None:
+        monkeypatch.setenv("TZ", tz)
+        time.tzset()
+
+    yield _set
+    monkeypatch.undo()
+    time.tzset()
+
+
+class TestHistoryTimestamps:
+    @staticmethod
+    def _apparent_age_seconds(ts_str: str) -> float:
+        """The consumer conversion of engine/handlers.py gds_health / engine/boot.py."""
+        from datetime import UTC, datetime
+
+        ts = datetime.fromisoformat(ts_str)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        return (datetime.now(tz=UTC) - ts).total_seconds()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tz", ["America/Los_Angeles", "Asia/Tokyo", "UTC"])
+    async def test_history_timestamp_is_utc_aware(self, process_tz, tz):
+        from datetime import UTC, datetime
+
+        process_tz(tz)
+        job = _job("noop", "noop_algo", schedule_type="manual")
+        scheduler = GDSScheduler(_minimal_spec([job]), _mock_driver())
+        await scheduler.execute_job(job)
+        ts_str = scheduler.job_history[-1]["timestamp"]
+        assert datetime.fromisoformat(ts_str).utcoffset() is not None
+        assert datetime.fromisoformat(ts_str).tzinfo == UTC
+        assert abs(self._apparent_age_seconds(ts_str)) < 60
+
+    @pytest.mark.asyncio
+    async def test_flag_off_restores_naive_local_timestamps(self, process_tz, monkeypatch):
+        from datetime import datetime
+
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gds_history_utc_timestamps", False)
+        process_tz("Asia/Tokyo")
+        job = _job("noop", "noop_algo", schedule_type="manual")
+        scheduler = GDSScheduler(_minimal_spec([job]), _mock_driver())
+        await scheduler.execute_job(job)
+        assert datetime.fromisoformat(scheduler.job_history[-1]["timestamp"]).tzinfo is None
+
+    def test_flag_default_on(self):
+        from engine.config.settings import Settings
+
+        assert Settings().gds_history_utc_timestamps is True
+
+
+# ── Stable Louvain (S2-15) contract ───────────────────────
+
+
+class TestStableLouvainContract:
+    """RU-099 / CEG-COR-085 (DEC-39 option A): the multi-run path is honest.
+
+    N runs each write the same property, so the persisted labels are the last
+    successful run's; the result reports averaged metrics and says, through
+    ``consensus=False``, that no per-node consensus was computed.
+    """
+
+    @pytest.mark.asyncio
+    async def test_stability_runs_report_no_consensus(self):
+        driver = _mock_driver([{"communityCount": 4, "modularity": 0.40}])
+        job = _job("stable_louvain", "louvain").model_copy(update={"stability_runs": 3})
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+
+        result = await scheduler.execute_job(job)
+
+        assert result["status"] == "success"
+        assert result["consensus"] is False
+        assert result["stability_runs"] == 3
+        assert result["communities"] == 4
+        assert result["modularity"] == pytest.approx(0.40)
+        assert result["stability_coefficient"] == pytest.approx(1.0)
+
+    @pytest.mark.asyncio
+    async def test_single_run_path_has_no_consensus_key(self):
+        driver = _mock_driver([{"communityCount": 4, "modularity": 0.40}])
+        job = _job("plain_louvain", "louvain")
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+
+        result = await scheduler.execute_job(job)
+
+        assert "consensus" not in result
+        assert "stability_runs" not in result
+
+    def test_docstring_does_not_claim_majority_consensus(self):
+        doc = (GDSScheduler._run_stable_louvain.__doc__ or "").lower()
+        assert "majority" not in doc
+        assert "last successful run" in doc
