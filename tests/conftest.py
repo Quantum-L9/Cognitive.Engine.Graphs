@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +41,69 @@ DOMAINS_DIR: Path = Path(__file__).parent.parent / "domains"
 # asyncio_default_fixture_loop_scope / asyncio_default_test_loop_scope = session.
 
 
+# ── Integration requirement guard ──────────────────────────────────────────────
+# CI's integration job sets CEG_REQUIRE_INTEGRATION=1 next to real Neo4j and
+# PostgreSQL services. Under that flag a missing service is a broken job, not an
+# optional test: every "service unavailable" skip becomes a failure, so the job
+# can never report green while having exercised nothing. Without the flag
+# (local runs, the unit-focused `test` job) the skip behaviour is unchanged.
+
+REQUIRE_INTEGRATION_ENV = "CEG_REQUIRE_INTEGRATION"
+INTEGRATION_DIR: Path = Path(__file__).parent / "integration"
+
+
+def integration_required() -> bool:
+    """True when CEG_REQUIRE_INTEGRATION is set to 1/true/yes."""
+    return os.getenv(REQUIRE_INTEGRATION_ENV, "").strip().lower() in {"1", "true", "yes"}
+
+
+def skip_or_fail_unavailable(reason: str) -> None:
+    """Skip because an integration dependency is unavailable — or fail if required."""
+    if integration_required():
+        pytest.fail(f"{REQUIRE_INTEGRATION_ENV}=1 but {reason}", pytrace=False)
+    pytest.skip(reason)
+
+
+def _is_integration_path(path: Path) -> bool:
+    return path.resolve().is_relative_to(INTEGRATION_DIR.resolve())
+
+
+def _fail_required_skip(report: pytest.CollectReport | pytest.TestReport) -> None:
+    """Rewrite a skip report under tests/integration into a failure (flag on only)."""
+    if hasattr(report, "wasxfail"):
+        return  # an explicit xfail is a declared expectation, not a missing service
+    reason = report.longrepr[2] if isinstance(report.longrepr, tuple) else str(report.longrepr)
+    report.outcome = "failed"
+    report.longrepr = f"{REQUIRE_INTEGRATION_ENV}=1 forbids skipping integration tests: {reason}"
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(
+    item: pytest.Item, call: pytest.CallInfo[None]
+) -> Generator[None, pytest.TestReport, pytest.TestReport]:
+    """Backstop for skips raised outside neo4j_container (other fixtures, test bodies)."""
+    report = yield
+    if report.skipped and integration_required() and _is_integration_path(Path(str(item.path))):
+        _fail_required_skip(report)
+    return report
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_make_collect_report(
+    collector: pytest.Collector,
+) -> Generator[None, pytest.CollectReport, pytest.CollectReport]:
+    """Backstop for module-level skips (e.g. pytest.importorskip) under tests/integration."""
+    report = yield
+    if (
+        report.skipped
+        and integration_required()
+        and isinstance(collector, pytest.Module)
+        and _is_integration_path(Path(str(collector.path)))
+    ):
+        _fail_required_skip(report)
+    return report
+
+
 # ── Neo4j Testcontainer ────────────────────────────────────────────────────────
 
 
@@ -49,6 +112,7 @@ def neo4j_container():
     """
     Session-scoped Neo4j testcontainer.
     Falls back to NEO4J_TEST_URI env var if testcontainers unavailable.
+    With CEG_REQUIRE_INTEGRATION=1, an unavailable Neo4j fails instead of skipping.
     """
     uri = os.getenv("NEO4J_TEST_URI")
     user = os.getenv("NEO4J_TEST_USER", "neo4j")
@@ -74,7 +138,7 @@ def neo4j_container():
         container.stop()
 
     except ImportError:
-        pytest.skip("testcontainers not installed and NEO4J_TEST_URI not set")
+        skip_or_fail_unavailable("testcontainers not installed and NEO4J_TEST_URI not set")
 
 
 # ── Graph Driver ───────────────────────────────────────────────────────────────

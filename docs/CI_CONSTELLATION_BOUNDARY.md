@@ -54,6 +54,15 @@ mean "CI runs through the constellation" — `ci.yml`, `ci-quality.yml`, and
 `audit.yml` remain fully independent, CEG-owned pipelines. See
 `docs/CI_PIPELINE.md` for the full 8-phase pipeline this sits inside.
 
+### CEG-owned extensions of `ci.yml`
+
+New CEG checks extend `ci.yml` (CEG-owned) rather than `audit.yml` or a
+constellation repo:
+
+| Added | Job | What it does | Gating |
+|---|---|---|---|
+| 2026-10-29 | `integration` — *Integration Tests (Neo4j Enterprise + PostgreSQL)* | Runs `pytest tests/integration -p no:xdist` against `neo4j:5.18-enterprise` (GDS plugin, Enterprise evaluation licence accepted for CI, owner-approved) and `postgres:16` service containers, with `CEG_REQUIRE_INTEGRATION=1` so `tests/conftest.py` fails instead of skipping when a service or dependency is missing | Advisory: not in the `ci-gate` fan-in and not a required check |
+
 ## What's NOT wired: `l9-harness` and `l9-assurance`
 
 Neither repo is integrated here. The only mention of `l9-harness` anywhere
