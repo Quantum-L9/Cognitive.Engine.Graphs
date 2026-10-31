@@ -274,6 +274,13 @@ queryschema:
     type: float
   - name: target_price
     type: float
+  # The requesting buyer's Facility community (CEG-COR-070, DEC-18 option A):
+  # the louvain_community GDS job writes community_id on every Facility from
+  # TRANSACTED_WITH, so a buyer that is itself a Facility can supply its own.
+  # Omitted, community_match scores the neutral 0.5 as before.
+  - name: community_id
+    type: int
+    description: Louvain community_id of the requesting buyer's Facility
   - name: requires_active_supply
     type: bool
     # Declared default true (CEG-COR-004, DEC-12 option A'): omitted, the field

@@ -44,7 +44,10 @@ PlasticOS historical flat/docs specs are archived under `docs/archive/plasticos/
 
 ### Production Domains (Stress-Tested)
 1. **plasticos** - Recycled plastic buyer-supplier matching (29 edge types, 22 gates)
-2. **mortgage-brokerage** - Borrower-lender-product matching (ECOA-compliant)
+2. **mortgage-brokerage** - Borrower-lender-product matching (ECOA-compliant).
+   Served as on main (owner decision 2026-10-29) without state-licensing or
+   lender-blacklist enforcement (DEC-15); uncomment `activation: dormant` in its
+   spec to withhold it.
 3. **healthcare-referral** - Provider-patient-specialist matching (HIPAA-compliant)
 4. **freight-matching** - Load-carrier matching with ELD integration
 

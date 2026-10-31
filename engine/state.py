@@ -153,6 +153,11 @@ class EngineState:
 
             # Stop GDS schedulers
             for domain_id, scheduler in self._gds_schedulers.items():
+                # RU-007: with GDS disabled admin registers a scheduler for manual
+                # trigger without starting APScheduler; there is nothing to stop.
+                if getattr(getattr(scheduler, "scheduler", None), "running", True) is False:
+                    logger.info("GDS scheduler for domain=%s was never started", domain_id)
+                    continue
                 try:
                     scheduler.shutdown()
                     logger.info("GDS scheduler stopped for domain=%s", domain_id)

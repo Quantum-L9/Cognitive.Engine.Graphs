@@ -206,13 +206,6 @@ FILE_REGISTRY: list[FileMeta] = [
     FileMeta("scripts/entrypoint.sh", "l9-template", ["scripts"], ["L9_TEMPLATE", "scripts", "entrypoint"], "platform"),
     FileMeta("scripts/audit.sh", "l9-template", ["scripts", "audit"], ["L9_TEMPLATE", "scripts", "audit"], "platform"),
     FileMeta("scripts/README.md", "l9-template", ["scripts"], ["L9_TEMPLATE", "scripts", "docs"], "platform"),
-    FileMeta(
-        "tools/domain_extractor.py",
-        "l9-template",
-        ["tools"],
-        ["L9_TEMPLATE", "tools", "domain-extractor"],
-        "platform",
-    ),
     # --- Test Harness ---
     FileMeta("tests/conftest.py", "l9-template", ["test"], ["L9_TEMPLATE", "test", "fixtures"], "platform"),
     FileMeta("tests/README.md", "l9-template", ["test"], ["L9_TEMPLATE", "test", "docs"], "platform"),
@@ -847,9 +840,6 @@ FILE_REGISTRY: list[FileMeta] = [
     # =========================================================================
     # DOMAIN-SPECIFIC FILES  (origin: domain-specific, owner: domain-team)
     # =========================================================================
-    FileMeta(
-        "domains/MASTER-SPEC-ALL-DOMAINS.yaml", "domain-specific", ["config"], ["domains", "master-spec"], "domain-team"
-    ),
     FileMeta("domains/README.md", "domain-specific", ["config"], ["domains", "docs"], "domain-team"),
     FileMeta("domains/TESTING_GUIDE.md", "domain-specific", ["test"], ["domains", "testing", "guide"], "domain-team"),
     # =========================================================================
@@ -865,6 +855,20 @@ FILE_REGISTRY: list[FileMeta] = [
     FileMeta("contracts/contract_18.yaml", "l9-template", ["contracts"], ["governance", "compliance"], "platform"),
     FileMeta(
         "docs/FEATURE_GATES.md", "engine-specific", ["docs"], ["feature-gates", "activation", "runbook"], "engine-team"
+    ),
+    FileMeta(
+        "docs/remediation/CEG_CORRECTNESS_0d84ec8_LEDGER.md",
+        "engine-specific",
+        ["docs"],
+        ["remediation", "audit", "ledger"],
+        "engine-team",
+    ),
+    FileMeta(
+        "docs/remediation/VERIFICATION.md",
+        "engine-specific",
+        ["docs"],
+        ["remediation", "audit", "verification"],
+        "engine-team",
     ),
     FileMeta(
         "tests/contracts/test_chassis_parity.py", "engine-specific", ["test"], ["platform", "chassis"], "engine-team"
