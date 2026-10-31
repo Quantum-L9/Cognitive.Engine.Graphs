@@ -350,8 +350,10 @@ def _match_set_spec() -> MagicMock:
     endpoint.idproperty = "depot_id"
     endpoint.fieldsupdated = ["status"]
     # A node endpoint: MagicMock attributes are truthy, so name the absent edge
-    # explicitly (relationship endpoints set ``targetedge``).
+    # and graph-ref namespace explicitly (relationship endpoints set
+    # ``targetedge``; tenant specs may declare ``refnamespace``).
     endpoint.targetedge = None
+    endpoint.refnamespace = None
     spec = MagicMock()
     spec.domain.id = "test_domain"
     spec.capabilities = []

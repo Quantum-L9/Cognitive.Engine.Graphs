@@ -598,19 +598,30 @@ class ScoringAssembler:
         self._query_params[default_key] = default
         self._query_params[sample_key] = int(sample_k)
 
+        # RU-021 / CEG-COR-082: the ratio is (#community matches within the K
+        # most recent successes) / (size of that sample). The sample is taken
+        # once — successes ordered by created_at DESC (undated last, elementId
+        # tie-break), first K — and the community filter runs inside it. The
+        # former expression sliced the filtered list and the unfiltered list
+        # separately, i.e. min(K, matches) / min(K, total) (100 successes, 50
+        # matching, K=28 scored 1.0 instead of 0.5). Variables are dimension-
+        # scoped so the COLLECT subquery cannot correlate with an outer name.
+        sample_var = f"pa_sample_{safe_dim}"
+        outcome_var = f"pa_o_{safe_dim}"
+        member_var = f"pa_m_{safe_dim}"
+        # Labels and relationship type above passed sanitize_label() (C-9).
+        success_path = f"(qe)-[:{outcome_rel}]->({outcome_var}:{outcome_node})"
         return (
-            f"CASE "
-            f"  WHEN size([(qe)-[:{outcome_rel}]->(o:{outcome_node}) "
-            f"    WHERE o.{success_prop} = ${success_key} | o]) = 0 THEN ${default_key} "
-            f"  ELSE toFloat("
-            f"    size([(qe)-[:{outcome_rel}]->(o:{outcome_node}) "
-            f"      WHERE o.{success_prop} = ${success_key} "
-            f"      AND o.community_id = candidate.{cand_community_prop} | o][0..${sample_key}])"
-            f"  ) / toFloat("
-            f"    size([(qe)-[:{outcome_rel}]->(o:{outcome_node}) "
-            f"      WHERE o.{success_prop} = ${success_key} | o][0..${sample_key}])"
-            f"  ) "
-            f"END"
+            f"[{sample_var} IN [COLLECT {{ "
+            f"MATCH {success_path} "
+            f"WHERE {outcome_var}.{success_prop} = ${success_key} "
+            f"RETURN {outcome_var} "
+            f"ORDER BY {outcome_var}.created_at IS NULL, {outcome_var}.created_at DESC, elementId({outcome_var}) "
+            f"LIMIT ${sample_key} }}] | "
+            f"CASE WHEN size({sample_var}) = 0 THEN ${default_key} "
+            f"ELSE toFloat(size([{member_var} IN {sample_var} "
+            f"WHERE {member_var}.community_id = candidate.{cand_community_prop}])) "
+            f"/ toFloat(size({sample_var})) END][0]"
         )
 
     def _compile_community_bridge(self, dim: ScoringDimensionSpec) -> str:

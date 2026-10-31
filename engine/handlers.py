@@ -591,12 +591,45 @@ def _annotate_weighted_confidence(
             cand["confidence_detail"] = detail
 
 
+def _match_request_as_legacy(tenant: str, payload: dict[str, Any], domain_loader: DomainPackLoader) -> dict[str, Any]:
+    """RU-012 / CEG-COR-063 (R1a-DEC-04): admit a contract-versioned MatchRequest.
+
+    A payload without ``contract_version`` is the legacy MatchPayload and is
+    returned unchanged. One with it is validated as
+    ``engine.models.payloads.MatchRequest`` against the tenant's
+    ``DomainContract`` (domain, declared direction, extra=forbid, transport
+    fields refused) and mapped onto the legacy keys handle_match reads:
+    ``direction`` -> ``match_direction``, ``query.facts`` -> ``query``,
+    ``top_n``. Gated by ``match_request_contract_admission``.
+    """
+    from engine.config.settings import settings as _contract_settings
+
+    if "contract_version" not in payload or not _contract_settings.match_request_contract_admission:
+        return payload
+    from pydantic import ValidationError as _PydanticValidationError
+
+    from engine.models.payloads import DomainContract, MatchRequest, admit_payload
+
+    contract = DomainContract.from_spec(domain_loader.load_domain(tenant))
+    try:
+        request = admit_payload(MatchRequest, payload, contract)
+    except _PydanticValidationError as exc:
+        raise ValidationError(
+            f"MatchRequest admission failed: {exc}",
+            action="match",
+            tenant=tenant,
+            detail="RU-012: contract_version payloads are admitted as MatchRequest",
+        ) from exc
+    return {"query": dict(request.query.facts), "match_direction": request.direction, "top_n": request.top_n}
+
+
 async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Gate-then-score graph traversal."""
     graph_driver, domain_loader = _require_deps()
     _validate_tenant_access(tenant, "match")
     start_time = time.monotonic()
 
+    payload = _match_request_as_legacy(tenant, payload, domain_loader)
     query = _require_key(payload, "query", "match", tenant)
     match_direction = _require_key(payload, "match_direction", "match", tenant)
 
