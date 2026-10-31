@@ -18,6 +18,7 @@ All handlers: `async def handle_*(tenant: str, payload: dict) -> dict`
 | healthcheck | handle_healthcheck | Alias for health |
 | health-assess | handle_health_assess | Canonical Gate health route (HEALTH-01): only `health_assess` / `health_batch_assess` / `health_report`, never the rest of admin |
 | enrich | handle_enrich | ROI-based re-enrichment triggering |
+| score | handle_score_remote | Gate-routed cohort score (SCORING-GATE-01): default off, explicit tenant `score:read`, builds the evidence binding from the admitted spec, then calls the local `handle_score` |
 
 ## Admin Subactions (payload["subaction"])
 | Subaction | Purpose |
@@ -43,7 +44,7 @@ admin subactions remain a direct operator surface. Both share `_dispatch_health`
 
 ## Dependency Map
 ```
-handlers.py (registers all 9 actions)
+handlers.py (registers all 10 actions)
   ├── config/ → schema.py → settings.py
   ├── gates/compiler.py → gates/types/ → null_semantics.py
   ├── scoring/assembler.py → calibration.py, confidence.py, pareto.py
