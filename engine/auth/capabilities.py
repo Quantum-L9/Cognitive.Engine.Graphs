@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 PERM_MATCH_READ = "match:read"
 PERM_SYNC_WRITE = "sync:write"
 PERM_ADMIN_WRITE = "admin:write"
+PERM_SCORE_READ = "score:read"
 
 # ── W3-03: Action-Level Permission Map ──────────────────────────
 # Maps every engine action to a required capability string.
@@ -60,6 +61,7 @@ ACTION_PERMISSION_MAP: dict[str, str] = {
     "resolve": PERM_MATCH_READ,
     "health": PERM_MATCH_READ,
     "healthcheck": PERM_MATCH_READ,
+    "score": PERM_SCORE_READ,
 }
 
 # All known capability action strings
@@ -362,6 +364,14 @@ class CapabilitySet:
         if subjects is None:
             return True
         return tenant in subjects or "*" in subjects
+
+    def grants_explicitly(self, tenant: str, action: str) -> bool:
+        """Whether ``tenant`` is named for ``action`` (SCORING-GATE-01 §1.3).
+
+        Unlike ``has_capability`` this never defaults open: no capabilities, no
+        entry for ``action`` and the ``"*"`` wildcard all deny.
+        """
+        return tenant in self._action_subjects.get(action, set())
 
     def to_dict(self) -> dict[str, Any]:
         return {action: sorted(subjects) for action, subjects in self._action_subjects.items()}

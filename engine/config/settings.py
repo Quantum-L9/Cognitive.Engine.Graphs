@@ -300,12 +300,18 @@ class Settings(BaseSettings):
     relationship_sync_audit_on_commit_enabled: bool = True
     # A1: graph_evidence_priority_v1 dedupes on (relationship_type, evidence_ref),
     # the identity relationship sync writes. Off: evidence_ref alone. §28.
-    evidence_identity_per_type_enabled: bool = False
+    evidence_identity_per_type_enabled: bool = True
     # GATE-KEY-01: SDK /v1/execute accepts a Gate-claiming packet only when it is
     # signed under a key id in L9_GATE_SIGNING_KEY_IDS (required in staging/prod,
     # where hmac-sha256 is refused). Off: the claim-only gate-only check, under
     # which any peer whose key CEG verifies can claim Gate and pick the tenant.
     gate_signing_key_binding_enabled: bool = True
+    # SCORING-GATE-01: the Gate-routed `score` action (handle_score_remote). Off
+    # (default; production stays off pending operator approval): the action is
+    # refused before any spec load or graph read. On still requires an explicit
+    # tenant `score:read` grant, a -reviewed/-production spec with relevance and
+    # declared evidence types, and evidence_identity_per_type_enabled. §29.
+    remote_score_enabled: bool = False
 
     # Correctness remediation lane A (plan 0d84ec8, RU-001..RU-060)
     # Each flag ships on (a correctness fix); off restores the pre-fix behaviour.
