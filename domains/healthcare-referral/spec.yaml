@@ -15,7 +15,7 @@ domain:
   description: >
     Match patients to optimal providers and specialists with HIPAA-compliant
     filtering and capacity-aware routing.
-  version: 1.0.0
+  version: 1.1.0
   # Legacy matching pack, retired from serving (operator decision 2026-10-25:
   # domain-specific runtime architecture is retired). Withheld by the generic
   # loader admission policy whatever its gates compile to.
@@ -47,6 +47,10 @@ ontology:
         - {name: acceptsnewpatients, type: bool}
         - {name: currentpanelsize, type: int, managedby: sync}
         - {name: maxpanelsize, type: int}
+        # maxpanelsize - currentpanelsize, computed by ingestion (CEG-COR-153,
+        # DEC-20 option A): a gate compares one candidate property with a query
+        # value, never two candidate properties.
+        - {name: remainingpanelcapacity, type: int, managedby: sync}
         - {name: latitude, type: float}
         - {name: longitude, type: float}
         - {name: avgwaitdays, type: int}
@@ -102,10 +106,14 @@ gates:
     queryparam: true
     nullbehavior: fail
   - name: panel_capacity
-    type: selfrange
-    candidateprop_min: currentpanelsize
-    candidateprop_max: maxpanelsize
+    # At least one open panel slot (CEG-COR-153). The selfrange form compiled to
+    # currentpanelsize <= 1 AND 1 <= maxpanelsize, admitting full panels and
+    # rejecting any provider with more than one patient.
+    type: threshold
+    candidateprop: remainingpanelcapacity
     queryparam: 1
+    operator: ">="
+    nullbehavior: pass
   - name: distance_max
     type: threshold
     candidateprop: distance

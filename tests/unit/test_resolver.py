@@ -451,6 +451,149 @@ class TestMergeIntegrity:
         assert Settings().entity_resolution_merge_integrity is True
 
 
+# ── RU-103 / CEG-COR-177: behavioral similarity scoped to the entity label ──
+
+
+def _supplier_domain(id_property: str = "supplier_id") -> Any:
+    from engine.config.schema import DomainSpec
+
+    raw: dict[str, Any] = {
+        "domain": {"id": "test_domain", "name": "Test", "version": "0.0.1"},
+        "ontology": {
+            "nodes": [
+                {
+                    "label": "Supplier",
+                    "managedby": "sync",
+                    "candidate": True,
+                    "matchdirection": "d1",
+                    "properties": [{"name": id_property, "type": "string", "required": True}],
+                },
+                {
+                    "label": "Query",
+                    "managedby": "api",
+                    "queryentity": True,
+                    "matchdirection": "d1",
+                    "properties": [{"name": "query_id", "type": "int", "required": True}],
+                },
+            ],
+            "edges": [],
+        },
+        "matchentities": {
+            "candidate": [{"label": "Supplier", "matchdirection": "d1"}],
+            "queryentity": [{"label": "Query", "matchdirection": "d1"}],
+        },
+        "queryschema": {"matchdirections": ["d1"], "fields": []},
+        "traversal": {"steps": []},
+        "gates": [],
+        "scoring": {"dimensions": []},
+    }
+    return DomainSpec(**raw)
+
+
+class _BehavioralGraph:
+    """Fake driver evaluating the behavioral-similarity statement over a node list.
+
+    nodes: (label, properties, outcome match_ids reached via RESULTED_IN).
+    A node pattern without a label matches every label, as Cypher does.
+    """
+
+    def __init__(self, nodes: list[tuple[str, dict[str, Any], set[str]]]) -> None:
+        self._nodes = nodes
+        self.cyphers: list[str] = []
+
+    def _matches(self, cypher: str, var: str, key: str) -> set[str]:
+        import re
+
+        pattern = re.search(rf"\({var}(?::(\w+))?\s*\{{(\w+): \${key}\}}\)", cypher)
+        assert pattern, cypher
+        label, prop = pattern.group(1), pattern.group(2)
+        out: set[str] = set()
+        for node_label, props, outcomes in self._nodes:
+            if (label is None or node_label == label) and props.get(prop) == self._params[key]:
+                out |= outcomes
+        return out
+
+    async def execute_query(self, cypher: str, parameters: dict[str, Any], database: str) -> list[dict[str, Any]]:
+        self.cyphers.append(cypher)
+        self._params = parameters
+        a = self._matches(cypher, "a", "a_id")
+        b = self._matches(cypher, "b", "b_id")
+        return [{"shared_count": len(a & b), "union_count": len(a | b)}]
+
+
+@pytest.mark.unit
+class TestBehavioralLabelScope:
+    @pytest.mark.asyncio
+    async def test_behavioral_cypher_carries_the_label_on_both_nodes(self) -> None:
+        spec = _make_spec(property_weight=0.0, structural_weight=0.0, behavioral_weight=1.0)
+        driver = _mock_driver()
+        driver.execute_query.side_effect = [
+            [{"a_name": "A", "b_name": "B", "a_region": "US", "b_region": "EU"}],
+            [{"shared_count": 0, "union_count": 0}],
+            [{"shared_count": 3, "union_count": 6}],
+        ]
+        scorer = SimilarityScorer(spec, driver, "test_domain")
+        assert abs(await scorer.compute_similarity("e1", "e2", "Supplier") - 0.5) < 0.01
+        behavioral = str(driver.execute_query.call_args_list[2].kwargs["cypher"])
+        assert "(a:Supplier {entity_id: $a_id})" in behavioral
+        assert "(b:Supplier {entity_id: $b_id})" in behavioral
+
+    @pytest.mark.asyncio
+    async def test_same_id_node_of_another_label_does_not_change_the_score(self) -> None:
+        graph = _BehavioralGraph(
+            [
+                ("Supplier", {"entity_id": "e1"}, {"m1", "m2"}),
+                ("Supplier", {"entity_id": "e2"}, {"m1", "m2"}),
+                # Same id, different label, unrelated outcomes.
+                ("Buyer", {"entity_id": "e1"}, {"m7", "m8", "m9"}),
+            ]
+        )
+        scorer = SimilarityScorer(_make_spec(), graph, "test_domain")  # type: ignore[arg-type]
+        assert await scorer._behavioral_similarity("e1", "e2", "Supplier") == 1.0
+
+    @pytest.mark.asyncio
+    async def test_behavioral_lookup_uses_the_declared_id_property(self) -> None:
+        """PO-04 extension of RU-002: the node is found by the label's declared id."""
+        graph = _BehavioralGraph(
+            [
+                ("Supplier", {"supplier_id": "s1"}, {"m1"}),
+                ("Supplier", {"supplier_id": "s2"}, {"m1", "m2"}),
+            ]
+        )
+        scorer = SimilarityScorer(_make_spec(), graph, "test_domain", domain_spec=_supplier_domain())  # type: ignore[arg-type]
+        assert await scorer._behavioral_similarity("s1", "s2", "Supplier") == 0.5
+        assert "(a:Supplier {supplier_id: $a_id})" in graph.cyphers[-1]
+        assert "entity_id" not in graph.cyphers[-1]
+
+    @pytest.mark.asyncio
+    async def test_resolver_passes_the_domain_spec_to_its_scorer(self) -> None:
+        graph = _BehavioralGraph([("Supplier", {"supplier_id": "s1"}, {"m1"})])
+        resolver = EntityResolver(_make_spec(), graph, "test_domain", domain_spec=_supplier_domain())  # type: ignore[arg-type]
+        await resolver._scorer._behavioral_similarity("s1", "s1", "Supplier")
+        assert "(a:Supplier {supplier_id: $a_id})" in graph.cyphers[-1]
+
+    @pytest.mark.asyncio
+    async def test_flag_off_restores_label_less_entity_id_query(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "resolution_behavioral_label_scoped", False)
+        graph = _BehavioralGraph(
+            [
+                ("Supplier", {"entity_id": "e1"}, {"m1", "m2"}),
+                ("Supplier", {"entity_id": "e2"}, {"m1", "m2"}),
+                ("Buyer", {"entity_id": "e1"}, {"m7", "m8", "m9"}),
+            ]
+        )
+        scorer = SimilarityScorer(_make_spec(), graph, "test_domain", domain_spec=_supplier_domain())  # type: ignore[arg-type]
+        assert await scorer._behavioral_similarity("e1", "e2", "Supplier") == pytest.approx(2 / 5)
+        assert "(a {entity_id: $a_id})" in graph.cyphers[-1]
+
+    def test_flag_default_on(self) -> None:
+        from engine.config.settings import Settings
+
+        assert Settings().resolution_behavioral_label_scoped is True
+
+
 class _StructuralFakeScorer(_FakeScorer):
     """Like _FakeScorer, but a pair scored after a RESOLVED_FROM edge already
     touches either entity drops by ``penalty`` -- the effect of the new edge on

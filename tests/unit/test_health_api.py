@@ -608,3 +608,98 @@ class TestHealthAssessAction:
         finally:
             _reset_singleton()
         assert pipeline.loaded_domains == []
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+#  RU-108 / CEG-COR-044 — one readiness on every health path
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_FACILITY = {
+    "facility_id": "fac-1",
+    "name": "Acme Recycling",
+    "lat": 41.88,
+    "lon": -87.63,
+    "credit_score": 720,
+    "min_density": 0.90,
+    "max_density": 0.97,
+    "min_mfi": 1.0,
+    "max_mfi": 12.0,
+    "contamination_tolerance": 0.05,
+    "food_grade_certified": True,
+    "capacity_tons_month": 400,
+    "tier": "gold",
+    "community_id": 3,
+    "rate_per_ton": 180.0,
+    "rate_confidence": 0.8,
+    "last_transaction_date": "2026-09-01",
+}
+
+
+@pytest.fixture
+def real_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The real analysis pipeline over the checked-in plasticos pack; only the loader and dispatch are fakes."""
+    from engine.config.loader import DomainPackLoader
+
+    spec = DomainPackLoader().load_domain(TENANT)
+    loader = MagicMock()
+    loader.load_domain.return_value = spec
+    monkeypatch.setattr(health_api, "_get_domain_loader", lambda: loader)
+
+    async def _no_dispatch(*_: Any, **__: Any) -> dict[str, Any]:
+        return {"triggered": False, "reason": "test", "dispatch": {"status": "skipped", "error": "test"}}
+
+    monkeypatch.setattr(health_api, "trigger_reenrichment_v2", _no_dispatch)
+
+
+async def _three_readings(confidences: dict[str, float] | None) -> list[tuple[float, str, float]]:
+    assess_payload: dict[str, Any] = {
+        "entity_id": "fac-1",
+        "node_label": "Facility",
+        "entity_data": dict(_FACILITY),
+    }
+    batch_entity: dict[str, Any] = {"entity_id": "fac-1", "node_label": "Facility", "data": dict(_FACILITY)}
+    report_payload: dict[str, Any] = {"entity_id": "fac-1", "node_label": "Facility", "entity_data": dict(_FACILITY)}
+    if confidences is not None:
+        assess_payload["field_confidences"] = confidences
+        batch_entity["field_confidences"] = confidences
+        report_payload["field_confidences"] = confidences
+
+    assess = (await health_api.handle_health_assess(TENANT, assess_payload))["entity_health"]
+    batch = (await health_api.handle_health_batch_assess(TENANT, {"entities": [batch_entity]}))["entities"][0][
+        "entity_health"
+    ]
+    report = await health_api.handle_health_report(TENANT, report_payload)  # HealthReport is flat
+    return [(h["readiness_score"], h["grade"], h["gate_completeness"]) for h in (assess, batch, report)]
+
+
+@pytest.mark.finding("CEG-COR-044")
+class TestReadinessAgreesAcrossSubactions:
+    async def test_no_confidences_same_nonzero_readiness_everywhere(self, real_pipeline: None) -> None:
+        with patch("engine.config.settings.settings", _settings()):
+            readings = await _three_readings(None)
+        assert len(set(readings)) == 1, readings
+        score, grade, gate_completeness = readings[0]
+        assert score > 0.0
+        assert grade != "F"
+        assert gate_completeness == 1.0
+
+    async def test_supplied_confidences_forwarded_by_batch_and_report(self, real_pipeline: None) -> None:
+        confidences = dict.fromkeys(_FACILITY, 0.95)
+        confidences["contamination_tolerance"] = 0.5  # explicit low confidence on a gate field still discounts it
+        with patch("engine.config.settings.settings", _settings()):
+            readings = await _three_readings(confidences)
+            baseline = await _three_readings(dict.fromkeys(_FACILITY, 0.95))
+        assert len(set(readings)) == 1, readings
+        assert readings[0][2] < 1.0
+        assert readings[0][2] < baseline[0][2]
+
+    async def test_flag_off_restores_legacy_outputs(self, real_pipeline: None) -> None:
+        confidences = dict.fromkeys(_FACILITY, 0.95)
+        with patch("engine.config.settings.settings", _settings(health_absent_confidence_counts_enabled=False)):
+            without = await _three_readings(None)
+            with_conf = await _three_readings(confidences)
+        # Legacy: absent confidence coerces to 0 everywhere, and batch/report ignore a supplied map.
+        assert all(r[0] == 0.0 and r[1] == "F" for r in without), without
+        assert with_conf[0][0] > 0.0
+        assert with_conf[1] == without[1]
+        assert with_conf[2] == without[2]
