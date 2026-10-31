@@ -354,13 +354,28 @@ class ScoringAssembler:
         return base_expr
 
     def _compile_geodecay(self, dim: ScoringDimensionSpec) -> str:
+        """Distance decay between the candidate's and the query's coordinates.
+
+        RU-037 / CEG-COR-011: with ``settings.geodecay_declared_longitude`` on
+        (default) the longitude operands are the dimension's declared
+        ``candidateprop_lon`` / ``queryprop_lon``, defaulting to
+        ``candidate.lon`` / ``$lon``; off ignores the declarations.
+        """
+        from engine.config.settings import settings
+
         k = cypher_number(dim.decayconstant or 50000.0)
         lat_prop = sanitize_label(dim.candidateprop or "lat")
         query_lat_param = sanitize_label(dim.queryprop or lat_prop)
+        lon_prop = "lon"
+        query_lon_param = "lon"
+        if settings.geodecay_declared_longitude:
+            # getattr: duck-typed dimension doubles predate the fields (cf. soft_match).
+            lon_prop = sanitize_label(getattr(dim, "candidateprop_lon", None) or "lon")
+            query_lon_param = sanitize_label(getattr(dim, "queryprop_lon", None) or "lon")
         return (
             f"1.0 / (1.0 + point.distance("
-            f"point({{latitude: candidate.{lat_prop}, longitude: candidate.lon}}),"
-            f" point({{latitude: ${query_lat_param}, longitude: $lon}})"
+            f"point({{latitude: candidate.{lat_prop}, longitude: candidate.{lon_prop}}}),"
+            f" point({{latitude: ${query_lat_param}, longitude: ${query_lon_param}}})"
             f") / {k})"
         )
 
@@ -583,19 +598,30 @@ class ScoringAssembler:
         self._query_params[default_key] = default
         self._query_params[sample_key] = int(sample_k)
 
+        # RU-021 / CEG-COR-082: the ratio is (#community matches within the K
+        # most recent successes) / (size of that sample). The sample is taken
+        # once — successes ordered by created_at DESC (undated last, elementId
+        # tie-break), first K — and the community filter runs inside it. The
+        # former expression sliced the filtered list and the unfiltered list
+        # separately, i.e. min(K, matches) / min(K, total) (100 successes, 50
+        # matching, K=28 scored 1.0 instead of 0.5). Variables are dimension-
+        # scoped so the COLLECT subquery cannot correlate with an outer name.
+        sample_var = f"pa_sample_{safe_dim}"
+        outcome_var = f"pa_o_{safe_dim}"
+        member_var = f"pa_m_{safe_dim}"
+        # Labels and relationship type above passed sanitize_label() (C-9).
+        success_path = f"(qe)-[:{outcome_rel}]->({outcome_var}:{outcome_node})"
         return (
-            f"CASE "
-            f"  WHEN size([(qe)-[:{outcome_rel}]->(o:{outcome_node}) "
-            f"    WHERE o.{success_prop} = ${success_key} | o]) = 0 THEN ${default_key} "
-            f"  ELSE toFloat("
-            f"    size([(qe)-[:{outcome_rel}]->(o:{outcome_node}) "
-            f"      WHERE o.{success_prop} = ${success_key} "
-            f"      AND o.community_id = candidate.{cand_community_prop} | o][0..${sample_key}])"
-            f"  ) / toFloat("
-            f"    size([(qe)-[:{outcome_rel}]->(o:{outcome_node}) "
-            f"      WHERE o.{success_prop} = ${success_key} | o][0..${sample_key}])"
-            f"  ) "
-            f"END"
+            f"[{sample_var} IN [COLLECT {{ "
+            f"MATCH {success_path} "
+            f"WHERE {outcome_var}.{success_prop} = ${success_key} "
+            f"RETURN {outcome_var} "
+            f"ORDER BY {outcome_var}.created_at IS NULL, {outcome_var}.created_at DESC, elementId({outcome_var}) "
+            f"LIMIT ${sample_key} }}] | "
+            f"CASE WHEN size({sample_var}) = 0 THEN ${default_key} "
+            f"ELSE toFloat(size([{member_var} IN {sample_var} "
+            f"WHERE {member_var}.community_id = candidate.{cand_community_prop}])) "
+            f"/ toFloat(size({sample_var})) END][0]"
         )
 
     def _compile_community_bridge(self, dim: ScoringDimensionSpec) -> str:

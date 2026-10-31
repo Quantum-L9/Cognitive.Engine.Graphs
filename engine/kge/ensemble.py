@@ -206,7 +206,18 @@ class WeightedDistributionScore(VariantEnsemble):
 
 
 class RankAggregationEnsemble(VariantEnsemble):
-    """Rank Aggregation Ensemble (Borda / Plurality)."""
+    """Rank Aggregation Ensemble (Borda / Plurality).
+
+    RU-112 / CEG-COR-048 (DEC-44): the fused value is a function of the
+    variant scores. Variants are ranked by score (best first, rank 0):
+
+    - BORDA (and the fallback for methods without their own rule):
+      ``weight_i = (n - rank_i) / sum(1..n)``, ``final = sum(weight_i * s_i)``
+      — a Borda-weighted mean, in [0, 1].
+    - PLURALITY: the top-ranked variant's score (weight 1.0, others 0.0).
+
+    ``EnsembleResult.weights`` reports the weights actually used.
+    """
 
     def __init__(self, method: RankAggregationMethod = RankAggregationMethod.BORDA) -> None:
         self.method = method
@@ -217,19 +228,13 @@ class RankAggregationEnsemble(VariantEnsemble):
 
         ranked = sorted(scores, key=lambda s: -s.score)
 
-        if self.method == RankAggregationMethod.BORDA:
-            _final, explanation = self._borda_count(ranked)
-        elif self.method == RankAggregationMethod.PLURALITY:
-            _final, explanation = self._plurality(ranked)
+        if self.method == RankAggregationMethod.PLURALITY:
+            final, weights, explanation = self._plurality(ranked)
         else:
-            _final, explanation = self._borda_count(ranked)
-
-        n = len(ranked)
-        norm_score = (n - 0) / n if n > 0 else 0.5  # Top rank gets full score
-        weights = {s.variant_id: 1.0 / len(scores) for s in scores}
+            final, weights, explanation = self._borda_count(ranked)
 
         return EnsembleResult(
-            final_score=norm_score,
+            final_score=min(1.0, max(0.0, final)),
             component_scores=ranked,
             weights=weights,
             fusion_strategy=self.method.value,
@@ -237,12 +242,20 @@ class RankAggregationEnsemble(VariantEnsemble):
             explanation=explanation,
         )
 
-    def _borda_count(self, ranked: list[VariantScore]) -> tuple[float, str]:
+    def _borda_count(self, ranked: list[VariantScore]) -> tuple[float, dict[str, float], str]:
+        """Borda-weighted mean of the ranked variant scores."""
         n = len(ranked)
-        total_pts = sum(n - i for i in range(n))
-        top_pts = n
-        top_score = top_pts / total_pts if total_pts > 0 else 0.5
-        return top_score, (f"Borda Count: top_variant={ranked[0].variant_id}, points={top_pts}/{total_pts}")
+        total_pts = n * (n + 1) // 2
+        weights: dict[str, float] = {}
+        final = 0.0
+        for rank_position, variant in enumerate(ranked):
+            weight = (n - rank_position) / total_pts
+            weights[variant.variant_id] = weights.get(variant.variant_id, 0.0) + weight
+            final += weight * variant.score
+        explanation = (
+            f"Borda Count: final_score={final:.4f}, top_variant={ranked[0].variant_id}, points={n}/{total_pts}"
+        )
+        return final, weights, explanation
 
     def _rrf_score(
         self,
@@ -272,9 +285,12 @@ class RankAggregationEnsemble(VariantEnsemble):
                 scores = {e: v / max_s for e, v in scores.items()}
         return scores
 
-    def _plurality(self, ranked: list[VariantScore]) -> tuple[float, str]:
+    def _plurality(self, ranked: list[VariantScore]) -> tuple[float, dict[str, float], str]:
+        """Top-ranked variant's score; the winner carries all the weight."""
         winner = ranked[0]
-        return winner.score, (f"Plurality: winner={winner.variant_id}, score={winner.score:.4f}")
+        weights = {s.variant_id: 0.0 for s in ranked}
+        weights[winner.variant_id] = 1.0
+        return winner.score, weights, (f"Plurality: winner={winner.variant_id}, score={winner.score:.4f}")
 
     def explain(self, result: EnsembleResult) -> str:
         return result.explanation
@@ -388,14 +404,39 @@ class EnsembleController:
         """Construct from domain-pack KGEEnsembleSpec."""
         return cls(spec=spec)
 
+    def _accepted_strategies(self) -> str:
+        return ", ".join(s.value for s in self.strategies)
+
+    def _resolve_strategy(self, strategy: FusionStrategy | str) -> FusionStrategy:
+        """Return the implemented strategy named by ``strategy`` or raise.
+
+        RU-124 / CEG-COR-111 (DEC-46 option 1): the code spellings
+        (``FusionStrategy`` values) are authoritative; an unknown name or an
+        enum member without an implementation is rejected, never silently
+        replaced by the weighted mean.
+        """
+        try:
+            resolved = FusionStrategy(strategy)
+        except ValueError:
+            msg = f"Unknown ensemble strategy {strategy!r}; accepted values: {self._accepted_strategies()}"
+            raise ValueError(msg) from None
+        if resolved not in self.strategies:
+            msg = (
+                f"Ensemble strategy {resolved.value!r} has no implementation; "
+                f"accepted values: {self._accepted_strategies()}"
+            )
+            raise ValueError(msg)
+        return resolved
+
     @property
     def default_strategy(self) -> FusionStrategy:
-        """Default fusion strategy from domain-pack spec."""
+        """Default fusion strategy from domain-pack spec (WDS when no spec).
+
+        Raises:
+            ValueError: ``spec.strategy`` is not an implemented strategy.
+        """
         if self._spec:
-            try:
-                return FusionStrategy(self._spec.strategy)
-            except ValueError:
-                pass
+            return self._resolve_strategy(self._spec.strategy)
         return FusionStrategy.WEIGHTED_MEAN
 
     def predict(
@@ -411,6 +452,10 @@ class EnsembleController:
 
         Returns:
             EnsembleResult with final_score ready for kge_score writeback.
+
+        Raises:
+            ValueError: no scores, or the requested / configured strategy is
+                unknown or has no implementation (RU-124).
         """
         if not settings.kge_enabled:
             logger.warning("EnsembleController.predict skipped — kge_enabled=False")
@@ -424,6 +469,8 @@ class EnsembleController:
 
         if not scores:
             raise ValueError("No scores to ensemble")
+
+        resolved_strategy = self._resolve_strategy(strategy) if strategy is not None else self.default_strategy
 
         # Filter below confidence threshold
         threshold = settings.kge_confidence_threshold
@@ -446,10 +493,7 @@ class EnsembleController:
                 explanation=f"Single variant: {single.variant_id}",
             )
 
-        resolved_strategy = strategy or self.default_strategy
-        impl = self.strategies.get(resolved_strategy)
-        if not impl:
-            impl = self.strategies[FusionStrategy.WEIGHTED_MEAN]
+        impl = self.strategies[resolved_strategy]
 
         try:
             result = impl.fuse(valid_scores)

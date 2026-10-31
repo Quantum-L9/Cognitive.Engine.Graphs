@@ -1,10 +1,3 @@
-# NON-AUTHORITATIVE / ARCHIVED — DO NOT LOAD AT RUNTIME
-# Authoritative executable PlasticOS domain source:
-#   domains/plasticos/spec.yaml
-# Loader authority: engine.config.loader.DomainPackLoader
-# See: docs/adr/ADR-103-ceg-plasticos-spec-authority.md
-#      docs/archive/plasticos/ARCHIVE_MAP.md
-#
 <!-- L9_META
 l9_schema: 1
 origin: domain-specific
@@ -14,6 +7,14 @@ tags: [plasticos, changelog]
 owner: domain-team
 status: active
 /L9_META -->
+
+# NON-AUTHORITATIVE / ARCHIVED — DO NOT LOAD AT RUNTIME
+# Authoritative executable PlasticOS domain source:
+#   domains/plasticos/spec.yaml
+# Loader authority: engine.config.loader.DomainPackLoader
+# See: docs/adr/ADR-103-ceg-plasticos-spec-authority.md
+#      docs/archive/plasticos/ARCHIVE_MAP.md
+#
 
 ## Diff Summary: v0.3.0 → v0.4.0
 

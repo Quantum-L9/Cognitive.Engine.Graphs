@@ -15,7 +15,7 @@ domain:
   description: >
     Match roofing projects to optimal contractors and materials with weather
     windows, insurance claims, and permit tracking.
-  version: 1.0.0
+  version: 1.1.0
   # Legacy matching pack, retired from serving (operator decision 2026-10-25:
   # domain-specific runtime architecture is retired). Withheld by the generic
   # loader admission policy whatever its gates compile to.
@@ -50,6 +50,9 @@ ontology:
         - {name: specialties, type: string}
         - {name: currentprojectcount, type: int}
         - {name: maxconcurrentprojects, type: int}
+        # maxconcurrentprojects - currentprojectcount, computed by ingestion
+        # (CEG-COR-153, DEC-20 option A).
+        - {name: remainingprojectcapacity, type: int, managedby: sync}
         - {name: averageprojectratingusd, type: float}
         - {name: insurancelicensed, type: bool}
         - {name: emergencyavailable, type: bool}
@@ -110,10 +113,13 @@ gates:
     candidateprop: specialties
     queryparam: rooftype
   - name: capacity_check
-    type: selfrange
-    candidateprop_min: currentprojectcount
-    candidateprop_max: maxconcurrentprojects
+    # At least one open project slot (CEG-COR-153); the selfrange form compiled
+    # to currentprojectcount <= 1 AND 1 <= maxconcurrentprojects.
+    type: threshold
+    candidateprop: remainingprojectcapacity
     queryparam: 1
+    operator: ">="
+    nullbehavior: pass
   - name: insurance_license
     type: boolean
     candidateprop: insurancelicensed

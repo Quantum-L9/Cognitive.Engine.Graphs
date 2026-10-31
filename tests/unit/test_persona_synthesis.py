@@ -165,7 +165,50 @@ class TestComputeSynthesisWeights:
         result = compute_synthesis_weights([o1, o2], fv)
 
         for r in result:
-            assert float(r["weight"]) >= 0.09  # slightly below floor after renormalization is ok
+            # RU-128 / CEG-COR-115: the floor holds after normalisation (was >= 0.09)
+            assert float(r["weight"]) >= 0.10 - 1e-12
+        assert sum(float(r["weight"]) for r in result) == pytest.approx(1.0)
+
+    @pytest.mark.finding("CEG-COR-115")
+    def test_minimum_weight_floor_single_signal(self) -> None:
+        """raw alignments [1, 0, 0] -> [0.8, 0.1, 0.1]: floored entries fixed, rest renormalised."""
+        o1 = _make_output("p1", "Verifier", verification_need=1.0)
+        o2 = _make_output("p2", "None1")
+        o3 = _make_output("p3", "None2")
+        fv = FeatureVector(verification_need=1.0)
+
+        weights = [float(r["weight"]) for r in compute_synthesis_weights([o1, o2, o3], fv)]
+
+        assert weights == pytest.approx([0.8, 0.1, 0.1])
+        assert min(weights) >= 0.10 - 1e-12
+        assert sum(weights) == pytest.approx(1.0)
+
+    @pytest.mark.finding("CEG-COR-115")
+    def test_floor_iterates_and_preserves_alignment_order(self) -> None:
+        """A second pass catches entries pushed below the floor by the first."""
+        o1 = _make_output("p1", "A", verification_need=1.0)
+        o2 = _make_output("p2", "B", verification_need=0.15)
+        o3 = _make_output("p3", "C")
+        o4 = _make_output("p4", "D")
+        fv = FeatureVector(verification_need=1.0)
+
+        weights = [float(r["weight"]) for r in compute_synthesis_weights([o1, o2, o3, o4], fv)]
+
+        assert min(weights) >= 0.10 - 1e-12
+        assert sum(weights) == pytest.approx(1.0)
+        assert weights[0] >= weights[1] >= weights[2]
+
+    @pytest.mark.finding("CEG-COR-115")
+    def test_infeasible_floor_uses_equal_weights(self) -> None:
+        """n * min_persona_weight > 1 -> equal weights."""
+        outputs = [_make_output("p0", "Strong", verification_need=1.0)] + [
+            _make_output(f"p{i}", f"Z{i}") for i in range(1, 11)
+        ]
+        fv = FeatureVector(verification_need=1.0)
+
+        weights = [float(r["weight"]) for r in compute_synthesis_weights(outputs, fv)]
+
+        assert weights == pytest.approx([1 / 11] * 11)
 
 
 @pytest.mark.unit

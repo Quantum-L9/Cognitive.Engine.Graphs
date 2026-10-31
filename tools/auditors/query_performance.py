@@ -24,6 +24,26 @@ from tools.auditors.base import (
     register_auditor,
 )
 
+_LOOPS = (ast.For, ast.AsyncFor)
+
+
+def _loop_body_calls(loop):
+    """Calls executed once per iteration of *loop*: its body, not its iterable or ``else``.
+
+    A nested loop's own body is left to that loop (so each call is reported
+    once), but the nested loop's iterable and ``else`` block still run once per
+    outer iteration.
+    """
+    stack = list(loop.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.Call):
+            yield node
+        if isinstance(node, _LOOPS):
+            stack.extend([node.target, node.iter, *node.orelse])
+            continue
+        stack.extend(ast.iter_child_nodes(node))
+
 
 @register_auditor
 class QueryPerformanceAuditor(BaseAuditor):
@@ -64,11 +84,9 @@ class QueryPerformanceAuditor(BaseAuditor):
             "read",
         }
         for node in ast.walk(tree):
-            if not isinstance(node, (ast.For, ast.AsyncFor)):
+            if not isinstance(node, _LOOPS):
                 continue
-            for child in ast.walk(node):
-                if not isinstance(child, ast.Call):
-                    continue
+            for child in sorted(_loop_body_calls(node), key=lambda c: (c.lineno, c.col_offset)):
                 if not isinstance(child.func, ast.Attribute):
                     continue
                 if child.func.attr in query_methods:

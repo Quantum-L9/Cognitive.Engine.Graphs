@@ -204,3 +204,60 @@ class TestDAGExecution:
         assert len(waves) == 5
         for i, expected_alg in enumerate(["a", "b", "c", "d", "e"]):
             assert waves[i][0].algorithm == expected_alg
+
+
+def _named_job(name: str, algorithm: str, depends_on: list[str] | None = None) -> GDSJobSpec:
+    return GDSJobSpec(
+        name=name,
+        algorithm=algorithm,
+        schedule=GDSJobScheduleSpec(type="manual"),
+        projection=GDSProjectionSpec(nodelabels=["Facility"], edgetypes=["SUPPLIES_TO"]),
+        depends_on=depends_on or [],
+    )
+
+
+@pytest.mark.unit
+class TestDAGJobIdentity:
+    """RU-096 / CEG-COR-036: DAG nodes are jobs (by name), not algorithms."""
+
+    def test_same_algorithm_jobs_all_kept_in_declaration_order(self) -> None:
+        jobs = [_named_job("louvain_by_material", "louvain"), _named_job("louvain_by_polymer", "louvain")]
+        waves = GDSScheduler._build_execution_dag(jobs)
+        assert [[j.name for j in wave] for wave in waves] == [["louvain_by_material", "louvain_by_polymer"]]
+
+    def test_algorithm_dependency_resolves_to_every_matching_job(self) -> None:
+        jobs = [
+            _named_job("louvain_a", "louvain"),
+            _named_job("cooc", "cooccurrence", ["louvain"]),
+            _named_job("louvain_b", "louvain"),
+        ]
+        waves = GDSScheduler._build_execution_dag(jobs)
+        assert [[j.name for j in wave] for wave in waves] == [["louvain_a", "louvain_b"], ["cooc"]]
+
+    def test_unknown_dependency_still_ignored(self) -> None:
+        jobs = [_named_job("x", "louvain", ["nonexistent"]), _named_job("y", "louvain")]
+        waves = GDSScheduler._build_execution_dag(jobs)
+        assert [[j.name for j in wave] for wave in waves] == [["x", "y"]]
+
+    def test_cycle_members_in_fallback_wave(self) -> None:
+        jobs = [
+            _named_job("free", "geoproximity"),
+            _named_job("a", "louvain", ["cooccurrence"]),
+            _named_job("b", "cooccurrence", ["louvain"]),
+        ]
+        waves = GDSScheduler._build_execution_dag(jobs)
+        assert [j.name for j in waves[0]] == ["free"]
+        assert sorted(j.name for j in waves[-1]) == ["a", "b"]
+
+    def test_flag_off_restores_algorithm_keyed_dag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gds_dag_job_identity_by_name", False)
+        jobs = [_named_job("louvain_by_material", "louvain"), _named_job("louvain_by_polymer", "louvain")]
+        waves = GDSScheduler._build_execution_dag(jobs)
+        assert [[j.name for j in wave] for wave in waves] == [["louvain_by_polymer"]]
+
+    def test_flag_default_on(self) -> None:
+        from engine.config.settings import Settings
+
+        assert Settings().gds_dag_job_identity_by_name is True
