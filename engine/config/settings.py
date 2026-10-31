@@ -677,6 +677,25 @@ class Settings(BaseSettings):
     # False, registers jobs without starting APScheduler (manual trigger only);
     # EngineState.shutdown stops them all. Off: boot-local list, admin duplicate.
     gds_shared_scheduler_registry: bool = True
+    # RU-006 / CEG-COR-015 (R1a-DEC-02): one outcome record schema. Sync
+    # entity_type=outcome writes through handle_outcomes' writer (domain
+    # outcome_node_label, positive|negative|neutral -> success|failure|partial,
+    # RESULTED_IN); outcomes persist optional fingerprint.dimension_scores (JSON)
+    # and was_selected; score_feedback projects dimension_scores and
+    # OutcomeFeedback counts success/failure. Off: :Outcome + HAS_OUTCOME with
+    # the sync vocabulary, no dimension_scores, positive/negative classes.
+    outcome_schema_unified: bool = True
+    # RU-012 / CEG-COR-063 (R1a-DEC-04 "admit both"): a match payload carrying
+    # contract_version is admitted as engine.models.payloads.MatchRequest against
+    # the tenant's DomainContract and mapped onto the legacy internals (direction
+    # -> match_direction, query.facts -> query, top_n). Legacy MatchPayload is
+    # unchanged. Off: such a payload is rejected (no match_direction).
+    match_request_contract_admission: bool = True
+    # RU-015 / CEG-COR-080 (R1a-DEC-05 "withhold"): a gate's roleexempt and
+    # relaxedpenalty are accepted by the schema and ignored by the match path, so
+    # engine.config.loader.admission_defects reports a pack declaring either and
+    # the loader withholds it until a domain needs roles. Off: accepted, ignored.
+    gate_role_exemption: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
