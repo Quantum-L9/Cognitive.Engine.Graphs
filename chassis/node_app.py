@@ -48,7 +48,9 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-_TRUST_REQUIRED_ENVIRONMENTS = frozenset({"staging", "prod"})
+# `production` is listed although the pinned SDK refuses it: docker-compose.prod.yml
+# sets L9_ENVIRONMENT=production, and the binding must not depend on L9_ENV=prod too.
+_TRUST_REQUIRED_ENVIRONMENTS = frozenset({"staging", "prod", "production"})
 _SYMMETRIC_ALGORITHM = "hmac-sha256"
 
 
@@ -156,7 +158,7 @@ def _install_gate_only_ingress(
 
 
 def _trust_required_environment() -> bool:
-    """True for SDK staging/prod (``L9_ENVIRONMENT``) or engine prod (``L9_ENV``)."""
+    """True for SDK staging/prod/production (``L9_ENVIRONMENT``) or engine prod (``L9_ENV``)."""
     from engine.config.settings import settings
 
     sdk_environment = os.environ.get("L9_ENVIRONMENT", "local").strip().lower()

@@ -678,7 +678,10 @@ def test_gate_key_binding_resolution(
     assert _gate_key_binding() == expected
 
 
-@pytest.mark.parametrize(("sdk_env", "l9_env"), [("staging", "dev"), ("prod", "dev"), ("local", "prod")])
+@pytest.mark.parametrize(
+    ("sdk_env", "l9_env"),
+    [("staging", "dev"), ("prod", "dev"), ("production", "dev"), ("local", "prod")],
+)
 def test_gate_key_binding_required_in_trust_environments(
     monkeypatch: pytest.MonkeyPatch, sdk_env: str, l9_env: str
 ) -> None:
