@@ -18,10 +18,15 @@ The two vocabularies are the repository's synthetic verification domains
 (``tests/fixtures/domains``), copied under new ids with one relationship sync
 endpoint added for an edge their ontology already declares. The same runtime
 code serves both; no named product domain is involved.
+
+Approved relevance comes from the tenant spec itself (``evidencerelevance`` on the
+evidence edge, honoured at ``-reviewed``; QM.POC0.TENANT_ASSOCIATION_MAPPING.004
+D-8/D-8b), never from a map the test supplies.
 """
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -30,12 +35,14 @@ from typing import Any
 import pytest
 import pytest_asyncio
 import yaml
+from neo4j.exceptions import ConstraintError
 
+import engine.handlers as handlers_module
 from engine.config.loader import DomainPackLoader
+from engine.config.settings import settings
 from engine.graph.driver import GraphDriver
-from engine.handlers import ValidationError, handle_score, handle_sync, init_dependencies
-from engine.scoring.evidence_priority import approved_relevance_map
-from engine.scoring.graph_evidence import GraphEvidenceBinding
+from engine.handlers import ExecutionError, ValidationError, handle_score, handle_sync, init_dependencies
+from engine.scoring.graph_evidence import GraphEvidenceBinding, approved_relevance_from_spec
 from engine.state import get_state
 from tests.fixtures.domain_contracts import SYNTHETIC_DOMAINS_ROOT
 
@@ -91,6 +98,11 @@ def domains_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
     for domain_id, vocabulary in VOCABULARIES.items():
         spec = yaml.safe_load((SYNTHETIC_DOMAINS_ROOT / vocabulary["source"] / "spec.yaml").read_text())
         spec["domain"]["id"] = domain_id
+        # Synthetic approval: a reviewed spec declaring relevance 1.0 for its evidence edge.
+        spec["domain"]["version"] = "1.0.0-reviewed"
+        for edge in spec["ontology"]["edges"]:
+            if edge["type"] == vocabulary["edge_type"]:
+                edge["evidencerelevance"] = 1.0
         for endpoint in vocabulary["extra_endpoints"]:
             spec["sync"]["endpoints"].append({"method": "POST", "batchstrategy": "UNWINDMERGE", **endpoint})
         (root / domain_id).mkdir()
@@ -107,7 +119,10 @@ async def _wipe(driver: GraphDriver, database: str) -> None:
 
 
 @pytest_asyncio.fixture
-async def graph(graph_driver: GraphDriver, domains_root: Path) -> AsyncGenerator[GraphDriver, None]:
+async def graph(
+    graph_driver: GraphDriver, domains_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> AsyncGenerator[GraphDriver, None]:
+    monkeypatch.setattr(settings, "relationship_sync_enabled", True)
     for tenant in VOCABULARIES:
         await graph_driver.execute_query(f"CREATE DATABASE `{tenant}` IF NOT EXISTS WAIT", database="system")
         await _wipe(graph_driver, tenant)
@@ -154,7 +169,8 @@ async def _edges(driver: GraphDriver, tenant: str) -> list[dict[str, Any]]:
 
 
 def _binding(driver: GraphDriver, tenant: str) -> GraphEvidenceBinding:
-    return GraphEvidenceBinding(driver, approved_relevance_map({VOCABULARIES[tenant]["edge_type"]: 1.0}))
+    _, loader = handlers_module._require_deps()
+    return GraphEvidenceBinding(driver, approved_relevance_from_spec(loader.load_domain(tenant)))
 
 
 async def _score(driver: GraphDriver, tenant: str) -> dict[str, Any]:
@@ -225,6 +241,23 @@ async def test_local_score_reads_the_real_graph_and_abstains_without_it(graph: G
     assert {a["entity_ref"] for a in removed["abstained"]} == set(v["subjects"])
 
 
+@pytest.mark.parametrize("version", ["1.0.0-proposed", "1.0.0"])
+async def test_relevance_from_an_unreviewed_spec_never_scores(graph: GraphDriver, version: str) -> None:
+    v = VOCABULARIES[TENANT_A]
+    await _seed_nodes(TENANT_A)
+    await _sync_edges(TENANT_A, _edge_row(TENANT_A))
+    _, loader = handlers_module._require_deps()
+    unreviewed = loader.load_domain(TENANT_A).model_copy(deep=True)
+    unreviewed.domain.version = version
+    binding = GraphEvidenceBinding(graph, approved_relevance_from_spec(unreviewed))
+    result = await handle_score(TENANT_A, {"entity_refs": v["subjects"], "top_n": 2}, binding=binding)
+    assert result["evidence_reader"]["connected"] is True
+    assert result["scored"] == []
+    by_ref = {a["entity_ref"]: a for a in result["abstained"]}
+    assert set(by_ref) == set(v["subjects"])
+    assert "no_qualifying_relationship" in repr(by_ref[v["subjects"][0]])
+
+
 # ── D. Negative evidence and replay ────────────────────────────────────────────
 
 
@@ -281,6 +314,61 @@ async def test_invalid_relationship_rows_write_nothing(
             TENANT_A, _edge_row(TENANT_A, evidence_ref="evidence:ok"), _edge_row(TENANT_A, **row_overrides)
         )
     assert await _edges(graph, TENANT_A) == []
+
+
+# ── E. Transactional integrity and evidence identity ───────────────────────────
+
+
+async def test_a_failed_postcheck_rolls_back_every_write(graph: GraphDriver, monkeypatch: pytest.MonkeyPatch) -> None:
+    await _seed_nodes(TENANT_A)
+    # The post-write comparison sees evidence that differs from what was sent.
+    monkeypatch.setattr(handlers_module, "stored_evidence", lambda stored: {"tampered": True})
+    rows = [_edge_row(TENANT_A, evidence_ref=f"evidence:rollback:{i}") for i in range(3)]
+    with pytest.raises(ExecutionError, match="rolled back"):
+        await _sync_edges(TENANT_A, *rows)
+    assert await _edges(graph, TENANT_A) == []
+
+
+async def test_the_database_refuses_a_second_edge_for_one_evidence_ref(graph: GraphDriver) -> None:
+    await _seed_nodes(TENANT_A)
+    await _sync_edges(TENANT_A, _edge_row(TENANT_A))
+    v = VOCABULARIES[TENANT_A]
+    # Bypass every engine check: write the same (tenant, evidence_ref) on another endpoint pair.
+    with pytest.raises(ConstraintError):
+        await graph.execute_write(
+            cypher=(
+                f"MATCH (a:{v['from_label']} {{{v['from_id']}: $other}}), (b:{v['to_label']}) "
+                f"CREATE (a)-[:{v['edge_type']} {{_tenant: $tenant, evidence_ref: $ref}}]->(b)"
+            ),
+            parameters={"other": v["subjects"][1], "tenant": TENANT_A, "ref": f"evidence:{TENANT_A}:1"},
+            database=TENANT_A,
+        )
+    assert len(await _edges(graph, TENANT_A)) == 1
+
+
+async def test_concurrent_conflicting_writers_never_commit_two_assertions(graph: GraphDriver) -> None:
+    await _seed_nodes(TENANT_A)
+    v = VOCABULARIES[TENANT_A]
+    for round_ in range(5):
+        ref = f"evidence:race:{round_}"
+        outcomes = await asyncio.gather(
+            _sync_edges(TENANT_A, _edge_row(TENANT_A, evidence_ref=ref, from_id=v["subjects"][0])),
+            _sync_edges(TENANT_A, _edge_row(TENANT_A, evidence_ref=ref, from_id=v["subjects"][1])),
+            return_exceptions=True,
+        )
+        successes = [o for o in outcomes if isinstance(o, dict)]
+        refusals = [o for o in outcomes if isinstance(o, ValidationError)]
+        assert (len(successes), len(refusals)) == (1, 1), outcomes
+    edges = await _edges(graph, TENANT_A)
+    assert sorted(e["props"]["evidence_ref"] for e in edges) == [f"evidence:race:{i}" for i in range(5)]
+
+
+async def test_concurrent_identical_replays_record_one_edge(graph: GraphDriver) -> None:
+    await _seed_nodes(TENANT_A)
+    outcomes = await asyncio.gather(*(_sync_edges(TENANT_A, _edge_row(TENANT_A)) for _ in range(4)))
+    assert all(o["status"] == "success" for o in outcomes)
+    [edge] = await _edges(graph, TENANT_A)
+    assert edge["props"]["source_revision"] == "rev-2026-10-25"
 
 
 # ── C. Isolation ───────────────────────────────────────────

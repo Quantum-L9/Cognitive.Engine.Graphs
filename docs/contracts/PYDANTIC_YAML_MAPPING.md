@@ -15,6 +15,12 @@ status: active
 Pydantic field names are IDENTICAL to YAML keys. snake_case everywhere.
 No aliases. No Field(alias=...). No model_config with populate_by_name.
 
+> **Correction for sync endpoints (D-1).** `SyncEndpointSpec` and its new
+> `observedfrom` / `refnamespace` keys are flatcase in the live schema, and the
+> attribute name is still identical to the YAML key. See
+> `FIELD_NAMES.md` → SyncEndpoint. The new keys follow their siblings; no
+> naming migration is implied.
+
 ## Example: spec.yaml ↔ DomainSpec
 
 ```yaml
