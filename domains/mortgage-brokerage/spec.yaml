@@ -15,8 +15,17 @@ domain:
   description: >
     Match borrower profiles to optimal wholesale lender loan products with
     ECOA-compliant scoring and outcome feedback loops.
-  version: 1.0.1
+  version: 1.1.0
   alternatedomains: []
+  # Served, as on main (owner decision 2026-10-29: withholding of this pack
+  # stays off until the owner enables it). State licensing and the borrower's
+  # lender blacklist are NOT enforced (CEG-COR-012, DEC-15 "D now, then A"):
+  # both constrain the LoanProduct's Lender — Lender-[:OPERATESIN]->State with
+  # statecode = $propertystate, and BorrowerProfile-[:BLACKLISTEDLENDER]->Lender
+  # — and no existing gate can constrain a non-candidate alias or a
+  # query-anchored edge, so served rankings can include products from lenders
+  # unlicensed in the borrower's state. To withhold the pack, uncomment:
+  # activation: dormant
 
 ontology:
   nodes:
@@ -115,13 +124,15 @@ derivedparameters:
     type: float
     unit: percentage
 
+# The lender step binds `lender` for scoring (CEG-COR-012). The former
+# `lenderstatelicensing` step (`lender-[:OPERATESIN]->st:State {statecode:
+# $query.propertystate}`) is not expressible: traversal patterns forbid braces
+# and parameters, so it refused every match. Licensing awaits an alias-aware
+# gate (DEC-15 option A); the pack is dormant until then.
 traversal:
   steps:
     - name: lenderresolve
-      pattern: "candidate-[:OFFEREDBY]->lender:Lender"
-      required: true
-    - name: lenderstatelicensing
-      pattern: "lender-[:OPERATESIN]->st:State {statecode: $query.propertystate}"
+      pattern: "(candidate:LoanProduct)-[:OFFEREDBY]->(lender:Lender)"
       required: true
 
 gates:
@@ -156,19 +167,28 @@ gates:
     queryparam: loanamountusd
     nullbehavior: pass
   - name: va_eligibility
-    type: boolean
+    # An implication, not an equality (CEG-COR-005, DEC-13 option A): Cypher
+    # orders false < true, so `requiresvaeligibility <= vaeligible` admits every
+    # product for a VA-eligible borrower and only products that do not require
+    # VA eligibility for one who is not.
+    type: threshold
     candidateprop: requiresvaeligibility
     queryparam: vaeligible
+    operator: "<="
     nullbehavior: pass
   - name: loanpurpose_match
-    type: enummap
+    # Scalar equality (CEG-COR-164): enummap compiled `candidate.loanpurpose IN
+    # $loanpurpose`, IN over a scalar enum value.
+    type: threshold
     candidateprop: loanpurpose
     queryparam: loanpurpose
-  - name: blacklist_exclusion
-    type: exclusion
-    edgetype: BLACKLISTEDLENDER
-    fromnode: query
-    tonode: lender
+    operator: "="
+    nullbehavior: pass
+  # No blacklist gate (CEG-COR-019, DEC-15): `blacklist_exclusion` declared
+  # BLACKLISTEDLENDER from the query entity to the lender, but an exclusion gate
+  # always anchors its edge at the candidate, so the compiler refuses it
+  # (exclusion_endpoint_validation). Enforcement awaits a query-anchored
+  # exclusion construct (DEC-15 option A); the pack is dormant until then.
 
 scoring:
   dimensions:
@@ -181,9 +201,16 @@ scoring:
       weightkey: wrate
       defaultweight: 0.35
     - name: approval_rate
+      # The lender's approval rate, read through the `lender` alias the
+      # lenderresolve step binds (CEG-COR-070). `alias: lender.approvalratepct`
+      # with `computation: candidateproperty` compiled to coalesce(candidate.value,
+      # 0.0) — 0 for every product. approvalratepct is a 0-100 percentage, so it
+      # is divided by 100 into [0, 1]; read raw it would saturate the clamp.
       source: traversalalias
-      alias: lender.approvalratepct
-      computation: candidateproperty
+      alias: lender
+      candidateprop: approvalratepct
+      computation: customcypher
+      expression: "coalesce(lender.approvalratepct, 0.0) / 100.0"
       weightkey: wapproval
       defaultweight: 0.25
     - name: closing_speed
@@ -194,13 +221,11 @@ scoring:
       maxvalue: 60
       weightkey: wspeed
       defaultweight: 0.20
-    - name: community_match
-      source: computed
-      candidateprop: louvaincommunityid
-      queryprop: louvaincommunityid
-      computation: communitymatch
-      weightkey: wcommunity
-      defaultweight: 0.10
+    # No community_match dimension (CEG-COR-070, DEC-18 option B): it compared
+    # LoanProduct.louvaincommunityid with $louvaincommunityid, which no
+    # queryschema field supplies (a BorrowerProfile has no community) and no GDS
+    # job writes, so it scored 0.5 for every product. The remaining weights are
+    # unchanged (sum 0.80 <= 1.0): a constant term never changed the ranking.
 
 compliance:
   regimes:

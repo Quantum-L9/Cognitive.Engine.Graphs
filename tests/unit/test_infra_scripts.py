@@ -308,3 +308,36 @@ def test_gate4_http_fallback_only_when_pytest_missing(tmp_path: Path) -> None:
     proc = _precommit_smoke(tmp_path, PYTEST_IMPORT_RC="1")
     assert "API health check OK" in proc.stdout
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+# ── RU-148 / RG-184: deep_mri summary substitution and health count ─────────
+
+
+def test_deep_mri_summary_counts(tmp_path: Path) -> None:
+    text = (REPO / "tools" / "infra" / "deep_mri.sh").read_text(encoding="utf-8")
+    lines = [ln for ln in text.splitlines() if ln.startswith(('echo "║  Healthy:', 'echo "║  Open Ports:'))]
+    assert len(lines) == 2
+    stubs = tmp_path / "stubs"
+    _stub(stubs, "docker", 'case "$*" in *"ps --format"*) printf "healthy\\nunhealthy\\nstarting\\n";; esac; exit 0')
+    _stub(stubs, "nc", '[ "$3" = 8000 ]')
+    snippet = "\n".join(["set -euo pipefail", 'MRI_PORTS="8000 5432"', *lines, "echo reached-end"])
+
+    proc = _run([BASH, "-c", snippet], cwd=tmp_path, env=_env(tmp_path, stubs))
+
+    assert proc.returncode == 0, proc.stderr
+    assert "bad substitution" not in proc.stderr
+    out = proc.stdout.splitlines()
+    assert out[0] == "║  Healthy:           1"
+    assert out[1] == "║  Open Ports:        1/2"
+    assert out[2] == "reached-end"
+
+
+def test_deep_mri_summary_zero_healthy(tmp_path: Path) -> None:
+    text = (REPO / "tools" / "infra" / "deep_mri.sh").read_text(encoding="utf-8")
+    line = next(ln for ln in text.splitlines() if ln.startswith('echo "║  Healthy:'))
+    stubs = tmp_path / "stubs"
+    _stub(stubs, "docker", 'printf "unhealthy\\n"; exit 0')
+
+    proc = _run([BASH, "-c", f"set -euo pipefail\n{line}"], cwd=tmp_path, env=_env(tmp_path, stubs))
+
+    assert proc.stdout == "║  Healthy:           0\n", proc.stderr

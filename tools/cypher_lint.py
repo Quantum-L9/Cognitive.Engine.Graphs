@@ -546,6 +546,28 @@ def _looks_like_query(text: str) -> bool:
     return len(set(_CLAUSE_KEYWORD_RE.findall(text))) >= 2
 
 
+def _is_diagnostic_use(use: ast.Name, parents: dict[ast.AST, ast.AST]) -> bool:
+    """A read of a message name that only reaches ``raise`` / an exception or a logger call."""
+    parent = parents.get(use)
+    if isinstance(parent, ast.Raise):
+        return True
+    if isinstance(parent, ast.Call) and use in parent.args:
+        name = _call_name(parent)
+        return name.endswith(("Error", "Exception", "Warning")) or name in LOG_METHODS
+    return False
+
+
+def _only_diagnostic_uses(assign: ast.AST, target: str, parents: dict[ast.AST, ast.AST]) -> bool:
+    """Every read of ``target`` in the enclosing function is diagnostic (and there is at least one)."""
+    scope: ast.AST | None = assign
+    while scope is not None and not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
+        scope = parents.get(scope)
+    if scope is None:
+        return False
+    uses = [n for n in ast.walk(scope) if isinstance(n, ast.Name) and n.id == target and isinstance(n.ctx, ast.Load)]
+    return bool(uses) and all(_is_diagnostic_use(u, parents) for u in uses)
+
+
 def _is_message_context(node: ast.AST, parents: dict[ast.AST, ast.AST], text: str = "") -> bool:
     """Diagnostic text, not Cypher: skip by AST context."""
     child: ast.AST = node
@@ -576,9 +598,11 @@ def _is_message_context(node: ast.AST, parents: dict[ast.AST, ast.AST], text: st
                 return True
         if isinstance(parent, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
             targets = parent.targets if isinstance(parent, ast.Assign) else [parent.target]
-            if any(isinstance(t, ast.Name) and t.id in MESSAGE_NAMES for t in targets):
-                # A message-like name does not hide a query-shaped string.
-                return not _looks_like_query(text)
+            names = [t.id for t in targets if isinstance(t, ast.Name) and t.id in MESSAGE_NAMES]
+            if names:
+                # A message-like name does not hide a query-shaped string, unless every
+                # read of it only reaches an exception or a logger (it is never executed).
+                return not _looks_like_query(text) or all(_only_diagnostic_uses(parent, n, parents) for n in names)
         if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Module)):
             return False
         child = parent

@@ -2,8 +2,8 @@
 l9_schema: 1
 origin: engine-specific
 engine: graph
-layer: [docs]
-tags: [dev-docs, revenue]
+layer: [audit]
+tags: [research, revenue, spec-coverage]
 owner: engine-team
 status: active
 /L9_META -->

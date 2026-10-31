@@ -121,6 +121,20 @@ class ComplianceEngine:
             )
             return 0
 
+    async def flush_audit_before_erasure(self) -> int:
+        """Durable pre-delete flush for a GDPR erasure (RU-066 follow-up).
+
+        The erasure entry must reach ``packet_audit_log`` before anything is
+        deleted, so this flush is never soft: ``compliance_audit_soft_sink``
+        (which lets a request continue past a failed flush) does not apply. A
+        missing audit pool or a failed flush raises, and the caller deletes
+        nothing; the entry stays buffered for the periodic flush.
+        """
+        if self._db_pool is None:
+            msg = "GDPR erasure requires a durable audit sink (POSTGRES_DSN audit pool); nothing was deleted"
+            raise RuntimeError(msg)
+        return await self.flush_audit()
+
     def _audit_violation(
         self,
         violation: ProhibitedFactorViolationError,

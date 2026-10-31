@@ -315,6 +315,32 @@ def test_cypher_assigned_to_message_named_variable_is_scanned() -> None:
     assert [f.expression for f in _blocking(src)] == ["spec.target_node"]
 
 
+def test_query_shaped_message_used_only_in_an_exception_is_not_cypher() -> None:
+    """A query-shaped error message that only reaches ``raise X(msg)`` is a diagnostic, not Cypher."""
+    src = (
+        "def check(spec, matches):\n"
+        "    if len(matches) != 1:\n"
+        "        msg = (\n"
+        "            f\"Endpoint '{spec.path}': ontology must declare exactly one edge \"\n"
+        '            f"({spec.fromnode})-[:{spec.targetedge}]->({spec.tonode}), found {len(matches)}"\n'
+        "        )\n"
+        "        raise ValueError(msg)\n"
+    )
+    assert _blocking(src) == []
+
+
+def test_query_shaped_message_reaching_a_sink_is_still_scanned() -> None:
+    """The diagnostic exemption needs every use to be diagnostic; one sink use keeps it scanned."""
+    src = (
+        "async def run(driver, spec):\n"
+        "    msg = f'MATCH (n:{spec.target_node}) RETURN n'\n"
+        "    if spec.strict:\n"
+        "        raise ValueError(msg)\n"
+        "    return await driver.execute_query(msg)\n"
+    )
+    assert [f.expression for f in _blocking(src)] == ["spec.target_node"]
+
+
 def test_shadowed_method_name_does_not_validate_spec_get() -> None:
     """shadow: a same-module ``get`` method does not certify ``spec.get(...)``."""
     src = (

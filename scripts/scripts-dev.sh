@@ -39,10 +39,11 @@ case "$ACTION" in
     echo ""
     echo "Starting API..."
     cd "$ROOT_DIR"
+    # Same uvicorn target as scripts/entrypoint.sh (chassis selected by L9_CHASSIS).
     if command -v poetry >/dev/null 2>&1; then
-      poetry run uvicorn engine.api.app:app --reload --host 0.0.0.0 --port "${API_PORT:-8000}" &
+      poetry run uvicorn chassis.entrypoint:create_app --factory --reload --host 0.0.0.0 --port "${API_PORT:-8000}" &
     else
-      python3 -m uvicorn engine.api.app:app --reload --host 0.0.0.0 --port "${API_PORT:-8000}" &
+      python3 -m uvicorn chassis.entrypoint:create_app --factory --reload --host 0.0.0.0 --port "${API_PORT:-8000}" &
     fi
 
     echo ""
@@ -57,7 +58,7 @@ case "$ACTION" in
   down)
     echo "🛑 Stopping L9 dev stack..."
     docker compose -f "$ROOT_DIR/docker-compose.yml" down
-    pkill -f "uvicorn engine.api.app" 2>/dev/null || true
+    pkill -f "uvicorn chassis.entrypoint:create_app" 2>/dev/null || true
     echo "✅ Stopped"
     ;;
 
