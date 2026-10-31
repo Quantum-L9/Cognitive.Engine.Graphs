@@ -73,13 +73,48 @@ dim.params  # dict[str, Any] — scoring-type-specific parameters
 
 ### SyncEndpoint
 
+Correction (QM.POC0.TENANT_ASSOCIATION_MAPPING.004, D-1): `SyncEndpointSpec`
+keys are **flatcase** in the live schema (`engine/config/schema.py`), and the
+YAML key equals the attribute name. The snake_case names this section used to
+list do not exist. Only this section is corrected here; the rest of this file
+is unchanged.
+
 ```python
-endpoint.path  # str — e.g., "facilities"
-endpoint.target_node  # str — Neo4j label (MUST sanitize before Cypher)
-endpoint.id_property  # str — unique key property
-endpoint.strategy  # str — "merge" or "match_set"
-endpoint.taxonomy_edges  # list[TaxonomyEdge]
-endpoint.children  # list[ChildSync]
+endpoint.path  # str — e.g., "/v1/sync/facilities"; the last segment is the entity type
+endpoint.method  # str — "POST" | "PATCH"
+endpoint.targetnode  # str | None — node label (MUST sanitize before Cypher)
+endpoint.targetedge  # str | None — relationship type (relationship endpoints)
+endpoint.fromnode  # str | None — relationship source label
+endpoint.tonode  # str | None — relationship target label
+endpoint.idproperty  # str | None — unique key property of a node endpoint
+endpoint.batchstrategy  # SyncStrategy — UNWINDMERGE | UNWINDMATCHSET
+endpoint.taxonomyedges  # list[TaxonomyEdgeSpec] | None
+endpoint.childsync  # list[ChildSyncSpec] | None
+endpoint.fieldsupdated  # list[str] | None — PATCH
+endpoint.refnamespace  # str | None — node endpoints only; ids are "<refnamespace>:<record id>"
+endpoint.observedfrom  # list[ObservedAssociationSourceSpec] | None — relationship endpoints only
+```
+
+`ObservedAssociationSourceSpec` (unknown keys refused):
+
+```python
+source.provider  # str — ^[a-z][a-z0-9_-]{1,31}$
+source.fromobjecttype  # str — provider-native object type of fromnode records
+source.toobjecttype  # str — provider-native object type of tonode records
+source.associationcategory  # str — ^[A-Z][A-Z0-9_]{0,63}$
+source.associationtypeid  # int — strict, >= 1
+```
+
+### EdgeSpec
+
+```python
+edge.type  # str
+edge.from_  # str — YAML key `from`
+edge.to  # str
+edge.direction  # EdgeDirection
+edge.category  # EdgeCategory
+edge.managedby  # ManagedByType
+edge.evidencerelevance  # float | None — approved relevance in [0, 1]; scoring honours it at -reviewed/-production
 ```
 
 
@@ -103,8 +138,8 @@ domain_spec.matchdirections  # WRONG: not a top-level field
 gate.candidateprop  # WRONG: field is called 'field'
 gate.null_semantics  # WRONG: field is called 'null_behavior'
 dim.computation_type  # WRONG: field is called 'type'
-endpoint.targetnode  # WRONG: missing underscore
-endpoint.idproperty  # WRONG: missing underscore
+endpoint.target_node  # WRONG: the live key is flatcase `targetnode`
+endpoint.id_property  # WRONG: the live key is flatcase `idproperty`
 ```
 
 
