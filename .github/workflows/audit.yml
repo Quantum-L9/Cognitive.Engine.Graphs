@@ -27,7 +27,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install pyyaml
+      - run: 'pip install --only-binary :all: pyyaml==6.0.3'
 
       - name: Run audit harness
         run: python tools/audit_harness.py --json

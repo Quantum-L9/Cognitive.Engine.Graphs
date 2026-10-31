@@ -212,12 +212,9 @@ class GraphLifecycle(LifecycleHook):
         # W4-04: Cancel compliance flush task
         if self._compliance_flush_task is not None:
             self._compliance_flush_task.cancel()
-            try:
-                await self._compliance_flush_task
-            except asyncio.CancelledError:
-                # Expected: awaiting a task we just cancelled re-raises
-                # CancelledError. Swallow it here so shutdown continues.
-                pass
+            # gather() absorbs the cancelled task's CancelledError, so shutdown
+            # continues; a cancellation of shutdown itself still propagates.
+            await asyncio.gather(self._compliance_flush_task, return_exceptions=True)
             self._compliance_flush_task = None
             logger.info("W4-04: Compliance flush task stopped")
 
@@ -251,7 +248,8 @@ class GraphLifecycle(LifecycleHook):
                     except Exception as exc:
                         logger.warning("Compliance flush failed for domain=%s: %s", domain_id, exc)
             except asyncio.CancelledError:
-                break
+                # Let the task end as cancelled; shutdown() awaits it via gather().
+                raise
             except Exception as exc:
                 logger.warning("Compliance flush loop error: %s", exc)
 
