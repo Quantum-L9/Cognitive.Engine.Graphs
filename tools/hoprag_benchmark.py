@@ -30,10 +30,17 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from tools.path_policy import PathPolicyError, resolve_existing_file_under_root, resolve_root, resolve_under_root
 
 logger = logging.getLogger(__name__)
 
@@ -234,7 +241,7 @@ def compare_hop_efficiency(
     }
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for benchmark tool."""
     import argparse
 
@@ -257,24 +264,36 @@ def main() -> None:
         default="benchmark_results",
         help="Output directory for results",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--root",
+        default=".",
+        help="Allowed root for input and output paths (default: current directory)",
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        root = resolve_root(args.root)
+        ground_truth_path = resolve_existing_file_under_root(args.ground_truth, root, option="--ground-truth")
+        predictions_path = resolve_existing_file_under_root(args.predictions, root, option="--predictions")
+        output_dir = resolve_under_root(args.output_dir, root, option="--output-dir")
+    except PathPolicyError as exc:
+        parser.error(str(exc))
+    except OSError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     # Load data
-    ground_truth: list[dict[str, Any]] = []
-    with open(args.ground_truth) as f:
-        for line in f:
-            ground_truth.append(json.loads(line))
-
-    predictions: list[dict[str, Any]] = []
-    with open(args.predictions) as f:
-        for line in f:
-            predictions.append(json.loads(line))
+    try:
+        ground_truth = [json.loads(line) for line in ground_truth_path.read_text(encoding="utf-8").splitlines()]
+        predictions = [json.loads(line) for line in predictions_path.read_text(encoding="utf-8").splitlines()]
+    except OSError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     # Run benchmark
     result = run_benchmark(ground_truth, predictions)
 
     # Output results
-    output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     summary = {
@@ -285,12 +304,12 @@ def main() -> None:
         "execution_time_s": round(result.execution_time_s, 3),
     }
 
-    with open(output_dir / "summary.json", "w") as f:
-        json.dump(summary, f, indent=2)
+    (output_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     print(f"Benchmark complete: F1={result.mean_f1:.4f}, P={result.mean_precision:.4f}, R={result.mean_recall:.4f}")
     print(f"Results saved to {output_dir}/")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

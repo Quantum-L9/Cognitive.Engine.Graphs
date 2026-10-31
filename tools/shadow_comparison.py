@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from engine.shadow.compare import RankedCandidate, emit_shadow_comparison
+from tools.path_policy import PathPolicyError, resolve_existing_file_under_root, resolve_root, resolve_under_root
 
 
 def _load_ranked(items: list[dict]) -> list[RankedCandidate]:
@@ -34,14 +35,32 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Emit CEG shadow comparison artifact")
     p.add_argument("--input", required=True, help="JSON with packet_id, primary[], shadow[]")
     p.add_argument("--output", required=True, help="Write comparison JSON here")
+    p.add_argument(
+        "--root",
+        default=".",
+        help="Allowed root for input and output paths (default: current directory)",
+    )
     args = p.parse_args(argv)
-    data = json.loads(Path(args.input).read_text())
+    try:
+        root = resolve_root(args.root)
+        input_path = resolve_existing_file_under_root(args.input, root, option="--input")
+        out = resolve_under_root(args.output, root, option="--output")
+    except PathPolicyError as exc:
+        p.error(str(exc))
+    except OSError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    try:
+        data = json.loads(input_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     comparison = emit_shadow_comparison(
         packet_id=str(data["packet_id"]),
         primary=_load_ranked(data.get("primary") or []),
         shadow=_load_ranked(data.get("shadow") or []),
     )
-    out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     payload = comparison.to_dict()
     out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")

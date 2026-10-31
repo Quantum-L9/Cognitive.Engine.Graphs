@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import yaml
 
 from engine.config.schema import DomainSpec
+from tools.path_policy import PathPolicyError, resolve_root, resolve_under_root
 
 
 def _check_cross_references(spec: DomainSpec) -> list[dict]:
@@ -243,21 +244,31 @@ def validate_spec(spec_path: Path, strict: bool = False) -> tuple[list[dict], in
     return results, exit_code
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Validate a CEG domain spec YAML")
     parser.add_argument("spec_path", type=Path, help="Path to domain spec YAML file")
     parser.add_argument("--strict", action="store_true", help="Escalate warnings to failures")
     parser.add_argument("--json", action="store_true", dest="json_output", help="Output as JSON for CI")
-    args = parser.parse_args()
+    parser.add_argument(
+        "--root",
+        default=".",
+        help="Allowed root for the domain specification (default: current directory)",
+    )
+    args = parser.parse_args(argv)
+    try:
+        root = resolve_root(args.root)
+        spec_path = resolve_under_root(args.spec_path, root, option="spec_path")
+    except PathPolicyError as exc:
+        parser.error(str(exc))
 
-    if not args.spec_path.exists():
-        print(f"Error: {args.spec_path} not found", file=sys.stderr)
+    if not spec_path.exists():
+        print(f"Error: {spec_path} not found", file=sys.stderr)
         sys.exit(1)
 
-    results, exit_code = validate_spec(args.spec_path, strict=args.strict)
+    results, exit_code = validate_spec(spec_path, strict=args.strict)
 
     if args.json_output:
-        output = {"results": results, "exit_code": exit_code, "spec_path": str(args.spec_path)}
+        output = {"results": results, "exit_code": exit_code, "spec_path": str(spec_path)}
         print(json.dumps(output, indent=2))
     else:
         status_emoji = {"PASS": "[PASS]", "FAIL": "[FAIL]", "WARN": "[WARN]"}

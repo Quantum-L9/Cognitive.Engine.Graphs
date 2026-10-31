@@ -28,6 +28,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from tools.path_policy import PathPolicyError, resolve_root, resolve_under_root
+
 CYPHER_SAFETY_MD = "CYPHER_SAFETY.md"
 BANNED_PATTERNS_MD = "BANNED_PATTERNS.md"
 SHARED_MODELS_MD = "SHARED_MODELS.md"
@@ -761,13 +767,28 @@ def scan_file(file_path: Path, content: str, root: Path) -> list[Violation]:
 
 
 def main() -> int:
-    root = Path.cwd()
+    root = resolve_root(Path.cwd())
     skip_dirs = {".venv", "venv", "__pycache__", ".git", "site-packages"}
     if len(sys.argv) > 1:
         # Pre-commit passes filenames
-        paths = [Path(p) for p in sys.argv[1:] if Path(p).suffix == ".py" and not any(s in str(p) for s in skip_dirs)]
+        paths: list[Path] = []
+        for raw_path in (Path(p) for p in sys.argv[1:]):
+            if raw_path.suffix != ".py" or any(part in skip_dirs for part in raw_path.parts):
+                continue
+            try:
+                paths.append(resolve_under_root(raw_path, root, option="pre-commit Python file"))
+            except PathPolicyError as exc:
+                print(f"Error: {exc}", file=sys.stderr)
+                return 2
     else:
-        paths = [p for p in root.rglob("*.py") if not any(s in str(p) for s in skip_dirs)]
+        paths = []
+        for discovered_path in root.rglob("*.py"):
+            if any(part in skip_dirs for part in discovered_path.parts):
+                continue
+            try:
+                paths.append(resolve_under_root(discovered_path, root, option="discovered Python file"))
+            except PathPolicyError:
+                continue
 
     all_violations: list[Violation] = []
     for path in paths:

@@ -42,6 +42,12 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from tools.path_policy import PathPolicyError, resolve_existing_file_under_root, resolve_root, resolve_under_root
+
 try:
     import yaml
 except ImportError:
@@ -378,7 +384,11 @@ def extract_research_features(root: Path) -> list[SpecFeature]:
     skipped and warned about — an unmapped pattern cannot be scanned for, so
     reporting it as MISSING would be indistinguishable from a genuine gap.
     """
-    path = root / RESEARCH_DIR / RESEARCH_PATTERNS_FILE
+    try:
+        path = resolve_under_root(root / RESEARCH_DIR / RESEARCH_PATTERNS_FILE, root, option="research patterns")
+    except PathPolicyError as exc:
+        print(f"WARNING: {exc}", file=sys.stderr)
+        return []
     if not path.exists():
         return []
 
@@ -456,8 +466,9 @@ def scan_codebase(root: Path, features: list[SpecFeature]) -> None:
         if ".venv" in py_file.parts or "__pycache__" in py_file.parts:
             continue
         try:
-            py_cache[str(py_file.relative_to(root))] = py_file.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+            safe_py_file = resolve_under_root(py_file, root, option="discovered Python file")
+            py_cache[str(py_file.relative_to(root))] = safe_py_file.read_text(encoding="utf-8", errors="replace")
+        except (OSError, PathPolicyError):
             # Unreadable file (permissions, transient IO): skip it and keep
             # scanning the rest of the tree.
             pass
@@ -466,8 +477,9 @@ def scan_codebase(root: Path, features: list[SpecFeature]) -> None:
         if ".venv" in yaml_file.parts:
             continue
         try:
-            yaml_cache[str(yaml_file.relative_to(root))] = yaml_file.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+            safe_yaml_file = resolve_under_root(yaml_file, root, option="discovered YAML file")
+            yaml_cache[str(yaml_file.relative_to(root))] = safe_yaml_file.read_text(encoding="utf-8", errors="replace")
+        except (OSError, PathPolicyError):
             # Unreadable file (permissions, transient IO): skip it and keep
             # scanning the rest of the tree.
             pass
@@ -580,7 +592,7 @@ def write_coverage_report(out_dir: Path, features: list[SpecFeature], matrix: di
     (out_dir / "coverage_report.md").write_text("\n".join(lines), encoding="utf-8")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="L9 Spec Coverage Extractor")
     parser.add_argument("--spec", default=None, help="Path to spec YAML (auto-detected if omitted)")
     parser.add_argument("--root", default=".", help="Repo root directory")
@@ -590,22 +602,43 @@ def main() -> int:
         choices=["MISSING", "PARTIAL", "NONE"],
         help="Exit 1 if any features have this status (or worse)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    root = Path(args.root).resolve()
-    out_dir = root / "artifacts"
+    try:
+        root = resolve_root(args.root)
+        out_dir = resolve_under_root("artifacts", root, option="artifact output directory")
+    except PathPolicyError as exc:
+        parser.error(str(exc))
 
-    spec_path = Path(args.spec) if args.spec else None
+    spec_path: Path | None = None
+    if args.spec:
+        try:
+            spec_path = resolve_existing_file_under_root(args.spec, root, option="--spec")
+        except PathPolicyError as exc:
+            parser.error(str(exc))
+        except OSError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
     if spec_path is None:
         candidates = list(root.glob("*spec*.yaml")) + list(root.glob("*spec*.yml"))
         if candidates:
-            spec_path = candidates[0]
+            try:
+                spec_path = resolve_existing_file_under_root(candidates[0], root, option="auto-detected spec")
+            except PathPolicyError as exc:
+                parser.error(str(exc))
+            except OSError as exc:
+                print(f"ERROR: {exc}", file=sys.stderr)
+                return 1
         else:
             print("ERROR: No spec YAML found. Use --spec path/to/spec.yaml", file=sys.stderr)
             return 2
 
     print(f"Loading spec: {spec_path}")
-    spec = load_yaml_file(spec_path)
+    try:
+        spec = load_yaml_file(spec_path)
+    except OSError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     features: list[SpecFeature] = []
     features += extract_gate_features(spec)

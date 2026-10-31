@@ -61,7 +61,7 @@ def test_cli_writes_deterministic_artifact(tmp_path: Path) -> None:
             }
         )
     )
-    rc = main(["--input", str(inp), "--output", str(out)])
+    rc = main(["--input", str(inp), "--output", str(out), "--root", str(tmp_path)])
     assert rc == 0
     data = json.loads(out.read_text())
     assert data["observational"] is True
