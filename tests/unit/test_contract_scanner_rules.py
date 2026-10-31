@@ -181,6 +181,20 @@ def test_del001_client_names_are_scoped_to_their_bindings(src: str) -> None:
     assert _rule_lines(src, "DEL-001") == []
 
 
+def test_del001_flags_nonlocal_client_binding() -> None:
+    src = (
+        "import httpx\n"
+        "def outer():\n"
+        "    client = None\n"
+        "    def init():\n"
+        "        nonlocal client\n"
+        "        client = httpx.Client()\n"
+        "    def call(u):\n"
+        "        return client.get(u)\n"
+    )
+    assert _rule_lines(src, "DEL-001") == [8]
+
+
 @pytest.mark.parametrize(
     "src",
     [
@@ -202,6 +216,17 @@ def test_del001_scoped_client_names_still_flag(src: str) -> None:
     lines = src.splitlines()
     expected = [i for i, line in enumerate(lines, start=1) if "client.get(" in line]
     assert _rule_lines(src, "DEL-001") == expected
+
+
+def test_del001_flags_attribute_client_bound_by_with() -> None:
+    src = (
+        "import httpx\n"
+        "class Api:\n"
+        "    def call(self, u):\n"
+        "        with httpx.Client() as self.client:\n"
+        "            return self.client.post(u)\n"
+    )
+    assert _rule_lines(src, "DEL-001") == [5]
 
 
 def test_del_rules_scoped_to_engine() -> None:
@@ -226,12 +251,64 @@ def test_unparsable_file_falls_back_to_line_regex() -> None:
     assert ("ARCH-001", 3) in hits
 
 
+def test_scan_file_parses_once_for_all_ast_rules(monkeypatch: pytest.MonkeyPatch) -> None:
+    parse_calls = 0
+    parse = cs.ast.parse
+
+    def count_parse(*args: object, **kwargs: object) -> object:
+        nonlocal parse_calls
+        parse_calls += 1
+        return parse(*args, **kwargs)
+
+    monkeypatch.setattr(cs.ast, "parse", count_parse)
+    src = "import yaml\nfrom fastapi import FastAPI\nimport httpx\nyaml.load(f)\nhttpx.get(u)\n"
+
+    cs.scan_file(Path("engine/x.py"), src, REPO)
+
+    assert parse_calls == 1
+
+
+def test_unparsable_file_respects_ast_rule_path_scope() -> None:
+    src = "def broken(:\nfrom fastapi import FastAPI\nimport httpx\nhttpx.get(u)\n"
+    assert _hits(src, path="tools/broken.py") == []
+
+
 def test_main_exits_one_on_violation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "engine").mkdir()
     (tmp_path / "engine" / "x.py").write_text("import fastapi\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cs.sys, "argv", ["contract_scanner.py"])
     assert cs.main() == 1
+
+
+def test_main_rejects_explicit_escape_without_scanning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    escaped = tmp_path / "outside.py"
+    escaped.write_text("eval('outside')\n", encoding="utf-8")
+    scanned: list[Path] = []
+    monkeypatch.chdir(root)
+    monkeypatch.setattr(cs.sys, "argv", ["contract_scanner.py", str(escaped)])
+    monkeypatch.setattr(cs, "scan_file", lambda path, text, scan_root: scanned.append(path) or [])
+
+    assert cs.main() == 2
+    assert scanned == []
+    assert "pre-commit Python file must stay under --root" in capsys.readouterr().err
+
+
+def test_main_skips_venv_during_default_discovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ignored = tmp_path / ".venv" / "lib" / "ignored.py"
+    ignored.parent.mkdir(parents=True)
+    ignored.write_text("eval('ignored')\n", encoding="utf-8")
+    scanned: list[Path] = []
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cs.sys, "argv", ["contract_scanner.py"])
+    monkeypatch.setattr(cs, "scan_file", lambda path, text, scan_root: scanned.append(path) or [])
+
+    assert cs.main() == 0
+    assert scanned == []
 
 
 # ── ERR-002 (RU-136, RG-172; DEC-51: enforced in engine/ only) ──────────────

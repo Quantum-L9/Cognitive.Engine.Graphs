@@ -93,6 +93,7 @@ import ast
 import re
 import string
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -133,13 +134,19 @@ MESSAGE_KWARGS = MESSAGE_NAMES | frozenset({"resource", "title", "gate_impact", 
 _LIMIT_SKIP_RE = re.compile(r"\b(?:LIMIT|SKIP)$")
 _WAIVER_RE = re.compile(r"#\s*cypher-lint:\s*allow\b\s*(?P<reason>.*)$")
 
-# Cypher-likeness of the literal text, interpolations replaced by "X".
-_CYPHER_TEXT_RE = re.compile(
+# Cypher-likeness of literal text, with interpolations replaced by "X". These
+# stay below the scanner's regex-alternation complexity threshold while keeping
+# the original alternatives and boundaries unchanged.
+_CYPHER_CLAUSE_RE = re.compile(
     r"\b(?:MATCH|MERGE|CREATE|DELETE|DETACH|SET|REMOVE|WHERE|WITH|RETURN|CALL|YIELD|UNWIND|LIMIT|SKIP"
-    r"|ORDER BY|UNION|FOREACH|EXISTS|OPTIONAL|CASE|WHEN|THEN|ELSE|END|AND|OR|NOT|XOR|IS NULL|IS NOT NULL"
-    r"|DISTINCT|coalesce|toFloat|toString|toInteger|datetime|duration|point)\b"
-    r"|-\[|\]->|<-\[|\bcandidate\.|\$query\.|\$X\b|\(\s*\w*\s*:\s*X"
+    r"|ORDER BY|UNION|FOREACH)\b"
 )
+_CYPHER_EXPRESSION_RE = re.compile(
+    r"\b(?:EXISTS|OPTIONAL|CASE|WHEN|THEN|ELSE|END|AND|OR|NOT|XOR|IS NULL|IS NOT NULL|DISTINCT"
+    r"|coalesce|toFloat|toString|toInteger|datetime)\b"
+)
+_CYPHER_FUNCTION_RE = re.compile(r"\b(?:duration|point)\b")
+_CYPHER_STRUCTURE_RE = re.compile(r"-\[|\]->|<-\[|\bcandidate\.|\$query\.|\$X\b|\(\s*\w*\s*:\s*X")
 _FRAGMENT_FUNC_RE = re.compile(
     r"compile|assemble|cypher|query|clause|predicate|fragment|expr|where|_ref$|_pattern|render|generate",
     re.IGNORECASE,
@@ -157,9 +164,10 @@ _CLAUSE_KEYWORD_RE = re.compile(
     r"\b(?:OPTIONAL MATCH|MATCH|MERGE|CREATE|DETACH DELETE|DELETE|SET|REMOVE|WHERE|WITH|RETURN|CALL|YIELD"
     r"|UNWIND|ORDER BY|FOREACH|UNION)\b"
 )
-_PERCENT_SPEC_RE = re.compile(
-    r"%(?:\((?P<key>[^)]*)\))?[#0\- +]*(?:\*|\d+)?(?:\.(?:\*|\d+))?[hlL]?(?P<conv>[diouxXeEfFgGcrsa%])"
-)
+# Anchored only at the already-located '%' prefix. Mapping keys are found with
+# a precomputed next-')' table below, so malformed '%(' prefixes cannot induce
+# the repeated whole-suffix backtracking of the former unanchored regex.
+_PERCENT_TAIL_RE = re.compile(r"[#0\- +]*(?:\*|\d+)?(?:\.(?:\*|\d+))?[hlL]?(?P<conv>[diouxXeEfFgGcrsa%])")
 _COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
 SINK_CALLS = frozenset({"execute_query", "execute_write", "run", "_raw_execute_query", "_raw_execute_write"})
 SINK_KWARGS = frozenset({"cypher", "query", "statement"})
@@ -546,6 +554,14 @@ def _looks_like_query(text: str) -> bool:
     return len(set(_CLAUSE_KEYWORD_RE.findall(text))) >= 2
 
 
+def _has_cypher_signal(text: str) -> bool:
+    """Whether text has any of the original Cypher keyword or structural signals."""
+    return any(
+        pattern.search(text)
+        for pattern in (_CYPHER_CLAUSE_RE, _CYPHER_EXPRESSION_RE, _CYPHER_FUNCTION_RE, _CYPHER_STRUCTURE_RE)
+    )
+
+
 def _is_diagnostic_use(use: ast.Name, parents: dict[ast.AST, ast.AST]) -> bool:
     """A read of a message name that only reaches ``raise`` / an exception or a logger call."""
     parent = parents.get(use)
@@ -611,7 +627,7 @@ def _is_message_context(node: ast.AST, parents: dict[ast.AST, ast.AST], text: st
 
 def _is_cypher_candidate(node: ast.AST, parents: dict[ast.AST, ast.AST], text: str) -> bool:
     """Does this string template build Cypher? Decided by its text *or* by where it flows."""
-    if _CYPHER_TEXT_RE.search(text):
+    if _has_cypher_signal(text):
         return True
     child: ast.AST = node
     while child in parents:
@@ -779,6 +795,48 @@ def _field_access(arg: ast.expr, access: str) -> ast.expr:
     return node
 
 
+def _next_closing_parens(text: str) -> list[int]:
+    """At each offset, the first later-or-current closing parenthesis, or ``-1``."""
+    next_closing = [-1] * (len(text) + 1)
+    closing = -1
+    for index in range(len(text) - 1, -1, -1):
+        if text[index] == ")":
+            closing = index
+        next_closing[index] = closing
+    return next_closing
+
+
+def _iter_percent_specs(fmt: str) -> Iterator[tuple[int, int, str | None, str]]:
+    """Yield ``(start, end, mapping_key, conversion)`` for valid percent specs in linear time.
+
+    This retains the former regex's recovery behavior: an invalid ``%`` is skipped
+    and a later percent may still begin a valid specification. The lookup table
+    prevents every unterminated mapping key from scanning the remaining suffix.
+    """
+    next_closing = _next_closing_parens(fmt)
+    search_from = 0
+    while (start := fmt.find("%", search_from)) != -1:
+        tail_start = start + 1
+        key_start: int | None = None
+        closing = -1
+        key: str | None = None
+        if tail_start < len(fmt) and fmt[tail_start] == "(":
+            closing = next_closing[tail_start]
+            if closing == -1:
+                search_from = start + 1
+                continue
+            key_start = tail_start + 1
+            tail_start = closing + 1
+        if match := _PERCENT_TAIL_RE.match(fmt, tail_start):
+            end = match.end()
+            if key_start is not None:
+                key = fmt[key_start:closing]
+            yield start, end, key, match.group("conv")
+            search_from = end
+        else:
+            search_from = start + 1
+
+
 def _percent_template(node: ast.BinOp) -> _Template | None:
     fmt = _str_value(node.left)
     if fmt is None:
@@ -788,15 +846,14 @@ def _percent_template(node: ast.BinOp) -> _Template | None:
     text: str = ""
     parts: list[tuple[str, ast.expr]] = []
     pos, index = 0, 0
-    for match in _PERCENT_SPEC_RE.finditer(fmt):
-        literal = fmt[pos : match.start()]
+    for start, end, key, conversion in _iter_percent_specs(fmt):
+        literal = fmt[pos:start]
         text += literal
-        pos = match.end()
-        if match.group("conv") == "%":
+        pos = end
+        if conversion == "%":
             text += "%"
             continue
         text += "X"
-        key = match.group("key")
         args: list[ast.expr]
         if key is not None:
             # A literal dict, or a runtime mapping (`% params`) read as params[key].

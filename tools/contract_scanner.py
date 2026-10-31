@@ -26,6 +26,7 @@ import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
@@ -232,6 +233,14 @@ def _end(node: ast.AST) -> tuple[int, int]:
     return (getattr(node, "end_lineno", None) or 0, getattr(node, "end_col_offset", None) or 0)
 
 
+def _parent_map(tree: ast.Module) -> dict[ast.AST, ast.AST]:
+    parents: dict[ast.AST, ast.AST] = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+    return parents
+
+
 class _ClientNames:
     """Which name uses refer to an HTTP client object, by lexical scope and assignment flow.
 
@@ -246,26 +255,32 @@ class _ClientNames:
     """
 
     def __init__(self, tree: ast.Module, is_factory: Callable[[ast.expr], bool]) -> None:
-        self._parents: dict[ast.AST, ast.AST] = {}
-        for parent in ast.walk(tree):
-            for child in ast.iter_child_nodes(parent):
-                self._parents[child] = parent
+        self._parents = _parent_map(tree)
         self._module = tree
         self._bindings: dict[ast.AST, dict[str, list[_NameBinding]]] = {}
         self._declared: dict[ast.AST, dict[str, str]] = {}  # scope -> {name: "global" | "nonlocal"}
+        self._collect_declarations(tree)
+        self._collect_bindings(tree, is_factory)
+
+    def _collect_declarations(self, tree: ast.Module) -> None:
         for node in ast.walk(tree):
             if isinstance(node, ast.Global | ast.Nonlocal):
                 kind = "global" if isinstance(node, ast.Global) else "nonlocal"
                 declared = self._declared.setdefault(self._scope_of(node), {})
                 declared.update(dict.fromkeys(node.names, kind))
+
+    def _collect_bindings(self, tree: ast.Module, is_factory: Callable[[ast.expr], bool]) -> None:
         for node in ast.walk(tree):
             if isinstance(node, _FUNCTION_SCOPES):
-                args = node.args
-                for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]:
-                    if arg is not None:
-                        self._add(node, arg.arg, _NameBinding(None, (0, 0), is_client=False))
+                self._bind_parameters(node)
             elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
                 self._bind_store(node, is_factory)
+
+    def _bind_parameters(self, function: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda) -> None:
+        args = function.args
+        for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]:
+            if arg is not None:
+                self._add(function, arg.arg, _NameBinding(None, (0, 0), is_client=False))
 
     def _scope_of(self, node: ast.AST) -> ast.AST:
         current = self._parents.get(node)
@@ -375,52 +390,81 @@ class _ClientNames:
         return any(b.is_client for b in [*reaching, *foreign])
 
 
+def _is_client_factory_call(
+    node: ast.expr,
+    *,
+    modules: set[str],
+    members: dict[str, str],
+    client_factories: frozenset[str],
+) -> bool:
+    return isinstance(node, ast.Call) and _is_member_ref(node.func, modules, members, client_factories)
+
+
+def _attribute_clients(tree: ast.Module, is_factory: Callable[[ast.expr], bool]) -> set[str]:
+    attr_clients: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign | ast.AnnAssign) and node.value is not None:
+            if is_factory(node.value):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                attr_clients.update(ast.unparse(target) for target in targets if not isinstance(target, ast.Name))
+        elif isinstance(node, ast.With | ast.AsyncWith):
+            for item in node.items:
+                target = item.optional_vars
+                if target is not None and not isinstance(target, ast.Name) and is_factory(item.context_expr):
+                    attr_clients.add(ast.unparse(target))
+    return attr_clients
+
+
+def _is_http_client_method_call(
+    call: ast.Call,
+    names: _ClientNames,
+    attr_clients: set[str],
+    is_factory: Callable[[ast.expr], bool],
+) -> bool:
+    func = call.func
+    if not (isinstance(func, ast.Attribute) and func.attr in _HTTP_METHODS):
+        return False
+    receiver = func.value
+    if isinstance(receiver, ast.Name):
+        return names.is_client(receiver)
+    return is_factory(receiver) or ast.unparse(receiver) in attr_clients
+
+
+def _http_call_lines(
+    tree: ast.Module,
+    modules: set[str],
+    members: dict[str, str],
+    is_factory: Callable[[ast.expr], bool],
+) -> list[int]:
+    names = _ClientNames(tree, is_factory)
+    attr_clients = _attribute_clients(tree, is_factory)
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if _is_member_ref(node.func, modules, members, _HTTP_METHODS) or _is_http_client_method_call(
+            node, names, attr_clients, is_factory
+        ):
+            lines.append(node.lineno)
+    return lines
+
+
+def _check_http_calls(tree: ast.Module, *, module: str, client_factories: frozenset[str]) -> list[int]:
+    modules, members = _module_aliases(tree, module)
+    if not modules and not members:
+        return []
+    is_factory = partial(
+        _is_client_factory_call,
+        modules=modules,
+        members=members,
+        client_factories=client_factories,
+    )
+    return _http_call_lines(tree, modules, members, is_factory)
+
+
 def _http_call_check(module: str, client_factories: frozenset[str]) -> AstCheck:
     """Raw HTTP via *module*: module-level calls, imported functions, and calls on client objects."""
-
-    def check(tree: ast.Module) -> list[int]:
-        modules, members = _module_aliases(tree, module)
-        if not modules and not members:
-            return []
-
-        def is_client_factory_call(node: ast.expr) -> bool:
-            return isinstance(node, ast.Call) and _is_member_ref(node.func, modules, members, client_factories)
-
-        # Client-bound names are resolved by lexical scope and assignment flow
-        # (``_ClientNames``); other client-bound expressions — object state such
-        # as ``self.c = httpx.Client()`` — stay module-wide.
-        names = _ClientNames(tree, is_client_factory_call)
-        attr_clients: set[str] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Assign | ast.AnnAssign) and node.value is not None:
-                if is_client_factory_call(node.value):
-                    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                    attr_clients.update(ast.unparse(t) for t in targets if not isinstance(t, ast.Name))
-            elif isinstance(node, ast.With | ast.AsyncWith):
-                for item in node.items:
-                    target = item.optional_vars
-                    if target is not None and not isinstance(target, ast.Name):
-                        if is_client_factory_call(item.context_expr):
-                            attr_clients.add(ast.unparse(target))
-
-        lines: list[int] = []
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            if _is_member_ref(func, modules, members, _HTTP_METHODS):
-                lines.append(node.lineno)
-            elif isinstance(func, ast.Attribute) and func.attr in _HTTP_METHODS:
-                receiver = func.value
-                if isinstance(receiver, ast.Name):
-                    is_client = names.is_client(receiver)
-                else:
-                    is_client = is_client_factory_call(receiver) or ast.unparse(receiver) in attr_clients
-                if is_client:
-                    lines.append(node.lineno)
-        return lines
-
-    return check
+    return partial(_check_http_calls, module=module, client_factories=client_factories)
 
 
 RULES: list[dict] = [
@@ -702,6 +746,7 @@ RULES: list[dict] = [
 ]
 
 SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2}
+_SKIP_DIRS = frozenset({".venv", "venv", "__pycache__", ".git", "site-packages"})
 
 
 def _path_matches_rule(file_path: Path, rule: dict) -> bool:
@@ -766,30 +811,33 @@ def scan_file(file_path: Path, content: str, root: Path) -> list[Violation]:
     return violations
 
 
-def main() -> int:
-    root = resolve_root(Path.cwd())
-    skip_dirs = {".venv", "venv", "__pycache__", ".git", "site-packages"}
-    if len(sys.argv) > 1:
-        # Pre-commit passes filenames
-        paths: list[Path] = []
-        for raw_path in (Path(p) for p in sys.argv[1:]):
-            if raw_path.suffix != ".py" or any(part in skip_dirs for part in raw_path.parts):
-                continue
-            try:
-                paths.append(resolve_under_root(raw_path, root, option="pre-commit Python file"))
-            except PathPolicyError as exc:
-                print(f"Error: {exc}", file=sys.stderr)
-                return 2
-    else:
-        paths = []
-        for discovered_path in root.rglob("*.py"):
-            if any(part in skip_dirs for part in discovered_path.parts):
-                continue
-            try:
-                paths.append(resolve_under_root(discovered_path, root, option="discovered Python file"))
-            except PathPolicyError:
-                continue
+def _is_scannable_python(path: Path) -> bool:
+    return path.suffix == ".py" and not any(part in _SKIP_DIRS for part in path.parts)
 
+
+def _explicit_python_paths(raw_paths: list[str], root: Path) -> list[Path]:
+    """Resolve pre-commit paths, preserving fail-fast policy errors."""
+    paths: list[Path] = []
+    for raw_path in map(Path, raw_paths):
+        if _is_scannable_python(raw_path):
+            paths.append(resolve_under_root(raw_path, root, option="pre-commit Python file"))
+    return paths
+
+
+def _discovered_python_paths(root: Path) -> list[Path]:
+    """Resolve discovered Python files, skipping entries that escape through links."""
+    paths: list[Path] = []
+    for discovered_path in root.rglob("*.py"):
+        if not _is_scannable_python(discovered_path):
+            continue
+        try:
+            paths.append(resolve_under_root(discovered_path, root, option="discovered Python file"))
+        except PathPolicyError:
+            continue
+    return paths
+
+
+def _scan_paths(paths: list[Path], root: Path) -> list[Violation]:
     all_violations: list[Violation] = []
     for path in paths:
         if not path.is_file():
@@ -799,13 +847,14 @@ def main() -> int:
         except OSError:
             continue
         all_violations.extend(scan_file(path, text, root))
+    return all_violations
 
+
+def _report_violations(all_violations: list[Violation]) -> int:
     all_violations.sort(key=lambda v: (SEVERITY_ORDER.get(v.severity, 99), v.file, v.line))
-
     if not all_violations:
         print("L9 contract scan: no violations.")
         return 0
-
     print("L9 Contract Violations (commit/merge blocked):\n", file=sys.stderr)
     for v in all_violations:
         print(
@@ -817,6 +866,16 @@ def main() -> int:
         file=sys.stderr,
     )
     return 1
+
+
+def main() -> int:
+    root = resolve_root(Path.cwd())
+    try:
+        paths = _explicit_python_paths(sys.argv[1:], root) if len(sys.argv) > 1 else _discovered_python_paths(root)
+    except PathPolicyError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+    return _report_violations(_scan_paths(paths, root))
 
 
 if __name__ == "__main__":
