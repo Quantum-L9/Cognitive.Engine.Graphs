@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -308,6 +309,175 @@ class TestCircuitBreaker:
         assert metrics.total_successes == 0
 
 
+async def _hang() -> None:
+    """A call that never completes on its own (Neo4j connection-acquisition stall)."""
+    await asyncio.sleep(60)
+
+
+class TestCircuitBreakerCancelledProbes:
+    """RU-094 / CEG-COR-035: a cancelled HALF_OPEN probe returns its slot.
+
+    The SDK runtime wraps every handler in ``asyncio.wait_for``; a probe that
+    outlives the packet timeout is cancelled inside ``CircuitBreaker.call``.
+    Before the fix the slot was never returned, so after half_open_max_calls
+    cancellations the breaker rejected every call until process restart.
+    """
+
+    async def _tripped(self, half_open_max_calls: int = 3) -> Any:
+        from engine.graph.circuit_breaker import BreakerState, CircuitBreaker
+
+        cb = CircuitBreaker(
+            name="test",
+            failure_threshold=1,
+            recovery_timeout=0.0,
+            half_open_max_calls=half_open_max_calls,
+        )
+        with pytest.raises(RuntimeError):
+            await cb.call(AsyncMock(side_effect=RuntimeError("down")))
+        assert cb.state == BreakerState.OPEN
+        return cb
+
+    @pytest.mark.asyncio
+    async def test_cancelled_probes_release_slots_and_breaker_recovers(self) -> None:
+        from engine.graph.circuit_breaker import BreakerState
+
+        cb = await self._tripped()
+        for _ in range(3):
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(cb.call(_hang), timeout=0.01)
+
+        assert cb.state == BreakerState.HALF_OPEN
+        assert cb._half_open_calls == 0
+        # No failure/success was recorded for the cancelled probes.
+        assert cb.get_metrics().total_failures == 1
+        assert cb.get_metrics().total_successes == 0
+
+        assert await cb.call(AsyncMock(return_value="ok")) == "ok"
+        assert cb.state == BreakerState.CLOSED
+
+    @pytest.mark.asyncio
+    async def test_cancellation_propagates_to_caller(self) -> None:
+        cb = await self._tripped()
+        task = asyncio.ensure_future(cb.call(_hang))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert cb._half_open_calls == 0
+
+    @pytest.mark.asyncio
+    async def test_stale_probe_does_not_decrement_new_cycle(self) -> None:
+        """A probe from cycle N cancelled during cycle N+1 leaves N+1's counter alone."""
+        from engine.graph.circuit_breaker import BreakerState
+
+        cb = await self._tripped()
+        stale = asyncio.ensure_future(cb.call(_hang))
+        await asyncio.sleep(0)
+        assert cb._half_open_calls == 1
+
+        # A second probe of the same cycle fails: HALF_OPEN -> OPEN.
+        with pytest.raises(RuntimeError):
+            await cb.call(AsyncMock(side_effect=RuntimeError("still down")))
+        assert cb.state == BreakerState.OPEN
+
+        # recovery_timeout=0: the next call opens a new HALF_OPEN cycle.
+        fresh = asyncio.ensure_future(cb.call(_hang))
+        await asyncio.sleep(0)
+        assert cb.state == BreakerState.HALF_OPEN
+        assert cb._half_open_calls == 1
+
+        stale.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await stale
+        assert cb._half_open_calls == 1, "stale probe decremented the new cycle's counter"
+
+        fresh.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await fresh
+        assert cb._half_open_calls == 0
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("outcome", ["success", "failure"])
+    async def test_cancel_while_recording_outcome_releases_slot(self, outcome: str) -> None:
+        """A probe cancelled while _on_success/_on_failure waits on the lock returns its slot."""
+        from engine.graph.circuit_breaker import BreakerState
+
+        cb = await self._tripped(half_open_max_calls=1)
+        entered, finish = asyncio.Event(), asyncio.Event()
+
+        async def _probe() -> str:
+            entered.set()
+            await finish.wait()
+            if outcome == "failure":
+                raise RuntimeError("probe failed")
+            return "ok"
+
+        task = asyncio.ensure_future(cb.call(_probe))
+        await entered.wait()
+        await cb._lock.acquire()  # the outcome recorder will block on this
+        try:
+            finish.set()
+            for _ in range(5):
+                await asyncio.sleep(0)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            cb._lock.release()
+        assert cb.state == BreakerState.HALF_OPEN
+        assert cb._half_open_calls == 0
+        assert await cb.call(AsyncMock(return_value="ok")) == "ok"
+        assert cb.state == BreakerState.CLOSED
+
+    @pytest.mark.asyncio
+    async def test_concurrent_probes_still_bounded(self) -> None:
+        from engine.graph.circuit_breaker import CircuitOpenError
+
+        cb = await self._tripped(half_open_max_calls=3)
+        probes = [asyncio.ensure_future(cb.call(_hang)) for _ in range(5)]
+        await asyncio.sleep(0)
+        rejected = [p for p in probes if p.done() and isinstance(p.exception(), CircuitOpenError)]
+        assert len(rejected) == 2
+        assert cb._half_open_calls == 3
+        for p in probes:
+            p.cancel()
+        await asyncio.gather(*probes, return_exceptions=True)
+        assert cb._half_open_calls == 0
+
+    @pytest.mark.asyncio
+    async def test_closed_state_cancellation_changes_no_counters(self) -> None:
+        from engine.graph.circuit_breaker import BreakerState, CircuitBreaker
+
+        cb = CircuitBreaker(name="test", failure_threshold=3)
+        for _ in range(10):
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(cb.call(_hang), timeout=0.001)
+        m = cb.get_metrics()
+        assert cb.state == BreakerState.CLOSED
+        assert m.consecutive_failures == 0
+        assert m.total_failures == 0
+        assert cb._half_open_calls == 0
+
+    @pytest.mark.asyncio
+    async def test_flag_off_keeps_legacy_slot_accounting(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+        from engine.graph.circuit_breaker import CircuitOpenError
+
+        monkeypatch.setattr(settings, "neo4j_circuit_release_cancelled_probes", False)
+        cb = await self._tripped()
+        for _ in range(3):
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(cb.call(_hang), timeout=0.01)
+        assert cb._half_open_calls == 3
+        with pytest.raises(CircuitOpenError):
+            await cb.call(AsyncMock(return_value="ok"))
+
+    def test_flag_default_on(self) -> None:
+        from engine.config.settings import Settings
+
+        assert Settings().neo4j_circuit_release_cancelled_probes is True
+
+
 # ---------------------------------------------------------------------------
 # W4-03: DomainPackLoader Async TTL Cache Tests
 # ---------------------------------------------------------------------------
@@ -544,6 +714,192 @@ class TestGraphDriverCircuitBreaker:
         # Next call should be rejected by circuit breaker
         with pytest.raises(CircuitOpenError):
             await driver.execute_query("RETURN 1", database="neo4j")
+
+
+def _driver_with_session_errors(errors: dict[str, BaseException | None]) -> Any:
+    """GraphDriver whose session.run raises errors[database] (None = returns)."""
+    from engine.graph.driver import GraphDriver
+
+    driver = GraphDriver(uri="bolt://localhost:7687")
+    driver._driver = MagicMock()
+
+    def _session(database: str) -> Any:
+        session = AsyncMock()
+        error = errors.get(database)
+        if error is not None:
+            session.run = AsyncMock(side_effect=error)
+        else:
+            result = AsyncMock()
+            result.data = AsyncMock(return_value=[{"ok": 1}])
+            session.run = AsyncMock(return_value=result)
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=session)
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        return ctx
+
+    driver._driver.session.side_effect = _session
+    return driver
+
+
+class TestBreakerFailureClassification:
+    """RU-093 / CEG-COR-034: client errors do not trip the process-wide breaker."""
+
+    @pytest.mark.asyncio
+    async def test_classifier_neutral_errors_do_not_count(self) -> None:
+        from engine.graph.circuit_breaker import BreakerState, CircuitBreaker
+
+        cb = CircuitBreaker(
+            name="test",
+            failure_threshold=2,
+            is_failure=lambda exc: not isinstance(exc, ValueError),
+        )
+        with pytest.raises(RuntimeError):
+            await cb.call(AsyncMock(side_effect=RuntimeError("infra")))
+        for _ in range(5):
+            with pytest.raises(ValueError):
+                await cb.call(AsyncMock(side_effect=ValueError("client")))
+        m = cb.get_metrics()
+        assert cb.state == BreakerState.CLOSED
+        # Neutral: the streak is neither incremented nor reset.
+        assert m.consecutive_failures == 1
+        assert m.total_failures == 1
+        assert m.total_neutral_errors == 5
+        assert m.to_dict()["total_neutral_errors"] == 5
+        with pytest.raises(RuntimeError):
+            await cb.call(AsyncMock(side_effect=RuntimeError("infra")))
+        assert cb.state == BreakerState.OPEN
+
+    @pytest.mark.asyncio
+    async def test_neutral_error_releases_half_open_slot(self) -> None:
+        from engine.graph.circuit_breaker import BreakerState, CircuitBreaker
+
+        cb = CircuitBreaker(
+            name="test",
+            failure_threshold=1,
+            recovery_timeout=0.0,
+            half_open_max_calls=1,
+            is_failure=lambda exc: not isinstance(exc, ValueError),
+        )
+        with pytest.raises(RuntimeError):
+            await cb.call(AsyncMock(side_effect=RuntimeError("infra")))
+        for _ in range(3):
+            with pytest.raises(ValueError):
+                await cb.call(AsyncMock(side_effect=ValueError("client")))
+            assert cb.state == BreakerState.HALF_OPEN
+            assert cb._half_open_calls == 0
+        assert await cb.call(AsyncMock(return_value="ok")) == "ok"
+        assert cb.state == BreakerState.CLOSED
+
+    @pytest.mark.asyncio
+    async def test_driver_client_errors_leave_breaker_closed(self) -> None:
+        import neo4j.exceptions as nx
+
+        from engine.config.settings import settings
+        from engine.graph.circuit_breaker import BreakerState
+
+        threshold = settings.neo4j_circuit_threshold
+        client_error = nx.ClientError("Cannot merge the following node because of null property value")
+        driver = _driver_with_session_errors({"tenant-a": client_error, "tenant-b": None})
+        for _ in range(threshold + 5):
+            with pytest.raises(nx.ClientError) as raised:
+                await driver.execute_query("MERGE (n:X {id: $id})", {"id": None}, database="tenant-a")
+            assert raised.value is client_error
+        assert driver.circuit_breaker.state == BreakerState.CLOSED
+        assert await driver.execute_query("RETURN 1", database="tenant-b") == [{"ok": 1}]
+
+    @pytest.mark.asyncio
+    async def test_driver_infrastructure_errors_still_open_breaker(self) -> None:
+        import neo4j.exceptions as nx
+
+        from engine.config.settings import settings
+        from engine.graph.circuit_breaker import BreakerState, CircuitOpenError
+
+        driver = _driver_with_session_errors(
+            {"tenant-a": nx.ClientError("syntax"), "tenant-b": nx.ServiceUnavailable("Couldn't connect")}
+        )
+        for _ in range(settings.neo4j_circuit_threshold + 5):
+            with pytest.raises(nx.ClientError):
+                await driver.execute_query("RETURN", database="tenant-a")
+        assert driver.circuit_breaker.state == BreakerState.CLOSED
+        for _ in range(settings.neo4j_circuit_threshold):
+            with pytest.raises(nx.ServiceUnavailable):
+                await driver.execute_query("RETURN 1", database="tenant-b")
+        assert driver.circuit_breaker.state == BreakerState.OPEN
+        with pytest.raises(CircuitOpenError):
+            await driver.execute_query("RETURN 1", database="tenant-a")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("error_name", ["AuthError", "TokenExpired", "Forbidden"])
+    async def test_driver_credential_errors_open_breaker(self, error_name: str) -> None:
+        """Owner decision 2026-10-29: credential ClientErrors are breaker failures."""
+        import neo4j.exceptions as nx
+
+        from engine.config.settings import settings
+        from engine.graph.circuit_breaker import BreakerState
+
+        error_cls = getattr(nx, error_name)
+        assert issubclass(error_cls, nx.ClientError)
+        driver = _driver_with_session_errors({"tenant-a": error_cls("credentials rejected")})
+        for _ in range(settings.neo4j_circuit_threshold):
+            with pytest.raises(error_cls):
+                await driver.execute_query("RETURN 1", database="tenant-a")
+        assert driver.circuit_breaker.state == BreakerState.OPEN
+        assert driver.circuit_breaker.get_metrics().total_neutral_errors == 0
+
+    @pytest.mark.parametrize(
+        ("error_name", "counts"),
+        [
+            ("AuthError", True),
+            ("TokenExpired", True),
+            ("Forbidden", True),
+            ("ClientError", False),
+            ("CypherSyntaxError", False),
+            ("CypherTypeError", False),
+            ("ConstraintError", False),
+        ],
+    )
+    def test_classifier_credential_carve_out(self, error_name: str, counts: bool) -> None:
+        import neo4j.exceptions as nx
+
+        from engine.graph.driver import _is_breaker_failure
+
+        assert _is_breaker_failure(getattr(nx, error_name)("x")) is counts
+
+    @pytest.mark.asyncio
+    async def test_absent_database_client_error_still_translated(self) -> None:
+        import neo4j.exceptions as nx
+
+        from engine.graph.circuit_breaker import BreakerState
+        from engine.graph.driver import DatabaseNotProvisionedError
+
+        driver = _driver_with_session_errors(
+            {"tenant-a": nx.ClientError("Database does not exist. Database name: 'tenant-a'.")}
+        )
+        for _ in range(10):
+            with pytest.raises(DatabaseNotProvisionedError, match="tenant-a"):
+                await driver.execute_query("RETURN 1", database="tenant-a")
+        assert driver.circuit_breaker.state == BreakerState.CLOSED
+
+    @pytest.mark.asyncio
+    async def test_flag_off_counts_client_errors(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import neo4j.exceptions as nx
+
+        from engine.config.settings import settings
+        from engine.graph.circuit_breaker import BreakerState, CircuitOpenError
+
+        monkeypatch.setattr(settings, "neo4j_circuit_ignore_client_errors", False)
+        driver = _driver_with_session_errors({"tenant-a": nx.ClientError("null MERGE key"), "tenant-b": None})
+        for _ in range(settings.neo4j_circuit_threshold):
+            with pytest.raises(nx.ClientError):
+                await driver.execute_query("MERGE (n:X {id: $id})", {"id": None}, database="tenant-a")
+        assert driver.circuit_breaker.state == BreakerState.OPEN
+        with pytest.raises(CircuitOpenError):
+            await driver.execute_query("RETURN 1", database="tenant-b")
+
+    def test_flag_default_on(self) -> None:
+        from engine.config.settings import Settings
+
+        assert Settings().neo4j_circuit_ignore_client_errors is True
 
 
 # ---------------------------------------------------------------------------

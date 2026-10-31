@@ -35,7 +35,7 @@ from engine.config.schema import (
     PropertySpec,
     PropertyType,
 )
-from engine.intake.crm_field_scanner import scan_crm_fields
+from engine.intake.crm_field_scanner import _gate_critical_fields, _scoring_weight_map, scan_crm_fields
 from engine.intake.intake_schema import (
     FieldMapping,
     FieldOrigin,
@@ -145,6 +145,13 @@ def compile_intake(
 
     matched_names = {m.canonical_name for m in scan.matched}
 
+    # Gate/scoring metadata for vertical and derived mappings comes from the
+    # same spec-derived sets the scanner applies to customer fields
+    # (CEG-COR-103); otherwise an already-gated or already-scored field is
+    # re-proposed because its mapping origin is not customer_provided.
+    gate_critical = _gate_critical_fields(spec.gates)
+    scoring_weights = _scoring_weight_map(spec)
+
     # Phase 2: Vertical discovery (vertical_standard) — keyword table is the caller's
     vertical = discover_vertical_fields(
         business_profile, spec=spec, domains_dir=domains_dir, vertical_keywords=vertical_keywords
@@ -160,6 +167,8 @@ def compile_intake(
                     canonical_name=field_name,
                     origin=FieldOrigin.VERTICAL_STANDARD,
                     node_label=node_label,
+                    is_gate_critical=field_name in gate_critical,
+                    scoring_weight=scoring_weights.get(field_name, 0.0),
                 )
                 vertical_additions.append(mapping)
                 field_origins[field_name] = FieldOrigin.VERTICAL_STANDARD
@@ -181,6 +190,8 @@ def compile_intake(
                         origin=FieldOrigin.L9_ENRICHABLE,
                         node_label=node_label,
                         derived_from=list(sources),
+                        is_gate_critical=target in gate_critical,
+                        scoring_weight=scoring_weights.get(target, 0.0),
                     )
                     enrichable_additions.append(mapping)
                     field_origins[target] = FieldOrigin.L9_ENRICHABLE

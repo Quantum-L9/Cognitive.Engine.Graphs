@@ -15,16 +15,26 @@ Validates L9_API_KEY from Authorization header on all routes except
 health endpoints. Single-token model: one key in AWS Secrets Manager,
 one consumer (Clawdbot).
 
-Wave 3 (W3-01): Extends with tenant authorization enforcement.
-- Extracts ``allowed_tenants`` claim from JWT payload in Authorization header
-- Compares request tenant against allowed_tenants; returns 403 if not present
-- TENANT_AUTH_ENABLED flag (default True) — when False, skip check for transition
+Wave 3 (W3-01): tenant authorization.
+- This middleware extracts the ``allowed_tenants`` claim from the JWT payload
+  in the Authorization header onto ``request.state`` (it cannot read the body
+  without consuming it)
+- The legacy execute route (``chassis.chassis_app._enforce_token_tenant``)
+  compares the parsed request tenant with that claim and returns 403 when it
+  is not present (RU-082)
+- TENANT_AUTH_ENABLED flag (default True) — when False, neither step runs
 - TENANT_AUTH_BYPASS_KEY env var for service-to-service calls (X-Internal-Bypass-Key header)
 
-Consumes:
-- engine.config.settings.settings.l9_api_key (from L9_API_KEY env var)
-- engine.config.settings.settings.tenant_auth_enabled (W3-01)
-- engine.config.settings.settings.tenant_auth_bypass_key (W3-01)
+Registration (RU-082): ``chassis.chassis_app.create_app`` (the legacy,
+dev/test-only chassis) adds this middleware when ``L9_API_KEY``
+(``ChassisSettings.l9_api_key``) is configured and
+``settings.legacy_chassis_auth_enabled`` is on. The SDK chassis
+(``chassis/node_app.py``) does not use it.
+
+Consumes (constructor arguments, supplied by create_app):
+- api_key: ChassisSettings.l9_api_key (L9_API_KEY env var)
+- tenant_auth_enabled: engine.config.settings.settings.tenant_auth_enabled (W3-01)
+- tenant_auth_bypass_key: engine.config.settings.settings.tenant_auth_bypass_key (W3-01)
 
 Security model:
 - Bearer token comparison uses hmac.compare_digest (timing-safe)
@@ -102,7 +112,8 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
     All other paths require: Authorization: Bearer <token>
 
     W3-01: When tenant_auth_enabled is True, extracts ``allowed_tenants``
-    from the JWT payload and compares against the request tenant.
+    from the JWT payload onto ``request.state``; the execute route compares it
+    with the request tenant (403 on mismatch).
 
     Responses:
         401 - Missing or malformed Authorization header
@@ -222,10 +233,9 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
                 request.state.jwt_claims = claims
                 request.state.allowed_tenants = allowed_tenants
 
-                # For POST requests, try to read tenant from cached body
-                # The actual tenant check is deferred to the handler layer
-                # because reading the body here would consume it.
-                # Instead, we store allowed_tenants on request.state and
-                # the execute route checks it after parsing the body.
+                # Reading the body here would consume it, so the comparison
+                # with the request tenant is made by the legacy execute route
+                # after it parses ExecuteRequest:
+                # chassis.chassis_app._enforce_token_tenant (RU-082).
 
         return await call_next(request)

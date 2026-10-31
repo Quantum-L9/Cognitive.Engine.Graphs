@@ -14,6 +14,8 @@ Unit tests for engine/intake — CRM-to-YAML pipeline + impact reporter.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from engine.config.schema import (
@@ -279,6 +281,69 @@ class TestIntakeCompiler:
         assert isinstance(result, IntakeResult)
         assert result.scan.coverage_pct == 0.0
 
+    # -- RU-116 / CEG-COR-103: gate/scoring metadata comes from the spec for every mapping --
+
+    @pytest.mark.finding("CEG-COR-103")
+    def test_vertical_additions_keep_gate_and_scoring_metadata(self) -> None:
+        import yaml
+
+        from engine.config.loader import DomainPackLoader
+
+        spec = DomainPackLoader().load_domain("plasticos")
+        result = compile_intake(
+            ["facility_id", "name"],
+            "We are a plastics recycler",
+            spec,
+            vertical_keywords={"plastics": "plasticos"},
+        )
+        parsed = yaml.safe_load(result.domain_spec_yaml)
+        proposed_gates = {p["field"] for p in parsed.get("gate_proposals", [])}
+        proposed_scoring = set(parsed.get("scoring_proposals", []))
+
+        for gated in ("min_density", "max_density", "contamination_tolerance", "food_grade_certified"):
+            assert gated not in proposed_gates, gated
+        assert "capacity_tons_month" not in proposed_gates
+        for scored in ("lat", "credit_score", "rate_per_ton"):
+            assert scored not in proposed_scoring, scored
+        # provenance labels unchanged; genuinely ungated/unscored fields still proposed
+        assert result.field_origins["min_density"] == FieldOrigin.VERTICAL_STANDARD
+        assert result.field_origins["facility_id"] == FieldOrigin.CUSTOMER_PROVIDED
+        assert "rate_confidence" in proposed_gates
+        facility_fields = {f["name"]: f for f in parsed["intake_compilation"]["nodes"]["Facility"]["fields"]}
+        assert facility_fields["min_density"]["gate_critical"] is True
+        assert facility_fields["credit_score"]["scoring_weight"] > 0
+
+    @pytest.mark.finding("CEG-COR-103")
+    def test_derived_additions_keep_gate_and_scoring_metadata(self, intake_spec: DomainSpec) -> None:
+        import yaml
+
+        result = compile_intake(
+            ["name"],
+            "Unknown",
+            intake_spec,
+            derivation_graph={"credit_score": ["name"], "min_density": ["name"]},
+        )
+        assert result.field_origins["credit_score"] == FieldOrigin.L9_ENRICHABLE
+        parsed = yaml.safe_load(result.domain_spec_yaml)
+        assert "credit_score" not in parsed.get("scoring_proposals", [])
+        assert "min_density" not in {p["field"] for p in parsed.get("gate_proposals", [])}
+
+    @pytest.mark.finding("CEG-COR-103")
+    def test_scanner_gate_set_includes_window_bounds(self) -> None:
+        from engine.intake.crm_field_scanner import _gate_critical_fields
+
+        gates = [
+            GateSpec(
+                name="window",
+                type=GateType.TEMPORALRANGE,
+                candidateprop_start="available_from",
+                candidateprop_end="available_until",
+                queryparam="pickup_date",
+            ),
+            GateSpec(name="density_range", type=GateType.RANGE, candidateprop_min="lo", candidateprop_max="hi"),
+        ]
+        assert _gate_critical_fields(gates) == {"available_from", "available_until", "lo", "hi"}
+
 
 # ── Impact Reporter Tests ─────────────────────────────────
 
@@ -371,6 +436,44 @@ class TestImpactReporter:
             for f in all_fields
         ]
         impact = analyse_impact(mappings, intake_spec)
+        assert impact.tier_recommendation == "autonomous"
+
+    # -- RU-117 / CEG-COR-104: coverage counts unique property names on both sides --
+
+    @pytest.mark.finding("CEG-COR-104")
+    def test_shared_property_name_full_coverage(self, intake_spec: DomainSpec) -> None:
+        nodes = list(intake_spec.ontology.nodes)
+        intake_node = nodes[1]
+        nodes[1] = intake_node.model_copy(
+            update={"properties": [*intake_node.properties, PropertySpec(name="lat", type=PropertyType.FLOAT)]}
+        )
+        spec = intake_spec.model_copy(update={"ontology": intake_spec.ontology.model_copy(update={"nodes": nodes})})
+        names = sorted({p.name for n in spec.ontology.nodes for p in n.properties})
+        mappings = [
+            FieldMapping(
+                crm_field_name=f, canonical_name=f, origin=FieldOrigin.CUSTOMER_PROVIDED, node_label="Facility"
+            )
+            for f in names
+        ]
+        impact = analyse_impact(mappings, spec)
+        assert impact.total_spec_fields == len(names)
+        assert impact.coverage_before == 100.0
+        assert impact.tier_recommendation == "autonomous"
+
+    @pytest.mark.finding("CEG-COR-104")
+    def test_every_plasticos_property_name_is_full_coverage(self) -> None:
+        from engine.config.loader import DomainPackLoader
+
+        spec = DomainPackLoader().load_domain("plasticos")
+        names = sorted({p.name for n in spec.ontology.nodes for p in n.properties})
+        mappings = [
+            FieldMapping(
+                crm_field_name=f, canonical_name=f, origin=FieldOrigin.CUSTOMER_PROVIDED, node_label="Facility"
+            )
+            for f in names
+        ]
+        impact = analyse_impact(mappings, spec)
+        assert impact.coverage_before == 100.0
         assert impact.tier_recommendation == "autonomous"
 
     def test_format_summary(self, intake_spec: DomainSpec) -> None:
@@ -513,3 +616,45 @@ class TestIntakeCompileHandlerValidation:
         }
         result = await handle_intake_compile("test-intake", payload)
         assert result["delivery_tier"]
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-105")
+class TestIntakeHandlersBindDomainToTenant:
+    """RU-118: payload.domain must equal the packet tenant on every intake handler (HEALTH-05 rule)."""
+
+    @pytest.fixture
+    def loader(self, intake_spec: DomainSpec) -> MagicMock:
+        from engine.intake import api
+
+        loader = MagicMock()
+        loader.load_domain.return_value = intake_spec
+        api.init_intake(loader)
+        return loader
+
+    @staticmethod
+    def _payloads() -> dict[str, dict[str, object]]:
+        return {
+            "handle_intake_scan": {"crm_fields": ["name"]},
+            "handle_intake_compile": {"crm_fields": ["name"], "business_profile": "a company"},
+            "handle_intake_report": {"entity_id": "e1", "crm_fields": ["name"]},
+        }
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("handler", ["handle_intake_scan", "handle_intake_compile", "handle_intake_report"])
+    async def test_foreign_domain_rejected_before_any_load(self, loader: MagicMock, handler: str) -> None:
+        from engine.intake import api
+
+        payload = {**self._payloads()[handler], "domain": "other"}
+        with pytest.raises(ValueError, match="does not match the packet tenant"):
+            await getattr(api, handler)("plasticos", payload)
+        assert loader.load_domain.call_count == 0
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("handler", ["handle_intake_scan", "handle_intake_compile", "handle_intake_report"])
+    async def test_absent_or_matching_domain_reads_the_tenant(self, loader: MagicMock, handler: str) -> None:
+        from engine.intake import api
+
+        await getattr(api, handler)("plasticos", self._payloads()[handler])
+        await getattr(api, handler)("plasticos", {**self._payloads()[handler], "domain": "plasticos"})
+        assert [c.args[0] for c in loader.load_domain.call_args_list] == ["plasticos", "plasticos"]
