@@ -23,13 +23,25 @@ reaches Neo4j, so there is no runtime path that can leak the factor.
 
 `ProhibitedFactorValidator` (`engine/compliance/prohibited_factors.py`) is constructed
 from `domain_spec.compliance.prohibitedfactors` and owns a `blocked_fields` set.
-`ComplianceEngine` (`engine/compliance/engine.py`) calls it on three surfaces:
+`ComplianceEngine` (`engine/compliance/engine.py`) calls it on these surfaces, before any
+Cypher is compiled or executed (`handle_match` before the match query, `handle_sync`
+before the sync query):
 
-| Surface | Method | Checks |
-|---|---|---|
-| Gate compilation | `validate_gate()` | `gate.candidateprop`, `gate.queryparam` |
-| Sync endpoint definition | `validate_sync_endpoint()` | endpoint field mappings, `idproperty` |
-| Sync batch payload | audit path | every field name in the inbound batch |
+| Surface | `ComplianceEngine` method | Validator method | Checks |
+|---|---|---|---|
+| Gate compilation (`handle_match`) | `validate_gates()` | `validate_gate()` | `candidateprop`, `candidateprop_min`/`_max`/`_start`/`_end`, `queryparam` (str only — a scalar literal is an operand, not a field), `queryparam_min`/`_max`/`_start`/`_end` |
+| Scoring compilation (`handle_match`) | `validate_scoring()` | `validate_scoring_dimension()` | dimension `candidateprop`, `queryprop` |
+| Sync endpoint definition (`handle_sync`) | `validate_sync_fields()` (via `check_sync_request()`) | `is_blocked()` | `fieldsupdated`, `idproperty` |
+| Sync batch payload (`handle_sync`) | `check_sync_request()` | `validate_sync_row()` | every key at any depth of each row (nested dicts and lists of dicts, e.g. `childsync` collections) |
+
+Field names are compared **casefolded** (`Race` matches `race`). The error names the
+gate, dimension or key, never a value. `PROHIBITED_FACTOR_FULL_COVERAGE=false` restores the
+pre-RU-061 check (gate `candidateprop`/`queryparam` and top-level sync keys only,
+exact-case) for rollback while a spec is corrected.
+
+Not covered (decision DEC-24 / R3-DEC-03, pending): raw-Cypher spec fields (gate
+`cypheroverride`/`condition`/`pattern`, scoring `customcypher` `expression`, traversal
+steps) and separator variants (`national_origin` vs `nationalorigin`).
 
 If `prohibitedfactors.enabled` is `False` or the section is absent, `blocked_fields` is
 empty and every check short-circuits — the mechanism ships dormant.
@@ -49,7 +61,7 @@ compliance:
       - disability
       - familial_status
       - national_origin
-    audit_on_violation: true
+    auditonviolation: true
 ```
 
 ## Correct
@@ -81,9 +93,14 @@ Blocked fields: {'race', 'ethnicity', ...}
 
 ## Audit
 
-With `audit_on_violation: true`, every blocked attempt is recorded through the audit
-path before the exception propagates. A rejected spec leaves a trail; it does not fail
-silently.
+With `auditonviolation: true` (the schema default), every blocked attempt raised through
+`ComplianceEngine` — gates, scoring dimensions, sync endpoint, sync rows — first emits
+one audit entry (`AuditLogger.log_violation`: severity `critical`, `outcome: denied`,
+`compliance_tags` = the domain's regime names, `resource` naming the gate / dimension /
+endpoint / row path and the blocked field, `metadata.blocked_field` = the field name —
+never a value), then re-raises the same `ValueError` (a `ProhibitedFactorViolationError`
+subclass). A rejected spec leaves a trail; it does not fail silently. The entry rides the
+next audit flush. `PROHIBITED_FACTOR_VIOLATION_AUDIT=false` turns the entry off.
 
 ## Verified by
 

@@ -24,7 +24,8 @@ Orchestration sequence:
 Exit codes:
     0 — all clean (no CRITICAL/HIGH findings, contracts wired)
     1 — CRITICAL or HIGH findings exist, or contracts broken
-    2 — harness infrastructure error (missing tools, bad YAML, etc.)
+    2 — harness infrastructure error (missing tools, bad YAML, a step that
+        timed out, etc.)
 
 Usage:
     python tools/audit_harness.py                    # default (blocks on CRITICAL/HIGH)
@@ -46,6 +47,12 @@ from pathlib import Path
 from typing import Any
 
 CONTRACT_WIRING_STEP = "Contract Wiring"
+STEP_TIMEOUT_S = 120
+INFRA_EXIT_CODE = 2
+TIMEOUT_EXIT_CODE = 124
+# Step exit codes that mean the step could not run to a verdict — an
+# infrastructure error, never an audit finding.
+INFRA_EXIT_CODES = frozenset({INFRA_EXIT_CODE, TIMEOUT_EXIT_CODE})
 
 
 @dataclass
@@ -97,7 +104,7 @@ def run_step(
             cwd=str(root),
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=STEP_TIMEOUT_S,
         )
         result.exit_code = proc.returncode
         result.stdout = proc.stdout
@@ -105,8 +112,8 @@ def run_step(
         if fail_on_nonzero and proc.returncode != 0:
             result.passed = False
     except subprocess.TimeoutExpired:
-        result.exit_code = 124
-        result.stderr = f"TIMEOUT: {name} exceeded 120s"
+        result.exit_code = TIMEOUT_EXIT_CODE
+        result.stderr = f"TIMEOUT: {name} exceeded {STEP_TIMEOUT_S}s"
         result.passed = False
     except FileNotFoundError as e:
         result.exit_code = 2
@@ -288,6 +295,25 @@ def write_harness_report(
     return report_path
 
 
+def is_infra_error(step: StepResult) -> bool:
+    """The step failed without reaching a verdict (missing script, command not found, timeout)."""
+    return not step.passed and step.exit_code in INFRA_EXIT_CODES
+
+
+def overall_exit_code(steps: list[StepResult]) -> int:
+    """Harness exit code per the module docstring.
+
+    2 when any blocking step failed with an infrastructure error (exit 2, or
+    the harness's own timeout, 124), else 1 when any blocking step failed,
+    else 0. Skipped steps and informational steps (already marked passed,
+    e.g. non-strict Spec Coverage) never block.
+    """
+    failed = [s for s in steps if not s.passed and not s.skipped]
+    if any(is_infra_error(s) for s in failed):
+        return INFRA_EXIT_CODE
+    return 1 if failed else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="L9 Audit Harness — orchestrates all static analysis")
     parser.add_argument(
@@ -350,7 +376,7 @@ def main() -> int:
     print("[1/3] Architecture audit...")
     if step1.passed:
         print("  ✅ No CRITICAL/HIGH findings")
-    elif step1.exit_code == 2:
+    elif is_infra_error(step1):
         print(f"  ⚠️  Infrastructure error: {step1.stderr.strip()[:100]}")
     else:
         print("  ❌ CRITICAL or HIGH findings detected")
@@ -382,10 +408,11 @@ def main() -> int:
         print("\n[3/3] Contract wiring check...")
         if step3.passed:
             print("  ✅ All contracts present and wired")
-        elif step3.exit_code == 2:
-            # Infrastructure error — don't block on missing tool
-            print(f"  ⚠️  Skipped (tool issue): {step3.stderr.strip()[:100]}")
-            step3.passed = True  # Don't block harness for missing optional tool
+        elif is_infra_error(step3):
+            # Infrastructure error (script missing / command not found / timeout): the wiring
+            # was not verified, so the step fails and the harness exits 2. Only an
+            # explicit --skip-contracts skips this step.
+            print(f"  ⚠️  Infrastructure error: {step3.stderr.strip()[:100]}")
         else:
             print("  ❌ Contract wiring issues detected")
             if step3.stderr:
@@ -395,7 +422,7 @@ def main() -> int:
 
     # ── Consolidate ─────────────────────────────────────────
     harness.overall_passed = all(s.passed for s in harness.steps)
-    harness.overall_exit_code = 0 if harness.overall_passed else 1
+    harness.overall_exit_code = overall_exit_code(harness.steps)
 
     audit_counts = parse_audit_report(root)
     coverage = parse_coverage_matrix(root)

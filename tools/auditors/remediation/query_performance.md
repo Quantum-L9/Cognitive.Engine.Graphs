@@ -2,8 +2,8 @@
 l9_schema: 1
 origin: engine-specific
 engine: graph
-layer: [audit]
-tags: [auditors, remediation, performance]
+layer: [tools]
+tags: [remediation, performance]
 owner: engine-team
 status: active
 /L9_META -->

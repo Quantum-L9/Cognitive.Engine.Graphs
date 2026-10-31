@@ -1,10 +1,11 @@
 """
 --- L9_META ---
-l9_schema: 2
+l9_schema: 1
 origin: engine-specific
 engine: graph
 layer: [test]
 tags: [causal, outcomes, handlers]
+owner: engine-team
 status: active
 --- /L9_META ---
 
@@ -165,3 +166,23 @@ async def test_causal_disabled_never_consults_the_validator() -> None:
 
     assert _outcome_write(calls)["create_resulted_in"] is True
     assert "rejected_count" not in result
+
+
+@pytest.mark.asyncio
+async def test_compiler_edge_uses_declared_identities_and_bound_threshold() -> None:
+    """RU-068 / CEG-COR-057: the causal edge matches the candidate by its declared id
+    and the outcome by `outcome_id`, under one WHERE with a bound threshold."""
+    spec = _spec()
+    endpoint = MagicMock()
+    endpoint.targetnode = "Facility"
+    endpoint.idproperty = "facility_id"
+    spec.sync.endpoints = [endpoint]
+
+    _result, calls = await _run(_VALID, spec)
+
+    ((cypher, params),) = [(c, p) for c, p in calls if "MERGE (source)-[r:RESULTED_IN" in c]
+    assert "MATCH (source:Facility {facility_id: $source_id})" in cypher
+    assert "MATCH (target:TransactionOutcome {outcome_id: $target_id})" in cypher
+    assert cypher.count("WHERE") == 1
+    assert params["confidence_threshold"] == 0.5
+    assert params["source_id"] == "c1"

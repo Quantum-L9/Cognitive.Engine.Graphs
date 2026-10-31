@@ -44,5 +44,12 @@ def test_loader_and_traversal_for_second_direction() -> None:
     spec = DomainPackLoader(config_path=str(ROOT / "domains")).load_domain("plasticos")
     assert DIR2 in spec.queryschema.matchdirections
     clauses = TraversalAssembler(spec).assemble_traversal(DIR2)
-    assert isinstance(clauses, list)
-    assert len(clauses) > 0
+    # CEG-COR-013: the FULFILLS_POLYMER constraint is an EXISTS traversal gate on
+    # $polymer_type; a required traversal MATCH repeated a SupplyOpportunity once
+    # per FULFILLS_POLYMER edge and is no longer emitted.
+    assert clauses == []
+    from engine.gates.compiler import GateCompiler
+
+    assert "MATCH (candidate)-[:FULFILLS_POLYMER]->(t:PolymerFamily) WHERE t.code = $polymer_type" in (
+        GateCompiler(spec).compile_all_gates(DIR2)
+    )

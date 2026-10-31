@@ -21,7 +21,10 @@ import uuid
 from typing import Any
 
 from engine.config.schema import CounterfactualSpec
+from engine.config.settings import settings
 from engine.graph.driver import GraphDriver
+from engine.models.outcomes import decode_outcome_map
+from engine.utils.security import sanitize_label
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +48,20 @@ class CounterfactualGenerator:
         counterfactual_spec: CounterfactualSpec,
         graph_driver: GraphDriver,
         domain_id: str,
+        outcome_label: str = "TransactionOutcome",
     ) -> None:
         self._spec = counterfactual_spec
         self._graph_driver = graph_driver
         self._db = domain_id
+        # RU-075 / CEG-COR-122: the domain's feedbackloop.outcome_node_label
+        # (passed by handle_outcomes); the queries hardcoded :TransactionOutcome.
+        self._outcome_label = sanitize_label(outcome_label)
+
+    def _label(self) -> str:
+        """Outcome label used in the fingerprint queries (legacy literal when the flag is off)."""
+        if not settings.counterfactual_dedupe_and_spec_label:
+            return "TransactionOutcome"
+        return sanitize_label(self._outcome_label)
 
     async def generate_for_outcome(
         self,
@@ -90,8 +103,9 @@ class CounterfactualGenerator:
 
     async def _get_outcome_fingerprint(self, outcome_node_id: str) -> dict[str, Any] | None:
         """Retrieve the match fingerprint from a TransactionOutcome node."""
-        cypher = """
-        MATCH (o:TransactionOutcome {outcome_id: $outcome_id})
+        label = self._label()
+        cypher = f"""
+        MATCH (o:{label} {{outcome_id: $outcome_id}})
         RETURN o.active_dimensions AS active_dimensions,
                o.dimension_weights AS dimension_weights,
                o.gates_passed AS gates_passed,
@@ -109,7 +123,7 @@ class CounterfactualGenerator:
         row = results[0]
         return {
             "active_dimensions": row.get("active_dimensions") or [],
-            "dimension_weights": row.get("dimension_weights") or {},
+            "dimension_weights": decode_outcome_map(row.get("dimension_weights")),
             "gates_passed": row.get("gates_passed") or [],
             "match_direction": row.get("match_direction"),
             "candidate_count": row.get("candidate_count", 0),
@@ -121,8 +135,9 @@ class CounterfactualGenerator:
         pool_size = self._spec.comparison_pool_size
         match_direction = fingerprint.get("match_direction")
 
-        cypher = """
-        MATCH (o:TransactionOutcome)
+        label = self._label()
+        cypher = f"""
+        MATCH (o:{label})
         WHERE o.outcome = 'success'
               AND o.active_dimensions IS NOT NULL
               AND o.match_direction = $match_direction
@@ -141,7 +156,7 @@ class CounterfactualGenerator:
         return [
             {
                 "active_dimensions": r.get("active_dimensions") or [],
-                "dimension_weights": r.get("dimension_weights") or {},
+                "dimension_weights": decode_outcome_map(r.get("dimension_weights")),
                 "gates_passed": r.get("gates_passed") or [],
                 "outcome_id": r.get("outcome_id"),
             }
@@ -170,6 +185,11 @@ class CounterfactualGenerator:
                 dim_counts[dim] = dim_counts.get(dim, 0) + 1
 
         scenarios: list[dict[str, Any]] = []
+        # RU-075: one scenario per (intervention_type, key_difference); the
+        # weight loop below otherwise emitted the same change_weight once per
+        # qualifying positive, consuming max_scenarios slots.
+        dedupe = settings.counterfactual_dedupe_and_spec_label
+        seen: set[tuple[str, str]] = set()
 
         # Dimensions present in positives but missing from actual
         missing_dims = {dim: count for dim, count in dim_counts.items() if dim not in actual_dims}
@@ -202,7 +222,9 @@ class CounterfactualGenerator:
                         if isinstance(actual_w, (int, float)) and isinstance(positive_w, (int, float)):
                             if positive_w > actual_w * 1.5:
                                 confidence = dim_counts.get(dim, 0) / total_positives
-                                if confidence >= min_confidence:
+                                key = (_INTERVENTION_CHANGE_WEIGHT, f"{dim}_weight_increase")
+                                if confidence >= min_confidence and not (dedupe and key in seen):
+                                    seen.add(key)
                                     scenarios.append(
                                         {
                                             "scenario_id": f"cf_{uuid.uuid4().hex[:12]}",

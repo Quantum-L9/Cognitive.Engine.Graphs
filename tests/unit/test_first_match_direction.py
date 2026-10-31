@@ -33,11 +33,21 @@ def test_domain_pack_loader_exposes_first_direction() -> None:
 
 
 def test_traversal_assembler_accepts_first_direction() -> None:
+    """The direction assembles; the polymer constraint is a gate, not a traversal MATCH (CEG-COR-013).
+
+    A required `MATCH (candidate:Facility)-[:PROCESSES]->(polymer)` step used to
+    be asserted here; it ignored the requested polymer and multiplied rows, so
+    the pack now expresses it as an EXISTS traversal gate on $polymer_type.
+    """
+    from engine.gates.compiler import GateCompiler
+
     loader = DomainPackLoader(config_path=str(ROOT / "domains"))
-    assembler = TraversalAssembler(loader.load_domain("plasticos"))
-    clauses = assembler.assemble_traversal(DIRECTION)
-    assert isinstance(clauses, list)
-    assert len(clauses) > 0
+    spec = loader.load_domain("plasticos")
+    clauses = TraversalAssembler(spec).assemble_traversal(DIRECTION)
+    assert clauses == []
+    assert "MATCH (candidate)-[:PROCESSES]->(t:PolymerFamily) WHERE t.code = $polymer_type" in (
+        GateCompiler(spec).compile_all_gates(DIRECTION)
+    )
 
 
 def test_legacy_direction_not_in_executable_contract() -> None:

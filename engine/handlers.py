@@ -15,6 +15,7 @@ Handlers receive (tenant: str, payload: dict) and return dict.
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 import time
@@ -514,6 +515,39 @@ def _candidate_id(candidate: Any, id_property: str, fallback: Any) -> str:
     return str(fallback if value is None else value)
 
 
+def _declared_id_predicate(
+    domain_spec: DomainSpec,
+    variable: str,
+    param: str,
+    match_direction: str | None = None,
+) -> str | None:
+    """RU-002 / CEG-COR-002: a label-scoped candidate-id predicate, or None for legacy.
+
+    Scoped to the candidate label(s) of ``match_direction`` when it names a
+    declared direction, else to every declared candidate label, each matched on
+    its own declared id property (``_candidate_id_property``):
+    ``(c:L1 AND c.p1 = $param) OR (c:L2 AND c.p2 = $param)``. Labels and
+    properties pass ``sanitize_label``; the value stays a parameter (C-9).
+    Returns None with ``spec_declared_candidate_id`` off or no declared
+    candidate label, so the caller keeps its ``{entity_id: $param}`` lookup.
+    """
+    from engine.config.settings import settings as _id_settings
+
+    if not _id_settings.spec_declared_candidate_id:
+        return None
+    candidates = domain_spec.matchentities.candidate
+    labels = [c.label for c in candidates if match_direction and c.matchdirection == match_direction]
+    if not labels:
+        labels = [c.label for c in candidates]
+    var = sanitize_label(variable)
+    key = sanitize_label(param)
+    parts: list[str] = []
+    for label in dict.fromkeys(labels):
+        prop = sanitize_label(_candidate_id_property(domain_spec, label))
+        parts.append(f"({var}:{sanitize_label(label)} AND {var}.{prop} = ${key})")
+    return " OR ".join(parts) or None
+
+
 def _annotate_weighted_confidence(
     checker: Any,
     candidates: list[Any],
@@ -557,12 +591,45 @@ def _annotate_weighted_confidence(
             cand["confidence_detail"] = detail
 
 
+def _match_request_as_legacy(tenant: str, payload: dict[str, Any], domain_loader: DomainPackLoader) -> dict[str, Any]:
+    """RU-012 / CEG-COR-063 (R1a-DEC-04): admit a contract-versioned MatchRequest.
+
+    A payload without ``contract_version`` is the legacy MatchPayload and is
+    returned unchanged. One with it is validated as
+    ``engine.models.payloads.MatchRequest`` against the tenant's
+    ``DomainContract`` (domain, declared direction, extra=forbid, transport
+    fields refused) and mapped onto the legacy keys handle_match reads:
+    ``direction`` -> ``match_direction``, ``query.facts`` -> ``query``,
+    ``top_n``. Gated by ``match_request_contract_admission``.
+    """
+    from engine.config.settings import settings as _contract_settings
+
+    if "contract_version" not in payload or not _contract_settings.match_request_contract_admission:
+        return payload
+    from pydantic import ValidationError as _PydanticValidationError
+
+    from engine.models.payloads import DomainContract, MatchRequest, admit_payload
+
+    contract = DomainContract.from_spec(domain_loader.load_domain(tenant))
+    try:
+        request = admit_payload(MatchRequest, payload, contract)
+    except _PydanticValidationError as exc:
+        raise ValidationError(
+            f"MatchRequest admission failed: {exc}",
+            action="match",
+            tenant=tenant,
+            detail="RU-012: contract_version payloads are admitted as MatchRequest",
+        ) from exc
+    return {"query": dict(request.query.facts), "match_direction": request.direction, "top_n": request.top_n}
+
+
 async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Gate-then-score graph traversal."""
     graph_driver, domain_loader = _require_deps()
     _validate_tenant_access(tenant, "match")
     start_time = time.monotonic()
 
+    payload = _match_request_as_legacy(tenant, payload, domain_loader)
     query = _require_key(payload, "query", "match", tenant)
     match_direction = _require_key(payload, "match_direction", "match", tenant)
 
@@ -601,7 +668,8 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     compliance = _get_compliance_engine(domain_spec)
     if compliance.enabled:
-        compliance.validate_gates(domain_spec.gates)
+        compliance.validate_gates(domain_spec.gates, tenant=tenant)
+        compliance.validate_scoring(domain_spec.scoring.dimensions, tenant=tenant)
         query = compliance.check_match_request(
             tenant=tenant,
             query=query,
@@ -645,6 +713,23 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             resolved_query[dim.queryprop] = None
 
     gate_compiler = GateCompiler(domain_spec)
+    # RU-010 / CEG-COR-023 (R1a-DEC-03, third alternative): W1-03 runs on the
+    # final resolved parameters (defaults backfilled, derived resolved) for the
+    # gates of this direction. strict_null_gates rejects a null undeclared or
+    # required gate parameter; a null optional one follows the gate's
+    # nullbehavior and is logged. Off: no pre-pass (compiled Cypher only).
+    if settings.strict_null_gates:
+        from engine.gates.compiler import UnboundGateParameterError
+
+        try:
+            gate_compiler.validate_gates(resolved_query, match_direction=match_direction, reject_unbound=True)
+        except UnboundGateParameterError as exc:
+            raise ValidationError(
+                str(exc),
+                action="match",
+                tenant=tenant,
+                detail="W1-03 strict_null_gates: undeclared or required gate parameter is null",
+            ) from exc
     where_clause = gate_compiler.compile_all_gates(match_direction)
 
     traversal_assembler = TraversalAssembler(domain_spec)
@@ -788,9 +873,18 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 results = apply_constraint_penalties(list(results), constraint_dicts)
 
             # Spec-driven Pareto filter using declared objectives
-            arb_dims = [obj.dimension for obj in domain_spec.decision_arbitration.pareto_config.objectives]
+            arb_config = domain_spec.decision_arbitration.pareto_config
+            arb_dims = [obj.dimension for obj in arb_config.objectives]
             if arb_dims and len(results) > 1:
-                arb_pareto = apply_pareto_filter(results, arb_dims, candidate_id_key=id_property)
+                # RU-019: forward declared directions and front_size_limit
+                # (ignored by the filter while arbitration_objective_direction is off).
+                arb_pareto = apply_pareto_filter(
+                    results,
+                    arb_dims,
+                    candidate_id_key=id_property,
+                    directions={obj.dimension: obj.direction for obj in arb_config.objectives},
+                    front_size_limit=arb_config.front_size_limit,
+                )
                 if pareto_metadata is None:
                     pareto_metadata = {}
                 pareto_metadata["arbitration"] = {
@@ -798,6 +892,10 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                     "pruned_pct": arb_pareto["pruned_pct"],
                     "nondominated_ids": arb_pareto["nondominated"],
                 }
+                if _settings.arbitration_objective_direction:
+                    # RU-019: non-dominated ids dropped by front_size_limit are
+                    # reported, not silently folded into pruned_pct.
+                    pareto_metadata["arbitration"]["trimmed_ids"] = arb_pareto["trimmed"]
 
     execution_time_ms = (time.monotonic() - start_time) * 1000
 
@@ -882,6 +980,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                     c["match_explanation"] = explanation
 
     response = {
+        "status": "success",  # RU-014 / CEG-COR-075 (RETURN_VALUES.md)
         "candidates": candidates_out,
         "query_id": f"q_{uuid.uuid4().hex[:12]}",
         "match_direction": match_direction,
@@ -894,10 +993,63 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # Flush audit entries (currently logs warning since db_pool=None;
     # will persist to PostgreSQL once provisioned)
-    await compliance.flush_audit()
+    await compliance.flush_audit_for_request()
 
     if compliance.enabled:
         response = compliance.redact_response(response, tenant)
+    return response
+
+
+async def _sync_outcomes_unified(
+    graph_driver: GraphDriver,
+    domain_spec: DomainSpec,
+    tenant: str,
+    batch: list[Any],
+) -> dict[str, Any]:
+    """RU-006 / CEG-COR-015: sync ``outcome`` items through the handle_outcomes writer.
+
+    Each item's ``outcome`` maps onto success|failure|partial
+    (_SYNC_OUTCOME_VOCABULARY); the node is the domain's outcome label with the
+    same properties, RESULTED_IN edge and causal check as handle_outcomes. Items
+    that are not maps, carry an unknown outcome or a malformed ``fingerprint``
+    are skipped, as unknown outcomes always were.
+    """
+    synced = 0
+    rejected_count = 0
+    for item in batch:
+        if not isinstance(item, dict):
+            continue
+        outcome_val = _SYNC_OUTCOME_VOCABULARY.get(item.get("outcome"))  # type: ignore[arg-type]
+        if outcome_val is None:
+            continue
+        match_id = item.get("match_id")
+        create_resulted_in = _resulted_in_permitted(domain_spec, item)
+        try:
+            cypher, parameters = _build_outcome_write(
+                domain_spec,
+                tenant,
+                outcome_id=f"out_{uuid.uuid4().hex[:12]}",
+                match_id=match_id,
+                candidate_id=item.get("chosen_candidate_id"),
+                outcome=outcome_val,
+                value=item.get("value"),
+                fingerprint=item.get("fingerprint", {}),
+                create_resulted_in=create_resulted_in,
+            )
+        except ValueError as exc:
+            logger.warning("Skipping outcome sync item for match_id=%s: %s", match_id, exc)
+            continue
+        try:
+            await graph_driver.execute_query(cypher=cypher, parameters=parameters, database=domain_spec.domain.id)
+        except Exception:
+            logger.warning("Failed to sync outcome for match_id=%s", match_id, exc_info=True)
+            continue
+        synced += 1
+        if not create_resulted_in:
+            rejected_count += 1
+    response: dict[str, Any] = {"status": "success", "entity_type": "outcome", "synced_count": synced}
+    if rejected_count:
+        response["rejected_count"] = rejected_count
     return response
 
 
@@ -922,6 +1074,12 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     if entity_type == "outcome" and _feedback_effective(domain_loader.load_domain(tenant)):
         domain_spec = domain_loader.load_domain(tenant)
         _enforce_capability(tenant, "sync", domain_spec)
+        from engine.config.settings import settings as _sync_outcome_settings
+
+        if _sync_outcome_settings.outcome_schema_unified:
+            return await _sync_outcomes_unified(graph_driver, domain_spec, tenant, batch)
+        # RU-002: the chosen candidate is found by its declared id property.
+        outcome_candidate_predicate = _declared_id_predicate(domain_spec, "c", "candidate_id")
         synced = 0
         for item in batch:
             if not isinstance(item, dict):
@@ -944,6 +1102,11 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 CREATE (c)-[:HAS_OUTCOME]->(o)
             )
             """
+            if outcome_candidate_predicate is not None:
+                cypher = cypher.replace(
+                    "OPTIONAL MATCH (c {entity_id: $candidate_id})",
+                    f"OPTIONAL MATCH (c) WHERE {outcome_candidate_predicate}",
+                )
             try:
                 await graph_driver.execute_query(
                     cypher=cypher,
@@ -1007,7 +1170,7 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     cypher = generator.generate_sync_query(endpoint_spec, batch)
 
     try:
-        await graph_driver.execute_query(
+        write_rows = await graph_driver.execute_query(
             cypher=cypher,
             parameters={"batch": batch, "tenant": tenant},
             database=domain_spec.domain.id,
@@ -1020,39 +1183,108 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             detail=str(exc),
         ) from exc
 
-    await compliance.flush_audit()
+    await compliance.flush_audit_for_request()
     result: dict[str, Any] = {
         "status": "success",
         "entity_type": entity_type,
         "synced_count": len(batch),
     }
+    from engine.config.schema import SyncStrategy
+    from engine.config.settings import settings as _sync_settings
+
+    # RU-060 / CEG-COR-169: UNWINDMATCHSET updates only rows that matched an
+    # existing node; the statement RETURNs that count. UNWINDMERGE unchanged.
+    if _sync_settings.sync_count_from_write_result and endpoint_spec.batchstrategy == SyncStrategy.UNWINDMATCHSET:
+        matched = 0
+        if write_rows and isinstance(write_rows[0], dict):
+            matched = int(write_rows[0].get("synced_count") or 0)
+        result["synced_count"] = matched
+        result["unmatched_count"] = len(batch) - matched
     if rejected_count > 0:
         result["rejected_count"] = rejected_count
     return result
 
 
+def _bind_admin_domain(
+    tenant: str,
+    payload: dict[str, Any],
+    *,
+    required: bool,
+    default: str | None = None,
+) -> Any:
+    """RU-003 / CEG-COR-003: the admin subaction's domain is the packet tenant's.
+
+    Every domain-bearing admin subaction reads ``domain_id`` here. A required
+    key still goes through ``_require_key`` (C-23); an optional one falls back
+    to ``default``. With ``admin_tenant_bound_domain`` on, a value that differs
+    from the packet tenant is rejected before any load_domain or driver call —
+    the identity contract binds tenant and domain id, mirroring HEALTH-05.
+    Off: the caller-chosen domain_id, exactly as before.
+    """
+    from engine.config.settings import settings as _admin_settings
+
+    domain_id = _require_key(payload, "domain_id", "admin", tenant) if required else payload.get("domain_id", default)
+    if _admin_settings.admin_tenant_bound_domain and domain_id is not None and domain_id != tenant:
+        raise ValidationError(
+            f"admin domain_id {domain_id!r} does not match the packet tenant {tenant!r}; "
+            "admin subactions operate on the caller's own domain only",
+            action="admin",
+            tenant=tenant,
+        )
+    return domain_id
+
+
+def _admin_response_contract(
+    handler: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]],
+) -> Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]:
+    """RU-014 / CEG-COR-075: stamp the C-23 response envelope on every admin success.
+
+    Every return carries ``status`` (``success`` where the subaction set none;
+    existing values are kept) and ``subaction`` (the request's). One wrapper at
+    dispatch exit instead of edits at each of the subaction return sites.
+    """
+
+    @functools.wraps(handler)
+    async def _stamped(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
+        result = await handler(tenant, payload)
+        result.setdefault("status", "success")
+        result["subaction"] = payload["subaction"]
+        return result
+
+    return _stamped
+
+
+@_admin_response_contract
 async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Admin: introspection, schema init, GDS trigger, capability delegation."""
     graph_driver, domain_loader = _require_deps()
     _validate_tenant_access(tenant, "admin")
     subaction = _require_key(payload, "subaction", "admin", tenant)
 
+    # RU-008 / CEG-COR-017: admin honours the tenant's spec capabilities like
+    # sync/outcomes/enrich do (every admin permission maps to admin:write).
+    # Gated by capability_auth_enabled; a spec without capabilities is unaffected.
+    from engine.config.settings import settings as _admin_cap_settings
+
+    if _admin_cap_settings.capability_auth_enabled:
+        _enforce_capability(tenant, "admin", domain_loader.load_domain(tenant))
+
     if subaction == "list_domains":
         return {"domains": domain_loader.list_domains()}
 
     if subaction == "get_domain":
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
         return {"domain": spec.model_dump(mode="json")}
 
     if subaction == "init_schema":
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
         count = await _init_schema(graph_driver, spec)
         return {"status": "schema_initialized", "constraints_created": count}
 
     if subaction == "trigger_gds":
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         job_name = _require_key(payload, "job_name", "admin", tenant)
         spec = domain_loader.load_domain(domain_id)
         scheduler = _get_or_create_scheduler(spec, graph_driver)
@@ -1061,7 +1293,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # --- W2-01: Score Calibration ---
     if subaction == "calibration_run":
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
         from engine.scoring.calibration import ScoreCalibrator
 
@@ -1075,16 +1307,21 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         # caller's own pack decides the domain half of the predicate.
         if not _feedback_effective(domain_loader.load_domain(tenant)):
             return {"status": "disabled", "message": _FEEDBACK_DISABLED_MESSAGE}
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
         # Read recent outcomes from Neo4j. The outcome node label is the domain's
         # (feedbackloop.outcome_node_label), not a fixed engine vocabulary.
         outcome_label = sanitize_label(spec.feedbackloop.outcome_node_label)
+        from engine.config.settings import settings as _fb_schema_settings
+
+        # RU-006: project the per-dimension scores the writers persist.
+        unified_schema = bool(_fb_schema_settings.outcome_schema_unified)
+        dimension_projection = ", o.dimension_scores AS dimension_scores" if unified_schema else ""
         outcome_cypher = f"""
         MATCH (o:{outcome_label})
         WHERE o.tenant = $tenant
         RETURN o.outcome AS outcome, o.candidate_id AS candidate_id,
-               o.match_id AS match_id, o.value AS value
+               o.match_id AS match_id, o.value AS value{dimension_projection}
         ORDER BY o.created_at DESC
         LIMIT 500
         """
@@ -1104,6 +1341,12 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
         from engine.scoring.feedback import OutcomeFeedback
 
+        if unified_schema:
+            from engine.models.outcomes import decode_outcome_map
+
+            outcome_records = [
+                {**rec, "dimension_scores": decode_outcome_map(rec.get("dimension_scores"))} for rec in outcome_records
+            ]
         feedback = OutcomeFeedback(outcome_records)
         result = feedback.compute_feedback()
         return {"status": "feedback_computed", **result}
@@ -1216,7 +1459,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
         if not _kge_s.kge_enabled:
             raise FeatureNotEnabled("KGE", flag="KGE_ENABLED", action="admin", tenant=tenant)
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
         if spec.kge is None:
             raise ValidationError(
@@ -1262,7 +1505,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     if subaction == "kge_status":
         from engine.config.settings import settings as _kge_s
 
-        domain_id = payload.get("domain_id")
+        domain_id = _bind_admin_domain(tenant, payload, required=False)
         kge_config_info: dict[str, Any] = {}
         if domain_id:
             try:
@@ -1292,8 +1535,13 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         if not _gdpr_s.gdpr_erasure_enabled:
             raise FeatureNotEnabled("GDPR Erasure", flag="GDPR_ERASURE_ENABLED", action="admin", tenant=tenant)
         data_subject_id = _require_key(payload, "data_subject_id", "admin", tenant)
-        domain_id = payload.get("domain_id", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=False, default=tenant)
         spec = domain_loader.load_domain(domain_id)
+        # RU-066: the subject property is the domain's declared field, sanitized
+        # before any query (an invalid name raises ValueError here).
+        from engine.utils.security import sanitize_label as _gdpr_label
+
+        subject_property = _gdpr_label(spec.compliance.gdpr_subject_id_field if spec.compliance else "data_subject_id")
 
         pii_handler = PIIHandler()
 
@@ -1301,28 +1549,65 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             # Dry-run: compute what WOULD be erased without executing
             try:
                 count_result = await graph_driver.execute_query(
-                    "MATCH (n {data_subject_id: $dsid}) RETURN count(n) AS cnt",
+                    f"MATCH (n {{{subject_property}: $dsid}}) RETURN count(n) AS cnt",
                     parameters={"dsid": data_subject_id},
                     database=domain_id,
                 )
                 node_count = count_result[0]["cnt"] if count_result else 0
             except Exception:
                 node_count = -1
+            # RU-066 follow-up: the dry run also scopes the packet step — the
+            # requesting tenant's PacketStore rows gdpr_erase_subject would
+            # delete. None when PacketStore is disabled (packets not erasable,
+            # as in the real summary); -1 when the count fails, like graph_nodes.
+            packet_count: int | None = None
+            if _gdpr_s.packet_store_enabled:
+                try:
+                    from engine.packet.packet_store import get_packet_store
+
+                    dry_pool = await get_packet_store().get_pool()
+                    packet_count = await pii_handler.count_subject_packets(data_subject_id, dry_pool, tenant=tenant)
+                except Exception:
+                    logger.exception("GDPR dry-run packet-store count failed")
+                    packet_count = -1
             return {
                 "status": "dry_run",
                 "data_subject_id": data_subject_id,
                 "dry_run": True,
-                "would_affect": {"graph_nodes": node_count},
+                "would_affect": {"graph_nodes": node_count, "packets": packet_count},
             }
 
-        # Real erasure
+        # Real erasure. RU-066 / DEC-26: packets live in the PacketStore database,
+        # so its pool is used when PacketStore is enabled; otherwise packets are
+        # reported as not erasable. The erasure is audited in the domain's
+        # ComplianceEngine trail before anything is deleted, and that flush is
+        # strict (RU-066 follow-up): a missing audit pool or a failed flush
+        # raises here, so nothing is deleted without a durable audit entry —
+        # compliance_audit_soft_sink no longer lets the delete proceed.
         try:
+            packet_pool = None
+            if _gdpr_s.packet_store_enabled:
+                from engine.packet.packet_store import get_packet_store
+
+                packet_pool = await get_packet_store().get_pool()
+            erasure_audit = _get_compliance_engine(spec)
+            erasure_audit.log_pii_erasure(
+                tenant=tenant,
+                data_subject_id=data_subject_id,
+                detail=f"Erasure requested for subject in domain {domain_id} (property {subject_property})",
+            )
+            await erasure_audit.flush_audit_before_erasure()
             result = await pii_handler.erase_subject(
                 data_subject_id=data_subject_id,
                 graph_driver=graph_driver,
+                db_pool=packet_pool,
                 # DB-STRICT-01: the same domain database the dry-run count above
                 # queries; the driver no longer falls back to 'neo4j'.
                 database=domain_id,
+                subject_property=subject_property,
+                performed_by=tenant,
+                # RU-066 follow-up: packets are erased for this tenant only.
+                tenant=tenant,
             )
         except Exception as exc:
             raise ExecutionError(
@@ -1331,17 +1616,6 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 tenant=tenant,
                 detail=str(exc),
             ) from exc
-
-        # Flush audit trail for erasure event
-        from engine.compliance.audit import AuditLogger
-
-        audit = AuditLogger()
-        audit.log_pii_erasure(
-            actor=tenant,
-            tenant=tenant,
-            data_subject_id=data_subject_id,
-            detail=f"Erased subject {data_subject_id} in domain {domain_id}",
-        )
 
         return {
             "status": "erased",
@@ -1352,7 +1626,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # --- W6-03: GDS Job History Exposure ---
     if subaction == "gds_status":
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
         scheduler = _get_or_create_scheduler(spec, graph_driver)
         history = await scheduler.get_job_history()
@@ -1374,7 +1648,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         }
 
     if subaction == "gds_trigger":
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         job_name = _require_key(payload, "job_name", "admin", tenant)
         spec = domain_loader.load_domain(domain_id)
         # Validate algorithm name exists in domain spec
@@ -1394,7 +1668,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
         from engine.config.settings import settings as _gds_s
 
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
         scheduler = _get_or_create_scheduler(spec, graph_driver)
         history = await scheduler.get_job_history()
@@ -1486,7 +1760,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # --- S2-08: Auto-generate calibration pairs from outcomes ---
     if subaction == "generate_calibration_pairs":
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
 
         # Read recent outcomes with scores (outcome node label is the domain's)
@@ -1532,7 +1806,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # --- S2-21: Domain density report ---
     if subaction == "domain_density_report":
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
 
         # Query graph statistics
@@ -1580,7 +1854,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # --- S2-23: Auto-tune aggregation strategies ---
     if subaction == "auto_tune":
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
 
         from engine.scoring.hgkr_utils import build_ablation_configs
@@ -1611,7 +1885,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 tenant=tenant,
             )
 
-        domain_id = _require_key(payload, "domain_id", "admin", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
         n_samples = int(payload.get("n_samples", 50))
 
@@ -1738,7 +2012,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
         entity = _require_key(payload, "entity", "admin", tenant)
         entity_id = _require_key(payload, "entity_id", "admin", tenant)
-        domain_id = payload.get("domain_id", tenant)
+        domain_id = _bind_admin_domain(tenant, payload, required=False, default=tenant)
 
         # The domain owns which inference may run for it (plugins.inference_rules).
         # `rules` absent means "every rule the domain authorizes"; `rules: []`
@@ -1815,7 +2089,7 @@ async def _handle_evaluate(
     """
     import math
 
-    domain_id = _require_key(payload, "domain_id", "admin", tenant)
+    domain_id = _bind_admin_domain(tenant, payload, required=True)
     test_set = _require_key(payload, "test_set", "admin", tenant)
     k = int(payload.get("k", 10))
     weight_overrides = payload.get("weights", {})
@@ -1826,6 +2100,18 @@ async def _handle_evaluate(
             action="admin",
             tenant=tenant,
         )
+
+    from engine.config.settings import settings as _eval_settings
+
+    # RU-002: read each returned candidate's declared id for the case direction
+    # (`entity_id` only, without loading the spec, while the flag is off).
+    eval_spec = domain_loader.load_domain(domain_id) if _eval_settings.spec_declared_candidate_id else None
+
+    def eval_id_property(direction: str) -> str:
+        if eval_spec is None:
+            return _FALLBACK_CANDIDATE_ID_PROPERTY
+        labels = [c.label for c in eval_spec.matchentities.candidate if c.matchdirection == direction]
+        return _candidate_id_property(eval_spec, labels[0]) if labels else _FALLBACK_CANDIDATE_ID_PROPERTY
 
     per_case_results: list[dict[str, Any]] = []
     total_precision = 0.0
@@ -1850,7 +2136,10 @@ async def _handle_evaluate(
             match_payload["weights"] = weight_overrides
 
         try:
-            match_result = await handle_match(domain_id, match_payload)
+            # RU-003: with the domain bound to the tenant, match runs as the tenant.
+            match_result = await handle_match(
+                tenant if _eval_settings.admin_tenant_bound_domain else domain_id, match_payload
+            )
         except Exception as exc:
             per_case_results.append({"case_index": case_idx, "error": str(exc)})
             continue
@@ -1861,7 +2150,7 @@ async def _handle_evaluate(
             if isinstance(c, dict):
                 cand_node = c.get("candidate", {})
                 if isinstance(cand_node, dict):
-                    returned_ids.append(str(cand_node.get("entity_id", "")))
+                    returned_ids.append(_candidate_id(cand_node, eval_id_property(match_direction), ""))
                 else:
                     returned_ids.append("")
             else:
@@ -1951,12 +2240,188 @@ def _get_or_create_scheduler(spec: DomainSpec, driver: GraphDriver) -> GDSSchedu
     state = get_state()
     domain_id = spec.domain.id
     if domain_id not in state.gds_schedulers:
+        from engine.config.settings import settings as _gds_reg_settings
+
         scheduler = GDSScheduler(spec, driver)
         scheduler.register_jobs()
-        scheduler.start()
+        # RU-007 / CEG-COR-016: boot registers its schedulers here too, so this
+        # branch only runs for a domain boot did not start. With GDS disabled the
+        # jobs are registered for manual trigger and no cron scheduler starts.
+        if not _gds_reg_settings.gds_shared_scheduler_registry or _gds_reg_settings.gds_enabled:
+            scheduler.start()
         state.gds_schedulers[domain_id] = scheduler
     result: GDSScheduler = state.gds_schedulers[domain_id]
     return result
+
+
+# RU-006 / CEG-COR-015 (R1a-DEC-02): the sync `outcome` entity type used a
+# second vocabulary. It maps onto the canonical success|failure|partial that
+# handle_outcomes writes and every established reader counts.
+_SYNC_OUTCOME_VOCABULARY: dict[str, str] = {
+    "positive": "success",
+    "negative": "failure",
+    "neutral": "partial",
+    "success": "success",
+    "failure": "failure",
+    "partial": "partial",
+}
+
+
+def _resulted_in_permitted(domain_spec: DomainSpec, record: dict[str, Any]) -> bool:
+    """R3 / CEG-FIX-001: may the RESULTED_IN edge for this outcome be created?
+
+    A rejection by CausalEdgeRuntimeValidator suppresses the edge (when
+    enforcement is on); the outcome node is the observation and is still written.
+    """
+    if not domain_spec.causal.enabled:
+        return True
+    from engine.causal.causal_validator import CausalEdgeRuntimeValidator
+    from engine.config.settings import settings as _causal_settings
+
+    validator = CausalEdgeRuntimeValidator(domain_spec.causal)
+    edge_record = {
+        "edge_type": "RESULTED_IN",
+        "source_ts": record.get("source_ts"),
+        "target_ts": record.get("target_ts"),
+        "confidence": record.get("confidence"),
+    }
+    _valid, rejected = validator.validate_batch([edge_record], "RESULTED_IN")
+    if rejected:
+        logger.info(
+            "Causal validation rejected RESULTED_IN edge: %s",
+            rejected[0].get("rejection_reason"),
+        )
+        return not _causal_settings.causal_rejection_enforcement_enabled
+    return True
+
+
+def _outcome_feedback_fields(fingerprint: dict[str, Any]) -> tuple[str | None, bool | None]:
+    """RU-006: optional ``fingerprint.dimension_scores`` / ``was_selected``.
+
+    ``dimension_scores`` is a map of dimension name to a finite number, stored
+    as sorted-key JSON (RU-005 codec) because Neo4j cannot hold a map property;
+    ``was_selected`` is a bool. Either absent is stored as null. Raises
+    ValueError on any other shape.
+    """
+    import math
+
+    from engine.models.outcomes import encode_outcome_map
+
+    raw_scores = fingerprint.get("dimension_scores")
+    encoded: str | None = None
+    if raw_scores is not None:
+        if not isinstance(raw_scores, dict):
+            msg = "fingerprint.dimension_scores must be a map of dimension -> number"
+            raise ValueError(msg)
+        for dim, score in raw_scores.items():
+            numeric = isinstance(score, (int, float)) and not isinstance(score, bool)
+            if not isinstance(dim, str) or not numeric or not math.isfinite(score):
+                msg = f"fingerprint.dimension_scores[{dim!r}] must be a finite number"
+                raise ValueError(msg)
+        encoded = encode_outcome_map(raw_scores)
+    was_selected = fingerprint.get("was_selected")
+    if was_selected is not None and not isinstance(was_selected, bool):
+        msg = "fingerprint.was_selected must be a boolean"
+        raise ValueError(msg)
+    return encoded, was_selected
+
+
+def _build_outcome_write(
+    domain_spec: DomainSpec,
+    tenant: str,
+    *,
+    outcome_id: str,
+    match_id: Any,
+    candidate_id: Any,
+    outcome: str,
+    value: Any,
+    fingerprint: Any,
+    create_resulted_in: bool,
+) -> tuple[str, dict[str, Any]]:
+    """The one outcome-record writer (handle_outcomes; sync ``outcome`` under RU-006).
+
+    Writes the domain's ``feedbackloop.outcome_node_label`` node with the match
+    fingerprint and a RESULTED_IN edge from the candidate found by its declared
+    id (RU-002). With ``outcome_schema_unified`` the node also carries
+    ``dimension_scores`` (JSON) and ``was_selected`` for score_feedback and
+    discover_weights. Raises ValueError for a malformed fingerprint.
+    """
+    from engine.config.settings import settings as _outcome_settings
+    from engine.models.outcomes import encode_outcome_map
+
+    unified = bool(_outcome_settings.outcome_schema_unified)
+    if unified and not isinstance(fingerprint, dict):
+        msg = "fingerprint must be a map"
+        raise ValueError(msg)
+    active_dimensions = fingerprint.get("active_dimensions", [])
+    dimension_weights = fingerprint.get("dimension_weights", {})
+    gates_passed = fingerprint.get("gates_passed", [])
+    match_direction = fingerprint.get("match_direction")
+    candidate_count = fingerprint.get("candidate_count", 0)
+    feedback_fields = _outcome_feedback_fields(fingerprint) if unified else None
+
+    # The outcome node label is the domain's (feedbackloop.outcome_node_label);
+    # the engine's system graph schema documents the default, not a fixed name.
+    outcome_label = sanitize_label(domain_spec.feedbackloop.outcome_node_label)
+    feedback_props = (
+        ",\n        dimension_scores: $dimension_scores,\n        was_selected: $was_selected" if unified else ""
+    )
+    cypher = (
+        f"\n    CREATE (o:{outcome_label} {{"
+        """
+        outcome_id: $outcome_id, match_id: $match_id,
+        candidate_id: $candidate_id, outcome: $outcome,
+        value: $value, created_at: datetime(), tenant: $tenant,
+        domain_id: $domain_id,
+        active_dimensions: $active_dimensions,
+        dimension_weights: $dimension_weights,
+        gates_passed: $gates_passed,
+        match_direction: $match_direction,
+        candidate_count: $candidate_count"""
+        f"{feedback_props}"
+        """
+    })
+    WITH o
+    OPTIONAL MATCH (c {entity_id: $candidate_id})
+    FOREACH (_ IN CASE WHEN c IS NOT NULL AND $create_resulted_in THEN [1] ELSE [] END |
+        CREATE (c)-[:RESULTED_IN]->(o)
+    )
+    RETURN o.outcome_id AS outcome_id
+    """
+    )
+
+    # RU-005 / CEG-COR-056: one decodable encoding (JSON) for the map-valued
+    # fingerprint field; off restores the Python repr writer.
+    stored_dimension_weights = (
+        encode_outcome_map(dimension_weights) if _outcome_settings.outcome_map_json_encoding else str(dimension_weights)
+    )
+
+    # RU-002: link the outcome to the candidate by its declared id property,
+    # scoped to the fingerprint's direction when it names a declared one.
+    outcome_candidate_predicate = _declared_id_predicate(domain_spec, "c", "candidate_id", match_direction)
+    if outcome_candidate_predicate is not None:
+        cypher = cypher.replace(
+            "OPTIONAL MATCH (c {entity_id: $candidate_id})",
+            f"OPTIONAL MATCH (c) WHERE {outcome_candidate_predicate}",
+        )
+    parameters: dict[str, Any] = {
+        "outcome_id": outcome_id,
+        "match_id": match_id,
+        "candidate_id": candidate_id,
+        "outcome": outcome,
+        "value": value,
+        "tenant": tenant,
+        "domain_id": domain_spec.domain.id,
+        "active_dimensions": active_dimensions,
+        "dimension_weights": stored_dimension_weights,
+        "gates_passed": gates_passed,
+        "match_direction": match_direction,
+        "candidate_count": candidate_count,
+        "create_resulted_in": create_resulted_in,
+    }
+    if feedback_fields is not None:
+        parameters["dimension_scores"], parameters["was_selected"] = feedback_fields
+    return cypher, parameters
 
 
 async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1982,76 +2447,28 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
     # R3: Causal validation for RESULTED_IN edge. CEG-FIX-001: a rejection
     # suppresses the edge in both write paths below; the outcome node is the
     # observation and is still recorded.
-    create_resulted_in = True
-    if domain_spec.causal.enabled:
-        from engine.causal.causal_validator import CausalEdgeRuntimeValidator
-        from engine.config.settings import settings as _causal_settings
-
-        validator = CausalEdgeRuntimeValidator(domain_spec.causal)
-        edge_record = {
-            "edge_type": "RESULTED_IN",
-            "source_ts": payload.get("source_ts"),
-            "target_ts": payload.get("target_ts"),
-            "confidence": payload.get("confidence"),
-        }
-        _valid, rejected = validator.validate_batch([edge_record], "RESULTED_IN")
-        if rejected:
-            logger.info(
-                "Causal validation rejected RESULTED_IN edge: %s",
-                rejected[0].get("rejection_reason"),
-            )
-            create_resulted_in = not _causal_settings.causal_rejection_enforcement_enabled
+    create_resulted_in = _resulted_in_permitted(domain_spec, payload)
 
     # R5: Extract match fingerprint from payload
     fingerprint = payload.get("fingerprint", {})
-    active_dimensions = fingerprint.get("active_dimensions", [])
-    dimension_weights = fingerprint.get("dimension_weights", {})
-    gates_passed = fingerprint.get("gates_passed", [])
-    match_direction = fingerprint.get("match_direction")
-    candidate_count = fingerprint.get("candidate_count", 0)
-
-    # The outcome node label is the domain's (feedbackloop.outcome_node_label);
-    # the engine's system graph schema documents the default, not a fixed name.
-    outcome_label = sanitize_label(domain_spec.feedbackloop.outcome_node_label)
-    cypher = (
-        f"\n    CREATE (o:{outcome_label} {{"
-        """
-        outcome_id: $outcome_id, match_id: $match_id,
-        candidate_id: $candidate_id, outcome: $outcome,
-        value: $value, created_at: datetime(), tenant: $tenant,
-        domain_id: $domain_id,
-        active_dimensions: $active_dimensions,
-        dimension_weights: $dimension_weights,
-        gates_passed: $gates_passed,
-        match_direction: $match_direction,
-        candidate_count: $candidate_count
-    })
-    WITH o
-    OPTIONAL MATCH (c {entity_id: $candidate_id})
-    FOREACH (_ IN CASE WHEN c IS NOT NULL AND $create_resulted_in THEN [1] ELSE [] END |
-        CREATE (c)-[:RESULTED_IN]->(o)
-    )
-    RETURN o.outcome_id AS outcome_id
-    """
-    )
+    try:
+        cypher, parameters = _build_outcome_write(
+            domain_spec,
+            tenant,
+            outcome_id=outcome_id,
+            match_id=match_id,
+            candidate_id=candidate_id,
+            outcome=outcome,
+            value=payload.get("value"),
+            fingerprint=fingerprint,
+            create_resulted_in=create_resulted_in,
+        )
+    except ValueError as exc:
+        raise ValidationError(str(exc), action="outcomes", tenant=tenant) from exc
     try:
         await graph_driver.execute_query(
             cypher=cypher,
-            parameters={
-                "outcome_id": outcome_id,
-                "match_id": match_id,
-                "candidate_id": candidate_id,
-                "outcome": outcome,
-                "value": payload.get("value"),
-                "tenant": tenant,
-                "domain_id": domain_spec.domain.id,
-                "active_dimensions": active_dimensions,
-                "dimension_weights": str(dimension_weights),
-                "gates_passed": gates_passed,
-                "match_direction": match_direction,
-                "candidate_count": candidate_count,
-                "create_resulted_in": create_resulted_in,
-            },
+            parameters=parameters,
             database=domain_spec.domain.id,
         )
     except Exception as exc:
@@ -2071,6 +2488,7 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
                 counterfactual_spec=domain_spec.counterfactual,
                 graph_driver=graph_driver,
                 domain_id=domain_spec.domain.id,
+                outcome_label=domain_spec.feedbackloop.outcome_node_label,  # RU-075
             )
             await generator.generate_for_outcome(outcome_id)
         except Exception:
@@ -2138,7 +2556,13 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
         compiler = CausalCompiler(domain_spec)
         for edge_spec in domain_spec.causal.causal_edges:
             if edge_spec.edge_type == "RESULTED_IN" and create_resulted_in:
-                edge_cypher = compiler.compile_causal_edge_create(edge_spec)
+                # RU-068: the source is the candidate, identified like everywhere
+                # else in handlers; the target (outcome) identity is resolved by
+                # the compiler. The threshold is bound, never interpolated.
+                edge_cypher = compiler.compile_causal_edge_create(
+                    edge_spec,
+                    source_id_property=_candidate_id_property(domain_spec, edge_spec.source_label),
+                )
                 try:
                     await graph_driver.execute_query(
                         cypher=edge_cypher,
@@ -2147,6 +2571,7 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
                             "target_id": outcome_id,
                             "confidence": 1.0,
                             "mechanism": f"outcome_{outcome}",
+                            "confidence_threshold": edge_spec.confidence_threshold,
                         },
                         database=domain_spec.domain.id,
                     )
@@ -2171,8 +2596,12 @@ async def handle_resolve(tenant: str, payload: dict[str, Any]) -> dict[str, Any]
     """Entity resolution: create RESOLVED_FROM edge between duplicate entities.
 
     When semantic_registry is enabled, uses multi-signal similarity scoring
-    to automatically find and merge duplicates. Otherwise, falls back to
-    manual RESOLVED_FROM edge creation.
+    to find duplicates and link each one to a canonical entity with a
+    ``(duplicate)-[:RESOLVED_FROM]->(canonical)`` edge. Otherwise, falls back
+    to manual ``(source)-[:RESOLVED_FROM]->(target)`` edge creation.
+
+    Resolution is linkage only (RU-102): no relationships are moved and match
+    does not consult RESOLVED_FROM; ``merged_count`` counts links created.
     """
     graph_driver, domain_loader = _require_deps()
     _validate_tenant_access(tenant, "resolve")
@@ -2233,10 +2662,12 @@ async def handle_resolve(tenant: str, payload: dict[str, Any]) -> dict[str, Any]
 
     label = sanitize_label(entity_type)
     resolution_id = f"res_{uuid.uuid4().hex[:12]}"
+    # RU-002: the declared id property for this label (entity_id with the flag off).
+    id_prop = sanitize_label(_candidate_id_property(domain_spec, entity_type))
 
     cypher = f"""
-    MATCH (source:{label} {{entity_id: $source_id}})
-    MATCH (target:{label} {{entity_id: $target_id}})
+    MATCH (source:{label} {{{id_prop}: $source_id}})
+    MATCH (target:{label} {{{id_prop}: $target_id}})
     CREATE (source)-[r:RESOLVED_FROM {{
         resolution_id: $resolution_id, confidence: $confidence,
         signal: $signal, created_at: datetime(), tenant: $tenant
@@ -2244,7 +2675,7 @@ async def handle_resolve(tenant: str, payload: dict[str, Any]) -> dict[str, Any]
     RETURN r.resolution_id AS resolution_id
     """
     try:
-        await graph_driver.execute_query(
+        created = await graph_driver.execute_query(
             cypher=cypher,
             parameters={
                 "source_id": source_id,
@@ -2263,6 +2694,17 @@ async def handle_resolve(tenant: str, payload: dict[str, Any]) -> dict[str, Any]
             tenant=tenant,
             detail=str(exc),
         ) from exc
+
+    from engine.config.settings import settings as _resolve_settings
+
+    # RU-004 / CEG-COR-014: no returned row means a MATCH found nothing and no
+    # RESOLVED_FROM edge exists; report it (RETURN_VALUES.md error propagation).
+    if _resolve_settings.resolve_requires_created_edge and not created:
+        raise ValidationError(
+            f"source or target entity not found for {entity_type}",
+            action="resolve",
+            tenant=tenant,
+        )
 
     return {
         "status": "resolved",
@@ -2303,7 +2745,14 @@ async def handle_health(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         # deployment is healthy but the "default" tenant hasn't been seeded.
         available = domain_loader.list_domains()
         if available:
-            checks["domain_spec"] = f"{_HEALTH_DOMAIN_TENANT_MISSING}: {available}"
+            from engine.config.settings import settings as _health_settings
+
+            # RU-013 / CEG-COR-074: the probe tenant is arbitrary and the probe is
+            # unauthenticated, so report how many packs exist, not their ids.
+            if _health_settings.health_probe_domain_count_only:
+                checks["domain_spec"] = f"{_HEALTH_DOMAIN_TENANT_MISSING}: {len(available)} domain packs"
+            else:
+                checks["domain_spec"] = f"{_HEALTH_DOMAIN_TENANT_MISSING}: {available}"
         else:
             checks["domain_spec"] = _HEALTH_DOMAIN_NO_PACKS
     except Exception:
@@ -2427,7 +2876,7 @@ async def handle_enrich(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     enrichments = payload.get("enrichments", [])
 
     if not enrichments:
-        return {"enriched_count": 0, "entity_type": entity_type, "tenant": tenant}
+        return {"status": "success", "enriched_count": 0, "entity_type": entity_type, "tenant": tenant}
 
     label = sanitize_label(entity_type)
 
@@ -2441,12 +2890,14 @@ async def handle_enrich(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             set_clauses.append(f"n.{safe_prop} = {safe_expr}")
 
     if not set_clauses:
-        return {"enriched_count": 0, "entity_type": entity_type, "tenant": tenant}
+        return {"status": "success", "enriched_count": 0, "entity_type": entity_type, "tenant": tenant}
 
     if entity_ids:
+        # RU-002: filter on the label's declared id property (entity_id with the flag off).
+        id_prop = sanitize_label(_candidate_id_property(domain_spec, entity_type))
         cypher = f"""
         MATCH (n:{label})
-        WHERE n.entity_id IN $entity_ids
+        WHERE n.{id_prop} IN $entity_ids
         SET {", ".join(set_clauses)}
         RETURN count(n) AS enriched_count
         """
@@ -2466,7 +2917,7 @@ async def handle_enrich(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     )
 
     count = result[0]["enriched_count"] if result else 0
-    return {"enriched_count": count, "entity_type": entity_type, "tenant": tenant}
+    return {"status": "success", "enriched_count": count, "entity_type": entity_type, "tenant": tenant}
 
 
 # CONTRACT-02: single source of truth for the engine's action surface.

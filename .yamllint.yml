@@ -28,16 +28,11 @@
 #     document kept verbatim for reference; parses as valid YAML but
 #     uses prose-style comma formatting throughout (230+ style hits).
 #     Reference documents are not consumed by runtime code.
-#   - domains/MASTER-SPEC-ALL-DOMAINS.yaml: intentionally NOT a
-#     single valid YAML document — it is a consolidated container of
-#     ten domain specs with prose headers, consumed only by
-#     tools/domain_extractor.py which splits it before parsing.
 
 extends: default
 
 ignore: |
   docs/archive/plasticos/PlasticOS Graph Cognitive Engine.yaml
-  domains/MASTER-SPEC-ALL-DOMAINS.yaml
   .hypothesis/
 
 rules:

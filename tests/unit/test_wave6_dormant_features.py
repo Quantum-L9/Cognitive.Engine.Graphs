@@ -52,6 +52,147 @@ def _make_basic_spec() -> MagicMock:
     return spec
 
 
+class _ErasureRecorder:
+    """Fake driver + pool for erase_subject that record what reaches each store (RU-066)."""
+
+    def __init__(self) -> None:
+        self.cypher: list[str] = []
+        self.sql: list[tuple] = []
+        self.erasure_entries_before_delete = -1
+        self.erasure_entries_before_sql = -1
+        self.persisted_before_delete = -1
+        self.persisted_before_sql = -1
+        self.transaction_depth = 0
+        self.in_transaction: list[bool] = []
+        # rows the ComplianceEngine audit pool received (packet_audit_log inserts)
+        self.persisted_rows: list[tuple] = []
+
+    def _erasure_entries(self) -> int:
+        """PII_ERASURE CRITICAL entries recorded so far: buffered or persisted."""
+        from engine.compliance.audit import AuditAction, AuditSeverity
+        from engine.state import get_state
+
+        engine = get_state().compliance_engines.get("test_domain")
+        buffered = 0
+        if engine is not None:
+            buffered = sum(
+                1
+                for e in engine._audit._buffer
+                if e.action == AuditAction.PII_ERASURE and e.severity == AuditSeverity.CRITICAL
+            )
+        return buffered + self._persisted_erasure_entries()
+
+    def _persisted_erasure_entries(self) -> int:
+        # flush_to_store row layout: (audit_id, timestamp, action, severity, ...)
+        return sum(1 for row in self.persisted_rows if row[2] == "pii_erasure" and row[3] == "critical")
+
+    def audit_pool(self, *, fail: bool = False):
+        """Fake POSTGRES_DSN audit pool; ``fail`` makes every flush raise."""
+        recorder = self
+
+        class _AuditConn:
+            async def executemany(self, sql, rows):
+                if fail:
+                    msg = "audit sink unavailable"
+                    raise ConnectionError(msg)
+                recorder.persisted_rows.extend(rows)
+
+        class _AuditPool:
+            def acquire(self):
+                class _Ctx:
+                    async def __aenter__(self):
+                        return _AuditConn()
+
+                    async def __aexit__(self, *exc):
+                        return None
+
+                return _Ctx()
+
+        return _AuditPool()
+
+    async def run(
+        self,
+        monkeypatch,
+        *,
+        subject_field,
+        subject_id,
+        dry_run=False,
+        packet_store=True,
+        audit_pool="default",
+    ):
+        from engine.config.schema import ComplianceSpec
+        from engine.config.settings import settings
+        from engine.state import get_state
+
+        recorder = self
+
+        async def execute_query(cypher, parameters=None, database=None):
+            recorder.cypher.append(cypher)
+            if "DETACH DELETE" in cypher:
+                recorder.erasure_entries_before_delete = recorder._erasure_entries()
+                recorder.persisted_before_delete = recorder._persisted_erasure_entries()
+                return [{"deleted": 3}]
+            return [{"cnt": 2}]
+
+        class _Conn:
+            async def fetchval(self, sql, *args):
+                recorder.sql.append((sql, args))
+                recorder.in_transaction.append(recorder.transaction_depth > 0)
+                if "gdpr_erase_subject" in sql:
+                    recorder.erasure_entries_before_sql = recorder._erasure_entries()
+                    recorder.persisted_before_sql = recorder._persisted_erasure_entries()
+                return 7
+
+            def transaction(self):
+                class _Tx:
+                    async def __aenter__(self):
+                        recorder.transaction_depth += 1
+
+                    async def __aexit__(self, *exc):
+                        recorder.transaction_depth -= 1
+
+                return _Tx()
+
+        class _Pool:
+            def acquire(self):
+                class _Ctx:
+                    async def __aenter__(self):
+                        return _Conn()
+
+                    async def __aexit__(self, *exc):
+                        return None
+
+                return _Ctx()
+
+        class _Store:
+            async def get_pool(self):
+                return _Pool()
+
+        monkeypatch.setattr(settings, "gdpr_erasure_enabled", True)
+        monkeypatch.setattr(settings, "gdpr_dry_run", dry_run)
+        monkeypatch.setattr(settings, "packet_store_enabled", packet_store)
+        monkeypatch.setattr("engine.packet.packet_store.get_packet_store", _Store)
+        driver = _make_graph_driver()
+        driver.execute_query = AsyncMock(side_effect=execute_query)
+        spec = _make_basic_spec()
+        spec.compliance = ComplianceSpec(gdpr_subject_id_field=subject_field)
+        # The pre-delete audit flush is strict (RU-066 follow-up), so a live
+        # erasure needs the POSTGRES_DSN audit pool; None models it unset.
+        pool = self.audit_pool() if audit_pool == "default" else audit_pool
+        init_dependencies(driver, _make_domain_loader(spec), db_pool=pool)
+        get_state().compliance_engines.pop("test_domain", None)
+        try:
+            # RU-003: an admin domain_id must equal the packet tenant.
+            return await handle_admin(
+                "test_domain",
+                {"subaction": "erase_subject", "data_subject_id": subject_id, "domain_id": "test_domain"},
+            )
+        finally:
+            self.final_entries = self._erasure_entries()
+            get_state().compliance_engines.pop("test_domain", None)
+            get_state()._db_pool = None
+
+
 def _make_kge_spec() -> MagicMock:
     spec = _make_basic_spec()
     kge = MagicMock()
@@ -152,7 +293,7 @@ class TestTriggerKGE:
 
         with pytest.raises(FeatureNotEnabled, match="KGE"):
             await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "trigger_kge", "domain_id": "test_domain"},
             )
 
@@ -172,7 +313,7 @@ class TestTriggerKGE:
             mock_settings.kge_embedding_dim = 256
             with pytest.raises(ValidationError, match="no 'kge' section"):
                 await handle_admin(
-                    "test_tenant",
+                    "test_domain",
                     {"subaction": "trigger_kge", "domain_id": "test_domain"},
                 )
 
@@ -192,7 +333,7 @@ class TestTriggerKGE:
             mock_settings.kge_embedding_dim = 256
             with pytest.raises(ValidationError, match="differs from"):
                 await handle_admin(
-                    "test_tenant",
+                    "test_domain",
                     {"subaction": "trigger_kge", "domain_id": "test_domain"},
                 )
 
@@ -209,7 +350,7 @@ class TestTriggerKGE:
             mock_settings.kge_embedding_dim = 256
             mock_settings.kge_confidence_threshold = 0.3
             result = await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "trigger_kge", "domain_id": "test_domain"},
             )
 
@@ -233,7 +374,7 @@ class TestTriggerKGE:
             mock_settings.kge_embedding_dim = 256
             mock_settings.kge_confidence_threshold = 0.3
             result = await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "trigger_kge", "domain_id": "test_domain"},
             )
 
@@ -265,7 +406,7 @@ class TestKGEStatus:
         init_dependencies(driver, loader)
 
         result = await handle_admin(
-            "test_tenant",
+            "test_domain",
             {"subaction": "kge_status", "domain_id": "test_domain"},
         )
 
@@ -309,6 +450,8 @@ class TestEraseSubject:
         with patch("engine.config.settings.settings") as mock_settings:
             mock_settings.gdpr_erasure_enabled = True
             mock_settings.gdpr_dry_run = True
+            # A MagicMock attribute is truthy; name the PacketStore state explicitly.
+            mock_settings.packet_store_enabled = False
             result = await handle_admin(
                 "test_tenant",
                 {"subaction": "erase_subject", "data_subject_id": "user-123"},
@@ -318,43 +461,142 @@ class TestEraseSubject:
         assert result["dry_run"] is True
         assert result["data_subject_id"] == "user-123"
         assert result["would_affect"]["graph_nodes"] == 5
+        # PacketStore disabled: packets are not erasable, so no count (not 0).
+        assert result["would_affect"]["packets"] is None
 
     @pytest.mark.asyncio
-    async def test_erase_subject_real_execution(self):
-        """When GDPR_DRY_RUN=False, performs actual erasure."""
-        driver = _make_graph_driver()
-        loader = _make_domain_loader()
-        init_dependencies(driver, loader)
+    async def test_erase_subject_real_execution(self, monkeypatch):
+        """When GDPR_DRY_RUN=False, performs actual erasure through the real PIIHandler.
 
-        mock_erasure_result = {
-            "data_subject_id": "user-123",
-            "packets_deleted": 0,
-            "graph_nodes_deleted": 3,
-            "embeddings_deleted": 0,
-        }
-
-        with (
-            patch("engine.config.settings.settings") as mock_settings,
-            patch("engine.compliance.pii.PIIHandler") as mock_pii_cls,
-            patch("engine.compliance.audit.AuditLogger") as mock_audit_cls,
-        ):
-            mock_settings.gdpr_erasure_enabled = True
-            mock_settings.gdpr_dry_run = False
-            mock_pii = MagicMock()
-            mock_pii.erase_subject = AsyncMock(return_value=mock_erasure_result)
-            mock_pii_cls.return_value = mock_pii
-            mock_audit = MagicMock()
-            mock_audit_cls.return_value = mock_audit
-
-            result = await handle_admin(
-                "test_tenant",
-                {"subaction": "erase_subject", "data_subject_id": "user-123"},
-            )
+        RU-066: this test used to replace PIIHandler and AuditLogger with mocks, which
+        hid the hardcoded subject property, the 1-argument SQL and the discarded
+        AuditLogger. It now drives the real handler with a fake driver and pool.
+        """
+        recorder = _ErasureRecorder()
+        result = await recorder.run(monkeypatch, subject_field="data_subject_id", subject_id="user-123")
 
         assert result["status"] == "erased"
         assert result["dry_run"] is False
         assert result["summary"]["graph_nodes_deleted"] == 3
-        mock_audit.log_pii_erasure.assert_called_once()
+        assert recorder.cypher == ["MATCH (n {data_subject_id: $dsid}) DETACH DELETE n RETURN count(n) AS deleted"]
+        assert recorder.erasure_entries_before_delete == 1
+        assert recorder.persisted_before_delete == 1
+
+    @pytest.mark.asyncio
+    async def test_erase_subject_uses_configured_subject_field_and_tenant_scoped_sql(self, monkeypatch):
+        """RU-066 follow-up (PR #352 review): the packet erasure is scoped to the
+        requesting tenant. Before, ``gdpr_erase_subject($1, $2)`` filtered on the
+        subject id only (another tenant's packets for a reused id were deleted
+        under an owner DSN), and no app.current_tenant was set (under the RLS
+        l9_product DSN every row was hidden and the call reported 0)."""
+        recorder = _ErasureRecorder()
+        result = await recorder.run(monkeypatch, subject_field="customer_id", subject_id="cust-42")
+
+        assert recorder.cypher == ["MATCH (n {customer_id: $dsid}) DETACH DELETE n RETURN count(n) AS deleted"]
+        assert recorder.sql == [
+            ("SELECT set_config('app.current_tenant', $1, true)", ("test_domain",)),
+            ("SELECT gdpr_erase_subject($1, $2, $3)", ("cust-42", "test_domain", "test_domain")),
+        ]
+        # transaction-local GUC: both statements run inside one transaction
+        assert recorder.in_transaction == [True, True]
+        assert result["summary"]["packets_deleted"] == 7
+        assert isinstance(result["summary"]["packets_deleted"], int)
+
+    @pytest.mark.asyncio
+    async def test_erase_subject_audit_entry_precedes_any_delete(self, monkeypatch):
+        recorder = _ErasureRecorder()
+        await recorder.run(monkeypatch, subject_field="customer_id", subject_id="cust-42")
+        # The PII_ERASURE CRITICAL entry was recorded, and persisted to the audit
+        # sink (not merely buffered), before both the pool and the driver
+        # recorded their delete.
+        assert recorder.erasure_entries_before_sql == 1
+        assert recorder.erasure_entries_before_delete == 1
+        assert recorder.persisted_before_sql == 1
+        assert recorder.persisted_before_delete == 1
+
+    @pytest.mark.asyncio
+    async def test_erase_subject_failed_audit_flush_blocks_every_delete(self, monkeypatch):
+        """RU-066 follow-up: a failed pre-delete audit flush blocks the erasure.
+
+        Before, ``flush_audit_for_request`` honoured ``compliance_audit_soft_sink``
+        (default True): the flush failure was logged and the packet and graph
+        deletes ran with no durable audit entry."""
+        from engine.config.settings import settings
+        from engine.handlers import ExecutionError
+
+        monkeypatch.setattr(settings, "compliance_audit_soft_sink", True)
+        recorder = _ErasureRecorder()
+        with pytest.raises(ExecutionError, match="GDPR erasure failed") as exc_info:
+            await recorder.run(
+                monkeypatch,
+                subject_field="customer_id",
+                subject_id="cust-42",
+                audit_pool=recorder.audit_pool(fail=True),
+            )
+        assert "audit sink unavailable" in str(exc_info.value.detail)
+        assert recorder.sql == []
+        assert recorder.cypher == []
+        # the entry is kept (re-buffered) for the periodic flush, not lost
+        assert recorder.final_entries == 1
+
+    @pytest.mark.asyncio
+    async def test_erase_subject_without_audit_sink_blocks_every_delete(self, monkeypatch):
+        """No POSTGRES_DSN audit pool: the erasure entry could not be made
+        durable, so nothing is deleted (before, flush returned 0 and the
+        deletes ran)."""
+        from engine.handlers import ExecutionError
+
+        recorder = _ErasureRecorder()
+        with pytest.raises(ExecutionError, match="GDPR erasure failed") as exc_info:
+            await recorder.run(monkeypatch, subject_field="customer_id", subject_id="cust-42", audit_pool=None)
+        assert "durable audit sink" in str(exc_info.value.detail)
+        assert recorder.sql == []
+        assert recorder.cypher == []
+
+    @pytest.mark.asyncio
+    async def test_erase_subject_packet_store_disabled_reports_not_erasable(self, monkeypatch):
+        recorder = _ErasureRecorder()
+        result = await recorder.run(monkeypatch, subject_field="customer_id", subject_id="c", packet_store=False)
+        assert recorder.sql == []
+        assert result["summary"]["packets_deleted"] is None
+        assert result["summary"]["packets_erasable"] is False
+
+    @pytest.mark.asyncio
+    async def test_erase_subject_dry_run_uses_configured_subject_field(self, monkeypatch):
+        recorder = _ErasureRecorder()
+        result = await recorder.run(monkeypatch, subject_field="customer_id", subject_id="cust-42", dry_run=True)
+        assert result["status"] == "dry_run"
+        assert recorder.cypher == ["MATCH (n {customer_id: $dsid}) RETURN count(n) AS cnt"]
+        # RU-066 follow-up: the dry run also counts the requesting tenant's
+        # packets, read-only, inside one transaction with the tenant GUC set.
+        assert recorder.sql == [
+            ("SELECT set_config('app.current_tenant', $1, true)", ("test_domain",)),
+            (
+                "SELECT count(*) FROM packet_store WHERE data_subject_id = $1 AND actor_tenant = $2",
+                ("cust-42", "test_domain"),
+            ),
+        ]
+        assert recorder.in_transaction == [True, True]
+        assert result["would_affect"] == {"graph_nodes": 2, "packets": 7}
+        assert recorder.persisted_rows == []
+
+    @pytest.mark.asyncio
+    async def test_erase_subject_dry_run_packet_store_disabled_reports_none(self, monkeypatch):
+        recorder = _ErasureRecorder()
+        result = await recorder.run(
+            monkeypatch, subject_field="customer_id", subject_id="cust-42", dry_run=True, packet_store=False
+        )
+        assert recorder.sql == []
+        assert result["would_affect"] == {"graph_nodes": 2, "packets": None}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("dry_run", [True, False])
+    async def test_erase_subject_invalid_subject_field_raises_before_any_query(self, monkeypatch, dry_run):
+        recorder = _ErasureRecorder()
+        with pytest.raises(ValueError, match="Invalid label or type"):
+            await recorder.run(monkeypatch, subject_field="a.b", subject_id="x", dry_run=dry_run)
+        assert recorder.cypher == []
+        assert recorder.sql == []
 
     @pytest.mark.asyncio
     async def test_erase_subject_missing_id(self):
@@ -384,6 +626,7 @@ class TestEraseSubject:
         with patch("engine.config.settings.settings") as mock_settings:
             mock_settings.gdpr_erasure_enabled = True
             mock_settings.gdpr_dry_run = True
+            mock_settings.packet_store_enabled = False
             result = await handle_admin(
                 "test_tenant",
                 {"subaction": "erase_subject", "data_subject_id": "already-erased"},
@@ -423,7 +666,7 @@ class TestGDSStatus:
         with patch("engine.handlers._get_or_create_scheduler") as mock_get:
             mock_get.return_value = _make_scheduler_with_history([])
             result = await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "gds_status", "domain_id": "test_domain"},
             )
 
@@ -456,7 +699,7 @@ class TestGDSStatus:
         with patch("engine.handlers._get_or_create_scheduler") as mock_get:
             mock_get.return_value = _make_scheduler_with_history(history)
             result = await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "gds_status", "domain_id": "test_domain"},
             )
 
@@ -480,7 +723,7 @@ class TestGDSTrigger:
         with patch("engine.handlers._get_or_create_scheduler") as mock_get:
             mock_get.return_value = _make_scheduler_with_history()
             result = await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "gds_trigger", "domain_id": "test_domain", "job_name": "louvain_community"},
             )
 
@@ -499,7 +742,7 @@ class TestGDSTrigger:
 
         with pytest.raises(ValidationError, match="not found in domain spec"):
             await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "gds_trigger", "domain_id": "test_domain", "job_name": "nonexistent_job"},
             )
 
@@ -528,7 +771,7 @@ class TestGDSHealth:
         with patch("engine.handlers._get_or_create_scheduler") as mock_get:
             mock_get.return_value = _make_scheduler_with_history(history)
             result = await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "gds_health", "domain_id": "test_domain"},
             )
 
@@ -555,7 +798,7 @@ class TestGDSHealth:
         with patch("engine.handlers._get_or_create_scheduler") as mock_get:
             mock_get.return_value = _make_scheduler_with_history(history)
             result = await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "gds_health", "domain_id": "test_domain"},
             )
 
@@ -573,7 +816,7 @@ class TestGDSHealth:
         with patch("engine.handlers._get_or_create_scheduler") as mock_get:
             mock_get.return_value = _make_scheduler_with_history([])
             result = await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {"subaction": "gds_health", "domain_id": "test_domain"},
             )
 
@@ -661,6 +904,19 @@ class TestGDPRSchemaExtension:
 # ═══════════════════════════════════════════════════════════════
 
 
+def _place_scheduler(monkeypatch, lifecycle, scheduler, *, shared_registry: bool) -> None:
+    """Put a scheduler where the probe reads it (RU-007 / gds_shared_scheduler_registry)."""
+    from engine.config.settings import settings
+    from engine.state import get_state
+
+    monkeypatch.setattr(settings, "gds_shared_scheduler_registry", shared_registry)
+    monkeypatch.setattr(get_state(), "_gds_schedulers", {})
+    if shared_registry:
+        get_state().gds_schedulers["test_domain"] = scheduler
+    else:
+        lifecycle._schedulers = [scheduler]
+
+
 @pytest.mark.unit
 class TestGDSHealthProbeRegistration:
     """Test that boot.py registers the GDS health probe."""
@@ -672,7 +928,8 @@ class TestGDSHealthProbeRegistration:
         assert hasattr(lifecycle, "_register_gds_health_probe")
 
     @pytest.mark.asyncio
-    async def test_health_probe_returns_ok(self):
+    @pytest.mark.parametrize("shared_registry", [True, False], ids=["registry", "boot_list"])
+    async def test_health_probe_returns_ok(self, monkeypatch, shared_registry):
         from engine.boot import GraphLifecycle
 
         lifecycle = GraphLifecycle()
@@ -684,14 +941,15 @@ class TestGDSHealthProbeRegistration:
                 {"algorithm": "louvain", "timestamp": recent_ts, "status": "success"},
             ]
         )
-        lifecycle._schedulers = [scheduler]
+        _place_scheduler(monkeypatch, lifecycle, scheduler, shared_registry=shared_registry)
         lifecycle._register_gds_health_probe()
 
         result = await lifecycle._gds_health_check()
         assert result["gds"] == "ok"
 
     @pytest.mark.asyncio
-    async def test_health_probe_returns_degraded(self):
+    @pytest.mark.parametrize("shared_registry", [True, False], ids=["registry", "boot_list"])
+    async def test_health_probe_returns_degraded(self, monkeypatch, shared_registry):
         from engine.boot import GraphLifecycle
 
         lifecycle = GraphLifecycle()
@@ -702,8 +960,82 @@ class TestGDSHealthProbeRegistration:
                 {"algorithm": "louvain", "timestamp": old_ts, "status": "success"},
             ]
         )
-        lifecycle._schedulers = [scheduler]
+        _place_scheduler(monkeypatch, lifecycle, scheduler, shared_registry=shared_registry)
         lifecycle._register_gds_health_probe()
 
         result = await lifecycle._gds_health_check()
         assert "degraded" in result["gds"]
+
+
+class _FakeErasePool:
+    """Pool whose connection records every statement and transaction nesting."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple, bool]] = []
+        self._depth = 0
+
+    def acquire(self):
+        pool = self
+
+        class _Conn:
+            async def fetchval(self, sql, *args):
+                pool.calls.append((sql, args, pool._depth > 0))
+                return 1
+
+            def transaction(self):
+                class _Tx:
+                    async def __aenter__(self):
+                        pool._depth += 1
+
+                    async def __aexit__(self, *exc):
+                        pool._depth -= 1
+
+                return _Tx()
+
+        class _Ctx:
+            async def __aenter__(self):
+                return _Conn()
+
+            async def __aexit__(self, *exc):
+                return None
+
+        return _Ctx()
+
+
+class TestPiiEraseSubjectTenantScope:
+    """RU-066 follow-up: PIIHandler.erase_subject scopes packet erasure to one tenant."""
+
+    @pytest.mark.asyncio
+    async def test_packet_erasure_sets_tenant_and_passes_it(self) -> None:
+        from engine.compliance.pii import PIIHandler
+
+        pool = _FakeErasePool()
+        summary = await PIIHandler().erase_subject("subj-1", db_pool=pool, tenant="tenant-a", performed_by="tenant-a")
+
+        assert pool.calls == [
+            ("SELECT set_config('app.current_tenant', $1, true)", ("tenant-a",), True),
+            ("SELECT gdpr_erase_subject($1, $2, $3)", ("subj-1", "tenant-a", "tenant-a"), True),
+        ]
+        assert summary["packets_deleted"] == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("tenant", [None, ""])
+    async def test_packet_erasure_without_tenant_raises_before_any_sql(self, tenant) -> None:
+        from engine.compliance.pii import PIIHandler
+
+        pool = _FakeErasePool()
+        with pytest.raises(ValueError, match="tenant"):
+            await PIIHandler().erase_subject("subj-1", db_pool=pool, tenant=tenant)
+        assert pool.calls == []
+
+    @pytest.mark.asyncio
+    async def test_rls_session_flag_off_skips_set_config_but_still_scopes(self, monkeypatch) -> None:
+        from engine.compliance.pii import PIIHandler
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "packet_store_rls_tenant_session_enabled", False)
+        pool = _FakeErasePool()
+        await PIIHandler().erase_subject("subj-1", db_pool=pool, tenant="tenant-a", performed_by="tenant-a")
+
+        assert [c[0] for c in pool.calls] == ["SELECT gdpr_erase_subject($1, $2, $3)"]
+        assert pool.calls[0][1] == ("subj-1", "tenant-a", "tenant-a")

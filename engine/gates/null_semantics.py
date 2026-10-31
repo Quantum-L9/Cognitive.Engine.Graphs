@@ -124,3 +124,30 @@ class NullHandler:
             null_clause = " AND ".join(null_conditions)
             return f"({null_clause} AND ({gate_cypher}))"
         return gate_cypher
+
+    @classmethod
+    def wrap_operands(
+        cls,
+        null_behavior: NullBehavior,
+        gate_cypher: str,
+        operands: list[str],
+        unguarded: list[str],
+    ) -> str:
+        """Wrap a predicate with null handling over exactly the operands it tests (RU-042).
+
+        PASS: a NULL operand imposes no constraint — ``unguarded`` operands get
+        an outer ``x IS NULL OR``; the predicate text already lets the others
+        pass on its own side. FAIL: any NULL tested operand rejects. Literal
+        operands are never listed. With nothing to check the predicate is
+        returned unchanged. The output shape matches
+        ``wrap_gate_with_null_logic`` for the same operand list.
+        """
+        if null_behavior == NullBehavior.PASS:
+            if unguarded:
+                null_clause = " OR ".join(f"{ref} IS NULL" for ref in unguarded)
+                return f"({null_clause} OR ({gate_cypher}))"
+            return gate_cypher
+        if operands:
+            null_clause = " AND ".join(f"{ref} IS NOT NULL" for ref in operands)
+            return f"({null_clause} AND ({gate_cypher}))"
+        return gate_cypher
