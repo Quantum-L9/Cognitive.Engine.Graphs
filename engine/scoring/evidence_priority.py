@@ -38,9 +38,9 @@ Rules the policy holds, each tested in ``tests/unit/test_evidence_priority.py``:
 The module is pure: it reads no graph, loads no domain pack and never touches
 the match path (``handle_match``, ``GateCompiler``, ``TraversalAssembler``,
 ``ScoringAssembler``). Evidence arrives through an ``EvidenceBinding`` the
-server supplies. No binding exists yet: the relationship vocabulary, relevance
-map and evidence materialisation must first be proven from a real, admitted
-EIE -> Gate -> CEG projection, so the local handler reports ``blocked`` until then.
+server supplies; ``engine.scoring.graph_evidence.GraphEvidenceBinding`` reads it
+from the tenant's Neo4j database (QM.POC0.CEG.GRAPH_EVIDENCE.002A). Without a
+binding, or when it cannot read its graph, the local handler reports ``blocked``.
 """
 
 from __future__ import annotations
@@ -69,6 +69,13 @@ _ENTITY_REF = re.compile(ENTITY_REF_PATTERN)
 
 class ScoreRequestError(ValueError):
     """A score request was refused before any evidence was read."""
+
+
+class EvidenceUnavailableError(RuntimeError):
+    """An evidence binding could not read its graph (absent database, no connection).
+
+    The local handler answers ``blocked`` rather than scoring from nothing.
+    """
 
 
 class ScoreRequest(BaseModel):

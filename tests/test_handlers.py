@@ -126,7 +126,10 @@ def _make_domain_spec() -> MagicMock:
     spec.derivedparameters = []
     spec.compliance = None
 
-    endpoint = MagicMock()
+    # A node endpoint with no graph-ref namespace, as SyncEndpointSpec defaults
+    # it (attributes set in the constructor keep this fixture under the
+    # statement limit).
+    endpoint = MagicMock(targetedge=None, refnamespace=None)
     endpoint.path = "/v1/sync/facility"
     endpoint.batchstrategy = "UNWINDMERGE"
     endpoint.targetnode = "Facility"
