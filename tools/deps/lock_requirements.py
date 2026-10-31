@@ -11,23 +11,28 @@ status: active
 
 Regenerate the hash-locked CI dependency files from the requirements files.
 
-    python tools/deps/lock_requirements.py            # rewrite both locks
+    python tools/deps/lock_requirements.py            # rewrite every lock
     python tools/deps/lock_requirements.py --check    # exit 1 when a lock is stale
 
 CI installs only from these locks, with ``--require-hashes`` and
-``--only-binary :all:`` (SonarCloud githubactions:S8541 / S8544), through
-tools/deps/install_locked.sh.
+``--only-binary :all:`` (SonarCloud githubactions:S8541 / S8544, OpenSSF Scorecard
+Pinned-Dependencies), through tools/deps/install_locked.sh.
 
 | Lock | Sources |
 |---|---|
 | requirements-ci.lock | requirements-ci.txt |
 | requirements-full.lock | requirements.txt + requirements-ci.txt |
 | requirements-runtime.lock | requirements.txt + pip-licenses (supply-chain license report) |
+| requirements-tools.lock | pyyaml + yamllint (small workflow steps) |
 
 constellation-node-sdk is a git dependency, which pip cannot hash. It is resolved
 at the commit poetry.lock pins (``resolved_reference``) so its own dependencies
-are locked with hashes, then removed from the lock body and recorded on a
-``# sdk:`` line; install_locked.sh installs it with ``--no-deps``.
+are locked, then written as that commit's source archive with its sha256
+(``SDK_ARCHIVE_SHA256``, the same pin Constellation.Gate's requirements.lock
+carries). It is the one source build: install_locked.sh names it with
+``--no-binary``. When poetry.lock moves the SDK, update SDK_ARCHIVE_COMMIT and
+SDK_ARCHIVE_SHA256 together (``pip hash`` on the new archive); rendering refuses
+a mismatch.
 
 Requires uv (https://docs.astral.sh/uv/).
 """
@@ -45,18 +50,23 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SDK_NAME = "constellation-node-sdk"
 SDK_REPO = "https://github.com/Quantum-L9/Gate_SDK.git"
+SDK_ARCHIVE = "https://github.com/Quantum-L9/Gate_SDK/archive/{commit}.tar.gz"
+SDK_ARCHIVE_COMMIT = "7ec6cdf5e26c837057ca35b7324a88de4d499ea3"
+SDK_ARCHIVE_SHA256 = "f397d6951a2615d92839864824ff5c1d48316ca7d9052b10519d157f3885ab6e"
 PYTHON_VERSION = "3.12"
 COMMAND = "python tools/deps/lock_requirements.py"
 LOCKS: dict[str, tuple[str, ...]] = {
     "requirements-ci.lock": ("requirements-ci.txt",),
     "requirements-full.lock": ("requirements.txt", "requirements-ci.txt"),
     "requirements-runtime.lock": ("requirements.txt",),
+    "requirements-tools.lock": (),
 }
 # Extra pins locked alongside a lock's sources. The license report must cover the
 # runtime set only (CI tools carry licenses the allow-list does not name), plus
 # the reporter itself; the version matches requirements-ci.txt.
 EXTRAS: dict[str, tuple[str, ...]] = {
     "requirements-runtime.lock": ("pip-licenses==5.5.5",),
+    "requirements-tools.lock": ("pyyaml==6.0.3", "yamllint==1.38.0"),
 }
 _SDK_LINE = re.compile(rf"^{re.escape(SDK_NAME)}\s*@\s*\S+", re.MULTILINE)
 
@@ -68,9 +78,20 @@ def sdk_commit() -> str:
         if package.get("name") == SDK_NAME:
             commit = package.get("source", {}).get("resolved_reference")
             if commit:
+                if commit != SDK_ARCHIVE_COMMIT:
+                    msg = (
+                        f"poetry.lock pins {SDK_NAME} at {commit}, but SDK_ARCHIVE_SHA256 is for "
+                        f"{SDK_ARCHIVE_COMMIT}: update SDK_ARCHIVE_COMMIT and SDK_ARCHIVE_SHA256 together"
+                    )
+                    raise SystemExit(msg)
                 return str(commit)
     msg = f"poetry.lock has no resolved_reference for {SDK_NAME}"
     raise SystemExit(msg)
+
+
+def sdk_archive_line(commit: str) -> str:
+    """The hashed archive requirement the locks carry for the Gate SDK."""
+    return f"{SDK_NAME} @ {SDK_ARCHIVE.format(commit=commit)} \\\n    --hash=sha256:{SDK_ARCHIVE_SHA256}"
 
 
 def _pinned_sources(sources: tuple[str, ...], commit: str, workdir: Path) -> list[Path]:
@@ -85,23 +106,9 @@ def _pinned_sources(sources: tuple[str, ...], commit: str, workdir: Path) -> lis
     return pinned
 
 
-def _strip_sdk(body: str, commit: str) -> str:
-    """Remove the unhashable SDK entry (and its ``# via`` lines); record it as ``# sdk:``."""
-    lines = body.splitlines()
-    out: list[str] = []
-    skipping = False
-    for line in lines:
-        if _SDK_LINE.match(line):
-            skipping = True
-            continue
-        if skipping and line.startswith("    #"):
-            continue
-        skipping = False
-        out.append(line)
-    if any(_SDK_LINE.match(line) for line in lines):
-        header_end = next(i for i, line in enumerate(out) if not line.startswith("#"))
-        out.insert(header_end, f"# sdk: {SDK_NAME} @ git+{SDK_REPO}@{commit}")
-    return "\n".join(out) + "\n"
+def _hash_sdk(body: str, commit: str) -> str:
+    """Replace the unhashable git SDK entry with the commit's hashed source archive."""
+    return _SDK_LINE.sub(lambda _: sdk_archive_line(commit), body)
 
 
 def render(lock: str, commit: str) -> str:
@@ -134,7 +141,7 @@ def render(lock: str, commit: str) -> str:
             check=True,
         )
         body = out.read_text().replace(str(workdir) + "/", "").replace("-r extras.txt", "lock_requirements.EXTRAS")
-    return _strip_sdk(body, commit)
+    return _hash_sdk(body, commit)
 
 
 def main(argv: list[str] | None = None) -> int:

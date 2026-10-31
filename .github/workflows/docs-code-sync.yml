@@ -56,7 +56,7 @@ jobs:
           cache: 'pip'
 
       - name: Install Dependencies
-        run: 'pip install --only-binary :all: pyyaml==6.0.3'
+        run: bash tools/deps/install_locked.sh tools
 
       - name: Check Script Existence
         run: |

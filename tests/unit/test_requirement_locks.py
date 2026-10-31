@@ -36,26 +36,27 @@ import lock_requirements  # noqa: E402
 pytestmark = pytest.mark.unit
 
 _PIN = re.compile(r"^([A-Za-z0-9_.\-\[\],]+)==([^\s\\;]+)")
+_URL_PIN = re.compile(r"^([A-Za-z0-9_.\-]+) @ (\S+)")
 
 
-def _locked(lock: str) -> tuple[dict[str, str], dict[str, int], str | None]:
-    """Locked versions, hash counts per package, and the ``# sdk:`` line."""
+def _locked(lock: str) -> tuple[dict[str, str], dict[str, int], dict[str, str]]:
+    """Locked versions, hash counts per requirement, and URL-pinned requirements."""
     versions: dict[str, str] = {}
     hashes: dict[str, int] = {}
-    sdk = None
+    urls: dict[str, str] = {}
     current = None
     for line in (ROOT / lock).read_text().splitlines():
-        if line.startswith("# sdk: "):
-            sdk = line.removeprefix("# sdk: ")
-            continue
-        match = _PIN.match(line)
-        if match:
+        if match := _PIN.match(line):
             current = canonicalize_name(match.group(1).split("[")[0])
             versions[current] = match.group(2)
             hashes[current] = 0
+        elif match := _URL_PIN.match(line):
+            current = canonicalize_name(match.group(1))
+            urls[current] = match.group(2)
+            hashes[current] = 0
         elif current and line.strip().startswith("--hash="):
             hashes[current] += 1
-    return versions, hashes, sdk
+    return versions, hashes, urls
 
 
 def _source_requirements(name: str) -> list[Requirement]:
@@ -94,13 +95,16 @@ def test_every_locked_package_is_hashed(lock: str) -> None:
 
 
 @pytest.mark.parametrize("lock", sorted(lock_requirements.LOCKS))
-def test_the_gate_sdk_pin_is_poetry_locks(lock: str) -> None:
-    _, _, sdk = _locked(lock)
+def test_the_gate_sdk_is_poetry_locks_commit_as_a_hashed_archive(lock: str) -> None:
+    _, _, urls = _locked(lock)
     wants_sdk = any(r.url for name in lock_requirements.LOCKS[lock] for r in _source_requirements(name))
     if not wants_sdk:
-        assert sdk is None
+        assert urls == {}
         return
-    assert sdk == f"{lock_requirements.SDK_NAME} @ git+{lock_requirements.SDK_REPO}@{lock_requirements.sdk_commit()}"
+    commit = lock_requirements.sdk_commit()
+    assert urls == {lock_requirements.SDK_NAME: lock_requirements.SDK_ARCHIVE.format(commit=commit)}
+    body = (ROOT / lock).read_text()
+    assert lock_requirements.sdk_archive_line(commit) in body
 
 
 def test_installs_are_wheel_only_and_hash_checked() -> None:
@@ -109,6 +113,5 @@ def test_installs_are_wheel_only_and_hash_checked() -> None:
         line.strip() for line in script.splitlines() if "pip install" in line and not line.lstrip().startswith("#")
     ]
     assert installs == [
-        'python -m pip install --only-binary :all: --require-hashes -r "$lock"',
-        'python -m pip install --only-binary :all: --no-deps "$sdk"',
+        'python -m pip install --only-binary :all: --no-binary constellation-node-sdk --require-hashes -r "$lock"',
     ]

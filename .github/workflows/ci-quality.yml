@@ -232,7 +232,7 @@ jobs:
         # and per-file exclusions live in .yamllint.yml (errors block,
         # style-only issues are warnings).
         run: |
-          pip install --only-binary :all: yamllint==1.38.0
+          bash tools/deps/install_locked.sh tools
           yamllint -c .yamllint.yml .
 
   # ===========================================================================
