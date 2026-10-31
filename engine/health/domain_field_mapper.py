@@ -57,15 +57,35 @@ def get_node_definition(domain_spec: DomainSpec, node_label: str) -> NodeSpec:
     raise ValueError(msg)
 
 
+# Every GateSpec key that names a candidate property the gate reads.
+_GATE_CANDIDATE_KEYS = (
+    "candidateprop",
+    "candidateprop_min",
+    "candidateprop_max",
+    "candidateprop_start",
+    "candidateprop_end",
+)
+
+
 def build_field_map(domain_spec: DomainSpec, node_label: str) -> DomainFieldMap:
     """Build a DomainFieldMap by cross-referencing ontology, gates, and scoring."""
     node_def = get_node_definition(domain_spec, node_label)
 
-    # Collect gate-critical fields from domain gates
+    from engine.config.settings import settings
+
+    # Collect gate-critical fields from domain gates. With
+    # health_range_gate_fields_enabled (CEG-COR-045) every candidate property a
+    # gate reads counts — candidateprop plus the range/window bounds
+    # candidateprop_min/max/start/end (the enumeration
+    # engine/intake/impact_reporter._gate_required_fields uses). Off: the legacy
+    # candidateprop-only set, under which a range gate's bounds were "low".
+    bound_keys = _GATE_CANDIDATE_KEYS if settings.health_range_gate_fields_enabled else ("candidateprop",)
     gate_critical_fields: set[str] = set()
     for gate in domain_spec.gates:
-        if gate.candidateprop:
-            gate_critical_fields.add(gate.candidateprop)
+        for key in bound_keys:
+            prop = getattr(gate, key, None)
+            if isinstance(prop, str) and prop:
+                gate_critical_fields.add(prop)
 
     # Collect scoring weights from domain scoring dimensions
     scoring_weights: dict[str, float] = {}

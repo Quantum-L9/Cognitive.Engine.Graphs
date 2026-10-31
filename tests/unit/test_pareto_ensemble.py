@@ -129,3 +129,28 @@ class TestParetoEnsembleResult:
         )
         with pytest.raises(ValueError, match="Unknown priority"):
             result.select_by_priority("unknown")
+
+
+@pytest.mark.unit
+class TestParetoFrontNotForcedToRankAggregation:
+    """RG-147 (RU-112 / CEG-COR-048): rank aggregation no longer fuses every
+    input to 1.0, so it cannot dominate every other strategy by construction."""
+
+    def test_low_scores_front_is_not_only_borda(self) -> None:
+        from unittest.mock import patch
+
+        from engine.kge.pareto_ensemble import ParetoEnsembleController
+
+        scores = [
+            VariantScore("v1", "r", score=0.01, confidence=0.9),
+            VariantScore("v2", "r", score=0.02, confidence=0.9),
+        ]
+        with patch("engine.kge.ensemble.settings") as mock_settings:
+            mock_settings.kge_enabled = True
+            mock_settings.kge_confidence_threshold = 0.0
+            result = ParetoEnsembleController().predict_pareto(scores)
+
+        assert len(result.all_results) == 3
+        borda = next(r for r in result.all_results if r.fusion_strategy == "borda")
+        assert borda.final_score <= 0.02
+        assert [r.fusion_strategy for r in result.pareto_front] != ["borda"]

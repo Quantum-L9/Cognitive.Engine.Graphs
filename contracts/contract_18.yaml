@@ -1,9 +1,10 @@
 # --- L9_META ---
-# l9_schema: 2
+# l9_schema: 1
 # origin: l9-template
 # engine: graph
 # layer: [contracts]
 # tags: [governance, compliance]
+# owner: platform
 # status: active
 # --- /L9_META ---
 id: CONTRACT-18
@@ -12,8 +13,11 @@ layer: testing
 level: SHOULD
 scope:
   # Every tracked file with a known format, not just engine/ and chassis/.
-  # The eligible set is computed by tools/l9_meta/discover.py from the git index
-  # minus config `exclude`; enumerating it here would go stale immediately.
+  # The eligible set is computed by tools/l9_meta_injector.py from the git index
+  # (`git ls-files`): FILE_REGISTRY entries plus tracked files matching these
+  # patterns, minus EXCLUDED_PATTERNS (generated artifacts/**). Headerless files
+  # are allowed only for __init__.py and the HEADERLESS_BASELINE ratchet.
+  # tools/l9_meta_injector.py SCOPE_PATTERNS mirrors this list (unit-tested).
   paths:
   - '**/*.py'
   - '**/*.yaml'
@@ -27,8 +31,9 @@ scope:
 preconditions:
 - New file created
 postconditions:
-- L9_META header present (schema v2; `owner` dropped, zero consumers verified)
-- Values match l9-meta.yaml resolution (`l9-meta check` exits 0)
+- L9_META header present (schema v1: l9_schema, origin, engine, layer, tags, owner, status)
+- Registered files carry exactly their tools/l9_meta_injector.py FILE_REGISTRY values
+- '`python tools/l9_meta_injector.py check` exits 0 (exit 1 on any PENDING, MISSING, NOHEADER, INVALID or ERROR file)'
 docs:
 - docs/contracts/L9_META_HEADERS.md
 verification:
