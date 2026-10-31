@@ -31,6 +31,9 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
+
+from engine.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -161,18 +164,69 @@ def authorized_rules(domain_spec: Any) -> list[str]:
     return [str(name) for name in (declared or [])]
 
 
-@register_inference_rule("infer_company_size_tier")
-def infer_company_size_tier(entity: dict, ctx: InferenceContext) -> InferenceResult | None:
-    """Infer company_size_tier from employee_count and revenue fields."""
-    emp = entity.get("employee_count") or entity.get("employees")
-    revenue = entity.get("annual_revenue_usd") or entity.get("revenue")
-    if emp is None and revenue is None:
+def _first_present(entity: dict, *keys: str) -> Any:
+    """Return the first value among ``keys`` that is not None (RU-089)."""
+    for key in keys:
+        value = entity.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def _parse_number[N: (int, float)](value: Any, kind: type[N]) -> N | None:
+    """Parse ``value`` as ``kind``; None when absent or unparseable (RU-089)."""
+    if value is None:
         return None
     try:
-        emp_n = int(emp) if emp is not None else None
-        rev_n = float(revenue) if revenue is not None else None
+        return kind(value)
     except (TypeError, ValueError):
         return None
+
+
+def _website_host(website: str) -> str | None:
+    """Host of a website URL without port, userinfo or leading ``www.`` (RU-089).
+
+    Scheme-less input is parsed as a network location (``//`` prefix).
+    """
+    text = website.strip()
+    if "://" not in text:
+        text = "//" + text
+    try:
+        host = urlsplit(text).hostname
+    except ValueError:
+        return None
+    if not host:
+        return None
+    return host.removeprefix("www.")
+
+
+@register_inference_rule("infer_company_size_tier")
+def infer_company_size_tier(entity: dict, ctx: InferenceContext) -> InferenceResult | None:
+    """Infer company_size_tier from employee_count and revenue fields.
+
+    With ``inference_input_parsing_strict_enabled`` each field falls back to
+    its alias only when absent (``employee_count=0`` is a value), and each
+    value is parsed on its own, so an unparseable employee count falls back
+    to revenue instead of discarding both. Off: the legacy ``or`` chain and
+    one shared parse.
+    """
+    if settings.inference_input_parsing_strict_enabled:
+        emp = _first_present(entity, "employee_count", "employees")
+        revenue = _first_present(entity, "annual_revenue_usd", "revenue")
+        if emp is None and revenue is None:
+            return None
+        emp_n = _parse_number(emp, int)
+        rev_n = _parse_number(revenue, float)
+    else:
+        emp = entity.get("employee_count") or entity.get("employees")
+        revenue = entity.get("annual_revenue_usd") or entity.get("revenue")
+        if emp is None and revenue is None:
+            return None
+        try:
+            emp_n = int(emp) if emp is not None else None
+            rev_n = float(revenue) if revenue is not None else None
+        except (TypeError, ValueError):
+            return None
     if emp_n is not None:
         if emp_n < 10:
             tier, conf = "micro", 0.90
@@ -217,6 +271,17 @@ def infer_email_domain_from_website(entity: dict, ctx: InferenceContext) -> Infe
     website = entity.get("website") or entity.get("website_url")
     if not website:
         return None
+    if settings.inference_input_parsing_strict_enabled:
+        host = _website_host(str(website))
+        if not host or "." not in host:
+            return None
+        return InferenceResult(
+            field_name="email_domain",
+            value=host,
+            confidence=0.92,
+            rule_name="infer_email_domain_from_website",
+            rationale=f"derived from website={website}",
+        )
     # Strip protocol and www
     domain = re.sub(r"^https?://", "", str(website).strip().lower())
     domain = re.sub(r"^www\.", "", domain)
@@ -232,13 +297,52 @@ def infer_email_domain_from_website(entity: dict, ctx: InferenceContext) -> Infe
     )
 
 
+# USPS ZIP first digit -> region, in the vocabulary this rule already emits
+# (RU-084). Zone-level and therefore approximate (zone 5 includes MT).
+_USPS_ZONE_REGION: dict[str, str] = {
+    "0": "Northeast",
+    "1": "Northeast",
+    "2": "Southeast",
+    "3": "Southeast",
+    "4": "Midwest",
+    "5": "Midwest",
+    "6": "Midwest",
+    "7": "South",
+    "8": "West",
+    "9": "West",
+}
+# Declared-country spellings that keep the US ZIP inference (compared
+# case-insensitively after stripping whitespace).
+_US_COUNTRY_DESIGNATIONS = frozenset({"us", "usa", "united states"})
+
+
 @register_inference_rule("infer_geography_from_postal_code")
 def infer_geography_from_postal_code(entity: dict, ctx: InferenceContext) -> InferenceResult | None:
-    """Infer region/country from postal code prefix."""
+    """Infer region/country from postal code prefix.
+
+    With ``inference_geo_usps_zones_enabled`` the region follows the USPS
+    first-digit zone, and an entity whose declared ``country`` is not a US
+    designation yields no inference (an absent or blank country keeps the
+    inference, R4-DEC-07). Off: the legacy five-digit threshold ladder.
+    """
     postal = entity.get("postal_code") or entity.get("zip_code")
     if not postal:
         return None
     postal_str = str(postal).strip().upper()
+    if settings.inference_geo_usps_zones_enabled:
+        country = entity.get("country")
+        declared = "" if country is None else str(country).strip().lower()
+        if declared and declared not in _US_COUNTRY_DESIGNATIONS:
+            return None
+        if not re.match(r"^\d{5}(-\d{4})?$", postal_str):
+            return None
+        return InferenceResult(
+            field_name="region",
+            value=_USPS_ZONE_REGION[postal_str[0]],
+            confidence=0.82,
+            rule_name="infer_geography_from_postal_code",
+            rationale=f"US zip={postal_str}",
+        )
     # US zip
     if re.match(r"^\d{5}(-\d{4})?$", postal_str):
         prefix = int(postal_str[:5])
@@ -302,34 +406,55 @@ def infer_icp_fit_score(entity: dict, ctx: InferenceContext) -> InferenceResult 
     )
 
 
+# Job-title tokenizer for infer_buyer_persona (RU-088): '&' is kept so the
+# declared 'r&d' keyword remains matchable.
+_TITLE_TOKEN_SPLIT = re.compile(r"[^a-z0-9&]+")
+
+
 @register_inference_rule("infer_buyer_persona")
 def infer_buyer_persona(entity: dict, ctx: InferenceContext) -> InferenceResult | None:
-    """Infer buyer_persona from job_title if present."""
+    """Infer buyer_persona from job_title if present.
+
+    With ``inference_persona_token_match_enabled`` a keyword matches only a
+    whole token of the title, split on ``[^a-z0-9&]+`` so ``r&d`` stays one
+    token ('Marketing Coordinator' no longer matches 'coo'). Off: the legacy
+    substring test. Keyword sets, precedence and confidences are unchanged.
+    """
     title = entity.get("job_title") or entity.get("title") or ""
     title_lower = str(title).lower()
     if not title_lower:
         return None
+    if settings.inference_persona_token_match_enabled:
+        tokens = frozenset(_TITLE_TOKEN_SPLIT.split(title_lower))
+
+        def _has(kw: str) -> bool:
+            return kw in tokens
+    else:
+
+        def _has(kw: str) -> bool:
+            return kw in title_lower
+
     exec_keywords = {"ceo", "coo", "president", "owner", "founder", "vp", "svp", "evp"}
     ops_keywords = {"operations", "ops", "plant", "facility", "production", "supply"}
     proc_keywords = {"procurement", "purchasing", "buyer", "sourcing"}
     tech_keywords = {"engineer", "technical", "r&d", "research", "quality"}
     for kw in exec_keywords:
-        if kw in title_lower:
+        if _has(kw):
             return InferenceResult(
                 "buyer_persona", "executive", 0.85, "infer_buyer_persona", rationale=f"title={title}"
             )
     for kw in proc_keywords:
-        if kw in title_lower:
+        if _has(kw):
             return InferenceResult(
                 "buyer_persona", "procurement", 0.83, "infer_buyer_persona", rationale=f"title={title}"
             )
     for kw in ops_keywords:
-        if kw in title_lower:
+        if _has(kw):
             return InferenceResult(
                 "buyer_persona", "operations", 0.80, "infer_buyer_persona", rationale=f"title={title}"
             )
     for kw in tech_keywords:
-        if kw in title_lower:
+        if _has(kw):
             return InferenceResult(
                 "buyer_persona", "technical", 0.78, "infer_buyer_persona", rationale=f"title={title}"
             )

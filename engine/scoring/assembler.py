@@ -103,7 +103,16 @@ class ScoringAssembler:
 
         Returns a mapping of dimension_name -> learned weight adjustment factor.
         Falls back to empty dict if feedback loop is disabled or no weights exist.
+
+        RU-022 / CEG-COR-030: the writer (``SignalWeightCalculator._store_weights``)
+        keys DimensionWeight on ``{dimension, tenant}``. While
+        ``settings.learned_weights_tenant_keyed`` is on (default) the reader
+        filters on exactly those properties, with ``$tenant`` = the domain id;
+        off emits the legacy ``dimension_name`` / ``domain_id`` reader, which
+        matches nothing the writer stores.
         """
+        from engine.config.settings import settings
+
         if not self._graph_driver:
             return {}
 
@@ -116,17 +125,33 @@ class ScoringAssembler:
         if not dim_names:
             return {}
 
-        cypher = """
+        parameters: dict[str, Any]
+        if settings.learned_weights_tenant_keyed:
+            cypher = """
+        MATCH (dw:DimensionWeight {tenant: $tenant})
+        WHERE dw.dimension IN $names
+        RETURN dw.dimension AS name, dw.weight AS weight
+        """
+            parameters = {"names": dim_names, "tenant": domain_id}
+        else:
+            cypher = """
         MATCH (dw:DimensionWeight)
         WHERE dw.dimension_name IN $names AND dw.domain_id = $domain_id
         RETURN dw.dimension_name AS name, dw.weight AS weight
         """
+            parameters = {"names": dim_names, "domain_id": domain_id}
         results = await self._graph_driver.execute_query(
             cypher=cypher,
-            parameters={"names": dim_names, "domain_id": domain_id},
+            parameters=parameters,
             database=domain_id,
         )
-        self._learned_weights = {r["name"]: r["weight"] for r in results if r.get("name") and r.get("weight")}
+        if settings.learned_weight_renormalization:
+            # RU-023: a learned 0.0 is a weight (it takes the penalty branch), not absence.
+            self._learned_weights = {
+                r["name"]: r["weight"] for r in results if r.get("name") and r.get("weight") is not None
+            }
+        else:
+            self._learned_weights = {r["name"]: r["weight"] for r in results if r.get("name") and r.get("weight")}
         logger.info(
             "Loaded %d learned dimension weights for domain %s",
             len(self._learned_weights),
@@ -175,9 +200,11 @@ class ScoringAssembler:
             }
 
         dimension_exprs: list[str] = []
-        weight_exprs: list[str] = []
+        weight_entries: list[tuple[float, str]] = []  # (coefficient, alias)
         active_dim_names: list[str] = []
-        effective_weights: dict[str, float] = {}
+        # RU-023: indices of non-penalised dimensions and their pre-learning weights.
+        rescalable: dict[int, float] = {}
+        learned_multiplier_applied = False
 
         learned = self._learned_weights or {}
         sw_spec = self.domain_spec.feedbackloop.signal_weights if learned else None
@@ -192,16 +219,27 @@ class ScoringAssembler:
             alias = sanitize_label(dim.name)
             dimension_exprs.append(f"{expr} AS {alias}")
             weight = self._request_weight(dim, weights)
+            pre_learning = weight
+            penalised = False
             # Convergence loop: multiply spec weight by learned adjustment factor
             if dim.name in learned and sw_spec is not None:
                 learned_w = learned[dim.name]
                 # Negative penalty: when learned weight < penalty_threshold,
                 # apply negative penalty instead of just reduced weight.
                 # Implements "primitive subtraction" from Lippl et al.
-                weight = -abs(sw_spec.penalty_factor) if learned_w < sw_spec.penalty_threshold else weight * learned_w
-            weight_exprs.append(f"({cypher_number(weight)} * {alias})")
+                penalised = learned_w < sw_spec.penalty_threshold
+                weight = -abs(sw_spec.penalty_factor) if penalised else weight * learned_w
+                learned_multiplier_applied = learned_multiplier_applied or not penalised
+            if not penalised:
+                rescalable[len(weight_entries)] = pre_learning
+            weight_entries.append((weight, alias))
             active_dim_names.append(dim.name)
-            effective_weights[dim.name] = weight
+
+        if settings.learned_weight_renormalization and learned_multiplier_applied:
+            self._renormalize_learned(weight_entries, rescalable)
+        weight_exprs = [f"({cypher_number(w)} * {a})" for w, a in weight_entries]
+        # RU-032: the monoculture check reads the coefficients actually emitted.
+        effective_weights = {name: w for name, (w, _a) in zip(active_dim_names, weight_entries, strict=True)}
 
         self._last_active_dims = list(active_dim_names)
         self._last_effective_weights = effective_weights
@@ -220,6 +258,21 @@ class ScoringAssembler:
     def last_active_dimension_names(self) -> list[str]:
         """Return dimension names from the most recent assemble_scoring_clause call."""
         return list(self._last_active_dims)
+
+    @staticmethod
+    def _renormalize_learned(weight_entries: list[tuple[float, str]], rescalable: dict[int, float]) -> None:
+        """RU-023 / CEG-COR-083 (C-22): rescale the non-penalised coefficients in place.
+
+        Learned multipliers redistribute weight among the non-penalised
+        dimensions; their sum is rescaled back to its pre-learning value so
+        learning never raises the positive weight sum.
+        """
+        pre_sum = sum(rescalable.values())
+        post_sum = sum(weight_entries[i][0] for i in rescalable)
+        if post_sum > 0:
+            scale = pre_sum / post_sum
+            for i in rescalable:
+                weight_entries[i] = (weight_entries[i][0] * scale, weight_entries[i][1])
 
     @staticmethod
     def _request_weight(dim: ScoringDimensionSpec, weights: dict[str, float]) -> Any:
@@ -301,13 +354,28 @@ class ScoringAssembler:
         return base_expr
 
     def _compile_geodecay(self, dim: ScoringDimensionSpec) -> str:
+        """Distance decay between the candidate's and the query's coordinates.
+
+        RU-037 / CEG-COR-011: with ``settings.geodecay_declared_longitude`` on
+        (default) the longitude operands are the dimension's declared
+        ``candidateprop_lon`` / ``queryprop_lon``, defaulting to
+        ``candidate.lon`` / ``$lon``; off ignores the declarations.
+        """
+        from engine.config.settings import settings
+
         k = cypher_number(dim.decayconstant or 50000.0)
         lat_prop = sanitize_label(dim.candidateprop or "lat")
         query_lat_param = sanitize_label(dim.queryprop or lat_prop)
+        lon_prop = "lon"
+        query_lon_param = "lon"
+        if settings.geodecay_declared_longitude:
+            # getattr: duck-typed dimension doubles predate the fields (cf. soft_match).
+            lon_prop = sanitize_label(getattr(dim, "candidateprop_lon", None) or "lon")
+            query_lon_param = sanitize_label(getattr(dim, "queryprop_lon", None) or "lon")
         return (
             f"1.0 / (1.0 + point.distance("
-            f"point({{latitude: candidate.{lat_prop}, longitude: candidate.lon}}),"
-            f" point({{latitude: ${query_lat_param}, longitude: $lon}})"
+            f"point({{latitude: candidate.{lat_prop}, longitude: candidate.{lon_prop}}}),"
+            f" point({{latitude: ${query_lat_param}, longitude: ${query_lon_param}}})"
             f") / {k})"
         )
 
@@ -373,16 +441,28 @@ class ScoringAssembler:
 
         Formula: 1 - |log(candidate_p / target_p)| / tau
         Handles SaaS $10/mo to $10k/mo ranges appropriately.
+
+        RU-017 / CEG-COR-006: the ratio is computed in floating point. Cypher
+        divides two INTEGER operands as INTEGER (450 / 500 -> 0), so both
+        operands are wrapped in ``toFloat()`` while
+        ``settings.pricealignment_float_division`` is on (default). Off emits
+        the legacy ``candidate.<p> / $<q>`` text for C-21 rollback.
         """
+        from engine.config.settings import settings
+
         cand_prop = sanitize_label(dim.candidateprop or "price_per_unit")
         query_prop = sanitize_label(dim.queryprop or "target_price")
         tau = cypher_number(dim.maxvalue or 2.0)  # tolerance: 2.0 = ~7.4x ratio scores 0
         default = float(dim.defaultwhennull)  # nosemgrep: float-requires-try-except
+        if settings.pricealignment_float_division:
+            ratio = f"toFloat(candidate.{cand_prop}) / toFloat(${query_prop})"
+        else:
+            ratio = f"candidate.{cand_prop} / ${query_prop}"
         return (
             f"CASE "
             f"  WHEN ${query_prop} IS NULL OR ${query_prop} <= 0 THEN {default} "
             f"  WHEN candidate.{cand_prop} IS NULL OR candidate.{cand_prop} <= 0 THEN {default} "
-            f"  ELSE toFloat(1.0 - abs(log(candidate.{cand_prop} / ${query_prop})) / {tau}) "
+            f"  ELSE toFloat(1.0 - abs(log({ratio})) / {tau}) "
             f"END"
         )
 
@@ -518,19 +598,30 @@ class ScoringAssembler:
         self._query_params[default_key] = default
         self._query_params[sample_key] = int(sample_k)
 
+        # RU-021 / CEG-COR-082: the ratio is (#community matches within the K
+        # most recent successes) / (size of that sample). The sample is taken
+        # once — successes ordered by created_at DESC (undated last, elementId
+        # tie-break), first K — and the community filter runs inside it. The
+        # former expression sliced the filtered list and the unfiltered list
+        # separately, i.e. min(K, matches) / min(K, total) (100 successes, 50
+        # matching, K=28 scored 1.0 instead of 0.5). Variables are dimension-
+        # scoped so the COLLECT subquery cannot correlate with an outer name.
+        sample_var = f"pa_sample_{safe_dim}"
+        outcome_var = f"pa_o_{safe_dim}"
+        member_var = f"pa_m_{safe_dim}"
+        # Labels and relationship type above passed sanitize_label() (C-9).
+        success_path = f"(qe)-[:{outcome_rel}]->({outcome_var}:{outcome_node})"
         return (
-            f"CASE "
-            f"  WHEN size([(qe)-[:{outcome_rel}]->(o:{outcome_node}) "
-            f"    WHERE o.{success_prop} = ${success_key} | o]) = 0 THEN ${default_key} "
-            f"  ELSE toFloat("
-            f"    size([(qe)-[:{outcome_rel}]->(o:{outcome_node}) "
-            f"      WHERE o.{success_prop} = ${success_key} "
-            f"      AND o.community_id = candidate.{cand_community_prop} | o][0..${sample_key}])"
-            f"  ) / toFloat("
-            f"    size([(qe)-[:{outcome_rel}]->(o:{outcome_node}) "
-            f"      WHERE o.{success_prop} = ${success_key} | o][0..${sample_key}])"
-            f"  ) "
-            f"END"
+            f"[{sample_var} IN [COLLECT {{ "
+            f"MATCH {success_path} "
+            f"WHERE {outcome_var}.{success_prop} = ${success_key} "
+            f"RETURN {outcome_var} "
+            f"ORDER BY {outcome_var}.created_at IS NULL, {outcome_var}.created_at DESC, elementId({outcome_var}) "
+            f"LIMIT ${sample_key} }}] | "
+            f"CASE WHEN size({sample_var}) = 0 THEN ${default_key} "
+            f"ELSE toFloat(size([{member_var} IN {sample_var} "
+            f"WHERE {member_var}.community_id = candidate.{cand_community_prop}])) "
+            f"/ toFloat(size({sample_var})) END][0]"
         )
 
     def _compile_community_bridge(self, dim: ScoringDimensionSpec) -> str:
@@ -586,9 +677,15 @@ class ScoringAssembler:
         property (``point.distance`` on a null ``lat``, a freshness date never
         synced) made the whole weighted ``score`` null, which the handler then
         tried to rank. Null clamps to 0.0, the ``NullStrategy.ZERO`` contract.
+
+        RU-031 / CEG-COR-166: NaN (``log`` of a negative argument, ``0.0 / 0.0``)
+        compares false to both bounds and so fell through to ELSE. It is treated
+        like null and clamps to 0.0; the test follows IS NULL so ``isNaN`` never
+        receives a null.
         """
         return (
-            f"CASE WHEN ({expr}) IS NULL THEN 0.0 WHEN ({expr}) < 0.0 THEN 0.0 "
+            f"CASE WHEN ({expr}) IS NULL THEN 0.0 WHEN isNaN(({expr})) THEN 0.0 "
+            f"WHEN ({expr}) < 0.0 THEN 0.0 "
             f"WHEN ({expr}) > 1.0 THEN 1.0 ELSE ({expr}) END"
         )
 

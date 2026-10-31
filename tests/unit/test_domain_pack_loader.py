@@ -324,3 +324,323 @@ class TestInvalidate:
         loader._cache["d2"] = (MagicMock(), 200.0)
         loader.invalidate()
         assert len(loader._cache) == 0
+
+
+# ============================================================================
+# RG-026 (RU-020 / CEG-COR-027..029): scoring dimensions that cannot execute
+# withhold the pack at admission instead of failing every match.
+# ============================================================================
+
+_REPO_DOMAINS = Path(__file__).resolve().parents[2] / "domains"
+
+
+def _spec_with_dimensions(  # type: ignore[no-untyped-def]
+    dimensions: list[dict[str, object]],
+    fields: list[dict[str, object]] | None = None,
+    candidate_properties: list[dict[str, object]] | None = None,
+):
+    import yaml
+
+    from engine.config.schema import DomainSpec
+
+    raw = yaml.safe_load(_minimal_spec_yaml("scoring-check"))
+    raw["scoring"]["dimensions"] = dimensions
+    raw["queryschema"]["fields"] = fields or []
+    raw["ontology"]["nodes"][0]["properties"] += candidate_properties or []
+    return DomainSpec.model_validate(raw)
+
+
+def _repo_spec(domain_id: str):  # type: ignore[no-untyped-def]
+    import yaml
+
+    from engine.config.schema import DomainSpec
+
+    return DomainSpec.model_validate(yaml.safe_load((_REPO_DOMAINS / domain_id / "spec.yaml").read_text()))
+
+
+def _pre_repair_freight_spec():  # type: ignore[no-untyped-def]
+    """freight-matching as it was before RU-037: deadhead/rate dims declare no operands.
+
+    geodecay then reads candidate.lat/lon vs $lat/$lon and pricealignment
+    candidate.price_per_unit vs $target_price (CEG-COR-011).
+    """
+    import yaml
+
+    from engine.config.schema import DomainSpec
+
+    raw = yaml.safe_load((_REPO_DOMAINS / "freight-matching" / "spec.yaml").read_text())
+    for dim in raw["scoring"]["dimensions"]:
+        if dim["name"] in ("deadhead_distance", "rate_alignment"):
+            for key in ("candidateprop", "candidateprop_lon", "queryprop", "queryprop_lon"):
+                dim.pop(key, None)
+    return DomainSpec.model_validate(raw)
+
+
+_BRIDGE = {
+    "name": "bridge",
+    "source": "computed",
+    "computation": "community_bridge",
+    "weightkey": "wb",
+    "defaultweight": 0.1,
+}
+_ATTENTION = {
+    "name": "attention",
+    "source": "computed",
+    "computation": "preference_attention",
+    "weightkey": "wa",
+    "defaultweight": 0.1,
+}
+_POPMEAN = {
+    "name": "rating",
+    "source": "candidateproperty",
+    "candidateprop": "rating",
+    "computation": "candidateproperty",
+    "null_strategy": "population_mean",
+    "weightkey": "wr",
+    "defaultweight": 0.1,
+}
+_PRIOR = {**_POPMEAN, "name": "prior", "null_strategy": "inherit_prior"}
+_STRUCTURAL = {**_POPMEAN, "name": "cold", "null_strategy": "zero", "cold_start_fallback": "structural_similarity"}
+
+
+@pytest.mark.unit
+class TestScoringAdmission:
+    """admission_defects compiles each direction's scoring and checks its parameters bind."""
+
+    @pytest.fixture(autouse=True)
+    def _default_admission(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config import loader as loader_module
+
+        monkeypatch.setattr(loader_module.settings, "unvalidated_domain_packs_enabled", False)
+        monkeypatch.setattr(loader_module.settings, "dormant_domain_packs_enabled", False)
+        # The check ships off (owner decision 2026-10-29); this class tests it on.
+        monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", True)
+
+    def test_community_bridge_without_query_field_names_the_parameter(self) -> None:
+        from engine.config.loader import withholding_reason
+
+        reason = withholding_reason(_spec_with_dimensions([_BRIDGE]))
+        assert reason is not None
+        assert "query_community_id" in reason
+
+    def test_community_bridge_with_its_query_field_is_admitted(self) -> None:
+        from engine.config.loader import admission_defects
+
+        spec = _spec_with_dimensions([_BRIDGE], fields=[{"name": "query_community_id", "type": "int"}])
+        assert admission_defects(spec) == []
+
+    def test_preference_attention_defect_quotes_the_compiler(self) -> None:
+        from engine.config.loader import admission_defects
+
+        defects = admission_defects(_spec_with_dimensions([_ATTENTION]))
+        assert len(defects) == 1
+        assert "attention" in defects[0]
+        assert "requires metadata.success_value" in defects[0]
+
+    def test_population_mean_names_its_unbound_parameter(self) -> None:
+        from engine.config.loader import admission_defects
+
+        defects = admission_defects(_spec_with_dimensions([_POPMEAN]))
+        assert defects
+        assert all("rating" in d for d in defects)
+        assert any("_popmean_rating" in d for d in defects)
+
+    @pytest.mark.parametrize("dim", [_PRIOR, _STRUCTURAL], ids=["inherit_prior", "structural_similarity"])
+    def test_options_without_a_producer_are_defects(self, dim: dict[str, object]) -> None:
+        from engine.config.loader import admission_defects
+
+        defects = admission_defects(_spec_with_dimensions([dim]))
+        assert len(defects) == 1
+        assert dim["name"] in defects[0]
+        assert "no producer" in defects[0]
+
+    @pytest.mark.parametrize(
+        "dim",
+        [_POPMEAN, {**_POPMEAN, "null_strategy": "zero", "cold_start_fallback": "population_mean"}],
+        ids=["null_strategy", "cold_start_fallback"],
+    )
+    @pytest.mark.parametrize(
+        "producer",
+        [
+            {"fields": [{"name": "_popmean_rating", "type": "float", "default": 0.5}]},
+            {"derived": {"name": "_popmean_rating", "expression": "0.5", "type": "float"}},
+        ],
+        ids=["queryschema", "derived"],
+    )
+    def test_population_mean_with_a_declared_parameter_is_admitted(
+        self, dim: dict[str, object], producer: dict[str, object]
+    ) -> None:
+        """handle_match binds a declared `_popmean_<dim>`; the option executes, so it is not a defect."""
+        from engine.config.loader import admission_defects, withholding_reason
+
+        spec = _spec_with_dimensions([dim], fields=producer.get("fields"))  # type: ignore[arg-type]
+        if "derived" in producer:
+            from engine.config.schema import DerivedParameterSpec
+
+            spec = spec.model_copy(
+                update={"derivedparameters": [DerivedParameterSpec.model_validate(producer["derived"])]}
+            )
+        assert admission_defects(spec) == []
+        assert withholding_reason(spec) is None
+
+    @pytest.mark.asyncio
+    async def test_admitted_population_mean_pack_binds_every_match_parameter(self) -> None:
+        """The admitted pack executes: handle_match binds `$_popmean_rating` and every other reference."""
+        import re
+        from typing import Any
+        from unittest.mock import MagicMock
+
+        from engine.handlers import handle_match, init_dependencies
+
+        spec = _spec_with_dimensions([_POPMEAN], fields=[{"name": "_popmean_rating", "type": "float", "default": 0.5}])
+        calls: list[tuple[str, dict[str, Any]]] = []
+
+        class _Driver:
+            async def execute_query(
+                self, *, cypher: str, parameters: dict[str, Any], database: str
+            ) -> list[dict[str, Any]]:
+                calls.append((cypher, parameters))
+                return []
+
+        loader = MagicMock()
+        loader.load_domain.return_value = spec
+        loader.list_domains.return_value = ["scoring-check"]
+        init_dependencies(_Driver(), loader)  # type: ignore[arg-type]
+        await handle_match("scoring-check", {"query": {}, "match_direction": "d1"})
+
+        cypher, parameters = calls[0]
+        assert "$_popmean_rating" in cypher
+        assert parameters["_popmean_rating"] == 0.5
+        assert set(re.findall(r"\$([A-Za-z_][A-Za-z0-9_]*)", cypher)) <= set(parameters)
+
+    def test_population_mean_without_its_parameter_is_one_unbound_defect(self) -> None:
+        from engine.config.loader import admission_defects
+
+        defects = admission_defects(_spec_with_dimensions([_POPMEAN]))
+        assert len(defects) == 1
+        assert "'_popmean_rating'" in defects[0]
+
+    @pytest.mark.parametrize(
+        ("dim", "prop"),
+        [(_PRIOR, "_prior_prior"), (_STRUCTURAL, "shared_neighbor_score")],
+        ids=["inherit_prior", "structural_similarity"],
+    )
+    def test_options_whose_candidate_property_the_pack_declares_are_admitted(
+        self, dim: dict[str, object], prop: str
+    ) -> None:
+        """A property declared on the candidate node is written by sync (`SET n += row`): a producer."""
+        from engine.config.loader import admission_defects
+
+        spec = _spec_with_dimensions([dim], candidate_properties=[{"name": prop, "type": "float", "managedby": "sync"}])
+        assert admission_defects(spec) == []
+
+    def test_one_defect_per_offending_dimension(self) -> None:
+        from engine.config.loader import admission_defects
+
+        ok = {**_POPMEAN, "name": "plain", "null_strategy": "zero"}
+        defects = admission_defects(_spec_with_dimensions([_BRIDGE, _ATTENTION, _PRIOR, ok]))
+        assert sorted(d.split(":", 1)[0] for d in defects) == sorted(
+            ["scoring[d1] bridge", "scoring[d1] attention", "scoring prior"]
+        )
+
+    def test_freight_matching_is_withheld_for_its_unbound_scoring_parameters(self) -> None:
+        """The pre-RU-037 freight shape: geodecay/pricealignment reference $lat, $lon, $target_price."""
+        from engine.config.loader import admission_defects, withholding_reason
+
+        spec = _pre_repair_freight_spec()
+        defects = "\n".join(admission_defects(spec))
+        for param in ("'lat'", "'lon'", "'target_price'"):
+            assert param in defects
+        assert withholding_reason(spec) is not None
+        # RU-037 declared the operands: the repository pack is admitted.
+        assert admission_defects(_repo_spec("freight-matching")) == []
+
+    def test_flag_off_restores_gate_only_admission(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config import loader as loader_module
+
+        monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", False)
+        # RU-039's full-match check also compiles scoring; isolate this unit's flag.
+        monkeypatch.setattr(loader_module.settings, "admission_checks_full_match", False)
+        for spec in (_spec_with_dimensions([_BRIDGE, _ATTENTION, _POPMEAN, _PRIOR]), _pre_repair_freight_spec()):
+            assert loader_module.admission_defects(spec) == []
+            assert loader_module.withholding_reason(spec) is None
+
+    @pytest.mark.parametrize("domain_id", ["plasticos", "mortgage-brokerage", "freight-matching"])
+    def test_served_packs_have_no_scoring_defect(self, domain_id: str) -> None:
+        """The scoring check alone withholds neither served pack (p_param_binding.py: unbound={})."""
+        from engine.config.loader import admission_defects
+
+        assert [d for d in admission_defects(_repo_spec(domain_id)) if d.startswith("scoring")] == []
+
+    def test_unvalidated_override_still_serves(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config import loader as loader_module
+
+        monkeypatch.setattr(loader_module.settings, "unvalidated_domain_packs_enabled", True)
+        assert loader_module.withholding_reason(_spec_with_dimensions([_BRIDGE])) is None
+
+
+# ============================================================================
+# RG-065 (RU-051 / CEG-COR-078): the loader cache is bounded by Settings, read
+# from the contract variable names DOMAIN_CACHE_MAXSIZE / DOMAIN_CACHE_TTL_SECONDS.
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestCacheBoundsFromSettings:
+    @pytest.fixture
+    def fresh_settings(self, monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
+        """Rebuild the Settings the loader reads after the test has set its environment."""
+        from engine.config import loader as loader_module
+        from engine.config.settings import Settings
+
+        def _apply() -> None:
+            monkeypatch.setattr(loader_module, "settings", Settings())
+
+        for name in ("DOMAIN_CACHE_MAXSIZE", "DOMAIN_CACHE_MAX_SIZE", "DOMAIN_CACHE_TTL_SECONDS"):
+            monkeypatch.delenv(name, raising=False)
+        return _apply
+
+    def test_contract_variable_bounds_the_cache(self, monkeypatch: pytest.MonkeyPatch, fresh_settings) -> None:  # type: ignore[no-untyped-def]
+        monkeypatch.setenv("DOMAIN_CACHE_MAXSIZE", "2")
+        monkeypatch.setenv("DOMAIN_CACHE_TTL_SECONDS", "7")
+        fresh_settings()
+        loader = DomainPackLoader()
+        assert loader._max_size == 2
+        assert loader._ttl_seconds == 7.0
+
+    def test_defaults_come_from_settings(self, fresh_settings) -> None:  # type: ignore[no-untyped-def]
+        fresh_settings()
+        loader = DomainPackLoader()
+        assert (loader._max_size, loader._ttl_seconds) == (100, 30.0)
+
+    def test_legacy_spelling_is_honoured_only_when_the_contract_variable_is_unset(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        fresh_settings,  # type: ignore[no-untyped-def]
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        monkeypatch.setenv("DOMAIN_CACHE_MAX_SIZE", "5")
+        fresh_settings()
+        with caplog.at_level("WARNING", logger="engine.config.loader"):
+            assert DomainPackLoader()._max_size == 5
+        assert "deprecated" in caplog.text
+
+        monkeypatch.setenv("DOMAIN_CACHE_MAXSIZE", "3")
+        fresh_settings()
+        assert DomainPackLoader()._max_size == 3
+
+    def test_cache_eviction_honours_the_bound(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        fresh_settings,  # type: ignore[no-untyped-def]
+    ) -> None:
+        monkeypatch.setenv("DOMAIN_CACHE_MAXSIZE", "2")
+        fresh_settings()
+        for name in ("pack-a", "pack-b", "pack-c"):
+            (tmp_path / name).mkdir()
+            (tmp_path / name / "spec.yaml").write_text(_minimal_spec_yaml(name))
+        loader = DomainPackLoader(config_path=str(tmp_path))
+        for name in ("pack-a", "pack-b", "pack-c"):
+            loader.load_domain(name)
+        assert len(loader._cache) == 2

@@ -205,3 +205,48 @@ class TestConfidenceIntervals:
 
         weights = await calc.recalculate_weights()
         assert weights["geo_score"] == 1.0  # baseline_weight
+
+
+async def _dimension_detail(dim_total: int, dim_wins: int, base_win_rate: float) -> dict[str, float]:
+    spec = _spec_with_confidence()
+    driver = AsyncMock()
+    driver.execute_query = AsyncMock(return_value=[{"dim_total": dim_total, "dim_wins": dim_wins}])
+    calc = SignalWeightCalculator(driver, spec)
+    return await calc._compute_dimension_weight("geo_score", base_win_rate, max(dim_total, 1), "TransactionOutcome")
+
+
+class TestProportionConfidenceInterval:
+    """RU-027 / CEG-COR-116 (RG-034): the CI comes from the win-rate proportion, not lift*(1-lift)."""
+
+    @pytest.mark.asyncio
+    async def test_positive_lift_ci_shrinks_with_sample_size(self) -> None:
+        # lift 2 at both sizes: base 0.5, every dimension outcome a win.
+        small = await _dimension_detail(dim_total=1, dim_wins=1, base_win_rate=0.5)
+        large = await _dimension_detail(dim_total=100, dim_wins=100, base_win_rate=0.5)
+        assert small["lift"] == large["lift"] == 2.0
+        assert small["ci_width"] > large["ci_width"] > 0.0
+        assert small["confidence"] < large["confidence"]
+
+    @pytest.mark.asyncio
+    async def test_interior_win_rate_ci_shrinks_with_sample_size(self) -> None:
+        # lift 2: base 0.25, dimension win rate 0.5.
+        n4 = await _dimension_detail(dim_total=4, dim_wins=2, base_win_rate=0.25)
+        n100 = await _dimension_detail(dim_total=100, dim_wins=50, base_win_rate=0.25)
+        assert n4["ci_width"] > n100["ci_width"] > 0.0
+        assert n4["confidence"] < n100["confidence"]
+
+    @pytest.mark.asyncio
+    async def test_small_sample_dampens_positive_lift(self) -> None:
+        """Dampening now pulls an n=1 lift-2 weight toward 1.0 (was confidence 1.0)."""
+        small = await _dimension_detail(dim_total=1, dim_wins=1, base_win_rate=0.5)
+        assert small["confidence"] < 0.5
+        assert 1.0 <= small["weight"] < 2.0
+
+    @pytest.mark.asyncio
+    async def test_flag_off_restores_lift_formula(self, monkeypatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "signal_weight_proportion_ci", False)
+        small = await _dimension_detail(dim_total=1, dim_wins=1, base_win_rate=0.5)
+        assert small["ci_width"] == 0.0
+        assert small["confidence"] == 1.0

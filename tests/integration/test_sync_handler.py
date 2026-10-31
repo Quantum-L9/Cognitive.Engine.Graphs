@@ -64,3 +64,47 @@ async def test_sync_unknown_entity_type_raises(domain_loader):
             )
     finally:
         get_state().reset()
+
+
+@pytest.mark.asyncio
+async def test_synced_facility_matches_on_its_processed_polymer(engine_deps, clean_db):
+    """RG-062 (RU-048 / CEG-COR-071): sync then match returns the synced facility.
+
+    The facilities endpoint links each listed polymer with a PROCESSES edge,
+    which the plasticos polymer gate requires; before, synced facilities had no
+    polymer edges and no engine-synced facility could ever match.
+    """
+    from engine.handlers import handle_match, handle_sync
+
+    synced = await handle_sync(
+        "plasticos",
+        {
+            "entity_type": "facilities",
+            "batch": [
+                {
+                    "facility_id": "sync-pet",
+                    "name": "Synced PET Facility",
+                    "contamination_tolerance": 0.10,
+                    "processed_polymers": [{"code": "PET"}],
+                },
+                {
+                    "facility_id": "sync-pp",
+                    "name": "Synced PP Facility",
+                    "contamination_tolerance": 0.10,
+                    "processed_polymers": [{"code": "PP"}],
+                },
+            ],
+        },
+    )
+    assert synced.get("status") in ("ok", "success")
+
+    result = await handle_match(
+        "plasticos",
+        {
+            "query": {"polymer_type": "PET", "contamination_pct": 0.04},
+            "match_direction": "supply_opportunity_to_buyer_facility",
+            "top_n": 10,
+        },
+    )
+    ids = [c["candidate"]["facility_id"] for c in result.get("candidates", [])]
+    assert ids == ["sync-pet"]

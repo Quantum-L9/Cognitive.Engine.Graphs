@@ -15,6 +15,9 @@ Target Coverage: 85%+
 
 from __future__ import annotations
 
+from typing import Any
+from unittest.mock import patch
+
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
@@ -46,6 +49,18 @@ from engine.config.schema import (
     SyncEndpointSpec,
     SyncStrategy,
 )
+from engine.config.settings import Settings
+
+# Validators read the module-level singleton; patch it at its source.
+_SETTINGS_TARGET = "engine.config.settings.settings"
+
+
+def _settings(**overrides: Any) -> Settings:
+    """A Settings instance with overrides (avoids .env side effects)."""
+    base: dict[str, Any] = {"neo4j_password": "test-pw", "api_secret_key": "test-key", "l9_env": "dev"}
+    base.update(overrides)
+    return Settings(**base)
+
 
 # ============================================================================
 # HELPERS
@@ -342,6 +357,32 @@ class TestDomainSpec:
         with pytest.raises(PydanticValidationError, match="unknown node label"):
             DomainSpec.model_validate(raw)
 
+    @staticmethod
+    def _cap_gate(name: str) -> dict[str, Any]:
+        return {"name": name, "type": "threshold", "candidateprop": "fid", "operator": ">=", "queryparam": 1}
+
+    def test_duplicate_gate_names_raise(self) -> None:
+        """RU-049 / CEG-COR-076: two gates named 'cap' fail validation, naming the duplicate."""
+        raw = _minimal_domain_raw()
+        raw["gates"] = [self._cap_gate("cap"), self._cap_gate("cap"), self._cap_gate("other")]
+        with pytest.raises(PydanticValidationError, match=r"Duplicate gate name\(s\): \['cap'\]"):
+            DomainSpec.model_validate(raw)
+
+    def test_distinct_gate_names_pass(self) -> None:
+        """RU-049: distinct gate names validate."""
+        raw = _minimal_domain_raw()
+        raw["gates"] = [self._cap_gate("cap"), self._cap_gate("other")]
+        spec = DomainSpec.model_validate(raw)
+        assert [g.name for g in spec.gates] == ["cap", "other"]
+
+    def test_duplicate_gate_names_flag_off_load(self) -> None:
+        """RU-049 flag off: duplicates load as before."""
+        raw = _minimal_domain_raw()
+        raw["gates"] = [self._cap_gate("cap"), self._cap_gate("cap")]
+        with patch(_SETTINGS_TARGET, _settings(gate_name_uniqueness=False)):
+            spec = DomainSpec.model_validate(raw)
+        assert [g.name for g in spec.gates] == ["cap", "cap"]
+
 
 @pytest.mark.unit
 class TestGateSpec:
@@ -356,6 +397,36 @@ class TestGateSpec:
     def test_null_behavior_default(self) -> None:
         """GateSpec defaults nullbehavior to PASS."""
         gate = GateSpec(name="g1", type=GateType.THRESHOLD)
+        assert gate.nullbehavior == NullBehavior.PASS
+
+    _GATE = {"name": "g1", "type": "threshold", "candidateprop": "p", "queryparam": "q", "operator": ">="}
+
+    def test_snake_case_null_behavior_key_rejected(self) -> None:
+        """RU-053 / CEG-COR-081: `null_behavior: fail` was ignored (PASS); it now fails validation."""
+        with pytest.raises(PydanticValidationError, match=r"unknown key\(s\) \['null_behavior'\]"):
+            GateSpec.model_validate({**self._GATE, "null_behavior": "fail"})
+
+    def test_unknown_gate_key_names_the_real_key(self) -> None:
+        """RU-053: the refusal points at the declared key the misspelling resembles."""
+        with pytest.raises(PydanticValidationError, match="did you mean 'nullbehavior'"):
+            GateSpec.model_validate({**self._GATE, "null_behavior": "fail"})
+
+    def test_unknown_gate_key_rejected_in_domain_spec(self) -> None:
+        """RU-053: a domain spec whose gate carries an unrecognised key fails validation."""
+        raw = _minimal_domain_raw()
+        raw["gates"] = [{**self._GATE, "queryparam": 1, "candidateprop": "fid", "threshold": 5}]
+        with pytest.raises(PydanticValidationError, match=r"unknown key\(s\) \['threshold'\]"):
+            DomainSpec.model_validate(raw)
+
+    def test_declared_gate_keys_accepted(self) -> None:
+        """RU-053: every declared key (here `nullbehavior`) still validates."""
+        gate = GateSpec.model_validate({**self._GATE, "nullbehavior": "fail"})
+        assert gate.nullbehavior == NullBehavior.FAIL
+
+    def test_unknown_gate_key_flag_off_ignored(self) -> None:
+        """RU-053 flag off: unknown keys are ignored as before (and nullbehavior stays PASS)."""
+        with patch(_SETTINGS_TARGET, _settings(gate_spec_forbid_unknown_keys=False)):
+            gate = GateSpec.model_validate({**self._GATE, "null_behavior": "fail"})
         assert gate.nullbehavior == NullBehavior.PASS
 
 
@@ -447,5 +518,36 @@ class TestDomainMetadata:
 
     def test_alternate_domains(self) -> None:
         """DomainMetadata stores alternate domains."""
-        m = DomainMetadata(id="p", name="P", version="1", alternatedomains=["alt1"])
+        m = DomainMetadata(id="p", name="P", version="1.0.0", alternatedomains=["alt1"])
         assert m.alternatedomains == ["alt1"]
+
+    @pytest.mark.parametrize("version", ["latest", "v2", "2026-03-01", "1", "1.0", "01.0.0", "1.0.0-beta", "1.0.0 "])
+    def test_non_semver_version_rejected(self, version: str) -> None:
+        """RU-057 / CEG-COR-152: DOMAIN_SPEC_VERSIONING.md bans non-semver versions."""
+        with pytest.raises(PydanticValidationError, match="is not semver"):
+            DomainMetadata(id="p", name="P", version=version)
+
+    @pytest.mark.parametrize("version", ["1.2\u0663.3", "1\u0660.0.0", "1.0.1\u0662-reviewed", "2.0.1\u0669"])
+    def test_non_ascii_digit_version_rejected(self, version: str) -> None:
+        """RU-057: version components are ASCII digits; Python's ``\\d`` also matches e.g. Arabic-Indic digits."""
+        with pytest.raises(PydanticValidationError, match="is not semver"):
+            DomainMetadata(id="p", name="P", version=version)
+
+    @pytest.mark.parametrize(
+        "version", ["0.0.1", "0.1.0", "1.0.0", "1.0.1", "1.1.0", "1.2.0", "2.0.0", "1.0.0-reviewed", "0.1.0-seed"]
+    )
+    def test_semver_version_accepted(self, version: str) -> None:
+        """RU-057: semver with an optional DOMAIN_SPEC_VERSIONING stage suffix validates."""
+        assert DomainMetadata(id="p", name="P", version=version).version == version
+
+    def test_non_semver_version_rejected_in_domain_spec(self) -> None:
+        """RU-057: the refusal reaches a full DomainSpec load."""
+        raw = _minimal_domain_raw()
+        raw["domain"]["version"] = "latest"
+        with pytest.raises(PydanticValidationError, match="'latest' is not semver"):
+            DomainSpec.model_validate(raw)
+
+    def test_non_semver_version_flag_off_accepted(self) -> None:
+        """RU-057 flag off: any string version is accepted, as before."""
+        with patch(_SETTINGS_TARGET, _settings(domain_version_semver_enforced=False)):
+            assert DomainMetadata(id="p", name="P", version="latest").version == "latest"

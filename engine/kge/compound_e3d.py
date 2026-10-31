@@ -27,6 +27,7 @@ Phase 4 implementation — gated behind settings.kge_enabled.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -35,8 +36,15 @@ import numpy.typing as npt
 
 from engine.config.schema import KGESpec
 from engine.config.settings import settings
+from engine.kge.transformations import Rotation, Scale, Transformation3D
 
 logger = logging.getLogger(__name__)
+
+# Floor for a TransE residual norm when normalising it into a unit gradient.
+_NORM_EPS = 1e-12
+
+# Lower bound for a learned Scale factor (Scale requires factor > 0).
+_MIN_SCALE = 1e-3
 
 
 @dataclass
@@ -102,11 +110,12 @@ class CompoundE3D:
         self._trained = False
 
         # --- CompoundE3D operator stores (Ge et al. 2023 §3.2) ---
-        # Keyed by relation name → list of instantiated transformation
-        # objects (Translation, Rotation, Scaling, Flip, Hyperplane, Shear).
-        # Populated by _build_relation_operators() at train/load time.
-        self._head_ops: dict[str, list[Any]] = {}
-        self._tail_ops: dict[str, list[Any]] = {}
+        # Keyed by relation name → ordered list of Transformation3D objects
+        # (ops[0] applied first). Populated by _build_relation_operators() at
+        # train time with a learnable head cascade [Rotation, Scale] and an
+        # identity (empty) tail cascade per training relation (RU-119).
+        self._head_ops: dict[str, list[Transformation3D]] = {}
+        self._tail_ops: dict[str, list[Transformation3D]] = {}
 
         # Platt scaling calibration parameters (learned post-training).
         # Maps raw distance d → probability via sigmoid(-(alpha*d - beta)).
@@ -155,25 +164,29 @@ class CompoundE3D:
         for rid in relations:
             if rid not in self._relation_embeddings:
                 self._relation_embeddings[rid] = rng.uniform(-bound, bound, size=self.dim)
+        # Per-relation operator cascades, trained jointly with the embeddings.
+        self._build_relation_operators(sorted(relations), rng)
 
         # Simplified training loop (production: replace with PyTorch optim)
         entity_list = list(entities)
         losses: list[float] = []
+        # Shuffle a local copy each epoch; the caller's list is never reordered
+        # (CEG-COR-113).
+        order = list(triples)
         for _ in range(epochs):
             epoch_loss = 0.0
-            rng.shuffle(triples)
-            for h, r, t in triples:
+            rng.shuffle(order)
+            for h, r, t in order:
                 pos_score = self._distance(h, r, t)
                 # Negative sampling — index the list so the type stays str
                 neg_t = entity_list[int(rng.integers(len(entity_list)))]
                 neg_score = self._distance(h, r, neg_t)
                 loss = max(0.0, self.config.margin + pos_score - neg_score)
                 epoch_loss += loss
-                # SGD update (simplified)
+                # SGD step along the gradient of the margin loss
+                # L = margin + d(h, r, t) - d(h, r, t') (CEG-COR-049, RU-119).
                 if loss > 0:
-                    grad = self.config.learning_rate
-                    self._entity_embeddings[h] -= grad * (self._entity_embeddings[h] - self._relation_embeddings[r])
-                    self._entity_embeddings[t] -= grad * (self._entity_embeddings[t] - self._relation_embeddings[r])
+                    self._margin_sgd_step(h, r, t, neg_t)
             losses.append(epoch_loss / max(len(triples), 1))
 
         self._trained = True
@@ -184,6 +197,173 @@ class CompoundE3D:
             "num_entities": len(entities),
             "num_relations": len(relations),
         }
+
+    def _build_relation_operators(self, relations: list[str], rng: np.random.Generator) -> None:
+        """Build the CompoundE3D operator cascade for each relation that has none.
+
+        RU-119 / CEG-COR-106 (DEC-45 "implement"): every training relation gets
+        a head cascade ``[Rotation(angle, axis), Scale(factor)]`` and an
+        identity (empty) tail cascade, so ``_distance`` scores
+        ``||S_r R_r h + r - t||`` (CompoundE3D-Head with the relation
+        embedding as the translation component). The rotation axis is a random
+        unit vector per relation; angle and factor start at the identity
+        (0 degrees, 1.0) and are learned by ``_margin_sgd_step``. Relations
+        that already carry operators keep them (retraining does not rebuild).
+        """
+        for relation in relations:
+            if relation in self._head_ops:
+                continue
+            axis = rng.normal(size=3)
+            norm = np.linalg.norm(axis).item()
+            if norm < _NORM_EPS:
+                axis = np.array([0.0, 0.0, 1.0])
+                norm = 1.0
+            unit = axis / norm
+            self._head_ops[relation] = [
+                Rotation(angle=0.0, axis=(unit[0].item(), unit[1].item(), unit[2].item())),
+                Scale(factor=1.0),
+            ]
+            self._tail_ops[relation] = []
+
+    def _effective_ops(self, relation: str) -> tuple[list[Transformation3D], list[Transformation3D]]:
+        """Head and tail cascades used by ``_distance`` for ``scoring_mode``."""
+        mode = getattr(self.config, "scoring_mode", "complete")
+        head_ops = [] if mode == "tail" else list(self._head_ops.get(relation, []))
+        tail_ops = [] if mode == "head" else list(self._tail_ops.get(relation, []))
+        return head_ops, tail_ops
+
+    @staticmethod
+    def _rotation_derivative(op: Rotation, x: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        """d/d(angle in radians) of ``op.apply(x)`` (Rodrigues, per 3-block)."""
+        out = np.zeros_like(x)
+        ax = np.array(op.axis, dtype=np.float64)
+        norm = np.linalg.norm(ax).item()
+        if norm < 1e-9:
+            return out
+        ax = ax / norm
+        rad = math.radians(op.angle)
+        cos_a, sin_a = math.cos(rad), math.sin(rad)
+        for i in range(0, len(x) - 2, 3):
+            v = x[i : i + 3]
+            out[i : i + 3] = -sin_a * v + cos_a * np.cross(ax, v) + sin_a * ax * np.dot(ax, v)
+        return out
+
+    @classmethod
+    def _cascade_backward(
+        cls,
+        ops: list[Transformation3D],
+        x: npt.NDArray[np.float64],
+        upstream: npt.NDArray[np.float64],
+    ) -> tuple[npt.NDArray[np.float64], list[float]]:
+        """Backpropagate ``upstream`` (dL/d cascade(x)) through ``ops``.
+
+        Returns (dL/dx, [dL/d param of op_k]) where the parameter of a Scale is
+        its factor and of a Rotation its angle in radians. Only the operator
+        family ``_build_relation_operators`` builds is trainable.
+        """
+        inputs: list[npt.NDArray[np.float64]] = []
+        current = x
+        for op in ops:
+            inputs.append(current)
+            current = op.apply(current)
+        grad = upstream
+        param_grads = [0.0] * len(ops)
+        for k in range(len(ops) - 1, -1, -1):
+            op, x_in = ops[k], inputs[k]
+            if isinstance(op, Scale):
+                param_grads[k] = np.dot(grad, x_in).item()
+                grad = op.factor * grad
+            elif isinstance(op, Rotation):
+                param_grads[k] = np.dot(grad, cls._rotation_derivative(op, x_in)).item()
+                grad = op.inverse().apply(grad)  # rotation is orthogonal: R^T = R^-1
+            else:
+                msg = f"CompoundE3D operator {type(op).__name__} has no training gradient"
+                raise TypeError(msg)
+        return grad, param_grads
+
+    @staticmethod
+    def _stepped_ops(ops: list[Transformation3D], grads: list[float], lr: float) -> list[Transformation3D]:
+        """``ops`` with each learnable parameter moved one SGD step against its gradient."""
+        stepped: list[Transformation3D] = []
+        for op, g in zip(ops, grads, strict=True):
+            if isinstance(op, Scale):
+                stepped.append(Scale(factor=max(_MIN_SCALE, op.factor - lr * g)))
+            elif isinstance(op, Rotation):
+                stepped.append(Rotation(angle=math.degrees(math.radians(op.angle) - lr * g), axis=op.axis))
+            else:
+                stepped.append(op)
+        return stepped
+
+    def _compound_sgd_step(self, head: str, relation: str, tail: str, neg_tail: str) -> None:
+        """One SGD step on L = margin + d(h, r, t) - d(h, r, t') through the cascades.
+
+        d(h, r, t) = ||H_r(h) + r - T_r(t)||. With g = residual / ||residual||
+        for the positive and g' for the negative triple, the upstream gradient
+        is (g - g') into the head cascade and r, -g into T_r(t) and +g' into
+        T_r(t'). All deltas are computed before any parameter moves, so an
+        aliased entity receives the sum of its gradients.
+        """
+        from engine.kge.beam_search import _CascadeTransformation
+
+        lr = self.config.learning_rate
+        head_ops, tail_ops = self._effective_ops(relation)
+        h_emb = self._entity_embeddings[head]
+        r_emb = self._relation_embeddings[relation]
+        t_emb = self._entity_embeddings[tail]
+        n_emb = self._entity_embeddings[neg_tail]
+        head_tx = _CascadeTransformation(head_ops)
+        tail_tx = _CascadeTransformation(tail_ops)
+        mapped_h = head_tx.apply(h_emb.copy())
+        pos = mapped_h + r_emb - tail_tx.apply(t_emb.copy())
+        neg = mapped_h + r_emb - tail_tx.apply(n_emb.copy())
+        g_pos = pos / max(np.linalg.norm(pos).item(), _NORM_EPS)
+        g_neg = neg / max(np.linalg.norm(neg).item(), _NORM_EPS)
+
+        grad_h, head_param_grads = self._cascade_backward(head_ops, h_emb, g_pos - g_neg)
+        grad_t, tail_grads_pos = self._cascade_backward(tail_ops, t_emb, -g_pos)
+        grad_n, tail_grads_neg = self._cascade_backward(tail_ops, n_emb, g_neg)
+
+        entity_deltas: dict[str, npt.NDArray[np.float64]] = {}
+        for eid, delta in ((head, -lr * grad_h), (tail, -lr * grad_t), (neg_tail, -lr * grad_n)):
+            entity_deltas[eid] = entity_deltas[eid] + delta if eid in entity_deltas else delta
+        for eid, delta in entity_deltas.items():
+            self._entity_embeddings[eid] = self._entity_embeddings[eid] + delta
+        self._relation_embeddings[relation] = r_emb - lr * (g_pos - g_neg)
+        if head_ops:
+            self._head_ops[relation] = self._stepped_ops(head_ops, head_param_grads, lr)
+        if tail_ops:
+            tail_param_grads = [a + b for a, b in zip(tail_grads_pos, tail_grads_neg, strict=True)]
+            self._tail_ops[relation] = self._stepped_ops(tail_ops, tail_param_grads, lr)
+
+    def _margin_sgd_step(self, head: str, relation: str, tail: str, neg_tail: str) -> None:
+        """One SGD step on the TransE margin loss for (h, r, t) against (h, r, t').
+
+        A relation with an operator cascade (RU-119) steps through
+        ``_compound_sgd_step`` instead; the TransE step below is the fallback
+        for relations without operators.
+
+        With g = (h + r - t) / ||h + r - t|| and g' = (h + r - t') / ||h + r - t'||:
+        h -= lr * (g - g'); r -= lr * (g - g'); t += lr * g; t' -= lr * g'.
+        All deltas are computed before any embedding moves, so an aliased
+        entity (t' == h or t' == t) receives the sum of its gradients.
+        """
+        if relation in self._head_ops:
+            self._compound_sgd_step(head, relation, tail, neg_tail)
+            return
+        lr = self.config.learning_rate
+        h_emb = self._entity_embeddings[head]
+        r_emb = self._relation_embeddings[relation]
+        pos = h_emb + r_emb - self._entity_embeddings[tail]
+        neg = h_emb + r_emb - self._entity_embeddings[neg_tail]
+        g_pos = pos / max(np.linalg.norm(pos).item(), _NORM_EPS)
+        g_neg = neg / max(np.linalg.norm(neg).item(), _NORM_EPS)
+
+        entity_deltas: dict[str, npt.NDArray[np.float64]] = {}
+        for eid, delta in ((head, -lr * (g_pos - g_neg)), (tail, lr * g_pos), (neg_tail, -lr * g_neg)):
+            entity_deltas[eid] = entity_deltas[eid] + delta if eid in entity_deltas else delta
+        for eid, delta in entity_deltas.items():
+            self._entity_embeddings[eid] = self._entity_embeddings[eid] + delta
+        self._relation_embeddings[relation] = r_emb - lr * (g_pos - g_neg)
 
     # ------------------------------------------------------------------
     # Inference
@@ -257,15 +437,18 @@ class CompoundE3D:
     def _distance(self, head: str, relation: str, tail: str) -> float:
         """CompoundE3D triple scoring (Ge et al. 2023, arXiv:2304.00378).
 
-        Three scoring modes controlled by self.config.scoring_mode:
-          'head'     : ||M_r * h  -  t||          (CompoundE3D-Head)
-          'tail'     : ||h  -  M_r_hat * t||      (CompoundE3D-Tail)
-          'complete' : ||M_r * h  -  M_r_hat * t||(CompoundE3D-Complete)
+        ``d = ||H_r(h) + r - T_r(t)||`` where H_r / T_r are the ordered operator
+        cascades in ``self._head_ops[relation]`` / ``self._tail_ops[relation]``
+        (applied with ``_CascadeTransformation``, ops[0] first) and ``r`` is the
+        relation embedding (the cascade's translation component). Three
+        scoring modes, controlled by ``self.config.scoring_mode``:
+          'head'     : ||H_r(h) + r - t||          (CompoundE3D-Head)
+          'tail'     : ||h + r - T_r(t)||          (CompoundE3D-Tail)
+          'complete' : ||H_r(h) + r - T_r(t)||     (CompoundE3D-Complete, default)
 
-        Operators M_r / M_r_hat are block-diagonal 4x4 affine matrices built
-        from the ordered cascade in self._head_ops[relation] /
-        self._tail_ops[relation].  Falls back to TransE if operators have
-        not been built (cold-start / pre-training compatibility).
+        ``_build_relation_operators`` builds the cascades at train time
+        (RU-119). A relation without operators falls back to TransE,
+        ``||h + r - t||`` (cold-start / pre-training compatibility).
         """
         h_emb = self._entity_embeddings.get(head)
         t_emb = self._entity_embeddings.get(tail)
@@ -273,33 +456,20 @@ class CompoundE3D:
 
         if h_emb is None or t_emb is None:
             return float("inf")  # nosemgrep: float-requires-try-except
+        if r_emb is None:
+            return float("inf")  # nosemgrep: float-requires-try-except
 
         # --- Fallback to TransE if operators not yet built ---
         if relation not in self._head_ops:
-            if r_emb is None:
-                return float("inf")  # nosemgrep: float-requires-try-except
             return float(np.linalg.norm((h_emb + r_emb) - t_emb))  # nosemgrep: float-requires-try-except
 
-        mode = getattr(self.config, "scoring_mode", "complete")
+        from engine.kge.beam_search import _CascadeTransformation
 
-        def _apply_ops(x: npt.NDArray[np.float64], ops: list[Any]) -> npt.NDArray[np.float64]:
-            """Sequentially apply a cascade of transformation objects."""
-            for op in ops:
-                x = op.apply(x)
-            return x
-
-        if mode == "head":
-            transformed_h = _apply_ops(h_emb.copy(), self._head_ops[relation])
-            dist = np.linalg.norm(transformed_h - t_emb)
-        elif mode == "tail":
-            transformed_t = _apply_ops(t_emb.copy(), self._tail_ops.get(relation, []))
-            dist = np.linalg.norm(h_emb - transformed_t)
-        else:  # 'complete' - default per paper
-            transformed_h = _apply_ops(h_emb.copy(), self._head_ops[relation])
-            transformed_t = _apply_ops(t_emb.copy(), self._tail_ops.get(relation, []))
-            dist = np.linalg.norm(transformed_h - transformed_t)
-
-        return float(dist)  # nosemgrep: float-requires-try-except
+        head_ops, tail_ops = self._effective_ops(relation)
+        transformed_h = _CascadeTransformation(head_ops).apply(h_emb.copy())
+        transformed_t = _CascadeTransformation(tail_ops).apply(t_emb.copy())
+        distance: float = np.linalg.norm(transformed_h + r_emb - transformed_t).item()
+        return distance
 
     def calibrate_platt(
         self,
@@ -397,10 +567,19 @@ class CompoundE3D:
         if not hasattr(self, "_icp_centroid"):
             msg = "score_against_icp: ICP centroid not built. Call build_icp_centroid(account_ids) first."
             raise RuntimeError(msg)
-        # Temporarily register ICP centroid as a named entity for _distance
+        # Register the ICP centroid as a named entity for this one _distance
+        # call only (CEG-COR-112): leaving it in the table put it in
+        # predict_tail's candidate pool. Any prior value under the key returns.
         icp_key = "__ICP_CENTROID__"
+        prior = self._entity_embeddings.get(icp_key)
         self._entity_embeddings[icp_key] = self._icp_centroid
-        raw_dist = self._distance(candidate_id, relation, icp_key)
+        try:
+            raw_dist = self._distance(candidate_id, relation, icp_key)
+        finally:
+            if prior is None:
+                del self._entity_embeddings[icp_key]
+            else:
+                self._entity_embeddings[icp_key] = prior
         # Apply Platt calibration
         logit = -(self._platt_alpha * raw_dist - self._platt_beta)
         prob = 1.0 / (1.0 + np.exp(-logit))

@@ -25,7 +25,6 @@ that every node shares.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import threading
 import uuid
@@ -225,6 +224,22 @@ class AuditLogger:
 
     Buffers entries in memory and flushes to registered sinks.
     Thread-safe for mixed sync/async usage.
+
+    Delivery semantics (RU-085):
+
+    * One ``threading.Lock`` guards every read, swap and append of the
+      buffer and of the per-sink pending lists, so a ``log()`` from a worker
+      thread can never land between flush's snapshot and its reset.
+    * ``flush()`` moves the buffer into one pending list per sink and
+      delivers each sink only its own pending entries. A sink that raises
+      keeps its entries pending; the next flush retries that sink alone, so
+      a healthy sink receives each ``audit_id`` exactly once. Every sink is
+      attempted, then the first sink error is re-raised.
+    * ``buffer_size`` bounds the buffer and each sink's pending list. On
+      overflow the **oldest** entries are dropped, counted in
+      ``dropped_count`` and reported with a WARNING (drop-oldest was chosen
+      over a forced flush because ``log()`` is synchronous and may run off
+      the event loop, where it cannot await a sink).
     """
 
     def __init__(
@@ -237,13 +252,17 @@ class AuditLogger:
         self._buffer: list[AuditEntry] = []
         self._buffer_size = buffer_size
         self._sinks = sinks or []
-        self._async_lock = asyncio.Lock()
-        self._sync_lock = threading.Lock()
+        # Entries flushed but not yet accepted, one list per sink (same index).
+        self._pending: list[list[AuditEntry]] = [[] for _ in self._sinks]
+        self._dropped = 0
+        self._lock = threading.Lock()
         self._log = logging.getLogger("l9.audit")
 
     def add_sink(self, sink: AuditSink) -> None:
         """Register an audit persistence sink."""
-        self._sinks.append(sink)
+        with self._lock:
+            self._sinks.append(sink)
+            self._pending.append([])
 
     def log(
         self,
@@ -294,23 +313,40 @@ class AuditLogger:
         return entry
 
     async def flush(self) -> int:
-        """Flush buffer to all registered sinks. Returns total persisted."""
-        async with self._async_lock:
-            entries = list(self._buffer)
-            self._buffer.clear()
+        """Flush buffer to all registered sinks. Returns total persisted.
 
-        if not entries:
-            return 0
+        Raises the first sink error after every sink was attempted; the
+        failed sinks keep their entries pending for the next flush.
+        """
+        with self._lock:
+            batch, self._buffer = self._buffer, []
+            work: list[tuple[int, AuditSink, list[AuditEntry]]] = []
+            dropped = 0
+            for index, sink in enumerate(self._sinks):
+                pending = self._pending[index]
+                pending.extend(batch)
+                dropped += self._trim(pending)
+                self._pending[index] = []
+                work.append((index, sink, pending))
+        self._warn_dropped(dropped)
 
         total = 0
-        for sink in self._sinks:
+        first_error: Exception | None = None
+        for index, sink, entries in work:
+            if not entries:
+                continue
             try:
                 total += await sink.write_batch(entries)
-            except Exception:
-                logger.exception("Audit sink %s failed, re-buffering", type(sink).__name__)
-                async with self._async_lock:
-                    self._buffer = entries + self._buffer
-                raise
+            except Exception as exc:
+                logger.exception("Audit sink %s failed, keeping %d entries pending", type(sink).__name__, len(entries))
+                with self._lock:
+                    self._pending[index] = entries + self._pending[index]
+                    dropped = self._trim(self._pending[index])
+                self._warn_dropped(dropped)
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise first_error
         return total
 
     def get_retention_days(self, compliance_tags: Sequence[str]) -> int:
@@ -321,9 +357,38 @@ class AuditLogger:
 
     @property
     def buffer_count(self) -> int:
-        return len(self._buffer)
+        """Distinct entries not yet delivered to every sink."""
+        with self._lock:
+            pending_ids = {e.audit_id for pending in self._pending for e in pending}
+            return len(self._buffer) + len(pending_ids)
+
+    @property
+    def dropped_count(self) -> int:
+        """Entries discarded because the buffer or a pending list overflowed."""
+        with self._lock:
+            return self._dropped
+
+    def _trim(self, entries: list[AuditEntry]) -> int:
+        """Drop the oldest entries beyond ``buffer_size``. Caller holds the lock."""
+        excess = len(entries) - self._buffer_size
+        if excess <= 0:
+            return 0
+        del entries[:excess]
+        self._dropped += excess
+        return excess
+
+    def _warn_dropped(self, dropped: int) -> None:
+        if dropped:
+            logger.warning(
+                "Audit buffer over buffer_size=%d: dropped %d oldest entries (total dropped=%d)",
+                self._buffer_size,
+                dropped,
+                self._dropped,
+            )
 
     def _emit(self, entry: AuditEntry) -> None:
         self._log.info("audit_event", extra={"audit": entry.model_dump(mode="json")})
-        with self._sync_lock:
+        with self._lock:
             self._buffer.append(entry)
+            dropped = self._trim(self._buffer)
+        self._warn_dropped(dropped)

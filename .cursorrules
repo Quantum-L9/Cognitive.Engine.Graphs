@@ -1,9 +1,10 @@
 # --- L9_META ---
-# l9_schema: 2
+# l9_schema: 1
 # origin: l9-template
 # engine: graph
 # layer: [agent-rules]
-# tags: [governance]
+# tags: [L9_TEMPLATE, agent-rules, cursor]
+# owner: platform
 # status: active
 # --- /L9_META ---
 # Made By: Igor Beylin
@@ -52,6 +53,9 @@
 #
 #   @agents/cursor/cursor_memory_kernel.yaml
 #     Memory substrate protocol, session state, MCP tool mapping.
+#     Historical: its `cursor_memory_client.py` commands no longer exist — the
+#     agents/cursor Python tooling was retired (DEC-53). Use the governance
+#     memory CLI (`python -m ops.memory.cli`) instead.
 #
 #   @CLAUDE.md
 #     Claude Code agent conventions. Both agents must pass the same
@@ -160,8 +164,9 @@
 # engine boundaries, and governance stay aligned across Composer windows:
 #   - agents/cursor/cursor_system_prompt.md
 #   - agents/cursor/governance-reference.md
-# Memory CLI (health/search/write): requires MCP_API_KEY_C or L9_EXECUTOR_API_KEY in
-# repo-root .env and/or .env.local (loaded by agents/cursor/cursor_memory_client.py).
+# Memory CLI (health/search/write): the governance memory CLI
+# (`python -m ops.memory.cli`). The former agents/cursor/cursor_memory_client.py
+# was retired with the rest of the agents/cursor Python tooling (DEC-53).
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -302,8 +302,18 @@ class PacketEnvelope(BaseModel):
 
     @classmethod
     def from_wire(cls, data: dict[str, Any]) -> PacketEnvelope:
-        """Deserialize from wire dict. Validates all fields."""
-        return cls.model_validate(data)
+        """Deserialize from wire dict. Validates all fields and the content_hash.
+
+        RU-092 / CEG-COR-173: a packet whose ``security.content_hash`` does not
+        match ``_compute_hash`` over its packet_type, action, payload, tenant
+        and address (tampered in transit, or a forged hash) raises
+        ``ValueError`` instead of being accepted.
+        """
+        packet = cls.model_validate(data)
+        if not packet.verify_integrity():
+            msg = f"PacketEnvelope {packet.packet_id} failed integrity check: content_hash does not match its content"
+            raise ValueError(msg)
+        return packet
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

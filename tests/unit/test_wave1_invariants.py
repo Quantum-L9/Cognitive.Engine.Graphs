@@ -226,6 +226,132 @@ class TestW101DomainCrossRef:
         spec = DomainSpec.model_validate(raw)
         assert len(spec.scoring.dimensions) == 2
 
+    @staticmethod
+    def _mixed_scope_dimensions(scoped: float, unscoped: float) -> dict[str, Any]:
+        """One dimension scoped to the spec's direction, one unscoped (applies to every direction)."""
+        return {
+            "dimensions": [
+                {
+                    "name": "scoped_dim",
+                    "source": "candidateproperty",
+                    "candidateprop": "credit_score",
+                    "computation": "candidateproperty",
+                    "weightkey": "w_scoped",
+                    "defaultweight": scoped,
+                    "matchdirections": ["supply_opportunity_to_buyer_facility"],
+                },
+                {
+                    "name": "unscoped_dim",
+                    "source": "candidateproperty",
+                    "candidateprop": "lat",
+                    "computation": "candidateproperty",
+                    "weightkey": "w_unscoped",
+                    "defaultweight": unscoped,
+                },
+            ],
+        }
+
+    def test_scoring_weight_mixed_scope_exceeds_ceiling_raises(self) -> None:
+        """RU-044 / CEG-COR-024: unscoped weight counts toward every declared direction.
+
+        Effective weight for the direction is 0.6 (scoped) + 0.6 (unscoped) = 1.2.
+        """
+        raw = _minimal_spec_raw()
+        raw["scoring"] = self._mixed_scope_dimensions(scoped=0.6, unscoped=0.6)
+        with pytest.raises(ValueError, match="'supply_opportunity_to_buyer_facility'"):
+            DomainSpec.model_validate(raw)
+
+    def test_scoring_weight_mixed_scope_at_ceiling_passes(self) -> None:
+        """RU-044: scoped 0.4 + unscoped 0.6 is exactly the ceiling and is accepted."""
+        raw = _minimal_spec_raw()
+        raw["scoring"] = self._mixed_scope_dimensions(scoped=0.4, unscoped=0.6)
+        spec = DomainSpec.model_validate(raw)
+        assert len(spec.scoring.dimensions) == 2
+
+    def test_scoring_weight_mixed_scope_flag_off_keeps_bucket_check(self) -> None:
+        """RU-044 flag off: each scope bucket is checked alone (legacy), so 0.6 + 0.6 loads."""
+        raw = _minimal_spec_raw()
+        raw["scoring"] = self._mixed_scope_dimensions(scoped=0.6, unscoped=0.6)
+        s = _make_settings(weight_ceiling_includes_unscoped=False)
+        with patch(_SETTINGS_TARGET, s):
+            spec = DomainSpec.model_validate(raw)
+        assert len(spec.scoring.dimensions) == 2
+
+    def test_scoring_weight_mixed_scope_skipped_without_strict_validation(self) -> None:
+        """RU-044 stays gated by domain_strict_validation, as the bucket check is today."""
+        raw = _minimal_spec_raw()
+        raw["scoring"] = self._mixed_scope_dimensions(scoped=0.6, unscoped=0.6)
+        s = _make_settings(domain_strict_validation=False)
+        with patch(_SETTINGS_TARGET, s):
+            spec = DomainSpec.model_validate(raw)
+        assert len(spec.scoring.dimensions) == 2
+
+    @staticmethod
+    def _spec_with_gate(gate: dict[str, Any], extra_fields: list[str] | None = None) -> dict[str, Any]:
+        raw = _minimal_spec_raw()
+        for name in extra_fields or []:
+            raw["queryschema"]["fields"].append({"name": name, "type": "datetime"})
+        raw["gates"] = [gate]
+        return raw
+
+    _THRESHOLD_ABSENT = {
+        "name": "tw",
+        "type": "threshold",
+        "candidateprop": "credit_score",
+        "operator": ">=",
+        "queryparam": "window",
+    }
+    _TEMPORAL_WINDOW = {"name": "tw", "type": "temporalrange", "candidateprop": "name", "queryparam": "window"}
+
+    def test_undeclared_gate_param_raises(self) -> None:
+        """RU-050 / CEG-COR-077: a gate naming an absent parameter fails validation (was warning only)."""
+        raw = self._spec_with_gate(dict(self._THRESHOLD_ABSENT))
+        with pytest.raises(ValueError, match="Gate 'tw' references undeclared parameter 'window'"):
+            DomainSpec.model_validate(raw)
+
+    def test_temporalrange_derived_params_declared_passes(self, caplog: pytest.LogCaptureFixture) -> None:
+        """RU-050: temporalrange {queryparam: window} with window_start and window_end declared validates."""
+        raw = self._spec_with_gate(dict(self._TEMPORAL_WINDOW), ["window_start", "window_end"])
+        with caplog.at_level("WARNING", logger="engine.config.schema"):
+            spec = DomainSpec.model_validate(raw)
+        assert spec.gates[0].queryparam == "window"
+        assert "undeclared parameter" not in caplog.text
+
+    @pytest.mark.parametrize("declared", [[], ["window_start"], ["window_end"]])
+    def test_temporalrange_derived_params_missing_raises(self, declared: list[str]) -> None:
+        """RU-050: temporalrange needs both <q>_start and <q>_end declared; neither or one alone raises."""
+        raw = self._spec_with_gate(dict(self._TEMPORAL_WINDOW), declared)
+        with pytest.raises(ValueError, match="references undeclared parameter 'window'"):
+            DomainSpec.model_validate(raw)
+
+    def test_suffixed_param_with_declared_base_passes(self) -> None:
+        """RU-050 keeps the `<base>_min/_max/_start/_end` exemption for a declared base."""
+        gate = dict(self._THRESHOLD_ABSENT, queryparam="density_min")
+        spec = DomainSpec.model_validate(self._spec_with_gate(gate))
+        assert spec.gates[0].queryparam == "density_min"
+
+    def test_literal_queryparam_is_not_a_reference(self) -> None:
+        """RU-050 keeps literal queryparam operands exempt."""
+        gate = dict(self._THRESHOLD_ABSENT, queryparam=85.0)
+        spec = DomainSpec.model_validate(self._spec_with_gate(gate))
+        assert spec.gates[0].queryparam == pytest.approx(85.0)
+
+    def test_undeclared_gate_param_flag_off_warns(self, caplog: pytest.LogCaptureFixture) -> None:
+        """RU-050 flag off: the legacy warning, and the spec loads."""
+        raw = self._spec_with_gate(dict(self._THRESHOLD_ABSENT))
+        s = _make_settings(domain_undeclared_param_rejected=False)
+        with patch(_SETTINGS_TARGET, s), caplog.at_level("WARNING", logger="engine.config.schema"):
+            spec = DomainSpec.model_validate(raw)
+        assert spec.gates[0].queryparam == "window"
+        assert "Gate 'tw' references undeclared parameter 'window'" in caplog.text
+
+    def test_undeclared_gate_param_skipped_without_strict_validation(self) -> None:
+        """RU-050 applies only under domain_strict_validation, as the warning did."""
+        raw = self._spec_with_gate(dict(self._THRESHOLD_ABSENT))
+        with patch(_SETTINGS_TARGET, _make_settings(domain_strict_validation=False)):
+            spec = DomainSpec.model_validate(raw)
+        assert spec.gates[0].queryparam == "window"
+
     def test_gate_exclusion_unknown_edge_raises(self) -> None:
         """Exclusion gate referencing unknown edge type is rejected."""
         raw = _minimal_spec_raw()
@@ -272,6 +398,21 @@ class TestW102ScoreRange:
         result = ScoringAssembler._clamp_expression("candidate.score")
         assert result.startswith("CASE WHEN (candidate.score) IS NULL THEN 0.0 ")
         assert result.endswith("ELSE (candidate.score) END")
+
+    def test_clamp_expression_maps_nan_to_zero(self) -> None:
+        """RU-031 / CEG-COR-166 (RG-039): NaN compares false to both bounds and fell to ELSE.
+
+        ``log(1 + x)`` for x < -1 or ``0.0 / 0.0`` is NaN in Cypher; NaN is
+        treated like null (``NullStrategy.ZERO``) and clamps to 0.0, tested
+        right after IS NULL so ``isNaN`` never sees a null.
+        """
+        from engine.scoring.assembler import ScoringAssembler
+
+        result = ScoringAssembler._clamp_expression("x")
+        assert "WHEN isNaN((x)) THEN 0.0" in result
+        assert result.index("IS NULL THEN 0.0") < result.index("isNaN((x))") < result.index("< 0.0 THEN 0.0")
+        assert "> 1.0 THEN 1.0" in result
+        assert result.endswith("ELSE (x) END")
 
     def test_scoring_assembler_clamps_when_enabled(self) -> None:
         """Dimension expressions are clamped when SCORE_CLAMP_ENABLED=True."""
@@ -537,6 +678,80 @@ class TestW104TraversalValidators:
             with pytest.raises(ValueError, match="exceeds hard cap"):
                 DomainSpec.model_validate(raw)
 
+    @staticmethod
+    def _spec_with_step_pattern(pattern: str) -> dict[str, Any]:
+        raw = _minimal_spec_raw()
+        raw["traversal"] = {"steps": [{"name": "step1", "pattern": pattern, "required": True}]}
+        return raw
+
+    @pytest.mark.parametrize("hops", ["*1..", "*2..", "*..", "*"])
+    def test_open_hop_range_raises(self, hops: str) -> None:
+        """RU-045 / CEG-COR-038: a variable-length step with no explicit upper bound is refused."""
+        raw = self._spec_with_step_pattern(f"(candidate:Facility)-[:EXCLUDED_FROM{hops}]->(target:Facility)")
+        s = _make_settings(max_hop_hard_cap=10)
+        with patch(_SETTINGS_TARGET, s):
+            with pytest.raises(ValueError, match=r"no explicit upper bound|exceeds hard cap"):
+                DomainSpec.model_validate(raw)
+
+    @pytest.mark.parametrize("hops", ["*1..", "*2.."])
+    def test_open_hop_range_names_the_missing_bound(self, hops: str) -> None:
+        """RU-045: the refusal of `*N..` names the open range (it was accepted before)."""
+        raw = self._spec_with_step_pattern(f"(candidate:Facility)-[:EXCLUDED_FROM{hops}]->(target:Facility)")
+        s = _make_settings(max_hop_hard_cap=10)
+        with patch(_SETTINGS_TARGET, s):
+            with pytest.raises(ValueError, match="no explicit upper bound"):
+                DomainSpec.model_validate(raw)
+
+    @pytest.mark.parametrize(
+        ("hops", "message"),
+        [("*0..", "hop count must be >= 1"), ("*..20", "exceeds hard cap"), ("*0..3", "hop count must be >= 1")],
+    )
+    def test_existing_hop_refusals_preserved(self, hops: str, message: str) -> None:
+        """RU-045 preserves the existing `*0..` / `*..20` refusals and their messages."""
+        raw = self._spec_with_step_pattern(f"(candidate:Facility)-[:EXCLUDED_FROM{hops}]->(target:Facility)")
+        s = _make_settings(max_hop_hard_cap=10)
+        with patch(_SETTINGS_TARGET, s):
+            with pytest.raises(ValueError, match=message):
+                DomainSpec.model_validate(raw)
+
+    @pytest.mark.parametrize("hops", ["*1..3", "*2", "*..3", ""])
+    def test_bounded_hop_ranges_accepted(self, hops: str) -> None:
+        """RU-045 preserves `*1..3`, `*2`, `*..3` and fixed one-hop steps."""
+        pattern = f"(candidate:Facility)-[:EXCLUDED_FROM{hops}]->(target:Facility)"
+        raw = self._spec_with_step_pattern(pattern)
+        s = _make_settings(max_hop_hard_cap=10)
+        with patch(_SETTINGS_TARGET, s):
+            spec = DomainSpec.model_validate(raw)
+        assert spec.traversal is not None
+
+        from engine.traversal.assembler import _validate_traversal_pattern
+
+        with patch(_SETTINGS_TARGET, s):
+            assert _validate_traversal_pattern(pattern, "step1") == pattern
+
+    @pytest.mark.parametrize("hops", ["*1..", "*2..", "*..", "*"])
+    def test_assembler_rejects_open_hop_range(self, hops: str) -> None:
+        """RU-045 defence in depth: the assembler grammar requires an explicit upper bound."""
+        from engine.traversal.assembler import _validate_traversal_pattern
+
+        s = _make_settings(max_hop_hard_cap=10)
+        with patch(_SETTINGS_TARGET, s):
+            with pytest.raises(ValueError, match="does not match allowed structure"):
+                _validate_traversal_pattern(f"(a:A)-[:R{hops}]->(b:B)", "s")
+
+    @pytest.mark.parametrize("hops", ["*1..", "*2.."])
+    def test_open_hop_range_flag_off_restores_acceptance(self, hops: str) -> None:
+        """RU-045 flag off: `*N..` loads and the assembler grammar accepts it, as before."""
+        from engine.traversal.assembler import _validate_traversal_pattern
+
+        pattern = f"(candidate:Facility)-[:EXCLUDED_FROM{hops}]->(target:Facility)"
+        raw = self._spec_with_step_pattern(pattern)
+        s = _make_settings(max_hop_hard_cap=10, traversal_open_range_rejected=False)
+        with patch(_SETTINGS_TARGET, s):
+            spec = DomainSpec.model_validate(raw)
+            assert spec.traversal is not None
+            assert _validate_traversal_pattern(pattern, "step1") == pattern
+
     def test_hop_count_zero_raises(self) -> None:
         """Traversal with 0 hops is rejected."""
         raw = _minimal_spec_raw()
@@ -711,9 +926,20 @@ async def _plasticos_dir1_match_cypher() -> str:
     from unittest.mock import MagicMock
 
     from engine.config.loader import DomainPackLoader
+    from engine.config.schema import TraversalSpec, TraversalStepSpec
     from engine.handlers import handle_match, init_dependencies
 
+    # RG-047 needs a required multi-valued traversal step. The served plasticos
+    # pack constrains polymers with EXISTS gates since RU-040 (CEG-COR-013), so
+    # the row-multiplying step is added back to a copy of the pack here.
     spec = DomainPackLoader(config_path=str(_DOMAINS_DIR)).load_domain("plasticos")
+    step = TraversalStepSpec(
+        name="polymer_capability",
+        pattern="(candidate:Facility)-[:PROCESSES]->(polymer:PolymerFamily)",
+        required=True,
+        matchdirections=["supply_opportunity_to_buyer_facility"],
+    )
+    spec = spec.model_copy(update={"traversal": TraversalSpec(steps=[step])})
     driver = _MatchCypherCapture()
     loader = MagicMock()
     loader.load_domain.return_value = spec

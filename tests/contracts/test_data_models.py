@@ -136,5 +136,30 @@ def test_resolved_from_edge_defined(graph_schema):
     assert "RESOLVED_FROM" in edge_types
 
 
+def test_resolved_from_direction_matches_resolver(graph_schema):
+    """RU-102 / CEG-COR-124 (DEC-40 option A): the resolver writes
+    ``(duplicate)-[:RESOLVED_FROM]->(canonical)`` (engine/resolution/resolver.py
+    ``_create_resolution`` / ``_merge_resolution``); the contract states the same."""
+    edge = next(e for e in graph_schema["system_edges"] if e.get("type") == "RESOLVED_FROM")
+    assert edge["from"] == "< duplicate entity >"
+    assert edge["to"] == "< canonical entity >"
+    description = edge["description"].lower()
+    assert "no engine match" in description
+    assert "transfer" not in description or "not transferred" in description
+
+
+def test_resolution_docstrings_do_not_claim_relationship_transfer():
+    """RU-102: resolution links duplicates to a canonical; it moves no edges."""
+    import engine.resolution.resolver as resolver_module
+    from engine.handlers import handle_resolve
+    from engine.resolution.resolver import EntityResolver
+
+    for doc in (resolver_module.__doc__, EntityResolver.__doc__, handle_resolve.__doc__):
+        text = (doc or "").lower()
+        assert "transfers relationships" not in text
+        assert "transfer edges" not in text
+        assert "merge duplicates" not in text
+
+
 def test_graph_schema_has_domain_abstraction_note(graph_schema):
     assert "domain_schema_abstraction" in graph_schema

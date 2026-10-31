@@ -67,3 +67,48 @@ def test_cli_writes_deterministic_artifact(tmp_path: Path) -> None:
     assert data["observational"] is True
     assert data["replaces_primary"] is False
     assert data["checksum"].startswith("sha256:")
+
+
+# ── RU-105 / CEG-COR-128: non-finite scores and duplicate ids are reported ──
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("primary_score", "shadow_score"),
+    [
+        (0.9, float("nan")),
+        (float("nan"), 0.9),
+        (float("nan"), float("nan")),
+        (0.9, float("inf")),
+        (float("-inf"), float("-inf")),
+    ],
+)
+def test_non_finite_score_is_a_score_mismatch(primary_score: float, shadow_score: float) -> None:
+    result = emit_shadow_comparison(
+        packet_id="pkt-nan",
+        primary=[RankedCandidate("a", primary_score, 1)],
+        shadow=[RankedCandidate("a", shadow_score, 1)],
+    )
+    assert [m.mismatch_class for m in result.mismatches] == ["score"]
+
+
+@pytest.mark.unit
+def test_duplicate_candidate_id_is_reported_per_extra_occurrence() -> None:
+    primary = [
+        RankedCandidate("a", 0.9, 1),
+        RankedCandidate("a", 0.4, 2),
+        RankedCandidate("a", 0.3, 3),
+        RankedCandidate("b", 0.2, 4),
+    ]
+    shadow = [RankedCandidate("a", 0.9, 1), RankedCandidate("b", 0.2, 2), RankedCandidate("b", 0.1, 3)]
+    result = emit_shadow_comparison(packet_id="pkt-dup", primary=primary, shadow=shadow)
+    duplicates = [m for m in result.mismatches if m.mismatch_class == "duplicate"]
+    assert [(m.candidate_id, m.primary_rank, m.shadow_rank) for m in duplicates] == [
+        ("a", 2, None),
+        ("a", 3, None),
+        ("b", None, 3),
+    ]
+    # The first (best-ranked) occurrence is the one compared: a@1 vs a@1 agrees.
+    assert not any(m.candidate_id == "a" and m.mismatch_class in {"rank", "score"} for m in result.mismatches)
+    again = emit_shadow_comparison(packet_id="pkt-dup", primary=primary, shadow=shadow)
+    assert result.to_dict()["checksum"] == again.to_dict()["checksum"]

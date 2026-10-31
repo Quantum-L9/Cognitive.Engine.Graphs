@@ -2,8 +2,10 @@
 
 Real API (engine/traversal/assembler.py):
     TraversalAssembler(domain_spec).assemble_traversal(match_direction: str) -> list[str]
-The plasticos spec declares direction 'supply_opportunity_to_buyer_facility' with a required
-(candidate:Facility)-[:PROCESSES]->(polymer:PolymerFamily) step.
+The served plasticos pack no longer declares traversal steps (CEG-COR-013: its polymer
+constraint is an EXISTS traversal gate), so the fixture adds the former required
+(candidate:Facility)-[:PROCESSES]->(polymer:PolymerFamily) step to a copy of it to keep
+exercising the assembler on a real pack.
 """
 
 from __future__ import annotations
@@ -15,12 +17,30 @@ import pytest
 def plasticos_spec():
     """Load plasticos spec, skip if not loadable."""
     from engine.config.loader import DomainPackLoader
+    from engine.config.schema import TraversalSpec, TraversalStepSpec
 
     loader = DomainPackLoader()
     try:
-        return loader.load_domain("plasticos")
+        spec = loader.load_domain("plasticos")
     except Exception:
         pytest.skip("plasticos domain spec not loadable with current schema")
+    step = TraversalStepSpec(
+        name="polymer_capability",
+        pattern="(candidate:Facility)-[:PROCESSES]->(polymer:PolymerFamily)",
+        required=True,
+        matchdirections=["supply_opportunity_to_buyer_facility"],
+    )
+    return spec.model_copy(update={"traversal": TraversalSpec(steps=[step])})
+
+
+def test_served_plasticos_pack_declares_no_row_multiplying_steps():
+    """CEG-COR-013: the polymer constraint lives in EXISTS gates, not traversal MATCH steps."""
+    from engine.config.loader import DomainPackLoader
+    from engine.traversal.assembler import TraversalAssembler
+
+    served = DomainPackLoader().load_domain("plasticos")
+    for direction in served.queryschema.matchdirections:
+        assert TraversalAssembler(served).assemble_traversal(direction) == []
 
 
 def test_assembler_produces_list(plasticos_spec):

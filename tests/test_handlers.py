@@ -13,6 +13,7 @@ Tests for engine/handlers.py - all 6 action handlers."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -125,6 +126,11 @@ def _make_domain_spec() -> MagicMock:
 
     spec.derivedparameters = []
     spec.compliance = None
+    # RU-010 (R1a-DEC-03): the gate reads $min_grade, so the query schema declares
+    # it (optional); an undeclared gate parameter is refused before the query.
+    grade_field = MagicMock(required=False, default=None)
+    grade_field.name = "min_grade"
+    spec.queryschema.fields = [grade_field]
 
     endpoint = MagicMock()
     endpoint.path = "/v1/sync/facility"
@@ -177,6 +183,7 @@ async def test_match_returns_structure() -> None:
     assert "candidates" in result
     assert "query_id" in result
     assert isinstance(result["execution_time_ms"], float)
+    assert result["status"] == "success"  # RU-014 / CEG-COR-075
 
 
 @pytest.mark.asyncio
@@ -466,6 +473,34 @@ async def test_match_arbitration_front_uses_declared_candidate_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_match_arbitration_forwards_direction_and_front_size_limit() -> None:
+    """RU-019 / CEG-COR-026: handle_match passes the declared objective direction and front_size_limit."""
+    from engine.state import get_state
+
+    spec = _loaded_spec_for_results()
+    spec.decision_arbitration.enabled = True
+    spec.decision_arbitration.constraints = []
+    objective = MagicMock()
+    objective.dimension = "cost"
+    objective.direction = "minimize"
+    spec.decision_arbitration.pareto_config.objectives = [objective]
+    spec.decision_arbitration.pareto_config.front_size_limit = 1
+    get_state().graph_driver.execute_query = AsyncMock(
+        return_value=[
+            {"candidate": {"facility_id": "F-1"}, "score": 0.4, "cost": 0.1},
+            {"candidate": {"facility_id": "F-2"}, "score": 0.6, "cost": 0.9},
+            {"candidate": {"facility_id": "F-3"}, "score": 0.9, "cost": 0.1},
+        ]
+    )
+
+    result = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
+
+    # cost is minimised: F-1 and F-3 tie on the front; the limit keeps the higher score.
+    assert result["pareto"]["arbitration"]["nondominated_ids"] == ["F-3"]
+    assert result["pareto"]["arbitration"]["frontsize"] == 1
+
+
+@pytest.mark.asyncio
 async def test_match_binds_compiler_literals_into_query_parameters() -> None:
     """CEG-009b: a literal-operand gate reaches execute_query bound.
 
@@ -497,3 +532,202 @@ async def test_match_binds_compiler_literals_into_query_parameters() -> None:
     assert parameters["gate_grade_gate_value"] == 85.0
     assert parameters["urgency"] == "routine"
     assert "top_n" in parameters
+
+
+# ── RU-061 / CEG-COR-008: prohibited factors block before any Cypher runs ──
+
+
+def _mortgage_spec_with(*, dimension_prop: str | None = None, gate_update: dict | None = None):
+    import yaml
+
+    from engine.config.schema import DomainSpec
+
+    spec = DomainSpec.model_validate(
+        yaml.safe_load(Path("domains/mortgage-brokerage/spec.yaml").read_text(encoding="utf-8"))
+    )
+    if dimension_prop is not None:
+        dims = list(spec.scoring.dimensions)
+        dims[0] = dims[0].model_copy(update={"candidateprop": dimension_prop})
+        spec = spec.model_copy(update={"scoring": spec.scoring.model_copy(update={"dimensions": dims})})
+    if gate_update is not None:
+        gates = list(spec.gates)
+        gates[0] = gates[0].model_copy(update=gate_update)
+        spec = spec.model_copy(update={"gates": gates})
+    return spec
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "spec_kwargs",
+    [
+        {"dimension_prop": "age"},
+        {"gate_update": {"candidateprop": "Race"}},
+        {"gate_update": {"candidateprop_min": "age"}},
+    ],
+)
+async def test_match_blocks_prohibited_reference_before_any_query(spec_kwargs: dict) -> None:
+    from engine.state import get_state
+
+    spec = _mortgage_spec_with(**spec_kwargs)
+    state = get_state()
+    state.compliance_engines.pop(spec.domain.id, None)
+    state.domain_loader.load_domain = MagicMock(return_value=spec)
+    driver = state.graph_driver
+
+    with pytest.raises(ValueError, match="prohibited field"):
+        await handle_match("t", {"query": {"creditscore": 700}, "match_direction": "borrowertoproduct"})
+    driver.execute_query.assert_not_awaited()
+
+
+# ── RU-062 / CEG-COR-009: candidate PII is redacted on the match response ──
+
+
+@pytest.mark.asyncio
+async def test_match_response_candidate_lacks_raw_pii() -> None:
+    from engine.config.schema import ComplianceSpec, PIISpec
+    from engine.state import get_state
+
+    spec = _loaded_spec_for_results()
+    spec.compliance = ComplianceSpec(pii=PIISpec(enabled=True))  # the domain opts in to PII handling
+    get_state().compliance_engines.pop("test_domain", None)
+    get_state().graph_driver.execute_query = AsyncMock(
+        return_value=[{"candidate": {"facility_id": "F-1", "contact_email": "ops@f1.com"}, "score": 0.9}]
+    )
+
+    result = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
+
+    assert "ops@f1.com" not in str(result["candidates"])
+    assert result["candidates"][0]["candidate"]["facility_id"] == "F-1"
+
+
+# ── RU-065 / CEG-COR-053: an audit sink failure never fails a request ──
+
+
+class _FailingPool:
+    def acquire(self):
+        class _Ctx:
+            async def __aenter__(self):
+                msg = "postgres unavailable"
+                raise ConnectionError(msg)
+
+            async def __aexit__(self, *exc: object) -> None:
+                return None
+
+        return _Ctx()
+
+
+@pytest.mark.asyncio
+async def test_match_and_sync_succeed_when_audit_sink_fails(caplog: pytest.LogCaptureFixture) -> None:
+    from engine.state import get_state
+
+    state = get_state()
+    init_dependencies(state.graph_driver, state.domain_loader, db_pool=_FailingPool())
+    _loaded_spec_for_results()
+    state.compliance_engines.pop("test_domain", None)
+    state.graph_driver.execute_query = AsyncMock(return_value=[{"candidate": {"facility_id": "F-1"}, "score": 0.9}])
+    try:
+        with caplog.at_level("WARNING"):
+            match = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
+            sync = await handle_sync("t", {"entity_type": "facility", "batch": [{"facility_id": "F1"}]})
+    finally:
+        state.compliance_engines.pop("test_domain", None)
+        init_dependencies(state.graph_driver, state.domain_loader)
+    assert match["candidates"][0]["candidate"]["facility_id"] == "F-1"
+    assert sync["status"] == "success"
+    assert any("audit flush failed" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_match_violation_leaves_denied_entry_in_domain_engine() -> None:
+    """RU-063: after the request fails, EngineState's domain ComplianceEngine holds the denied entry."""
+    from engine.state import get_state
+
+    spec = _mortgage_spec_with(dimension_prop="age")
+    state = get_state()
+    state.compliance_engines.pop(spec.domain.id, None)
+    state.domain_loader.load_domain = MagicMock(return_value=spec)
+
+    with pytest.raises(ValueError, match="prohibited field"):
+        await handle_match("acme", {"query": {"creditscore": 700}, "match_direction": "borrowertoproduct"})
+    entries = state.compliance_engines[spec.domain.id]._audit.flush_sync()
+    denied = [e for e in entries if e.outcome == "denied"]
+    assert len(denied) == 1
+    assert denied[0].actor == "acme"
+    state.compliance_engines.pop(spec.domain.id, None)
+
+
+@pytest.mark.asyncio
+async def test_declared_pii_id_property_does_not_change_pareto_ids() -> None:
+    """RU-064: Pareto ids are computed before redact_response, so hashing a declared
+    PII field that is also the candidate id property leaves them unaffected."""
+    from engine.compliance.pii import PIIHandler
+    from engine.config.schema import ComplianceSpec, PIISpec
+    from engine.state import get_state
+
+    spec = _loaded_spec_for_results()
+    spec.compliance = ComplianceSpec(pii=PIISpec(enabled=True, fields=["facility_id"], handling="hash"))
+    spec.decision_arbitration.enabled = True
+    spec.decision_arbitration.constraints = []
+    objective = MagicMock()
+    objective.dimension = "structural"
+    spec.decision_arbitration.pareto_config.objectives = [objective]
+    state = get_state()
+    state.compliance_engines.pop("test_domain", None)
+    state.graph_driver.execute_query = AsyncMock(
+        return_value=[
+            {"candidate": {"facility_id": "F-1"}, "score": 0.9, "structural": 0.9},
+            {"candidate": {"facility_id": "F-2"}, "score": 0.5, "structural": 0.5},
+        ]
+    )
+    try:
+        result = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
+    finally:
+        state.compliance_engines.pop("test_domain", None)
+
+    assert result["pareto"]["non_dominated_ids"] == ["F-1"]
+    assert result["candidates"][0]["candidate"]["facility_id"] == PIIHandler.hash_value("F-1")
+
+
+@pytest.mark.asyncio
+async def test_sync_rejects_inverted_causal_records_by_batch_edge_type() -> None:
+    """RU-069 / CEG-COR-058: sync rows carry no `edge_type`; the batch's edge type decides."""
+    from engine.config.schema import CausalEdgeSpec, CausalSubgraphSpec
+    from engine.state import get_state
+
+    spec = get_state().domain_loader.load_domain.return_value
+    spec.causal = CausalSubgraphSpec(
+        enabled=True,
+        causal_edges=[CausalEdgeSpec(edge_type="RESULTED_IN", source_label="Facility", target_label="Outcome")],
+    )
+    result = await handle_sync(
+        "t",
+        {
+            "entity_type": "facility",
+            "edge_type": "RESULTED_IN",
+            "batch": [
+                {"facility_id": "F1", "source_ts": "2026-03-01T00:00:00", "target_ts": "2026-03-02T00:00:00"},
+                {"facility_id": "F2", "source_ts": "2026-03-02T00:00:00", "target_ts": "2026-03-01T00:00:00"},
+            ],
+        },
+    )
+    assert result["status"] == "success"
+    assert result["synced_count"] == 1
+    assert result["rejected_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_match_response_keeps_candidate_fields_when_domain_opts_out_of_pii() -> None:
+    from engine.config.schema import ComplianceSpec, PIISpec
+    from engine.state import get_state
+
+    spec = _loaded_spec_for_results()
+    spec.compliance = ComplianceSpec(pii=PIISpec(enabled=False))  # idea-portfolio: compliance.pii: {enabled: false}
+    get_state().compliance_engines.pop("test_domain", None)
+    get_state().graph_driver.execute_query = AsyncMock(
+        return_value=[{"candidate": {"facility_id": "F-1", "contact_email": "ops@f1.com"}, "score": 0.9}]
+    )
+
+    result = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
+
+    assert result["candidates"][0]["candidate"]["contact_email"] == "ops@f1.com"
+    assert result["candidates"][0]["candidate"]["facility_id"] == "F-1"
