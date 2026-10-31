@@ -1396,7 +1396,7 @@ violates the rule stops loading (`DomainSpec.model_validate` raises). All defaul
 | `domain_undeclared_param_rejected` (`DOMAIN_UNDECLARED_PARAM_REJECTED`) | `true` | RU-050 / CEG-COR-077 | Under `domain_strict_validation`, when the spec declares any queryschema field or derived parameter, a gate whose string `queryparam` is undeclared raises `ValueError("Gate '<g>' references undeclared parameter '<q>'")`. Declared means: the name itself, its base after stripping `_min`/`_max`/`_start`/`_end`, or, for a `temporalrange` gate, both `<q>_start` and `<q>_end` (the names the compiler derives). Literal (scalar) operands are exempt | The same message is a WARNING log and the spec loads; admission (`admission_defects`) is the only refusal |
 | `gate_spec_forbid_unknown_keys` (`GATE_SPEC_FORBID_UNKNOWN_KEYS`) | `true` | RU-053 / CEG-COR-081 | A `GateSpec` `model_validator(mode="before")` raises `Gate '<name>' has unknown key(s) [<keys>]` for any input key outside `GateSpec.model_fields`, adding `'<key>' (did you mean '<field>'?)` when the key matches a field with underscores removed (e.g. `null_behavior` → `nullbehavior`). No aliases are introduced. Fields added to `GateSpec` later are accepted automatically | Unknown keys are ignored: `null_behavior: fail` leaves `nullbehavior` at its `pass` default and the gate admits NULL operands |
 | `domain_version_semver_enforced` (`DOMAIN_VERSION_SEMVER_ENFORCED`) | `true` | RU-057 / CEG-COR-152 | `DomainMetadata.version` must fully match `(0\|[1-9]\d*)\.(0\|[1-9]\d*)\.(0\|[1-9]\d*)` optionally followed by `-seed`, `-discovered`, `-inferred`, `-proposed`, `-reviewed` or `-production` (DOMAIN_SPEC_VERSIONING.md); anything else raises `domain.version '<v>' is not semver`. `TemplateProvenance.version` is unchanged. Shipped pack versions (0.1.0, 1.0.0, 1.0.1, 1.1.0, 1.2.0) validate | Any string, including `latest`, `v2` and dates, is accepted |
-## 25. Correctness remediation lane J (plan 0d84ec8, round 2)
+## 26. Correctness remediation lane J (plan 0d84ec8, round 2)
 
 |---|---|---|---|---|
 | `geodecay_declared_longitude` (`GEODECAY_DECLARED_LONGITUDE`) | `true` | RU-037 / CEG-COR-011 (DEC-14 option A) | A `geodecay` dimension's declared `candidateprop_lon` / `queryprop_lon` name the longitude operands (`point({latitude: candidate.<candidateprop>, longitude: candidate.<candidateprop_lon>})` vs `point({latitude: $<queryprop>, longitude: $<queryprop_lon>})`); undeclared they default to `candidate.lon` / `$lon`, so dimensions without them (PlasticOS `geo_proximity`, `active_supply_geo`) compile byte-identically. `freight-matching` `deadhead_distance` measures Carrier `currentlat`/`currentlon` to Load `pickuplat`/`pickuplon` | The declarations are ignored and `candidate.lon` / `$lon` are emitted; `freight-matching` is withheld again by the scoring admission check for its unbound `$lon` |
@@ -1406,7 +1406,7 @@ violates the rule stops loading (`DomainSpec.model_validate` raises). All defaul
 Set `GEODECAY_DECLARED_LONGITUDE=false` and restart. Domain-spec changes of this
 lane (plasticos 1.3.0, mortgage-brokerage 1.1.0, freight-matching 1.2.0) roll
 back by restoring the previous spec file; the loader hot-reloads on mtime.
-## 25. Correctness remediation lane K (plan 0d84ec8)
+## 27. Correctness remediation lane K (plan 0d84ec8)
 
 Round-2 fixes from the CEG correctness remediation plan. Each ships `True`; set
 the env var to `false` to restore the previous behaviour verbatim.
