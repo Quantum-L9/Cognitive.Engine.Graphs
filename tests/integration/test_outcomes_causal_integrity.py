@@ -1,10 +1,11 @@
 """
 --- L9_META ---
-l9_schema: 2
+l9_schema: 1
 origin: engine-specific
 engine: graph
 layer: [test]
 tags: [causal, outcomes, integration]
+owner: engine-team
 status: active
 --- /L9_META ---
 
@@ -107,7 +108,9 @@ async def wire(graph_driver, minimal_domain_spec) -> AsyncGenerator[_Wire, None]
 
     tag = f"{_RUN_TAG}_{uuid.uuid4().hex[:12]}"
     await graph_driver.execute_write(
-        cypher="CREATE (c:Facility {entity_id: $cid, run_tag: $tag})",
+        # RU-002: outcome edges link by the declared id (facility_id); entity_id
+        # stays so the SPEC_DECLARED_CANDIDATE_ID=false rollback still links.
+        cypher="CREATE (c:Facility {facility_id: $cid, entity_id: $cid, run_tag: $tag})",
         parameters={"cid": f"{tag}_cand", "tag": tag},
         database=_DB,
     )

@@ -157,6 +157,14 @@ class SyncGenerator:
         else:
             cypher_parts.append("SET n += row, n._tenant = $tenant")
 
+        from engine.config.settings import settings
+
+        # RU-060 / CEG-COR-169: MATCH drops rows with no existing node; report how
+        # many rows actually matched (and were updated) so the handler need not
+        # assume the whole batch landed.
+        if settings.sync_count_from_write_result:
+            cypher_parts.append("RETURN count(n) AS synced_count")
+
         return "\n".join(cypher_parts)
 
 

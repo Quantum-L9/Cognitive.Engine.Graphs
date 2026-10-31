@@ -13,6 +13,14 @@ dora:
 
 > **Tier:** AGENTS | **Path:** `agents/cursor` | **Owner:** Igor
 
+> **Retired (DEC-53):** every Python module that this README and `docs/`,
+> `superprompt.md` and `cursor_memory_kernel.yaml` describe — `*.py`,
+> `integrations/`, `scripts/` and `GMP-v2.0-Perplex-Py-Scripts/` — has been
+> deleted from this repository. The engine never imported them, several could not
+> import at all, and the governance SSOT replaced the memory client with
+> `python -m ops.memory.cli`. Only the Markdown/YAML governance material remains;
+> references below to `.py` files and their CLI commands are historical.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                                               Cursor Agent                                              │

@@ -30,7 +30,7 @@ import re
 from collections.abc import Generator
 from typing import TypeVar
 
-from pydantic import BaseModel, ValidationError
+from pydantic import AliasChoices, AliasPath, BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -86,13 +86,9 @@ def sanitize_llm_input(user_input: str, max_length: int = 2000) -> str:
     if not user_input:
         return ""
 
-    # Check for injection patterns
-    matches = INJECTION_REGEX.findall(user_input.lower())
-    if matches:
-        logger.warning(f"Potential prompt injection detected: {matches[:3]}")
-        raise ValueError(
-            "Input contains potentially malicious patterns. Please rephrase your request without meta-instructions."
-        )
+    # Check the raw input: special tokens that the stripping below removes
+    # (e.g. <|im_start|>) are themselves rejection patterns.
+    _reject_injection(user_input)
 
     # Truncate
     if len(user_input) > max_length:
@@ -114,14 +110,62 @@ def sanitize_llm_input(user_input: str, max_length: int = 2000) -> str:
         user_input = user_input.replace(token, "")
 
     # Normalize whitespace
-    user_input = " ".join(user_input.split())
+    user_input = " ".join(user_input.split()).strip()
 
-    return user_input.strip()
+    # RU-072 / CEG-COR-119: check again on the final string — token stripping and
+    # whitespace normalization can reassemble a blocked phrase
+    # ("ignore  previous", "ignore prev<s>ious") that the raw check missed.
+    _reject_injection(user_input)
+
+    return user_input
+
+
+def _reject_injection(text: str) -> None:
+    """Raise ValueError when ``text`` matches an injection pattern."""
+    matches = INJECTION_REGEX.findall(text.lower())
+    if matches:
+        logger.warning(f"Potential prompt injection detected: {matches[:3]}")
+        raise ValueError(
+            "Input contains potentially malicious patterns. Please rephrase your request without meta-instructions."
+        )
 
 
 # ============================================================
 # Output Validation (Schema Enforcement)
 # ============================================================
+
+
+def _alias_keys(alias: str | AliasPath | AliasChoices) -> set[str]:
+    """Top-level input keys a validation alias accepts."""
+    if isinstance(alias, str):
+        return {alias}
+    if isinstance(alias, AliasPath):
+        head = alias.path[0] if alias.path else None
+        return {head} if isinstance(head, str) else set()
+    keys: set[str] = set()
+    for choice in alias.choices:
+        keys |= _alias_keys(choice)
+    return keys
+
+
+def _accepted_input_keys(schema: type[BaseModel]) -> set[str]:
+    """Top-level keys ``schema`` accepts on validation: field names and/or aliases.
+
+    Mirrors pydantic's ``validate_by_alias`` / ``validate_by_name``
+    (``populate_by_name``) so a key such as ``"from"`` that targets a field
+    whose validation alias is ``"from"`` is not reported as undeclared.
+    """
+    config = schema.model_config
+    by_alias = config.get("validate_by_alias", True)
+    by_name = bool(config.get("validate_by_name") or config.get("populate_by_name"))
+    keys: set[str] = set()
+    for name, field in schema.model_fields.items():
+        alias = field.validation_alias
+        if alias is None or by_name:
+            keys.add(name)
+        if alias is not None and by_alias:
+            keys |= _alias_keys(alias)
+    return keys
 
 
 def validate_llm_output(llm_response: str, expected_schema: type[T], strict: bool = True) -> T:
@@ -159,6 +203,17 @@ def validate_llm_output(llm_response: str, expected_schema: type[T], strict: boo
         # ValueError (its superclass) so the JSON-parse failure surfaces cleanly.
         msg = f"LLM output is not valid JSON: {e}"
         raise ValueError(msg) from e
+
+    # RU-073 / CEG-COR-120: model_validate(strict=True) only disables type
+    # coercion; extra keys are ignored unless the model forbids them. strict
+    # promises "reject extra fields", so undeclared keys are refused here.
+    # Declared keys are the ones pydantic itself accepts: field names and/or
+    # validation aliases, per the schema's validate_by_name/validate_by_alias.
+    if strict and isinstance(data, dict):
+        extra = sorted(set(data) - _accepted_input_keys(expected_schema))
+        if extra:
+            msg = f"LLM output has unexpected field(s) for {expected_schema.__name__}: {extra}"
+            raise ValueError(msg)
 
     # Validate against schema
     try:

@@ -61,3 +61,79 @@ def test_input_not_mutated(plasticos_spec):
     snapshot = dict(original)
     resolver.resolve_parameters(original)
     assert original == snapshot
+
+
+# ── RU-016 / CEG-COR-171: defaults are backfilled before derived parameters ──
+
+
+def _freight_spec_with_defaulted_derivation():
+    from pathlib import Path
+
+    from engine.config.loader import DomainPackLoader
+    from engine.config.schema import DerivedParameterSpec, QueryFieldSpec
+
+    domains = Path(__file__).resolve().parents[2] / "domains"
+    base = DomainPackLoader(config_path=str(domains)).load_domain("freight-matching")
+    qs = base.queryschema.model_copy(
+        update={"fields": [*base.queryschema.fields, QueryFieldSpec(name="r1a_budget", type="float", default=100.0)]}
+    )
+    return base.model_copy(
+        update={
+            "queryschema": qs,
+            "derivedparameters": [
+                *base.derivedparameters,
+                DerivedParameterSpec(name="r1a_half_budget", expression="r1a_budget / 2.0", type="float"),
+            ],
+        }
+    )
+
+
+class _ParamCapture:
+    def __init__(self) -> None:
+        self.parameters: list[dict] = []
+
+    async def execute_query(self, *, cypher: str, parameters: dict, database: str) -> list[dict]:
+        self.parameters.append(parameters)
+        return []
+
+
+async def _match_freight(query: dict) -> dict:
+    from unittest.mock import MagicMock
+
+    from engine.handlers import handle_match, init_dependencies
+
+    spec = _freight_spec_with_defaulted_derivation()
+    driver = _ParamCapture()
+    loader = MagicMock()
+    loader.load_domain.return_value = spec
+    init_dependencies(driver, loader)  # type: ignore[arg-type]
+    # RU-010 (R1a-DEC-03): the pack's required gate fields must be supplied;
+    # the defaulted derivation under test is unaffected by them.
+    # pickupdate: required since RU-046 made availability_window read it.
+    query = {"weightlbs": 1000.0, "equipmenttype": "van", "pickupdate": "2026-11-02T08:00:00Z", **query}
+    await handle_match(spec.domain.id, {"query": query, "match_direction": spec.queryschema.matchdirections[0]})
+    return driver.parameters[0]
+
+
+@pytest.mark.finding("CEG-COR-171")
+async def test_derived_parameter_sees_declared_default_for_omitted_field():
+    params = await _match_freight({})
+    assert params["r1a_budget"] == 100.0
+    assert params["r1a_half_budget"] == 50.0
+
+
+@pytest.mark.finding("CEG-COR-171")
+async def test_explicit_value_wins_over_declared_default():
+    params = await _match_freight({"r1a_budget": 30.0})
+    assert params["r1a_budget"] == 30.0
+    assert params["r1a_half_budget"] == 15.0
+
+
+@pytest.mark.finding("CEG-COR-171")
+async def test_flag_off_resolves_before_defaults(monkeypatch):
+    from engine.config.settings import settings
+    from engine.handlers import ValidationError
+
+    monkeypatch.setattr(settings, "query_defaults_before_derived", False)
+    with pytest.raises(ValidationError, match="Derived parameter|r1a_budget|Unknown"):
+        await _match_freight({})

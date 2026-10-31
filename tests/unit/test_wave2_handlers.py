@@ -56,7 +56,7 @@ class TestCalibrationRunSubaction:
         init_dependencies(driver, loader)
 
         result = await handle_admin(
-            "test_tenant",
+            "test_domain",
             {
                 "subaction": "calibration_run",
                 "domain_id": "test_domain",
@@ -84,7 +84,7 @@ class TestCalibrationRunSubaction:
         init_dependencies(driver, loader)
 
         result = await handle_admin(
-            "test_tenant",
+            "test_domain",
             {
                 "subaction": "calibration_run",
                 "domain_id": "test_domain",
@@ -108,7 +108,7 @@ class TestScoreFeedbackSubaction:
         with patch("engine.handlers._fb_settings", create=True):
             with patch("engine.config.settings.Settings") as mock_cls:
                 result = await handle_admin(
-                    "test_tenant",
+                    "test_domain",
                     {
                         "subaction": "score_feedback",
                         "domain_id": "test_domain",
@@ -126,7 +126,7 @@ class TestScoreFeedbackSubaction:
         with patch("engine.config.settings.settings") as mock_settings:
             mock_settings.feedback_enabled = True
             result = await handle_admin(
-                "test_tenant",
+                "test_domain",
                 {
                     "subaction": "score_feedback",
                     "domain_id": "test_domain",
@@ -279,7 +279,7 @@ class TestFeedbackPredicate:
         init_dependencies(_make_graph_driver(), _make_domain_loader(domain_feedback=False))
         with patch("engine.config.settings.settings") as mock_settings:
             mock_settings.feedback_enabled = True
-            feedback = await handle_admin("test_tenant", {"subaction": "score_feedback", "domain_id": "test_domain"})
+            feedback = await handle_admin("test_domain", {"subaction": "score_feedback", "domain_id": "test_domain"})
             applied = await handle_admin(
                 "test_tenant",
                 {
@@ -312,7 +312,7 @@ class TestFeedbackPredicate:
     async def test_global_off_domain_on_is_still_disabled(self) -> None:
         """The domain pack cannot switch the loop on by itself; the operator flag stays authoritative."""
         init_dependencies(_make_graph_driver(), _make_domain_loader(domain_feedback=True))
-        result = await handle_admin("test_tenant", {"subaction": "score_feedback", "domain_id": "test_domain"})
+        result = await handle_admin("test_domain", {"subaction": "score_feedback", "domain_id": "test_domain"})
         assert result["status"] == "disabled"
 
     def test_no_feedback_site_reads_a_flag_on_its_own(self) -> None:
@@ -335,3 +335,65 @@ class TestFeedbackPredicate:
             and ("feedbackloop.enabled" in line or ".feedback_enabled" in line)
         ]
         assert gating == [], gating
+
+
+# ── RU-060 / CEG-COR-169: UNWINDMATCHSET synced_count comes from the write ──
+
+
+def _match_set_spec() -> MagicMock:
+    from engine.config.schema import SyncStrategy
+
+    endpoint = MagicMock()
+    endpoint.path = "/v1/sync/depot"
+    endpoint.batchstrategy = SyncStrategy.UNWINDMATCHSET
+    endpoint.targetnode = "Depot"
+    endpoint.idproperty = "depot_id"
+    endpoint.fieldsupdated = ["status"]
+    # A node endpoint: MagicMock attributes are truthy, so name the absent edge
+    # and graph-ref namespace explicitly (relationship endpoints set
+    # ``targetedge``; tenant specs may declare ``refnamespace``).
+    endpoint.targetedge = None
+    endpoint.refnamespace = None
+    spec = MagicMock()
+    spec.domain.id = "test_domain"
+    spec.capabilities = []
+    spec.compliance = None
+    spec.causal.enabled = False
+    spec.sync.endpoints = [endpoint]
+    spec.feedbackloop.enabled = False
+    return spec
+
+
+@pytest.mark.unit
+@pytest.mark.finding("CEG-COR-169")
+class TestSyncMatchSetCount:
+    BATCH = [{"depot_id": "d1", "status": "a"}, {"depot_id": "d2", "status": "b"}, {"depot_id": "d3", "status": "c"}]
+
+    @pytest.mark.asyncio
+    async def test_synced_count_is_the_driver_count(self):
+        driver = _make_graph_driver()
+        driver.execute_query = AsyncMock(return_value=[{"synced_count": 1}])
+        init_dependencies(driver, _make_domain_loader(_match_set_spec()))
+        with patch("engine.handlers._get_compliance_engine") as get_ce:
+            get_ce.return_value.enabled = False
+            get_ce.return_value.flush_audit = AsyncMock()
+            get_ce.return_value.flush_audit_for_request = AsyncMock()  # RU-065 request-path flush
+            result = await handle_sync("test_domain", {"entity_type": "depot", "batch": list(self.BATCH)})
+        assert result["synced_count"] == 1
+        assert result["unmatched_count"] == 2
+        assert "RETURN count(n) AS synced_count" in driver.execute_query.call_args.kwargs["cypher"]
+
+    @pytest.mark.asyncio
+    async def test_flag_off_reports_batch_length(self, monkeypatch):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "sync_count_from_write_result", False)
+        driver = _make_graph_driver()
+        init_dependencies(driver, _make_domain_loader(_match_set_spec()))
+        with patch("engine.handlers._get_compliance_engine") as get_ce:
+            get_ce.return_value.enabled = False
+            get_ce.return_value.flush_audit = AsyncMock()
+            get_ce.return_value.flush_audit_for_request = AsyncMock()  # RU-065 request-path flush
+            result = await handle_sync("test_domain", {"entity_type": "depot", "batch": list(self.BATCH)})
+        assert result["synced_count"] == 3
+        assert "unmatched_count" not in result

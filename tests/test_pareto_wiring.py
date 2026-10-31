@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  Milestone 2.1: Schema Extension
 # ═══════════════════════════════════════════════════════════════════════════
@@ -156,6 +158,29 @@ class TestApplyConstraintPenalties:
         candidates = [{"dimension_scores": {"a": 0.1}, "score": 0.5}]
         result = apply_constraint_penalties(candidates, [])
         assert len(result) == 1
+
+    def test_match_projection_row_shape(self):
+        """RU-001 (CEG-COR-001): rows shaped exactly like handle_match's RETURN.
+
+        `RETURN candidate, score, {<alias>: <alias>, ...} AS dimension_scores`
+        yields {candidate, score, dimension_scores}; constraints must read the map.
+        """
+        from engine.scoring.pareto_integrator import apply_constraint_penalties
+
+        rows = [
+            {"candidate": {"depot_id": "d1"}, "score": 0.9, "dimension_scores": {"reliability": 0.8, "ports": 0.4}},
+            {"candidate": {"depot_id": "d2"}, "score": 0.7, "dimension_scores": {"reliability": 0.2, "ports": 0.9}},
+            {"candidate": {"depot_id": "d3"}, "score": 0.6, "dimension_scores": {"reliability": 0.6, "ports": 0.1}},
+        ]
+        constraints = [
+            {"dimension": "reliability", "threshold": 0.5, "hard": True, "penalty": 0.5},
+            {"dimension": "ports", "threshold": 0.3, "hard": False, "penalty": 0.5},
+        ]
+        result = apply_constraint_penalties(rows, constraints)
+        assert [r["candidate"]["depot_id"] for r in result] == ["d1", "d3"]
+        assert result[0]["score"] == 0.9
+        assert result[1]["score"] == pytest.approx(0.3)  # soft penalty on ports 0.1 < 0.3
+        assert set(result[0]) >= {"candidate", "score", "dimension_scores"}
 
 
 class TestApplyParetoFilter:
@@ -380,3 +405,161 @@ class TestApplyParetoFilterDeclaredId:
         # Without the key the same rows fall back to positional ids.
         positional = apply_pareto_filter(candidates, ["structural", "geo"])
         assert positional["nondominated"] == ["0"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  RU-018 / CEG-COR-025: a numeric 0.0 is a score, not absence (RG-023)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestArbitrationZeroScorePresent:
+    def test_hard_constraint_rejects_top_level_zero(self):
+        """A top-level d=0.0 is below threshold 0.5 and must be rejected, not skipped."""
+        from engine.scoring.pareto_integrator import apply_constraint_penalties
+
+        candidates = [
+            {"candidate": {"entity_id": "a"}, "d": 0.0, "score": 0.9},
+            {"candidate": {"entity_id": "b"}, "d": 0.2, "score": 0.8},
+            {"candidate": {"entity_id": "c"}, "d": 0.9, "score": 0.7},
+        ]
+        constraints = [{"dimension": "d", "threshold": 0.5, "hard": True, "penalty": 0.5}]
+        kept = apply_constraint_penalties(candidates, constraints)
+        assert [r["candidate"]["entity_id"] for r in kept] == ["c"]
+
+    def test_soft_constraint_penalises_top_level_zero(self):
+        from engine.scoring.pareto_integrator import apply_constraint_penalties
+
+        candidates = [{"d": 0.0, "d_score": 0.99, "score": 1.0}]
+        kept = apply_constraint_penalties(candidates, [{"dimension": "d", "threshold": 0.5, "hard": False}])
+        assert kept[0]["score"] == 0.5
+
+    def test_absent_dimension_still_skips_constraint(self):
+        """Preserved: a dimension absent everywhere does not trigger the constraint."""
+        from engine.scoring.pareto_integrator import apply_constraint_penalties
+
+        candidates = [{"other": 0.1, "score": 1.0}]
+        kept = apply_constraint_penalties(candidates, [{"dimension": "d", "threshold": 0.5, "hard": True}])
+        assert len(kept) == 1
+        assert kept[0]["score"] == 1.0
+
+    def test_build_pareto_candidates_keeps_zero(self):
+        """risk=0.0 next to risk_score=0.99 is read as 0.0, not substituted."""
+        from engine.scoring.pareto_integrator import build_pareto_candidates
+
+        results = [{"candidate": {"entity_id": "c1"}, "risk": 0.0, "risk_score": 0.99}]
+        cands = build_pareto_candidates(results, ["risk"])
+        assert cands[0].dimension_scores["risk"] == 0.0
+
+    def test_build_pareto_candidates_zero_in_subdict_wins(self):
+        """Lookup order dimension_scores[d] -> d -> d_score; a 0.0 in the sub-dict is present."""
+        from engine.scoring.pareto_integrator import build_pareto_candidates
+
+        results = [{"candidate": {"entity_id": "c1"}, "dimension_scores": {"risk": 0.0}, "risk_score": 0.99}]
+        cands = build_pareto_candidates(results, ["risk"])
+        assert cands[0].dimension_scores["risk"] == 0.0
+
+    def test_flag_off_restores_legacy_truthiness(self, monkeypatch):
+        """C-21: arbitration_zero_score_present=False restores the `or` fall-through."""
+        from engine.config.settings import settings
+        from engine.scoring.pareto_integrator import apply_constraint_penalties, build_pareto_candidates
+
+        monkeypatch.setattr(settings, "arbitration_zero_score_present", False)
+        candidates = [
+            {"candidate": {"entity_id": "a"}, "d": 0.0, "score": 0.9},
+            {"candidate": {"entity_id": "b"}, "d": 0.2, "score": 0.8},
+            {"candidate": {"entity_id": "c"}, "d": 0.9, "score": 0.7},
+        ]
+        kept = apply_constraint_penalties(candidates, [{"dimension": "d", "threshold": 0.5, "hard": True}])
+        assert [r["candidate"]["entity_id"] for r in kept] == ["a", "c"]
+        cands = build_pareto_candidates([{"risk": 0.0, "risk_score": 0.99}], ["risk"])
+        assert cands[0].dimension_scores["risk"] == 0.99
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  RU-019 / CEG-COR-026: objective direction and front_size_limit (RG-024)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestArbitrationObjectiveDirection:
+    def test_minimize_objective_selects_cheap(self):
+        from engine.scoring.pareto_integrator import apply_pareto_filter
+
+        candidates = [
+            {"candidate": {"entity_id": "cheap"}, "cost": 0.1, "score": 0.4},
+            {"candidate": {"entity_id": "pricey"}, "cost": 0.9, "score": 0.6},
+        ]
+        result = apply_pareto_filter(candidates, ["cost"], directions={"cost": "minimize"})
+        assert result["nondominated"] == ["cheap"]
+        assert result["dominated"] == ["pricey"]
+
+    def test_front_size_limit_keeps_higher_score(self):
+        """Two mutually non-dominated rows, limit 1 -> exactly the higher composite score (DEC-04 A)."""
+        from engine.scoring.pareto_integrator import apply_pareto_filter
+
+        candidates = [
+            {"candidate": {"entity_id": "lo"}, "a": 0.9, "b": 0.1, "score": 0.3},
+            {"candidate": {"entity_id": "hi"}, "a": 0.1, "b": 0.9, "score": 0.8},
+        ]
+        result = apply_pareto_filter(candidates, ["a", "b"], front_size_limit=1)
+        assert result["nondominated"] == ["hi"]
+        assert result["frontsize"] == 1
+        assert result["trimmed"] == ["lo"]
+
+    def test_front_within_limit_is_untouched(self):
+        from engine.scoring.pareto_integrator import apply_pareto_filter
+
+        candidates = [
+            {"candidate": {"entity_id": "lo"}, "a": 0.9, "b": 0.1, "score": 0.3},
+            {"candidate": {"entity_id": "hi"}, "a": 0.1, "b": 0.9, "score": 0.8},
+        ]
+        result = apply_pareto_filter(candidates, ["a", "b"], front_size_limit=5)
+        assert result["nondominated"] == ["lo", "hi"]
+        assert result["trimmed"] == []
+
+    def test_unknown_direction_is_maximize(self, caplog):
+        from engine.scoring.pareto_integrator import apply_pareto_filter
+
+        candidates = [
+            {"candidate": {"entity_id": "cheap"}, "cost": 0.1},
+            {"candidate": {"entity_id": "pricey"}, "cost": 0.9},
+        ]
+        with caplog.at_level("WARNING"):
+            result = apply_pareto_filter(candidates, ["cost"], directions={"cost": "lowest"})
+        assert result["nondominated"] == ["pricey"]
+        assert "lowest" in caplog.text
+
+    def test_flag_off_restores_maximise_all_unbounded(self, monkeypatch):
+        """C-21: arbitration_objective_direction=False ignores directions and the limit."""
+        from engine.config.settings import settings
+        from engine.scoring.pareto_integrator import apply_pareto_filter
+
+        monkeypatch.setattr(settings, "arbitration_objective_direction", False)
+        candidates = [
+            {"candidate": {"entity_id": "cheap"}, "cost": 0.1, "q": 0.1, "score": 0.4},
+            {"candidate": {"entity_id": "pricey"}, "cost": 0.9, "q": 0.0, "score": 0.6},
+        ]
+        result = apply_pareto_filter(candidates, ["cost", "q"], directions={"cost": "minimize"}, front_size_limit=1)
+        assert result["nondominated"] == ["cheap", "pricey"]
+
+    def test_minimize_missing_or_none_value_is_worst_not_best(self):
+        """RU-019: an absent / None / non-numeric minimised value never beats a real cost."""
+        from engine.scoring.pareto_integrator import apply_pareto_filter
+
+        candidates = [
+            {"candidate": {"entity_id": "real"}, "cost": 0.2, "q": 0.5, "score": 0.5},
+            {"candidate": {"entity_id": "absent"}, "q": 0.5, "score": 0.5},
+            {"candidate": {"entity_id": "none"}, "cost": None, "q": 0.5, "score": 0.5},
+            {"candidate": {"entity_id": "junk"}, "cost": "n/a", "q": 0.5, "score": 0.5},
+        ]
+        result = apply_pareto_filter(candidates, ["cost", "q"], directions={"cost": "minimize"})
+        assert result["nondominated"] == ["real"]
+        assert result["dominated"] == ["absent", "none", "junk"]
+
+    def test_minimize_missing_value_flag_off_keeps_zero_fill(self, monkeypatch):
+        """C-21: with arbitration_objective_direction off the 0.0 fill and maximise-all are restored."""
+        from engine.config.settings import settings
+        from engine.scoring.pareto_integrator import build_pareto_candidates
+
+        monkeypatch.setattr(settings, "arbitration_objective_direction", False)
+        cands = build_pareto_candidates([{"q": 0.5}], ["cost", "q"])
+        assert cands[0].dimension_scores["cost"] == 0.0

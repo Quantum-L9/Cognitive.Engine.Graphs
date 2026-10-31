@@ -126,16 +126,15 @@ class GraphLifecycle(LifecycleHook):
                     reregister_with_gate_forever(settings.gate_reregistration_interval_seconds)
                 )
 
-        # Start GDS schedulers for all loaded domains (if GDS enabled)
+        # Start GDS schedulers for all loaded domains (if GDS enabled).
+        # RU-007: with gds_shared_scheduler_registry each started scheduler is
+        # registered in EngineState.gds_schedulers (init_dependencies ran above),
+        # the one registry admin gds_* reuses and EngineState.shutdown stops.
         if settings.gds_enabled:
             for domain_id in self._domain_loader.list_domains():
                 try:
                     spec = self._domain_loader.load_domain(domain_id)
-                    if spec.gdsjobs:
-                        scheduler = GDSScheduler(spec, self._graph_driver)
-                        scheduler.register_jobs()
-                        scheduler.start()
-                        self._schedulers.append(scheduler)
+                    if spec.gdsjobs and self._start_domain_scheduler(domain_id, spec, GDSScheduler):
                         logger.info(
                             "GDS scheduler started for domain=%s (%d jobs)",
                             domain_id,
@@ -159,10 +158,38 @@ class GraphLifecycle(LifecycleHook):
         )
 
         # W6-03: Register GDS health probe
-        if settings.gds_enabled and self._schedulers:
+        if settings.gds_enabled and self._registered_schedulers():
             self._register_gds_health_probe()
 
         logger.info("GraphLifecycle.startup complete")
+
+    def _start_domain_scheduler(self, domain_id: str, spec: Any, scheduler_cls: Any) -> bool:
+        """Start one domain's GDS scheduler and record it; False if already registered.
+
+        RU-007: with gds_shared_scheduler_registry the scheduler goes into
+        EngineState.gds_schedulers (one per domain id); otherwise the boot-local list.
+        """
+        shared_registry = settings.gds_shared_scheduler_registry
+        if shared_registry and domain_id in get_state().gds_schedulers:
+            return False
+        scheduler = scheduler_cls(spec, self._graph_driver)
+        scheduler.register_jobs()
+        scheduler.start()
+        if shared_registry:
+            get_state().gds_schedulers[domain_id] = scheduler
+        else:
+            self._schedulers.append(scheduler)
+        return True
+
+    def _registered_schedulers(self) -> list[Any]:
+        """Schedulers the W6-03 probe inspects.
+
+        RU-007: the EngineState registry when gds_shared_scheduler_registry is on;
+        the boot-local list otherwise. Read at probe time, not captured.
+        """
+        if settings.gds_shared_scheduler_registry:
+            return list(get_state().gds_schedulers.values())
+        return list(self._schedulers)
 
     def _register_gds_health_probe(self) -> None:
         """W6-03: Register a health probe that checks GDS algorithm staleness."""
@@ -173,7 +200,7 @@ class GraphLifecycle(LifecycleHook):
             max_staleness = timedelta(hours=settings.gds_max_staleness_hours)
             now = datetime.now(tz=UTC)
             stale_jobs: list[str] = []
-            for scheduler in self._schedulers:
+            for scheduler in self._registered_schedulers():
                 history = await scheduler.get_job_history()
                 # Group by algorithm, check most recent entry
                 seen: set[str] = set()

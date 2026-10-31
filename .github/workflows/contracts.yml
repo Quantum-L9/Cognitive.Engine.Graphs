@@ -1,9 +1,10 @@
 # --- L9_META ---
-# l9_schema: 2
+# l9_schema: 1
 # origin: l9-template
 # engine: graph
 # layer: [ci]
-# tags: [delivery, harness]
+# tags: [L9_TEMPLATE, ci, contracts]
+# owner: platform
 # status: active
 # --- /L9_META ---
 # L9 Contract Enforcement — 24 invariants / 27 docs as hard gates
@@ -58,8 +59,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - run: pip install pyyaml
-      # Default mode is dry-run verification; there is no `check` subcommand.
+      # Default mode is dry-run verification (same as `check`); exits 1 when any
+      # eligible file is PENDING, MISSING, NOHEADER, INVALID or ERROR. Stdlib only.
       - run: python tools/l9_meta_injector.py
 
   lint:

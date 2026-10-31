@@ -261,6 +261,7 @@ class TestHandleEnrich:
 
             assert result["enriched_count"] == 0
             assert result["entity_type"] == "Facility"
+            assert result["status"] == "success"  # RU-014 / CEG-COR-075
         finally:
             _reset_singleton()
 
@@ -332,6 +333,7 @@ class TestHandleEnrich:
 
             assert result["enriched_count"] == 5
             assert result["entity_type"] == "Facility"
+            assert result["status"] == "success"  # RU-014 / CEG-COR-075
             mock_driver.execute_query.assert_called_once()
         finally:
             _reset_singleton()

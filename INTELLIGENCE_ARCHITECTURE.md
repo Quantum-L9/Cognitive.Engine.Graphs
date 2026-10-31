@@ -54,7 +54,9 @@ Match Request → Gate-then-Score → Results Returned
                              DimensionWeight Nodes in Neo4j
                                        ↓
                              ScoringAssembler.load_learned_weights()
-                             (spec_weight × learned_weight = final)
+                             (spec_weight × learned_weight, then the non-penalised
+                              weights rescaled to their pre-learning sum (C-22);
+                              learned < penalty_threshold → −penalty_factor)
                                        ↓
                              Next Match → Improved Scoring ↺
 ```
@@ -66,7 +68,11 @@ For each scoring dimension `i`:
 ```
 lift_i = P(positive | dim_i active) / P(positive)
 freq_factor_i = √(count_with_dim_i / total_outcomes)
-ci_width_i = 1.96 × √(lift_i × (1 - lift_i) / sample_size_i)
+p_i = wins_with_dim_i / sample_size_i            (dimension win rate)
+ñ_i = sample_size_i + 1.96²;  p̃_i = (wins_with_dim_i + 1.96²/2) / ñ_i
+ci_width_i = 1.96 × √(p̃_i × (1 - p̃_i) / ñ_i) / P(positive)
+             (95% CI of the win-rate proportion, Agresti-Coull, on the lift scale;
+              SIGNAL_WEIGHT_PROPORTION_CI=false restores √(lift × (1 - min(lift, 1)) / n))
 confidence_i = 1.0 - min(ci_width_i, 1.0)
 weight_i = clamp(1.0 + (lift_i - 1.0) × confidence_i × freq_factor_i, min, max)
 ```

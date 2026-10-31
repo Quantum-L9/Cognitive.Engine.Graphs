@@ -27,6 +27,7 @@ Contains:
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -81,8 +82,14 @@ def generate_calibration_pairs(
 
     Returns:
         List of CalibrationPair objects suitable for domain spec injection.
+
+    RU-026 / CEG-COR-084: a record whose score is not finite or lies outside
+    [0, 1] cannot form a valid CalibrationPair; it is skipped and counted
+    (the count is logged, the value never is) instead of raising and
+    aborting the whole batch.
     """
     pairs: list[CalibrationPair] = []
+    skipped = 0
 
     for record in outcome_records:
         outcome = record.get("outcome")
@@ -94,6 +101,9 @@ def generate_calibration_pairs(
             continue
 
         score = float(score)
+        if not math.isfinite(score) or score < 0.0 or score > 1.0:
+            skipped += 1
+            continue
 
         if outcome == "success":
             pairs.append(
@@ -116,7 +126,12 @@ def generate_calibration_pairs(
                 )
             )
 
-    logger.info("Generated %d calibration pairs from %d outcomes", len(pairs), len(outcome_records))
+    logger.info(
+        "Generated %d calibration pairs from %d outcomes (%d skipped: score not finite or outside [0, 1])",
+        len(pairs),
+        len(outcome_records),
+        skipped,
+    )
     return pairs
 
 

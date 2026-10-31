@@ -70,12 +70,18 @@ system_edges:
         description: Target event timestamp for causal validation.
 
   - type: RESOLVED_FROM
-    from: "< canonical entity >"
-    to: "< duplicate entity >"
+    from: "< duplicate entity >"
+    to: "< canonical entity >"
     description: |
-      Created by handle_resolve(). Links a canonical entity to a duplicate.
-      Used for entity deduplication. Created automatically when
+      Created by handle_resolve(). Links a duplicate entity to its canonical
+      entity (engine/resolution/resolver.py writes
+      (duplicate)-[:RESOLVED_FROM]->(canonical); the manual path writes
+      (source)-[:RESOLVED_FROM]->(target)). Created automatically when
       semantic_registry.enabled=true and similarity exceeds threshold.
+      Linkage only: relationships are not transferred to the canonical and
+      no engine match or scoring query consumes this edge, so resolved
+      duplicates remain match candidates. The resolver reads it only to skip
+      already-resolved entities.
     source: engine/handlers.py:handle_resolve()
     properties:
       - name: confidence

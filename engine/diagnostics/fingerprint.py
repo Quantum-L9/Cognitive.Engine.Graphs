@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 import math
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -79,15 +80,25 @@ class AlgorithmicFingerprint:
     concentration_ratio: float
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    def to_vector(self) -> list[float]:
+    def to_vector(
+        self,
+        *,
+        bucket_labels: Sequence[str] | None = None,
+        dimension_keys: Sequence[str] | None = None,
+    ) -> list[float]:
         """Convert fingerprint to a fixed-length numeric vector for comparison.
 
         Vector layout: [bucket_freqs..., dimension_freqs..., entropy, concentration]
-        Bucket frequencies are ordered by DEFAULT_BUCKET_LABELS.
-        Dimension frequencies are ordered alphabetically by dimension name.
+        Bucket frequencies are ordered by ``bucket_labels`` (default
+        DEFAULT_BUCKET_LABELS); dimension frequencies by ``dimension_keys``
+        (default: this fingerprint's own dimensions, alphabetically). A key the
+        fingerprint lacks contributes 0.0, so two fingerprints vectorised over
+        the same key order compare the same quantity at every index (RU-104).
         """
-        bucket_vec = [self.score_distribution.get(label, 0.0) for label in DEFAULT_BUCKET_LABELS]
-        dim_vec = [v for _, v in sorted(self.dimension_dominance.items())]
+        labels = DEFAULT_BUCKET_LABELS if bucket_labels is None else tuple(bucket_labels)
+        dims = sorted(self.dimension_dominance) if dimension_keys is None else list(dimension_keys)
+        bucket_vec = [self.score_distribution.get(label, 0.0) for label in labels]
+        dim_vec = [self.dimension_dominance.get(dim, 0.0) for dim in dims]
         return bucket_vec + dim_vec + [self.entropy, self.concentration_ratio]
 
 

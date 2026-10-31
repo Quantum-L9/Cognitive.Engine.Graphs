@@ -20,7 +20,7 @@
 domain:
   id: plasticos
   name: PlasticOS Recycling Marketplace
-  version: 1.1.0
+  version: 1.3.0
   description: 'Domain specification for matching material intake requests (RFQs)
     from buyers to recycling facilities (suppliers) based on polymer compatibility,
     geographic proximity, capacity, certifications, and historical transaction success.
@@ -274,24 +274,27 @@ queryschema:
     type: float
   - name: target_price
     type: float
+  # The requesting buyer's Facility community (CEG-COR-070, DEC-18 option A):
+  # the louvain_community GDS job writes community_id on every Facility from
+  # TRANSACTED_WITH, so a buyer that is itself a Facility can supply its own.
+  # Omitted, community_match scores the neutral 0.5 as before.
+  - name: community_id
+    type: int
+    description: Louvain community_id of the requesting buyer's Facility
   - name: requires_active_supply
     type: bool
-    description: When true, only active SupplyOpportunity candidates pass
+    # Declared default true (CEG-COR-004, DEC-12 option A'): omitted, the field
+    # bound NULL and the gate's FAIL null policy rejected every candidate.
+    default: true
+    description: When true (the default), only active SupplyOpportunity candidates
+      pass; when false, active and inactive candidates pass
+# No traversal steps (CEG-COR-013): a required `MATCH (candidate)-[:PROCESSES]->
+# (polymer)` step neither tested the requested polymer nor kept one row per
+# candidate — a facility processing three polymers came back three times. The
+# polymer constraint is the two `type: traversal` gates below, which compile to
+# `EXISTS { MATCH (candidate)-[:E]->(t:PolymerFamily) WHERE t.code = $polymer_type }`.
 traversal:
-  steps:
-  - name: polymer_capability
-    pattern: (candidate:Facility)-[:PROCESSES]->(polymer:PolymerFamily)
-    required: true
-    matchdirections:
-    - supply_opportunity_to_buyer_facility
-    description: Ensure facility processes the requested polymer type
-  - name: active_supply_polymer
-    pattern: (candidate:SupplyOpportunity)-[:FULFILLS_POLYMER]->(polymer:PolymerFamily)
-    required: true
-    matchdirections:
-    - buyer_demand_to_supply_opportunity
-    description: Active supply must fulfill requested polymer; distinct from Facility
-      PROCESSES capability
+  steps: []
 gates:
 - name: density_range
   type: range
@@ -320,9 +323,13 @@ gates:
   - supply_opportunity_to_buyer_facility
   description: Facility must tolerate the material's contamination level
 - name: food_grade_check
-  type: boolean
+  # An implication, not an equality (CEG-COR-005): Cypher orders false < true,
+  # so `certified >= required` admits every facility when certification is not
+  # required (false / NULL) and only certified ones when it is (true).
+  type: threshold
   candidateprop: food_grade_certified
   queryparam: requires_food_grade
+  operator: '>='
   nullbehavior: pass
   matchdirections:
   - supply_opportunity_to_buyer_facility
@@ -343,14 +350,20 @@ gates:
   - supply_opportunity_to_buyer_facility
   description: Exclude facilities on buyer's blacklist
 - name: active_supply_available
-  type: boolean
+  # An implication, not an equality (CEG-COR-004): Cypher orders false < true,
+  # so `active >= requires_active_supply` admits only active supply when the
+  # requirement is true (the default) and active or inactive supply when it is
+  # false. FAIL keeps candidates with no `active` value out: they are not
+  # SupplyOpportunity records.
+  type: threshold
   candidateprop: active
   queryparam: requires_active_supply
+  operator: '>='
   nullbehavior: fail
   matchdirections:
   - buyer_demand_to_supply_opportunity
-  description: Candidate must be an active SupplyOpportunity (not inactive capability
-    projection)
+  description: When active supply is required (the default), the candidate must be
+    an active SupplyOpportunity (not an inactive capability projection)
 - name: active_supply_volume
   type: threshold
   candidateprop: available_tons
@@ -370,6 +383,27 @@ gates:
   - buyer_demand_to_supply_opportunity
   description: Active supply polymer_type must equal demand polymer_type (PACK-026
     hard-gate harvest)
+- name: polymer_capability_gate
+  type: traversal
+  edgetype: PROCESSES
+  tonode: PolymerFamily
+  candidateprop: code
+  queryparam: polymer_type
+  nullbehavior: fail
+  matchdirections:
+  - supply_opportunity_to_buyer_facility
+  description: Facility must PROCESS the requested polymer family
+- name: fulfills_polymer_gate
+  type: traversal
+  edgetype: FULFILLS_POLYMER
+  tonode: PolymerFamily
+  candidateprop: code
+  queryparam: polymer_type
+  nullbehavior: fail
+  matchdirections:
+  - buyer_demand_to_supply_opportunity
+  description: Active supply must FULFILL the requested polymer family; distinct
+    from Facility PROCESSES capability
 scoring:
   dimensions:
   - name: geo_proximity
@@ -413,10 +447,14 @@ scoring:
     matchdirections:
     - supply_opportunity_to_buyer_facility
   - name: rate_score
+    # Normalised into [0, 1] (CEG-COR-151): `weightedrate` multiplied the raw
+    # rate by rate_confidence, so any realistic rate per ton clamped to 1.0 and
+    # the dimension could not rank. log(1 + rate) / log(1 + maxvalue) keeps the
+    # order; rates at or above maxvalue saturate.
     source: candidateproperty
-    computation: weightedrate
+    computation: lognormalized
     candidateprop: rate_per_ton
-    queryprop: rate_confidence
+    maxvalue: 1000.0
     weightkey: w_rate
     defaultweight: 0.15
     matchdirections:
@@ -431,10 +469,13 @@ scoring:
     matchdirections:
     - supply_opportunity_to_buyer_facility
   - name: recency
+    # temporalproximity reads its horizon in days from maxvalue (CEG-COR-151);
+    # decayconstant is the geodecay distance constant and was ignored here,
+    # leaving the 90-day default instead of the intended 180 days.
     source: candidateproperty
     computation: temporalproximity
     candidateprop: last_transaction_date
-    decayconstant: 15552000.0
+    maxvalue: 180.0
     weightkey: w_recency
     defaultweight: 0.1
     matchdirections:
@@ -461,10 +502,22 @@ scoring:
     - buyer_demand_to_supply_opportunity
 sync:
   endpoints:
+  # Polymer edges are ingested with the nodes (CEG-COR-071): the polymer gates
+  # require PROCESSES / FULFILLS_POLYMER, so engine-synced nodes without them
+  # could never match.
+  # facilities: `processed_polymers` is a list of {code: <PolymerFamily.code>}
+  # maps. childsync SETs each map onto the PolymerFamily node (c += child_row),
+  # so the maps must carry the code only.
   - path: /v1/sync/facilities
     targetnode: Facility
     idproperty: facility_id
     batchstrategy: UNWINDMERGE
+    childsync:
+    - field: processed_polymers
+      targetnode: PolymerFamily
+      targetid: code
+      edgetype: PROCESSES
+      edgedirection: parenttochild
   - path: /v1/sync/polymerfamilies
     targetnode: PolymerFamily
     idproperty: code
@@ -473,10 +526,17 @@ sync:
     targetnode: MaterialForm
     idproperty: form_id
     batchstrategy: UNWINDMERGE
+  # supply-opportunities: the scalar polymer_type links to an existing
+  # PolymerFamily by code (sync the polymerfamilies taxonomy first).
   - path: /v1/sync/supply-opportunities
     targetnode: SupplyOpportunity
     idproperty: opportunity_id
     batchstrategy: UNWINDMERGE
+    taxonomyedges:
+    - field: polymer_type
+      edgetype: FULFILLS_POLYMER
+      targetlabel: PolymerFamily
+      targetid: code
   - path: /v1/sync/buyer-demands
     targetnode: BuyerDemand
     idproperty: demand_id

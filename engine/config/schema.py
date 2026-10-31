@@ -348,6 +348,8 @@ class TraversalSpec(BaseModel):
         from engine.config.settings import settings
 
         max_cap = settings.max_hop_hard_cap
+        if settings.traversal_open_range_rejected:
+            return self._validate_hop_ranges(max_cap)
         hop_re = re.compile(r"\*(\d+)?(?:\.\.(\d+))?")
 
         for step in self.steps:
@@ -376,6 +378,43 @@ class TraversalSpec(BaseModel):
 
         return self
 
+    def _validate_hop_ranges(self, max_cap: int) -> TraversalSpec:
+        """RU-045 / CEG-COR-038: parse the whole `*[min][..[max]]` range token.
+
+        The legacy regex matched `*1` inside `*1..` and read it as exactly one
+        hop, so `*1..` / `*2..` loaded and were emitted unbounded. A `..` must be
+        followed by an explicit upper bound; that bound is checked against the cap.
+        """
+        import re
+
+        hop_re = re.compile(r"\*(\d*)(\.\.)?(\d*)")
+        for step in self.steps:
+            for match in hop_re.finditer(step.pattern):
+                min_hops_str, range_sep, max_hops_str = match.group(1), match.group(2), match.group(3)
+                if min_hops_str and int(min_hops_str) < 1:
+                    msg = f"Traversal step '{step.name}': hop count must be >= 1, got {int(min_hops_str)}"
+                    raise ValueError(msg)
+                if range_sep and not max_hops_str:
+                    msg = (
+                        f"Traversal step '{step.name}': variable-length range '{match.group(0)}' "
+                        "has no explicit upper bound"
+                    )
+                    raise ValueError(msg)
+                if max_hops_str:
+                    max_hops = int(max_hops_str)
+                elif min_hops_str:
+                    max_hops = int(min_hops_str)
+                else:
+                    # unbounded '*' — flag it
+                    max_hops = max_cap + 1
+                if max_hops < 1:
+                    msg = f"Traversal step '{step.name}': hop count must be >= 1, got {max_hops}"
+                    raise ValueError(msg)
+                if max_hops > max_cap:
+                    msg = f"Traversal step '{step.name}': max hops {max_hops} exceeds hard cap {max_cap}"
+                    raise ValueError(msg)
+        return self
+
 
 class GateSpec(BaseModel):
     """Gate definition."""
@@ -390,6 +429,34 @@ class GateSpec(BaseModel):
     # (CEG-009b). The earlier validator stringified scalars, so `true` became
     # the parameter name `$True` and `85.0` the refused name `$85.0`.
     queryparam: str | int | float | bool | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_unknown_keys(cls, data: object) -> object:
+        """RU-053 / CEG-COR-081: refuse a gate key that is not a declared field.
+
+        Pydantic ignores unknown keys by default, so the documented-but-wrong
+        `null_behavior: fail` compiled as the PASS default. Field names are the
+        YAML keys (no aliases, PYDANTIC_YAML_MAPPING.md), so `model_fields` is
+        the complete set of accepted keys.
+        """
+        from engine.config.settings import settings
+
+        if not settings.gate_spec_forbid_unknown_keys or not isinstance(data, dict):
+            return data
+        unknown = sorted(str(key) for key in data if key not in cls.model_fields)
+        if unknown:
+            by_squashed = {name.replace("_", "").lower(): name for name in cls.model_fields}
+            hints = [
+                f"'{key}' (did you mean '{by_squashed[key.replace('_', '').lower()]}'?)"
+                for key in unknown
+                if key.replace("_", "").lower() in by_squashed
+            ]
+            msg = f"Gate '{data.get('name')}' has unknown key(s) {unknown}"
+            if hints:
+                msg += f"; {', '.join(hints)}"
+            raise ValueError(msg)
+        return data
 
     @field_validator("queryparam", mode="before")
     @classmethod
@@ -457,6 +524,9 @@ class ScoringDimensionSpec(BaseModel):
     maxvalue: float | None = None
     defaultwhennull: float = 0.0
     decayconstant: float | None = None  # For geodecay: distance k in meters
+    # For geodecay: longitude operands (RU-037); default candidate.lon / $lon.
+    candidateprop_lon: str | None = None
+    queryprop_lon: str | None = None
     bias: float | None = None  # For communitymatch: multiplicative boost
     weightkey: str
     defaultweight: float
@@ -1110,6 +1180,31 @@ class DomainMetadata(BaseModel):
     # absent on the shipped vertical packs, which are the templates themselves.
     template: TemplateProvenance | None = None
 
+    @field_validator("version")
+    @classmethod
+    def validate_version_semver(cls, v: str) -> str:
+        """RU-057 / CEG-COR-152: `{major}.{minor}.{patch}[-{stage}]` per DOMAIN_SPEC_VERSIONING.md.
+
+        `latest`, `v2`, dates and other free-form strings were accepted. The
+        stage, when present, is one of the contract's six production stages.
+        Components are ASCII digits ([0-9]); a regex digit class would also accept Unicode decimals.
+        """
+        import re
+
+        from engine.config.settings import settings
+
+        if not settings.domain_version_semver_enforced:
+            return v
+        semver = r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+        stages = "seed|discovered|inferred|proposed|reviewed|production"
+        if re.fullmatch(rf"{semver}(?:-(?:{stages}))?", v) is None:
+            msg = (
+                f"domain.version {v!r} is not semver: expected "
+                f"'<major>.<minor>.<patch>' with an optional '-<stage>' suffix ({stages.replace('|', ', ')})"
+            )
+            raise ValueError(msg)
+        return v
+
 
 class DomainSpec(BaseModel):
     """Complete domain pack specification."""
@@ -1187,6 +1282,19 @@ class DomainSpec(BaseModel):
                     msg = f"Edge '{edge.type}' target '{edge.to}' not found in ontology nodes"
                     raise ValueError(msg)
 
+        # RU-049 / CEG-COR-076: gate names are identities (compiled gate params,
+        # composite subgate references); a second literal must not overwrite the first.
+        if settings.gate_name_uniqueness:
+            seen_gate_names: set[str] = set()
+            duplicate_gate_names: set[str] = set()
+            for gate in self.gates:
+                if gate.name in seen_gate_names:
+                    duplicate_gate_names.add(gate.name)
+                seen_gate_names.add(gate.name)
+            if duplicate_gate_names:
+                msg = f"Duplicate gate name(s): {sorted(duplicate_gate_names)}"
+                raise ValueError(msg)
+
         # Validate gate property references
         for gate in self.gates:
             if gate.candidateprop and "." not in gate.candidateprop:
@@ -1213,14 +1321,27 @@ class DomainSpec(BaseModel):
                     base = gate.queryparam.removesuffix("_min").removesuffix("_max")
                     base = base.removesuffix("_start").removesuffix("_end")
                     if base not in all_param_names and gate.queryparam not in all_param_names:
-                        import logging
+                        if settings.domain_undeclared_param_rejected:
+                            # RU-050 / CEG-COR-077: the temporalrange compiler derives
+                            # `<q>_start` / `<q>_end` from a named queryparam; both
+                            # declared makes the reference valid.
+                            derived_declared = (
+                                gate.type == GateType.TEMPORALRANGE
+                                and f"{gate.queryparam}_start" in all_param_names
+                                and f"{gate.queryparam}_end" in all_param_names
+                            )
+                            if not derived_declared:
+                                msg = f"Gate '{gate.name}' references undeclared parameter '{gate.queryparam}'"
+                                raise ValueError(msg)
+                        else:
+                            import logging
 
-                        _logger = logging.getLogger(__name__)
-                        _logger.warning(
-                            "Gate '%s' references undeclared parameter '%s'",
-                            gate.name,
-                            gate.queryparam,
-                        )
+                            _logger = logging.getLogger(__name__)
+                            _logger.warning(
+                                "Gate '%s' references undeclared parameter '%s'",
+                                gate.name,
+                                gate.queryparam,
+                            )
 
         # (c) W1-01: Scoring dimension default weights sum check (per match direction)
         if settings.domain_strict_validation and self.scoring and self.scoring.dimensions:
@@ -1231,6 +1352,14 @@ class DomainSpec(BaseModel):
                 keys = dim.matchdirections or ["*"]
                 for key in keys:
                     buckets[key] = buckets.get(key, 0.0) + dim.defaultweight
+            if settings.weight_ceiling_includes_unscoped:
+                # RU-044: an unscoped dimension scores in every direction, so each
+                # declared direction (and any direction a dimension is scoped to)
+                # carries the unscoped weight on top of its own.
+                unscoped = buckets.get("*", 0.0)
+                directions = [*self.queryschema.matchdirections, *(k for k in buckets if k != "*")]
+                for direction in dict.fromkeys(directions):
+                    buckets[direction] = buckets.get(direction, 0.0) + unscoped
             for key, weight_sum in buckets.items():
                 if weight_sum > weight_ceiling + tolerance:
                     msg = (
