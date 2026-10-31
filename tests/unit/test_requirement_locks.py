@@ -14,7 +14,9 @@ The hash-locked CI dependency files stay in step with their sources.
 CI installs only from requirements-*.lock (tools/deps/install_locked.sh), so a
 requirements file that moves without a lock regeneration would silently stop
 reaching CI. Each source specifier must be satisfied by the locked version, every
-locked package must carry a hash, and the Gate SDK pin must be poetry.lock's.
+locked package must trace back (through uv's ``# via`` annotations) to a
+requirement still in a source file, every locked package must carry a hash, and
+the Gate SDK pin must be poetry.lock's.
 Regenerate with: python tools/deps/lock_requirements.py
 """
 
@@ -85,6 +87,52 @@ def test_every_source_requirement_is_satisfied_by_the_lock(lock: str) -> None:
         if locked is None or not req.specifier.contains(locked, prereleases=True):
             stale.append(f"{req} (locked: {locked})")
     assert not stale, f"{lock} is stale — run python tools/deps/lock_requirements.py: {stale}"
+
+
+_EXTRAS_VIA = "lock_requirements.EXTRAS"
+
+
+def _via(lock: str) -> dict[str, set[str]]:
+    """Each locked package and what uv says pulled it in (``-r file``, extras, or packages)."""
+    via: dict[str, set[str]] = {}
+    current = None
+    in_block = False
+    for line in (ROOT / lock).read_text().splitlines():
+        if match := _PIN.match(line) or _URL_PIN.match(line):
+            current = canonicalize_name(match.group(1).split("[")[0])
+            via[current] = set()
+            in_block = False
+        elif current is None:
+            continue
+        elif line.startswith("    # via "):
+            via[current].add(line.removeprefix("    # via ").strip())
+        elif line == "    # via":
+            in_block = True
+        elif in_block and line.startswith("    #   "):
+            via[current].add(line.removeprefix("    #   ").strip())
+        else:
+            in_block = False
+    return via
+
+
+@pytest.mark.parametrize("lock", sorted(lock_requirements.LOCKS))
+def test_every_locked_package_traces_to_a_current_source(lock: str) -> None:
+    """A requirement removed from its source must not linger in the lock with its dependencies."""
+    via = _via(lock)
+    direct = {canonicalize_name(r.name) for name in lock_requirements.LOCKS[lock] for r in _source_requirements(name)}
+    direct |= {canonicalize_name(Requirement(e).name) for e in lock_requirements.EXTRAS.get(lock, ())}
+    sources = {f"-r {name}" for name in lock_requirements.LOCKS[lock]} | {_EXTRAS_VIA}
+    reachable = {pkg for pkg, parents in via.items() if pkg in direct and parents & sources}
+    grew = True
+    while grew:
+        grew = False
+        for pkg, parents in via.items():
+            if pkg not in reachable and {canonicalize_name(p) for p in parents} & reachable:
+                reachable.add(pkg)
+                grew = True
+    assert set(via) - reachable == set(), (
+        f"{lock} keeps packages no current requirement pulls in — run python tools/deps/lock_requirements.py"
+    )
 
 
 @pytest.mark.parametrize("lock", sorted(lock_requirements.LOCKS))

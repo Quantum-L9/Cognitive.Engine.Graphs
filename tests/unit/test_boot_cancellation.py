@@ -76,3 +76,40 @@ async def test_cancelling_shutdown_itself_propagates() -> None:
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(shutdown, timeout=5)
         get_state.return_value.shutdown.assert_not_awaited()
+
+
+# ── BOOT_CANCELLATION_PROPAGATES=false restores the previous behavior ─────────
+
+
+async def test_flag_off_flush_loop_returns_normally_on_cancel(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "compliance_flush_interval", 3600)
+    monkeypatch.setattr(settings, "boot_cancellation_propagates", False)
+    task = asyncio.create_task(GraphLifecycle()._compliance_flush_loop())
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    assert not task.cancelled()
+    assert task.exception() is None
+
+
+async def test_flag_off_shutdown_swallows_its_own_cancellation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "boot_cancellation_propagates", False)
+    lifecycle = GraphLifecycle()
+
+    async def slow_cleanup_on_cancel() -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.05)
+            raise
+
+    lifecycle._compliance_flush_task = asyncio.create_task(slow_cleanup_on_cancel())
+    await asyncio.sleep(0)
+    with patch("engine.boot.get_state") as get_state:
+        get_state.return_value.compliance_engines = {}
+        get_state.return_value.shutdown = AsyncMock()
+        shutdown = asyncio.create_task(lifecycle.shutdown())
+        await asyncio.sleep(0.01)
+        shutdown.cancel()
+        await asyncio.wait_for(shutdown, timeout=5)
+        get_state.return_value.shutdown.assert_awaited_once()
