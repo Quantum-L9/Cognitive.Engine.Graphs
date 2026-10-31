@@ -26,12 +26,26 @@ from tools.auditors.base import (
     register_auditor,
 )
 
+_PYTEST_EXPECTATIONS = frozenset({"raises", "warns", "deprecated_call"})
+
+
+def _is_pytest_expectation(expr):
+    """``pytest.raises(...)`` / ``pytest.warns(...)`` (or the bare imported names) used as a context manager."""
+    if not isinstance(expr, ast.Call):
+        return False
+    func = expr.func
+    if isinstance(func, ast.Attribute):
+        return func.attr in _PYTEST_EXPECTATIONS and isinstance(func.value, ast.Name) and func.value.id == "pytest"
+    return isinstance(func, ast.Name) and func.id in _PYTEST_EXPECTATIONS
+
 
 def _count_assertions(node):
     count = 0
     for n in ast.walk(node):
         if isinstance(n, ast.Assert):
             count += 1
+        elif isinstance(n, (ast.With, ast.AsyncWith)):
+            count += sum(1 for item in n.items if _is_pytest_expectation(item.context_expr))
         elif isinstance(n, ast.Call):
             if (isinstance(n.func, ast.Attribute) and n.func.attr.startswith("assert")) or (
                 isinstance(n.func, ast.Name) and n.func.id in ("assert_raises", "assertRaises")
@@ -97,7 +111,7 @@ class TestQualityAuditor(BaseAuditor):
         """Return (updated_counter, test_count). Flags tests with zero assertions."""
         tc = 0
         for node in ast.walk(tree):
-            if not isinstance(node, ast.FunctionDef) or not node.name.startswith("test_"):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not node.name.startswith("test_"):
                 continue
             tc += 1
             if _count_assertions(node) == 0:

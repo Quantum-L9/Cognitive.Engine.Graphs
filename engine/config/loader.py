@@ -26,7 +26,7 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError as PydanticValidationError
 
-from engine.config.schema import DomainActivation, DomainSpec
+from engine.config.schema import DomainActivation, DomainSpec, GateSpec
 from engine.config.settings import settings
 from engine.utils.security import tenant_id_defect
 
@@ -88,6 +88,7 @@ def admission_defects(spec: DomainSpec) -> list[str]:
     for gate in spec.gates:
         if gate.strictwhen:
             defects.append(f"{gate.name}: strictwhen {gate.strictwhen!r} is not consumed by any compiler")
+        defects.extend(_role_field_defects(gate))
         try:
             cypher = compiler.compile(gate)
         except (ValueError, KeyError) as exc:
@@ -113,6 +114,27 @@ def admission_defects(spec: DomainSpec) -> list[str]:
     if settings.admission_checks_full_match:
         defects.extend(_match_defects(spec))
     return list(dict.fromkeys(defects))
+
+
+def _role_field_defects(gate: GateSpec) -> list[str]:
+    """RU-015 / CEG-COR-080 (R1a-DEC-05): role exemption and relaxed mode are not served.
+
+    ``handle_match`` passes no request role to ``compile_all_gates`` and never
+    calls ``compile_relaxed``, so a gate's ``roleexempt`` and ``relaxedpenalty``
+    are accepted and ignored. Until a domain needs roles, a pack declaring
+    either is withheld with this named defect. Gated by
+    ``settings.gate_role_exemption``.
+    """
+    if not settings.gate_role_exemption:
+        return []
+    defects: list[str] = []
+    if gate.roleexempt is not None:
+        defects.append(f"{gate.name}: roleexempt {gate.roleexempt!r} is not consumed — match takes no request role")
+    if "relaxedpenalty" in gate.model_fields_set:
+        defects.append(
+            f"{gate.name}: relaxedpenalty {gate.relaxedpenalty!r} is not consumed — relaxed matching is not exposed"
+        )
+    return defects
 
 
 def _match_defects(spec: DomainSpec) -> list[str]:

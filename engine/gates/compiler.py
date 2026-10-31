@@ -87,6 +87,38 @@ def bind_param_key(gate_name: str, suffix: str) -> str:
     return sanitize_label(raw_key)
 
 
+class _Operand:
+    """A value a compiled predicate tests, for null handling (RU-042).
+
+    ``guarded`` marks an operand the predicate text already lets impose no
+    constraint when NULL (a per-side ``x IS NULL OR …``), so a PASS wrap need
+    not repeat it; a FAIL wrap still rejects it.
+    """
+
+    __slots__ = ("guarded", "ref")
+
+    def __init__(self, ref: str, *, guarded: bool = False) -> None:
+        self.ref = ref
+        self.guarded = guarded
+
+
+class _Predicate(str):
+    """A compiled predicate that also carries the operands it tests (RU-042)."""
+
+    operands: tuple[_Operand, ...]
+
+    def __new__(cls, text: str, operands: list[_Operand] | tuple[_Operand, ...] = ()) -> _Predicate:
+        obj = super().__new__(cls, text)
+        obj.operands = tuple(operands)
+        return obj
+
+
+def _operands_from_predicate() -> bool:
+    from engine.config.settings import settings
+
+    return settings.gate_null_operands_from_predicate
+
+
 def _param_name(name: str | None, fallback: str = "value") -> str:
     """Validated Cypher parameter identifier for a gate's query parameter."""
     return sanitize_label(name or fallback)
@@ -103,6 +135,15 @@ def _declared(gate: GateSpec, field: str) -> str | None:
     if isinstance(value, str) and value.strip():
         return value
     return None
+
+
+class UnboundGateParameterError(ValueError):
+    """RU-010: an active gate's undeclared or required parameter resolved to null."""
+
+    def __init__(self, problems: list[str]) -> None:
+        self.problems = problems
+        msg = "Gate parameter resolved to null: " + "; ".join(problems)
+        super().__init__(msg)
 
 
 class GateCompiler:
@@ -143,29 +184,48 @@ class GateCompiler:
         self._bound_by: dict[str, tuple[str, str]] = {}
         # CEG-009c: composite gates currently being expanded (cycle guard).
         self._composite_stack: list[str] = []
+        # RU-043: the direction compile_all_gates / compile_relaxed is compiling
+        # (None for a direct compile()), checked against composite subgates.
+        self._direction: str | None = None
 
     # ── W1-03: Gate validation (seL4-inspired) ──────────────
 
     def validate_gates(
         self,
         resolved_params: dict[str, object] | None = None,
+        *,
+        match_direction: str | None = None,
+        reject_unbound: bool = False,
     ) -> list[str]:
         """W1-03: Pre-compilation gate validation.
 
         Checks:
         (a) Every required gate field has a corresponding parameter in the resolved set.
         (b) No gate uses an operator incompatible with the field's declared type.
-        (c) Post-compilation: if a resolved parameter is None, log WARNING and
-            reject if STRICT_NULL_GATES is enabled.
+        (c) Post-compilation: if a resolved parameter is None, log WARNING
+            (STRICT_NULL_GATES) and, with ``reject_unbound``, reject it when the
+            parameter is undeclared or a required queryschema field.
 
         A literal `queryparam` is bound by the compiler itself and therefore
         never looked up in the resolved set.
+
+        RU-010 / CEG-COR-023 (R1a-DEC-03, third alternative): ``match_direction``
+        restricts the check to the gates active for that direction (the same
+        filter compile_all_gates applies). ``reject_unbound`` raises
+        UnboundGateParameterError for every active gate whose parameter is
+        missing or null and is either not declared (neither a queryschema field
+        nor a derived parameter) or a ``required`` queryschema field; a null
+        declared optional parameter is left to the gate's ``nullbehavior`` in
+        the compiled Cypher (C-14) and only warned about.
 
         Returns list of warning messages (empty = all clear).
         """
         from engine.config.settings import settings
 
         warnings: list[str] = []
+        unbound: list[str] = []
+        field_required = {f.name: f.required for f in self.domain_spec.queryschema.fields}
+        declared = set(field_required) | {p.name for p in self.domain_spec.derivedparameters}
         # Build a property type index from ontology
         prop_types: dict[str, str] = {}
         for node in self.domain_spec.ontology.nodes:
@@ -177,6 +237,8 @@ class GateCompiler:
         numeric_types = frozenset({"int", "float", "datetime", "date", "duration"})
 
         for gate in self._gates:
+            if match_direction is not None and gate.matchdirections and match_direction not in gate.matchdirections:
+                continue
             named_param = gate.queryparam if isinstance(gate.queryparam, str) else None
 
             # (a) Check that required gate params exist in resolved set
@@ -205,7 +267,12 @@ class GateCompiler:
                     if settings.strict_null_gates:
                         warnings.append(msg)
                         logger.warning(msg)
+                    if reject_unbound and (named_param not in declared or field_required.get(named_param, False)):
+                        kind = "required" if named_param in declared else "undeclared"
+                        unbound.append(f"gate '{gate.name}' needs {kind} parameter '{named_param}'")
 
+        if unbound:
+            raise UnboundGateParameterError(unbound)
         return warnings
 
     # ── Public API ─────────────────────────────────────────
@@ -253,10 +320,14 @@ class GateCompiler:
         self._query_params = {}
         self._bound_by = {}
         fragments: list[str] = []
+        composed = self._composed_subgates(match_direction)
 
         for gate in self._gates:
             # Direction filter
             if gate.matchdirections and match_direction not in gate.matchdirections:
+                continue
+            # RU-043: a subgate contributes only through its composite.
+            if gate.name in composed:
                 continue
 
             # Role exemption
@@ -264,7 +335,7 @@ class GateCompiler:
                 logger.debug(f"Gate {gate.name} exempted for role={role}")
                 continue
 
-            fragment = self.compile(gate)
+            fragment = self._compile_for(gate, match_direction)
             if fragment:
                 fragments.append(f"({fragment})")
 
@@ -286,15 +357,18 @@ class GateCompiler:
         self._query_params = {}
         self._bound_by = {}
         hard_fragments: list[str] = []
+        composed = self._composed_subgates(match_direction)
 
         for gate in self._gates:
             if gate.matchdirections and match_direction not in gate.matchdirections:
+                continue
+            if gate.name in composed:
                 continue
             if role and gate.roleexempt and role in gate.roleexempt:
                 continue
 
             if math.isclose(gate.relaxedpenalty, 0.0, abs_tol=1e-9):
-                fragment = self.compile(gate)
+                fragment = self._compile_for(gate, match_direction)
                 if fragment:
                     hard_fragments.append(f"({fragment})")
 
@@ -302,6 +376,34 @@ class GateCompiler:
             return "true"
 
         return AND_JOINER.join(hard_fragments)
+
+    def _composed_subgates(self, match_direction: str) -> set[str]:
+        """Names referenced as subgates by a composite applicable to ``match_direction`` (RU-043).
+
+        Before, a subgate was also compiled as a top-level filter, so an OR
+        composite degenerated to the AND of its subgates.
+        """
+        from engine.config.settings import settings
+
+        if not settings.composite_subgate_scoping:
+            return set()
+        names: set[str] = set()
+        for gate in self._gates:
+            if gate.type != GateType.COMPOSITE or not gate.subgates:
+                continue
+            if gate.matchdirections and match_direction not in gate.matchdirections:
+                continue
+            names.update(gate.subgates)
+        return names
+
+    def _compile_for(self, gate: GateSpec, match_direction: str) -> str:
+        """``compile`` with the direction recorded so composites can check their subgates' scope."""
+        previous = self._direction
+        self._direction = match_direction
+        try:
+            return self.compile(gate)
+        finally:
+            self._direction = previous
 
     # ── Parameter binding (C-009 / CEG-009b) ────────────────
 
@@ -347,6 +449,11 @@ class GateCompiler:
         """The declared parameter name behind `queryparam`, or None for a literal / absent one."""
         return gate.queryparam if isinstance(gate.queryparam, str) else None
 
+    def _param_operands(self, gate: GateSpec, *, guarded: bool = False) -> list[_Operand]:
+        """The declared `queryparam` as a null-checkable operand; a literal is never NULL."""
+        named = self._named_param(gate)
+        return [_Operand(f"${_param_name(named)}", guarded=guarded)] if named else []
+
     # ── Gate Type Handlers ─────────────────────────────────
 
     def _get_handler(self, gate_type: GateType) -> Callable[[GateSpec], str]:
@@ -372,9 +479,10 @@ class GateCompiler:
     def _compile_boolean(self, gate: GateSpec) -> str:
         """Boolean gate: candidate.prop = $param OR candidate.prop = true."""
         prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "prop"
+        tested = [_Operand(f"candidate.{prop}"), *self._param_operands(gate)]
         if gate.queryparam is not None:
-            return f"candidate.{prop} = {self._operand(gate)}"
-        return f"candidate.{prop} = true"
+            return _Predicate(f"candidate.{prop} = {self._operand(gate)}", tested)
+        return _Predicate(f"candidate.{prop} = true", tested)
 
     def _compile_threshold(self, gate: GateSpec) -> str:
         """
@@ -383,7 +491,8 @@ class GateCompiler:
         """
         prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "prop"
         op = _OPERATORS[gate.operator or ">="]
-        return f"candidate.{prop} {op} {self._operand(gate)}"
+        tested = [_Operand(f"candidate.{prop}"), *self._param_operands(gate)]
+        return _Predicate(f"candidate.{prop} {op} {self._operand(gate)}", tested)
 
     def _compile_range(self, gate: GateSpec) -> str:
         """
@@ -409,6 +518,17 @@ class GateCompiler:
         if settings.gate_declared_bounds_enabled and lower and upper:
             lo = sanitize_label(lower)
             hi = sanitize_label(upper)
+            if _operands_from_predicate():
+                # Each NULL query bound imposes no constraint on its own side.
+                return _Predicate(
+                    f"(${lo} IS NULL OR candidate.{base_prop} >= ${lo}) AND "
+                    f"(${hi} IS NULL OR candidate.{base_prop} <= ${hi})",
+                    [
+                        _Operand(f"candidate.{base_prop}"),
+                        _Operand(f"${lo}", guarded=True),
+                        _Operand(f"${hi}", guarded=True),
+                    ],
+                )
             return f"candidate.{base_prop} >= ${lo} AND candidate.{base_prop} <= ${hi}"
 
         min_prop = sanitize_label(gate.candidateprop_min) if gate.candidateprop_min else f"min_{base_prop}"
@@ -418,7 +538,12 @@ class GateCompiler:
         parts = []
         parts.append(f"(candidate.{min_prop} IS NULL OR candidate.{min_prop} <= {param})")
         parts.append(f"(candidate.{max_prop} IS NULL OR {param} <= candidate.{max_prop})")
-        return AND_JOINER.join(parts)
+        tested = [
+            _Operand(f"candidate.{min_prop}", guarded=True),
+            _Operand(f"candidate.{max_prop}", guarded=True),
+            *self._param_operands(gate),
+        ]
+        return _Predicate(AND_JOINER.join(parts), tested)
 
     def _compile_enum(self, gate: GateSpec) -> str:
         """
@@ -427,9 +552,10 @@ class GateCompiler:
         """
         prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "prop"
         param = self._operand(gate)
+        tested = [_Operand(f"candidate.{prop}"), *self._param_operands(gate)]
         if gate.invertible:
-            return f"{param} IN candidate.{prop}"
-        return f"candidate.{prop} IN {param}"
+            return _Predicate(f"{param} IN candidate.{prop}", tested)
+        return _Predicate(f"candidate.{prop} IN {param}", tested)
 
     def _compile_exclusion(self, gate: GateSpec) -> str:
         """
@@ -460,15 +586,18 @@ class GateCompiler:
         exclusion_edge = "(candidate)-[:" + edge_type + "]->"
         if gate.queryparam is not None:
             param = self._operand(gate)
-            return (
+            # candidateprop names the excluded TARGET node's property, never the
+            # candidate's, so only the query parameter takes part in null handling.
+            return _Predicate(
                 "NOT EXISTS { MATCH "
                 + exclusion_edge
                 + "(excluded) WHERE excluded."
                 + target_prop
                 + f" = {param} "
-                + "}"
+                + "}",
+                self._param_operands(gate),
             )
-        return "NOT EXISTS { MATCH " + exclusion_edge + "() }"
+        return _Predicate("NOT EXISTS { MATCH " + exclusion_edge + "() }", [])
 
     def _check_exclusion_endpoints(self, gate: GateSpec, edge_type: str) -> None:
         """Refuse an exclusion gate the compiled predicate cannot honour (CEG-COR-019).
@@ -533,6 +662,8 @@ class GateCompiler:
         (CEG-009c); the previous behaviour — warn and compile what is left —
         silently widened the gate.
         """
+        from engine.config.settings import settings
+
         combinator = f" {_LOGIC[(gate.logic or 'AND').upper()]} "
         if not gate.subgates:
             msg = f"Gate '{gate.name}': composite gate declares no subgates"
@@ -550,11 +681,24 @@ class GateCompiler:
                 if sub_gate_spec is None:
                     msg = f"Gate '{gate.name}': subgate '{sub_gate_name}' is not declared in this domain spec"
                     raise ValueError(msg)
+                direction = self._direction
+                if (
+                    direction is not None
+                    and settings.composite_subgate_scoping
+                    and sub_gate_spec.matchdirections
+                    and direction not in sub_gate_spec.matchdirections
+                ):
+                    msg = (
+                        f"Gate '{gate.name}': subgate '{sub_gate_name}' is scoped to "
+                        f"{sub_gate_spec.matchdirections}, not to direction '{direction}' being compiled"
+                    )
+                    raise ValueError(msg)
                 sub_fragments.append(f"({self.compile(sub_gate_spec)})")
         finally:
             self._composite_stack.pop()
 
-        return combinator.join(sub_fragments)
+        # Each subgate already carries its own null handling.
+        return _Predicate(combinator.join(sub_fragments), [])
 
     def _compile_self_range(self, gate: GateSpec) -> str:
         """
@@ -567,9 +711,15 @@ class GateCompiler:
         max_prop = sanitize_label(gate.candidateprop_max) if gate.candidateprop_max else f"max_{base_prop}"
         param = self._operand(gate)
 
-        return (
+        tested = [
+            _Operand(f"candidate.{min_prop}", guarded=True),
+            _Operand(f"candidate.{max_prop}", guarded=True),
+            *self._param_operands(gate),
+        ]
+        return _Predicate(
             f"(candidate.{min_prop} IS NULL OR candidate.{min_prop} <= {param}) AND "
-            f"(candidate.{max_prop} IS NULL OR {param} <= candidate.{max_prop})"
+            f"(candidate.{max_prop} IS NULL OR {param} <= candidate.{max_prop})",
+            tested,
         )
 
     def _compile_freshness(self, gate: GateSpec) -> str:
@@ -577,10 +727,26 @@ class GateCompiler:
         Freshness gate: candidate.prop >= datetime() - duration({days: N})
         Ensures data recency (e.g., rate sheets updated within 24h).
         """
+        from engine.config.settings import settings
+
         prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "updated_at"
         duration_field = "days"
-        duration_value = int(gate.maxagedays or 1)
-        return f"candidate.{prop} >= datetime() - duration({{{duration_field}: {duration_value}}})"
+        if settings.freshness_maxagedays_validated:
+            # Default only when absent; 0 used to become 1 day and a negative
+            # age a cutoff in the future (CEG-COR-079).
+            if gate.maxagedays is None:
+                duration_value = 1
+            elif int(gate.maxagedays) < 1:
+                msg = f"Gate '{gate.name}': freshness maxagedays must be >= 1 day, got {gate.maxagedays!r}"
+                raise ValueError(msg)
+            else:
+                duration_value = int(gate.maxagedays)
+        else:
+            duration_value = int(gate.maxagedays or 1)
+        return _Predicate(
+            f"candidate.{prop} >= datetime() - duration({{{duration_field}: {duration_value}}})",
+            [_Operand(f"candidate.{prop}")],
+        )
 
     def _compile_temporal_range(self, gate: GateSpec) -> str:
         """
@@ -615,9 +781,34 @@ class GateCompiler:
         if settings.gate_declared_bounds_enabled and prop_start and prop_end:
             cand_start = sanitize_label(prop_start)
             cand_end = sanitize_label(prop_end)
+            if _operands_from_predicate():
+                # Window overlap: each side is unconstrained when either of its
+                # operands is NULL (PASS); a FAIL wrap rejects any NULL.
+                return _Predicate(
+                    f"(candidate.{cand_start} IS NULL OR ${end_param} IS NULL OR candidate.{cand_start} <= ${end_param})"
+                    f" AND (candidate.{cand_end} IS NULL OR ${start_param} IS NULL OR "
+                    f"candidate.{cand_end} >= ${start_param})",
+                    [
+                        _Operand(f"candidate.{cand_start}", guarded=True),
+                        _Operand(f"candidate.{cand_end}", guarded=True),
+                        _Operand(f"${start_param}", guarded=True),
+                        _Operand(f"${end_param}", guarded=True),
+                    ],
+                )
             return f"candidate.{cand_start} <= ${end_param} AND candidate.{cand_end} >= ${start_param}"
 
         prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "timestamp"
+        if _operands_from_predicate():
+            # The tested parameters are the start/end names, never the bare queryparam.
+            return _Predicate(
+                f"(${start_param} IS NULL OR candidate.{prop} >= ${start_param}) AND "
+                f"(${end_param} IS NULL OR candidate.{prop} <= ${end_param})",
+                [
+                    _Operand(f"candidate.{prop}"),
+                    _Operand(f"${start_param}", guarded=True),
+                    _Operand(f"${end_param}", guarded=True),
+                ],
+            )
         return f"candidate.{prop} >= ${start_param} AND candidate.{prop} <= ${end_param}"
 
     def _compile_traversal(self, gate: GateSpec) -> str:
@@ -659,7 +850,11 @@ class GateCompiler:
         # Concatenated like the exclusion gate above: edge_type / target_label /
         # prop are sanitize_label()-validated and values only ever flow through
         # $ parameters (C-009; tools/contract_scanner.py SEC-001).
-        return "EXISTS { MATCH (candidate)-[:" + edge_type + "]->(t" + label_clause + ")" + target_filter + " }"
+        # candidateprop is the target node's property: only the parameter is null-checked.
+        return _Predicate(
+            "EXISTS { MATCH (candidate)-[:" + edge_type + "]->(t" + label_clause + ")" + target_filter + " }",
+            self._param_operands(gate) if target_filter else [],
+        )
 
     # ── Null Semantics ─────────────────────────────────────
 
@@ -694,6 +889,15 @@ class GateCompiler:
         # candidate happens to carry a same-named property — a hidden coupling
         # between the candidate's shape and its taxonomy (Stage 2, P4). The
         # legacy wrap is kept behind the same flag as the legacy predicate.
+
+        operands = getattr(predicate, "operands", None)
+        if operands is not None and _operands_from_predicate():
+            return NullHandler.wrap_operands(
+                null_behavior=null_behavior,
+                gate_cypher=str(predicate),
+                operands=[op.ref for op in operands],
+                unguarded=[op.ref for op in operands if not op.guarded],
+            )
 
         is_traversal = gate.type == GateType.TRAVERSAL
         skip_candidate_prop = is_traversal and settings.traversal_gate_exists_subquery

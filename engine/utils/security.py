@@ -34,7 +34,8 @@ def sanitize_label(label: str) -> str:
     if len(label) > _MAX_LABEL_LEN:
         msg = f"Label exceeds maximum length of {_MAX_LABEL_LEN}: {label!r}"
         raise ValueError(msg)
-    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", label):
+    # RU-077 / CEG-COR-126: fullmatch — `$` also matches before a trailing newline.
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", label):
         msg = f"Invalid label or type: {label!r}"
         raise ValueError(msg)
     return label

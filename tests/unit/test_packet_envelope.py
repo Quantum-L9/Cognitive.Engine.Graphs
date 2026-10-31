@@ -389,6 +389,62 @@ class TestSerialization:
         restored = type(base_packet).from_wire(wire)
         assert "contact_email" in restored.security.pii_fields
 
+    def test_from_wire_rejects_tampered_payload(self, base_packet):
+        """RG-121 (RU-092 / CEG-COR-173): before, from_wire accepted any content_hash."""
+        wire = base_packet.to_wire()
+        wire["payload"] = {**wire["payload"], "tampered": True}
+        with pytest.raises(ValueError, match="content_hash"):
+            type(base_packet).from_wire(wire)
+
+    def test_from_wire_rejects_tampered_tenant(self, base_packet):
+        wire = base_packet.to_wire()
+        wire["tenant"] = {**wire["tenant"], "actor": "someone-else"}
+        with pytest.raises(ValueError, match="content_hash"):
+            type(base_packet).from_wire(wire)
+
+    def test_from_wire_rejects_forged_hash(self, base_packet):
+        wire = base_packet.to_wire()
+        wire["security"] = {**wire["security"], "content_hash": "0" * 64}
+        with pytest.raises(ValueError, match="content_hash"):
+            type(base_packet).from_wire(wire)
+
+
+class TestContentHashDocMatchesCode:
+    """RG-121 / DEC-34 (align doc to code): PACKET_ENVELOPE_FIELDS.md names _compute_hash's inputs."""
+
+    def test_doc_formula_keys_equal_code_inputs(self):
+        import re
+        from pathlib import Path
+
+        doc = (Path(__file__).resolve().parents[2] / "docs" / "contracts" / "PACKET_ENVELOPE_FIELDS.md").read_text()
+        section = doc.split("## content_hash Computation", 1)[1].split("\n## ", 1)[0]
+        block = section.split("```python", 1)[1].split("```", 1)[0]
+        assert '"action": envelope.action.value' in block
+        assert '"tenant": json.loads(envelope.tenant.model_dump_json())' in block
+        assert '"address": json.loads(envelope.address.model_dump_json())' in block
+        assert 'payload.get("action")' not in block
+        assert "tenant.actor" not in block
+        keys = set(re.findall(r'^\s*"(\w+)":', block, re.MULTILINE))
+        assert keys == {"packet_type", "action", "payload", "tenant", "address"}
+
+    def test_doc_formula_reproduces_code_hash(self, base_packet):
+        import hashlib
+
+        envelope = base_packet
+        hash_input = json.dumps(
+            {
+                "packet_type": envelope.packet_type.value,
+                "action": envelope.action.value,
+                "payload": envelope.payload,
+                "tenant": json.loads(envelope.tenant.model_dump_json()),
+                "address": json.loads(envelope.address.model_dump_json()),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        assert hashlib.sha256(hash_input.encode("utf-8")).hexdigest() == envelope.security.content_hash
+
 
 # ── Chassis Bridge ────────────────────────────────────────
 

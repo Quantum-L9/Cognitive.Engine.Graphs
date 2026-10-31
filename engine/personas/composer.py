@@ -169,8 +169,14 @@ def create_composite_persona(
         msg = "Cannot create composite persona from empty list."
         raise ValueError(msg)
 
-    # Use scores as weights for blending
-    blend_input: list[WeightedPersona] = [{"persona": p["persona"], "weight": p["score"]} for p in selected]
+    # Use scores as weights for blending. A zero-signal query (every selected
+    # score ~0) blends with equal weights, the convention
+    # synthesis.compute_synthesis_weights uses, instead of failing the low-
+    # confidence fallback with "all-zero weights" (CEG-COR-114).
+    if math.isclose(sum(p["score"] for p in selected), 0.0, abs_tol=1e-9):
+        blend_input: list[WeightedPersona] = [{"persona": p["persona"], "weight": 1.0} for p in selected]
+    else:
+        blend_input = [{"persona": p["persona"], "weight": p["score"]} for p in selected]
     blended_vector = blend_personas(blend_input)
 
     # Build hybrid system prompt from relevant parts

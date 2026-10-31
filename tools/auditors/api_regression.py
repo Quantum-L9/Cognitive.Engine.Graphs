@@ -89,23 +89,30 @@ class APIRegressionAuditor(BaseAuditor):
     def scan(self, files, repo_root, index=None, dep_indexes=None):
         result = AuditResult(auditor_name=self.name)
         c = 0
-        diff = _run_git(["diff", "--name-only", "main", "HEAD"], repo_root)
-        if diff is None:  # nosemgrep: singleton-requires-lock
-            diff = _run_git(["diff", "--name-only", "origin/main", "HEAD"], repo_root)
+        # Compare against the merge base, not main's tip: a class added on main
+        # after this branch was cut is not something this branch removed.
+        merge_base = None
+        for ref in ("main", "origin/main"):
+            out = _run_git(["merge-base", ref, "HEAD"], repo_root)
+            if out is not None and out.strip():
+                merge_base = out.strip()
+                break
+        if merge_base is None:  # nosemgrep: singleton-requires-lock
+            return result
+        diff = _run_git(["diff", "--name-only", merge_base, "HEAD"], repo_root)
         if diff is None:  # nosemgrep: singleton-requires-lock
             return result
         changed = [f for f in diff.strip().split("\n") if f.endswith(".py") and "/tests/" not in f]
         for rp in changed:
             fp = repo_root / rp
-            if not fp.exists():
-                continue
-            with open(fp) as fh:
-                cur_api = _extract_public_api(fh.read())
-            base = _run_git(["show", f"main:{rp}"], repo_root)
+            if fp.exists():
+                with open(fp) as fh:
+                    cur_api = _extract_public_api(fh.read())
+            else:
+                cur_api = {}  # module deleted on this branch: every base public class is removed
+            base = _run_git(["show", f"{merge_base}:{rp}"], repo_root)
             if base is None:  # nosemgrep: singleton-requires-lock
-                base = _run_git(["show", f"origin/main:{rp}"], repo_root)
-            if base is None:  # nosemgrep: singleton-requires-lock
-                continue
+                continue  # file added on this branch: nothing to regress against
             base_api = _extract_public_api(base)
             for cn, bc in base_api.items():
                 if cn not in cur_api:

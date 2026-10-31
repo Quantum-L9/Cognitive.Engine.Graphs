@@ -64,19 +64,6 @@ class _Recorder:
         return []
 
 
-@pytest.fixture(autouse=True)
-def _load_withheld_pack_as_fixture_data(monkeypatch: pytest.MonkeyPatch) -> None:
-    """These tests load freight-matching only as fixture data for a mocked loader.
-
-    Since RU-020/RU-039 the loader withholds that pack (its scoring references
-    unbound $lat/$lon/$target_price, CEG-COR-011 — GATED on RU-037). Admission
-    itself is covered by tests/unit/test_legacy_pack_serving_boundary.py.
-    """
-    from engine.config.settings import settings as _settings
-
-    monkeypatch.setattr(_settings, "unvalidated_domain_packs_enabled", True)
-
-
 @pytest.fixture
 def wired(monkeypatch: pytest.MonkeyPatch) -> tuple[_Recorder, MagicMock]:
     # Reach each subaction's domain read: open the gates that precede it.
@@ -124,7 +111,8 @@ async def test_same_tenant_domain_is_served(wired) -> None:
 @pytest.mark.finding("CEG-COR-003")
 async def test_optional_domain_defaults_to_tenant(wired) -> None:
     driver, loader = wired
-    loader.load_domain.return_value = MagicMock()
+    # RU-066 reads compliance.gdpr_subject_id_field; None selects the default field.
+    loader.load_domain.return_value = MagicMock(compliance=None)
     result = await handle_admin(TENANT, {"subaction": "erase_subject", "data_subject_id": "ds-1"})
     assert result["status"] == "dry_run"
     assert driver.calls[0]["database"] == TENANT
