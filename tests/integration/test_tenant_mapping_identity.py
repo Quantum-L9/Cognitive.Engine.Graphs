@@ -33,8 +33,7 @@ from engine.config.loader import DomainPackLoader
 from engine.config.settings import settings
 from engine.graph.driver import GraphDriver
 from engine.handlers import ValidationError, handle_score, handle_sync, init_dependencies
-from engine.scoring.evidence_priority import approved_relevance_map
-from engine.scoring.graph_evidence import GraphEvidenceBinding
+from engine.scoring.graph_evidence import GraphEvidenceBinding, approved_relevance_from_spec
 from engine.state import get_state
 from tests.fixtures.domain_contracts import SYNTHETIC_DOMAINS_ROOT
 
@@ -50,6 +49,9 @@ def domains_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
     root = tmp_path_factory.mktemp("mapped-domains")
     spec = yaml.safe_load((SYNTHETIC_DOMAINS_ROOT / "cheese-aging" / "spec.yaml").read_text())
     spec["domain"].update({"id": TENANT, "version": "1.1.0-reviewed"})
+    for edge in spec["ontology"]["edges"]:
+        if edge["type"] == "TENDED_BY":
+            edge["evidencerelevance"] = 0.5
     endpoints = spec["sync"]["endpoints"]
     endpoints[0]["refnamespace"] = "creamery.cave"
     endpoints += [
@@ -125,7 +127,7 @@ def _row(**overrides: Any) -> dict[str, Any]:
 async def test_one_identity_from_node_sync_through_relationship_sync_to_scoring(
     graph: tuple[GraphDriver, DomainPackLoader],
 ) -> None:
-    driver, _ = graph
+    driver, loader = graph
     await handle_sync(TENANT, {"entity_type": "aging-caves", "batch": [{"cave_id": ref} for ref in CAVES]})
     await handle_sync(TENANT, {"entity_type": "affineurs", "batch": [{"affineur_id": AFFINEUR}]})
     result = await handle_sync(TENANT, {"entity_type": "tended-by", "batch": [_row()]})
@@ -138,10 +140,10 @@ async def test_one_identity_from_node_sync_through_relationship_sync_to_scoring(
     )
     assert edge == {"a": CAVES[0], "b": AFFINEUR, "subject": CAVES[0], "object": AFFINEUR}
 
-    binding = GraphEvidenceBinding(driver, approved_relevance_map({"TENDED_BY": 0.5}))
+    binding = GraphEvidenceBinding(driver, approved_relevance_from_spec(loader.load_domain(TENANT)))
     scored = await handle_score(TENANT, {"entity_refs": CAVES, "top_n": 2}, binding=binding)
     assert [s["entity_ref"] for s in scored["scored"]] == [CAVES[0]]
-    assert scored["scored"][0]["score"] == 50.0  # confidence 1.0 x relevance 0.5
+    assert scored["scored"][0]["score"] == 50.0  # confidence 1.0 x spec relevance 0.5
     assert [a["entity_ref"] for a in scored["abstained"]] == [CAVES[1]]
 
 

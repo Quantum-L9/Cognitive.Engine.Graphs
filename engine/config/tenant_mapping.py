@@ -11,8 +11,8 @@ status: active
 
 Tenant-configured provider association mapping (QM.POC0.TENANT_ASSOCIATION_MAPPING.004).
 
-The tenant domain spec is the single authority for the two declarations that let
-a provider observation become graph evidence with a scoreable identity:
+The tenant domain spec is the single authority for three declarations that let a
+provider observation become scoreable graph evidence:
 
 - ``sync.endpoints[].observedfrom`` on a relationship endpoint names the provider
   associations that endpoint accepts as observations. The relationship type,
@@ -20,19 +20,41 @@ a provider observation become graph evidence with a scoreable identity:
 - ``sync.endpoints[].refnamespace`` on a node endpoint is the one place a provider
   record id is mapped to a graph ref (``<namespace>:<record id>``). Node sync,
   relationship sync and scoring resolve the same identity from it (D-13).
+- ``ontology.edges[].evidencerelevance`` is the server-owned approved relevance of
+  an evidence edge type. Scoring honours it only for a ``-reviewed`` or
+  ``-production`` spec (D-8, D-8b).
 
 ``validate_tenant_mapping`` runs from ``DomainSpec.validate_cross_references`` on
 every load, unconditionally (D-7): a spec carrying a malformed, ambiguous or
 conflicting declaration never loads, so it fails before any source read or graph
-write. Specs that declare neither key are unaffected.
+write. Specs that declare none of the three keys are unaffected.
 """
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from engine.config.schema import DomainSpec, SyncEndpointSpec
+
+SPEC_VERSION_PATTERN = re.compile(
+    r"^(?P<semver>\d+\.\d+\.\d+)-(?P<stage>seed|discovered|inferred|proposed|reviewed|production)$"
+)
+# docs/contracts/DOMAIN_SPEC_VERSIONING.md: only human-reviewed or released specs
+# may activate relevance in scoring (D-8b).
+RELEVANCE_ACTIVE_STAGES = frozenset({"reviewed", "production"})
+
+
+def spec_version_stage(version: str) -> str | None:
+    """The stage suffix of ``{major}.{minor}.{patch}-{stage}``, or None when the version has none."""
+    match = SPEC_VERSION_PATTERN.fullmatch(version)
+    return match.group("stage") if match else None
+
+
+def relevance_is_active(domain_spec: DomainSpec) -> bool:
+    """Whether this spec's stage lets declared ``evidencerelevance`` reach scoring."""
+    return spec_version_stage(domain_spec.domain.version) in RELEVANCE_ACTIVE_STAGES
 
 
 def _endpoints(domain_spec: DomainSpec) -> list[SyncEndpointSpec]:
@@ -123,7 +145,37 @@ def _validate_observations(domain_spec: DomainSpec) -> None:
             owners[key] = endpoint.path
 
 
+def _validate_relevance(domain_spec: DomainSpec) -> None:
+    from engine.sync.generator import resolve_relationship_declaration
+
+    declared = [edge for edge in domain_spec.ontology.edges if edge.evidencerelevance is not None]
+    for edge in declared:
+        writers = [
+            endpoint
+            for endpoint in _endpoints(domain_spec)
+            if endpoint.targetedge == edge.type and endpoint.fromnode == edge.from_ and endpoint.tonode == edge.to
+        ]
+        if not writers:
+            msg = (
+                f"Edge ({edge.from_})-[:{edge.type}]->({edge.to}) declares evidencerelevance but no "
+                "relationship sync endpoint writes it"
+            )
+            raise ValueError(msg)
+        for endpoint in writers:
+            resolve_relationship_declaration(domain_spec, endpoint)
+
+    # Scoring keys relevance by relationship type, so every signature of a type
+    # that declares it must declare the same value.
+    for edge_type in sorted({edge.type for edge in declared}):
+        values = {edge.evidencerelevance for edge in domain_spec.ontology.edges if edge.type == edge_type}
+        if len(values) > 1:
+            listed = sorted("<none>" if value is None else str(value) for value in values)
+            msg = f"Edge type {edge_type!r}: every signature declares the same evidencerelevance, found {listed}"
+            raise ValueError(msg)
+
+
 def validate_tenant_mapping(domain_spec: DomainSpec) -> None:
     """Refuse a malformed, ambiguous or conflicting tenant mapping declaration (raises ValueError)."""
     _validate_ref_namespaces(domain_spec)
     _validate_observations(domain_spec)
+    _validate_relevance(domain_spec)

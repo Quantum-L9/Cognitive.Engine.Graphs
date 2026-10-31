@@ -18,6 +18,10 @@ The two vocabularies are the repository's synthetic verification domains
 (``tests/fixtures/domains``), copied under new ids with one relationship sync
 endpoint added for an edge their ontology already declares. The same runtime
 code serves both; no named product domain is involved.
+
+Approved relevance comes from the tenant spec itself (``evidencerelevance`` on the
+evidence edge, honoured at ``-reviewed``; QM.POC0.TENANT_ASSOCIATION_MAPPING.004
+D-8/D-8b), never from a map the test supplies.
 """
 
 from __future__ import annotations
@@ -38,8 +42,7 @@ from engine.config.loader import DomainPackLoader
 from engine.config.settings import settings
 from engine.graph.driver import GraphDriver
 from engine.handlers import ExecutionError, ValidationError, handle_score, handle_sync, init_dependencies
-from engine.scoring.evidence_priority import approved_relevance_map
-from engine.scoring.graph_evidence import GraphEvidenceBinding
+from engine.scoring.graph_evidence import GraphEvidenceBinding, approved_relevance_from_spec
 from engine.state import get_state
 from tests.fixtures.domain_contracts import SYNTHETIC_DOMAINS_ROOT
 
@@ -95,6 +98,11 @@ def domains_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
     for domain_id, vocabulary in VOCABULARIES.items():
         spec = yaml.safe_load((SYNTHETIC_DOMAINS_ROOT / vocabulary["source"] / "spec.yaml").read_text())
         spec["domain"]["id"] = domain_id
+        # Synthetic approval: a reviewed spec declaring relevance 1.0 for its evidence edge.
+        spec["domain"]["version"] = "1.0.0-reviewed"
+        for edge in spec["ontology"]["edges"]:
+            if edge["type"] == vocabulary["edge_type"]:
+                edge["evidencerelevance"] = 1.0
         for endpoint in vocabulary["extra_endpoints"]:
             spec["sync"]["endpoints"].append({"method": "POST", "batchstrategy": "UNWINDMERGE", **endpoint})
         (root / domain_id).mkdir()
@@ -161,7 +169,8 @@ async def _edges(driver: GraphDriver, tenant: str) -> list[dict[str, Any]]:
 
 
 def _binding(driver: GraphDriver, tenant: str) -> GraphEvidenceBinding:
-    return GraphEvidenceBinding(driver, approved_relevance_map({VOCABULARIES[tenant]["edge_type"]: 1.0}))
+    _, loader = handlers_module._require_deps()
+    return GraphEvidenceBinding(driver, approved_relevance_from_spec(loader.load_domain(tenant)))
 
 
 async def _score(driver: GraphDriver, tenant: str) -> dict[str, Any]:
@@ -230,6 +239,23 @@ async def test_local_score_reads_the_real_graph_and_abstains_without_it(graph: G
     assert removed["evidence_reader"]["connected"] is True
     assert removed["scored"] == []
     assert {a["entity_ref"] for a in removed["abstained"]} == set(v["subjects"])
+
+
+@pytest.mark.parametrize("version", ["1.0.0-proposed", "1.0.0"])
+async def test_relevance_from_an_unreviewed_spec_never_scores(graph: GraphDriver, version: str) -> None:
+    v = VOCABULARIES[TENANT_A]
+    await _seed_nodes(TENANT_A)
+    await _sync_edges(TENANT_A, _edge_row(TENANT_A))
+    _, loader = handlers_module._require_deps()
+    unreviewed = loader.load_domain(TENANT_A).model_copy(deep=True)
+    unreviewed.domain.version = version
+    binding = GraphEvidenceBinding(graph, approved_relevance_from_spec(unreviewed))
+    result = await handle_score(TENANT_A, {"entity_refs": v["subjects"], "top_n": 2}, binding=binding)
+    assert result["evidence_reader"]["connected"] is True
+    assert result["scored"] == []
+    by_ref = {a["entity_ref"]: a for a in result["abstained"]}
+    assert set(by_ref) == set(v["subjects"])
+    assert "no_qualifying_relationship" in repr(by_ref[v["subjects"][0]])
 
 
 # ── D. Negative evidence and replay ────────────────────────────────────────────
