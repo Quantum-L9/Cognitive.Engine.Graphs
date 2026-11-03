@@ -1,5 +1,5 @@
 # L9 Engine — Dev/Test Dependencies
-# Install after requirements.txt: pip install -r requirements-dev.txt
+# Install through: bash tools/deps/install_locked.sh full
 
 -r requirements.txt
 
@@ -9,6 +9,7 @@ pytest-cov==7.1.0
 pytest-mock>=3.14.0,<4.0.0
 pytest-xdist>=3.8.0,<4.0.0
 pytest-timeout>=2.4.0,<3.0.0
+pre-commit==4.7.0
 ruff==0.16.8
 mypy==2.3.1
 faker>=40.5.1,<41.0.0

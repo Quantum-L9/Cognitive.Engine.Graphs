@@ -124,7 +124,7 @@ services:
 
   # ── Neo4j 5.x Enterprise + GDS ──────────────────────────
   neo4j:
-    image: neo4j:5-enterprise
+    image: neo4j:5-enterprise@sha256:c07aabc5a52c7097bcdc3085cc22152b3804f86752aecac4d668f0ab177afe15
     container_name: l9-graph-neo4j
     ports:
       - "7475:7474"  # Browser (7475 external -> 7474 internal)
@@ -154,7 +154,7 @@ services:
 
   # ── PostgreSQL 16 (PacketStore + ComplianceEngine audit) ──
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     container_name: l9-graph-postgres
     ports:
       - "5432:5432"

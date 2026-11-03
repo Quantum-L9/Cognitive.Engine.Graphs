@@ -84,7 +84,7 @@ class SpecFeature:
 
 def load_yaml_file(path: Path) -> dict[str, Any]:
     if yaml is None:
-        raise RuntimeError("PyYAML required: pip install pyyaml")
+        raise RuntimeError("PyYAML required: bash tools/deps/install_locked.sh tools")
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 

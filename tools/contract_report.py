@@ -29,7 +29,7 @@ from pathlib import Path
 try:
     import yaml
 except ImportError:
-    print("PyYAML required: pip install pyyaml", file=sys.stderr)
+    print("PyYAML required: bash tools/deps/install_locked.sh tools", file=sys.stderr)
     sys.exit(1)
 
 

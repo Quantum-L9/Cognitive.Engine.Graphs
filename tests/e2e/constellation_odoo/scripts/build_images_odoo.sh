@@ -11,17 +11,16 @@
 #   odoo              IB-Odoo_19/Dockerfile                   -> l9e2e/odoo:local
 #   eie-accommodated  l9e2e/eie:local + one declared layer    -> l9e2e/eie:local
 #
-# eie-accommodated exists because EIE's image, built from its own Dockerfile at
-# b583c9e, cannot serve `converge`:
+# eie-accommodated verifies that EIE's image, built from its own Dockerfile at
+# b583c9e, can serve `converge` without an undeclared runtime installation:
 #   1. `pip install ".[dev]"` resolves the unpinned `sqlalchemy` to 2.1.x, where
 #      greenlet is only pulled by the `asyncio` extra; app/services/pg_store.py
 #      imports sqlalchemy.ext.asyncio and the process exits before registering.
 #   2. `alembic` is not a dependency, so the documented schema step
 #      (`alembic upgrade head`) cannot run and every durable converge fails
 #      with `relation "enrichment_results" does not exist`.
-# The accommodation adds ONLY what is missing, ON TOP of the unmodified image,
-# labels the image so the verdict can see it, and is reported as a deviation.
-# It disappears on its own once EIE declares these dependencies.
+# A missing dependency fails closed: it must be declared and hash-locked by the
+# EIE image producer rather than installed dynamically into an E2E overlay.
 #
 # SDK participation proof (L9-PARTICIPATION-01; run_odoo_e2e.sh with
 # L9E2E_SDK_PARTICIPATION=1) adds three declared, labelled layers:
@@ -40,6 +39,7 @@ set -Eeuo pipefail
 WORKSPACE="${L9_E2E_WORKSPACE:-/home/user}"
 GATE_RAIL="${WORKSPACE}/Constellation.Gate/constellation-gate/tests/e2e/docker"
 OUT="${L9_E2E_BUILD_DIR:-/root/l9e2e/build}"
+CEG_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 PROXY="${HTTPS_PROXY:-}"
 NOPROXY="${NO_PROXY:-localhost,127.0.0.1}"
 mkdir -p "$OUT"
@@ -75,22 +75,9 @@ build_eie_accommodated() {
   if [[ ${#missing[@]} -eq 0 ]]; then
     echo "eie: no accommodation needed"; return 0
   fi
-  local prior label
-  prior="$(docker image inspect l9e2e/eie:local \
-             --format '{{index .Config.Labels "io.l9.e2e.accommodation"}}' 2>/dev/null || true)"
-  [[ "$prior" == "<no value>" ]] && prior=""
-  label="$(IFS=,; echo "${prior:+${prior},}${missing[*]}")"
-  local df="${OUT}/eie-accommodation.Dockerfile"
-  {
-    echo "FROM l9e2e/eie:local"
-    printf 'RUN pip install --no-cache-dir'; printf ' "%s"' "${missing[@]}"; echo
-  } > "$df"
-  echo "eie: accommodating ${missing[*]}"
-  docker buildx build --network host --progress plain \
-    --label "io.l9.e2e.accommodation=${label}" \
-    --build-arg "HTTPS_PROXY=${PROXY}" --build-arg "https_proxy=${PROXY}" \
-    -f "$df" -t l9e2e/eie:local --load "${OUT}" \
-    2>&1 | tee "${OUT}/eie-accommodation.build.log" | tail -5
+  echo "FATAL: l9e2e/eie:local is missing undeclared dependencies: ${missing[*]}" >&2
+  echo "       Repair the EIE image's committed hash-locked dependency profile; dynamic E2E installs are forbidden." >&2
+  return 1
 }
 
 SDK_REPO="${WORKSPACE}/Gate_SDK"
@@ -103,9 +90,11 @@ sdk_sha() {
 }
 
 build_sdk_overlay() {
-  local sha url
+  local sha
   sha="$(sdk_sha)"
-  url="https://github.com/Quantum-L9/Gate_SDK/archive/${sha}.tar.gz"
+  local archive="${OUT}/gate-sdk-${sha}.tar.gz" archive_hash
+  git -C "$SDK_REPO" archive --format=tar.gz --output "$archive" "$sha"
+  archive_hash="$(sha256sum "$archive" | awk '{print $1}')"
   for n in gate eie ceg odoo; do
     local img="l9e2e/${n}:local" user df
     user="$(docker image inspect "$img" --format '{{.Config.User}}')"
@@ -113,10 +102,11 @@ build_sdk_overlay() {
     {
       echo "FROM ${img}"
       echo "USER root"
+      echo "COPY $(basename "$archive") /tmp/gate-sdk.tar.gz"
       if [[ "$n" == "odoo" ]]; then
-        echo "RUN pip3 install --no-cache-dir --no-deps --force-reinstall --break-system-packages \"constellation-node-sdk @ ${url}\""
+        echo "RUN pip3 install --no-cache-dir --require-hashes --no-deps --force-reinstall --break-system-packages /tmp/gate-sdk.tar.gz --hash=sha256:${archive_hash}"
       else
-        echo "RUN pip install --no-cache-dir --no-deps --force-reinstall \"constellation-node-sdk @ ${url}\""
+        echo "RUN pip install --no-cache-dir --require-hashes --no-deps --force-reinstall /tmp/gate-sdk.tar.gz --hash=sha256:${archive_hash}"
       fi
       [[ -n "$user" ]] && echo "USER ${user}"
     } > "$df"
@@ -157,19 +147,25 @@ build_sdk_adoption() {
 }
 
 build_sdk_node() {
-  local sha url ctx
+  local sha ctx archive archive_hash
   sha="$(sdk_sha)"
-  url="https://github.com/Quantum-L9/Gate_SDK/archive/${sha}.tar.gz"
   ctx="$(mktemp -d -p "${OUT}" "sdk-node.XXXX")"
+  archive="${ctx}/gate-sdk.tar.gz"
+  git -C "$SDK_REPO" archive --format=tar.gz --output "$archive" "$sha"
+  archive_hash="$(sha256sum "$archive" | awk '{print $1}')"
+  cp "${CEG_ROOT}/requirements-runtime.lock" "${ctx}/requirements-runtime.lock"
   mkdir -p "${ctx}/examples/minimal_node"
   for f in app.py handlers.py spec.yaml; do
     git -C "$SDK_REPO" show "HEAD:examples/minimal_node/${f}" > "${ctx}/examples/minimal_node/${f}"
   done
   cat > "${ctx}/Dockerfile.src" <<DOCKERFILE
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159
 WORKDIR /srv
 ENV PYTHONPATH=/srv PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-RUN pip install --no-cache-dir "constellation-node-sdk @ ${url}"
+COPY requirements-runtime.lock /tmp/requirements-runtime.lock
+RUN pip install --no-cache-dir --only-binary :all: --no-binary constellation-node-sdk --require-hashes -r /tmp/requirements-runtime.lock
+COPY gate-sdk.tar.gz /tmp/gate-sdk.tar.gz
+RUN pip install --no-cache-dir --require-hashes --no-deps --force-reinstall /tmp/gate-sdk.tar.gz --hash=sha256:${archive_hash}
 COPY examples/ /srv/examples/
 DOCKERFILE
   python3 "${GATE_RAIL}/scripts/ca_inject.py" --src "${ctx}/Dockerfile.src" \

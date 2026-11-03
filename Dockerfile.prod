@@ -10,31 +10,24 @@
 #
 # L9 Engine — Multi-stage Production Dockerfile
 
-FROM python:3.12-slim AS builder
+FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS builder
 
 WORKDIR /build
 
-# git is required to resolve the git+https constellation-node-sdk dependency
-# (both by `poetry install` below and by the pip fallback)
+# git is retained for native build prerequisites used by the runtime dependency set.
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install build deps
-RUN pip install --no-cache-dir poetry && \
-    poetry config virtualenvs.create false
+COPY requirements-runtime.lock requirements-runtime.lock
+COPY tools/deps/install_locked.sh tools/deps/install_locked.sh
+RUN PIP_PREFIX=/install bash tools/deps/install_locked.sh runtime
 
-COPY pyproject.toml poetry.lock* ./
-# --only main: install runtime deps, skip the [dev] group.
-# --no-root: install dependencies only, not the l9-engine project itself
-# (the "current project" install needs README.md, which isn't in the
-# build context yet, and isn't needed — engine/domains/chassis are
-# copied as raw source into the runtime stage below, not pip-installed).
-RUN poetry install --only main --no-root --no-interaction --no-ansi
-
-COPY . .
+COPY engine/ ./engine/
+COPY domains/ ./domains/
+COPY chassis/ ./chassis/
 
 # --- Production ---
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159
 
 ARG L9_PROJECT=l9-engine
 ARG L9_ENV=prod
@@ -42,8 +35,7 @@ ARG L9_ENV=prod
 WORKDIR /app
 
 # Copy installed packages + app code
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /install /usr/local
 COPY --from=builder /build/engine ./engine
 COPY --from=builder /build/domains ./domains
 COPY --from=builder /build/chassis ./chassis
