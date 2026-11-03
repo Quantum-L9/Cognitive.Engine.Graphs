@@ -53,6 +53,8 @@ independently of the code default.
 | Pareto Ensemble | `PARETO_ENABLED` | `True` | `True` | active |
 | Pareto Weight Discovery | `PARETO_WEIGHT_DISCOVERY_ENABLED` | `False` | `True` | active (opt-in) |
 | Domain Strict Validation | `DOMAIN_STRICT_VALIDATION` | `True` | `True` | active |
+| Native Domain Approval Receipts | `DOMAIN_PACK_RECEIPTS_ENABLED` | `False` | unchanged | dormant; immutable native revision/receipt admission, no warm-cache fallback; see [native publisher runbook](runbooks/domain-pack-publish.md) |
+| Production Domain Stage | `DOMAIN_PRODUCTION_STAGE_REQUIRED` | `False` | unchanged | dormant; production legacy admission requires reviewed/production; publisher/receipt mode always enforce stage |
 | Score Clamping | `SCORE_CLAMP_ENABLED` | `True` | `True` | active; a null dimension clamps to `0.0` as well (Stage 2, see §20) |
 | Strict Null Gates | `STRICT_NULL_GATES` | `True` | `True` | active |
 | Param Strict Mode | `PARAM_STRICT_MODE` | `True` | `True` | active |
