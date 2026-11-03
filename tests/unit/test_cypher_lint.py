@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from tools import cypher_lint as cl
 from tools.cypher_lint import Finding, scan_source, scan_tree
 
 pytestmark = pytest.mark.unit
@@ -398,6 +399,35 @@ def test_percent_format_is_scanned() -> None:
     assert [f.expression for f in _blocking(src)] == ["spec.target_node", "spec.a", "spec.b"]
 
 
+def test_percent_spec_iterator_preserves_valid_specs_and_mapping_keys() -> None:
+    fmt = "a %s %% %(per%cent)05d %q %s"
+    specs = [(fmt[start:end], key, conversion) for start, end, key, conversion in cl._iter_percent_specs(fmt)]
+    assert specs == [("%s", None, "s"), ("%%", None, "%"), ("%(per%cent)05d", "per%cent", "d"), ("%s", None, "s")]
+
+
+def test_percent_spec_iterator_recovers_linearly_from_unclosed_mapping_prefixes() -> None:
+    malformed = "%(" * 20_000
+    assert list(cl._iter_percent_specs(malformed)) == []
+    shared_closing = "%(" * 100_000 + ")q"
+    assert list(cl._iter_percent_specs(shared_closing)) == []
+    fmt = "%q%s %(key)q%s %%"
+    specs = [(fmt[start:end], key, conversion) for start, end, key, conversion in cl._iter_percent_specs(fmt)]
+    assert specs == [("%s", None, "s"), ("%s", None, "s"), ("%%", None, "%")]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("MATCH (n) RETURN n", True),
+        ("coalesce(n.x, $x)", True),
+        ("NOT EXISTS((query)-[:X]->(candidate))", True),
+        ("MATCHX is an ordinary identifier", False),
+    ],
+)
+def test_split_cypher_detector_preserves_keyword_and_boundary_behavior(text: str, expected: bool) -> None:
+    assert cl._has_cypher_signal(text) is expected
+
+
 def test_str_format_field_access_is_classified_as_the_accessed_value() -> None:
     """RU-138 review: `{0.threshold}` interpolates spec.threshold, not the bare argument."""
     src = (
@@ -439,6 +469,12 @@ def test_percent_format_over_a_runtime_mapping_is_scanned() -> None:
         (4, "spec.labels['label']"),
     ]
     assert findings[0].kind.startswith("raw domain-spec value")
+
+
+def test_percent_mapping_key_with_percent_preserves_expression_classification() -> None:
+    src = "def percent_mapping(spec):\n    return 'MATCH (n:%(la%bel)s) RETURN n' % spec.labels\n"
+    findings = _blocking(src)
+    assert [(finding.line_no, finding.expression) for finding in findings] == [(2, "spec.labels['la%bel']")]
 
 
 def test_str_format_over_unpacked_mapping_is_scanned() -> None:
