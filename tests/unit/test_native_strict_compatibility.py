@@ -11,7 +11,7 @@ status: active
 
 F-001 authoring CLI compatibility; native runtime admission remains distinct."""
 
-# ruff: noqa: S603 — current interpreter and repository-owned CLIs only.
+# ruff: noqa: S603 — only the current interpreter and repo/pinned CLIs are executed.
 
 from __future__ import annotations
 
@@ -31,15 +31,10 @@ from tests.unit.test_domain_pack_loader import _minimal_spec_yaml
 from tools.validate_domain import validate_spec
 
 pytestmark = pytest.mark.unit
-
 REPO = Path(__file__).resolve().parents[2]
-
 PINNED_REVISION = "f8d933d83a11244a2ada79c7f0d0dea74fbbe6ce"
-
 PINNED_SOURCE_SHA256 = "3587b3f3dd9997bfe56bab323d0d7332b222796f39ac9842d4483ad76bde550f"
-
 PINNED_GOLDEN = REPO / "tests/fixtures/native_authoring_predecessor_f8d933.json"
-
 AUTHORING_ENV = {
     "L9_ENV": "dev",
     "UNVALIDATED_DOMAIN_PACKS_ENABLED": "true",

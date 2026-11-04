@@ -898,6 +898,20 @@ FILE_REGISTRY: list[FileMeta] = [
         "engine-team",
     ),
     FileMeta(
+        "docs/runbooks/domain-pack-publish.md",
+        "engine-specific",
+        ["docs", "runbooks"],
+        ["domain-pack", "native-publication", "runbook"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tools/publish_domain_pack.py",
+        "engine-specific",
+        ["tools"],
+        ["domain-pack", "native-publication", "receipt"],
+        "engine-team",
+    ),
+    FileMeta(
         "tests/unit/test_native_domain_supply_chain.py",
         "engine-specific",
         ["test"],
@@ -923,6 +937,20 @@ FILE_REGISTRY: list[FileMeta] = [
         "engine-specific",
         ["test"],
         ["test", "fixtures", "native-authoring", "predecessor-parity"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/unit/test_native_runbook_cli.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "native-domain", "runbook", "cli"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/unit/test_native_domain_publication.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "native-domain", "publication"],
         "engine-team",
     ),
 ]
