@@ -889,6 +889,28 @@ FILE_REGISTRY: list[FileMeta] = [
         ["causal", "outcomes", "handlers"],
         "engine-team",
     ),
+    # --- Native domain supply chain: documentation, publication, and proofs ---
+    FileMeta(
+        "tests/unit/test_native_domain_supply_chain.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "native-domain", "supply-chain"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/unit/test_native_receipt_cli.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "native-domain", "receipt", "cli"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/unit/test_native_strict_compatibility.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "native-authoring", "predecessor-parity"],
+        "engine-team",
+    ),
 ]
 
 
