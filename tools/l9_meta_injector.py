@@ -953,6 +953,13 @@ FILE_REGISTRY: list[FileMeta] = [
         ["test", "unit", "native-domain", "publication"],
         "engine-team",
     ),
+    FileMeta(
+        "tests/unit/test_native_domain_integrity.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "native-domain", "integrity"],
+        "engine-team",
+    ),
 ]
 
 
