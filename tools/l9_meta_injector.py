@@ -891,6 +891,13 @@ FILE_REGISTRY: list[FileMeta] = [
     ),
     # --- Native domain supply chain: documentation, publication, and proofs ---
     FileMeta(
+        "docs/contracts/NATIVE_AUTHORING_VALIDATION.md",
+        "engine-specific",
+        ["docs", "contracts"],
+        ["contracts", "native-authoring", "validation"],
+        "engine-team",
+    ),
+    FileMeta(
         "tests/unit/test_native_domain_supply_chain.py",
         "engine-specific",
         ["test"],
@@ -909,6 +916,13 @@ FILE_REGISTRY: list[FileMeta] = [
         "engine-specific",
         ["test"],
         ["test", "unit", "native-authoring", "predecessor-parity"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/fixtures/native_authoring_predecessor_f8d933.json",
+        "engine-specific",
+        ["test"],
+        ["test", "fixtures", "native-authoring", "predecessor-parity"],
         "engine-team",
     ),
 ]
