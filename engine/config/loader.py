@@ -16,22 +16,15 @@ Discovers, validates, caches, and hot-reloads domain spec YAML files.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import logging
 import os
 import re
-import stat
 import threading
 import time
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
 
 import yaml
-from pydantic import ConfigDict, Field, RootModel, model_validator, with_config
 from pydantic import ValidationError as PydanticValidationError
-from typing_extensions import TypedDict
 
 from engine.config.schema import DomainActivation, DomainSpec, GateSpec
 from engine.config.settings import settings
@@ -62,434 +55,7 @@ class DomainSpecError(Exception):
     """Raised when a domain spec fails validation."""
 
 
-@with_config(ConfigDict(extra="forbid", strict=True))
-class _CurrentRecord(TypedDict):
-    schema: Literal["ceg.domain-current/v1"]
-    tenant_id: str
-    version: str
-    sha256: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
-
-
-@with_config(ConfigDict(extra="forbid", strict=True))
-class _ApprovalRecord(TypedDict):
-    schema: Literal["ceg.domain-approval/v1"]
-    tenant_id: str
-    version: str
-    sha256: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
-    reviewed_input_sha256: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")]
-    reviewed_by: Annotated[str, Field(min_length=1, max_length=200)]
-    approval_ref: Annotated[str, Field(min_length=1, max_length=1000)]
-    reviewed_at: str
-    previous_sha256: Annotated[str | None, Field(pattern=r"^[a-f0-9]{64}$")]
-
-
-class DomainCurrent(RootModel[_CurrentRecord]):
-    """Atomic native JSON pointer with strict literal-key validation and no aliases."""
-
-
-class DomainApproval(RootModel[_ApprovalRecord]):
-    """Unsigned native review assertion; root fields preserve canonical JSON keys."""
-
-    @staticmethod
-    def explicit_review(value: str) -> str:
-        if not value.strip() or value != value.strip() or any(ord(char) < 32 for char in value):
-            msg = "reviewer and approval reference must be explicit nonblank text"
-            raise ValueError(msg)
-        return value
-
-    @staticmethod
-    def review_timestamp(value: str) -> str:
-        try:
-            timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError as exc:
-            msg = "reviewed_at must be an ISO-8601 timezone-aware timestamp"
-            raise ValueError(msg) from exc
-        if timestamp.tzinfo is None or timestamp > datetime.now(tz=UTC):
-            msg = "reviewed_at must be timezone-aware and not in the future"
-            raise ValueError(msg)
-        return value
-
-    @model_validator(mode="after")
-    def validate_review(self) -> DomainApproval:
-        self.explicit_review(self.root["reviewed_by"])
-        self.explicit_review(self.root["approval_ref"])
-        self.review_timestamp(self.root["reviewed_at"])
-        return self
-
-
-def read_native_file(path: Path, *, limit: int = MAX_SPEC_BYTES) -> bytes:
-    """Read one bounded regular file, rejecting symlinks in every path component.
-
-    Directory-fd traversal prevents a parent symlink swap between check/open.
-    Each immutable spec is hashed and parsed from these same bytes.
-    """
-    absolute = path.absolute()
-    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        for part in absolute.parts[1:-1]:
-            next_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-            os.close(fd)
-            fd = next_fd
-        file_fd = os.open(absolute.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
-        try:
-            info = os.fstat(file_fd)
-            if not stat.S_ISREG(info.st_mode):
-                raise DomainSpecError(f"Native input must be a regular file: {path}")
-            if info.st_size > limit:
-                raise DomainSpecError(f"Domain spec exceeds maximum size: {info.st_size} bytes > {limit} bytes")
-            with os.fdopen(file_fd, "rb", closefd=False) as stream:
-                data = stream.read(limit + 1)
-            if len(data) > limit:
-                raise DomainSpecError(f"Domain spec exceeds maximum size: {limit} bytes")
-            return data
-        finally:
-            os.close(file_fd)
-    except OSError as exc:
-        raise DomainSpecError(f"Cannot read native input (missing, unreadable or symlink): {path}: {exc}") from exc
-    finally:
-        os.close(fd)
-
-
-class _NativeSafeLoader(yaml.SafeLoader):
-    """Safe YAML with unambiguous explicit keys; template merge aliases preserved."""
-
-    def construct_mapping(self, node: Any, deep: bool = False) -> dict[Any, Any]:
-        seen: set[str] = set()
-        for key_node, _value_node in node.value:
-            if key_node.tag == "tag:yaml.org,2002:merge":
-                continue
-            key = self.construct_object(key_node, deep=deep)
-            if not isinstance(key, str) or key in seen:
-                raise DomainSpecError(f"Invalid YAML: duplicate or non-string mapping key {key!r}")
-            seen.add(key)
-        self.flatten_mapping(node)
-        return cast("dict[Any, Any]", super().construct_mapping(node, deep=deep))
-
-
-def _bounded_yaml(text: str) -> Any:
-    """Bound alias-expanded size/depth before constructing an untrusted YAML DAG."""
-    loader = _NativeSafeLoader(text)
-    try:
-        node = loader.get_single_node()
-        visiting: set[int] = set()
-        counts: dict[int, int] = {}
-
-        def count(item: Any, depth: int = 0) -> int:
-            if item is None:
-                return 0
-            identity = id(item)
-            if identity in visiting or depth > 100:
-                raise DomainSpecError("Invalid YAML: cyclic aliases or excessive nesting")
-            if identity in counts:
-                return counts[identity]
-            visiting.add(identity)
-            children = (
-                [child for pair in item.value for child in pair]
-                if isinstance(item, yaml.MappingNode)
-                else item.value
-                if isinstance(item, yaml.SequenceNode)
-                else []
-            )
-            total = 1
-            for child in children:
-                total += count(child, depth + 1)
-                if total > 100_000:
-                    raise DomainSpecError("Invalid YAML: alias-expanded structure exceeds limit")
-            visiting.remove(identity)
-            counts[identity] = total
-            return total
-
-        count(node)
-        return loader.construct_document(node) if node is not None else None
-    finally:
-        loader.dispose()
-
-
-def _parse_native_bytes(
-    data: bytes,
-    tenant_id: str | None = None,
-    *,
-    complete: bool = False,
-    require_reviewed: bool = False,
-) -> DomainSpec:
-    """Shared bounded parsing, schema, identity and stage checks; not admission."""
-    if len(data) > MAX_SPEC_BYTES:
-        raise DomainSpecError(f"Domain spec exceeds maximum size: {len(data)} bytes > {MAX_SPEC_BYTES} bytes")
-    try:
-        text = data.decode("utf-8")
-        raw = _bounded_yaml(text)
-    except (UnicodeError, yaml.YAMLError, RecursionError) as exc:
-        raise DomainSpecError(f"Invalid YAML: {exc}") from exc
-    if not isinstance(raw, dict):
-        raise DomainSpecError(f"Domain spec must be a YAML mapping, got {type(raw).__name__}")
-    if complete:
-        required_guards = (
-            "domain_strict_validation",
-            "domain_version_semver_enforced",
-            "gate_spec_forbid_unknown_keys",
-            "gate_name_uniqueness",
-            "domain_undeclared_param_rejected",
-            "weight_ceiling_includes_unscoped",
-            "traversal_open_range_rejected",
-            "prohibited_factor_full_coverage",
-            "gate_role_exemption",
-        )
-        disabled = [name for name in required_guards if not getattr(settings, name)]
-        if disabled:
-            raise DomainSpecError(f"Complete native admission requires validation guards: {', '.join(disabled)}")
-        unknown = sorted(set(raw) - set(DomainSpec.model_fields))
-        if unknown:
-            raise DomainSpecError(f"Complete native admission refuses unknown top-level keys: {unknown}")
-    try:
-        spec = DomainSpec.model_validate(raw)
-    except (PydanticValidationError, RecursionError) as exc:
-        raise DomainSpecError(f"Domain '{tenant_id}' validation failed:\n{exc}") from exc
-    defect = tenant_id_defect(spec.domain.id)
-    if defect is not None:
-        raise DomainNotFoundError(f"Invalid domain ID: {defect}")
-    if tenant_id is not None and spec.domain.id != tenant_id:
-        raise DomainSpecError(
-            f"Domain '{tenant_id}' declares domain.id {spec.domain.id!r}; the directory name is the lookup key"
-        )
-    if require_reviewed or (settings.is_production and settings.domain_production_stage_required):
-        require_reviewed_stage(spec)
-    return spec
-
-
-def validate_native_bytes(
-    data: bytes,
-    tenant_id: str | None = None,
-    *,
-    complete: bool = False,
-    require_reviewed: bool = False,
-) -> DomainSpec:
-    """Sole runtime/publisher admission surface; behavioral defaults unchanged.
-
-    Complete operator admission checks traversal/scoring regardless of runtime
-    withholding overrides, without rewriting settings or reviewed bytes.
-    Authoring compatibility is a separate policy over the same native parser.
-    """
-    spec = _parse_native_bytes(data, tenant_id, complete=complete, require_reviewed=require_reviewed)
-    reason = withholding_reason(spec, complete=complete)
-    if reason is not None:
-        raise DomainNotFoundError(reason)
-    return spec
-
-
-def require_reviewed_stage(spec: DomainSpec) -> None:
-    """Native publication never promotes/relabels an unsuffixed or partial draft."""
-    semver = r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
-    if re.fullmatch(rf"{semver}-(reviewed|production)", spec.domain.version) is None:
-        raise DomainSpecError("Native publication stage must be reviewed or production")
-
-
-def validate_native_file(
-    path: Path,
-    tenant_id: str | None = None,
-    *,
-    complete: bool = False,
-    require_reviewed: bool = False,
-    receipt_path: Path | None = None,
-) -> DomainSpec:
-    """Read once and delegate all admission decisions to native bytes admission."""
-    data = read_native_file(path)
-    spec = validate_native_bytes(
-        data,
-        tenant_id,
-        complete=complete or receipt_path is not None,
-        require_reviewed=require_reviewed or receipt_path is not None,
-    )
-    if receipt_path is not None:
-        validate_native_approval(data, spec, read_native_record(receipt_path, DomainApproval))
-    return spec
-
-
-def validate_authoring_file(
-    path: Path,
-    tenant_id: str | None = None,
-    *,
-    strict: bool = False,
-    require_reviewed: bool = False,
-) -> tuple[list[dict[str, str]], int]:
-    """Predecessor default/strict authoring checks, independent of runtime bypasses.
-
-    This diagnostic is not runtime admission or operator approval. Its global
-    scoring-weight ceiling intentionally differs from runtime's per-direction
-    schema ceiling. Native compilers/validators remain the semantic owners.
-    """
-    spec = _parse_native_bytes(read_native_file(path), tenant_id, require_reviewed=require_reviewed)
-    results = _authoring_cross_reference_results(spec)
-    results.extend(_authoring_gate_results(spec))
-    try:
-        if spec.traversal is None:
-            results.append({"check": "W1-04-traversal", "status": "PASS", "message": "No traversal defined"})
-        else:
-            for direction, warnings in _native_traversal_warnings(spec):
-                if warnings:
-                    results.extend({"check": "W1-04-traversal", "status": "WARN", "message": w} for w in warnings)
-                else:
-                    results.append(
-                        {
-                            "check": "W1-04-traversal",
-                            "status": "PASS",
-                            "message": f"Traversal valid for direction '{direction}'",
-                        }
-                    )
-    except Exception as exc:
-        results.append({"check": "W1-04-traversal", "status": "FAIL", "message": f"Traversal validation failed: {exc}"})
-    try:
-        _validate_native_compliance(spec, scoring=False)
-        results.append(
-            {"check": "W3-02-prohibited-factors", "status": "PASS", "message": "No prohibited factors in gates"}
-        )
-    except Exception as exc:
-        results.append(
-            {"check": "W3-02-prohibited-factors", "status": "FAIL", "message": f"Prohibited factor violation: {exc}"}
-        )
-    failed = any(result["status"] == "FAIL" for result in results)
-    warned = any(result["status"] == "WARN" for result in results)
-    return results, 1 if failed or (strict and warned) else 2 if warned else 0
-
-
-def _authoring_cross_reference_results(spec: DomainSpec) -> list[dict[str, str]]:
-    """Unconditional W1-01 authoring checks, including the legacy global ceiling."""
-    results: list[dict[str, str]] = []
-    node_labels = {node.label for node in spec.ontology.nodes}
-    edge_types = {edge.type for edge in spec.ontology.edges}
-    for edge in spec.ontology.edges:
-        for end, label, field in (("source", edge.from_, "from"), ("target", edge.to, "to")):
-            if label not in node_labels:
-                results.append(
-                    {
-                        "check": f"W1-01-edge-{end}",
-                        "status": "FAIL",
-                        "message": f"Edge '{edge.type}' {end} '{label}' not in ontology nodes",
-                        "path": f"ontology.edges[type={edge.type}].{field}",
-                    }
-                )
-    for candidate in spec.matchentities.candidate:
-        if candidate.label not in node_labels:
-            results.append(
-                {
-                    "check": "W1-01-candidate-label",
-                    "status": "FAIL",
-                    "message": f"Candidate label '{candidate.label}' not in ontology",
-                    "path": f"matchentities.candidate[label={candidate.label}]",
-                }
-            )
-    for gate in spec.gates:
-        if gate.edgetype and gate.edgetype not in edge_types:
-            results.append(
-                {
-                    "check": "W1-01-gate-edge",
-                    "status": "FAIL",
-                    "message": f"Gate '{gate.name}' references unknown edge type '{gate.edgetype}'",
-                    "path": f"gates[name={gate.name}].edgetype",
-                }
-            )
-    weight_sum = sum(dimension.defaultweight for dimension in spec.scoring.dimensions)
-    if weight_sum > 1.0 + 1e-9:
-        results.append(
-            {
-                "check": "W1-01-weight-sum",
-                "status": "FAIL",
-                "message": f"Scoring default weights sum to {weight_sum:.4f}, exceeding 1.0",
-                "path": "scoring.dimensions[*].defaultweight",
-            }
-        )
-    return results or [{"check": "W1-01-cross-ref", "status": "PASS", "message": "All cross-references valid"}]
-
-
-def _authoring_gate_results(spec: DomainSpec) -> list[dict[str, str]]:
-    """Mandatory W1-03 direction compilation by the existing native compiler."""
-    from engine.gates.compiler import GateCompiler
-
-    results: list[dict[str, str]] = []
-    try:
-        compiler = GateCompiler(spec)
-        for direction in spec.queryschema.matchdirections:
-            clause = compiler.compile_all_gates(direction)
-            if clause:
-                results.append(
-                    {
-                        "check": "W1-03-gate-compile",
-                        "status": "PASS",
-                        "message": f"Gates compile for direction '{direction}' ({len(clause)} chars)",
-                    }
-                )
-    except Exception as exc:
-        results.append({"check": "W1-03-gate-compile", "status": "FAIL", "message": f"Gate compilation failed: {exc}"})
-    return results or [{"check": "W1-03-gate-compile", "status": "PASS", "message": "No gates to compile"}]
-
-
-def _native_traversal_warnings(spec: DomainSpec) -> list[tuple[str, list[str]]]:
-    """Shared traversal owner's warnings: authoring warns, complete admission fails."""
-    from engine.traversal.assembler import TraversalAssembler
-
-    assembler = TraversalAssembler(spec)
-    return [(direction, assembler.validate_traversal(direction)) for direction in spec.queryschema.matchdirections]
-
-
-def _validate_native_compliance(spec: DomainSpec, *, scoring: bool) -> None:
-    """Use the native prohibited-factor owner, with explicit coverage policy."""
-    from engine.compliance.prohibited_factors import ProhibitedFactorValidator
-
-    compliance = ProhibitedFactorValidator(spec)
-    for gate in spec.gates:
-        compliance.validate_gate(gate)
-    if scoring:
-        for dimension in spec.scoring.dimensions:
-            compliance.validate_scoring_dimension(dimension)
-
-
-def _unique_json(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise DomainSpecError(f"Duplicate JSON key: {key}")
-        result[key] = value
-    return result
-
-
-def read_native_record[Record: (DomainCurrent, DomainApproval)](path: Path, model: type[Record]) -> Record:
-    """Bounded, strict JSON receipt/pointer parsing, including duplicate-key refusal."""
-    try:
-        raw = json.loads(read_native_file(path, limit=16 * 1024), object_pairs_hook=_unique_json)
-        return model.model_validate(raw)
-    except (ValueError, UnicodeError, RecursionError) as exc:
-        raise DomainSpecError(f"Invalid native record {path}: {exc}") from exc
-
-
-def validate_native_approval(data: bytes, spec: DomainSpec, receipt: DomainApproval) -> None:
-    """Bind already parsed native review evidence to these exact admitted bytes."""
-    digest = hashlib.sha256(data).hexdigest()
-    if receipt.root["tenant_id"] != spec.domain.id or receipt.root["sha256"] != digest:
-        raise DomainSpecError("Native receipt tenant/hash mismatch or spec tamper")
-    if receipt.root["reviewed_input_sha256"] != digest:
-        raise DomainSpecError("Native approval does not bind exact reviewed input bytes")
-    if receipt.root["version"] != spec.domain.version:
-        raise DomainSpecError("Native receipt version does not match admitted spec")
-    if receipt.root["previous_sha256"] == digest:
-        raise DomainSpecError("Native receipt cannot refer to itself as the previous revision")
-
-
-def load_native_revision(root: Path, tenant_id: str, sha256: str) -> tuple[DomainSpec, DomainApproval]:
-    """Admit one immutable revision and bind its exact bytes to review evidence."""
-    defect = tenant_id_defect(tenant_id)
-    if defect is not None or re.fullmatch(r"[a-f0-9]{64}", sha256) is None:
-        raise DomainSpecError("Invalid native revision tenant or sha256")
-    revision = root / tenant_id / "revisions" / sha256
-    data = read_native_file(revision / SPEC_FILENAME)
-    digest = hashlib.sha256(data).hexdigest()
-    receipt = read_native_record(revision / "receipt.json", DomainApproval)
-    if digest != sha256:
-        raise DomainSpecError("Native receipt tenant/hash mismatch or spec tamper")
-    spec = validate_native_bytes(data, tenant_id, complete=True, require_reviewed=True)
-    validate_native_approval(data, spec, receipt)
-    return spec, receipt
-
-
-def admission_defects(spec: DomainSpec, *, complete: bool = False) -> list[str]:
+def admission_defects(spec: DomainSpec) -> list[str]:
     """Gate compilations that would fail or silently reject every candidate.
 
     This is the generic, domain-neutral admission check that replaced the
@@ -543,44 +109,11 @@ def admission_defects(spec: DomainSpec, *, complete: bool = False) -> list[str]:
         for rule_name in spec.plugins.inference_rules:
             if rule_name not in registered:
                 defects.append(f"plugins.inference_rules: {rule_name!r} is not a registered inference rule")
-    if complete or settings.scoring_admission_check_enabled or settings.admission_checks_full_match:
-        defects.extend(_scoring_defects(spec, check_producers=complete or settings.scoring_admission_check_enabled))
-    if complete or settings.admission_checks_full_match:
+    if settings.scoring_admission_check_enabled or settings.admission_checks_full_match:
+        defects.extend(_scoring_defects(spec, check_producers=settings.scoring_admission_check_enabled))
+    if settings.admission_checks_full_match:
         defects.extend(_match_defects(spec))
-    if complete:
-        defects.extend(_complete_native_defects(spec))
     return list(dict.fromkeys(defects))
-
-
-def _complete_native_defects(spec: DomainSpec) -> list[str]:
-    """Use native traversal/compliance/sync owners for full operator admission."""
-    from engine.sync.generator import SyncGenerator, resolve_relationship_declaration
-
-    defects: list[str] = []
-    edge_types = {edge.type for edge in spec.ontology.edges}
-    for gate in spec.gates:
-        if gate.edgetype and gate.edgetype not in edge_types:
-            defects.append(f"gate {gate.name}: undeclared edge type {gate.edgetype!r}")
-    for _direction, warnings in _native_traversal_warnings(spec):
-        defects.extend(warnings)
-    try:
-        _validate_native_compliance(spec, scoring=True)
-    except ValueError as exc:
-        defects.append(f"compliance: {exc}")
-    if spec.sync:
-        generator = SyncGenerator(spec)
-        nodes = {node.label: {prop.name for prop in node.properties} for node in spec.ontology.nodes}
-        for endpoint in spec.sync.endpoints:
-            try:
-                if endpoint.targetedge:
-                    resolve_relationship_declaration(spec, endpoint)
-                else:
-                    if endpoint.targetnode not in nodes or endpoint.idproperty not in nodes[endpoint.targetnode]:
-                        defects.append(f"sync {endpoint.path}: targetnode/idproperty is not declared by ontology")
-                    generator.generate_sync_query(endpoint, [])
-            except (ValueError, KeyError, TypeError) as exc:
-                defects.append(f"sync {endpoint.path}: refused by native sync owner — {exc}")
-    return defects
 
 
 def _role_field_defects(gate: GateSpec) -> list[str]:
@@ -736,7 +269,7 @@ def _scoring_defects(spec: DomainSpec, *, check_producers: bool) -> list[str]:
     return defects
 
 
-def withholding_reason(spec: DomainSpec, *, complete: bool = False) -> str | None:
+def withholding_reason(spec: DomainSpec) -> str | None:
     """Why a validated pack is not served, or ``None`` when it is admitted.
 
     Two generic, fail-closed conditions, each with one explicit operator
@@ -750,15 +283,15 @@ def withholding_reason(spec: DomainSpec, *, complete: bool = False) -> str | Non
        (``admission_defects``); ``unvalidated_domain_packs_enabled`` serves it
        anyway, knowing the gates will not execute faithfully.
     """
-    if spec.domain.activation is DomainActivation.DORMANT and (complete or not settings.dormant_domain_packs_enabled):
+    if spec.domain.activation is DomainActivation.DORMANT and not settings.dormant_domain_packs_enabled:
         return (
             f"Domain '{spec.domain.id}' is declared dormant by its pack (domain.activation: dormant); "
             "set DORMANT_DOMAIN_PACKS_ENABLED=true to serve it"
         )
-    if complete or not settings.unvalidated_domain_packs_enabled:
-        defects = admission_defects(spec, complete=complete)
+    if not settings.unvalidated_domain_packs_enabled:
+        defects = admission_defects(spec)
         if defects:
-            if not complete and not _match_admission_checks_enabled():
+            if not _match_admission_checks_enabled():
                 return (
                     f"Domain '{spec.domain.id}' is withheld: {len(defects)} gate(s) do not compile to executable "
                     f"Cypher ({defects[0]}); set UNVALIDATED_DOMAIN_PACKS_ENABLED=true to serve it anyway"
@@ -803,12 +336,6 @@ class DomainPackLoader:
 
     def __init__(self, config_path: str | None = None) -> None:
         raw = config_path or os.getenv("DOMAIN_SPECS_PATH") or "domains"
-        if settings.domain_pack_receipts_enabled and settings.is_production:
-            path = Path(raw)
-            if not path.is_absolute() or not path.is_dir() or any(p.is_symlink() for p in [path, *path.parents]):
-                raise DomainSpecError("Native production pack root must be explicitly supplied, absolute and present")
-        # Do not resolve away symlinks before secure component-by-component opens.
-        self._native_root = Path(raw).absolute()
         self._base_path = Path(raw).resolve()
         self._cache: dict[str, tuple[DomainSpec, float, float]] = {}
         self._lock = threading.Lock()
@@ -824,8 +351,6 @@ class DomainPackLoader:
         ``_load_and_validate``, so a withheld pack is never cached as servable
         and the same verdict applies to ``list_domains``.
         """
-        if settings.domain_pack_receipts_enabled:
-            return self._load_current(domain_id)
         spec_path = self._resolve_spec_path(domain_id)
 
         with self._lock:
@@ -860,8 +385,6 @@ class DomainPackLoader:
 
     async def load_domain_async(self, domain_id: str) -> DomainSpec:
         """Async domain loading with per-domain stampede prevention."""
-        if settings.domain_pack_receipts_enabled:
-            return await asyncio.to_thread(self.load_domain, domain_id)
         with self._lock:
             if domain_id in self._cache:
                 cached_spec, _cached_mtime, cached_at = self._cache[domain_id]
@@ -893,8 +416,7 @@ class DomainPackLoader:
             return []
         admitted: list[str] = []
         for d in sorted(self._base_path.iterdir()):
-            filename = "current.json" if settings.domain_pack_receipts_enabled else SPEC_FILENAME
-            if not (d.is_dir() and (d / filename).exists()):
+            if not (d.is_dir() and (d / SPEC_FILENAME).exists()):
                 continue
             try:
                 self.load_domain(d.name)
@@ -903,23 +425,6 @@ class DomainPackLoader:
                 continue
             admitted.append(d.name)
         return admitted
-
-    def _load_current(self, domain_id: str) -> DomainSpec:
-        """Read pointer once, then hash/validate only its fixed immutable revision.
-
-        No legacy fallback and no cache hit after a changed pointer or tamper.
-        A concurrent atomic switch yields either complete old or new revision.
-        """
-        defect = tenant_id_defect(domain_id)
-        if defect is not None:
-            raise DomainNotFoundError(f"Invalid domain ID: {defect}")
-        pointer = read_native_record(self._native_root / domain_id / "current.json", DomainCurrent)
-        if pointer.root["tenant_id"] != domain_id:
-            raise DomainSpecError("Native current pointer tenant mismatch")
-        spec, _receipt = load_native_revision(self._native_root, domain_id, pointer.root["sha256"])
-        if pointer.root["version"] != spec.domain.version:
-            raise DomainSpecError("Native current pointer version mismatch")
-        return spec
 
     def _resolve_spec_path(self, domain_id: str) -> Path:
         """Resolve and validate spec file path, preventing traversal and symlinks.
@@ -940,8 +445,8 @@ class DomainPackLoader:
             raise DomainNotFoundError(f"Invalid domain ID: {defect}")
 
         candidate = (self._base_path / domain_id / SPEC_FILENAME).resolve()
-        raw_path = self._native_root / domain_id / SPEC_FILENAME
-        if raw_path.is_symlink() or raw_path.parent.is_symlink():
+        raw_path = self._base_path / domain_id / SPEC_FILENAME
+        if raw_path.is_symlink():
             raise DomainNotFoundError(f"Invalid domain path: {domain_id!r} spec.yaml is a symlink")
         try:
             candidate.relative_to(self._base_path.resolve())
@@ -949,8 +454,30 @@ class DomainPackLoader:
             raise DomainNotFoundError(f"Invalid domain path: {domain_id!r} resolves outside base directory") from exc
         if not candidate.exists():
             raise DomainNotFoundError(f"Domain spec not found: {candidate}")
-        return raw_path
+        return candidate
 
     def _load_and_validate(self, path: Path, domain_id: str) -> DomainSpec:
-        """Delegate schema and actual admission to the shared native owner."""
-        return validate_native_file(path, domain_id)
+        """Load YAML and validate against DomainSpec schema."""
+        file_size = path.stat().st_size
+        if file_size > MAX_SPEC_BYTES:
+            raise DomainSpecError(
+                f"Domain spec {domain_id} exceeds maximum size: {file_size} bytes > {MAX_SPEC_BYTES} bytes"
+            )
+        try:
+            raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            raise DomainSpecError(f"Invalid YAML in {path}: {exc}") from exc
+        if not isinstance(raw, dict):
+            raise DomainSpecError(f"Domain spec must be a YAML mapping, got {type(raw).__name__}")
+        try:
+            spec = DomainSpec.model_validate(raw)
+        except PydanticValidationError as exc:
+            raise DomainSpecError(f"Domain '{domain_id}' validation failed:\n{exc}") from exc
+        if spec.domain.id != domain_id:
+            raise DomainSpecError(
+                f"Domain '{domain_id}' declares domain.id {spec.domain.id!r}; the directory name is the lookup key"
+            )
+        reason = withholding_reason(spec)
+        if reason is not None:
+            raise DomainNotFoundError(reason)
+        return spec

@@ -28,13 +28,9 @@ how the spec was produced. The version drives schema migration behavior.
 | `seed` | Auto-generated from CRM field scan | ENRICH schema discovery (Phase 0) |
 | `discovered` | Fields added by enrichment passes | ENRICH convergence loop (Phase 1-2) |
 | `inferred` | Derived fields added by inference | ENRICH inference engine (Phase 2-4) |
-| `proposed` | Native graph decisions authored, awaiting review | CEG graph domain owner |
+| `proposed` | Gates/scoring auto-proposed | ENRICH convergence (Phase 6) |
 | `reviewed` | Human-reviewed and approved | Human approval |
 | `production` | Deployed and active | Release process |
-
-EIE discovery/enrichment supplies evidence and purpose-specific enrichment
-proposals, not CEG match, gate, scoring or graph-policy authority. A CEG domain
-owner explicitly authors those native decisions; EIE never auto-promotes them.
 
 ## Example Progression
 ```
@@ -42,7 +38,7 @@ owner explicitly authors those native decisions; EIE never auto-promotes them.
 0.1.0-seed         → CRM scan: name, city, phone, notes, category
 0.2.0-discovered   → Enrichment added: materials_handled, process_types, contamination_tolerance
 0.3.0-inferred     → Inference added: material_grade, facility_tier, buyer_class
-0.4.0-proposed     → CEG graph owner authored native decisions, awaiting human review
+0.4.0-proposed     → Auto-proposed gates and scoring dimensions
 1.0.0-reviewed     → Human approved all proposed changes
 1.0.0-production   → Deployed to graph engine
 1.1.0-discovered   → New enrichment cycle discovered: moisture_tolerance
@@ -152,11 +148,3 @@ spec (D-8b). A spec carrying `observedfrom` or `evidencerelevance` is promoted
 to `-production` only after human review.
 
 ```
-
-## Native operator publication and revision identity
-
-The bounded native CEG publisher (`tools/publish_domain_pack.py`) requires an explicitly supplied named reviewer, external approval reference, and exact reviewed-input SHA-256. This lane never infers auto-approval from the earlier tier/stage progression examples. It does not produce gates/scoring from EIE enrichment, require a semantic compiler, or rewrite the reviewed file to change its stage. Unsuffixed repository templates remain readable under the existing default runtime policy but cannot be published by this operator tool; publication requires an already authored `-reviewed` or `-production` version.
-
-Published identity is `tenant_id == domain.id == <root>/<tenant_id>/current.json tenant_id == Neo4j database name`. The atomic `ceg.domain-current/v1` JSON pointer selects `<root>/<tenant_id>/revisions/<bare-sha256>/spec.yaml` plus an immutable `ceg.domain-approval/v1` `receipt.json`. The receipt binds tenant, native version, published and reviewed-input digests, named reviewer, external approval reference, timezone-aware review/assertion time, and the previous admitted digest (required null on first publication). The pointer carries `schema`, `tenant_id`, `version`, and `sha256`; pointer/receipt/YAML/version/path digests must agree.
-
-Changed input bytes require a new native version. Forward publication refuses numeric-version or production-to-reviewed downgrades. Explicit rollback freshly validates an existing reviewed revision and changes only the atomic pointer, not its approval history. Approval receipts are unsigned operator assertions, not authenticated reviewer identities; independent authorization, approval auditing, operator store permissions, read-only runtime mounts, and cross-engine compatible-pair checks remain separately required. Runtime receipt and production-stage flags ship off without changing any existing defaults. See [native publication runbook](../runbooks/domain-pack-publish.md) for exact JSON/API contracts, admission requirements, atomicity, and rollback limits.
