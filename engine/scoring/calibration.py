@@ -171,7 +171,11 @@ class ScoreCalibrator:
         abstract_pos: dict[str, int] = {cid: i for i, cid in enumerate(abstract_ranking)}
 
         # NDCG: relevance based on position in abstract ranking
-        relevances_actual = [float(n - abstract_pos[cid]) if cid in abstract_pos else 0.0 for cid in concrete_ranking]
+        # float() of int arithmetic (list length minus list index): cannot raise.
+        relevances_actual = [
+            float(n - abstract_pos[cid]) if cid in abstract_pos else 0.0  # nosemgrep: semgrep.float-requires-try-except
+            for cid in concrete_ranking
+        ]
         ideal_relevances = sorted(relevances_actual, reverse=True)
         idcg = _dcg(ideal_relevances)
         ndcg = min(1.0, _dcg(relevances_actual) / idcg) if idcg > 0 else 0.0

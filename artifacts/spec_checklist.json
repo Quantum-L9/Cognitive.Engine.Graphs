@@ -3,15 +3,8 @@
     "category": "gates",
     "name": "range",
     "spec_reference": "gates (detected in spec text)",
-    "search_tokens": [
-      "range",
-      "range",
-      "\"range\"",
-      "GateType.RANGE"
-    ],
-    "search_files": [
-      "engine/gates/**/*.py"
-    ],
+    "search_tokens": ["range", "range", "\"range\"", "GateType.RANGE"],
+    "search_files": ["engine/gates/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/GMP-v2.0-Perplex-Py-Scripts/script_3.py",
@@ -111,15 +104,8 @@
     "category": "gates",
     "name": "threshold",
     "spec_reference": "gates (detected in spec text)",
-    "search_tokens": [
-      "threshold",
-      "threshold",
-      "\"threshold\"",
-      "GateType.THRESHOLD"
-    ],
-    "search_files": [
-      "engine/gates/**/*.py"
-    ],
+    "search_tokens": ["threshold", "threshold", "\"threshold\"", "GateType.THRESHOLD"],
+    "search_files": ["engine/gates/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       ".github/governance/quality-thresholds.yaml",
@@ -248,15 +234,8 @@
     "category": "gates",
     "name": "boolean",
     "spec_reference": "gates (detected in spec text)",
-    "search_tokens": [
-      "boolean",
-      "boolean",
-      "\"boolean\"",
-      "GateType.BOOLEAN"
-    ],
-    "search_files": [
-      "engine/gates/**/*.py"
-    ],
+    "search_tokens": ["boolean", "boolean", "\"boolean\"", "GateType.BOOLEAN"],
+    "search_files": ["engine/gates/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/GMP-v2.0-Perplex-Py-Scripts/script_2.py",
@@ -317,15 +296,8 @@
     "category": "gates",
     "name": "composite",
     "spec_reference": "gates (detected in spec text)",
-    "search_tokens": [
-      "composite",
-      "composite",
-      "\"composite\"",
-      "GateType.COMPOSITE"
-    ],
-    "search_files": [
-      "engine/gates/**/*.py"
-    ],
+    "search_tokens": ["composite", "composite", "\"composite\"", "GateType.COMPOSITE"],
+    "search_files": ["engine/gates/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
@@ -376,15 +348,8 @@
     "category": "gates",
     "name": "enum_map",
     "spec_reference": "gates (detected in spec text)",
-    "search_tokens": [
-      "enum_map",
-      "enummap",
-      "\"enum_map\"",
-      "GateType.ENUM_MAP"
-    ],
-    "search_files": [
-      "engine/gates/**/*.py"
-    ],
+    "search_tokens": ["enum_map", "enummap", "\"enum_map\"", "GateType.ENUM_MAP"],
+    "search_files": ["engine/gates/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
@@ -426,15 +391,8 @@
     "category": "gates",
     "name": "exclusion",
     "spec_reference": "gates (detected in spec text)",
-    "search_tokens": [
-      "exclusion",
-      "exclusion",
-      "\"exclusion\"",
-      "GateType.EXCLUSION"
-    ],
-    "search_files": [
-      "engine/gates/**/*.py"
-    ],
+    "search_tokens": ["exclusion", "exclusion", "\"exclusion\"", "GateType.EXCLUSION"],
+    "search_files": ["engine/gates/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
@@ -482,15 +440,8 @@
     "category": "gates",
     "name": "self_range",
     "spec_reference": "gates (detected in spec text)",
-    "search_tokens": [
-      "self_range",
-      "selfrange",
-      "\"self_range\"",
-      "GateType.SELF_RANGE"
-    ],
-    "search_files": [
-      "engine/gates/**/*.py"
-    ],
+    "search_tokens": ["self_range", "selfrange", "\"self_range\"", "GateType.SELF_RANGE"],
+    "search_files": ["engine/gates/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
@@ -528,15 +479,8 @@
     "category": "gates",
     "name": "freshness",
     "spec_reference": "gates (detected in spec text)",
-    "search_tokens": [
-      "freshness",
-      "freshness",
-      "\"freshness\"",
-      "GateType.FRESHNESS"
-    ],
-    "search_files": [
-      "engine/gates/**/*.py"
-    ],
+    "search_tokens": ["freshness", "freshness", "\"freshness\"", "GateType.FRESHNESS"],
+    "search_files": ["engine/gates/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
@@ -596,9 +540,7 @@
       "\"temporal_range\"",
       "GateType.TEMPORAL_RANGE"
     ],
-    "search_files": [
-      "engine/gates/**/*.py"
-    ],
+    "search_files": ["engine/gates/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
@@ -635,15 +577,8 @@
     "category": "gates",
     "name": "traversal",
     "spec_reference": "gates (detected in spec text)",
-    "search_tokens": [
-      "traversal",
-      "traversal",
-      "\"traversal\"",
-      "GateType.TRAVERSAL"
-    ],
-    "search_files": [
-      "engine/gates/**/*.py"
-    ],
+    "search_tokens": ["traversal", "traversal", "\"traversal\"", "GateType.TRAVERSAL"],
+    "search_files": ["engine/gates/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       ".github/governance/semgrep-identity-map.yaml",
@@ -737,14 +672,8 @@
     "category": "scoring",
     "name": "geo_decay",
     "spec_reference": "scoring (detected in spec text)",
-    "search_tokens": [
-      "geo_decay",
-      "geodecay",
-      "\"geo_decay\""
-    ],
-    "search_files": [
-      "engine/scoring/**/*.py"
-    ],
+    "search_tokens": ["geo_decay", "geodecay", "\"geo_decay\""],
+    "search_files": ["engine/scoring/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
@@ -796,14 +725,8 @@
     "category": "scoring",
     "name": "log_normalized",
     "spec_reference": "scoring (detected in spec text)",
-    "search_tokens": [
-      "log_normalized",
-      "lognormalized",
-      "\"log_normalized\""
-    ],
-    "search_files": [
-      "engine/scoring/**/*.py"
-    ],
+    "search_tokens": ["log_normalized", "lognormalized", "\"log_normalized\""],
+    "search_files": ["engine/scoring/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
@@ -839,14 +762,8 @@
     "category": "scoring",
     "name": "community_match",
     "spec_reference": "scoring (detected in spec text)",
-    "search_tokens": [
-      "community_match",
-      "communitymatch",
-      "\"community_match\""
-    ],
-    "search_files": [
-      "engine/scoring/**/*.py"
-    ],
+    "search_tokens": ["community_match", "communitymatch", "\"community_match\""],
+    "search_files": ["engine/scoring/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
@@ -888,14 +805,8 @@
     "category": "scoring",
     "name": "inverse_linear",
     "spec_reference": "scoring (detected in spec text)",
-    "search_tokens": [
-      "inverse_linear",
-      "inverselinear",
-      "\"inverse_linear\""
-    ],
-    "search_files": [
-      "engine/scoring/**/*.py"
-    ],
+    "search_tokens": ["inverse_linear", "inverselinear", "\"inverse_linear\""],
+    "search_files": ["engine/scoring/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
@@ -934,14 +845,8 @@
     "category": "scoring",
     "name": "candidate_property",
     "spec_reference": "scoring (detected in spec text)",
-    "search_tokens": [
-      "candidate_property",
-      "candidateproperty",
-      "\"candidate_property\""
-    ],
-    "search_files": [
-      "engine/scoring/**/*.py"
-    ],
+    "search_tokens": ["candidate_property", "candidateproperty", "\"candidate_property\""],
+    "search_files": ["engine/scoring/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
@@ -995,14 +900,8 @@
     "category": "scoring",
     "name": "custom_cypher",
     "spec_reference": "scoring (detected in spec text)",
-    "search_tokens": [
-      "custom_cypher",
-      "customcypher",
-      "\"custom_cypher\""
-    ],
-    "search_files": [
-      "engine/scoring/**/*.py"
-    ],
+    "search_tokens": ["custom_cypher", "customcypher", "\"custom_cypher\""],
+    "search_files": ["engine/scoring/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
@@ -1034,14 +933,8 @@
     "category": "scoring",
     "name": "temporal_decay",
     "spec_reference": "scoring (detected in spec text)",
-    "search_tokens": [
-      "temporal_decay",
-      "temporaldecay",
-      "\"temporal_decay\""
-    ],
-    "search_files": [
-      "engine/scoring/**/*.py"
-    ],
+    "search_tokens": ["temporal_decay", "temporaldecay", "\"temporal_decay\""],
+    "search_files": ["engine/scoring/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "docs/archive/plasticos/plasticos_domain_spec.yaml",
@@ -1070,15 +963,8 @@
     "category": "v1.1_node",
     "name": "TransactionOutcome",
     "spec_reference": "v1.1 addition: TransactionOutcome node",
-    "search_tokens": [
-      "TransactionOutcome",
-      "\"TransactionOutcome\"",
-      "'TransactionOutcome'"
-    ],
-    "search_files": [
-      "engine/**/*.py",
-      "domains/**/*.yaml"
-    ],
+    "search_tokens": ["TransactionOutcome", "\"TransactionOutcome\"", "'TransactionOutcome'"],
+    "search_files": ["engine/**/*.py", "domains/**/*.yaml"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "docs/archive/plasticos/plasticos_domain_spec.yaml",
@@ -1122,15 +1008,8 @@
     "category": "v1.1_node",
     "name": "SignalEvent",
     "spec_reference": "v1.1 addition: SignalEvent node",
-    "search_tokens": [
-      "SignalEvent",
-      "\"SignalEvent\"",
-      "'SignalEvent'"
-    ],
-    "search_files": [
-      "engine/**/*.py",
-      "domains/**/*.yaml"
-    ],
+    "search_tokens": ["SignalEvent", "\"SignalEvent\"", "'SignalEvent'"],
+    "search_files": ["engine/**/*.py", "domains/**/*.yaml"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml",
@@ -1147,15 +1026,8 @@
     "category": "v1.1_edge",
     "name": "RESULTED_IN",
     "spec_reference": "v1.1 addition: RESULTED_IN edge",
-    "search_tokens": [
-      "RESULTED_IN",
-      "\"RESULTED_IN\"",
-      "'RESULTED_IN'"
-    ],
-    "search_files": [
-      "engine/**/*.py",
-      "domains/**/*.yaml"
-    ],
+    "search_tokens": ["RESULTED_IN", "\"RESULTED_IN\"", "'RESULTED_IN'"],
+    "search_files": ["engine/**/*.py", "domains/**/*.yaml"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "docs/archive/plasticos/plasticos_domain_spec.yaml",
@@ -1193,15 +1065,8 @@
     "category": "v1.1_edge",
     "name": "RESOLVED_FROM",
     "spec_reference": "v1.1 addition: RESOLVED_FROM edge",
-    "search_tokens": [
-      "RESOLVED_FROM",
-      "\"RESOLVED_FROM\"",
-      "'RESOLVED_FROM'"
-    ],
-    "search_files": [
-      "engine/**/*.py",
-      "domains/**/*.yaml"
-    ],
+    "search_tokens": ["RESOLVED_FROM", "\"RESOLVED_FROM\"", "'RESOLVED_FROM'"],
+    "search_files": ["engine/**/*.py", "domains/**/*.yaml"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml",
@@ -1231,60 +1096,28 @@
     "category": "v1.1_action",
     "name": "outcomes",
     "spec_reference": "v1.1 addition: outcomes action/endpoint",
-    "search_tokens": [
-      "handle_outcomes",
-      "\"outcomes\"",
-      "'outcomes'",
-      "outcomes"
-    ],
-    "search_files": [
-      "engine/handlers.py",
-      "engine/**/*.py"
-    ],
+    "search_tokens": ["handle_outcomes", "\"outcomes\"", "'outcomes'", "outcomes"],
+    "search_files": ["engine/handlers.py", "engine/**/*.py"],
     "status": "PARTIAL",
-    "evidence_files": [
-      "engine/handlers.py"
-    ],
-    "evidence_lines": [
-      "engine/handlers.py:1595",
-      "engine/handlers.py:2021"
-    ]
+    "evidence_files": ["engine/handlers.py"],
+    "evidence_lines": ["engine/handlers.py:1595", "engine/handlers.py:2021"]
   },
   {
     "category": "v1.1_action",
     "name": "resolve",
     "spec_reference": "v1.1 addition: resolve action/endpoint",
-    "search_tokens": [
-      "handle_resolve",
-      "\"resolve\"",
-      "'resolve'",
-      "resolve"
-    ],
-    "search_files": [
-      "engine/handlers.py",
-      "engine/**/*.py"
-    ],
+    "search_tokens": ["handle_resolve", "\"resolve\"", "'resolve'", "resolve"],
+    "search_files": ["engine/handlers.py", "engine/**/*.py"],
     "status": "PARTIAL",
-    "evidence_files": [
-      "engine/handlers.py"
-    ],
-    "evidence_lines": [
-      "engine/handlers.py:1788",
-      "engine/handlers.py:2022"
-    ]
+    "evidence_files": ["engine/handlers.py"],
+    "evidence_lines": ["engine/handlers.py:1788", "engine/handlers.py:2022"]
   },
   {
     "category": "v1.1_scoring",
     "name": "temporal_decay",
     "spec_reference": "v1.1 addition: temporal_decay scoring type",
-    "search_tokens": [
-      "temporal_decay",
-      "temporaldecay",
-      "\"temporal_decay\""
-    ],
-    "search_files": [
-      "engine/scoring/**/*.py"
-    ],
+    "search_tokens": ["temporal_decay", "temporaldecay", "\"temporal_decay\""],
+    "search_files": ["engine/scoring/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "docs/archive/plasticos/plasticos_domain_spec.yaml",
@@ -1313,39 +1146,20 @@
     "category": "v1.1_scoring",
     "name": "outcome_weighted",
     "spec_reference": "v1.1 addition: outcome_weighted scoring type",
-    "search_tokens": [
-      "outcome_weighted",
-      "outcomeweighted",
-      "\"outcome_weighted\""
-    ],
-    "search_files": [
-      "engine/scoring/**/*.py"
-    ],
+    "search_tokens": ["outcome_weighted", "outcomeweighted", "\"outcome_weighted\""],
+    "search_files": ["engine/scoring/**/*.py"],
     "status": "PARTIAL",
-    "evidence_files": [
-      "tools/spec_extract.py"
-    ],
-    "evidence_lines": [
-      "tools/spec_extract.py:207",
-      "tools/spec_extract.py:264"
-    ]
+    "evidence_files": ["tools/spec_extract.py"],
+    "evidence_lines": ["tools/spec_extract.py:207", "tools/spec_extract.py:264"]
   },
   {
     "category": "action_handler",
     "name": "match",
     "spec_reference": "chassis action: match",
-    "search_tokens": [
-      "handle_match",
-      "\"match\"",
-      "register_handler(\"match\""
-    ],
-    "search_files": [
-      "engine/handlers.py"
-    ],
+    "search_tokens": ["handle_match", "\"match\"", "register_handler(\"match\""],
+    "search_files": ["engine/handlers.py"],
     "status": "PARTIAL",
-    "evidence_files": [
-      "engine/handlers.py"
-    ],
+    "evidence_files": ["engine/handlers.py"],
     "evidence_lines": [
       "engine/handlers.py:393",
       "engine/handlers.py:1439",
@@ -1357,60 +1171,30 @@
     "category": "action_handler",
     "name": "sync",
     "spec_reference": "chassis action: sync",
-    "search_tokens": [
-      "handle_sync",
-      "\"sync\"",
-      "register_handler(\"sync\""
-    ],
-    "search_files": [
-      "engine/handlers.py"
-    ],
+    "search_tokens": ["handle_sync", "\"sync\"", "register_handler(\"sync\""],
+    "search_files": ["engine/handlers.py"],
     "status": "PARTIAL",
-    "evidence_files": [
-      "engine/handlers.py"
-    ],
-    "evidence_lines": [
-      "engine/handlers.py:645",
-      "engine/handlers.py:2019"
-    ]
+    "evidence_files": ["engine/handlers.py"],
+    "evidence_lines": ["engine/handlers.py:645", "engine/handlers.py:2019"]
   },
   {
     "category": "action_handler",
     "name": "admin",
     "spec_reference": "chassis action: admin",
-    "search_tokens": [
-      "handle_admin",
-      "\"admin\"",
-      "register_handler(\"admin\""
-    ],
-    "search_files": [
-      "engine/handlers.py"
-    ],
+    "search_tokens": ["handle_admin", "\"admin\"", "register_handler(\"admin\""],
+    "search_files": ["engine/handlers.py"],
     "status": "PARTIAL",
-    "evidence_files": [
-      "engine/handlers.py"
-    ],
-    "evidence_lines": [
-      "engine/handlers.py:775",
-      "engine/handlers.py:2020"
-    ]
+    "evidence_files": ["engine/handlers.py"],
+    "evidence_lines": ["engine/handlers.py:775", "engine/handlers.py:2020"]
   },
   {
     "category": "action_handler",
     "name": "query",
     "spec_reference": "chassis action: query",
-    "search_tokens": [
-      "handle_query",
-      "\"query\"",
-      "register_handler(\"query\""
-    ],
-    "search_files": [
-      "engine/handlers.py"
-    ],
+    "search_tokens": ["handle_query", "\"query\"", "register_handler(\"query\""],
+    "search_files": ["engine/handlers.py"],
     "status": "PARTIAL",
-    "evidence_files": [
-      "engine/handlers.py"
-    ],
+    "evidence_files": ["engine/handlers.py"],
     "evidence_lines": [
       "engine/handlers.py:399",
       "engine/handlers.py:1443",
@@ -1422,56 +1206,28 @@
     "category": "action_handler",
     "name": "enrich",
     "spec_reference": "chassis action: enrich",
-    "search_tokens": [
-      "handle_enrich",
-      "\"enrich\"",
-      "register_handler(\"enrich\""
-    ],
-    "search_files": [
-      "engine/handlers.py"
-    ],
+    "search_tokens": ["handle_enrich", "\"enrich\"", "register_handler(\"enrich\""],
+    "search_files": ["engine/handlers.py"],
     "status": "PARTIAL",
-    "evidence_files": [
-      "engine/handlers.py"
-    ],
-    "evidence_lines": [
-      "engine/handlers.py:1942",
-      "engine/handlers.py:2025"
-    ]
+    "evidence_files": ["engine/handlers.py"],
+    "evidence_lines": ["engine/handlers.py:1942", "engine/handlers.py:2025"]
   },
   {
     "category": "action_handler",
     "name": "healthcheck",
     "spec_reference": "chassis action: healthcheck",
-    "search_tokens": [
-      "handle_healthcheck",
-      "\"healthcheck\"",
-      "register_handler(\"healthcheck\""
-    ],
-    "search_files": [
-      "engine/handlers.py"
-    ],
+    "search_tokens": ["handle_healthcheck", "\"healthcheck\"", "register_handler(\"healthcheck\""],
+    "search_files": ["engine/handlers.py"],
     "status": "PARTIAL",
-    "evidence_files": [
-      "engine/handlers.py"
-    ],
-    "evidence_lines": [
-      "engine/handlers.py:1937",
-      "engine/handlers.py:2024"
-    ]
+    "evidence_files": ["engine/handlers.py"],
+    "evidence_lines": ["engine/handlers.py:1937", "engine/handlers.py:2024"]
   },
   {
     "category": "gds_algorithm",
     "name": "louvain",
     "spec_reference": "gds (detected in spec text)",
-    "search_tokens": [
-      "louvain",
-      "_run_louvain",
-      "\"louvain\""
-    ],
-    "search_files": [
-      "engine/gds/**/*.py"
-    ],
+    "search_tokens": ["louvain", "_run_louvain", "\"louvain\""],
+    "search_files": ["engine/gds/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_workflow_kernel.yaml",
@@ -1521,14 +1277,8 @@
     "category": "gds_algorithm",
     "name": "cooccurrence",
     "spec_reference": "gds (detected in spec text)",
-    "search_tokens": [
-      "cooccurrence",
-      "_run_cooccurrence",
-      "\"cooccurrence\""
-    ],
-    "search_files": [
-      "engine/gds/**/*.py"
-    ],
+    "search_tokens": ["cooccurrence", "_run_cooccurrence", "\"cooccurrence\""],
+    "search_files": ["engine/gds/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
@@ -1556,14 +1306,8 @@
     "category": "gds_algorithm",
     "name": "reinforcement",
     "spec_reference": "gds (detected in spec text)",
-    "search_tokens": [
-      "reinforcement",
-      "_run_reinforcement",
-      "\"reinforcement\""
-    ],
-    "search_files": [
-      "engine/gds/**/*.py"
-    ],
+    "search_tokens": ["reinforcement", "_run_reinforcement", "\"reinforcement\""],
+    "search_files": ["engine/gds/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "chassis/auth/settings.py",
@@ -1612,14 +1356,8 @@
     "category": "gds_algorithm",
     "name": "temporal_recency",
     "spec_reference": "gds (detected in spec text)",
-    "search_tokens": [
-      "temporal_recency",
-      "_run_temporal_recency",
-      "\"temporal_recency\""
-    ],
-    "search_files": [
-      "engine/gds/**/*.py"
-    ],
+    "search_tokens": ["temporal_recency", "_run_temporal_recency", "\"temporal_recency\""],
+    "search_files": ["engine/gds/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml",
@@ -1647,14 +1385,8 @@
     "category": "gds_algorithm",
     "name": "similarity",
     "spec_reference": "gds (detected in spec text)",
-    "search_tokens": [
-      "similarity",
-      "_run_similarity",
-      "\"similarity\""
-    ],
-    "search_files": [
-      "engine/gds/**/*.py"
-    ],
+    "search_tokens": ["similarity", "_run_similarity", "\"similarity\""],
+    "search_files": ["engine/gds/**/*.py"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "agents/cursor/cursor_memory_client.py",
@@ -1723,19 +1455,10 @@
     "category": "research_pattern",
     "name": "Behavioral Graph Collaborative Filtering",
     "spec_reference": "tools/research/top5_leverage_patterns_detailed.json#1_COLLABORATIVE_FILTERING_AT_SCALE",
-    "search_tokens": [
-      "cooccurrence",
-      "communitymatch"
-    ],
-    "search_files": [
-      "engine/gds/",
-      "engine/scoring/"
-    ],
+    "search_tokens": ["cooccurrence", "communitymatch"],
+    "search_files": ["engine/gds/", "engine/scoring/"],
     "status": "IMPLEMENTED",
-    "evidence_files": [
-      "engine/gds/scheduler.py",
-      "engine/scoring/assembler.py"
-    ],
+    "evidence_files": ["engine/gds/scheduler.py", "engine/scoring/assembler.py"],
     "evidence_lines": [
       "engine/gds/scheduler.py:42",
       "engine/gds/scheduler.py:45",
@@ -1751,19 +1474,10 @@
     "category": "research_pattern",
     "name": "Context-Aware Entity Resolution",
     "spec_reference": "tools/research/top5_leverage_patterns_detailed.json#2_ENTITY_DISAMBIGUATION_VIA_CONTEXT",
-    "search_tokens": [
-      "EntityResolver",
-      "handle_resolve"
-    ],
-    "search_files": [
-      "engine/resolution/",
-      "engine/handlers.py"
-    ],
+    "search_tokens": ["EntityResolver", "handle_resolve"],
+    "search_files": ["engine/resolution/", "engine/handlers.py"],
     "status": "IMPLEMENTED",
-    "evidence_files": [
-      "engine/handlers.py",
-      "engine/resolution/resolver.py"
-    ],
+    "evidence_files": ["engine/handlers.py", "engine/resolution/resolver.py"],
     "evidence_lines": [
       "engine/resolution/resolver.py:30",
       "engine/handlers.py:1804",
@@ -1774,14 +1488,8 @@
     "category": "research_pattern",
     "name": "Low-Dimensional Similarity via Graph Embeddings",
     "spec_reference": "tools/research/top5_leverage_patterns_detailed.json#3_GRAPH_EMBEDDINGS_FOR_SIMILARITY",
-    "search_tokens": [
-      "CompoundE3D",
-      "kge_enabled"
-    ],
-    "search_files": [
-      "engine/kge/",
-      "engine/config/"
-    ],
+    "search_tokens": ["CompoundE3D", "kge_enabled"],
+    "search_files": ["engine/kge/", "engine/config/"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "engine/config/schema.py",
@@ -1809,13 +1517,8 @@
     "category": "research_pattern",
     "name": "Session-Context Dynamic Re-Ranking",
     "spec_reference": "tools/research/top5_leverage_patterns_detailed.json#4_REAL_TIME_CONTEXT_AWARE_RANKING",
-    "search_tokens": [
-      "temporalproximity",
-      "calibration"
-    ],
-    "search_files": [
-      "engine/scoring/"
-    ],
+    "search_tokens": ["temporalproximity", "calibration"],
+    "search_files": ["engine/scoring/"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "engine/scoring/assembler.py",
@@ -1840,19 +1543,10 @@
     "category": "research_pattern",
     "name": "Transitive Relationship Discovery via Multi-Hop Traversal",
     "spec_reference": "tools/research/top5_leverage_patterns_detailed.json#5_MULTI_HOP_TRAVERSAL_FOR_ENRICHMENT",
-    "search_tokens": [
-      "MultiHopTraverser",
-      "multihop"
-    ],
-    "search_files": [
-      "engine/traversal/",
-      "engine/hoprag/"
-    ],
+    "search_tokens": ["MultiHopTraverser", "multihop"],
+    "search_files": ["engine/traversal/", "engine/hoprag/"],
     "status": "IMPLEMENTED",
-    "evidence_files": [
-      "engine/hoprag/__init__.py",
-      "engine/traversal/multihop.py"
-    ],
+    "evidence_files": ["engine/hoprag/__init__.py", "engine/traversal/multihop.py"],
     "evidence_lines": [
       "engine/traversal/multihop.py:138",
       "engine/traversal/multihop.py:151",
@@ -1865,19 +1559,10 @@
     "category": "research_pattern",
     "name": "Behavioral Graph Collaborative Filtering",
     "spec_reference": "tools/research/top5_leverage_patterns_detailed.json#1_COLLABORATIVE_FILTERING_AT_SCALE",
-    "search_tokens": [
-      "cooccurrence",
-      "communitymatch"
-    ],
-    "search_files": [
-      "engine/gds/",
-      "engine/scoring/"
-    ],
+    "search_tokens": ["cooccurrence", "communitymatch"],
+    "search_files": ["engine/gds/", "engine/scoring/"],
     "status": "IMPLEMENTED",
-    "evidence_files": [
-      "engine/gds/scheduler.py",
-      "engine/scoring/assembler.py"
-    ],
+    "evidence_files": ["engine/gds/scheduler.py", "engine/scoring/assembler.py"],
     "evidence_lines": [
       "engine/gds/scheduler.py:42",
       "engine/gds/scheduler.py:45",
@@ -1893,19 +1578,10 @@
     "category": "research_pattern",
     "name": "Context-Aware Entity Resolution",
     "spec_reference": "tools/research/top5_leverage_patterns_detailed.json#2_ENTITY_DISAMBIGUATION_VIA_CONTEXT",
-    "search_tokens": [
-      "EntityResolver",
-      "handle_resolve"
-    ],
-    "search_files": [
-      "engine/resolution/",
-      "engine/handlers.py"
-    ],
+    "search_tokens": ["EntityResolver", "handle_resolve"],
+    "search_files": ["engine/resolution/", "engine/handlers.py"],
     "status": "IMPLEMENTED",
-    "evidence_files": [
-      "engine/handlers.py",
-      "engine/resolution/resolver.py"
-    ],
+    "evidence_files": ["engine/handlers.py", "engine/resolution/resolver.py"],
     "evidence_lines": [
       "engine/resolution/resolver.py:30",
       "engine/handlers.py:1804",
@@ -1916,14 +1592,8 @@
     "category": "research_pattern",
     "name": "Low-Dimensional Similarity via Graph Embeddings",
     "spec_reference": "tools/research/top5_leverage_patterns_detailed.json#3_GRAPH_EMBEDDINGS_FOR_SIMILARITY",
-    "search_tokens": [
-      "CompoundE3D",
-      "kge_enabled"
-    ],
-    "search_files": [
-      "engine/kge/",
-      "engine/config/"
-    ],
+    "search_tokens": ["CompoundE3D", "kge_enabled"],
+    "search_files": ["engine/kge/", "engine/config/"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "engine/config/schema.py",
@@ -1951,13 +1621,8 @@
     "category": "research_pattern",
     "name": "Session-Context Dynamic Re-Ranking",
     "spec_reference": "tools/research/top5_leverage_patterns_detailed.json#4_REAL_TIME_CONTEXT_AWARE_RANKING",
-    "search_tokens": [
-      "temporalproximity",
-      "calibration"
-    ],
-    "search_files": [
-      "engine/scoring/"
-    ],
+    "search_tokens": ["temporalproximity", "calibration"],
+    "search_files": ["engine/scoring/"],
     "status": "IMPLEMENTED",
     "evidence_files": [
       "engine/scoring/assembler.py",
@@ -1982,19 +1647,10 @@
     "category": "research_pattern",
     "name": "Transitive Relationship Discovery via Multi-Hop Traversal",
     "spec_reference": "tools/research/top5_leverage_patterns_detailed.json#5_MULTI_HOP_TRAVERSAL_FOR_ENRICHMENT",
-    "search_tokens": [
-      "MultiHopTraverser",
-      "multihop"
-    ],
-    "search_files": [
-      "engine/traversal/",
-      "engine/hoprag/"
-    ],
+    "search_tokens": ["MultiHopTraverser", "multihop"],
+    "search_files": ["engine/traversal/", "engine/hoprag/"],
     "status": "IMPLEMENTED",
-    "evidence_files": [
-      "engine/hoprag/__init__.py",
-      "engine/traversal/multihop.py"
-    ],
+    "evidence_files": ["engine/hoprag/__init__.py", "engine/traversal/multihop.py"],
     "evidence_lines": [
       "engine/traversal/multihop.py:138",
       "engine/traversal/multihop.py:151",

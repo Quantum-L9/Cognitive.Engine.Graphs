@@ -3,14 +3,8 @@
     "l9_schema": 1,
     "origin": "l9-template",
     "engine": "graph",
-    "layer": [
-      "telemetry"
-    ],
-    "tags": [
-      "L9_TEMPLATE",
-      "telemetry",
-      "grafana"
-    ],
+    "layer": ["telemetry"],
+    "tags": ["L9_TEMPLATE", "telemetry", "grafana"],
     "owner": "platform",
     "status": "active"
   },
@@ -18,10 +12,7 @@
     "id": null,
     "uid": "l9-neo4j",
     "title": "L9 Engine \u2014 Neo4j",
-    "tags": [
-      "l9",
-      "neo4j"
-    ],
+    "tags": ["l9", "neo4j"],
     "timezone": "browser",
     "refresh": "30s",
     "time": {

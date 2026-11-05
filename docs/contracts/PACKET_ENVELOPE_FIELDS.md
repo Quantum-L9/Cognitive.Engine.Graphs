@@ -9,204 +9,231 @@ status: active
 /L9_META -->
 
 <!-- L9_TEMPLATE: true -->
-# L9 PacketEnvelope Field Contract
+# L9 TransportPacket Field Contract
 
-> **Migration Notice (GMP-133):** For inter-node communication, use `TransportPacket`
-> from `constellation_node_sdk` via `engine/packet_bridge.py`. PacketEnvelope remains
-> valid for internal engine use and memory substrate operations.
+> The filename is historical. `PacketEnvelope` is retired: both declarations
+> (`engine/packet/packet_envelope.py`, `l9_core/models.py`) were deleted under
+> Quantum-L9/Cognitive.Engine.Graphs#138. `TransportPacket` from
+> `constellation_node_sdk` is the **only** wire format, inside the engine and between
+> nodes. Constructing or deriving anything else is forbidden (org Semgrep
+> `AST-TRANSPORT-001`–`004`, baseline ratchet `pre-commit/packet-envelope-prohibited`).
 
-## TransportPacket (Gate SDK — Current Standard)
+## Rule
+
+`TransportPacket` and every sub-model are `frozen=True, extra="forbid"`. Every node that
+creates, reads, or derives a packet uses these exact field names. No aliases, no
+abbreviations, no local redefinition (`SHARED-001`).
+
+A packet is created only by:
+
+- `create_transport_packet(...)` — a root packet (the SDK factory);
+- `packet.derive(...)` — a child with new lineage and recomputed hashes;
+- `packet.with_hop(hop)` — the same packet with one more `hop_trace` entry.
+
+In CEG those calls sit behind `engine/packet/chassis_contract.py`
+(`inflate_ingress`, `deflate_egress`, `delegate_to_node`) and `engine/packet_bridge.py`
+(`build_request_packet`, `build_response_packet`). Handler code calls those, not the SDK.
 
 ```python
-from constellation_node_sdk import TransportPacket
+from engine.packet.chassis_contract import deflate_egress, delegate_to_node, inflate_ingress
 from engine.packet_bridge import build_request_packet, build_response_packet
 
-# Build outbound packet
 packet = build_request_packet(
     action="graph-query",
     payload={"cypher": "MATCH (n) RETURN n"},
     tenant="plasticos",
     trace_id="trace-12345",
 )
-
-# Access fields
 packet.header.action  # "graph-query"
 packet.header.trace_id  # "trace-12345"
 packet.payload  # {"cypher": "..."}
 packet.tenant.actor  # "plasticos"
 ```
 
----
-
-## PacketEnvelope (Internal Use)
-
-## Rule
-PacketEnvelope is immutable (frozen=True). Every constellation node that creates,
-reads, or derives a packet MUST use these exact field names. No aliases. No abbreviations.
-
-## Required Fields (must be present on every packet)
+## Top-level fields
 
 ```python
-class PacketEnvelope(BaseModel, frozen=True):
-    packet_id: UUID  # Auto-generated, globally unique
-    packet_type: str  # From PACKET_TYPE_REGISTRY.md
-    payload: dict[str, Any]  # Domain-specific data — the ONLY field that varies
-    timestamp: datetime  # UTC, auto-generated
+class TransportPacket(BaseModel):  # frozen, extra=forbid — constellation_node_sdk
+    header: TransportHeader
+    address: TransportAddress
+    tenant: TenantContext
+    payload: dict[str, Any]  # the only field that carries domain data
+    security: TransportSecurity
+    governance: TransportGovernance
+    provenance: RoutingProvenance
+    delegation_chain: tuple[DelegationLink, ...] = ()
+    hop_trace: tuple[TransportHop, ...] = ()  # append-only, outside transport_hash
+    lineage: TransportLineage
+    attachments: tuple[TransportAttachment, ...] = ()
 ```
 
+## Sub-models
 
-## Standard Optional Fields
+### TransportHeader
 
 ```python
-class PacketEnvelope(BaseModel, frozen=True):  # continued: optional fields
-    metadata: PacketMetadata | None  # schema_version, agent, domain
-    provenance: PacketProvenance | None  # source, tool, derive_type
-    confidence: PacketConfidence | None  # score (0.0-1.0), rationale
-    reasoning_block: dict | None  # StructuredReasoningBlock if applicable
-    thread_id: UUID | None  # Conversation/task grouping
-    lineage: PacketLineage | None  # parent_ids, derivation_type, generation
-    tags: list[str]  # Lightweight labels
-    ttl: datetime | None  # Expiration for garbage collection
-    trace_id: str | None  # W3C Trace Context ID
-    correlation_id: str | None  # Cross-service correlation
-    content_hash: str  # SHA-256 — auto-computed, UNIQUE constraint in DB
+packet_id: UUID  # auto-generated, globally unique
+packet_type: str  # closed set, see PACKET_TYPE_REGISTRY.md
+action: str  # lowercase, ^[a-z0-9][a-z0-9._-]{0,63}$
+priority: int = 2  # 0..3
+created_at: datetime  # UTC
+expires_at: datetime | None
+timeout_ms: int = 30_000
+schema_version: str = "1.0"
+idempotency_key: str | None
+trace_id: str | None  # W3C trace id, preserved across derive()
+correlation_id: str | None  # preserved across derive()
+causation_id: UUID | None  # parent packet_id on a derived packet
+retry_count: int = 0
+replay_mode: bool = False
+not_before: datetime | None
 ```
 
-
-## Nested Model Fields
-
-### PacketMetadata
+### TransportAddress
 
 ```python
-class PacketMetadata(BaseModel, frozen=True):
-    schema_version: str  # e.g., "1.1.0"
-    agent: str | None  # Which agent/service created this
-    domain: str | None  # e.g., "plasticos"
+source_node: str
+destination_node: str
+reply_to: str
 ```
-
-
-### PacketProvenance
-
-```python
-class PacketProvenance(BaseModel, frozen=True):
-    source: str  # e.g., "enrichment-engine", "graph-engine"
-    tool: str | None  # e.g., "sonar-variations", "gate-compiler"
-    derive_type: str | None  # e.g., "enrichment", "inference", "match"
-```
-
-
-### PacketConfidence
-
-```python
-class PacketConfidence(BaseModel, frozen=True):
-    score: float  # 0.0 to 1.0
-    rationale: str | None  # Why this confidence level
-```
-
-
-### PacketLineage
-
-```python
-class PacketLineage(BaseModel, frozen=True):
-    parent_ids: list[UUID]  # Packets this was derived from
-    derivation_type: str  # "enrichment", "inference", "match", "delegation"
-    generation: int  # 0 = root, increments per derivation
-```
-
-
-### PacketAddress
-
-```python
-class PacketAddress(BaseModel, frozen=True):
-    source_node: str  # e.g., "plasticos"
-    destination_node: str  # e.g., "enrichment-engine"
-    reply_to: str | None  # Where to send the response
-```
-
 
 ### TenantContext
 
 ```python
-class TenantContext(BaseModel, frozen=True):
-    actor: str  # Who is doing it
-    on_behalf_of: str | None  # Who authorized it
-    originator: str | None  # Who started the chain
-    org_id: str  # Tenant isolation key
-    user_id: str | None  # Individual actor
+actor: str  # who is doing it
+on_behalf_of: str  # who authorized it (defaults to actor)
+originator: str  # who started the chain (defaults to actor)
+org_id: str  # tenant isolation key
+user_id: str | None  # individual actor
 ```
 
+`derive()` never changes the tenant (`assert_tenant_immutable`).
+
+### TransportSecurity
+
+```python
+payload_hash: str  # sha256 of canonical payload
+transport_hash: str  # sha256 of the transport core (below)
+signature: str | None
+signature_algorithm: str | None  # "hmac-sha256" | "ed25519"
+signing_key_id: str | None
+classification: str = "internal"  # public | internal | confidential | restricted
+encryption_status: str = "plaintext"
+pii_fields: tuple[str, ...] = ()  # payload keys holding PII (GDPR ops)
+```
+
+### TransportGovernance
+
+```python
+intent: str
+compliance_tags: tuple[str, ...] = ()
+retention_days: int = 90
+redaction_applied: bool = False
+audit_required: bool = False  # delegate_to_node() sets True
+data_subject_id: str | None
+```
+
+### TransportLineage
+
+```python
+parent_id: UUID | None  # None on a root packet
+root_id: UUID  # the root packet's packet_id
+generation: int = 0  # +1 per derive()
+```
+
+### DelegationLink
+
+```python
+delegator: str
+delegatee: str
+scope: tuple[str, ...]
+granted_at: datetime
+expires_at: datetime | None
+constraints: dict[str, Any] | None
+proof: str | None
+```
+
+`RoutingProvenance`, `TransportHop` and `TransportAttachment` are defined by the SDK
+(`constellation_node_sdk.transport`); CEG does not construct them directly — hops come
+from `make_dispatch_hop` / `make_response_hop`.
 
 ## Immutability Contract
 
 ```python
 # ✅ CORRECT — derive creates a new packet
-new_packet = original.derive(
-    mutation={"payload": new_payload},
-    derivation_type="enrichment",
-)
-# new_packet.lineage.parent_ids == [original.packet_id]
-# new_packet.lineage.generation == original.lineage.generation + 1
+child = packet.derive(packet_type="response", payload=new_payload)
+# child.lineage.parent_id == packet.header.packet_id
+# child.lineage.generation == packet.lineage.generation + 1
+# child.lineage.root_id == packet.lineage.root_id
 
-# ❌ BANNED — direct mutation raises ValidationError
-original.payload["new_field"] = "value"  # FROZEN — will crash
+# ✅ CORRECT — a hop is appended, the signed core is unchanged
+traced = child.with_hop(hop)
+
+# ❌ BANNED — direct mutation raises ValidationError ("Instance is frozen")
+packet.payload = {"new_field": "value"}
+
+# ❌ BANNED — an in-place edit of the payload dict is not blocked, but the packet
+# then fails re-validation with TransportIntegrityError. Never do it.
+packet.payload["new_field"] = "value"
 ```
 
+## Hash Computation
 
-## content_hash Computation
-
-This is the formula `engine/packet/packet_envelope.py:_compute_hash` implements
-(DEC-34: the document is aligned to the code; no hash value changed). It covers
-the envelope's own `action` field and the full `TenantContext` and
-`PacketAddress`, not `payload.get("action")` or `tenant.actor` alone.
+This is the formula `constellation_node_sdk.transport.hashing` implements
+(`compute_payload_hash`, `compute_transport_hash`); `tests/unit/test_packet_envelope.py`
+checks this block against the SDK source. Canonical JSON is sorted keys, compact
+separators, UTC datetimes and string UUIDs (`canonical_json`).
 
 ```python
-# Deterministic: sorted keys, compact separators, canonical JSON
 import hashlib
-import json
 
-hash_input = json.dumps(
-    {
-        "packet_type": envelope.packet_type.value,
-        "action": envelope.action.value,
-        "payload": envelope.payload,
-        "tenant": json.loads(envelope.tenant.model_dump_json()),
-        "address": json.loads(envelope.address.model_dump_json()),
-    },
-    sort_keys=True,
-    separators=(",", ":"),
-    default=str,
-)
-content_hash = hashlib.sha256(hash_input.encode("utf-8")).hexdigest()
+from constellation_node_sdk.transport.hashing import canonical_json
+
+payload_hash = hashlib.sha256(canonical_json(packet.payload)).hexdigest()
+transport_hash = hashlib.sha256(
+    canonical_json(
+        {
+            "header": packet.header,
+            "address": packet.address,
+            "tenant": packet.tenant,
+            "payload": packet.payload,
+            "governance": packet.governance,
+            "delegation_chain": packet.delegation_chain,
+            "lineage": packet.lineage,
+            "attachments": packet.attachments,
+            "provenance": packet.provenance,
+            "payload_hash": packet.security.payload_hash,
+        }
+    )
+).hexdigest()
 ```
 
-`PacketEnvelope.verify_integrity()` recomputes it, and `PacketEnvelope.from_wire()`
-raises `ValueError` when it does not match (RU-092), so a tampered or forged
-packet is rejected at deserialization.
+`hop_trace` and the signature fields are outside `transport_hash`, which is why
+`with_hop()` keeps an existing signature valid. `TransportPacket` re-checks both hashes
+on every construction and validation, and raises `TransportIntegrityError` on a
+mismatch, so a tampered or forged packet is rejected at deserialization.
 
-This is the legacy `PacketEnvelope` hash. It is not what `packet_store` persists:
-for SDK `TransportPacket`s the `packet_store.content_hash` column holds
-`security.transport_hash` (RU-078, `PACKET_STORE_PACKET_IDENTITY_DEDUP_ENABLED`;
-`security.payload_hash` with that flag off) — see `docs/FEATURE_GATES.md` §7.
-
+`packet_store` persists `security.transport_hash` in its `content_hash` column
+(UNIQUE; RU-078, `PACKET_STORE_PACKET_IDENTITY_DEDUP_ENABLED`; `security.payload_hash`
+with that flag off) — see `docs/FEATURE_GATES.md` §7.
 
 ## WRONG Field Names (agents generate these — they're all wrong)
 
 ```python
-packetid  # WRONG → packet_id
-packettype  # WRONG → packet_type
-contentHash  # WRONG → content_hash
-threadId  # WRONG → thread_id
-traceId  # WRONG → trace_id
-parentIds  # WRONG → parent_ids (inside PacketLineage)
-sourceNode  # WRONG → source_node (inside PacketAddress)
-onBehalfOf  # WRONG → on_behalf_of (inside TenantContext)
-```
-
+packetid  # WRONG → header.packet_id
+packet.packet_id  # WRONG → packet.header.packet_id
+packettype  # WRONG → header.packet_type
+contentHash  # WRONG → security.transport_hash (or security.payload_hash)
+content_hash  # WRONG on a packet → security.transport_hash (content_hash is the packet_store column)
+traceId  # WRONG → header.trace_id
+parent_ids  # WRONG → lineage.parent_id (single parent)
+sourceNode  # WRONG → address.source_node
+onBehalfOf  # WRONG → tenant.on_behalf_of
 ```
 
 ## The Only Data Container (CONTRACT-06)
 
-Every inter-service payload is a `PacketEnvelope`. The boundary functions are the only
+Every inter-service payload is a `TransportPacket`. The boundary functions are the only
 sanctioned way in and out:
 
 ```python
@@ -216,9 +243,9 @@ from engine.packet.chassis_contract import deflate_egress, inflate_ingress
 - `inflate_ingress()` at boundary **entry**
 - `deflate_egress()` at boundary **exit**
 - Engine code **between** boundaries works with typed dicts and Pydantic models, never
-  raw envelopes
+  raw packets
 
-`packet_type` values are lowercase (`PKT-001`). Persistence goes through the memory
-substrate — direct `INSERT INTO packetstore` or `INSERT INTO memory_embeddings` from
-engine code is banned (`MEM-001`, `MEM-002`); see
+`packet_type` values are lowercase (`PKT-001`). Persistence goes through
+`engine/packet/packet_store.py` — direct `INSERT INTO packetstore` or
+`INSERT INTO memory_embeddings` from engine code is banned (`MEM-001`, `MEM-002`); see
 [MEMORY_SUBSTRATE_ACCESS.md](MEMORY_SUBSTRATE_ACCESS.md).
