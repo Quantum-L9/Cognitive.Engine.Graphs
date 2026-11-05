@@ -76,6 +76,14 @@ def test_traversal_gate_parity_respects_existing_flags(
         assert validate_spec(path)[1] == 0
 
 
+def test_legacy_load_accepts_symlinked_pack_root(tmp_path: Path) -> None:
+    source(tmp_path / "real", draft())
+    linked = tmp_path / "linked"
+    linked.symlink_to(tmp_path / "real", target_is_directory=True)
+    loaded = owner.DomainPackLoader(str(linked)).load_domain("acme")
+    assert loaded.domain.id == "acme"
+
+
 def test_approval_defaults_are_off() -> None:
     assert Settings(_env_file=None).domain_pack_receipts_enabled is False
     assert Settings(_env_file=None).domain_production_stage_required is False

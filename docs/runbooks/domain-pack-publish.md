@@ -6,11 +6,12 @@ This mechanism does not authorize a release. It performs no deployment, live pro
 
 `engine.config.loader.validate_native_bytes(data, tenant_id=None, *, complete=False, require_reviewed=False)` is the shared admission surface. `validate_native_file(path, tenant_id=None, *, complete=False, require_reviewed=False)` performs one secure, bounded file read and calls it. `DomainPackLoader` and `tools/validate_domain.py` delegate to this owner rather than independently checking aggregate scoring weights or warning-only traversal validation.
 
-Default CLI admission follows the same existing feature flags and withholding policy as the legacy loader, including dormant packs, unconsumed gates, and opt-in traversal/scoring checks. Folder-shaped `spec.yaml` inputs use the parent directory as the expected tenant; arbitrary draft filenames derive identity from `domain.id`, or an operator can pass `--tenant-id`. `--strict` remains a compatibility option; the owner has no independent warning-only verdict. The CLI returns exit 0 for admitted or 1 for refused, with JSON `results`, `exit_code`, and `spec_path` under `--json`.
+The CLI entry point always requests authoring validation (`authoring=True`), the policy in `docs/contracts/NATIVE_AUTHORING_VALIDATION.md`. Default authoring checks cross-references, the global weight ceiling, gate compilation, traversal warnings, and prohibited factors. A clean spec exits 0, warnings-only input exits 2, and any failure exits 1. `--strict` keeps that authoring policy and escalates warnings to exit 1. `--complete` and `--receipt` select native operator admission instead of the authoring policy. Folder-shaped `spec.yaml` inputs use the parent directory as the expected tenant; arbitrary draft filenames derive identity from `domain.id`, or an operator can pass `--tenant-id`. JSON output includes `results`, `exit_code`, and `spec_path`.
 
 ```bash
 .venv/bin/python tools/validate_domain.py domains/plasticos/spec.yaml --complete --json
 .venv/bin/python tools/validate_domain.py /operator/input/candidate.yaml \
+  --root /operator/input \
   --tenant-id acme --complete --require-reviewed --json
 ```
 

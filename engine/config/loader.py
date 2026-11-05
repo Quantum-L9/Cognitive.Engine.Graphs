@@ -949,7 +949,10 @@ class DomainPackLoader:
             raise DomainNotFoundError(f"Invalid domain path: {domain_id!r} resolves outside base directory") from exc
         if not candidate.exists():
             raise DomainNotFoundError(f"Domain spec not found: {candidate}")
-        return raw_path
+        # Receipt mode never reaches this helper. Legacy loads must keep the
+        # resolved path so a symlinked release root still opens; read_native_file
+        # rejects every symlink component on the unresolved path.
+        return candidate
 
     def _load_and_validate(self, path: Path, domain_id: str) -> DomainSpec:
         """Delegate schema and actual admission to the shared native owner."""
