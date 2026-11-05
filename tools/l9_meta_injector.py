@@ -1207,7 +1207,17 @@ def inject_meta(content: str, meta: FileMeta, engine: str) -> str:
         # Only inject _l9_meta into objects, not arrays (arrays would break structure)
         if not isinstance(data, dict):
             return content  # Skip arrays - can't inject meta without breaking structure
-        data["_l9_meta"] = format_json_meta(meta, engine)
+        expected = format_json_meta(meta, engine)
+        current = data.get("_l9_meta")
+        if (
+            next(iter(data), None) == "_l9_meta"
+            and isinstance(current, dict)
+            and list(current.items()) == list(expected.items())
+        ):
+            # The header is correct and first. Layout belongs to the JSON formatter
+            # (Biome, biome.json), so a correct file is left byte-for-byte as is.
+            return content
+        data["_l9_meta"] = expected
         ordered = {"_l9_meta": data.pop("_l9_meta")}
         ordered.update(data)
         return json.dumps(ordered, indent=2) + "\n"
