@@ -1395,6 +1395,10 @@ EXCLUDED_PATTERNS: dict[str, str] = {
         "generated: rewritten on every run by tools/audit_engine.py (write_report), "
         "tools/spec_extract.py and tools/audit_harness.py, which emit no header"
     ),
+    "reports/end-session/**": (
+        "generated: session and governance handoff reports written on every publish by "
+        "the governance post-publish hook, which emits no header"
+    ),
     "chassis/Dockerfile.chassis": (
         'protected infrastructure file (Dockerfile*); its header declares engine: "*" for the '
         "engine-agnostic chassis image, which this repo's engine-scoped v1 check cannot express"
