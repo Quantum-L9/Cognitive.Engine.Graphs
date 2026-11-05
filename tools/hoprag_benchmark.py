@@ -299,7 +299,14 @@ def main(argv: list[str] | None = None) -> int:
     # Run benchmark
     result = run_benchmark(ground_truth, predictions)
 
-    # Output results
+    # Output results. Resolve the file itself so a summary.json symlink
+    # inside an allowed directory cannot redirect the write outside --root.
+    output_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        summary_path = resolve_under_root(output_dir / "summary.json", root, option="summary.json")
+    except PathPolicyError as exc:
+        parser.error(str(exc))
+
     summary = {
         "mean_precision": round(result.mean_precision, 4),
         "mean_recall": round(result.mean_recall, 4),
@@ -309,7 +316,7 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     try:
-        write_text_no_follow(output_dir, "summary.json", json.dumps(summary, indent=2))
+        write_text_no_follow(summary_path.parent, summary_path.name, json.dumps(summary, indent=2))
     except PathPolicyError as exc:
         parser.error(str(exc))
     except OSError as exc:

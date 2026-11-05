@@ -46,12 +46,12 @@
 
   "forwardPorts": [8000, 7474, 7687, 6379, 3000, 9090, 16686],
   "portsAttributes": {
-    "8000": {"label": "FastAPI"},
-    "7474": {"label": "Neo4j Browser"},
-    "6379": {"label": "Redis"},
-    "3000": {"label": "Grafana"},
-    "9090": {"label": "Prometheus"},
-    "16686": {"label": "Jaeger UI"}
+    "8000": { "label": "FastAPI" },
+    "7474": { "label": "Neo4j Browser" },
+    "6379": { "label": "Redis" },
+    "3000": { "label": "Grafana" },
+    "9090": { "label": "Prometheus" },
+    "16686": { "label": "Jaeger UI" }
   },
 
   "postCreateCommand": "bash tools/deps/install_locked.sh full && pre-commit install",
