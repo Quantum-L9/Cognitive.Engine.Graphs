@@ -212,20 +212,40 @@ def test_every_native_path_component_rejects_symlinks(
 
 
 def test_atomic_concurrent_readers_observe_complete_revisions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import threading
     from concurrent.futures import ThreadPoolExecutor
+
+    import tools.publish_domain_pack as publisher
 
     publish(tmp_path)
     monkeypatch.setattr(owner.settings, "domain_pack_receipts_enabled", True)
     loader = owner.DomainPackLoader(str(tmp_path / "store"))
+    switch_entered = threading.Event()
+    reader_during_switch = threading.Event()
+    real_replace = publisher.os.replace
 
-    def read_many() -> set[str]:
-        return {loader.load_domain("acme").domain.version for _ in range(25)}
+    def coordinated_replace(src: str | Path, dst: str | Path) -> None:
+        if Path(dst).name == "current.json":
+            switch_entered.set()
+            if not reader_during_switch.wait(timeout=5):
+                raise TimeoutError("no reader overlapped the current.json switch")
+        real_replace(src, dst)
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        reads = [executor.submit(read_many) for _ in range(2)]
-        publish(tmp_path, draft("1.1.0-reviewed"))
-        observed = set().union(*(result.result() for result in reads))
-    assert observed <= {"1.0.0-reviewed", "1.1.0-reviewed"}
+    monkeypatch.setattr(publisher.os, "replace", coordinated_replace)
+
+    def read_during_switch() -> set[str]:
+        if not switch_entered.wait(timeout=5):
+            raise TimeoutError("publisher did not enter the pointer switch")
+        version = loader.load_domain("acme").domain.version
+        reader_during_switch.set()
+        return {version}
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        reader = executor.submit(read_during_switch)
+        published = executor.submit(lambda: publish(tmp_path, draft("1.1.0-reviewed")))
+        observed = reader.result(timeout=10)
+        published.result(timeout=10)
+    assert observed == {"1.0.0-reviewed"}
     assert loader.load_domain("acme").domain.version == "1.1.0-reviewed"
 
 
