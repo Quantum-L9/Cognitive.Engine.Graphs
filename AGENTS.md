@@ -22,9 +22,13 @@ Cross-tool agent instructions for the CEG repository. Read by Claude Code, Codex
 ## Commands
 
 ```bash
-make setup              # Install deps, pre-commit hooks, verify Neo4j
+make setup              # Create .venv; install requirements.txt + -dev + -ci
+make validate           # Action refs, contract wiring + scan, payload compiler, C-18 headers
+make check              # ruff check + ruff format --check + mypy engine/ + cypher-lint (no autofix)
+make test               # Unit suite (pytest -m unit) — no Docker, no Neo4j
+make test-docker        # Full pytest suite inside the api container (the pre-V2 `make test`)
+make check-fix          # Autofix lint + types + unit tests (the pre-V2 `make check`)
 make dev                # docker-compose (app + Neo4j + Postgres)
-make test               # Full pytest suite (unit + integration + compliance)
 make test-unit          # Gate compilation, scoring math, parameter resolution
 make test-integration   # testcontainers-neo4j full pipeline
 make lint               # ruff check + mypy
@@ -131,6 +135,23 @@ tools/                   # contract_scanner.py, verify_contracts.py, validate_do
 | `docs/CI_PIPELINE.md` | 7 CI phases, 15 pre-commit hooks, blocking vs advisory | CI failure diagnosis |
 | `docs/CI_CONSTELLATION_BOUNDARY.md` | What's wired (`l9-ci-core`/`l9-ci-sdk`) vs. not (`l9-harness`/`l9-assurance`); extend-don't-replace rule for `audit.yml` | Before wiring any Quantum-L9 constellation repo, or touching `tools/audit_harness.py` / `.github/workflows/audit.yml` |
 | `.claude/rules/contracts.md` | 24 contracts + enforcement matrix (automated vs manual) | Contract uncertainty |
+
+## Repository execution contract (Core V2, make-v1)
+
+`.l9/repo-workflow.json` declares the Quantum-L9 Core repository execution
+contract `l9.repo-execution/v2` with facade `make-v1`. The required org check
+`Analyze (central Core)` validates it, compares the root `Makefile`
+byte-for-byte with Core's `tools/l9_repo/facades/make-v1.mk`, checks the
+`Repo.mk` ABI, then runs `make setup`, `make validate`, `make check`,
+`make test` in order and stops at the first failure.
+
+- `Makefile` is Core-owned and generated: never edit it, never add an L9_META
+  header to it. Both it and `.l9/repo-workflow.json` are in
+  `tools/l9_meta_injector.py` `EXCLUDED_PATTERNS` with the reason.
+- `Repo.mk` is repository-owned: every recipe lives there. It implements the
+  `repo-setup` / `repo-validate` / `repo-check` / `repo-test` leaves and must
+  not define `help`, `setup`, `validate`, `check` or `test`.
+- Each leaf must run on a plain CI runner, so none may need Docker or Neo4j.
 
 <!-- BEGIN L9 FORMATTER OWNERSHIP (generated — do not edit) -->
 
