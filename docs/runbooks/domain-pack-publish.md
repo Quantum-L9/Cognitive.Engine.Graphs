@@ -1,3 +1,13 @@
+<!-- L9_META
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [docs, runbooks]
+tags: [domain-pack, native-publication, runbook]
+owner: engine-team
+status: active
+/L9_META -->
+
 # Native CEG domain-pack publication (offline operator workflow)
 
 This mechanism does not authorize a release. It performs no deployment, live promotion, graph writes, Gate action, compiler call, network operation, or approval discovery. A trusted operator must separately authorize the reviewer, external approval record, store permissions, and read-only runtime delivery. CEG and EIE retain distinct native specs and independent digests; a cross-engine compatibility record is a separate operator responsibility.

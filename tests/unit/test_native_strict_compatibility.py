@@ -1,4 +1,15 @@
-"""F-001 authoring CLI compatibility; native runtime admission remains distinct."""
+"""
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [test, unit, native-authoring, predecessor-parity]
+owner: engine-team
+status: active
+--- /L9_META ---
+
+F-001 authoring CLI compatibility; native runtime admission remains distinct."""
 
 # ruff: noqa: S603 — only the current interpreter and repo/pinned CLIs are executed.
 
@@ -7,7 +18,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -23,6 +33,9 @@ from tools.validate_domain import validate_spec
 pytestmark = pytest.mark.unit
 REPO = Path(__file__).resolve().parents[2]
 PINNED_REVISION = "f8d933d83a11244a2ada79c7f0d0dea74fbbe6ce"
+PINNED_BLOB_SHA1 = "52a7f503431dbebe8dfa32ad46552b0ec628b6d7"
+PINNED_SOURCE_SHA256 = "3587b3f3dd9997bfe56bab323d0d7332b222796f39ac9842d4483ad76bde550f"
+PINNED_GOLDEN = REPO / "tests/fixtures/native_authoring_predecessor_f8d933.json"
 
 
 def _source(tmp_path: Path, case: str = "good") -> Path:
@@ -135,17 +148,21 @@ def test_actual_authoring_cli_failures_cannot_use_runtime_bypasses(
 def test_actual_fixture_cli_matches_pinned_default_and_strict_verdicts(
     tmp_path: Path, tenant: str, expected: int, flags: tuple[str, ...]
 ) -> None:
-    git = shutil.which("git")
-    assert git is not None
-    pinned = subprocess.run(
-        [git, "show", f"{PINNED_REVISION}:tools/validate_domain.py"],
-        cwd=REPO,
-        capture_output=True,
-        text=True,
-        check=True,
+    # Hosted CI checks out shallow (depth 1), so the pinned predecessor is read
+    # from a hash-bound golden instead of `git show` on a historical object.
+    golden = json.loads(PINNED_GOLDEN.read_text(encoding="utf-8"))
+    assert golden["schema"] == "ceg.native-authoring-predecessor/v1"
+    pinned = golden["source"]
+    assert pinned["revision"] == PINNED_REVISION
+    assert pinned["path"] == "tools/validate_domain.py"
+    assert pinned["git_blob_sha1"] == PINNED_BLOB_SHA1
+    pinned_data = pinned["content"].encode("utf-8")
+    assert hashlib.sha256(pinned_data).hexdigest() == pinned["sha256"] == PINNED_SOURCE_SHA256
+    assert hashlib.sha1(b"blob %d\0" % len(pinned_data) + pinned_data, usedforsecurity=False).hexdigest() == (
+        PINNED_BLOB_SHA1
     )
     script = tmp_path / "pinned-validate.py"
-    script.write_text(pinned.stdout, encoding="utf-8")
+    script.write_bytes(pinned_data)
     path = REPO / "domains" / tenant / "spec.yaml"
     before = hashlib.sha256(path.read_bytes()).hexdigest()
     pinned_code, pinned_body = _cli(path, *flags, script=script)

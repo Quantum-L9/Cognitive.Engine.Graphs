@@ -1,4 +1,15 @@
-"""The offline CLI consumes the same CEG-owned receipt contract as the loader."""
+"""
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [test, unit, native-domain, receipt, cli]
+owner: engine-team
+status: active
+--- /L9_META ---
+
+The offline CLI consumes the same CEG-owned receipt contract as the loader."""
 
 from __future__ import annotations
 
