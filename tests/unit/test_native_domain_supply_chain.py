@@ -18,10 +18,12 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 from engine.config import loader as owner
 from engine.config.settings import Settings
 from tests.unit.test_domain_pack_loader import _minimal_spec_yaml
+from tools.validate_domain import validate_spec
 
 pytestmark = pytest.mark.unit
 
@@ -64,6 +66,51 @@ def receipt_layout(tmp_path: Path) -> tuple[Path, str]:
     (revision / "receipt.json").write_text(json.dumps(receipt.model_dump()))
     (root / "acme" / "current.json").write_text(json.dumps(pointer.model_dump()))
     return root, digest
+
+
+@pytest.mark.parametrize("data", [b"[bad", b"- item", b"\xff", b"!!python/object:os.system {}", b"domain: {}"])
+def test_hostile_yaml_cli_fails_without_traceback(tmp_path: Path, data: bytes) -> None:
+    path = source(tmp_path, data)
+    results, code = validate_spec(path)
+    assert code == 1
+    assert results[0]["status"] == "FAIL"
+    with pytest.raises((owner.DomainSpecError, owner.DomainNotFoundError)):
+        owner.DomainPackLoader(str(tmp_path)).load_domain("acme")
+
+
+def test_cli_loader_same_withholding_reason(tmp_path: Path) -> None:
+    path = source(tmp_path, draft().replace(b"name: acme", b"name: acme\n  activation: dormant"))
+    with pytest.raises(owner.DomainNotFoundError) as err:
+        owner.DomainPackLoader(str(tmp_path)).load_domain("acme")
+    results, code = validate_spec(path)
+    assert code == 1
+    assert results[0]["message"] == str(err.value)
+
+
+def test_cli_uses_per_direction_weight_semantics(tmp_path: Path) -> None:
+    # PlasticOS is a multi-direction fixture; summing all directions is incorrect.
+    path = REPO / "domains" / "plasticos" / "spec.yaml"
+    assert owner.DomainPackLoader(str(REPO / "domains")).load_domain("plasticos").domain.version == "1.3.0"
+    assert validate_spec(path)[1] == 0
+
+
+@pytest.mark.parametrize("full", [False, True])
+def test_traversal_gate_parity_respects_existing_flags(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, full: bool
+) -> None:
+    data = yaml.safe_load(draft())
+    data["traversal"]["steps"] = [{"pattern": "(candidate)-[:MISSING]->(x:Thing)", "matchdirections": ["d1"]}]
+    path = source(tmp_path, yaml.safe_dump(data).encode())
+    monkeypatch.setattr(owner.settings, "admission_checks_full_match", full)
+    try:
+        owner.DomainPackLoader(str(tmp_path)).load_domain("acme")
+    except (owner.DomainSpecError, owner.DomainNotFoundError) as err:
+        reason = str(err)
+        results, code = validate_spec(path)
+        assert code == 1
+        assert results[0]["message"] == reason
+    else:
+        assert validate_spec(path)[1] == 0
 
 
 def test_approval_defaults_are_off() -> None:
@@ -130,6 +177,11 @@ def test_receipt_loader_refuses_authorized_symlink_ancestor(
     assert loader._cache == {}
 
 
+def test_duplicate_yaml_keys_rejected(tmp_path: Path) -> None:
+    path = source(tmp_path, draft() + b"gates: []\n")
+    assert validate_spec(path)[1] == 1
+
+
 def test_receipt_mode_requires_explicit_production_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(owner.settings, "domain_pack_receipts_enabled", True)
     monkeypatch.setattr(owner.settings, "l9_env", "prod")
@@ -138,6 +190,44 @@ def test_receipt_mode_requires_explicit_production_root(tmp_path: Path, monkeypa
         owner.DomainPackLoader()
     with pytest.raises(owner.DomainSpecError, match="root"):
         owner.DomainPackLoader(str(tmp_path / "missing"))
+
+
+@pytest.mark.parametrize("version", ["1.0.0", "1.0.0-seed", "1.0.0-proposed", "1.0.0-reviewed", "1.0.0-production"])
+@pytest.mark.parametrize("stage_flag", [False, True])
+def test_runtime_stage_flag_parity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str, stage_flag: bool
+) -> None:
+    path = source(tmp_path, draft(version))
+    monkeypatch.setattr(owner.settings, "l9_env", "prod")
+    monkeypatch.setattr(owner.settings, "domain_production_stage_required", stage_flag)
+    results, code = validate_spec(path)
+    refused = stage_flag and version.rsplit("-", 1)[-1] not in {"reviewed", "production"}
+    if refused:
+        with pytest.raises(owner.DomainSpecError) as err:
+            owner.DomainPackLoader(str(tmp_path)).load_domain("acme")
+        assert code == 1
+        assert results[0]["message"] == str(err.value)
+    else:
+        assert owner.DomainPackLoader(str(tmp_path)).load_domain("acme").domain.version == version
+        assert code == 0
+
+
+def test_native_fixture_aliases_and_all_loader_cli_verdicts_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    loader = owner.DomainPackLoader(str(REPO / "domains"))
+    for path in sorted((REPO / "domains").glob("*/spec.yaml")):
+        before = hashlib.sha256(path.read_bytes()).hexdigest()
+        results, code = validate_spec(path)
+        try:
+            loader.load_domain(path.parent.name)
+        except (owner.DomainNotFoundError, owner.DomainSpecError) as err:
+            message = str(err)
+            assert code == 1
+            assert results[0]["message"] == message
+        else:
+            assert code == 0
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == before
+    monkeypatch.setattr(owner.settings, "dormant_domain_packs_enabled", True)
+    assert loader.load_domain("idea-portfolio").domain.id == "idea-portfolio"
 
 
 def test_secure_file_read_bound_and_nonregular_file(tmp_path: Path) -> None:

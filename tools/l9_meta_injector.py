@@ -891,6 +891,27 @@ FILE_REGISTRY: list[FileMeta] = [
     ),
     # --- Native domain supply chain: documentation, publication, and proofs ---
     FileMeta(
+        "docs/contracts/NATIVE_AUTHORING_VALIDATION.md",
+        "engine-specific",
+        ["docs", "contracts"],
+        ["contracts", "native-authoring", "validation"],
+        "engine-team",
+    ),
+    FileMeta(
+        "docs/runbooks/domain-pack-publish.md",
+        "engine-specific",
+        ["docs", "runbooks"],
+        ["domain-pack", "native-publication", "runbook"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tools/publish_domain_pack.py",
+        "engine-specific",
+        ["tools"],
+        ["domain-pack", "native-publication", "receipt"],
+        "engine-team",
+    ),
+    FileMeta(
         "tests/unit/test_native_domain_supply_chain.py",
         "engine-specific",
         ["test"],
@@ -909,6 +930,34 @@ FILE_REGISTRY: list[FileMeta] = [
         "engine-specific",
         ["test"],
         ["test", "unit", "native-authoring", "predecessor-parity"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/fixtures/native_authoring_predecessor_f8d933.json",
+        "engine-specific",
+        ["test"],
+        ["test", "fixtures", "native-authoring", "predecessor-parity"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/unit/test_native_runbook_cli.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "native-domain", "runbook", "cli"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/unit/test_native_domain_publication.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "native-domain", "publication"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/unit/test_native_domain_integrity.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "native-domain", "integrity"],
         "engine-team",
     ),
 ]
