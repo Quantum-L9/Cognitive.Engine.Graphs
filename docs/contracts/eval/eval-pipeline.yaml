@@ -7,7 +7,6 @@
 # owner: engine-team
 # status: active
 # --- /L9_META ---
-
 contract_id: CEG-EVAL-PIPELINE-v1
 campaign_id: CEG-CONTRACT-COMPLETE-2026-10-30
 baseline:

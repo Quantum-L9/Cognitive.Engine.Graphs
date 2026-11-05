@@ -1332,11 +1332,9 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # RU-008 / CEG-COR-017: admin honours the tenant's spec capabilities like
     # sync/outcomes/enrich do (every admin permission maps to admin:write).
-    # Gated by capability_auth_enabled; a spec without capabilities is unaffected.
-    from engine.config.settings import settings as _admin_cap_settings
-
-    if _admin_cap_settings.capability_auth_enabled:
-        _enforce_capability(tenant, "admin", domain_loader.load_domain(tenant))
+    # Call unconditionally so a production/staging deploy cannot skip the
+    # CAPABILITY_AUTH_ENABLED=False fail-closed branch inside _enforce_capability.
+    _enforce_capability(tenant, "admin", domain_loader.load_domain(tenant))
 
     if subaction == "list_domains":
         return {"domains": domain_loader.list_domains()}

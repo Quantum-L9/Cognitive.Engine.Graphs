@@ -7,7 +7,6 @@
 # owner: engine-team
 # status: active
 # --- /L9_META ---
-
 schema: l9.ceg.api.shared-models/v1
 contract_id: CEG-API-SHARED-MODELS-v1
 campaign_id: CEG-CONTRACT-COMPLETE-2026-10-30

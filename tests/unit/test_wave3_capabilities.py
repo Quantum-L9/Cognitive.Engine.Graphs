@@ -783,9 +783,23 @@ class TestAdminCapabilityEnforcement:
         from engine.handlers import handle_admin
 
         monkeypatch.setattr(settings, "capability_auth_enabled", False)
+        monkeypatch.setattr(settings, "l9_env", "dev")
         _admin_wired([CapabilitySpec(name="admin_ops", actions=["admin:write"], allowed_subjects=["ops-only"])])
         result = await handle_admin("orbital-logistics", {"subaction": "list_domains"})
         assert result["domains"] == ["orbital-logistics"]
+
+    async def test_capability_auth_disabled_is_refused_for_admin_in_production(self, monkeypatch):
+        from engine.config.settings import settings
+        from engine.handlers import ValidationError, handle_admin
+
+        monkeypatch.setattr(settings, "capability_auth_enabled", False)
+        monkeypatch.setattr(settings, "l9_env", "prod")
+        driver = _admin_wired(
+            [CapabilitySpec(name="admin_ops", actions=["admin:write"], allowed_subjects=["orbital-logistics"])]
+        )
+        with pytest.raises(ValidationError, match="permitted only in dev, local, or test"):
+            await handle_admin("orbital-logistics", {"subaction": "init_schema", "domain_id": "orbital-logistics"})
+        driver.execute_query.assert_not_called()
 
 
 @pytest.mark.finding("AUTH-RESOLVE-01")
@@ -833,8 +847,9 @@ class TestDelegatedCapabilityAuthorization:
 
         _admin_wired([self._ADMIN_CAP])
         validator = get_capability_validator()
+        payload = self._payload(source_tenant="forged-source")
         with pytest.raises(ValidationError, match="source_tenant must equal the packet tenant"):
-            await handle_admin(self._CALLER, self._payload(source_tenant="forged-source"))
+            await handle_admin(self._CALLER, payload)
         assert validator.audit_summary()["total_registered"] == 0
 
     async def test_missing_parent_cannot_mint_a_root_capability(self):
@@ -842,8 +857,9 @@ class TestDelegatedCapabilityAuthorization:
 
         _admin_wired([self._ADMIN_CAP])
         validator = get_capability_validator()
+        payload = self._payload()
         with pytest.raises(ValidationError, match="requires an existing active parent grant"):
-            await handle_admin(self._CALLER, self._payload())
+            await handle_admin(self._CALLER, payload)
         assert validator.audit_summary()["total_registered"] == 0
 
     async def test_registered_parent_can_delegate_a_strict_subset_to_target(self):
@@ -869,8 +885,9 @@ class TestDelegatedCapabilityAuthorization:
         from engine.handlers import ValidationError, handle_admin
 
         _admin_wired([self._ADMIN_CAP])
+        payload = self._payload(expires_in_seconds=-1)
         with pytest.raises(ValidationError, match="non-negative number"):
-            await handle_admin(self._CALLER, self._payload(expires_in_seconds=-1))
+            await handle_admin(self._CALLER, payload)
 
 
 class TestCapabilityRecordBinding:
