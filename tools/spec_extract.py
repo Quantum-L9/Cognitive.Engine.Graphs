@@ -46,7 +46,13 @@ REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from tools.path_policy import PathPolicyError, resolve_existing_file_under_root, resolve_root, resolve_under_root
+from tools.path_policy import (
+    PathPolicyError,
+    resolve_existing_file_under_root,
+    resolve_root,
+    resolve_under_root,
+    write_text_no_follow,
+)
 
 try:
     import yaml
@@ -521,14 +527,11 @@ def scan_codebase(root: Path, features: list[SpecFeature]) -> None:
 
 
 def write_checklist(out_dir: Path, features: list[SpecFeature]) -> None:
-    out_dir.mkdir(parents=True, exist_ok=True)
     data = [asdict(f) for f in features]
-    (out_dir / "spec_checklist.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+    write_text_no_follow(out_dir, "spec_checklist.json", json.dumps(data, indent=2))
 
 
 def write_coverage_matrix(out_dir: Path, features: list[SpecFeature]) -> None:
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     by_category: dict[str, dict[str, int]] = {}
     for f in features:
         cat = f.category
@@ -543,11 +546,10 @@ def write_coverage_matrix(out_dir: Path, features: list[SpecFeature]) -> None:
             totals[k] += cat_data[k]
 
     matrix = {"categories": by_category, "totals": totals, "generated_at": datetime.now(UTC).isoformat()}
-    (out_dir / COVERAGE_MATRIX_JSON).write_text(json.dumps(matrix, indent=2), encoding="utf-8")
+    write_text_no_follow(out_dir, COVERAGE_MATRIX_JSON, json.dumps(matrix, indent=2))
 
 
 def write_coverage_report(out_dir: Path, features: list[SpecFeature], matrix: dict) -> None:
-    out_dir.mkdir(parents=True, exist_ok=True)
     lines: list[str] = []
     lines.append("# L9 Spec Coverage Report")
     lines.append(f"\n- Generated: {datetime.now(UTC).isoformat()}")
@@ -589,7 +591,7 @@ def write_coverage_report(out_dir: Path, features: list[SpecFeature], matrix: di
                 lines.append("- **No code references found**")
             lines.append("")
 
-    (out_dir / "coverage_report.md").write_text("\n".join(lines), encoding="utf-8")
+    write_text_no_follow(out_dir, "coverage_report.md", "\n".join(lines))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -656,11 +658,16 @@ def main(argv: list[str] | None = None) -> int:
 
     scan_codebase(root, features)
 
-    write_checklist(out_dir, features)
-    write_coverage_matrix(out_dir, features)
-
-    matrix_data = json.loads((out_dir / COVERAGE_MATRIX_JSON).read_text())
-    write_coverage_report(out_dir, features, matrix_data)
+    try:
+        write_checklist(out_dir, features)
+        write_coverage_matrix(out_dir, features)
+        matrix_data = json.loads((out_dir / COVERAGE_MATRIX_JSON).read_text())
+        write_coverage_report(out_dir, features, matrix_data)
+    except PathPolicyError as exc:
+        parser.error(str(exc))
+    except OSError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     totals = matrix_data["totals"]
     print(
