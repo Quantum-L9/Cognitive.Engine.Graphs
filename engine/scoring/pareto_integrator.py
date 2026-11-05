@@ -127,7 +127,10 @@ def build_pareto_candidates(
                 # Check inside dimension_scores sub-dict
                 ds = record.get("dimension_scores", {})
                 if isinstance(ds, dict) and dim in ds:
-                    dim_scores[dim] = float(ds[dim])
+                    try:
+                        dim_scores[dim] = float(ds[dim])
+                    except (TypeError, ValueError):
+                        dim_scores[dim] = 0.0
                 else:
                     dim_scores[dim] = 0.0
 
@@ -171,9 +174,11 @@ def apply_constraint_penalties(
 
         for constraint in constraints:
             dim = constraint.get("dimension", "")
-            threshold = float(constraint.get("threshold", 0.0))
+            # threshold / penalty come from ArbitrationConstraintSpec (pydantic float,
+            # ge=0.0, le=1.0), copied verbatim by handle_match, the only caller.
+            threshold = float(constraint.get("threshold", 0.0))  # nosemgrep: semgrep.float-requires-try-except
             is_hard = constraint.get("hard", False)
-            penalty = float(constraint.get("penalty", 0.5))
+            penalty = float(constraint.get("penalty", 0.5))  # nosemgrep: semgrep.float-requires-try-except
 
             if zero_present:
                 # RU-018: dimension_scores[d] -> d -> d_score, presence by `is None`.
@@ -187,7 +192,12 @@ def apply_constraint_penalties(
             if score is None:
                 continue
 
-            score = float(score)
+            # A non-numeric result-row value is treated like an absent one,
+            # as build_pareto_candidates does.
+            try:
+                score = float(score)
+            except (TypeError, ValueError):
+                continue
 
             if score < threshold:
                 if is_hard:

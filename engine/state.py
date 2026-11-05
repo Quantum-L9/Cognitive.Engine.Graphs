@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -222,19 +223,23 @@ class EngineState:
 # ---------------------------------------------------------------------------
 
 _ENGINE_STATE: EngineState | None = None
+_ENGINE_STATE_LOCK = threading.Lock()
 
 
 def get_state() -> EngineState:
     """Return the process-singleton EngineState instance (lazy-created)."""
     global _ENGINE_STATE
     if _ENGINE_STATE is None:
-        _ENGINE_STATE = EngineState()
+        with _ENGINE_STATE_LOCK:
+            if _ENGINE_STATE is None:  # Double-check under the lock
+                _ENGINE_STATE = EngineState()
     return _ENGINE_STATE
 
 
 def _reset_singleton() -> None:
     """Reset the process-singleton for test isolation. Do NOT call in production."""
     global _ENGINE_STATE
-    if _ENGINE_STATE is not None:
-        _ENGINE_STATE.reset()
-    _ENGINE_STATE = None
+    with _ENGINE_STATE_LOCK:
+        if _ENGINE_STATE is not None:
+            _ENGINE_STATE.reset()
+        _ENGINE_STATE = None

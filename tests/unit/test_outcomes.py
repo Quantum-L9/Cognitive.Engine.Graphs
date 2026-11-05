@@ -259,6 +259,44 @@ class TestUnifiedOutcomeSchema:
         assert history[2] == {"dimension_scores": {"revenue": pytest.approx(0.2)}, "was_selected": True}
         assert history[3]["was_selected"] is False
 
+    async def test_discover_weights_skips_non_numeric_dimension_scores(
+        self, feedback_on: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A stored outcome whose dimension score is not numeric is skipped, not a crash."""
+        monkeypatch.setattr(settings, "pareto_weight_discovery_enabled", True)
+        from engine.config.schema import DecisionArbitrationSpec, ParetoConfigSpec, ParetoObjectiveSpec
+
+        arbitration = DecisionArbitrationSpec(
+            enabled=True,
+            pareto_config=ParetoConfigSpec(objectives=[ParetoObjectiveSpec(dimension="revenue")]),
+        )
+        spec = _plasticos().model_copy(update={"decision_arbitration": arbitration})
+        graph = _wire(spec)
+        for i in range(10):
+            await handle_outcomes(
+                "plasticos",
+                {
+                    "match_id": f"m{i}",
+                    "candidate_id": "F1",
+                    "outcome": "success",
+                    "fingerprint": {"dimension_scores": {"revenue": 0.1 * i}, "was_selected": True},
+                },
+            )
+        graph.nodes.append(
+            {
+                "outcome": "success",
+                "candidate_id": "F2",
+                "match_id": "bad",
+                "dimension_scores": json.dumps({"revenue": "n/a"}),
+                "was_selected": True,
+            }
+        )
+        discover = AsyncMock(return_value=[])
+        with patch("engine.scoring.weight_discovery.adaptive_weight_discovery", discover):
+            result = await handle_admin("plasticos", {"subaction": "discover_weights", "domain_id": "plasticos"})
+        assert result["outcome_history_size"] == 10
+        assert len(discover.await_args.kwargs["outcome_history"]) == 10
+
 
 @pytest.mark.unit
 class TestUnifiedOutcomeSchemaOff:

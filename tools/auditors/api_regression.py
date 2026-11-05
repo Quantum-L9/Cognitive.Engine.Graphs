@@ -97,10 +97,10 @@ class APIRegressionAuditor(BaseAuditor):
             if out is not None and out.strip():
                 merge_base = out.strip()
                 break
-        if merge_base is None:  # nosemgrep: singleton-requires-lock
+        if merge_base is None:  # nosemgrep: semgrep.singleton-requires-lock
             return result
         diff = _run_git(["diff", "--name-only", merge_base, "HEAD"], repo_root)
-        if diff is None:  # nosemgrep: singleton-requires-lock
+        if diff is None:  # nosemgrep: semgrep.singleton-requires-lock
             return result
         changed = [f for f in diff.strip().split("\n") if f.endswith(".py") and "/tests/" not in f]
         for rp in changed:
@@ -111,7 +111,7 @@ class APIRegressionAuditor(BaseAuditor):
             else:
                 cur_api = {}  # module deleted on this branch: every base public class is removed
             base = _run_git(["show", f"{merge_base}:{rp}"], repo_root)
-            if base is None:  # nosemgrep: singleton-requires-lock
+            if base is None:  # nosemgrep: semgrep.singleton-requires-lock
                 continue  # file added on this branch: nothing to regress against
             base_api = _extract_public_api(base)
             for cn, bc in base_api.items():

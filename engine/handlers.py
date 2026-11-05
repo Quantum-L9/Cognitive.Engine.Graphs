@@ -371,7 +371,7 @@ def _try_safe_literal(expr_stripped: str, expr_lower: str) -> str | None:
     if expr_lower in ("true", "false", "null"):
         return expr_stripped
     try:
-        float(expr_stripped)  # nosemgrep: float-requires-try-except
+        float(expr_stripped)  # nosemgrep: semgrep.float-requires-try-except
     except ValueError:
         pass
     else:
@@ -854,8 +854,9 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             def _pareto_dims(row: dict[str, Any]) -> dict[str, float]:
                 projected = row.get("dimension_scores") if project_dimensions else None
                 source = projected if isinstance(projected, dict) else row
+                # Only int | float values pass the isinstance filter: float() cannot raise.
                 return {
-                    k: float(v)
+                    k: float(v)  # nosemgrep: semgrep.float-requires-try-except
                     for k, v in source.items()
                     if k not in ("candidate", "score") and isinstance(v, (int, float))
                 }
@@ -2002,9 +2003,15 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                     continue
             if not isinstance(ds, dict):
                 continue
+            # A stored outcome with a non-numeric dimension score is malformed;
+            # skip it like the unparseable-JSON case above.
+            try:
+                dimension_scores = {k: float(v) for k, v in ds.items()}
+            except (ValueError, TypeError):
+                continue
             outcome_history.append(
                 {
-                    "dimension_scores": {k: float(v) for k, v in ds.items()},
+                    "dimension_scores": dimension_scores,
                     "was_selected": bool(rec.get("was_selected", False)),
                 }
             )
