@@ -48,13 +48,43 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _gate_ingress_violation(body: dict[str, Any], gate_node: str) -> str | None:
+# `production` is listed although the pinned SDK refuses it: docker-compose.prod.yml
+# sets L9_ENVIRONMENT=production, and the binding must not depend on L9_ENV=prod too.
+_TRUST_REQUIRED_ENVIRONMENTS = frozenset({"staging", "prod", "production"})
+_SYMMETRIC_ALGORITHM = "hmac-sha256"
+
+
+def _gate_ingress_violation(
+    body: dict[str, Any],
+    gate_node: str,
+    *,
+    gate_key_ids: frozenset[str] | None = None,
+    refuse_symmetric: bool = False,
+) -> str | None:
     """Return a rejection reason if the packet is not Gate-authored, else None.
 
     NodeRuntimeConfig has no gate-only ingress field, so this is enforced here
     rather than by the SDK. Checks mirror the Gate's own dispatch-authority
     rules: origin_kind == "gate", resolved_by_gate, and source_node == gate.
+
+    Those three are claims the signer chooses. GATE-KEY-01: with
+    ``gate_key_ids`` the packet must also be signed under a Gate key id, so a
+    peer whose key CEG verifies cannot claim Gate and hand a handler any
+    tenant. The SDK then verifies the signature under that id. With
+    ``refuse_symmetric`` an hmac-sha256 signature is refused: every verifier
+    of a shared HMAC key can mint it, so it cannot prove Gate wrote the packet.
     """
+    if gate_key_ids is not None:
+        security = body.get("security")
+        if not isinstance(security, dict):
+            return "packet must carry security"
+        key_id = str(security.get("signing_key_id") or "").strip()
+        if key_id not in gate_key_ids:
+            return f"security.signing_key_id {key_id!r} is not a Gate signing key"
+        algorithm = str(security.get("signature_algorithm") or "").strip().lower()
+        if refuse_symmetric and algorithm == _SYMMETRIC_ALGORITHM:
+            return f"{_SYMMETRIC_ALGORITHM} cannot prove Gate authorship here; Gate must sign with ed25519"
+
     provenance = body.get("provenance")
     address = body.get("address")
     if not isinstance(provenance, dict) or not isinstance(address, dict):
@@ -74,7 +104,13 @@ def _gate_ingress_violation(body: dict[str, Any], gate_node: str) -> str | None:
     return None
 
 
-def _install_gate_only_ingress(app: FastAPI, *, gate_node: str) -> None:
+def _install_gate_only_ingress(
+    app: FastAPI,
+    *,
+    gate_node: str,
+    gate_key_ids: frozenset[str] | None = None,
+    refuse_symmetric: bool = False,
+) -> None:
     """Reject non-Gate-authored packets on /v1/execute before the SDK sees them."""
 
     @app.middleware("http")
@@ -105,7 +141,12 @@ def _install_gate_only_ingress(app: FastAPI, *, gate_node: str) -> None:
         if not isinstance(body, dict):
             return await call_next(request)
 
-        reason = _gate_ingress_violation(body, gate_node)
+        reason = _gate_ingress_violation(
+            body,
+            gate_node,
+            gate_key_ids=gate_key_ids,
+            refuse_symmetric=refuse_symmetric,
+        )
         if reason is not None:
             logger.warning("Gate-only ingress rejected packet: %s", reason)
             return JSONResponse(
@@ -114,6 +155,43 @@ def _install_gate_only_ingress(app: FastAPI, *, gate_node: str) -> None:
             )
 
         return await call_next(request)
+
+
+def _trust_required_environment() -> bool:
+    """True for SDK staging/prod/production (``L9_ENVIRONMENT``) or engine prod (``L9_ENV``)."""
+    from engine.config.settings import settings
+
+    sdk_environment = os.environ.get("L9_ENVIRONMENT", "local").strip().lower()
+    return sdk_environment in _TRUST_REQUIRED_ENVIRONMENTS or settings.l9_env == "prod"
+
+
+def _gate_key_binding() -> tuple[frozenset[str] | None, bool]:
+    """Resolve GATE-KEY-01: the Gate key ids /v1/execute accepts, and the HMAC refusal.
+
+    ``L9_GATE_SIGNING_KEY_IDS`` names the key ids Gate signs with
+    (comma-separated). In staging/prod it is required and hmac-sha256 is
+    refused; startup fails rather than serving an ingress where any verified
+    peer can claim Gate. Elsewhere an unset list leaves the claim-only check.
+    ``gate_signing_key_binding_enabled`` off restores the claim-only check.
+    """
+    from engine.config.settings import settings
+
+    if not settings.gate_signing_key_binding_enabled:
+        logger.warning("Gate signing key binding DISABLED - /v1/execute trusts packet claims of Gate authorship")
+        return None, False
+    raw = os.environ.get("L9_GATE_SIGNING_KEY_IDS", "")
+    key_ids = frozenset(part.strip() for part in raw.split(",") if part.strip())
+    trust_required = _trust_required_environment()
+    if not key_ids:
+        if trust_required:
+            msg = (
+                "L9_GATE_SIGNING_KEY_IDS is required in staging/prod (GATE-KEY-01): without it any "
+                "peer whose key CEG verifies can claim Gate authorship and choose the tenant"
+            )
+            raise RuntimeError(msg)
+        logger.warning("L9_GATE_SIGNING_KEY_IDS unset - /v1/execute does not bind packets to a Gate key")
+        return None, False
+    return key_ids, trust_required
 
 
 class SdkLifecycleAdapter(SdkLifecycleHook):
@@ -157,7 +235,13 @@ def create_app() -> FastAPI:
 
     if _env_bool("L9_ENFORCE_GATE_ONLY_INGRESS", default=True):
         gate_node = os.environ.get("L9_GATE_NODE_NAME", "gate").strip().lower()
-        _install_gate_only_ingress(app, gate_node=gate_node)
+        gate_key_ids, refuse_symmetric = _gate_key_binding()
+        _install_gate_only_ingress(
+            app,
+            gate_node=gate_node,
+            gate_key_ids=gate_key_ids,
+            refuse_symmetric=refuse_symmetric,
+        )
         logger.info("Gate-only ingress enforced (gate node: %s)", gate_node)
     else:
         logger.warning("Gate-only ingress DISABLED - /v1/execute accepts any packet origin")

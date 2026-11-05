@@ -1024,6 +1024,60 @@ this sync writes, so one `evidence_ref` under two types is not
 `conflicting_evidence`. Off: `evidence_ref` alone. Tests:
 `tests/unit/test_graph_evidence_binding.py`.
 
+## 29. Gate-routed score and Gate key binding (SCORING-GATE-01)
+
+### Gate signing key binding (`gate_signing_key_binding_enabled`, default `True`) — GATE-KEY-01
+
+The SDK verifies an inbound `/v1/execute` signature against any key in
+`L9_VERIFYING_KEYS_JSON`, and the chassis gate-only check compared claims the
+signer chooses (`source_node`, `origin_kind`, `resolved_by_gate`). A peer whose
+key CEG verifies could therefore claim Gate and hand a handler any tenant.
+
+On: `L9_GATE_SIGNING_KEY_IDS` (comma-separated) names the key ids Gate signs
+with, and a packet signed under any other id, or unsigned, is refused with 403
+before the SDK runs it. In staging/prod (`L9_ENVIRONMENT` staging/prod, or
+`L9_ENV=prod`) the list is required — startup fails without it — and an
+`hmac-sha256` signature is refused, because every verifier of a shared HMAC key
+can mint it. Gate must sign with `ed25519` there and CEG must hold only Gate's
+public key under those ids. Elsewhere an unset list keeps the claim-only check
+with a warning. Off: the claim-only check everywhere.
+
+**Operator action:** set `L9_GATE_SIGNING_KEY_IDS` and move Gate to ed25519
+before deploying this build to staging/prod. Tests: `tests/unit/test_node_app.py`
+(GATE-KEY-01 section).
+
+### Remote score (`remote_score_enabled`, default `False`)
+
+`score` is registered (`handle_score_remote`) and advertised, but refused with
+`FeatureNotEnabled` before any spec load or graph read while off. Production
+stays off pending a separate operator approval. On, every one of these still
+holds, each checked before the read:
+
+- `evidence_identity_per_type_enabled` is on (otherwise `FeatureNotEnabled`: a
+  ref-only rank is never served remotely, whatever the flag's default);
+- the tenant passes the allowlist and is a legal database name;
+- the request is `{entity_refs, top_n}` only (server-owned fields refused);
+- the tenant spec grants `score:read` to the tenant by name. A wildcard, another
+  tenant's grant, `match:read`, or no `capabilities` section is refused with
+  `AuthorizationError`, independently of `CAPABILITY_AUTH_ENABLED`;
+- the spec has approved `evidencerelevance` (`-reviewed`/`-production`) and at
+  least one `targetedge` evidence type, otherwise the result is `blocked`.
+
+The binding (`GraphEvidenceBinding`, type-bounded by the spec's declared types)
+is built from the admitted spec and the injected driver; the local
+`handle_score` and the `graph_evidence_priority_v1` algorithm are unchanged.
+Activation also needs `score` in `L9_ALLOWED_ACTIONS`, a Gate that owns `score`
+(Gate refuses a registration advertising an action it does not own), a Gate
+consumer key policy naming `score` and the tenant, GATE-KEY-01 in force, and
+Neo4j Enterprise 5.7+ for the evidence it reads. Tests:
+`tests/unit/test_handle_score.py` (SCORING-GATE-01 section).
+
+### Rollback
+
+`REMOTE_SCORE_ENABLED=false` refuses every remote score immediately.
+`GATE_SIGNING_KEY_BINDING_ENABLED=false` restores the claim-only ingress check
+(not recommended: it reopens tenant injection by any verified peer).
+
 ---
 
 ## Querying Feature Status

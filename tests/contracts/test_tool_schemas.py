@@ -276,7 +276,10 @@ def test_gate_exposure_not_equivalent_to_sdk_handler_registration() -> None:
     spec = yaml.safe_load((REPO / "engine/spec.yaml").read_text())
     advertised = set(spec["node"]["actions"])
     assert {"match", "sync", "outcomes", "resolve"} <= advertised
-    assert {"admin", "enrich", "score"}.isdisjoint(advertised)
+    assert {"admin", "enrich"}.isdisjoint(advertised)
+    # score is Gate-routed since #397 (REMOTE_SCORE_ENABLED, default off) but is
+    # still not an agent tool: no tool schema is published for it.
+    assert "score" in advertised
     assert "health-assess" in advertised
     assert "score" not in {
         x["name"] for x in yaml.safe_load((CONTRACTS_ROOT / "agents/tool-schemas/_index.yaml").read_text())["tools"]
