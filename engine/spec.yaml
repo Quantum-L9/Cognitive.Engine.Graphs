@@ -41,10 +41,17 @@ node:
   #   * `health-assess` is the canonical health route (HEALTH-01, operator
   #     decision 2026-10-22): Gate owns the action name for `ceg`, and it
   #     dispatches only the three health subactions — health is not routed
-  #     through `admin`.
+  #     through `admin`;
+  #   * `score` (SCORING-GATE-01) is the operator/consumer-initiated cohort
+  #     score: Gate owns the name for `ceg` as an operator-only action. CEG's
+  #     handler is the secured adapter (handle_score_remote), default off
+  #     (REMOTE_SCORE_ENABLED=false) and gated on an explicit tenant
+  #     `score:read`. Advertising requires a Gate that owns `score`: a Gate
+  #     without it refuses the whole registration (GATE-OWN-01).
   actions:
     - match
     - sync
     - outcomes
     - resolve
     - health-assess
+    - score

@@ -41,6 +41,7 @@ EXPECTED_ACTIONS = {
     "healthcheck",
     "health-assess",
     "enrich",
+    "score",
 }
 
 

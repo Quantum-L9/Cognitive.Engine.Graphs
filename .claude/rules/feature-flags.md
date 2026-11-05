@@ -80,7 +80,9 @@ were industry-specific and had no caller).
 |------|---------|---------|
 | relationship_sync_enabled | True | `sync` to a `targetedge` endpoint writes typed evidence edges (QM.POC0 002A); requires Neo4j Enterprise 5.7+ for the per-type uniqueness constraint — fails closed otherwise |
 | relationship_sync_audit_on_commit_enabled | True | Relationship sync records its compliance mutation entry only after the write commits |
-| evidence_identity_per_type_enabled | False | Local score dedupes evidence on `(relationship_type, evidence_ref)` instead of `evidence_ref` alone |
+| evidence_identity_per_type_enabled | True | Score dedupes evidence on `(relationship_type, evidence_ref)` instead of `evidence_ref` alone; the remote `score` route refuses it off (SCORING-GATE-01) |
+| remote_score_enabled | False | Gate-routed `score` (`handle_score_remote`); off refuses before any spec load or read. On still needs explicit tenant `score:read`, an admissible spec and typed identity (SCORING-GATE-01, FEATURE_GATES §29) |
+| gate_signing_key_binding_enabled | True | SDK `/v1/execute` accepts a Gate claim only under a key id in `L9_GATE_SIGNING_KEY_IDS` (required in staging/prod, where hmac-sha256 is refused) (GATE-KEY-01); off restores the claim-only check |
 
 ## Scoring Weights (Contract 22: sum ≤ 1.0)
 | Weight | Default | Enforced by |
