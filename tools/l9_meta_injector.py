@@ -889,6 +889,56 @@ FILE_REGISTRY: list[FileMeta] = [
         ["causal", "outcomes", "handlers"],
         "engine-team",
     ),
+    # --- Native domain supply chain: documentation, publication, and proofs ---
+    FileMeta(
+        "docs/contracts/NATIVE_AUTHORING_VALIDATION.md",
+        "engine-specific",
+        ["docs", "contracts"],
+        ["contracts", "native-authoring", "validation"],
+        "engine-team",
+    ),
+    FileMeta(
+        "docs/runbooks/domain-pack-publish.md",
+        "engine-specific",
+        ["docs", "runbooks"],
+        ["domain-pack", "native-publication", "runbook"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tools/publish_domain_pack.py",
+        "engine-specific",
+        ["tools"],
+        ["domain-pack", "native-publication", "receipt"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/unit/test_native_domain_supply_chain.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "native-domain", "supply-chain"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/unit/test_native_receipt_cli.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "native-domain", "receipt", "cli"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/unit/test_native_strict_compatibility.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "native-authoring", "predecessor-parity"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/fixtures/native_authoring_predecessor_f8d933.json",
+        "engine-specific",
+        ["test"],
+        ["test", "fixtures", "native-authoring", "predecessor-parity"],
+        "engine-team",
+    ),
 ]
 
 

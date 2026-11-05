@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Offline operator publication of explicitly reviewed native CEG packs.
+"""
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [tools]
+tags: [domain-pack, native-publication, receipt]
+owner: engine-team
+status: active
+--- /L9_META ---
+
+Offline operator publication of explicitly reviewed native CEG packs.
 
 No approval is generated or inferred. The operator supplies a named reviewer,
 external approval reference and exact reviewed-byte SHA-256. This is an unsigned

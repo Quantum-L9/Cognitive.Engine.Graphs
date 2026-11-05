@@ -1,3 +1,13 @@
+<!-- L9_META
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [docs, contracts]
+tags: [contracts, native-authoring, validation]
+owner: engine-team
+status: active
+/L9_META -->
+
 # Native CEG authoring validation
 
 ## Policy and ownership

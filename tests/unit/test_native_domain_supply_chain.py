@@ -1,4 +1,15 @@
-"""Native owner parity and operator publication contracts (no live promotion)."""
+"""
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [test, unit, native-domain, supply-chain]
+owner: engine-team
+status: active
+--- /L9_META ---
+
+Native owner parity and operator publication contracts (no live promotion)."""
 
 # ruff: noqa: S603 — subprocess tests execute only sys.executable and repository-owned CLIs.
 
