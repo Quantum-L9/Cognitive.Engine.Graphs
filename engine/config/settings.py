@@ -72,6 +72,14 @@ class Settings(BaseSettings):
     # --- Domain Packs ---
     domains_root: Path = Path("./domains")
 
+    # Native operator supply chain: opt-in only, existing fixture layout unchanged.
+    # Receipt mode reads tenant/current.json and verifies the immutable revision
+    # on every load (no cached fallback). In prod it requires an absolute root.
+    domain_pack_receipts_enabled: bool = False
+    # Unsuffixed example versions remain usable unless the operator opts in.
+    # The offline publisher always requires reviewed/production, independent of this.
+    domain_production_stage_required: bool = False
+
     # --- Logging ---
     log_level: str = "INFO"
 

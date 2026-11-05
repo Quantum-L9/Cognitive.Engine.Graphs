@@ -46,7 +46,13 @@ REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from tools.path_policy import PathPolicyError, resolve_existing_file_under_root, resolve_root, resolve_under_root
+from tools.path_policy import (
+    PathPolicyError,
+    resolve_existing_file_under_root,
+    resolve_root,
+    resolve_under_root,
+    write_text_no_follow,
+)
 
 try:
     import yaml
@@ -561,7 +567,8 @@ def _biome_json(value: object, *, width: int = 100) -> str:
 def write_checklist(out_dir: Path, features: list[SpecFeature], root: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     data = [asdict(f) for f in features]
-    _artifact_file(out_dir, "spec_checklist.json", root).write_text(_biome_json(data), encoding="utf-8")
+    _artifact_file(out_dir, "spec_checklist.json", root)
+    write_text_no_follow(out_dir, "spec_checklist.json", _biome_json(data))
 
 
 def write_coverage_matrix(out_dir: Path, features: list[SpecFeature], root: Path) -> None:
@@ -581,7 +588,8 @@ def write_coverage_matrix(out_dir: Path, features: list[SpecFeature], root: Path
             totals[k] += cat_data[k]
 
     matrix = {"categories": by_category, "totals": totals, "generated_at": datetime.now(UTC).isoformat()}
-    _artifact_file(out_dir, COVERAGE_MATRIX_JSON, root).write_text(json.dumps(matrix, indent=2), encoding="utf-8")
+    _artifact_file(out_dir, COVERAGE_MATRIX_JSON, root)
+    write_text_no_follow(out_dir, COVERAGE_MATRIX_JSON, json.dumps(matrix, indent=2))
 
 
 def write_coverage_report(out_dir: Path, features: list[SpecFeature], matrix: dict, root: Path) -> None:
@@ -628,7 +636,8 @@ def write_coverage_report(out_dir: Path, features: list[SpecFeature], matrix: di
                 lines.append("- **No code references found**")
             lines.append("")
 
-    _artifact_file(out_dir, "coverage_report.md", root).write_text("\n".join(lines), encoding="utf-8")
+    _artifact_file(out_dir, "coverage_report.md", root)
+    write_text_no_follow(out_dir, "coverage_report.md", "\n".join(lines))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -703,6 +712,9 @@ def main(argv: list[str] | None = None) -> int:
         write_coverage_report(out_dir, features, matrix_data, root)
     except PathPolicyError as exc:
         parser.error(str(exc))
+    except OSError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     totals = matrix_data["totals"]
     print(

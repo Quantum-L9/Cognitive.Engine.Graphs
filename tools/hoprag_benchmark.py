@@ -40,7 +40,13 @@ REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from tools.path_policy import PathPolicyError, resolve_existing_file_under_root, resolve_root, resolve_under_root
+from tools.path_policy import (
+    PathPolicyError,
+    resolve_existing_file_under_root,
+    resolve_root,
+    resolve_under_root,
+    write_text_no_follow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -309,7 +315,13 @@ def main(argv: list[str] | None = None) -> int:
         "execution_time_s": round(result.execution_time_s, 3),
     }
 
-    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    try:
+        write_text_no_follow(summary_path.parent, summary_path.name, json.dumps(summary, indent=2))
+    except PathPolicyError as exc:
+        parser.error(str(exc))
+    except OSError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     print(f"Benchmark complete: F1={result.mean_f1:.4f}, P={result.mean_precision:.4f}, R={result.mean_recall:.4f}")
     print(f"Results saved to {output_dir}/")

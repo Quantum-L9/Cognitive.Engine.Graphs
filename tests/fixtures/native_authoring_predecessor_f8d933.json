@@ -1,0 +1,163 @@
+{
+  "_l9_meta": {
+    "l9_schema": 1,
+    "origin": "engine-specific",
+    "engine": "graph",
+    "layer": [
+      "test"
+    ],
+    "tags": [
+      "test",
+      "fixtures",
+      "native-authoring",
+      "predecessor-parity"
+    ],
+    "owner": "engine-team",
+    "status": "active"
+  },
+  "schema": "ceg.native-authoring-predecessor/v1",
+  "source": {
+    "revision": "f8d933d83a11244a2ada79c7f0d0dea74fbbe6ce",
+    "path": "tools/validate_domain.py",
+    "git_blob_sha1": "52a7f503431dbebe8dfa32ad46552b0ec628b6d7",
+    "sha256": "3587b3f3dd9997bfe56bab323d0d7332b222796f39ac9842d4483ad76bde550f",
+    "content": "#!/usr/bin/env python3\n\"\"\"\nDomain-spec validation CLI tool (W5-04).\n\nValidates a domain spec YAML against Wave 1 invariants:\n  - W1-01: Cross-reference validation (ontology \u2192 gates \u2192 scoring)\n  - W1-03: Gate compilation checks\n  - W1-04: Traversal pattern safety\n  - W3-02: Capability validation (prohibited factors)\n\nUsage:\n    python tools/validate_domain.py path/to/spec.yaml\n    python tools/validate_domain.py path/to/spec.yaml --strict\n    python tools/validate_domain.py path/to/spec.yaml --json\n\nExit codes:\n    0 \u2014 all checks passed\n    1 \u2014 critical failures\n    2 \u2014 warnings only (no failures)\n\"\"\"\n\nfrom __future__ import annotations\n\nimport argparse\nimport json\nimport sys\nfrom pathlib import Path\n\n# Allow running from repo root\nsys.path.insert(0, str(Path(__file__).resolve().parent.parent))\n\nimport yaml\n\nfrom engine.config.schema import DomainSpec\n\n\ndef _check_cross_references(spec: DomainSpec) -> list[dict]:\n    \"\"\"W1-01: Validate cross-references between spec sections.\"\"\"\n    results = []\n    node_labels = {n.label for n in spec.ontology.nodes}\n    edge_types = {e.type for e in spec.ontology.edges}\n\n    # Check edge from/to references\n    for edge in spec.ontology.edges:\n        if edge.from_ not in node_labels:\n            results.append(\n                {\n                    \"check\": \"W1-01-edge-source\",\n                    \"status\": \"FAIL\",\n                    \"message\": f\"Edge '{edge.type}' source '{edge.from_}' not in ontology nodes\",\n                    \"path\": f\"ontology.edges[type={edge.type}].from\",\n                }\n            )\n        if edge.to not in node_labels:\n            results.append(\n                {\n                    \"check\": \"W1-01-edge-target\",\n                    \"status\": \"FAIL\",\n                    \"message\": f\"Edge '{edge.type}' target '{edge.to}' not in ontology nodes\",\n                    \"path\": f\"ontology.edges[type={edge.type}].to\",\n                }\n            )\n\n    # Check match entity references\n    for candidate in spec.matchentities.candidate:\n        if candidate.label not in node_labels:\n            results.append(\n                {\n                    \"check\": \"W1-01-candidate-label\",\n                    \"status\": \"FAIL\",\n                    \"message\": f\"Candidate label '{candidate.label}' not in ontology\",\n                    \"path\": f\"matchentities.candidate[label={candidate.label}]\",\n                }\n            )\n\n    # Check gate edge references\n    for gate in spec.gates:\n        if gate.edgetype and gate.edgetype not in edge_types:\n            results.append(\n                {\n                    \"check\": \"W1-01-gate-edge\",\n                    \"status\": \"FAIL\",\n                    \"message\": f\"Gate '{gate.name}' references unknown edge type '{gate.edgetype}'\",\n                    \"path\": f\"gates[name={gate.name}].edgetype\",\n                }\n            )\n\n    # Check scoring weight sum\n    if spec.scoring and spec.scoring.dimensions:\n        weight_sum = sum(d.defaultweight for d in spec.scoring.dimensions)\n        if weight_sum > 1.0 + 1e-9:\n            results.append(\n                {\n                    \"check\": \"W1-01-weight-sum\",\n                    \"status\": \"FAIL\",\n                    \"message\": f\"Scoring default weights sum to {weight_sum:.4f}, exceeding 1.0\",\n                    \"path\": \"scoring.dimensions[*].defaultweight\",\n                }\n            )\n\n    if not results:\n        results.append({\"check\": \"W1-01-cross-ref\", \"status\": \"PASS\", \"message\": \"All cross-references valid\"})\n\n    return results\n\n\ndef _check_gate_compilation(spec: DomainSpec) -> list[dict]:\n    \"\"\"W1-03: Validate gate compilation.\"\"\"\n    results = []\n\n    try:\n        from engine.gates.compiler import GateCompiler\n\n        compiler = GateCompiler(spec)\n        directions = spec.queryschema.matchdirections\n        for direction in directions:\n            clause = compiler.compile_all_gates(direction)\n            if clause:\n                results.append(\n                    {\n                        \"check\": \"W1-03-gate-compile\",\n                        \"status\": \"PASS\",\n                        \"message\": f\"Gates compile for direction '{direction}' ({len(clause)} chars)\",\n                    }\n                )\n    except Exception as exc:\n        results.append(\n            {\n                \"check\": \"W1-03-gate-compile\",\n                \"status\": \"FAIL\",\n                \"message\": f\"Gate compilation failed: {exc}\",\n            }\n        )\n\n    if not results:\n        results.append({\"check\": \"W1-03-gate-compile\", \"status\": \"PASS\", \"message\": \"No gates to compile\"})\n\n    return results\n\n\ndef _check_traversal(spec: DomainSpec) -> list[dict]:\n    \"\"\"W1-04: Validate traversal patterns.\"\"\"\n    results = []\n\n    if spec.traversal is None:\n        results.append({\"check\": \"W1-04-traversal\", \"status\": \"PASS\", \"message\": \"No traversal defined\"})\n        return results\n\n    try:\n        from engine.traversal.assembler import TraversalAssembler\n\n        assembler = TraversalAssembler(spec)\n        for direction in spec.queryschema.matchdirections:\n            warnings = assembler.validate_traversal(direction)\n            if warnings:\n                for w in warnings:\n                    results.append({\"check\": \"W1-04-traversal\", \"status\": \"WARN\", \"message\": w})\n            else:\n                results.append(\n                    {\n                        \"check\": \"W1-04-traversal\",\n                        \"status\": \"PASS\",\n                        \"message\": f\"Traversal valid for direction '{direction}'\",\n                    }\n                )\n    except Exception as exc:\n        results.append(\n            {\n                \"check\": \"W1-04-traversal\",\n                \"status\": \"FAIL\",\n                \"message\": f\"Traversal validation failed: {exc}\",\n            }\n        )\n\n    return results\n\n\ndef _check_compliance(spec: DomainSpec) -> list[dict]:\n    \"\"\"W3-02: Validate prohibited factors.\"\"\"\n    results = []\n\n    try:\n        from engine.compliance.prohibited_factors import ProhibitedFactorValidator\n\n        validator = ProhibitedFactorValidator(spec)\n        for gate in spec.gates:\n            validator.validate_gate(gate)\n        results.append(\n            {\n                \"check\": \"W3-02-prohibited-factors\",\n                \"status\": \"PASS\",\n                \"message\": \"No prohibited factors in gates\",\n            }\n        )\n    except Exception as exc:\n        results.append(\n            {\n                \"check\": \"W3-02-prohibited-factors\",\n                \"status\": \"FAIL\",\n                \"message\": f\"Prohibited factor violation: {exc}\",\n            }\n        )\n\n    return results\n\n\ndef validate_spec(spec_path: Path, strict: bool = False) -> tuple[list[dict], int]:\n    \"\"\"Run all validation checks on a domain spec.\n\n    Returns:\n        Tuple of (results, exit_code).\n    \"\"\"\n    # Load and parse YAML\n    raw = spec_path.read_text(encoding=\"utf-8\")\n    data = yaml.safe_load(raw)\n\n    # Validate with Pydantic\n    try:\n        spec = DomainSpec(**data)\n    except Exception as exc:\n        return [{\"check\": \"schema-validation\", \"status\": \"FAIL\", \"message\": f\"Schema validation failed: {exc}\"}], 1\n\n    # Run all checks\n    results: list[dict] = []\n    results.extend(_check_cross_references(spec))\n    results.extend(_check_gate_compilation(spec))\n    results.extend(_check_traversal(spec))\n    results.extend(_check_compliance(spec))\n\n    # Determine exit code\n    has_fail = any(r[\"status\"] == \"FAIL\" for r in results)\n    has_warn = any(r[\"status\"] == \"WARN\" for r in results)\n\n    if has_fail:\n        exit_code = 1\n    elif has_warn and strict:\n        exit_code = 1  # Strict mode escalates warnings to failures\n    elif has_warn:\n        exit_code = 2\n    else:\n        exit_code = 0\n\n    return results, exit_code\n\n\ndef main() -> None:\n    parser = argparse.ArgumentParser(description=\"Validate a CEG domain spec YAML\")\n    parser.add_argument(\"spec_path\", type=Path, help=\"Path to domain spec YAML file\")\n    parser.add_argument(\"--strict\", action=\"store_true\", help=\"Escalate warnings to failures\")\n    parser.add_argument(\"--json\", action=\"store_true\", dest=\"json_output\", help=\"Output as JSON for CI\")\n    args = parser.parse_args()\n\n    if not args.spec_path.exists():\n        print(f\"Error: {args.spec_path} not found\", file=sys.stderr)\n        sys.exit(1)\n\n    results, exit_code = validate_spec(args.spec_path, strict=args.strict)\n\n    if args.json_output:\n        output = {\"results\": results, \"exit_code\": exit_code, \"spec_path\": str(args.spec_path)}\n        print(json.dumps(output, indent=2))\n    else:\n        status_emoji = {\"PASS\": \"[PASS]\", \"FAIL\": \"[FAIL]\", \"WARN\": \"[WARN]\"}\n        for r in results:\n            status = status_emoji.get(r[\"status\"], r[\"status\"])\n            msg = r[\"message\"]\n            path = r.get(\"path\", \"\")\n            path_str = f\" ({path})\" if path else \"\"\n            print(f\"  {status} {r['check']}: {msg}{path_str}\")\n\n        pass_count = sum(1 for r in results if r[\"status\"] == \"PASS\")\n        fail_count = sum(1 for r in results if r[\"status\"] == \"FAIL\")\n        warn_count = sum(1 for r in results if r[\"status\"] == \"WARN\")\n        print(f\"\\nSummary: {pass_count} passed, {fail_count} failed, {warn_count} warnings\")\n\n        if exit_code == 0:\n            print(\"Result: ALL CHECKS PASSED\")\n        elif exit_code == 2:\n            print(\"Result: WARNINGS (non-blocking)\")\n        else:\n            print(\"Result: FAILURES DETECTED\")\n\n    sys.exit(exit_code)\n\n\nif __name__ == \"__main__\":\n    main()\n"
+  },
+  "generation": {
+    "method": "git show exact predecessor object; execute unchanged CLI",
+    "native_import_revision": "93cf1a83bdb88656a627b442a6d114c3a3502cde",
+    "python_version": "3.12.16"
+  },
+  "environment": {
+    "L9_ENV": "dev",
+    "UNVALIDATED_DOMAIN_PACKS_ENABLED": "true",
+    "DORMANT_DOMAIN_PACKS_ENABLED": "true",
+    "DOMAIN_STRICT_VALIDATION": "true",
+    "SCORING_ADMISSION_CHECK_ENABLED": "false",
+    "ADMISSION_CHECKS_FULL_MATCH": "false"
+  },
+  "fixtures": {
+    "plasticos": {
+      "path": "domains/plasticos/spec.yaml",
+      "git_blob_sha1": "a05b70f2d731ff6879ca006213f3589367088adf",
+      "sha256": "855fbf8e894392b951c294582a7b518db8b8cbf702bd617748037e3ecb44e435",
+      "verdicts": {
+        "default": {
+          "flags": [],
+          "exit_code": 1,
+          "checks": [
+            [
+              "W1-01-weight-sum",
+              "FAIL"
+            ],
+            [
+              "W1-03-gate-compile",
+              "PASS"
+            ],
+            [
+              "W1-03-gate-compile",
+              "PASS"
+            ],
+            [
+              "W1-04-traversal",
+              "PASS"
+            ],
+            [
+              "W1-04-traversal",
+              "PASS"
+            ],
+            [
+              "W3-02-prohibited-factors",
+              "PASS"
+            ]
+          ]
+        },
+        "strict": {
+          "flags": [
+            "--strict"
+          ],
+          "exit_code": 1,
+          "checks": [
+            [
+              "W1-01-weight-sum",
+              "FAIL"
+            ],
+            [
+              "W1-03-gate-compile",
+              "PASS"
+            ],
+            [
+              "W1-03-gate-compile",
+              "PASS"
+            ],
+            [
+              "W1-04-traversal",
+              "PASS"
+            ],
+            [
+              "W1-04-traversal",
+              "PASS"
+            ],
+            [
+              "W3-02-prohibited-factors",
+              "PASS"
+            ]
+          ]
+        }
+      }
+    },
+    "freight-matching": {
+      "path": "domains/freight-matching/spec.yaml",
+      "git_blob_sha1": "95eae0a76e5578e4298bec98bfaad5d29eca2583",
+      "sha256": "7e3f4a21ab935d37ac33a0f8577a9e72d584d0ee76e5ac067fddf830694044c7",
+      "verdicts": {
+        "default": {
+          "flags": [],
+          "exit_code": 0,
+          "checks": [
+            [
+              "W1-01-cross-ref",
+              "PASS"
+            ],
+            [
+              "W1-03-gate-compile",
+              "PASS"
+            ],
+            [
+              "W1-04-traversal",
+              "PASS"
+            ],
+            [
+              "W3-02-prohibited-factors",
+              "PASS"
+            ]
+          ]
+        },
+        "strict": {
+          "flags": [
+            "--strict"
+          ],
+          "exit_code": 0,
+          "checks": [
+            [
+              "W1-01-cross-ref",
+              "PASS"
+            ],
+            [
+              "W1-03-gate-compile",
+              "PASS"
+            ],
+            [
+              "W1-04-traversal",
+              "PASS"
+            ],
+            [
+              "W3-02-prohibited-factors",
+              "PASS"
+            ]
+          ]
+        }
+      }
+    }
+  }
+}

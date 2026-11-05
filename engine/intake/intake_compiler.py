@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from typing import cast
 
 import structlog
 import yaml
@@ -330,4 +331,4 @@ def _build_domain_yaml(
     if scoring_proposals:
         output["scoring_proposals"] = scoring_proposals
 
-    return yaml.dump(output, default_flow_style=False, sort_keys=False)
+    return cast("str", yaml.dump(output, default_flow_style=False, sort_keys=False))

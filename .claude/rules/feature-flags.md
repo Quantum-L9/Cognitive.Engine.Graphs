@@ -70,6 +70,8 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 |------|---------|---------|
 | unvalidated_domain_packs_enabled | False | Serve packs whose gates do not compile to executable Cypher (`engine.config.loader.admission_defects`, CEG-009) |
 | dormant_domain_packs_enabled | False | Serve packs that declare `domain.activation: dormant` (replaced the per-domain `idea_portfolio_enabled`) |
+| domain_pack_receipts_enabled | False (OFF) | `DOMAIN_PACK_RECEIPTS_ENABLED=true`: load `current.json` and its immutable native spec/approval revision, freshly verify exact bytes, tenant, version and reviewed-input digest plus reviewer/ref/time and complete admission on every sync/async load and domain listing; no cache or legacy fallback after refusal. In prod require an explicit absolute existing nonsymlink root. Off preserves legacy folder discovery/caching and configured resolved-path loading. |
+| domain_production_stage_required | False (OFF) | `DOMAIN_PRODUCTION_STAGE_REQUIRED=true`: under `L9_ENV=prod`, native legacy admission requires a `-reviewed` or `-production` version suffix. Off preserves unsuffixed native examples. Receipt mode and the offline publisher require reviewed/production stages independently of this flag or runtime bypasses; neither flag creates approval or enables publication by itself. |
 
 Entity resolution is tuned per domain in `DomainSpec.semantic_registry`; there are no
 engine-wide resolution tolerances (the former melt-flow-index / density tolerances
