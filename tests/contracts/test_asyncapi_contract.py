@@ -2,7 +2,7 @@
 AsyncAPI contract tests.
 
 Sources:
-  engine/packet/packet_envelope.py:PacketType
+  constellation_node_sdk TransportHeader.packet_type (closed set)
   engine/packet/chassis_contract.py:inflate_ingress, deflate_egress
   chassis/actions.py:execute_action() — request -> persist lifecycle
 """

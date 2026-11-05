@@ -595,7 +595,6 @@ RULES: list[dict] = [
         "Redefining TransportPacket - import the shared model",
         remediation="from constellation_node_sdk import TransportPacket",
         include_dirs=[ENGINE_DIR],
-        exclude_dirs=["engine/packet/packet_envelope.py"],  # canonical envelope in this repo
     ),
     _rule(
         "SHARED-002",
@@ -603,9 +602,8 @@ RULES: list[dict] = [
         "HIGH",
         r"class\s+TenantContext\s*\(",
         "Redefining TenantContext - import the shared model",
-        remediation="from engine.packet.packet_envelope import TenantContext",
+        remediation="from constellation_node_sdk import TenantContext",
         include_dirs=[ENGINE_DIR],
-        exclude_dirs=["engine/packet/packet_envelope.py"],  # canonical envelope in this repo
     ),
     _rule(
         "SHARED-003",

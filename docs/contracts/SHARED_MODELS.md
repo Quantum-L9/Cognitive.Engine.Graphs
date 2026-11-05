@@ -49,37 +49,28 @@ it resolves to belongs in `poetry.lock` as `resolved_reference`.
 
 ---
 
-## Package: l9-core (Internal Models)
+## No internal envelope
 
-For internal engine operations and memory substrate:
-```
-
-l9/
-core/
-__init__.py
-envelope.py          \# PacketEnvelope, PacketAddress, TenantContext, etc.
-contract.py          \# ExecuteRequest, ExecuteResponse, HealthResponse
-delegation.py        \# delegate_to_node(), DelegationLink, HopEntry
-security.py          \# PacketSecurity, PacketGovernance
-types.py             \# PacketType enum, shared type aliases
-
-```
+There is no second, "internal" packet model. `PacketEnvelope` and the `l9_core` package
+that declared it were deleted (Quantum-L9/Cognitive.Engine.Graphs#138);
+`TransportPacket` is the only wire format inside the engine and between nodes.
 
 ## Import Pattern
 ```python
-# ✅ CORRECT — import from engine.packet (internal operations)
-from engine.packet.packet_envelope import PacketEnvelope, PacketLineage, PacketType, TenantContext
+# ✅ CORRECT — the shared models come from constellation_node_sdk
+from constellation_node_sdk import TenantContext, TransportLineage, TransportPacket
+
+# ✅ CORRECT — engine code reaches packets only through the chassis bridge
 from engine.packet.chassis_contract import deflate_egress, delegate_to_node, inflate_ingress
 
 
-# ❌ WRONG — redefining in engine code
-class PacketEnvelope(BaseModel):  # BANNED — already in l9-core
-    packet_id: UUID
+# ❌ WRONG — redefining TransportPacket
+class TransportPacket(BaseModel):  # BANNED — already in constellation_node_sdk (SHARED-001)
     ...
 
 
-# ❌ WRONG — redefining TransportPacket
-class TransportPacket(BaseModel):  # BANNED — already in constellation_node_sdk
+# ❌ WRONG — reintroducing a parallel envelope
+class PacketEnvelope(BaseModel):  # BANNED — retired; org Semgrep AST-TRANSPORT-001/002
     ...
 
 
@@ -98,24 +89,14 @@ from engine.routing.models import RoutingDecision
 ```
 
 
-## When to Add to l9-core vs Engine
+## When to Add to the SDK vs Engine
 
 | If the model is used by… | Where it lives |
 | :-- | :-- |
-| 2+ nodes | `l9-core` |
+| 2+ nodes | `constellation_node_sdk` (a Gate_SDK change) |
 | 1 node only | That engine's `models/` |
-| The chassis | `l9-core` (chassis imports from it) |
+| The chassis | `constellation_node_sdk` (chassis imports from it) |
 | Tests only | `tests/conftest.py` fixtures |
-
-## Installation
-
-```bash
-# In every engine's pyproject.toml
-[project]
-dependencies = [
-    "l9-core>=1.0.0",
-]
-```
 
 ```
 

@@ -401,13 +401,6 @@ FILE_REGISTRY: list[FileMeta] = [
     ),
     FileMeta("engine/packet/__init__.py", "engine-specific", ["config"], ["packet"], "engine-team"),
     FileMeta(
-        "engine/packet/packet_envelope.py",
-        "engine-specific",
-        ["config"],
-        ["packet", "envelope", "pydantic"],
-        "engine-team",
-    ),
-    FileMeta(
         "engine/packet/chassis_contract.py", "engine-specific", ["config"], ["packet", "chassis-bridge"], "engine-team"
     ),
     FileMeta("engine/utils/__init__.py", "engine-specific", ["config"], ["utils"], "engine-team"),
@@ -1616,7 +1609,6 @@ HEADERLESS_BASELINE: frozenset[str] = frozenset(
         "docs/runbooks/CEG_OUTCOME_REPLAY.md",
         "docs/runbooks/CEG_SHADOW_COMPARISON.md",
         "engine/security/llm.py",
-        "l9_core/models.py",
         "memory-bank/activeContext.md",
         "memory-bank/progress.md",
         "memory-bank/tasks.md",

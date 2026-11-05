@@ -30,7 +30,7 @@ route that 404s, bypasses auth, or fails a contract test.
 | 2 | `engine/handlers.py` → `register_all()` | `chassis_router.register_handler("<action>", handle_<action>)` |
 | 3 | `chassis/actions.py` → `_engine_handlers` | `"<action>": handle_<action>` + the import |
 | 4 | `engine/auth/capabilities.py` → `ACTION_PERMISSION_MAP` | `"<action>": "<scope>:<read\|write>"` |
-| 5 | `engine/packet/packet_envelope.py` → `PacketType` | enum member if the action emits a new packet kind |
+| 5 | — (`packet_type` is the SDK closed set) | nothing; a new packet kind is a Gate_SDK change, see `docs/contracts/PACKET_TYPE_REGISTRY.md` |
 | 6 | `tests/contracts/_constants.py` → `KNOWN_ACTIONS` | the action name |
 | 7 | `docs/contracts/api/openapi.yaml` | add to the `action` enum and the request examples |
 

@@ -64,7 +64,12 @@ NEVER be renamed or removed. Use EXACTLY these strings.
 ## Adding a New Packet Type
 
 1. Add to this file
-2. Add to the `PacketType` enum in `engine/packet/packet_envelope.py`
+2. The wire `header.packet_type` is not a CEG enum: it is the closed set that
+   `constellation_node_sdk` `TransportHeader` validates (`request`, `response`, `event`,
+   `command`, `delegation`, `failure`, `replay_request`, `replay_response`,
+   `compensation`). A value outside it is rejected at construction, so a new wire
+   packet type is a Gate_SDK change, not a CEG one. None of the registry values above
+   is a valid `header.packet_type`; do not put them there.
 3. Add validation in `PacketValidator`
 4. Update `tools/audit_rules.yaml` if compliance checks apply
 ```

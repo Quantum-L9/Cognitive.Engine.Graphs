@@ -68,10 +68,10 @@ async def execute_action(
     """
     Chassis entrypoint: POST /v1/execute
 
-    1. Inflate inbound JSON → PacketEnvelope (request)
+    1. Inflate inbound JSON → TransportPacket (request)
     2. Route to engine handler by action
     3. Execute handler
-    4. Deflate engine response → PacketEnvelope (response)
+    4. Deflate engine response → TransportPacket (response)
     5. Return outbound envelope as JSON
     """
     # Lazy-initialize engine on first call
@@ -79,7 +79,7 @@ async def execute_action(
 
     start_time = time.time()
 
-    # Inflate request into PacketEnvelope
+    # Inflate request into TransportPacket
     request_packet = _inflate_ingress(
         action=action,
         payload=payload,
@@ -117,7 +117,7 @@ async def execute_action(
             status = "failed"
         http_hint = _http_status_hint(e, engine_error_cls)
 
-    # Deflate response into PacketEnvelope
+    # Deflate response into TransportPacket
     processing_ms = (time.time() - start_time) * 1000
     _response_packet = _deflate_egress(
         request=request_packet,
@@ -128,7 +128,7 @@ async def execute_action(
         responding_node="graph-engine",
     )
 
-    # Persist PacketEnvelope pair to audit trail (stub — no-op until DB wired)
+    # Persist TransportPacket pair to audit trail (stub — no-op until DB wired)
     try:
         from engine.packet.packet_store import get_packet_store
 
