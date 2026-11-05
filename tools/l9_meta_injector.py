@@ -1204,28 +1204,32 @@ def _json_header_is_current(data: dict[str, Any], expected: dict[str, Any]) -> b
     )
 
 
+def _inject_json_meta(content: str, meta: FileMeta, engine: str) -> str:
+    """Put ``_l9_meta`` first in a JSON object; leave non-objects and correct files as is."""
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        return content
+    # Only inject _l9_meta into objects, not arrays (arrays would break structure)
+    if not isinstance(data, dict):
+        return content
+    expected = format_json_meta(meta, engine)
+    if _json_header_is_current(data, expected):
+        # Layout belongs to the JSON formatter (Biome, biome.json), so a file
+        # whose header is already correct is left byte-for-byte as is.
+        return content
+    data.pop("_l9_meta", None)
+    ordered = {"_l9_meta": expected, **data}
+    return json.dumps(ordered, indent=2) + "\n"
+
+
 def inject_meta(content: str, meta: FileMeta, engine: str) -> str:
     """Inject L9_META header into file content based on filetype."""
     ftype = _detect_filetype(meta.path)
 
     # --- JSON ---
     if ftype == "json":
-        try:
-            data = json.loads(content)
-        except json.JSONDecodeError:
-            return content
-        # Only inject _l9_meta into objects, not arrays (arrays would break structure)
-        if not isinstance(data, dict):
-            return content  # Skip arrays - can't inject meta without breaking structure
-        expected = format_json_meta(meta, engine)
-        if _json_header_is_current(data, expected):
-            # Layout belongs to the JSON formatter (Biome, biome.json), so a file
-            # whose header is already correct is left byte-for-byte as is.
-            return content
-        data["_l9_meta"] = expected
-        ordered = {"_l9_meta": data.pop("_l9_meta")}
-        ordered.update(data)
-        return json.dumps(ordered, indent=2) + "\n"
+        return _inject_json_meta(content, meta, engine)
 
     # --- TOML ---
     if ftype == "toml":
