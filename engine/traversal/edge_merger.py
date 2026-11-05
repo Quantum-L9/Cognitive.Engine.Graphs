@@ -118,7 +118,7 @@ class EdgeMerger:
             incoming_triplets=target_triplets,
             vertex_count=1000,
         )
-        print(len(result.edges))  # <= n * log(n)
+        edge_count = len(result.edges)  # <= n * log(n)
     """
 
     def __init__(
