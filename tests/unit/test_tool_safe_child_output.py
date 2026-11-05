@@ -146,7 +146,7 @@ def test_safe_writer_writes_child_of_nonreadable_directory(tmp_path: Path) -> No
     try:
         if os.geteuid() != 0:
             with pytest.raises(PermissionError):
-                os.open(drop, os.O_RDONLY | os.O_DIRECTORY)
+                os.close(os.open(drop, os.O_RDONLY | os.O_DIRECTORY))
         path_policy.write_text_no_follow(drop, "summary.json", "payload")
         assert (drop / "summary.json").read_text(encoding="utf-8") == "payload"
     finally:

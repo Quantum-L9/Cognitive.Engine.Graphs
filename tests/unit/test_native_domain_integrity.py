@@ -107,7 +107,7 @@ def test_publisher_cannot_use_runtime_overrides(tmp_path: Path, monkeypatch: pyt
 
 
 def test_atomic_pointer_failure_preserves_previous(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import tools.publish_domain_pack as publisher
+    from tools import publish_domain_pack as publisher
 
     first = publish(tmp_path)
     old = (tmp_path / "store" / "acme" / "current.json").read_bytes()
@@ -215,7 +215,7 @@ def test_atomic_concurrent_readers_observe_complete_revisions(tmp_path: Path, mo
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
-    import tools.publish_domain_pack as publisher
+    from tools import publish_domain_pack as publisher
 
     publish(tmp_path)
     monkeypatch.setattr(owner.settings, "domain_pack_receipts_enabled", True)
