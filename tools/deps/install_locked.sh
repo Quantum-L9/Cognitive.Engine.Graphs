@@ -33,8 +33,10 @@ case "${1:-}" in
   *) echo "usage: $0 ci|full|runtime|tools" >&2; exit 2 ;;
 esac
 
-args=(--only-binary :all: --no-binary constellation-node-sdk --require-hashes -r "$lock")
+# Keep --require-hashes on this command line. Scorecard's pin probe does not
+# follow a bash array, so a split `pip install "${args[@]}"` is an unpinned pipCommand.
 if [[ -n "${PIP_PREFIX:-}" ]]; then
-  args=(--prefix "$PIP_PREFIX" "${args[@]}")
+  python -m pip install --prefix "$PIP_PREFIX" --only-binary :all: --no-binary constellation-node-sdk --require-hashes -r "$lock"
+else
+  python -m pip install --only-binary :all: --no-binary constellation-node-sdk --require-hashes -r "$lock"
 fi
-python -m pip install "${args[@]}"

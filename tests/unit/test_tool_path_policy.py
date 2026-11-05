@@ -64,7 +64,7 @@ def test_shared_policy_resolves_relative_paths_and_rejects_escape(tmp_path: Path
 def test_contract_scanner_rejects_precommit_path_outside_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, _ = _root_and_escape(tmp_path)
     escaped_python = tmp_path / "outside.py"
-    escaped_python.write_text("print('outside')\n", encoding="utf-8")
+    escaped_python.write_text("OUTSIDE = 'outside'\n", encoding="utf-8")
     monkeypatch.chdir(root)
     monkeypatch.setattr(contract_scanner.sys, "argv", ["contract_scanner.py", str(escaped_python)])
 
@@ -76,7 +76,7 @@ def test_contract_scanner_skips_symlinked_file_during_default_discovery(
 ) -> None:
     root, _ = _root_and_escape(tmp_path)
     external_python = tmp_path / "outside.py"
-    external_python.write_text("print('outside')\n", encoding="utf-8")
+    external_python.write_text("OUTSIDE = 'outside'\n", encoding="utf-8")
     _symlink(root / "linked.py", external_python)
     seen: list[Path] = []
     monkeypatch.chdir(root)
@@ -272,6 +272,50 @@ def test_spec_extractor_rejects_auto_detected_symlinked_spec(tmp_path: Path) -> 
         spec_extract.main(["--root", str(root), "--fail-on", "NONE"])
 
     assert raised.value.code == 2
+
+
+def test_hoprag_rejects_summary_symlink_inside_allowed_directory(tmp_path: Path) -> None:
+    root, _ = _root_and_escape(tmp_path)
+    outside = tmp_path / "outside-summary.json"
+    outside.write_text("untouched", encoding="utf-8")
+    output_dir = root / "results"
+    output_dir.mkdir()
+    _symlink(output_dir / "summary.json", outside)
+    (root / "ground.jsonl").write_text("{}\n", encoding="utf-8")
+    (root / "predictions.jsonl").write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as raised:
+        hoprag_benchmark.main(
+            [
+                "--ground-truth",
+                "ground.jsonl",
+                "--predictions",
+                "predictions.jsonl",
+                "--output-dir",
+                "results",
+                "--root",
+                str(root),
+            ]
+        )
+
+    assert raised.value.code == 2
+    assert outside.read_text(encoding="utf-8") == "untouched"
+
+
+def test_spec_extractor_rejects_artifact_file_symlinks(tmp_path: Path) -> None:
+    root, _ = _root_and_escape(tmp_path)
+    (root / "my-spec.yaml").write_text("gates:\n  types: {}\n", encoding="utf-8")
+    outside = tmp_path / "outside-artifact.json"
+    outside.write_text("untouched", encoding="utf-8")
+    artifacts = root / "artifacts"
+    artifacts.mkdir()
+    _symlink(artifacts / "spec_checklist.json", outside)
+
+    with pytest.raises(SystemExit) as raised:
+        spec_extract.main(["--spec", "my-spec.yaml", "--root", str(root), "--fail-on", "NONE"])
+
+    assert raised.value.code == 2
+    assert outside.read_text(encoding="utf-8") == "untouched"
 
 
 def test_spec_extractor_rejects_symlinked_artifacts_directory(tmp_path: Path) -> None:

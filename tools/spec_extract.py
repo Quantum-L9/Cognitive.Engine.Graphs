@@ -520,13 +520,51 @@ def scan_codebase(root: Path, features: list[SpecFeature]) -> None:
             feature.status = Status.MISSING.value
 
 
-def write_checklist(out_dir: Path, features: list[SpecFeature]) -> None:
+def _artifact_file(out_dir: Path, name: str, root: Path) -> Path:
+    """Resolve one artifact file so a child symlink cannot escape --root."""
+    return resolve_under_root(out_dir / name, root, option=name)
+
+
+def _biome_json(value: object, *, width: int = 100) -> str:
+    """Emit JSON that Biome 2.5.8 keeps stable (indent 2, width 100, bracket spacing)."""
+
+    def compact(node: object) -> str:
+        if node is None or isinstance(node, (bool, int, float, str)):
+            return json.dumps(node)
+        if isinstance(node, list):
+            return "[" + ", ".join(compact(item) for item in node) + "]"
+        if isinstance(node, dict):
+            if not node:
+                return "{}"
+            body = ", ".join(f"{json.dumps(key)}: {compact(item)}" for key, item in node.items())
+            return "{ " + body + " }"
+        raise TypeError(f"unsupported checklist value: {type(node).__name__}")
+
+    def emit(node: object, column: int, level: int) -> str:
+        rendered = compact(node)
+        if column + len(rendered) <= width or not isinstance(node, (list, dict)):
+            return rendered
+        pad = "  " * (level + 1)
+        close = "  " * level
+        if isinstance(node, list):
+            inner = ",\n".join(pad + emit(item, (level + 1) * 2, level + 1) for item in node)
+            return "[\n" + inner + "\n" + close + "]"
+        rows = []
+        for key, item in node.items():
+            prefix = f"{json.dumps(key)}: "
+            rows.append(pad + prefix + emit(item, (level + 1) * 2 + len(prefix), level + 1))
+        return "{\n" + ",\n".join(rows) + "\n" + close + "}"
+
+    return emit(value, 0, 0) + "\n"
+
+
+def write_checklist(out_dir: Path, features: list[SpecFeature], root: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     data = [asdict(f) for f in features]
-    (out_dir / "spec_checklist.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+    _artifact_file(out_dir, "spec_checklist.json", root).write_text(_biome_json(data), encoding="utf-8")
 
 
-def write_coverage_matrix(out_dir: Path, features: list[SpecFeature]) -> None:
+def write_coverage_matrix(out_dir: Path, features: list[SpecFeature], root: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     by_category: dict[str, dict[str, int]] = {}
@@ -543,10 +581,10 @@ def write_coverage_matrix(out_dir: Path, features: list[SpecFeature]) -> None:
             totals[k] += cat_data[k]
 
     matrix = {"categories": by_category, "totals": totals, "generated_at": datetime.now(UTC).isoformat()}
-    (out_dir / COVERAGE_MATRIX_JSON).write_text(json.dumps(matrix, indent=2), encoding="utf-8")
+    _artifact_file(out_dir, COVERAGE_MATRIX_JSON, root).write_text(json.dumps(matrix, indent=2), encoding="utf-8")
 
 
-def write_coverage_report(out_dir: Path, features: list[SpecFeature], matrix: dict) -> None:
+def write_coverage_report(out_dir: Path, features: list[SpecFeature], matrix: dict, root: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     lines: list[str] = []
     lines.append("# L9 Spec Coverage Report")
@@ -559,11 +597,12 @@ def write_coverage_report(out_dir: Path, features: list[SpecFeature], matrix: di
     lines.append("| Category | Implemented | Partial | Missing | Total |")
     lines.append("|----------|-------------|---------|---------|-------|")
 
-    cats = json.loads((out_dir / COVERAGE_MATRIX_JSON).read_text())["categories"]
+    matrix_path = _artifact_file(out_dir, COVERAGE_MATRIX_JSON, root)
+    cats = json.loads(matrix_path.read_text())["categories"]
     for cat, data in cats.items():
         lines.append(f"| {cat} | {data['IMPLEMENTED']} | {data['PARTIAL']} | {data['MISSING']} | {data['total']} |")
 
-    totals = json.loads((out_dir / COVERAGE_MATRIX_JSON).read_text())["totals"]
+    totals = json.loads(matrix_path.read_text())["totals"]
     lines.append(
         f"| **TOTAL** | **{totals['IMPLEMENTED']}** | **{totals['PARTIAL']}** | **{totals['MISSING']}** | **{totals['total']}** |"
     )
@@ -589,7 +628,7 @@ def write_coverage_report(out_dir: Path, features: list[SpecFeature], matrix: di
                 lines.append("- **No code references found**")
             lines.append("")
 
-    (out_dir / "coverage_report.md").write_text("\n".join(lines), encoding="utf-8")
+    _artifact_file(out_dir, "coverage_report.md", root).write_text("\n".join(lines), encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -656,11 +695,14 @@ def main(argv: list[str] | None = None) -> int:
 
     scan_codebase(root, features)
 
-    write_checklist(out_dir, features)
-    write_coverage_matrix(out_dir, features)
-
-    matrix_data = json.loads((out_dir / COVERAGE_MATRIX_JSON).read_text())
-    write_coverage_report(out_dir, features, matrix_data)
+    try:
+        write_checklist(out_dir, features, root)
+        write_coverage_matrix(out_dir, features, root)
+        matrix_path = _artifact_file(out_dir, COVERAGE_MATRIX_JSON, root)
+        matrix_data = json.loads(matrix_path.read_text())
+        write_coverage_report(out_dir, features, matrix_data, root)
+    except PathPolicyError as exc:
+        parser.error(str(exc))
 
     totals = matrix_data["totals"]
     print(

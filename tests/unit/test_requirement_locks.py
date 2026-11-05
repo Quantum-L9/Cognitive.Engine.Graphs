@@ -165,7 +165,13 @@ def test_installs_are_wheel_only_and_hash_checked() -> None:
     installs = [
         line.strip() for line in script.splitlines() if "pip install" in line and not line.lstrip().startswith("#")
     ]
-    assert installs == ['python -m pip install "${args[@]}"']
+    assert installs == [
+        (
+            'python -m pip install --prefix "$PIP_PREFIX" --only-binary :all: '
+            '--no-binary constellation-node-sdk --require-hashes -r "$lock"'
+        ),
+        ('python -m pip install --only-binary :all: --no-binary constellation-node-sdk --require-hashes -r "$lock"'),
+    ]
     assert 'ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"' in script
     assert "--only-binary :all:" in script
     assert "--no-binary constellation-node-sdk" in script
