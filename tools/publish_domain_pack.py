@@ -168,7 +168,7 @@ def publish_pack(
         reviewed_input_sha256=reviewed_input_sha256,
         reviewed_by=reviewed_by,
         approval_ref=approval_ref,
-        reviewed_at=reviewed_at or datetime.now(tz=UTC).isoformat(),
+        reviewed_at=datetime.now(tz=UTC).isoformat() if reviewed_at is None else reviewed_at,
         previous_sha256=None,
     )
     pointer = DomainCurrent(

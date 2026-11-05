@@ -72,6 +72,12 @@ def publish(tmp_path: Path, data: bytes | None = None, **overrides: str) -> dict
     return publish_pack(path, tmp_path / "store", **args)
 
 
+def test_explicit_empty_reviewed_at_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="reviewed_at"):
+        publish(tmp_path, reviewed_at="")
+    assert not (tmp_path / "store" / "acme" / "current.json").exists()
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [("reviewed_by", ""), ("approval_ref", " "), ("reviewed_input_sha256", "0" * 64), ("tenant_id", "other")],
