@@ -274,6 +274,50 @@ def test_spec_extractor_rejects_auto_detected_symlinked_spec(tmp_path: Path) -> 
     assert raised.value.code == 2
 
 
+def test_hoprag_rejects_summary_symlink_inside_allowed_directory(tmp_path: Path) -> None:
+    root, _ = _root_and_escape(tmp_path)
+    outside = tmp_path / "outside-summary.json"
+    outside.write_text("untouched", encoding="utf-8")
+    output_dir = root / "results"
+    output_dir.mkdir()
+    _symlink(output_dir / "summary.json", outside)
+    (root / "ground.jsonl").write_text("{}\n", encoding="utf-8")
+    (root / "predictions.jsonl").write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as raised:
+        hoprag_benchmark.main(
+            [
+                "--ground-truth",
+                "ground.jsonl",
+                "--predictions",
+                "predictions.jsonl",
+                "--output-dir",
+                "results",
+                "--root",
+                str(root),
+            ]
+        )
+
+    assert raised.value.code == 2
+    assert outside.read_text(encoding="utf-8") == "untouched"
+
+
+def test_spec_extractor_rejects_artifact_file_symlinks(tmp_path: Path) -> None:
+    root, _ = _root_and_escape(tmp_path)
+    (root / "my-spec.yaml").write_text("gates:\n  types: {}\n", encoding="utf-8")
+    outside = tmp_path / "outside-artifact.json"
+    outside.write_text("untouched", encoding="utf-8")
+    artifacts = root / "artifacts"
+    artifacts.mkdir()
+    _symlink(artifacts / "spec_checklist.json", outside)
+
+    with pytest.raises(SystemExit) as raised:
+        spec_extract.main(["--spec", "my-spec.yaml", "--root", str(root), "--fail-on", "NONE"])
+
+    assert raised.value.code == 2
+    assert outside.read_text(encoding="utf-8") == "untouched"
+
+
 def test_spec_extractor_rejects_symlinked_artifacts_directory(tmp_path: Path) -> None:
     root, _ = _root_and_escape(tmp_path)
     (root / "my-spec.yaml").write_text("gates:\n  types: {}\n", encoding="utf-8")
