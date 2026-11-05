@@ -119,7 +119,7 @@ tools/                   # contract_scanner.py, verify_contracts.py, validate_do
 1. **Engine owns logic, chassis owns HTTP** — handlers receive `(tenant, payload)` → `dict`
 2. **Domain spec is source of truth** — all matching behavior from YAML, never hardcoded
 3. **Gate-then-score in Cypher** — no post-filtering in Python
-4. **PacketEnvelope for all persisted events** — `inflate_ingress()` / `deflate_egress()`
+4. **TransportPacket for all persisted events** — the Gate_SDK wire model, built only via `inflate_ingress()` / `deflate_egress()` in `engine/packet/chassis_contract.py`
 5. **24 contracts enforced** — see `tools/contract_scanner.py` and `docs/contracts/`
 
 ## Agent Reference Docs

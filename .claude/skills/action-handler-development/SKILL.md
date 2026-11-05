@@ -17,7 +17,8 @@ async def handle_<action>(tenant: str, payload: dict[str, Any]) -> dict[str, Any
 
 Return a **flat domain dict**. Do not build a `{"status": ..., "data": ...}`
 envelope — `chassis/actions.py` wraps the return value via `deflate_egress()`
-into a response `PacketEnvelope`. Wrapping it yourself double-nests the payload.
+into a response `TransportPacket` (`engine/packet/chassis_contract.py`). Wrapping it
+yourself double-nests the payload.
 
 ## Seven registration points
 

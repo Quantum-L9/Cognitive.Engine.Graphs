@@ -1,77 +1,124 @@
 # ═══════════════════════════════════════════════════════════════
 # Contract: Internal Event / Packet Routing Contracts
-# Source:   constellation_node_sdk TransportPacket (TransportHeader.packet_type)
-#           engine/packet/chassis_contract.py
+# Source:   constellation_node_sdk TransportPacket (wire model, Gate_SDK)
+#           engine/packet/chassis_contract.py:inflate_ingress, deflate_egress
 #           chassis/actions.py:execute_action()
-# Version:  1.0.0
-# Updated:  2026-04-05
+# Version:  2.0.0
+# Updated:  2026-11-05
+# components.schemas: TransportPacket.model_json_schema() + SDK validator
+#           constraints; drift-checked by tests/contracts/test_asyncapi_contract.py
 # ═══════════════════════════════════════════════════════════════
 
 asyncapi: 3.0.0
-
 info:
   title: L9 CEG Internal Packet Events
-  version: 1.0.0
-  description: |
+  version: 2.0.0
+  description: |-
     CEG does not use an external message broker (no Kafka, RabbitMQ, or Redis Pub/Sub
     found in source). Internal "events" are TransportPacket objects flowing through
-    the synchronous inflate → handle → deflate → persist pipeline within a single
+    the synchronous inflate -> handle -> deflate -> persist pipeline within a single
     HTTP request lifecycle.
+
+    Every message payload is the Gate_SDK wire model
+    `constellation_node_sdk.transport.packet.TransportPacket` (frozen, extra=forbid).
+    `components.schemas` is `TransportPacket.model_json_schema()` with `$defs` moved
+    under `components/schemas`, plus the constraints the SDK enforces in field
+    validators (closed `header.packet_type` set, the `header.action` pattern,
+    lowercase sha256 hex for `security.payload_hash` / `security.transport_hash`,
+    closed classification / encryption / provenance / hop vocabularies).
+    The SDK also enforces what JSON Schema cannot: `security.payload_hash` must equal
+    the hash of `payload` and `security.transport_hash` the hash of the packet core.
+    tests/contracts/test_asyncapi_contract.py fails if these schemas drift from the
+    installed SDK model.
 
     If async event processing is added in a future version, this spec will be
     updated with broker bindings.
-
 channels:
   chassis.request.ingress:
-    description: |
+    description: |-
       Inbound action request arriving at POST /v1/execute.
-      TransportPacket created by inflate_ingress().
-      Source: chassis/actions.py:execute_action() → inflate_ingress()
+      Root TransportPacket (packet_type=request, lineage.generation=0) created by
+      inflate_ingress() through the SDK create_transport_packet().
+      Source: chassis/actions.py:execute_action() -> inflate_ingress()
     messages:
       ActionRequest:
         name: ActionRequest
         payload:
-          type: object
-          properties:
-            packet_id: {type: string, format: uuid}
-            packet_type: {type: string, const: REQUEST}
-            action:
-              type: string
-              enum: [match, sync, admin, outcomes, resolve, health, healthcheck, health-assess, enrich]
-            tenant: {type: string}
-            payload: {type: object, additionalProperties: true}
-            trace_id: {type: string}
-            content_hash: {type: string}
-          required: [packet_id, packet_type, action, tenant, payload, content_hash]
-
+          allOf:
+          - $ref: '#/components/schemas/TransportPacket'
+          - type: object
+            properties:
+              header:
+                type: object
+                properties:
+                  packet_type:
+                    const: request
+                  action:
+                    type: string
+                    enum:
+                    - match
+                    - sync
+                    - admin
+                    - outcomes
+                    - resolve
+                    - health
+                    - healthcheck
+                    - health-assess
+                    - enrich
+                required:
+                - packet_type
+                - action
   chassis.response.egress:
-    description: |
+    description: |-
       Outbound action response leaving via POST /v1/execute.
-      Derived TransportPacket created by deflate_egress().
-      Source: chassis/actions.py:execute_action() → deflate_egress()
+      Derived TransportPacket (packet_type=response) created by deflate_egress()
+      through request.derive(): lineage.parent_id is the request header.packet_id
+      and the payload is the {status, data, meta} result.
+      Source: chassis/actions.py:execute_action() -> deflate_egress()
     messages:
       ActionResponse:
         name: ActionResponse
         payload:
-          type: object
-          properties:
-            packet_id: {type: string, format: uuid}
-            packet_type: {type: string, const: RESPONSE}
-            parent_id: {type: string, format: uuid}
-            action: {type: string}
-            tenant: {type: string}
-            payload:
-              type: object
-              properties:
-                status: {type: string, enum: [success, failed, circuit_open]}
-                data: {type: object}
-                meta: {type: object}
-            content_hash: {type: string}
-
+          allOf:
+          - $ref: '#/components/schemas/TransportPacket'
+          - type: object
+            properties:
+              header:
+                type: object
+                properties:
+                  packet_type:
+                    const: response
+                required:
+                - packet_type
+              lineage:
+                type: object
+                properties:
+                  parent_id:
+                    type: string
+                    format: uuid
+                required:
+                - parent_id
+              payload:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - success
+                    - failed
+                    - circuit_open
+                  data:
+                    type: object
+                  meta:
+                    type: object
+                required:
+                - status
+                - data
+                - meta
   engine.audit.persist:
-    description: |
+    description: |-
       Packet pair persistence to audit trail. Called after every action.
-      Source: chassis/actions.py:execute_action() → PacketStore.persist()
+      Source: chassis/actions.py:execute_action() -> PacketStore.persist()
       NOTE: Currently a no-op stub unless a backing store is wired.
     messages:
       AuditPersist:
@@ -79,5 +126,489 @@ channels:
         payload:
           type: object
           properties:
-            request_packet: {type: object}
-            response_packet: {type: object}
+            request_packet:
+              $ref: '#/components/schemas/TransportPacket'
+            response_packet:
+              $ref: '#/components/schemas/TransportPacket'
+          required:
+          - request_packet
+          - response_packet
+components:
+  schemas:
+    DelegationLink:
+      additionalProperties: false
+      properties:
+        delegator:
+          type: string
+        delegatee:
+          type: string
+        scope:
+          items:
+            type: string
+          type: array
+        granted_at:
+          format: date-time
+          type: string
+        expires_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          default: null
+        constraints:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          default: null
+        proof:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+      required:
+      - delegator
+      - delegatee
+      - scope
+      type: object
+      title: DelegationLink
+    RoutingProvenance:
+      additionalProperties: false
+      properties:
+        origin_kind:
+          type: string
+          enum:
+          - client
+          - node
+          - gate
+        requested_action:
+          type: string
+          minLength: 1
+        resolved_by_gate:
+          default: false
+          type: boolean
+        route_kind:
+          anyOf:
+          - type: string
+            enum:
+            - external_ingress
+            - gate_relay
+          - type: 'null'
+          default: null
+        original_source_node:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+      required:
+      - origin_kind
+      - requested_action
+      type: object
+      title: RoutingProvenance
+    TenantContext:
+      additionalProperties: false
+      properties:
+        actor:
+          type: string
+          minLength: 1
+        on_behalf_of:
+          type: string
+          minLength: 1
+        originator:
+          type: string
+          minLength: 1
+        org_id:
+          type: string
+          minLength: 1
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+      required:
+      - actor
+      - on_behalf_of
+      - originator
+      - org_id
+      type: object
+      title: TenantContext
+    TransportAddress:
+      additionalProperties: false
+      properties:
+        source_node:
+          type: string
+          minLength: 1
+        destination_node:
+          type: string
+          minLength: 1
+        reply_to:
+          type: string
+          minLength: 1
+      required:
+      - source_node
+      - destination_node
+      - reply_to
+      type: object
+      title: TransportAddress
+    TransportAttachment:
+      additionalProperties: false
+      properties:
+        attachment_id:
+          format: uuid
+          type: string
+        media_type:
+          type: string
+        uri:
+          type: string
+        content_hash:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        encrypted:
+          default: true
+          type: boolean
+        size_bytes:
+          minimum: 0
+          type: integer
+      required:
+      - media_type
+      - uri
+      - content_hash
+      - size_bytes
+      type: object
+      title: TransportAttachment
+    TransportGovernance:
+      additionalProperties: false
+      properties:
+        intent:
+          type: string
+          minLength: 1
+        compliance_tags:
+          default: []
+          items:
+            type: string
+          type: array
+        retention_days:
+          default: 90
+          minimum: 0
+          type: integer
+        redaction_applied:
+          default: false
+          type: boolean
+        audit_required:
+          default: false
+          type: boolean
+        data_subject_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+      required:
+      - intent
+      type: object
+      title: TransportGovernance
+    TransportHeader:
+      additionalProperties: false
+      properties:
+        packet_id:
+          format: uuid
+          type: string
+        packet_type:
+          type: string
+          enum:
+          - request
+          - response
+          - event
+          - command
+          - delegation
+          - failure
+          - replay_request
+          - replay_response
+          - compensation
+        action:
+          type: string
+          pattern: ^[a-z0-9][a-z0-9._-]{0,63}$
+        priority:
+          default: 2
+          type: integer
+          minimum: 0
+          maximum: 3
+        created_at:
+          format: date-time
+          type: string
+        expires_at:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          default: null
+        timeout_ms:
+          default: 30000
+          minimum: 1
+          type: integer
+        schema_version:
+          default: '1.0'
+          type: string
+        idempotency_key:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+        trace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+        correlation_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+        causation_id:
+          anyOf:
+          - format: uuid
+            type: string
+          - type: 'null'
+          default: null
+        retry_count:
+          default: 0
+          minimum: 0
+          type: integer
+        replay_mode:
+          default: false
+          type: boolean
+        not_before:
+          anyOf:
+          - format: date-time
+            type: string
+          - type: 'null'
+          default: null
+      required:
+      - packet_type
+      - action
+      type: object
+      title: TransportHeader
+    TransportHop:
+      additionalProperties: false
+      properties:
+        hop_id:
+          format: uuid
+          type: string
+        packet_id:
+          format: uuid
+          type: string
+        node:
+          type: string
+        action:
+          type: string
+        direction:
+          type: string
+          enum:
+          - ingress
+          - dispatch
+          - execution
+          - response
+        status:
+          type: string
+          enum:
+          - received
+          - validated
+          - processing
+          - delegated
+          - completed
+          - failed
+        timestamp:
+          format: date-time
+          type: string
+        attempt:
+          anyOf:
+          - minimum: 1
+            type: integer
+          - type: 'null'
+          default: null
+        target_node:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+        duration_ms:
+          anyOf:
+          - minimum: 0
+            type: integer
+          - type: 'null'
+          default: null
+        queue_ms:
+          anyOf:
+          - minimum: 0
+            type: integer
+          - type: 'null'
+          default: null
+        network_ms:
+          anyOf:
+          - minimum: 0
+            type: integer
+          - type: 'null'
+          default: null
+        error_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+        error_message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+        previous_hop_hash:
+          anyOf:
+          - type: string
+            pattern: ^[0-9a-f]{64}$
+          - type: 'null'
+          default: null
+        hop_hash:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        hop_signature:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+        hop_signature_algorithm:
+          anyOf:
+          - type: string
+            enum:
+            - hmac-sha256
+            - ed25519
+          - type: 'null'
+          default: null
+        hop_signing_key_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+      required:
+      - packet_id
+      - node
+      - action
+      - direction
+      - status
+      - hop_hash
+      type: object
+      title: TransportHop
+    TransportLineage:
+      additionalProperties: false
+      properties:
+        parent_id:
+          anyOf:
+          - format: uuid
+            type: string
+          - type: 'null'
+          default: null
+        root_id:
+          format: uuid
+          type: string
+        generation:
+          default: 0
+          minimum: 0
+          type: integer
+      required:
+      - root_id
+      type: object
+      title: TransportLineage
+    TransportSecurity:
+      additionalProperties: false
+      properties:
+        payload_hash:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        transport_hash:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        signature:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+        signature_algorithm:
+          anyOf:
+          - type: string
+            enum:
+            - hmac-sha256
+            - ed25519
+          - type: 'null'
+          default: null
+        signing_key_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+        classification:
+          default: internal
+          type: string
+          enum:
+          - public
+          - internal
+          - confidential
+          - restricted
+        encryption_status:
+          default: plaintext
+          type: string
+          enum:
+          - plaintext
+          - encrypted
+          - envelope_only
+        pii_fields:
+          default: []
+          items:
+            type: string
+          type: array
+      required:
+      - payload_hash
+      - transport_hash
+      type: object
+      title: TransportSecurity
+    TransportPacket:
+      additionalProperties: false
+      properties:
+        header:
+          $ref: '#/components/schemas/TransportHeader'
+        address:
+          $ref: '#/components/schemas/TransportAddress'
+        tenant:
+          $ref: '#/components/schemas/TenantContext'
+        payload:
+          additionalProperties: true
+          type: object
+        security:
+          $ref: '#/components/schemas/TransportSecurity'
+        governance:
+          $ref: '#/components/schemas/TransportGovernance'
+        provenance:
+          $ref: '#/components/schemas/RoutingProvenance'
+        delegation_chain:
+          default: []
+          items:
+            $ref: '#/components/schemas/DelegationLink'
+          type: array
+        hop_trace:
+          default: []
+          items:
+            $ref: '#/components/schemas/TransportHop'
+          type: array
+        lineage:
+          $ref: '#/components/schemas/TransportLineage'
+        attachments:
+          default: []
+          items:
+            $ref: '#/components/schemas/TransportAttachment'
+          type: array
+      required:
+      - header
+      - address
+      - tenant
+      - payload
+      - security
+      - governance
+      - provenance
+      - lineage
+      type: object
+      title: TransportPacket
