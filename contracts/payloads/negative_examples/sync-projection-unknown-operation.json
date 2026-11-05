@@ -12,12 +12,8 @@
         "name": "Example Recycler",
         "state": "NC"
       },
-      "relationship_refs": [
-        "plasticos.facility.material.rule:22"
-      ],
-      "evidence_refs": [
-        "plasticos.capacity.observation:44"
-      ],
+      "relationship_refs": ["plasticos.facility.material.rule:22"],
+      "evidence_refs": ["plasticos.capacity.observation:44"],
       "source_record": {
         "system": "odoo",
         "record_ref": "res.partner:102",
