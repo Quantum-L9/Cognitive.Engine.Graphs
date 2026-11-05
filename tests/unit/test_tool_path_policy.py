@@ -64,7 +64,7 @@ def test_shared_policy_resolves_relative_paths_and_rejects_escape(tmp_path: Path
 def test_contract_scanner_rejects_precommit_path_outside_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root, _ = _root_and_escape(tmp_path)
     escaped_python = tmp_path / "outside.py"
-    escaped_python.write_text("print('outside')\n", encoding="utf-8")
+    escaped_python.write_text("OUTSIDE = 'outside'\n", encoding="utf-8")
     monkeypatch.chdir(root)
     monkeypatch.setattr(contract_scanner.sys, "argv", ["contract_scanner.py", str(escaped_python)])
 
@@ -76,7 +76,7 @@ def test_contract_scanner_skips_symlinked_file_during_default_discovery(
 ) -> None:
     root, _ = _root_and_escape(tmp_path)
     external_python = tmp_path / "outside.py"
-    external_python.write_text("print('outside')\n", encoding="utf-8")
+    external_python.write_text("OUTSIDE = 'outside'\n", encoding="utf-8")
     _symlink(root / "linked.py", external_python)
     seen: list[Path] = []
     monkeypatch.chdir(root)
