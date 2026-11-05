@@ -17,6 +17,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -43,6 +44,9 @@ def test_runbook_absolute_candidate_validation_command(tmp_path: Path) -> None:
     command = [substitutions.get(token, token) for token in shlex.split(example)]
     assert command[:2] == [".venv/bin/python", "tools/validate_domain.py"]
     assert command[2] == str(candidate)
+    # The documented interpreter is the operator's checkout venv; CI installs into
+    # the job's interpreter instead, so run the documented argv with this one.
+    argv = [sys.executable, *command[1:]]
     env = os.environ.copy()
     env.update(
         L9_ENV="dev",
@@ -51,7 +55,7 @@ def test_runbook_absolute_candidate_validation_command(tmp_path: Path) -> None:
         DOMAIN_STRICT_VALIDATION="true",
     )
     result = subprocess.run(  # noqa: S603 — verified repo-owned CLI example; no shell or publisher.
-        command,
+        argv,
         cwd=REPO,
         env=env,
         capture_output=True,
