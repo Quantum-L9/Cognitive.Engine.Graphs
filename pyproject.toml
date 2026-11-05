@@ -9,8 +9,8 @@ packages = [{include = "engine"}]
 
 [tool.poetry.dependencies]
 python = "^3.12"
-fastapi = ">=0.135.2,<0.142.0"
-uvicorn = {extras = ["standard"], version = ">=0.42,<0.54"}
+fastapi = ">=0.135.2,<0.163.0"
+uvicorn = {extras = ["standard"], version = ">=0.42,<0.55"}
 neo4j = "^5.25.0"
 pydantic = "^2.10.0"
 pydantic-settings = "^2.6.0"
@@ -22,7 +22,7 @@ structlog = ">=25.5,<27.0"
 prometheus-client = ">=0.24.1,<0.27.0"
 numpy = "^2.4.3"
 openai = "^1.0.0"
-asyncpg = "^0.31.0"
+asyncpg = ">=0.31,<0.33"
 constellation-node-sdk = {git = "https://github.com/Quantum-L9/Gate_SDK.git", rev = "v1"}
 
 [tool.poetry.group.dev.dependencies]
