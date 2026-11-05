@@ -3,14 +3,8 @@
     "l9_schema": 1,
     "origin": "engine-specific",
     "engine": "graph",
-    "layer": [
-      "docs",
-      "contracts"
-    ],
-    "tags": [
-      "contracts",
-      "tool-schema"
-    ],
+    "layer": ["docs", "contracts"],
+    "tags": ["contracts", "tool-schema"],
     "owner": "engine-team",
     "status": "active"
   },
@@ -165,10 +159,7 @@
       "additionalProperties": true
     },
     "field_confidences": {
-      "type": [
-        "object",
-        "null"
-      ],
+      "type": ["object", "null"],
       "description": "Field confidences.",
       "additionalProperties": {
         "type": "number",
@@ -178,12 +169,7 @@
     },
     "tier": {
       "type": "string",
-      "enum": [
-        "seed",
-        "enrich",
-        "discover",
-        "autonomous"
-      ],
+      "enum": ["seed", "enrich", "discover", "autonomous"],
       "description": "Health tier is only a caller request, never an entitlement; enum from engine/health/health_schemas.py:HealthTier."
     },
     "entities": {
@@ -196,10 +182,7 @@
       }
     },
     "scan_profile": {
-      "type": [
-        "object",
-        "null"
-      ],
+      "type": ["object", "null"],
       "properties": {
         "min_staleness_days": {
           "type": "integer"
@@ -224,17 +207,11 @@
       "description": "HealthScanProfile source model, with defaults governed by server."
     },
     "cost_ceiling_usd": {
-      "type": [
-        "number",
-        "null"
-      ],
+      "type": ["number", "null"],
       "minimum": 0
     },
     "max_entities": {
-      "type": [
-        "integer",
-        "null"
-      ],
+      "type": ["integer", "null"],
       "minimum": 0
     },
     "rules": {
@@ -246,9 +223,7 @@
       "uniqueItems": true
     }
   },
-  "required": [
-    "subaction"
-  ],
+  "required": ["subaction"],
   "additionalProperties": false,
   "examples": [
     {
@@ -267,9 +242,7 @@
             "polymer_type": "HDPE"
           },
           "match_direction": "supply_opportunity_to_buyer_facility",
-          "expected_ids": [
-            "facility-1"
-          ]
+          "expected_ids": ["facility-1"]
         }
       ],
       "k": 10
@@ -322,15 +295,10 @@
             "const": "apply_weight_proposal"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "current_weights",
-          "proposed_weights"
-        ]
+        "required": ["current_weights", "proposed_weights"]
       }
     },
     {
@@ -340,14 +308,10 @@
             "const": "auto_tune"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "domain_id"
-        ]
+        "required": ["domain_id"]
       }
     },
     {
@@ -357,14 +321,10 @@
             "const": "calibration_run"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "domain_id"
-        ]
+        "required": ["domain_id"]
       }
     },
     {
@@ -374,17 +334,10 @@
             "const": "delegate_capability"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "source_tenant",
-          "target_tenant",
-          "domain_id",
-          "actions"
-        ]
+        "required": ["source_tenant", "target_tenant", "domain_id", "actions"]
       }
     },
     {
@@ -394,14 +347,10 @@
             "const": "discover_weights"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "domain_id"
-        ]
+        "required": ["domain_id"]
       }
     },
     {
@@ -411,14 +360,10 @@
             "const": "domain_density_report"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "domain_id"
-        ]
+        "required": ["domain_id"]
       }
     },
     {
@@ -428,15 +373,10 @@
             "const": "emit_inference_feedback"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "entity",
-          "entity_id"
-        ]
+        "required": ["entity", "entity_id"]
       }
     },
     {
@@ -446,14 +386,10 @@
             "const": "erase_subject"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "data_subject_id"
-        ]
+        "required": ["data_subject_id"]
       }
     },
     {
@@ -463,15 +399,10 @@
             "const": "evaluate"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "domain_id",
-          "test_set"
-        ]
+        "required": ["domain_id", "test_set"]
       }
     },
     {
@@ -481,14 +412,10 @@
             "const": "gds_health"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "domain_id"
-        ]
+        "required": ["domain_id"]
       }
     },
     {
@@ -498,14 +425,10 @@
             "const": "gds_status"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "domain_id"
-        ]
+        "required": ["domain_id"]
       }
     },
     {
@@ -515,15 +438,10 @@
             "const": "gds_trigger"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "domain_id",
-          "job_name"
-        ]
+        "required": ["domain_id", "job_name"]
       }
     },
     {
@@ -533,14 +451,10 @@
             "const": "generate_calibration_pairs"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "domain_id"
-        ]
+        "required": ["domain_id"]
       }
     },
     {
@@ -550,14 +464,10 @@
             "const": "get_domain"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "domain_id"
-        ]
+        "required": ["domain_id"]
       }
     },
     {
@@ -567,15 +477,10 @@
             "const": "health_assess"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "entity_id",
-          "node_label"
-        ]
+        "required": ["entity_id", "node_label"]
       }
     },
     {
@@ -585,14 +490,10 @@
             "const": "init_schema"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "domain_id"
-        ]
+        "required": ["domain_id"]
       }
     },
     {
@@ -602,14 +503,10 @@
             "const": "revoke_capability"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "capability_id"
-        ]
+        "required": ["capability_id"]
       }
     },
     {
@@ -619,14 +516,10 @@
             "const": "score_feedback"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "domain_id"
-        ]
+        "required": ["domain_id"]
       }
     },
     {
@@ -636,15 +529,10 @@
             "const": "trigger_gds"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "domain_id",
-          "job_name"
-        ]
+        "required": ["domain_id", "job_name"]
       }
     },
     {
@@ -654,14 +542,10 @@
             "const": "trigger_kge"
           }
         },
-        "required": [
-          "subaction"
-        ]
+        "required": ["subaction"]
       },
       "then": {
-        "required": [
-          "domain_id"
-        ]
+        "required": ["domain_id"]
       }
     }
   ],

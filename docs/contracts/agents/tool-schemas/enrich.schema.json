@@ -3,14 +3,8 @@
     "l9_schema": 1,
     "origin": "engine-specific",
     "engine": "graph",
-    "layer": [
-      "docs",
-      "contracts"
-    ],
-    "tags": [
-      "contracts",
-      "tool-schema"
-    ],
+    "layer": ["docs", "contracts"],
+    "tags": ["contracts", "tool-schema"],
     "owner": "engine-team",
     "status": "active"
   },
@@ -52,25 +46,18 @@
             "description": "Safe expression whitelist; cannot include arbitrary Cypher or procedure calls."
           }
         },
-        "required": [
-          "property",
-          "expression"
-        ],
+        "required": ["property", "expression"],
         "additionalProperties": false
       },
       "default": []
     }
   },
-  "required": [
-    "entity_type"
-  ],
+  "required": ["entity_type"],
   "additionalProperties": false,
   "examples": [
     {
       "entity_type": "Supplier",
-      "entity_ids": [
-        "supplier-1"
-      ],
+      "entity_ids": ["supplier-1"],
       "enrichments": [
         {
           "property": "rank",

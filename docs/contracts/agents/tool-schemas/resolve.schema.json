@@ -3,14 +3,8 @@
     "l9_schema": 1,
     "origin": "engine-specific",
     "engine": "graph",
-    "layer": [
-      "docs",
-      "contracts"
-    ],
-    "tags": [
-      "contracts",
-      "tool-schema"
-    ],
+    "layer": ["docs", "contracts"],
+    "tags": ["contracts", "tool-schema"],
     "owner": "engine-team",
     "status": "active"
   },
@@ -27,9 +21,7 @@
     },
     "mode": {
       "type": "string",
-      "enum": [
-        "batch"
-      ],
+      "enum": ["batch"],
       "description": "Batch mode requires enabled semantic registry. Omit for single/manual resolution."
     },
     "source_id": {
@@ -61,9 +53,7 @@
       "default": "manual"
     }
   },
-  "required": [
-    "entity_type"
-  ],
+  "required": ["entity_type"],
   "additionalProperties": false,
   "examples": [
     {
@@ -95,9 +85,7 @@
   "x-schema-role": "bounded public client contract; the legacy handler may ignore extra keys",
   "anyOf": [
     {
-      "required": [
-        "source_id"
-      ]
+      "required": ["source_id"]
     },
     {
       "properties": {
@@ -105,9 +93,7 @@
           "const": "batch"
         }
       },
-      "required": [
-        "mode"
-      ]
+      "required": ["mode"]
     }
   ],
   "x-auth-control": "CEG source maps resolve to sync:write. In production, unconfigured or missing write grants fail closed; CAPABILITY_AUTH_ENABLED=false is limited to dev, local, and test. Gate/SDK ingress authorization remains a separate runtime proof obligation.",
@@ -115,20 +101,10 @@
   "x-runtime-validator-applies-this-json-schema": false,
   "x-domain-conditioned-required": {
     "semantic_registry_enabled_and_label_declared": {
-      "batch": [
-        "entity_type",
-        "mode=batch"
-      ],
-      "single": [
-        "entity_type",
-        "source_id"
-      ]
+      "batch": ["entity_type", "mode=batch"],
+      "single": ["entity_type", "source_id"]
     },
-    "legacy_or_label_not_declared": [
-      "entity_type",
-      "source_id",
-      "target_id"
-    ],
+    "legacy_or_label_not_declared": ["entity_type", "source_id", "target_id"],
     "rule": "a mode=batch payload is insufficient outside an opted-in semantic registry; no static schema admission may supersede the loaded DomainSpec"
   },
   "x-source-code-refs": [

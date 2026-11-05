@@ -3,14 +3,8 @@
     "l9_schema": 1,
     "origin": "engine-specific",
     "engine": "graph",
-    "layer": [
-      "docs",
-      "contracts"
-    ],
-    "tags": [
-      "contracts",
-      "tool-schema"
-    ],
+    "layer": ["docs", "contracts"],
+    "tags": ["contracts", "tool-schema"],
     "owner": "engine-team",
     "status": "active"
   },
@@ -41,10 +35,7 @@
       "description": "Optional causal edge type used only on configured paths."
     }
   },
-  "required": [
-    "entity_type",
-    "batch"
-  ],
+  "required": ["entity_type", "batch"],
   "additionalProperties": false,
   "examples": [
     {

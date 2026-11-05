@@ -3,14 +3,8 @@
     "l9_schema": 1,
     "origin": "engine-specific",
     "engine": "graph",
-    "layer": [
-      "docs",
-      "contracts"
-    ],
-    "tags": [
-      "contracts",
-      "tool-schema"
-    ],
+    "layer": ["docs", "contracts"],
+    "tags": ["contracts", "tool-schema"],
     "owner": "engine-team",
     "status": "active"
   },
@@ -77,10 +71,7 @@
       "$ref": "#/$defs/semver_ref"
     },
     "field_dictionary_version": {
-      "type": [
-        "string",
-        "null"
-      ],
+      "type": ["string", "null"],
       "minLength": 1
     }
   },
@@ -199,10 +190,7 @@
           "minLength": 1
         }
       },
-      "required": [
-        "id",
-        "version"
-      ],
+      "required": ["id", "version"],
       "additionalProperties": false
     },
     "evidence_item": {
@@ -228,11 +216,7 @@
           "pattern": "^[a-z0-9_.-]+:[^\\s]+$"
         }
       },
-      "required": [
-        "feature_id",
-        "value_state",
-        "evidence_ref"
-      ],
+      "required": ["feature_id", "value_state", "evidence_ref"],
       "additionalProperties": false
     },
     "typed_query": {
@@ -251,10 +235,7 @@
           "type": "object"
         }
       },
-      "required": [
-        "facts",
-        "evidence_summary"
-      ],
+      "required": ["facts", "evidence_summary"],
       "additionalProperties": false
     },
     "legacy_query": {
@@ -265,9 +246,7 @@
   "allOf": [
     {
       "if": {
-        "required": [
-          "contract_version"
-        ]
+        "required": ["contract_version"]
       },
       "then": {
         "required": [
@@ -289,23 +268,16 @@
         "not": {
           "anyOf": [
             {
-              "required": [
-                "match_direction"
-              ]
+              "required": ["match_direction"]
             },
             {
-              "required": [
-                "weights"
-              ]
+              "required": ["weights"]
             }
           ]
         }
       },
       "else": {
-        "required": [
-          "query",
-          "match_direction"
-        ],
+        "required": ["query", "match_direction"],
         "properties": {
           "query": {
             "$ref": "#/$defs/legacy_query"
@@ -314,24 +286,16 @@
         "not": {
           "anyOf": [
             {
-              "required": [
-                "direction"
-              ]
+              "required": ["direction"]
             },
             {
-              "required": [
-                "domain"
-              ]
+              "required": ["domain"]
             },
             {
-              "required": [
-                "policy_ref"
-              ]
+              "required": ["policy_ref"]
             },
             {
-              "required": [
-                "query_entity_ref"
-              ]
+              "required": ["query_entity_ref"]
             }
           ]
         }

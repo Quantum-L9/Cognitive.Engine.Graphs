@@ -3,14 +3,8 @@
     "l9_schema": 1,
     "origin": "engine-specific",
     "engine": "graph",
-    "layer": [
-      "docs",
-      "contracts"
-    ],
-    "tags": [
-      "contracts",
-      "tool-schema"
-    ],
+    "layer": ["docs", "contracts"],
+    "tags": ["contracts", "tool-schema"],
     "owner": "engine-team",
     "status": "active"
   },
@@ -32,17 +26,10 @@
     },
     "outcome": {
       "type": "string",
-      "enum": [
-        "success",
-        "failure",
-        "partial"
-      ]
+      "enum": ["success", "failure", "partial"]
     },
     "value": {
-      "type": [
-        "number",
-        "null"
-      ],
+      "type": ["number", "null"],
       "description": "Optional numeric outcome magnitude; handler passes value to graph/feedback."
     },
     "source_ts": {
@@ -104,21 +91,14 @@
           "description": "Optional per-dimension finite numeric scores; finite check is runtime _outcome_feedback_fields."
         },
         "was_selected": {
-          "type": [
-            "boolean",
-            "null"
-          ],
+          "type": ["boolean", "null"],
           "description": "Optional selection state; _outcome_feedback_fields checks bool or None, when outcome_schema_unified."
         }
       },
       "additionalProperties": false
     }
   },
-  "required": [
-    "match_id",
-    "candidate_id",
-    "outcome"
-  ],
+  "required": ["match_id", "candidate_id", "outcome"],
   "additionalProperties": false,
   "examples": [
     {
@@ -131,15 +111,11 @@
       "candidate_id": "buyer-13",
       "outcome": "partial",
       "fingerprint": {
-        "active_dimensions": [
-          "fit"
-        ],
+        "active_dimensions": ["fit"],
         "dimension_weights": {
           "fit": 1.0
         },
-        "gates_passed": [
-          "g1"
-        ],
+        "gates_passed": ["g1"],
         "match_direction": "supplier_to_buyer",
         "candidate_count": 1,
         "dimension_scores": {
@@ -193,10 +169,7 @@
   "x-runtime-validator-applies-this-json-schema": false,
   "x-conditional-fields": {
     "when": "outcome_schema_unified=True (default)",
-    "fields": [
-      "fingerprint.dimension_scores",
-      "fingerprint.was_selected"
-    ],
+    "fields": ["fingerprint.dimension_scores", "fingerprint.was_selected"],
     "runtime_policy": "Nonfinite dimension scores or non-boolean selection rejected by _outcome_feedback_fields; disabled flag changes enforcement and persistence."
   },
   "x-runtime-validation-boundary": "The SDK routes payload dict to handler; no observed loader validates this JSON Schema. additionalProperties:false and example rejection are candidate client contracts, NOT runtime rejection proofs.",
