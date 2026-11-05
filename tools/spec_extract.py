@@ -525,10 +525,43 @@ def _artifact_file(out_dir: Path, name: str, root: Path) -> Path:
     return resolve_under_root(out_dir / name, root, option=name)
 
 
+def _biome_json(value: object, *, width: int = 100) -> str:
+    """Emit JSON that Biome 2.5.8 keeps stable (indent 2, width 100, bracket spacing)."""
+
+    def compact(node: object) -> str:
+        if node is None or isinstance(node, (bool, int, float, str)):
+            return json.dumps(node)
+        if isinstance(node, list):
+            return "[" + ", ".join(compact(item) for item in node) + "]"
+        if isinstance(node, dict):
+            if not node:
+                return "{}"
+            body = ", ".join(f"{json.dumps(key)}: {compact(item)}" for key, item in node.items())
+            return "{ " + body + " }"
+        raise TypeError(f"unsupported checklist value: {type(node).__name__}")
+
+    def emit(node: object, column: int, level: int) -> str:
+        rendered = compact(node)
+        if column + len(rendered) <= width or not isinstance(node, (list, dict)):
+            return rendered
+        pad = "  " * (level + 1)
+        close = "  " * level
+        if isinstance(node, list):
+            inner = ",\n".join(pad + emit(item, (level + 1) * 2, level + 1) for item in node)
+            return "[\n" + inner + "\n" + close + "]"
+        rows = []
+        for key, item in node.items():
+            prefix = f"{json.dumps(key)}: "
+            rows.append(pad + prefix + emit(item, (level + 1) * 2 + len(prefix), level + 1))
+        return "{\n" + ",\n".join(rows) + "\n" + close + "}"
+
+    return emit(value, 0, 0) + "\n"
+
+
 def write_checklist(out_dir: Path, features: list[SpecFeature], root: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     data = [asdict(f) for f in features]
-    _artifact_file(out_dir, "spec_checklist.json", root).write_text(json.dumps(data, indent=2), encoding="utf-8")
+    _artifact_file(out_dir, "spec_checklist.json", root).write_text(_biome_json(data), encoding="utf-8")
 
 
 def write_coverage_matrix(out_dir: Path, features: list[SpecFeature], root: Path) -> None:
