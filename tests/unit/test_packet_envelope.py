@@ -137,7 +137,10 @@ class TestIntegrity:
         assert base_packet.security.transport_hash == compute_transport_hash(base_packet)
 
     def test_hash_deterministic(self, base_packet):
-        assert compute_transport_hash(base_packet) == compute_transport_hash(base_packet)
+        # An independently re-validated copy must hash identically.
+        copy = TransportPacket.model_validate(base_packet.model_dump())
+        assert copy is not base_packet
+        assert compute_transport_hash(copy) == base_packet.security.transport_hash
 
     def test_different_payload_different_hash(self, base_packet):
         other = _root(payload={"polymer": "PP", "min_volume_kg": 999})
@@ -165,8 +168,9 @@ class TestIntegrity:
         cannot be prevented — but it can no longer validate as a packet."""
         packet = _root(payload={"q": {"x": 1}})
         packet.payload["q"]["x"] = 99
+        dumped = packet.model_dump()
         with pytest.raises(TransportIntegrityError, match="payload_hash"):
-            TransportPacket.model_validate(packet.model_dump())
+            TransportPacket.model_validate(dumped)
 
 
 # ── Derivation ────────────────────────────────────────────
