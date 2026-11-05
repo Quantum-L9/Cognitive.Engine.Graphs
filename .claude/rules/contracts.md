@@ -21,8 +21,8 @@ Enforced by `tools/contract_scanner.py` and `tools/verify_contracts.py`.
 ## Layer 2 — Packet Protocol (6–8)
 | # | Name | Rule |
 |---|------|------|
-| 6 | PacketEnvelope Only | Every inter-service payload is a PacketEnvelope. inflate_ingress() at entry, deflate_egress() at exit. |
-| 7 | Immutability + Hash | PacketEnvelope frozen. Mutations via .derive(). content_hash SHA-256 UNIQUE constraint. |
+| 6 | TransportPacket Only | Every inter-service payload is an SDK `TransportPacket` (PacketEnvelope is retired, #138). inflate_ingress() at entry, deflate_egress() at exit. |
+| 7 | Immutability + Hash | TransportPacket frozen. Changes via .derive() / .with_hop() only. payload_hash + transport_hash SHA-256; packet_store content_hash (= transport_hash) UNIQUE. |
 | 8 | Lineage + Audit | Derived packets set parent_id, root_id, increment generation. hop_trace append-only. |
 
 ## Layer 3 — Security (9–11)

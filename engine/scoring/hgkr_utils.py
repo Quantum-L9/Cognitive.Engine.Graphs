@@ -100,7 +100,8 @@ def generate_calibration_pairs(
         if score is None or not isinstance(score, (int, float)):
             continue
 
-        score = float(score)
+        # ``score`` is int | float (isinstance guard above): float() cannot raise.
+        score = float(score)  # nosemgrep: semgrep.float-requires-try-except
         if not math.isfinite(score) or score < 0.0 or score > 1.0:
             skipped += 1
             continue

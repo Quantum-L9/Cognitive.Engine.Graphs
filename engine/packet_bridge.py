@@ -9,13 +9,13 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
-engine/packet_bridge.py — PacketEnvelope construction helpers for GRAPH
+engine/packet_bridge.py — TransportPacket construction helpers for GRAPH
 
 All outbound packets MUST be built via this module.
 Direct TransportPacket instantiation in handler code is forbidden.
 
 Provides:
-    build_request_packet  — construct an outbound PacketEnvelope
+    build_request_packet  — construct an outbound TransportPacket
     build_response_packet — construct a reply preserving inbound lineage
     extract_payload       — safely extract decoded payload dict
 

@@ -426,14 +426,14 @@ class ScoringAssembler:
 
     def _compile_candidateproperty(self, dim: ScoringDimensionSpec) -> str:
         """C-06 FIX: defaultwhennull emitted as validated numeric literal."""
-        default = float(dim.defaultwhennull)  # nosemgrep: float-requires-try-except
+        default = float(dim.defaultwhennull)  # nosemgrep: semgrep.float-requires-try-except
         prop = sanitize_label(dim.candidateprop or "value")
         return f"coalesce(candidate.{prop}, {default})"
 
     def _compile_weightedrate(self, dim: ScoringDimensionSpec) -> str:
         rate_prop = sanitize_label(dim.candidateprop or "rate")
         confidence_prop = sanitize_label(dim.queryprop or "confidence")
-        default = float(dim.defaultwhennull)  # nosemgrep: float-requires-try-except
+        default = float(dim.defaultwhennull)  # nosemgrep: semgrep.float-requires-try-except
         return f"coalesce(candidate.{rate_prop}, {default}) * coalesce(candidate.{confidence_prop}, 1.0)"
 
     def _compile_pricealignment(self, dim: ScoringDimensionSpec) -> str:
@@ -453,7 +453,7 @@ class ScoringAssembler:
         cand_prop = sanitize_label(dim.candidateprop or "price_per_unit")
         query_prop = sanitize_label(dim.queryprop or "target_price")
         tau = cypher_number(dim.maxvalue or 2.0)  # tolerance: 2.0 = ~7.4x ratio scores 0
-        default = float(dim.defaultwhennull)  # nosemgrep: float-requires-try-except
+        default = float(dim.defaultwhennull)  # nosemgrep: semgrep.float-requires-try-except
         if settings.pricealignment_float_division:
             ratio = f"toFloat(candidate.{cand_prop}) / toFloat(${query_prop})"
         else:
@@ -475,7 +475,7 @@ class ScoringAssembler:
         """
         date_prop = sanitize_label(dim.candidateprop or "last_activity_date")
         decay_days = cypher_number(dim.maxvalue or 90.0)
-        default = float(dim.defaultwhennull)  # nosemgrep: float-requires-try-except
+        default = float(dim.defaultwhennull)  # nosemgrep: semgrep.float-requires-try-except
         # Weights for 3 signals
         w1, w2, w3 = 0.6, 0.25, 0.15
         return (
@@ -493,12 +493,12 @@ class ScoringAssembler:
             raise ValueError(f"Dimension '{dim.name}': traversalalias requires 'alias' field")
         alias = sanitize_label(dim.alias)
         prop = sanitize_label(dim.candidateprop or "score")
-        default = float(dim.defaultwhennull)  # nosemgrep: float-requires-try-except
+        default = float(dim.defaultwhennull)  # nosemgrep: semgrep.float-requires-try-except
         return f"coalesce({alias}.{prop}, {default})"
 
     def _compile_kge(self, dim: ScoringDimensionSpec) -> str:
         """KGE embedding similarity score (CompoundE3D)."""
-        default = float(dim.defaultwhennull)  # nosemgrep: float-requires-try-except
+        default = float(dim.defaultwhennull)  # nosemgrep: semgrep.float-requires-try-except
         if dim.alias:
             alias = sanitize_label(dim.alias)
             prop = sanitize_label(dim.candidateprop or "kge_score")
@@ -520,7 +520,7 @@ class ScoringAssembler:
 
         Ref: engine/kge/beam_search.py, Deep Research Directive §8
         """
-        default = float(dim.defaultwhennull)  # nosemgrep: float-requires-try-except
+        default = float(dim.defaultwhennull)  # nosemgrep: semgrep.float-requires-try-except
         prop = sanitize_label(dim.candidateprop or "variant_discovery_score")
         if dim.alias:
             alias = sanitize_label(dim.alias)
@@ -542,7 +542,7 @@ class ScoringAssembler:
 
         Ref: engine/kge/ensemble.py, Deep Research Directive §9
         """
-        default = float(dim.defaultwhennull)  # nosemgrep: float-requires-try-except
+        default = float(dim.defaultwhennull)  # nosemgrep: semgrep.float-requires-try-except
         prop = sanitize_label(dim.candidateprop or "ensemble_confidence")
         if dim.alias:
             alias = sanitize_label(dim.alias)
@@ -566,7 +566,7 @@ class ScoringAssembler:
 
         Ref: Liu et al., Scientific Reports (2023) 13:6987, §3.2 preference attention.
         """
-        default = float(dim.defaultwhennull)  # nosemgrep: float-requires-try-except
+        default = float(dim.defaultwhennull)  # nosemgrep: semgrep.float-requires-try-except
         sample_k = (
             self.scoring_spec.preference_sample_size if hasattr(self.scoring_spec, "preference_sample_size") else 28
         )
@@ -638,7 +638,7 @@ class ScoringAssembler:
 
         Ref: Liu et al., Scientific Reports (2023) 13:6987, §3.3 cross-graph propagation.
         """
-        default = float(dim.defaultwhennull)  # nosemgrep: float-requires-try-except
+        default = float(dim.defaultwhennull)  # nosemgrep: semgrep.float-requires-try-except
 
         # Extract community properties from metadata or use sensible defaults
         metadata = dim.metadata if hasattr(dim, "metadata") and dim.metadata else {}

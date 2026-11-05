@@ -62,7 +62,8 @@ def _weight_entropy(result: EnsembleResult) -> float:
     if total == 0:
         return 0.0
     p = vals / total
-    raw_h = -float(np.sum(p * np.log(p)))
+    # float() of a numpy float64 reduction over a float64 array: cannot raise.
+    raw_h = -float(np.sum(p * np.log(p)))  # nosemgrep: semgrep.float-requires-try-except
     max_h = math.log(len(vals))
     return raw_h / max_h if max_h > 0 else 0.0
 

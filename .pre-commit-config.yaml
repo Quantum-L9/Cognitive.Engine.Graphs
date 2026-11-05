@@ -15,7 +15,7 @@
 repos:
   # Code formatting
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.8
+    rev: v0.16.1
     hooks:
       - id: ruff
         args: [--fix]
@@ -30,7 +30,7 @@ repos:
 
   # Type checking
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v2.3.1
+    rev: v2.3.0
     hooks:
       - id: mypy
         args: [--ignore-missing-imports, --follow-imports=silent]

@@ -3,13 +3,8 @@
     "l9_schema": 1,
     "origin": "engine-specific",
     "engine": "graph",
-    "layer": [
-      "audit"
-    ],
-    "tags": [
-      "research",
-      "schema"
-    ],
+    "layer": ["audit"],
+    "tags": ["research", "schema"],
     "owner": "engine-team",
     "status": "active"
   },
