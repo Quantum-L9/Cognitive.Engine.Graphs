@@ -98,10 +98,11 @@ class OutcomeFeedback:
             for dim, score in dim_scores.items():
                 if not isinstance(score, (int, float)):
                     continue
+                # ``score`` is int | float (isinstance guard above): float() cannot raise.
                 if outcome_type == positive_class:
-                    positive_dims[dim].append(float(score))
+                    positive_dims[dim].append(float(score))  # nosemgrep: semgrep.float-requires-try-except
                 elif outcome_type == negative_class:
-                    negative_dims[dim].append(float(score))
+                    negative_dims[dim].append(float(score))  # nosemgrep: semgrep.float-requires-try-except
 
         all_dims = set(positive_dims.keys()) | set(negative_dims.keys())
         dimension_analysis: dict[str, dict[str, Any]] = {}

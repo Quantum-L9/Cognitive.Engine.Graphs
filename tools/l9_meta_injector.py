@@ -403,13 +403,6 @@ FILE_REGISTRY: list[FileMeta] = [
     ),
     FileMeta("engine/packet/__init__.py", "engine-specific", ["config"], ["packet"], "engine-team"),
     FileMeta(
-        "engine/packet/packet_envelope.py",
-        "engine-specific",
-        ["config"],
-        ["packet", "envelope", "pydantic"],
-        "engine-team",
-    ),
-    FileMeta(
         "engine/packet/chassis_contract.py", "engine-specific", ["config"], ["packet", "chassis-bridge"], "engine-team"
     ),
     FileMeta("engine/utils/__init__.py", "engine-specific", ["config"], ["utils"], "engine-team"),
@@ -1196,23 +1189,42 @@ def _inject_comment_meta(content: str, meta: FileMeta, engine: str) -> str:
     return block + "\n" + content
 
 
+def _json_header_is_current(data: dict[str, Any], expected: dict[str, Any]) -> bool:
+    """True when ``_l9_meta`` is the first key and matches *expected* in schema order."""
+    current = data.get("_l9_meta")
+    return (
+        next(iter(data), None) == "_l9_meta"
+        and isinstance(current, dict)
+        and list(current.items()) == list(expected.items())
+    )
+
+
+def _inject_json_meta(content: str, meta: FileMeta, engine: str) -> str:
+    """Put ``_l9_meta`` first in a JSON object; leave non-objects and correct files as is."""
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        return content
+    # Only inject _l9_meta into objects, not arrays (arrays would break structure)
+    if not isinstance(data, dict):
+        return content
+    expected = format_json_meta(meta, engine)
+    if _json_header_is_current(data, expected):
+        # Layout belongs to the JSON formatter (Biome, biome.json), so a file
+        # whose header is already correct is left byte-for-byte as is.
+        return content
+    data.pop("_l9_meta", None)
+    ordered = {"_l9_meta": expected, **data}
+    return json.dumps(ordered, indent=2) + "\n"
+
+
 def inject_meta(content: str, meta: FileMeta, engine: str) -> str:
     """Inject L9_META header into file content based on filetype."""
     ftype = _detect_filetype(meta.path)
 
     # --- JSON ---
     if ftype == "json":
-        try:
-            data = json.loads(content)
-        except json.JSONDecodeError:
-            return content
-        # Only inject _l9_meta into objects, not arrays (arrays would break structure)
-        if not isinstance(data, dict):
-            return content  # Skip arrays - can't inject meta without breaking structure
-        data["_l9_meta"] = format_json_meta(meta, engine)
-        ordered = {"_l9_meta": data.pop("_l9_meta")}
-        ordered.update(data)
-        return json.dumps(ordered, indent=2) + "\n"
+        return _inject_json_meta(content, meta, engine)
 
     # --- TOML ---
     if ftype == "toml":
@@ -1377,6 +1389,10 @@ EXCLUDED_PATTERNS: dict[str, str] = {
     "artifacts/**": (
         "generated: rewritten on every run by tools/audit_engine.py (write_report), "
         "tools/spec_extract.py and tools/audit_harness.py, which emit no header"
+    ),
+    "reports/end-session/**": (
+        "generated: session and governance handoff reports written on every publish by "
+        "the governance post-publish hook, which emits no header"
     ),
     "chassis/Dockerfile.chassis": (
         'protected infrastructure file (Dockerfile*); its header declares engine: "*" for the '
@@ -1605,7 +1621,6 @@ HEADERLESS_BASELINE: frozenset[str] = frozenset(
         "docs/runbooks/CEG_OUTCOME_REPLAY.md",
         "docs/runbooks/CEG_SHADOW_COMPARISON.md",
         "engine/security/llm.py",
-        "l9_core/models.py",
         "memory-bank/activeContext.md",
         "memory-bank/progress.md",
         "memory-bank/tasks.md",

@@ -563,3 +563,42 @@ class TestArbitrationObjectiveDirection:
         monkeypatch.setattr(settings, "arbitration_objective_direction", False)
         cands = build_pareto_candidates([{"q": 0.5}], ["cost", "q"])
         assert cands[0].dimension_scores["cost"] == 0.0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Non-numeric result-row values never crash the arbitration path
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestArbitrationNonNumericValues:
+    def test_constraint_treats_non_numeric_score_as_absent(self):
+        """A non-numeric dimension value skips the constraint, like an absent one."""
+        from engine.scoring.pareto_integrator import apply_constraint_penalties
+
+        candidates = [
+            {"candidate": {"entity_id": "junk"}, "dimension_scores": {"d": "n/a"}, "score": 1.0},
+            {"candidate": {"entity_id": "low"}, "dimension_scores": {"d": 0.1}, "score": 1.0},
+        ]
+        constraints = [{"dimension": "d", "threshold": 0.5, "hard": True, "penalty": 0.5}]
+        kept = apply_constraint_penalties(candidates, constraints)
+        assert [r["candidate"]["entity_id"] for r in kept] == ["junk"]
+        assert kept[0]["score"] == 1.0
+
+    def test_constraint_non_numeric_score_legacy_mode(self, monkeypatch):
+        from engine.config.settings import settings
+        from engine.scoring.pareto_integrator import apply_constraint_penalties
+
+        monkeypatch.setattr(settings, "arbitration_zero_score_present", False)
+        candidates = [{"dimension_scores": {"d": "n/a"}, "score": 1.0}]
+        kept = apply_constraint_penalties(candidates, [{"dimension": "d", "threshold": 0.5, "hard": False}])
+        assert kept[0]["score"] == 1.0
+
+    def test_legacy_subdict_non_numeric_value_fills_zero(self, monkeypatch):
+        """Legacy (C-21) path: a non-numeric dimension_scores value gets the 0.0 fill."""
+        from engine.config.settings import settings
+        from engine.scoring.pareto_integrator import build_pareto_candidates
+
+        monkeypatch.setattr(settings, "arbitration_zero_score_present", False)
+        results = [{"candidate": {"entity_id": "c1"}, "dimension_scores": {"d": "n/a", "q": 0.4}}]
+        cands = build_pareto_candidates(results, ["d", "q"])
+        assert cands[0].dimension_scores == {"d": 0.0, "q": 0.4}

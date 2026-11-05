@@ -3,14 +3,8 @@
     "l9_schema": 1,
     "origin": "engine-specific",
     "engine": "graph",
-    "layer": [
-      "audit"
-    ],
-    "tags": [
-      "research",
-      "analysis",
-      "spec-coverage"
-    ],
+    "layer": ["audit"],
+    "tags": ["research", "analysis", "spec-coverage"],
     "owner": "engine-team",
     "status": "active"
   },
@@ -50,14 +44,8 @@
     "leverage_score": "10/10 - Proven across 3 different verticals with $510B total revenue influence",
     "engine_mapping": {
       "subsystem": "engine/gds + engine/scoring",
-      "search_tokens": [
-        "cooccurrence",
-        "communitymatch"
-      ],
-      "search_files": [
-        "engine/gds/",
-        "engine/scoring/"
-      ]
+      "search_tokens": ["cooccurrence", "communitymatch"],
+      "search_files": ["engine/gds/", "engine/scoring/"]
     }
   },
   "2_ENTITY_DISAMBIGUATION_VIA_CONTEXT": {
@@ -96,14 +84,8 @@
     "leverage_score": "9/10 - Critical for reducing noise in high-volume matching scenarios",
     "engine_mapping": {
       "subsystem": "engine/resolution",
-      "search_tokens": [
-        "EntityResolver",
-        "handle_resolve"
-      ],
-      "search_files": [
-        "engine/resolution/",
-        "engine/handlers.py"
-      ]
+      "search_tokens": ["EntityResolver", "handle_resolve"],
+      "search_files": ["engine/resolution/", "engine/handlers.py"]
     }
   },
   "3_GRAPH_EMBEDDINGS_FOR_SIMILARITY": {
@@ -140,14 +122,8 @@
     "leverage_score": "9/10 - Unlocks long-tail/novel scenarios where explicit historical data is sparse",
     "engine_mapping": {
       "subsystem": "engine/kge",
-      "search_tokens": [
-        "CompoundE3D",
-        "kge_enabled"
-      ],
-      "search_files": [
-        "engine/kge/",
-        "engine/config/"
-      ]
+      "search_tokens": ["CompoundE3D", "kge_enabled"],
+      "search_files": ["engine/kge/", "engine/config/"]
     }
   },
   "4_REAL_TIME_CONTEXT_AWARE_RANKING": {
@@ -186,13 +162,8 @@
     "leverage_score": "8/10 - Critical for time-sensitive/high-urgency scenarios (not all use cases need real-time)",
     "engine_mapping": {
       "subsystem": "engine/scoring",
-      "search_tokens": [
-        "temporalproximity",
-        "calibration"
-      ],
-      "search_files": [
-        "engine/scoring/"
-      ]
+      "search_tokens": ["temporalproximity", "calibration"],
+      "search_files": ["engine/scoring/"]
     }
   },
   "5_MULTI_HOP_TRAVERSAL_FOR_ENRICHMENT": {
@@ -231,14 +202,8 @@
     "leverage_score": "8/10 - Unlocks network effects and transitive trust/compatibility signals",
     "engine_mapping": {
       "subsystem": "engine/traversal + engine/hoprag",
-      "search_tokens": [
-        "MultiHopTraverser",
-        "multihop"
-      ],
-      "search_files": [
-        "engine/traversal/",
-        "engine/hoprag/"
-      ]
+      "search_tokens": ["MultiHopTraverser", "multihop"],
+      "search_files": ["engine/traversal/", "engine/hoprag/"]
     }
   }
 }
