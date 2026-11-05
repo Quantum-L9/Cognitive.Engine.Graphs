@@ -139,6 +139,33 @@ def test_safe_writer_refuses_dangling_child_symlink(tmp_path: Path) -> None:
     assert not outside.exists()
 
 
+def test_safe_writer_writes_child_of_nonreadable_directory(tmp_path: Path) -> None:
+    drop = tmp_path / "dropbox"
+    drop.mkdir()
+    drop.chmod(0o333)
+    try:
+        if os.geteuid() != 0:
+            with pytest.raises(PermissionError):
+                os.open(drop, os.O_RDONLY | os.O_DIRECTORY)
+        path_policy.write_text_no_follow(drop, "summary.json", "payload")
+        assert (drop / "summary.json").read_text(encoding="utf-8") == "payload"
+    finally:
+        drop.chmod(0o755)
+
+
+def test_safe_writer_writes_through_nonreadable_ancestor(tmp_path: Path) -> None:
+    ancestor = tmp_path / "dropbox"
+    ancestor.mkdir()
+    leaf = ancestor / "nested"
+    leaf.mkdir()
+    ancestor.chmod(0o333)
+    try:
+        path_policy.write_text_no_follow(leaf, "summary.json", "payload")
+        assert (leaf / "summary.json").read_text(encoding="utf-8") == "payload"
+    finally:
+        ancestor.chmod(0o755)
+
+
 def test_safe_writer_refuses_symlink_inserted_after_directory_resolution(tmp_path: Path) -> None:
     root = tmp_path / "allowed"
     root.mkdir()
