@@ -773,6 +773,20 @@ FILE_REGISTRY: list[FileMeta] = [
         ["gmp-report"],
         "engine-team",
     ),
+    FileMeta(
+        "reports/end-session/session-handoff/2026-11-05-pr412-944f0573b17a.md",
+        "engine-specific",
+        ["reports"],
+        ["session-handoff"],
+        "engine-team",
+    ),
+    FileMeta(
+        "reports/end-session/governance-handoff/2026-11-05-pr412-944f0573b17a.md",
+        "engine-specific",
+        ["reports"],
+        ["governance-handoff"],
+        "engine-team",
+    ),
     # --- templates ---
     FileMeta(
         "templates/styleguide.template.md", "l9-template", ["templates"], ["L9_TEMPLATE", "styleguide"], "platform"
