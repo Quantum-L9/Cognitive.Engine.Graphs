@@ -289,7 +289,7 @@ check-fix:	## Full local quality gate (autofix lint + types + unit tests; the pr
 	@echo "── Type Check ──"
 	@mypy engine/
 	@echo "── Unit Tests ──"
-	@PYTHONPATH="$${PYTHONPATH}:." python3 -m pytest tests/ -m "unit" --tb=short -q
+	@PYTHONPATH="$${PYTHONPATH:-}:." python3 -m pytest tests/ -m "unit" --tb=short -q
 	@echo "── All checks passed ──"
 
 # ── Agent Verification Gate ────────────────────────────────
@@ -311,14 +311,14 @@ agent-check:	## Agent completion gate: CI's blocking set + audit harness, run lo
 	@echo "── [3/8] Contract violation scan ──"
 	@python3 tools/contract_scanner.py
 	@echo "── [4/8] Payload contract compiler validator ──"
-	@PYTHONPATH="$${PYTHONPATH}:." python3 tools/payload_contract_compiler.py --stdout-only
+	@PYTHONPATH="$${PYTHONPATH:-}:." python3 tools/payload_contract_compiler.py --stdout-only
 	@echo "── [5/8] Lint + format ──"
 	@ruff check .
 	@ruff format --check .
 	@echo "── [6/8] Type check ──"
 	@mypy engine/ --config-file=pyproject.toml --ignore-missing-imports --exclude chassis
 	@echo "── [7/8] Tests ──"
-	@PYTHONPATH="$${PYTHONPATH}:." python3 -m pytest tests/ --tb=short -q
+	@PYTHONPATH="$${PYTHONPATH:-}:." python3 -m pytest tests/ --tb=short -q
 	@echo "── [8/8] Contract verification coverage ──"
 	@python3 tools/contract_report.py
 	@echo ""
@@ -335,14 +335,14 @@ agent-check-unit:	## Local agent gate (skips Docker integration/perf): CI's bloc
 	@echo "── [3/8] Contract violation scan ──"
 	@python3 tools/contract_scanner.py
 	@echo "── [4/8] Payload contract compiler validator ──"
-	@PYTHONPATH="$${PYTHONPATH}:." python3 tools/payload_contract_compiler.py --stdout-only
+	@PYTHONPATH="$${PYTHONPATH:-}:." python3 tools/payload_contract_compiler.py --stdout-only
 	@echo "── [5/8] Lint + format ──"
 	@ruff check .
 	@ruff format --check .
 	@echo "── [6/8] Type check ──"
 	@mypy engine/ --config-file=pyproject.toml --ignore-missing-imports --exclude chassis
 	@echo "── [7/8] Tests ──"
-	@PYTHONPATH="$${PYTHONPATH}:." python3 -m pytest tests/ -m "unit" --tb=short -q
+	@PYTHONPATH="$${PYTHONPATH:-}:." python3 -m pytest tests/ -m "unit" --tb=short -q
 	@echo "── [8/8] Contract verification coverage ──"
 	@python3 tools/contract_report.py
 	@echo ""
