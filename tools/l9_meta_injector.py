@@ -1194,6 +1194,16 @@ def _inject_comment_meta(content: str, meta: FileMeta, engine: str) -> str:
     return block + "\n" + content
 
 
+def _json_header_is_current(data: dict[str, Any], expected: dict[str, Any]) -> bool:
+    """True when ``_l9_meta`` is the first key and matches *expected* in schema order."""
+    current = data.get("_l9_meta")
+    return (
+        next(iter(data), None) == "_l9_meta"
+        and isinstance(current, dict)
+        and list(current.items()) == list(expected.items())
+    )
+
+
 def inject_meta(content: str, meta: FileMeta, engine: str) -> str:
     """Inject L9_META header into file content based on filetype."""
     ftype = _detect_filetype(meta.path)
@@ -1208,14 +1218,9 @@ def inject_meta(content: str, meta: FileMeta, engine: str) -> str:
         if not isinstance(data, dict):
             return content  # Skip arrays - can't inject meta without breaking structure
         expected = format_json_meta(meta, engine)
-        current = data.get("_l9_meta")
-        if (
-            next(iter(data), None) == "_l9_meta"
-            and isinstance(current, dict)
-            and list(current.items()) == list(expected.items())
-        ):
-            # The header is correct and first. Layout belongs to the JSON formatter
-            # (Biome, biome.json), so a correct file is left byte-for-byte as is.
+        if _json_header_is_current(data, expected):
+            # Layout belongs to the JSON formatter (Biome, biome.json), so a file
+            # whose header is already correct is left byte-for-byte as is.
             return content
         data["_l9_meta"] = expected
         ordered = {"_l9_meta": data.pop("_l9_meta")}
