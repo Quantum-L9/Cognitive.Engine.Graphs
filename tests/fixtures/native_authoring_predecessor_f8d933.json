@@ -3,15 +3,8 @@
     "l9_schema": 1,
     "origin": "engine-specific",
     "engine": "graph",
-    "layer": [
-      "test"
-    ],
-    "tags": [
-      "test",
-      "fixtures",
-      "native-authoring",
-      "predecessor-parity"
-    ],
+    "layer": ["test"],
+    "tags": ["test", "fixtures", "native-authoring", "predecessor-parity"],
     "owner": "engine-team",
     "status": "active"
   },
@@ -46,62 +39,24 @@
           "flags": [],
           "exit_code": 1,
           "checks": [
-            [
-              "W1-01-weight-sum",
-              "FAIL"
-            ],
-            [
-              "W1-03-gate-compile",
-              "PASS"
-            ],
-            [
-              "W1-03-gate-compile",
-              "PASS"
-            ],
-            [
-              "W1-04-traversal",
-              "PASS"
-            ],
-            [
-              "W1-04-traversal",
-              "PASS"
-            ],
-            [
-              "W3-02-prohibited-factors",
-              "PASS"
-            ]
+            ["W1-01-weight-sum", "FAIL"],
+            ["W1-03-gate-compile", "PASS"],
+            ["W1-03-gate-compile", "PASS"],
+            ["W1-04-traversal", "PASS"],
+            ["W1-04-traversal", "PASS"],
+            ["W3-02-prohibited-factors", "PASS"]
           ]
         },
         "strict": {
-          "flags": [
-            "--strict"
-          ],
+          "flags": ["--strict"],
           "exit_code": 1,
           "checks": [
-            [
-              "W1-01-weight-sum",
-              "FAIL"
-            ],
-            [
-              "W1-03-gate-compile",
-              "PASS"
-            ],
-            [
-              "W1-03-gate-compile",
-              "PASS"
-            ],
-            [
-              "W1-04-traversal",
-              "PASS"
-            ],
-            [
-              "W1-04-traversal",
-              "PASS"
-            ],
-            [
-              "W3-02-prohibited-factors",
-              "PASS"
-            ]
+            ["W1-01-weight-sum", "FAIL"],
+            ["W1-03-gate-compile", "PASS"],
+            ["W1-03-gate-compile", "PASS"],
+            ["W1-04-traversal", "PASS"],
+            ["W1-04-traversal", "PASS"],
+            ["W3-02-prohibited-factors", "PASS"]
           ]
         }
       }
@@ -115,46 +70,20 @@
           "flags": [],
           "exit_code": 0,
           "checks": [
-            [
-              "W1-01-cross-ref",
-              "PASS"
-            ],
-            [
-              "W1-03-gate-compile",
-              "PASS"
-            ],
-            [
-              "W1-04-traversal",
-              "PASS"
-            ],
-            [
-              "W3-02-prohibited-factors",
-              "PASS"
-            ]
+            ["W1-01-cross-ref", "PASS"],
+            ["W1-03-gate-compile", "PASS"],
+            ["W1-04-traversal", "PASS"],
+            ["W3-02-prohibited-factors", "PASS"]
           ]
         },
         "strict": {
-          "flags": [
-            "--strict"
-          ],
+          "flags": ["--strict"],
           "exit_code": 0,
           "checks": [
-            [
-              "W1-01-cross-ref",
-              "PASS"
-            ],
-            [
-              "W1-03-gate-compile",
-              "PASS"
-            ],
-            [
-              "W1-04-traversal",
-              "PASS"
-            ],
-            [
-              "W3-02-prohibited-factors",
-              "PASS"
-            ]
+            ["W1-01-cross-ref", "PASS"],
+            ["W1-03-gate-compile", "PASS"],
+            ["W1-04-traversal", "PASS"],
+            ["W3-02-prohibited-factors", "PASS"]
           ]
         }
       }
