@@ -63,9 +63,9 @@ class RetrievalMetrics:
         query_id: Query identifier.
     """
 
-    precision: float = 0.0  # nosemgrep: semgrep.float-requires-try-except
-    recall: float = 0.0  # nosemgrep: semgrep.float-requires-try-except
-    f1: float = 0.0  # nosemgrep: semgrep.float-requires-try-except
+    precision: float = 0.0
+    recall: float = 0.0
+    f1: float = 0.0
     top_k: int = 0
     query_id: str = ""
 
@@ -83,12 +83,12 @@ class BenchmarkResult:
         execution_time_s: Total benchmark time.
     """
 
-    mean_precision: float = 0.0  # nosemgrep: semgrep.float-requires-try-except
-    mean_recall: float = 0.0  # nosemgrep: semgrep.float-requires-try-except
-    mean_f1: float = 0.0  # nosemgrep: semgrep.float-requires-try-except
+    mean_precision: float = 0.0
+    mean_recall: float = 0.0
+    mean_f1: float = 0.0
     num_queries: int = 0
     per_query: list[RetrievalMetrics] = field(default_factory=list)
-    execution_time_s: float = 0.0  # nosemgrep: semgrep.float-requires-try-except
+    execution_time_s: float = 0.0
 
 
 def compute_retrieval_metrics(

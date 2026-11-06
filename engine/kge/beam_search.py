@@ -128,7 +128,7 @@ class BeamCandidate:
             "id": self.transformation_id,
             "type": self.transformation_type,
             "params": self.params,
-            "score": float(self.score),  # nosemgrep: semgrep.float-requires-try-except
+            "score": float(self.score),
             "depth": self.depth,
             "parent_id": self.parent_id,
             "chain": [{"type": t, "params": p} for t, p in self.ops()],
@@ -246,12 +246,12 @@ class BeamSearchEngine:
                 RuntimeWarning,
                 stacklevel=2,
             )
-            return float(rng.uniform(0.0, 0.3))  # nosemgrep: semgrep.float-requires-try-except
+            return float(rng.uniform(0.0, 0.3))
 
         # Sample entities for evaluation
         sample_ids = entity_ids or list(self.model._entity_embeddings.keys())[:100]
         if not sample_ids:
-            return float(rng.uniform(0.0, 0.3))  # nosemgrep: semgrep.float-requires-try-except
+            return float(rng.uniform(0.0, 0.3))
 
         # Compute quality score based on transformation consistency
         quality_scores = []
@@ -264,9 +264,7 @@ class BeamSearchEngine:
             diff = np.linalg.norm(transformed - emb)
             quality_scores.append(1.0 / (1.0 + diff))
 
-        quality_score = (
-            float(np.mean(quality_scores)) if quality_scores else 0.5  # nosemgrep: semgrep.float-requires-try-except
-        )  # nosemgrep: semgrep.float-requires-try-except
+        quality_score = float(np.mean(quality_scores)) if quality_scores else 0.5
 
         # Constraint satisfaction
         constraint_score = 1.0
@@ -277,7 +275,7 @@ class BeamSearchEngine:
             except Exception:
                 constraint_score *= 0.7
 
-        return float(quality_score * constraint_score)  # nosemgrep: semgrep.float-requires-try-except
+        return float(quality_score * constraint_score)
 
     def _stopping_criterion(
         self,
@@ -360,10 +358,10 @@ class BeamSearchEngine:
             for axis in [(1, 0, 0), (0, 1, 0), (0, 0, 1)]:
                 variants.append(
                     {
-                        "angle": float(angle),  # nosemgrep: semgrep.float-requires-try-except
-                        "axis_x": float(axis[0]),  # nosemgrep: semgrep.float-requires-try-except
-                        "axis_y": float(axis[1]),  # nosemgrep: semgrep.float-requires-try-except
-                        "axis_z": float(axis[2]),  # nosemgrep: semgrep.float-requires-try-except
+                        "angle": float(angle),
+                        "axis_x": float(axis[0]),
+                        "axis_y": float(axis[1]),
+                        "axis_z": float(axis[2]),
                     }
                 )
         return variants
@@ -387,7 +385,7 @@ class BeamSearchEngine:
         return variants
 
     def _make_flip_variants(self) -> list[dict[str, float]]:
-        return [{"axis": float(axis)} for axis in [0, 1, 2]]  # nosemgrep: semgrep.float-requires-try-except
+        return [{"axis": float(axis)} for axis in [0, 1, 2]]
 
     def _make_hyperplane_variants(self) -> list[dict[str, float]]:
         variants: list[dict[str, float]] = []
@@ -395,10 +393,10 @@ class BeamSearchEngine:
             for d in [-1.0, -0.5, 0.0, 0.5, 1.0]:
                 variants.append(
                     {
-                        "a": float(a),  # nosemgrep: semgrep.float-requires-try-except
-                        "b": float(b),  # nosemgrep: semgrep.float-requires-try-except
-                        "c": float(c),  # nosemgrep: semgrep.float-requires-try-except
-                        "d": float(d),  # nosemgrep: semgrep.float-requires-try-except
+                        "a": float(a),
+                        "b": float(b),
+                        "c": float(c),
+                        "d": float(d),
                     }
                 )
         return variants
@@ -534,7 +532,7 @@ class BeamSearchEngine:
         if not all_keys:
             return 1.0
         distances = [(params1.get(k, 0.0) - params2.get(k, 0.0)) ** 2 for k in all_keys]
-        return float(1.0 / (1.0 + np.sqrt(sum(distances))))  # nosemgrep: semgrep.float-requires-try-except
+        return float(1.0 / (1.0 + np.sqrt(sum(distances))))
 
     # ------------------------------------------------------------------
     # Main search

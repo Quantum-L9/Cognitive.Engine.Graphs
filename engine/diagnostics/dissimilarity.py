@@ -82,9 +82,7 @@ def _euclidean_distance(vec_a: list[float], vec_b: list[float]) -> float:
         vec_b = vec_b + [0.0] * (max_len - len(vec_b))
 
     # float() of a numeric result (sqrt of a sum of squares): cannot raise ValueError.
-    return float(  # nosemgrep: semgrep.float-requires-try-except
-        sum((a - b) ** 2 for a, b in zip(vec_a, vec_b, strict=True)) ** 0.5
-    )
+    return float(sum((a - b) ** 2 for a, b in zip(vec_a, vec_b, strict=True)) ** 0.5)
 
 
 def _shared_vector_keys(

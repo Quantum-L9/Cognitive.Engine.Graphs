@@ -58,7 +58,7 @@ class MockEmbeddingEncoder:
 
     def encode(self, text: str) -> tuple[float, ...]:
         # Hash-based fake embedding
-        val = float(hash(text) % 1000) / 1000.0  # nosemgrep: semgrep.float-requires-try-except
+        val = float(hash(text) % 1000) / 1000.0
         return (val, 1.0 - val, 0.5)
 
 

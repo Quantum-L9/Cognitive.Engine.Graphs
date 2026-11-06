@@ -99,6 +99,19 @@ jobs:
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN || '' }}
 
+      # The rule fixtures (.semgrep/fixtures/semgrep-rules.py: deliberate true
+      # positives and true negatives) must keep matching, or a rule edit could
+      # silently stop catching what it exists for. Same image tag as the action
+      # above, pulled in the same job, so the fixtures are judged by the engine
+      # that just ran the policy scan. The fixture path is given as a file:
+      # semgrep --test with a directory target crashes, and a fixture under
+      # tests/ is hidden by the rules' own **/tests/** exclude on this engine.
+      - name: Semgrep rule fixtures (semgrep --test)
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/src" -w /src returntocorp/semgrep-agent:v1 \
+            semgrep --test --metrics=off \
+              --config .semgrep/semgrep-rules.yaml .semgrep/fixtures/semgrep-rules.py
+
   # ===========================================================================
   # SECRETS-SCAN — GitGuardian Secrets Detection
   # ===========================================================================

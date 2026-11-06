@@ -378,7 +378,7 @@ class CompoundE3D:
             return 0.0
         dist = self._distance(head, relation, tail)
         # Convert distance to similarity score via sigmoid
-        return float(1.0 / (1.0 + np.exp(dist - self.config.margin)))  # nosemgrep: semgrep.float-requires-try-except
+        return float(1.0 / (1.0 + np.exp(dist - self.config.margin)))
 
     def embed(self, entity_id: str) -> npt.NDArray[np.float64] | None:
         """Return embedding vector for entity (or None if unknown)."""
@@ -410,7 +410,7 @@ class CompoundE3D:
             return 0.0
         dot = np.dot(ea, eb)
         norm = np.linalg.norm(ea) * np.linalg.norm(eb)
-        return float(dot / norm) if norm > 1e-9 else 0.0  # nosemgrep: semgrep.float-requires-try-except
+        return float(dot / norm) if norm > 1e-9 else 0.0
 
     # ------------------------------------------------------------------
     # Graph Writeback (for assembler._compile_kge)
@@ -455,13 +455,13 @@ class CompoundE3D:
         r_emb = self._relation_embeddings.get(relation)
 
         if h_emb is None or t_emb is None:
-            return float("inf")  # nosemgrep: semgrep.float-requires-try-except
+            return float("inf")
         if r_emb is None:
-            return float("inf")  # nosemgrep: semgrep.float-requires-try-except
+            return float("inf")
 
         # --- Fallback to TransE if operators not yet built ---
         if relation not in self._head_ops:
-            return float(np.linalg.norm((h_emb + r_emb) - t_emb))  # nosemgrep: semgrep.float-requires-try-except
+            return float(np.linalg.norm((h_emb + r_emb) - t_emb))
 
         from engine.kge.beam_search import _CascadeTransformation
 
@@ -506,9 +506,9 @@ class CompoundE3D:
 
         result = minimize(nll, x0=[1.0, 0.0], method="L-BFGS-B")
         self._platt_alpha, self._platt_beta = (
-            float(result.x[0]),  # nosemgrep: semgrep.float-requires-try-except
-            float(result.x[1]),  # nosemgrep: semgrep.float-requires-try-except
-        )  # nosemgrep: semgrep.float-requires-try-except
+            float(result.x[0]),
+            float(result.x[1]),
+        )
 
     def build_icp_centroid(
         self,
@@ -583,4 +583,4 @@ class CompoundE3D:
         # Apply Platt calibration
         logit = -(self._platt_alpha * raw_dist - self._platt_beta)
         prob = 1.0 / (1.0 + np.exp(-logit))
-        return float(np.clip(prob, 0.0, 1.0))  # nosemgrep: semgrep.float-requires-try-except
+        return float(np.clip(prob, 0.0, 1.0))

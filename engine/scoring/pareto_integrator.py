@@ -176,9 +176,9 @@ def apply_constraint_penalties(
             dim = constraint.get("dimension", "")
             # threshold / penalty come from ArbitrationConstraintSpec (pydantic float,
             # ge=0.0, le=1.0), copied verbatim by handle_match, the only caller.
-            threshold = float(constraint.get("threshold", 0.0))  # nosemgrep: semgrep.float-requires-try-except
+            threshold = float(constraint.get("threshold", 0.0))
             is_hard = constraint.get("hard", False)
-            penalty = float(constraint.get("penalty", 0.5))  # nosemgrep: semgrep.float-requires-try-except
+            penalty = float(constraint.get("penalty", 0.5))
 
             if zero_present:
                 # RU-018: dimension_scores[d] -> d -> d_score, presence by `is None`.

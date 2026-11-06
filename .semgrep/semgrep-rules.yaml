@@ -41,9 +41,33 @@ rules:
     - '**/tests/**'
     - '**/venv/**'
 - id: singleton-requires-lock
+  # Only real process-wide singletons: a module global rebound inside a
+  # function (`global X`), or a class attribute on cls / a CapitalName.
+  # A local or `self` lazy default is not shared state and needs no lock.
   patterns:
-  - pattern: "if $_INSTANCE is None:\n    $_INSTANCE = $FACTORY(...)\n"
-  - pattern-not-inside: "with $_LOCK:\n    ...\n"
+  - pattern-either:
+    - patterns:
+      - pattern-inside: |
+          def $F(...):
+              ...
+              global $X
+              ...
+      - pattern: |
+          if $X is None:
+              $X = $FACTORY(...)
+    - pattern: |
+        if cls.$ATTR is None:
+            cls.$ATTR = $FACTORY(...)
+    - patterns:
+      - pattern: |
+          if $CLS.$ATTR is None:
+              $CLS.$ATTR = $FACTORY(...)
+      - metavariable-regex:
+          metavariable: $CLS
+          regex: ^[A-Z][A-Za-z0-9_]*$
+  - pattern-not-inside: |
+      with $LOCK:
+          ...
   message: "Singleton initialization must use a lock for thread safety.\n\nBad:\n\
     \  if _instance is None:\n      _instance = create_instance()\n\nGood:\n  if _instance\
     \ is None:\n      with _lock:\n          if _instance is None:  # Double-check\n\
@@ -58,12 +82,54 @@ rules:
     - '**/tests/**'
     - '**/venv/**'
 - id: float-requires-try-except
-  patterns:
-  - pattern: float($VAR)
-  - pattern-not-inside: "try:\n    ...\nexcept ...:\n    ...\n"
-  message: "float() conversion should handle ValueError for invalid input.\n\nBad:\n\
-    \  value = float(user_input)  # Crashes on \"abc\"\n\nGood:\n  try:\n      value\
-    \ = float(user_input)\n  except (ValueError, TypeError):\n      value = default_value\n"
+  # Taint mode: flag float() only on values that flow from untrusted input
+  # (request payloads, environment, argv, stdin, parsed JSON/YAML) and are not
+  # converted inside a try block. A pattern of bare `float($VAR)` also matched
+  # numpy/math results, arithmetic, literals and pydantic float fields, which
+  # cannot raise ValueError: 55 false positives silenced by nosemgrep.
+  mode: taint
+  pattern-sources:
+  - pattern-either:
+    - pattern: os.environ[...]
+    - pattern: os.environ.get(...)
+    - pattern: os.getenv(...)
+    - pattern: sys.argv
+    - pattern: input(...)
+    - pattern: json.loads(...)
+    - pattern: yaml.safe_load(...)
+    - patterns:
+      - pattern-either:
+        - pattern-inside: |
+            def $F(..., $P, ...):
+                ...
+        - pattern-inside: |
+            async def $F(..., $P, ...):
+                ...
+      - metavariable-regex:
+          metavariable: $P
+          regex: ^(payload|body|raw|request|params|query|form|data)$
+      - pattern: $P
+  pattern-sanitizers:
+  - pattern: int(...)
+  pattern-sinks:
+  - patterns:
+    - pattern: float($VAR)
+    - pattern-not-inside: |
+        try:
+            ...
+        except ...:
+            ...
+    - pattern-not-inside: |
+        try:
+            ...
+        except ...:
+            ...
+        else:
+            ...
+    - focus-metavariable: $VAR
+  message: "float() of untrusted input should handle ValueError/TypeError.\n\nBad:\n\
+    \  value = float(payload[\"x\"])  # Crashes on \"abc\"\n\nGood:\n  try:\n      value\
+    \ = float(payload[\"x\"])\n  except (ValueError, TypeError):\n      value = default_value\n"
   languages:
   - python
   severity: WARNING
