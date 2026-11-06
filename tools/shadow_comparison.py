@@ -20,14 +20,14 @@ from tools.path_policy import PathPolicyError, resolve_existing_file_under_root,
 
 def _load_ranked(items: list[dict]) -> list[RankedCandidate]:
     out: list[RankedCandidate] = []
-    for item in items:
-        out.append(
-            RankedCandidate(
-                candidate_id=str(item["candidate_id"]),
-                score=float(item["score"]),
-                rank=int(item["rank"]),
-            )
-        )
+    for index, item in enumerate(items):
+        try:
+            score = float(item["score"])
+            rank = int(item["rank"])
+        except (TypeError, ValueError) as exc:
+            msg = f"ranked item {index}: score and rank must be numeric"
+            raise ValueError(msg) from exc
+        out.append(RankedCandidate(candidate_id=str(item["candidate_id"]), score=score, rank=rank))
     return out
 
 

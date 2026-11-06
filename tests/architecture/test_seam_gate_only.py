@@ -31,7 +31,7 @@ _NOT_ADVERTISED = {"enrich", "admin", "health", "healthcheck"}
 # HEALTH-01 (operator decision 2026-10-22): the advertised set is exactly the
 # three EIE->CEG seam actions, resolve, and the canonical health route. Health is
 # not routed through `admin`.
-_ADVERTISED_EXPECTED = {"match", "sync", "outcomes", "resolve", "health-assess"}
+_ADVERTISED_EXPECTED = {"match", "sync", "outcomes", "resolve", "health-assess", "score"}
 _HEALTH_SUBACTIONS = ("health_assess", "health_batch_assess", "health_report")
 _PEER_ENV_NAMES = ("EIE_URL", "EIE_BASE_URL", "ENRICHMENT_URL", "ENRICHMENT_ENGINE_URL", "PEER_URL", "NODE_URL")
 

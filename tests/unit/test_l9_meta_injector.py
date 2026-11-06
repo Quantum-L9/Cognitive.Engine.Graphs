@@ -22,6 +22,7 @@ source changes nothing but its header.
 from __future__ import annotations
 
 import ast
+import json
 import re
 import shutil
 import subprocess
@@ -123,6 +124,42 @@ def test_second_injection_is_byte_identical(path: str, content: str) -> None:
     once = inj.inject_meta(content, meta, "graph")
     twice = inj.inject_meta(once, meta, "graph")
     assert twice == once
+
+
+def test_json_with_correct_header_keeps_formatter_layout() -> None:
+    # Biome owns JSON layout (biome.json); C-18 owns only the header. A file whose
+    # _l9_meta already matches must not be rewritten to json.dumps(indent=2).
+    meta = _meta("cfg/x.json")
+    canonical = inj.inject_meta('{"tags": ["a", "b"]}\n', meta, "graph")
+    data = json.loads(canonical)
+    compact = '{\n  "_l9_meta": ' + json.dumps(data["_l9_meta"]) + ',\n  "tags": ["a", "b"]\n}\n'
+    assert compact != canonical
+    assert inj.inject_meta(compact, meta, "graph") == compact
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"tags": ["a"]}\n',
+        '{"tags": ["a"], "_l9_meta": {}}\n',
+    ],
+)
+def test_json_with_missing_or_misplaced_header_is_rewritten(content: str) -> None:
+    meta = _meta("cfg/x.json")
+    out = inj.inject_meta(content, meta, "graph")
+    assert out != content
+    data = json.loads(out)
+    assert next(iter(data)) == "_l9_meta"
+    assert data["_l9_meta"] == inj.format_json_meta(meta, "graph")
+
+
+def test_json_header_field_order_is_enforced() -> None:
+    meta = _meta("cfg/x.json")
+    expected = inj.format_json_meta(meta, "graph")
+    reordered = dict(reversed(list(expected.items())))
+    content = json.dumps({"_l9_meta": reordered, "a": 1}) + "\n"
+    out = inj.inject_meta(content, meta, "graph")
+    assert list(json.loads(out)["_l9_meta"]) == list(expected)
 
 
 @pytest.mark.parametrize(("path", "content"), COMMENT_CASES)

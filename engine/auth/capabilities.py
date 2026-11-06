@@ -30,6 +30,7 @@ import hashlib
 import logging
 import math
 import secrets
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -42,6 +43,7 @@ logger = logging.getLogger(__name__)
 PERM_MATCH_READ = "match:read"
 PERM_SYNC_WRITE = "sync:write"
 PERM_ADMIN_WRITE = "admin:write"
+PERM_SCORE_READ = "score:read"
 
 # ── W3-03: Action-Level Permission Map ──────────────────────────
 # Maps every engine action to a required capability string.
@@ -60,6 +62,7 @@ ACTION_PERMISSION_MAP: dict[str, str] = {
     "resolve": PERM_MATCH_READ,
     "health": PERM_MATCH_READ,
     "healthcheck": PERM_MATCH_READ,
+    "score": PERM_SCORE_READ,
 }
 
 # All known capability action strings
@@ -363,6 +366,14 @@ class CapabilitySet:
             return True
         return tenant in subjects or "*" in subjects
 
+    def grants_explicitly(self, tenant: str, action: str) -> bool:
+        """Whether ``tenant`` is named for ``action`` (SCORING-GATE-01 §1.3).
+
+        Unlike ``has_capability`` this never defaults open: no capabilities, no
+        entry for ``action`` and the ``"*"`` wildcard all deny.
+        """
+        return tenant in self._action_subjects.get(action, set())
+
     def to_dict(self) -> dict[str, Any]:
         return {action: sorted(subjects) for action, subjects in self._action_subjects.items()}
 
@@ -390,17 +401,21 @@ def check_action_permission(tenant: str, action: str, capability_set: Capability
 # ── Module-level singleton validator ────────────────────────────
 
 _capability_validator: CapabilityValidator | None = None
+_capability_validator_lock = threading.Lock()
 
 
 def get_capability_validator() -> CapabilityValidator:
     """Return the module-level CapabilityValidator singleton."""
     global _capability_validator
     if _capability_validator is None:
-        _capability_validator = CapabilityValidator()
+        with _capability_validator_lock:
+            if _capability_validator is None:  # Double-check under the lock
+                _capability_validator = CapabilityValidator()
     return _capability_validator
 
 
 def reset_capability_validator() -> None:
     """Reset the singleton (for testing)."""
     global _capability_validator
-    _capability_validator = None
+    with _capability_validator_lock:
+        _capability_validator = None

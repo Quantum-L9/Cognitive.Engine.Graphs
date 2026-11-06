@@ -28,6 +28,7 @@ rejected. There is no mapping layer.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 from engine.config.loader import DomainPackLoader
@@ -52,13 +53,16 @@ logger = logging.getLogger(__name__)
 
 # Module-level domain loader (initialized lazily)
 _domain_loader: DomainPackLoader | None = None
+_domain_loader_lock = threading.Lock()
 
 
 def _get_domain_loader() -> DomainPackLoader:
-    """Lazy-init domain loader."""
+    """Lazy-init domain loader (double-checked locking)."""
     global _domain_loader
     if _domain_loader is None:
-        _domain_loader = DomainPackLoader()
+        with _domain_loader_lock:
+            if _domain_loader is None:  # Double-check under the lock
+                _domain_loader = DomainPackLoader()
     return _domain_loader
 
 

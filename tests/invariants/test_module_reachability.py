@@ -80,7 +80,7 @@ REMOVED_SYMBOLS = (
 # Responsibilities the island duplicated, and the single owner each returned to.
 CANONICAL_OWNERS = {
     "audit persistence": "engine/compliance/audit.py",
-    "packet envelope contract": "engine/packet/packet_envelope.py",
+    "packet transport contract": "engine/packet/chassis_contract.py",
     "graph sync write path": "engine/sync/generator.py",
     "community detection write": "engine/gds/scheduler.py",
     "startup lifecycle": "engine/boot.py",
@@ -248,6 +248,7 @@ def test_canonical_owners_are_production_reachable() -> None:
         "engine.sync.generator",
         "engine.gds.scheduler",
         "engine.boot",
+        "engine.packet.chassis_contract",
     }
     assert sorted(expected - reachable) == []
 

@@ -3,14 +3,8 @@
     "l9_schema": 1,
     "origin": "l9-template",
     "engine": "graph",
-    "layer": [
-      "telemetry"
-    ],
-    "tags": [
-      "L9_TEMPLATE",
-      "telemetry",
-      "grafana"
-    ],
+    "layer": ["telemetry"],
+    "tags": ["L9_TEMPLATE", "telemetry", "grafana"],
     "owner": "platform",
     "status": "active"
   },
@@ -18,10 +12,7 @@
     "id": null,
     "uid": "l9-api",
     "title": "L9 Engine \u2014 API Performance",
-    "tags": [
-      "l9",
-      "api"
-    ],
+    "tags": ["l9", "api"],
     "timezone": "browser",
     "refresh": "15s",
     "time": {

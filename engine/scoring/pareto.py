@@ -181,7 +181,8 @@ def _shannon_entropy(weights: dict[str, float]) -> float:
     if total == 0:
         return 0.0
     p = vals / total
-    raw_h = -float(np.sum(p * np.log(p)))
+    # float() of a numpy float64 reduction over a float64 array: cannot raise.
+    raw_h = -float(np.sum(p * np.log(p)))  # nosemgrep: semgrep.float-requires-try-except
     max_h = math.log(len(vals))
     if max_h == 0:
         return 0.0
@@ -198,7 +199,8 @@ def _coverage(weights: dict[str, float], threshold: float = 0.05) -> float:
 
 def _dcg(relevances: list[float], k: int | None = None) -> float:
     """Discounted cumulative gain."""
-    if k is None:
+    # Not a singleton: ``k`` is a local default for an optional argument.
+    if k is None:  # nosemgrep: semgrep.singleton-requires-lock
         k = len(relevances)
     total = 0.0
     for i, rel in enumerate(relevances[:k]):
@@ -303,7 +305,11 @@ def discover_pareto_weights(
 
     weight_vectors: list[WeightVector] = []
     for row in all_samples:
-        w = {dim: float(row[i]) for i, dim in enumerate(dimension_names)}
+        # ``row`` is a float64 ndarray row (Dirichlet samples + normalised baseline).
+        w = {
+            dim: float(row[i])  # nosemgrep: semgrep.float-requires-try-except
+            for i, dim in enumerate(dimension_names)
+        }
         ndcg_val, div_val, cov_val = _evaluate_weight_vector(w, outcome_history, ema_alpha)
         weight_vectors.append(
             WeightVector(

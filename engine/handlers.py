@@ -28,13 +28,14 @@ from neo4j.exceptions import ConstraintError
 # T5-03: handlers.py is the sanctioned chassis bridge. Re-export chassis
 # error types here so other engine modules can use them without importing
 # chassis directly.
-from chassis.errors import FeatureNotEnabled  # noqa: F401
+from chassis.errors import AuthorizationError, FeatureNotEnabled
 
 # T5-03: handlers.py is the sanctioned chassis bridge. Re-export chassis
 # error types here so other engine modules can use them without importing
 # chassis directly.
 from engine.auth.capabilities import (
     ACTION_PERMISSION_MAP,
+    PERM_SCORE_READ,
     Capability,
     CapabilitySet,
     check_action_permission,
@@ -54,6 +55,11 @@ from engine.scoring.evidence_priority import (
     blocked_result,
     parse_score_request,
     score_cohort,
+)
+from engine.scoring.graph_evidence import (
+    GraphEvidenceBinding,
+    approved_relevance_from_spec,
+    declared_evidence_types,
 )
 from engine.state import get_state
 from engine.sync.generator import (
@@ -371,7 +377,7 @@ def _try_safe_literal(expr_stripped: str, expr_lower: str) -> str | None:
     if expr_lower in ("true", "false", "null"):
         return expr_stripped
     try:
-        float(expr_stripped)  # nosemgrep: float-requires-try-except
+        float(expr_stripped)  # nosemgrep: semgrep.float-requires-try-except
     except ValueError:
         pass
     else:
@@ -854,8 +860,9 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             def _pareto_dims(row: dict[str, Any]) -> dict[str, float]:
                 projected = row.get("dimension_scores") if project_dimensions else None
                 source = projected if isinstance(projected, dict) else row
+                # Only int | float values pass the isinstance filter: float() cannot raise.
                 return {
-                    k: float(v)
+                    k: float(v)  # nosemgrep: semgrep.float-requires-try-except
                     for k, v in source.items()
                     if k not in ("candidate", "score") and isinstance(v, (int, float))
                 }
@@ -2002,9 +2009,15 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                     continue
             if not isinstance(ds, dict):
                 continue
+            # A stored outcome with a non-numeric dimension score is malformed;
+            # skip it like the unparseable-JSON case above.
+            try:
+                dimension_scores = {k: float(v) for k, v in ds.items()}
+            except (ValueError, TypeError):
+                continue
             outcome_history.append(
                 {
-                    "dimension_scores": {k: float(v) for k, v in ds.items()},
+                    "dimension_scores": dimension_scores,
                     "was_selected": bool(rec.get("was_selected", False)),
                 }
             )
@@ -2983,7 +2996,7 @@ async def handle_enrich(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 SCORE_ACTION = "score"
 _SCORE_READER_BLOCKED = (
     "no evidence binding supplied: a local caller passes a GraphEvidenceBinding with a "
-    "server-approved relevance map; score is not registered for any remote route"
+    "server-approved relevance map; the remote route is handle_score_remote"
 )
 
 
@@ -2995,9 +3008,10 @@ async def handle_score(
 ) -> dict[str, Any]:
     """Local ``graph_evidence_priority_v1`` cohort scoring (QM.POC0.CEG.SCORE.001).
 
-    Deliberately NOT in ``ACTION_HANDLERS`` and not advertised in
-    ``engine/spec.yaml``: no chassis or Gate route reaches it until Gate owns
-    ``score`` and a CEG capability binds it. It loads no domain pack and calls
+    Deliberately NOT in ``ACTION_HANDLERS``: the Gate-routed ``score`` action
+    is ``handle_score_remote``, which checks activation and the tenant's
+    ``score:read`` grant and then calls this with the binding it built from the
+    admitted spec (SCORING-GATE-01). It loads no domain pack and calls
     nothing on the match path. ``tenant`` comes from the caller's context only;
     by HEALTH-05 it is also the Neo4j database the binding may read. The request
     is validated in full before any read. With no ``binding``, or one that
@@ -3038,6 +3052,74 @@ async def handle_score(
         binding.approved_relevance,
         identity_per_type=_score_settings.evidence_identity_per_type_enabled,
     )
+
+
+def _require_score_grant(tenant: str, domain_spec: DomainSpec) -> None:
+    """Explicit tenant ``score:read`` (SCORING-GATE-01 §1.3), whatever CAPABILITY_AUTH_ENABLED says.
+
+    ``_enforce_capability`` is not used: it returns when the global switch is off
+    or the spec declares no capabilities. Here a missing declaration, a missing
+    ``score:read`` entry, a wildcard or another tenant's grant all deny.
+    """
+    cap_set = _build_capability_set(domain_spec)
+    if cap_set is None or not cap_set.grants_explicitly(tenant, PERM_SCORE_READ):
+        msg = f"Tenant '{tenant}' holds no explicit '{PERM_SCORE_READ}' grant; a wildcard never grants score"
+        logger.warning("score refused: %s", msg)
+        raise AuthorizationError(msg, action=SCORE_ACTION, tenant=tenant)
+
+
+async def handle_score_remote(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Gate-routed ``score`` (SCORING-GATE-01): the secured adapter onto ``handle_score``.
+
+    ``tenant`` is the SDK transport's, which GATE-KEY-01 binds to a Gate
+    signature. Every refusal happens before the binding exists, so a refused
+    call reads no graph: ``remote_score_enabled`` off, typed evidence identity
+    off, an unauthorised tenant, a malformed request, no explicit
+    ``score:read``, or a spec with no approved relevance or no declared evidence
+    type. The binding is built here from the admitted spec and the injected
+    driver; nothing in the payload reaches it. ``handle_score`` and the
+    algorithm are unchanged.
+    """
+    from engine.config.settings import settings as _score_settings
+
+    # The SDK returns only the error type to the caller; these lines are the operator's diagnosis.
+    if not _score_settings.remote_score_enabled:
+        logger.info("score refused for tenant %s: REMOTE_SCORE_ENABLED is false", tenant)
+        raise FeatureNotEnabled("Remote score", flag="REMOTE_SCORE_ENABLED", action=SCORE_ACTION, tenant=tenant)
+    if not _score_settings.evidence_identity_per_type_enabled:
+        logger.warning("score refused for tenant %s: EVIDENCE_IDENTITY_PER_TYPE_ENABLED is false", tenant)
+        raise FeatureNotEnabled(
+            "Remote score typed evidence identity",
+            flag="EVIDENCE_IDENTITY_PER_TYPE_ENABLED",
+            message=(
+                "remote score requires EVIDENCE_IDENTITY_PER_TYPE_ENABLED=true: relationship sync writes "
+                "(relationship_type, evidence_ref) identity and a ref-only rank is refused"
+            ),
+            action=SCORE_ACTION,
+            tenant=tenant,
+        )
+    graph_driver, domain_loader = _require_deps()
+    _validate_tenant_access(tenant, SCORE_ACTION)
+    defect = tenant_id_defect(tenant)
+    if defect is not None:
+        raise ValidationError(f"tenant {defect}", action=SCORE_ACTION, tenant=tenant)
+    try:
+        request = parse_score_request(payload)
+    except ScoreRequestError as exc:
+        raise ValidationError(str(exc), action=SCORE_ACTION, tenant=tenant) from exc
+    domain_spec = domain_loader.load_domain(tenant)
+    _require_score_grant(tenant, domain_spec)
+    relevance = approved_relevance_from_spec(domain_spec)
+    evidence_types = declared_evidence_types(domain_spec)
+    if not relevance or not evidence_types:
+        logger.info("score blocked for tenant %s: spec has no approved relevance or evidence type", tenant)
+        return blocked_result(
+            request,
+            "tenant spec is not admissible for scoring: it needs approved evidencerelevance at "
+            "-reviewed/-production and at least one declared targetedge evidence type",
+        )
+    binding = GraphEvidenceBinding(graph_driver, relevance, relationship_types=evidence_types)
+    return await handle_score(tenant, payload, binding=binding)
 
 
 # CONTRACT-02: single source of truth for the engine's action surface.
@@ -3232,6 +3314,7 @@ ACTION_HANDLERS: dict[str, ActionHandler] = {
     "healthcheck": handle_healthcheck,
     "health-assess": handle_health_assess,
     "enrich": handle_enrich,
+    SCORE_ACTION: handle_score_remote,
 }
 
 

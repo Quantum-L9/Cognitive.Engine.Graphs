@@ -15,10 +15,10 @@
     "match_direction": "supplier_to_buyer",
     "top_n": 10,
     "weights": {
-      "structural": 0.30,
+      "structural": 0.3,
       "geo": 0.25,
-      "reinforcement": 0.20,
-      "freshness": 0.10
+      "reinforcement": 0.2,
+      "freshness": 0.1
     }
   },
   "trace_id": "test_match_001"

@@ -194,7 +194,11 @@ class _LLMBackend:
         self._client: Any = None
         self._provider: str = os.environ.get("LLM_PROVIDER", "openai")
         self._max_tokens: int = int(os.environ.get("LLM_MAX_TOKENS", "2048"))
-        self._temperature: float = float(os.environ.get("LLM_TEMPERATURE", "0.1"))
+        try:
+            self._temperature: float = float(os.environ.get("LLM_TEMPERATURE", "0.1"))
+        except ValueError as exc:
+            msg = "LLM_TEMPERATURE must be a number"
+            raise ValueError(msg) from exc
 
     def _ensure_client(self, model: str) -> Any:
         """Lazy-init the OpenAI client on first call."""

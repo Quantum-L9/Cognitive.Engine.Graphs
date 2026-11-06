@@ -69,6 +69,24 @@ def test_cli_writes_deterministic_artifact(tmp_path: Path) -> None:
     assert data["checksum"].startswith("sha256:")
 
 
+@pytest.mark.unit
+def test_cli_rejects_non_numeric_score(tmp_path: Path) -> None:
+    from tools.shadow_comparison import main
+
+    inp = tmp_path / "in.json"
+    inp.write_text(
+        json.dumps(
+            {
+                "packet_id": "pkt-bad",
+                "primary": [{"candidate_id": "x", "score": "high", "rank": 1}],
+                "shadow": [],
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="ranked item 0: score and rank must be numeric"):
+        main(["--input", str(inp), "--output", str(tmp_path / "out.json")])
+
+
 # ── RU-105 / CEG-COR-128: non-finite scores and duplicate ids are reported ──
 
 

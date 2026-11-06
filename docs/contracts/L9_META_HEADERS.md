@@ -94,6 +94,8 @@ still carry a canonical schema-1 header, or the check reports it as `NOHEADER`/`
 - `__init__.py` files may have no header (one that is present is still verified).
 - `artifacts/**` is not eligible: those files are regenerated without a header by
   `tools/audit_engine.py`, `tools/spec_extract.py` and `tools/audit_harness.py`.
+- `reports/end-session/**` is not eligible: those session and governance handoff
+  reports are written on every publish by the governance post-publish hook, without a header.
 - `EXCLUDED_PATTERNS` and `HEADERLESS_BASELINE` in `tools/l9_meta_injector.py` list the
   remaining exceptions with their reasons. The baseline is a ratchet of files that predate
   the check; new files are never added to it.
