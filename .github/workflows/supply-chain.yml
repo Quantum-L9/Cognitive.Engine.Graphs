@@ -56,6 +56,12 @@ jobs:
       id-token: write
       contents: read
       actions: read
+      # Private repository: scorecard-action documents these reads as needed
+      # for the GitHub GraphQL calls (ListCommits etc.); without them the run
+      # fails with "Resource not accessible by integration".
+      issues: read
+      pull-requests: read
+      checks: read
 
     steps:
       - name: Checkout Repository
