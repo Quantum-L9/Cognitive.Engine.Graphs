@@ -35,6 +35,11 @@ repos:
         name: mypy
         entry: mypy
         language: system
+        # A local hook defaults to every file type; mirrors-mypy declared
+        # Python only and ran serially. Without these, mypy is handed .md/.yml
+        # files and fails on duplicate `__main__` modules.
+        types_or: [python, pyi]
+        require_serial: true
         args: [--ignore-missing-imports, --follow-imports=silent]
         exclude: ^(tests/|tools/|domains/|current work/|harvest_staging/|docs/|engine/security/|engine/auth/)
 
