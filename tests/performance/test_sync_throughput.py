@@ -41,13 +41,15 @@ _BENCH_INDEXES = (("facility_id", "ceg_bench_facility_id"), ("tenant", "ceg_benc
 async def _ensure_facility_indexes(graph_driver, db: str) -> None:
     """Index :Facility(facility_id) and :Facility(tenant) unless already indexed.
 
-    A uniqueness constraint already backs an index on its property, and
-    `CREATE INDEX ... IF NOT EXISTS` can still raise for a conflicting
-    constraint, so only properties with no index of any kind get one.
+    Only a RANGE index serves the benchmark's equality MATCH/MERGE (TEXT,
+    FULLTEXT, POINT and VECTOR indexes do not). A uniqueness constraint's
+    backing index is RANGE, and `CREATE INDEX ... IF NOT EXISTS` can still
+    raise for that conflicting constraint, so only a property with no RANGE
+    index gets one.
     """
     rows = await graph_driver.execute_query(
-        "SHOW INDEXES YIELD labelsOrTypes, properties "
-        "WHERE labelsOrTypes = ['Facility'] AND size(properties) = 1 "
+        "SHOW INDEXES YIELD type, labelsOrTypes, properties "
+        "WHERE type = 'RANGE' AND labelsOrTypes = ['Facility'] AND size(properties) = 1 "
         "RETURN properties[0] AS prop",
         database=db,
     )
