@@ -308,7 +308,12 @@ jobs:
           DATABASE_URL: postgresql://${{ vars.POSTGRES_USER || 'test_user' }}:test_password@localhost:5432/${{ vars.POSTGRES_DB || 'test_db' }}
         run: |
           echo "Running test suite..."
+          # Performance benchmarks assert wall-clock throughput against a live
+          # Neo4j. Under -n auto they share the runner with xdist workers and
+          # the containerised Neo4j, so they measure contention, not the code;
+          # they run in the serial Integration job against its Neo4j service.
           PYTHONPATH=. pytest ${{ env.TEST_DIR }} \
+            -m "not performance" \
             -n auto \
             --cov=${{ env.SOURCE_DIR }} \
             --cov-report=xml \
@@ -401,7 +406,7 @@ jobs:
           PACKET_STORE_TEST_DSN: postgresql://ceg_test:ceg_test_password@localhost:5432/ceg_test
           CEG_REQUIRE_INTEGRATION: '1'
         run: |
-          PYTHONPATH=. pytest tests/integration \
+          PYTHONPATH=. pytest tests/integration tests/performance \
             -p no:xdist \
             --timeout=300 \
             --tb=short \
