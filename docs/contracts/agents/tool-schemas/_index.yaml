@@ -2,8 +2,8 @@
 # Contract: Agent Tool Schema Registry
 # Source:   chassis/actions.py:_engine_handlers
 #           engine/auth/capabilities.py:ACTION_PERMISSION_MAP
-# Version:  1.0.0
-# Updated:  2026-04-07
+# Version:  1.1.0
+# Updated:  2026-10-31
 # ═══════════════════════════════════════════════════════════════
 
 tools:
@@ -41,7 +41,7 @@ tools:
 
   - name: resolve
     schema_file: resolve.schema.json
-    capability: "match:read"
+    capability: "sync:write"
     handler: engine/handlers.py:handle_resolve
     description: Entity resolution — creates RESOLVED_FROM edges between duplicate entities.
 

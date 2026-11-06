@@ -23,10 +23,18 @@ from __future__ import annotations
 
 import ast
 import re
+import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from tools.path_policy import PathPolicyError, resolve_root, resolve_under_root
 
 CYPHER_SAFETY_MD = "CYPHER_SAFETY.md"
 BANNED_PATTERNS_MD = "BANNED_PATTERNS.md"
@@ -58,8 +66,8 @@ def _rule(
     exclude_dirs: list[str] | None = None,
     ast_check: AstCheck | None = None,
     path_ast_check: PathAstCheck | None = None,
-) -> dict:
-    r = {
+) -> dict[str, Any]:
+    r: dict[str, Any] = {
         "id": rule_id,
         "contract": contract,
         "severity": severity,
@@ -758,14 +766,54 @@ def scan_file(file_path: Path, content: str, root: Path) -> list[Violation]:
     return violations
 
 
+def _git_python_files(root: Path) -> list[Path] | None:
+    """Python files git considers repository source: tracked, plus untracked
+    files that are not ignored. ``None`` when ``root`` is not a git work tree.
+
+    A blind ``rglob`` also scanned gitignored runtime state: central CI
+    (``Analyze (central Core)``) provisions the l9-ci-sdk checkout at
+    ``.l9/runtime/sdk/source`` inside the workspace, and that checkout's own
+    rule fixtures (deliberate ``exec()`` samples) failed ``make validate`` as
+    if they were CEG code.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.py"],
+            cwd=root,
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    return [root / rel for rel in proc.stdout.decode("utf-8", "surrogateescape").split("\0") if rel]
+
+
 def main() -> int:
-    root = Path.cwd()
+    root = resolve_root(Path.cwd())
     skip_dirs = {".venv", "venv", "__pycache__", ".git", "site-packages"}
     if len(sys.argv) > 1:
         # Pre-commit passes filenames
-        paths = [Path(p) for p in sys.argv[1:] if Path(p).suffix == ".py" and not any(s in str(p) for s in skip_dirs)]
+        paths: list[Path] = []
+        for raw_path in (Path(p) for p in sys.argv[1:]):
+            if raw_path.suffix != ".py" or any(part in skip_dirs for part in raw_path.parts):
+                continue
+            try:
+                paths.append(resolve_under_root(raw_path, root, option="pre-commit Python file"))
+            except PathPolicyError as exc:
+                print(f"Error: {exc}", file=sys.stderr)
+                return 2
     else:
-        paths = [p for p in root.rglob("*.py") if not any(s in str(p) for s in skip_dirs)]
+        paths = []
+        discovered = _git_python_files(root)
+        for discovered_path in discovered if discovered is not None else root.rglob("*.py"):
+            if any(part in skip_dirs for part in discovered_path.parts):
+                continue
+            try:
+                paths.append(resolve_under_root(discovered_path, root, option="discovered Python file"))
+            except PathPolicyError:
+                continue
 
     all_violations: list[Violation] = []
     for path in paths:

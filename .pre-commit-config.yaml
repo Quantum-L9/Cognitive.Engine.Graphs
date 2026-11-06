@@ -15,7 +15,7 @@
 repos:
   # Code formatting
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.1
+    rev: 39d9ac5938dadb73df0564a45f163e25ff9fa6e2  # v0.16.1
     hooks:
       - id: ruff
         args: [--fix]
@@ -23,18 +23,24 @@ repos:
 
   # Secrets scanning (harvested concept from L9 Kernel — fresh config)
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.21.2
+    rev: a9e1950fe247fbb08817393121691474c55a6cfa  # v8.21.2
     hooks:
       - id: gitleaks
         args: ["protect", "--staged", "--config=.gitleaks.toml"]
 
   # Type checking
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v2.3.0
+  - repo: local
     hooks:
       - id: mypy
+        name: mypy
+        entry: mypy
+        language: system
+        # A local hook defaults to every file type; mirrors-mypy declared
+        # Python only and ran serially. Without these, mypy is handed .md/.yml
+        # files and fails on duplicate `__main__` modules.
+        types_or: [python, pyi]
+        require_serial: true
         args: [--ignore-missing-imports, --follow-imports=silent]
-        additional_dependencies: [pydantic, pydantic-settings, types-PyYAML, neo4j, structlog]
         exclude: ^(tests/|tools/|domains/|current work/|harvest_staging/|docs/|engine/security/|engine/auth/)
 
   # Unit tests covering staged Python only. Full catalog: make test / CI pytest.
@@ -98,8 +104,7 @@ repos:
       - id: l9-contract-files-exist
         name: L9 Contract Files Existence Check
         entry: python tools/verify_contracts.py
-        language: python
-        additional_dependencies: [pyyaml]
+        language: system
         pass_filenames: false
         always_run: true
 
@@ -189,7 +194,7 @@ repos:
 
   # YAML validation
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
+    rev: c4a0b883114b00d8d76b479c820ce7950211c99b  # v4.5.0
     hooks:
       - id: check-yaml
         args: [--allow-multiple-documents, --unsafe]

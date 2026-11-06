@@ -1,0 +1,131 @@
+{
+  "_l9_meta": {
+    "l9_schema": 1,
+    "origin": "engine-specific",
+    "engine": "graph",
+    "layer": ["docs", "contracts"],
+    "tags": ["contracts", "tool-schema"],
+    "owner": "engine-team",
+    "status": "active"
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Quantum-L9/Cognitive.Engine.Graphs/docs/contracts/agents/tool-schemas/resolve.schema.json",
+  "title": "ResolveActionPayload",
+  "description": "Entity resolution with graph writes; requires sync:write capability in an admitted domain policy. Batch mode only when the tenant semantic registry is enabled; other paths can create RESOLVED_FROM relationships. Source: engine/handlers.py:handle_resolve() at bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0. Packet tenant is supplied by the chassis, not by this payload.",
+  "type": "object",
+  "properties": {
+    "entity_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Domain entity label."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["batch"],
+      "description": "Batch mode requires enabled semantic registry. Omit for single/manual resolution."
+    },
+    "source_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Source entity id; required for single or manual mode."
+    },
+    "target_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Target entity id; required when semantic-registry resolution is not enabled."
+    },
+    "threshold": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Optional batch threshold passed to domain resolver."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "default": 1.0
+    },
+    "signal": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Evidence signal in manual resolution.",
+      "default": "manual"
+    }
+  },
+  "required": ["entity_type"],
+  "additionalProperties": false,
+  "examples": [
+    {
+      "entity_type": "Company",
+      "source_id": "company-1",
+      "target_id": "company-2",
+      "confidence": 0.95
+    },
+    {
+      "entity_type": "Company",
+      "mode": "batch"
+    }
+  ],
+  "x-negative-examples": [
+    {
+      "entity_type": "Company"
+    },
+    {
+      "entity_type": "Company",
+      "mode": "batch",
+      "threshold": 2
+    }
+  ],
+  "x-source-file": "engine/handlers.py:handle_resolve",
+  "x-source-revision": "bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0",
+  "x-required-capability-current": "sync:write",
+  "x-exposure": "gate_advertised",
+  "x-side-effects": "write: manual resolution creates RESOLVED_FROM; batch may write deduplication edges",
+  "x-schema-role": "bounded public client contract; the legacy handler may ignore extra keys",
+  "anyOf": [
+    {
+      "required": ["source_id"]
+    },
+    {
+      "properties": {
+        "mode": {
+          "const": "batch"
+        }
+      },
+      "required": ["mode"]
+    }
+  ],
+  "x-auth-control": "CEG source maps resolve to sync:write. In production, unconfigured or missing write grants fail closed; CAPABILITY_AUTH_ENABLED=false is limited to dev, local, and test. Gate/SDK ingress authorization remains a separate runtime proof obligation.",
+  "x-domain-conditioned-validation": "Manual requires target_id; semantic-registry single resolution does not. Runtime must enforce per admitted spec.",
+  "x-runtime-validator-applies-this-json-schema": false,
+  "x-domain-conditioned-required": {
+    "semantic_registry_enabled_and_label_declared": {
+      "batch": ["entity_type", "mode=batch"],
+      "single": ["entity_type", "source_id"]
+    },
+    "legacy_or_label_not_declared": ["entity_type", "source_id", "target_id"],
+    "rule": "a mode=batch payload is insufficient outside an opted-in semantic registry; no static schema admission may supersede the loaded DomainSpec"
+  },
+  "x-source-code-refs": [
+    "engine/handlers.py:handle_resolve (2655-2784)",
+    "engine/auth/capabilities.py:ACTION_PERMISSION_MAP (50-64)",
+    "engine/auth/capabilities.py:CapabilitySet.has_capability (347+)"
+  ],
+  "x-runtime-validation-boundary": "The SDK routes payload dict to handler; no observed loader validates this JSON Schema. additionalProperties:false and example rejection are candidate client contracts, NOT runtime rejection proofs.",
+  "x-contract-status": "candidate_unenforced_not_release_admitted",
+  "x-source-trace": "Code at engine/handlers.py and declared payload models; see alignment/FILE_LEDGER.yaml for source revision, owner and remaining proof.",
+  "x-authorization-is-runtime-owned": true,
+  "x-prohibited-claim": "Passing this schema proves only candidate JSON Schema validity, not Gate reachability, handler validation, authorization, or safe writes.",
+  "x-domain-conditioned-runtime-negative-examples": [
+    {
+      "tenant_domain_semantic_registry_enabled": false,
+      "payload": {
+        "entity_type": "Company",
+        "source_id": "company-1"
+      },
+      "expected": "ValidationError: Missing required target_id"
+    }
+  ],
+  "x-one_schema_cannot_prove_domain_admission": true
+}

@@ -53,6 +53,8 @@ independently of the code default.
 | Pareto Ensemble | `PARETO_ENABLED` | `True` | `True` | active |
 | Pareto Weight Discovery | `PARETO_WEIGHT_DISCOVERY_ENABLED` | `False` | `True` | active (opt-in) |
 | Domain Strict Validation | `DOMAIN_STRICT_VALIDATION` | `True` | `True` | active |
+| Native Domain Approval Receipts | `DOMAIN_PACK_RECEIPTS_ENABLED` | `False` | unchanged | dormant; immutable native revision/receipt admission, no warm-cache fallback; see the native publisher runbook, `docs/runbooks/domain-pack-publish.md` |
+| Production Domain Stage | `DOMAIN_PRODUCTION_STAGE_REQUIRED` | `False` | unchanged | dormant; production legacy admission requires reviewed/production; publisher/receipt mode always enforce stage |
 | Score Clamping | `SCORE_CLAMP_ENABLED` | `True` | `True` | active; a null dimension clamps to `0.0` as well (Stage 2, see §20) |
 | Strict Null Gates | `STRICT_NULL_GATES` | `True` | `True` | active |
 | Param Strict Mode | `PARAM_STRICT_MODE` | `True` | `True` | active |
@@ -513,8 +515,18 @@ last row (admit every tenant, WARNING at startup) without inventing an allowlist
 **Flag**: `CAPABILITY_AUTH_ENABLED=True` (default on)
 
 Enforces the domain-spec capability model, mapping each action to the permissions it
-requires. Disabling it removes per-action authorization while leaving tenant resolution
-intact.
+requires. In deployed environments, a domain policy must explicitly grant every write
+capability (`sync:write` includes `resolve`, `admin:write` includes admin operations).
+An absent or missing policy entry never grants a graph write in production or other
+deployed environments. In `dev`, `local`, and `test`, the capability guard retains
+the established legacy compatibility bypass. `CAPABILITY_AUTH_ENABLED=False` is also
+permitted only in those environments; production and staging-style environments reject
+both bypasses.
+
+To enable a write action in production, add the corresponding capability and allowed
+subject to the domain pack, deploy the pack, and verify a denied read-only request before
+admitting traffic. This CEG mechanism does not replace Gate/SDK caller authentication or
+route authorization.
 
 ---
 

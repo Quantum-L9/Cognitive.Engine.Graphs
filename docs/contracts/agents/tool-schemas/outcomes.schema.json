@@ -1,0 +1,180 @@
+{
+  "_l9_meta": {
+    "l9_schema": 1,
+    "origin": "engine-specific",
+    "engine": "graph",
+    "layer": ["docs", "contracts"],
+    "tags": ["contracts", "tool-schema"],
+    "owner": "engine-team",
+    "status": "active"
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Quantum-L9/Cognitive.Engine.Graphs/docs/contracts/agents/tool-schemas/outcomes.schema.json",
+  "title": "OutcomesActionPayload",
+  "description": "Record an observed matching outcome. Distinct from the typed OutcomeFeedback ingest model and sync(entity_type=outcome) path. Source: engine/handlers.py:handle_outcomes() at bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0. Packet tenant is supplied by the chassis, not by this payload.",
+  "type": "object",
+  "properties": {
+    "match_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Match fingerprint reference."
+    },
+    "candidate_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Candidate entity reference."
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["success", "failure", "partial"]
+    },
+    "value": {
+      "type": ["number", "null"],
+      "description": "Optional numeric outcome magnitude; handler passes value to graph/feedback."
+    },
+    "source_ts": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Causal validation source timestamp; used only if causal validation enabled."
+    },
+    "target_ts": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Causal validation target timestamp; used only if causal validation enabled."
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "match_packet_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional packet-store linkage when outcome_persistence_enabled; not a tenant id."
+    },
+    "fingerprint": {
+      "type": "object",
+      "properties": {
+        "active_dimensions": {
+          "type": "array",
+          "description": "Dimension names.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "dimension_weights": {
+          "type": "object",
+          "description": "Effective weights.",
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "gates_passed": {
+          "type": "array",
+          "description": "Gates passed.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "match_direction": {
+          "type": "string"
+        },
+        "candidate_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dimension_scores": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          },
+          "description": "Optional per-dimension finite numeric scores; finite check is runtime _outcome_feedback_fields."
+        },
+        "was_selected": {
+          "type": ["boolean", "null"],
+          "description": "Optional selection state; _outcome_feedback_fields checks bool or None, when outcome_schema_unified."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": ["match_id", "candidate_id", "outcome"],
+  "additionalProperties": false,
+  "examples": [
+    {
+      "match_id": "match-1",
+      "candidate_id": "buyer-12",
+      "outcome": "success"
+    },
+    {
+      "match_id": "match-2",
+      "candidate_id": "buyer-13",
+      "outcome": "partial",
+      "fingerprint": {
+        "active_dimensions": ["fit"],
+        "dimension_weights": {
+          "fit": 1.0
+        },
+        "gates_passed": ["g1"],
+        "match_direction": "supplier_to_buyer",
+        "candidate_count": 1,
+        "dimension_scores": {
+          "fit": 0.8
+        },
+        "was_selected": true
+      }
+    }
+  ],
+  "x-negative-examples": [
+    {
+      "match_id": "match-1",
+      "candidate_id": "buyer-12",
+      "outcome": "positive"
+    },
+    {
+      "match_id": "match-1",
+      "outcome": "success"
+    },
+    {
+      "match_id": "match-2",
+      "candidate_id": "buyer-13",
+      "outcome": "success",
+      "fingerprint": {
+        "was_selected": "true"
+      }
+    },
+    {
+      "match_id": "match-2",
+      "candidate_id": "buyer-13",
+      "outcome": "success",
+      "fingerprint": {
+        "dimension_scores": {
+          "fit": "0.8"
+        }
+      }
+    }
+  ],
+  "x-source-file": "engine/handlers.py:handle_outcomes",
+  "x-source-revision": "bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0",
+  "x-required-capability-current": "sync:write",
+  "x-exposure": "gate_advertised",
+  "x-side-effects": "write: outcome record and potentially feedback/causal edges gated by domain/settings",
+  "x-schema-role": "bounded public client contract; the legacy handler may ignore extra keys",
+  "x-source-code-refs": [
+    "engine/handlers.py:handle_outcomes (2487-2654)",
+    "engine/handlers.py:_build_outcome_write (2389-2486)",
+    "engine/handlers.py:_outcome_feedback_fields (2358-2386)",
+    "engine/config/settings.py:outcome_schema_unified (706)"
+  ],
+  "x-runtime-validator-applies-this-json-schema": false,
+  "x-conditional-fields": {
+    "when": "outcome_schema_unified=True (default)",
+    "fields": ["fingerprint.dimension_scores", "fingerprint.was_selected"],
+    "runtime_policy": "Nonfinite dimension scores or non-boolean selection rejected by _outcome_feedback_fields; disabled flag changes enforcement and persistence."
+  },
+  "x-runtime-validation-boundary": "The SDK routes payload dict to handler; no observed loader validates this JSON Schema. additionalProperties:false and example rejection are candidate client contracts, NOT runtime rejection proofs.",
+  "x-contract-status": "candidate_unenforced_not_release_admitted",
+  "x-source-trace": "Code at engine/handlers.py and declared payload models; see alignment/FILE_LEDGER.yaml for source revision, owner and remaining proof.",
+  "x-authorization-is-runtime-owned": true,
+  "x-prohibited-claim": "Passing this schema proves only candidate JSON Schema validity, not Gate reachability, handler validation, authorization, or safe writes."
+}

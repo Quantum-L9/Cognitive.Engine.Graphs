@@ -167,7 +167,7 @@ wait_for_healthy() {
 
 run_container_health_check() {
     local url="$1"
-    docker run --rm --network="${PROJECT_NAME}_default" curlimages/curl:latest \
+    docker run --rm --network="${PROJECT_NAME}_default" curlimages/curl:latest@sha256:3fb7e13e5d179a845c97d78204f3f1064d1907037f26a3ebf91710571151fd93 \
         -sf -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || echo "000"
     return 0
 }

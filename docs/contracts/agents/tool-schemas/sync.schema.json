@@ -1,0 +1,97 @@
+{
+  "_l9_meta": {
+    "l9_schema": 1,
+    "origin": "engine-specific",
+    "engine": "graph",
+    "layer": ["docs", "contracts"],
+    "tags": ["contracts", "tool-schema"],
+    "owner": "engine-team",
+    "status": "active"
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Quantum-L9/Cognitive.Engine.Graphs/docs/contracts/agents/tool-schemas/sync.schema.json",
+  "title": "SyncActionPayload",
+  "description": "Batch graph sync. Domain-provided endpoint type and property constraints are runtime admission, not a universal static entity vocabulary. Source: engine/handlers.py:handle_sync() at bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0. Packet tenant is supplied by the chassis, not by this payload.",
+  "type": "object",
+  "properties": {
+    "entity_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Endpoint name in the admitted tenant domain sync spec."
+    },
+    "batch": {
+      "type": "array",
+      "description": "One or more domain-shaped rows; relationship targetedge paths have additional runtime evidence requirements.",
+      "items": {
+        "type": "object",
+        "description": "Domain-shaped entity or relationship row.",
+        "additionalProperties": true
+      },
+      "minItems": 1
+    },
+    "edge_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional causal edge type used only on configured paths."
+    }
+  },
+  "required": ["entity_type", "batch"],
+  "additionalProperties": false,
+  "examples": [
+    {
+      "entity_type": "Supplier",
+      "batch": [
+        {
+          "id": "supplier-1",
+          "name": "Example Supplier"
+        }
+      ]
+    },
+    {
+      "entity_type": "outcome",
+      "batch": [
+        {
+          "match_id": "m-1",
+          "chosen_candidate_id": "c-2",
+          "outcome": "positive"
+        }
+      ]
+    }
+  ],
+  "x-negative-examples": [
+    {
+      "entity_type": "Supplier",
+      "batch": []
+    },
+    {
+      "batch": [
+        {
+          "id": "supplier-1"
+        }
+      ]
+    }
+  ],
+  "x-source-file": "engine/handlers.py:handle_sync",
+  "x-source-revision": "bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0",
+  "x-required-capability-current": "sync:write",
+  "x-exposure": "gate_advertised",
+  "x-side-effects": "write: Neo4j entity/relationship upserts; failed row handling is path-specific",
+  "x-schema-role": "bounded public client contract; the legacy handler may ignore extra keys",
+  "x-runtime-parity-note": "Handler checks nonempty batch and domain endpoint; individual row shapes are tenant-specific.",
+  "x-conditional-paths": {
+    "outcome_sync": "when global feedback_enabled AND tenant feedbackloop.enabled, routes to outcome-specific writer; outcome_schema_unified changes vocabulary/output; otherwise uses tenant-declared sync endpoint",
+    "relationship_targetedge": "requires operator flag and sufficient evidence; a shape-valid batch does not grant an authorized relationship writer"
+  },
+  "x-source-code-refs": [
+    "engine/handlers.py:handle_sync (1076-1265)",
+    "engine/handlers.py:_sync_outcomes_unified (1023-1073)",
+    "engine/handlers.py:_feedback_effective (263-275)",
+    "engine/config/settings.py:outcome_schema_unified (706)"
+  ],
+  "x-runtime-validator-applies-this-json-schema": false,
+  "x-runtime-validation-boundary": "The SDK routes payload dict to handler; no observed loader validates this JSON Schema. additionalProperties:false and example rejection are candidate client contracts, NOT runtime rejection proofs.",
+  "x-contract-status": "candidate_unenforced_not_release_admitted",
+  "x-source-trace": "Code at engine/handlers.py and declared payload models; see alignment/FILE_LEDGER.yaml for source revision, owner and remaining proof.",
+  "x-authorization-is-runtime-owned": true,
+  "x-prohibited-claim": "Passing this schema proves only candidate JSON Schema validity, not Gate reachability, handler validation, authorization, or safe writes."
+}

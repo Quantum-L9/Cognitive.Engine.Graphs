@@ -94,7 +94,7 @@ services:
 
   # ── Neo4j 5.x Enterprise + GDS ──────────────────────────
   neo4j:
-    image: neo4j:5.15-enterprise
+    image: neo4j:5.15-enterprise@sha256:b8491b6dcf998f216079d4793dde4b7d81759d8c05792fa48787c810e9e21e52
     container_name: l9-neo4j-prod
     ports:
       - "7474:7474"

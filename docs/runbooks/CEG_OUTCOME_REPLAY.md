@@ -5,9 +5,13 @@ Odoo artifact from TASK-057 (`schema=l9.odoo.outcome_replay_input.v1`).
 
 ## Command
 ```bash
+ROOT=/tmp/ceg-outcome-replay
+mkdir -p "$ROOT"
+cp /path/to/odoo-replay-input.json "$ROOT/input.json"
 env PYTHONPATH=. python3.12 tools/outcome_replay.py \
-  --input /path/to/odoo-replay-input.json \
-  --output /tmp/ceg-outcome-replay.json
+  --root "$ROOT" \
+  --input "$ROOT/input.json" \
+  --output "$ROOT/outcome-replay.json"
 ```
 
 ## Guarantees

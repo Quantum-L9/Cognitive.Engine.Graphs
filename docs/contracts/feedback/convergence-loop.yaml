@@ -1,0 +1,66 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: engine-specific
+# engine: graph
+# layer: [docs, contracts]
+# tags: [contracts, feedback]
+# owner: engine-team
+# status: active
+# --- /L9_META ---
+contract_id: CEG-FEEDBACK-CONVERGENCE-v1
+campaign_id: CEG-CONTRACT-COMPLETE-2026-10-30
+baseline:
+  repository: Quantum-L9/Cognitive.Engine.Graphs
+  commit: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+authority: candidate_extracted_from_source
+schema: l9.ceg.feedback.convergence/v1
+owner: CEG feedback domain owner
+status: implemented_code_path_gated_not_deployment_proven
+source_refs:
+- path: engine/feedback/convergence.py
+  symbol: ConvergenceLoop.on_outcome_recorded
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+- path: engine/handlers.py
+  symbol: _feedback_effective,handle_outcomes,handle_sync
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+- path: engine/config/settings.py
+  symbol: feedback_enabled
+  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+activation:
+  global_setting: feedback_enabled
+  global_default: false
+  domain_spec_setting: feedbackloop.enabled
+  rule: both must be true; neither flag individually activates
+observed:
+  handler_invokes_convergence_when_both_enabled: true
+  callback: ConvergenceLoop.on_outcome_recorded
+  runtime_delivery_tested_here: false
+  automatic_weight_admission_proven: false
+  convergence_stages_from_code:
+  - ScorePropagator.propagate_outcome
+  - SignalWeightCalculator.should_recalculate + recalculate_weights
+  - DriftDetector.check_and_alert
+  runtime_outcome_idempotency_proven: false
+  weight_recalculation_can_execute_after_gate: true
+invariants:
+- No unconditional scoring-weight mutation
+- No implied Gate worker action route
+- No learned-weight authority without approved policy
+- Keep outcome replay/idempotency obligations explicit
+required_proof:
+- gated-off case
+- gated-on case
+- single outcome propagates once
+- failure/rollback/idempotency receipt
+- cross-tenant denial
+operational_proof:
+  observed_in_this_pack: false
+  runtime_test_receipt: null
+  CI_run_id: null
+  blocked_until: owner-native executable and integration evidence, not this file presence
+contract_status_is_not_runtime_status: true
+blocking_validation:
+- repeat same outcome must not double-apply score adjustments
+- cross-tenant graph write denied
+- failure during propagation must report partial outcome truth
+- weight recalculation governance and replay admission
