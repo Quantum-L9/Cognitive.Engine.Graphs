@@ -139,7 +139,9 @@ FILE_REGISTRY: list[FileMeta] = [
     FileMeta("docker-compose.yml", "l9-template", ["docker"], ["L9_TEMPLATE", "docker", "dev"], "platform"),
     FileMeta("docker-compose.prod.yml", "l9-template", ["docker"], ["L9_TEMPLATE", "docker", "prod"], "platform"),
     # entrypoint.sh at root doesn't exist - use scripts/entrypoint.sh or chassis/entrypoint.sh
-    FileMeta("Makefile", "l9-template", ["build"], ["L9_TEMPLATE", "build", "commands"], "platform"),
+    # The root Makefile is the Core make-v1 facade and is EXCLUDED (see
+    # EXCLUDED_PATTERNS); the repository recipes and this header moved to Repo.mk.
+    FileMeta("Repo.mk", "l9-template", ["build"], ["L9_TEMPLATE", "build", "commands"], "platform"),
     # --- Telemetry ---
     FileMeta(
         "telemetry/dashboards/dashboards-docker-compose.monitoring.yml",
@@ -1466,6 +1468,16 @@ EXCLUDED_PATTERNS: dict[str, str] = {
     "chassis/Dockerfile.chassis": (
         'protected infrastructure file (Dockerfile*); its header declares engine: "*" for the '
         "engine-agnostic chassis image, which this repo's engine-scoped v1 check cannot express"
+    ),
+    "Makefile": (
+        "Core-owned make-v1 facade (Quantum-L9/l9-ci-core tools/l9_repo/facades/make-v1.mk): "
+        "Core's repository verification compares it byte-for-byte with the template, so a header "
+        "fails the contract; the repository recipes and their header live in Repo.mk. Only the "
+        "root Makefile is tracked; a pattern without '/' would also match a nested Makefile"
+    ),
+    ".l9/repo-workflow.json": (
+        "Core repository execution contract (l9.repo-execution/v2): Core rejects any key besides "
+        "schema, facade and required_phases, so the JSON header's _l9_meta key fails the contract"
     ),
 }
 

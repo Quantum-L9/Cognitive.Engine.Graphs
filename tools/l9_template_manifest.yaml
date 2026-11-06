@@ -146,6 +146,9 @@ files:
   - path: "Makefile"
     required: false
     tags: ["L9_TEMPLATE", "build", "commands"]
+  - path: "Repo.mk"
+    required: false
+    tags: ["L9_TEMPLATE", "build", "commands"]
 
   # --- Telemetry ---
   - path: "telemetry/dashboards/dashboards-docker-compose.monitoring.yml"
