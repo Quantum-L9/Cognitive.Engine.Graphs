@@ -1,0 +1,573 @@
+{
+  "_l9_meta": {
+    "l9_schema": 1,
+    "origin": "engine-specific",
+    "engine": "graph",
+    "layer": ["docs", "contracts"],
+    "tags": ["contracts", "tool-schema"],
+    "owner": "engine-team",
+    "status": "active"
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Quantum-L9/Cognitive.Engine.Graphs/docs/contracts/agents/tool-schemas/admin.schema.json",
+  "title": "AdminActionPayload",
+  "description": "Local operator administration. Never a Gate-advertised action and never an invitation for agents to call it remotely. Source: engine/handlers.py:handle_admin() at bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0. Packet tenant is supplied by the chassis, not by this payload.",
+  "type": "object",
+  "properties": {
+    "subaction": {
+      "type": "string",
+      "enum": [
+        "list_domains",
+        "get_domain",
+        "init_schema",
+        "trigger_gds",
+        "calibration_run",
+        "score_feedback",
+        "apply_weight_proposal",
+        "delegate_capability",
+        "revoke_capability",
+        "capability_audit",
+        "trigger_kge",
+        "kge_status",
+        "erase_subject",
+        "gds_status",
+        "gds_trigger",
+        "gds_health",
+        "feature_status",
+        "evaluate",
+        "generate_calibration_pairs",
+        "domain_density_report",
+        "auto_tune",
+        "discover_weights",
+        "health_assess",
+        "health_batch_assess",
+        "health_report",
+        "emit_inference_feedback"
+      ],
+      "description": "Exact subaction branch in handle_admin; local/operator-only, never Gate advertised."
+    },
+    "domain_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Domain ID. Most subactions route through _bind_admin_domain, which defaults to tenant matching (admin_tenant_bound_domain=True); delegate_capability takes domain_id directly."
+    },
+    "job_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "GDS job identifier."
+    },
+    "current_weights": {
+      "type": "object",
+      "description": "Current weight values.",
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "proposed_weights": {
+      "type": "object",
+      "description": "Proposed weight values.",
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "source_tenant": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Capability delegation source tenant (operator-only)."
+    },
+    "target_tenant": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Capability delegation target tenant (operator-only)."
+    },
+    "actions": {
+      "type": "array",
+      "description": "Requested delegated actions.",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Permission identifier."
+      },
+      "minItems": 1
+    },
+    "capability_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Target capability id."
+    },
+    "expires_in_seconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "data_subject_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Data-subject id for erasure."
+    },
+    "n_samples": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "test_set": {
+      "type": "array",
+      "description": "Required non-empty labeled cases for admin evaluate -> _handle_evaluate; each case is interpreted at runtime.",
+      "items": {
+        "type": "object",
+        "description": "Evaluation case.",
+        "additionalProperties": true
+      },
+      "minItems": 1
+    },
+    "k": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "weights": {
+      "type": "object",
+      "description": "Evaluation weight overrides.",
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "entity": {
+      "type": "object",
+      "description": "Feedback entity context.",
+      "additionalProperties": true
+    },
+    "entity_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Feedback entity id."
+    },
+    "pass_number": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "domain": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Health action domain; must be absent or match packet tenant on the health path."
+    },
+    "node_label": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Health node label."
+    },
+    "entity_data": {
+      "type": "object",
+      "description": "Health input fields.",
+      "additionalProperties": true
+    },
+    "field_confidences": {
+      "type": ["object", "null"],
+      "description": "Field confidences.",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    },
+    "tier": {
+      "type": "string",
+      "enum": ["seed", "enrich", "discover", "autonomous"],
+      "description": "Health tier is only a caller request, never an entitlement; enum from engine/health/health_schemas.py:HealthTier."
+    },
+    "entities": {
+      "type": "array",
+      "description": "Batch health records.",
+      "items": {
+        "type": "object",
+        "description": "Health entity.",
+        "additionalProperties": true
+      }
+    },
+    "scan_profile": {
+      "type": ["object", "null"],
+      "properties": {
+        "min_staleness_days": {
+          "type": "integer"
+        },
+        "max_readiness_score": {
+          "type": "number"
+        },
+        "include_failed_matches": {
+          "type": "boolean"
+        },
+        "include_never_enriched": {
+          "type": "boolean"
+        },
+        "exclude_entity_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "description": "HealthScanProfile source model, with defaults governed by server."
+    },
+    "cost_ceiling_usd": {
+      "type": ["number", "null"],
+      "minimum": 0
+    },
+    "max_entities": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "rules": {
+      "type": "array",
+      "description": "Allowed inference rule names. Only domain-spec authorized values may be dispatched; empty means none.",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": ["subaction"],
+  "additionalProperties": false,
+  "examples": [
+    {
+      "subaction": "list_domains"
+    },
+    {
+      "subaction": "get_domain",
+      "domain_id": "tenant-1"
+    },
+    {
+      "subaction": "evaluate",
+      "domain_id": "plasticos",
+      "test_set": [
+        {
+          "query": {
+            "polymer_type": "HDPE"
+          },
+          "match_direction": "supply_opportunity_to_buyer_facility",
+          "expected_ids": ["facility-1"]
+        }
+      ],
+      "k": 10
+    },
+    {
+      "subaction": "health_assess",
+      "entity_id": "e-1",
+      "node_label": "Supplier",
+      "entity_data": {},
+      "tier": "seed"
+    }
+  ],
+  "x-negative-examples": [
+    {
+      "subaction": "does_not_exist"
+    },
+    {
+      "subaction": "get_domain"
+    },
+    {
+      "subaction": "evaluate",
+      "domain_id": "plasticos"
+    },
+    {
+      "subaction": "health_assess",
+      "entity_id": "e-1"
+    },
+    {
+      "subaction": "health_assess",
+      "node_label": "Supplier"
+    },
+    {
+      "subaction": "health_assess",
+      "entity_id": "e-1",
+      "node_label": "Supplier",
+      "tier": "enterprise"
+    }
+  ],
+  "x-source-file": "engine/handlers.py:handle_admin",
+  "x-source-revision": "bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0",
+  "x-required-capability-current": "admin:write",
+  "x-exposure": "local_operator_only",
+  "x-side-effects": "potentially destructive administration; authorization and role review required",
+  "x-schema-role": "bounded public client contract; the legacy handler may ignore extra keys",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "apply_weight_proposal"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["current_weights", "proposed_weights"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "auto_tune"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["domain_id"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "calibration_run"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["domain_id"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "delegate_capability"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["source_tenant", "target_tenant", "domain_id", "actions"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "discover_weights"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["domain_id"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "domain_density_report"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["domain_id"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "emit_inference_feedback"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["entity", "entity_id"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "erase_subject"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["data_subject_id"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "evaluate"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["domain_id", "test_set"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "gds_health"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["domain_id"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "gds_status"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["domain_id"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "gds_trigger"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["domain_id", "job_name"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "generate_calibration_pairs"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["domain_id"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "get_domain"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["domain_id"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "health_assess"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["entity_id", "node_label"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "init_schema"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["domain_id"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "revoke_capability"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["capability_id"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "score_feedback"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["domain_id"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "trigger_gds"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["domain_id", "job_name"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "subaction": {
+            "const": "trigger_kge"
+          }
+        },
+        "required": ["subaction"]
+      },
+      "then": {
+        "required": ["domain_id"]
+      }
+    }
+  ],
+  "x-exposure-warning": "Gate node spec does not advertise admin; SDK registration still iterates all ACTION_HANDLERS, so never equate no Gate advertisement with absent SDK registration or guaranteed network inaccessibility.",
+  "x-runtime-parity-note": "Some specialized health, evaluation and inference subactions have further dynamic validation not expressible in this universal schema. No remote exposure claimed.",
+  "x-source-code-refs": [
+    "engine/handlers.py:handle_admin (1318-2129)",
+    "engine/handlers.py:_handle_evaluate (2131+)",
+    "engine/handlers.py:_dispatch_health (2843-2885)",
+    "engine/health/health_schemas.py:HealthAssessmentRequest (152-168)",
+    "engine/health/api.py:handle_health_assess (83-170)"
+  ],
+  "x-runtime-validator-applies-this-json-schema": false,
+  "x-branch-constraints": {
+    "evaluate": "_handle_evaluate requires domain_id and test_set; omission was a prior pack defect",
+    "health_assess": "HealthAssessmentRequest requires entity_id and node_label, but API flag can return disabled before Pydantic validation",
+    "health_report": "entity_id defaults to empty string in engine/health/api.py; not a source-enforced required field",
+    "domain_id": "_bind_admin_domain validates tenant binding when admin_tenant_bound_domain enabled"
+  },
+  "x-runtime-validation-boundary": "The SDK routes payload dict to handler; no observed loader validates this JSON Schema. additionalProperties:false and example rejection are candidate client contracts, NOT runtime rejection proofs.",
+  "x-contract-status": "candidate_unenforced_not_release_admitted",
+  "x-source-trace": "Code at engine/handlers.py and declared payload models; see alignment/FILE_LEDGER.yaml for source revision, owner and remaining proof.",
+  "x-authorization-is-runtime-owned": true,
+  "x-prohibited-claim": "Passing this schema proves only candidate JSON Schema validity, not Gate reachability, handler validation, authorization, or safe writes."
+}

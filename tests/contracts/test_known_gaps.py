@@ -1,70 +1,86 @@
 """
-Known gap tracker — tests that are expected to fail until the gap is filled.
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [test, contracts]
+owner: engine-team
+status: active
+--- /L9_META ---
 
-Each test corresponds to a known architectural gap identified in the
-CEG_Gap_Analysis_Frontier_Labs.md or the contract extraction process.
-These tests use xfail to document what's missing without breaking CI.
+Presence of a truthful architectural contract is NOT operational completion.
+The six architectural capability assertions remain strict expected failures until
+real implementation and native proof replace them. Schema files can be completed
+independently; the implementation gaps are not silently greenwashed.
 """
 
+from __future__ import annotations
+
+import json
+
 import pytest
+import yaml
 
 from tests.contracts._constants import CONTRACTS_ROOT
 
-# ── Evaluation infrastructure ────────────────────────────────────────────────
+TOOLS = ("match", "sync", "admin", "outcomes", "resolve", "enrich")
+ARCH = (
+    "eval/eval-pipeline.yaml",
+    "eval/benchmarks.yaml",
+    "feedback/convergence-loop.yaml",
+    "observability/otel-traces.yaml",
+    "observability/slo-definitions.yaml",
+    "auth/rbac-policy.yaml",
+)
 
 
-@pytest.mark.xfail(reason="GAP: No eval infra yet — no benchmark runner or metrics pipeline")
-def test_eval_infra_contract_exists():
-    path = CONTRACTS_ROOT / "eval" / "eval-pipeline.yaml"
-    assert path.exists()
+@pytest.mark.parametrize("name", TOOLS)
+def test_six_source_bound_schema_files_exist(name: str) -> None:
+    p = CONTRACTS_ROOT / "agents/tool-schemas" / f"{name}.schema.json"
+    s = json.loads(p.read_text())
+    assert s["x-source-file"] == f"engine/handlers.py:handle_{name}"
+    assert s["x-runtime-validator-applies-this-json-schema"] is False
 
 
-@pytest.mark.xfail(reason="GAP: No automated benchmarking contracts")
-def test_benchmark_contract_exists():
-    path = CONTRACTS_ROOT / "eval" / "benchmarks.yaml"
-    assert path.exists()
+@pytest.mark.parametrize("path", ARCH)
+def test_architecture_doc_preserves_evidence_and_unverified_runtime_state(path: str) -> None:
+    p = CONTRACTS_ROOT / path
+    d = yaml.safe_load(p.read_text())
+    assert d["authority"] == "candidate_extracted_from_source"
+    assert d["source_refs"]
+    assert d["baseline"]["commit"]
+    assert d["operational_proof"]["observed_in_this_pack"] is False
+    assert d["operational_proof"]["runtime_test_receipt"] is None
+    assert d["contract_status_is_not_runtime_status"] is True
 
 
-# ── Self-improvement / feedback loops ────────────────────────────────────────
+@pytest.mark.parametrize("path", ARCH)
+@pytest.mark.xfail(
+    strict=True,
+    reason="Open architectural capability: source code and runtime proof required; file existence is not closure",
+)
+def test_operational_gap_remains_open_until_native_proof(path: str) -> None:
+    d = yaml.safe_load((CONTRACTS_ROOT / path).read_text())
+    # An owner-admitted operational proof must replace this xfail with an actual
+    # executable behavior test before it can pass. No placeholder receipts.
+    assert d["status"] == "operational_verified"
+    assert d["operational_proof"]["observed_in_this_pack"] is True
 
 
-@pytest.mark.xfail(reason="GAP: Feedback convergence loop not yet contracted")
-def test_feedback_convergence_contract_exists():
-    path = CONTRACTS_ROOT / "feedback" / "convergence-loop.yaml"
-    assert path.exists()
+def test_security_gap_is_explicit_not_relabelled_ready() -> None:
+    r = yaml.safe_load((CONTRACTS_ROOT / "auth/rbac-policy.yaml").read_text())
+    assert r["release_ready"] is False
+    assert r["inconsistency"]["declared_permission"] == "sync:write"
+    assert r["inconsistency"]["status"] == "source_remediated_local"
+    statuses = {item["id"]: item["status"] for item in r["additional_inconsistencies"]}
+    assert statuses["AUTH-CAPSET-02"] == "source_remediated_local"
+    assert statuses["AUTH-DELEGATE-04"] == "source_remediated_local"
+    assert statuses["AUTH-GATE-03"] == "unverified"
 
 
-# ── Observability depth ──────────────────────────────────────────────────────
-
-
-@pytest.mark.xfail(reason="GAP: No OpenTelemetry trace contract")
-def test_otel_trace_contract_exists():
-    path = CONTRACTS_ROOT / "observability" / "otel-traces.yaml"
-    assert path.exists()
-
-
-@pytest.mark.xfail(reason="GAP: No SLO contract defined")
-def test_slo_contract_exists():
-    path = CONTRACTS_ROOT / "observability" / "slo-definitions.yaml"
-    assert path.exists()
-
-
-# ── Access control ───────────────────────────────────────────────────────────
-
-
-@pytest.mark.xfail(reason="GAP: RBAC model not yet contracted — JWT_SECRET flag exists but no policy")
-def test_rbac_policy_contract_exists():
-    path = CONTRACTS_ROOT / "auth" / "rbac-policy.yaml"
-    assert path.exists()
-
-
-# ── Tool schema completeness ────────────────────────────────────────────────
-
-TOOL_SCHEMAS_EXPECTED = {"match", "sync", "admin", "outcomes", "resolve", "enrich"}
-
-
-@pytest.mark.parametrize("name", sorted(TOOL_SCHEMAS_EXPECTED))
-@pytest.mark.xfail(reason="GAP: Individual tool schemas not yet generated")
-def test_individual_tool_schema_exists(name):
-    path = CONTRACTS_ROOT / "agents" / "tool-schemas" / f"{name}.schema.json"
-    assert path.exists()
+def test_otel_trace_id_does_not_automatically_mean_otel_export() -> None:
+    o = yaml.safe_load((CONTRACTS_ROOT / "observability/otel-traces.yaml").read_text())
+    assert o["observed"]["otel_span_emission_verified"] is False
+    assert o["observed"]["exporter_config_verified"] is False
+    assert o["observed"]["sdk_packet_reconstruction_can_create_new_trace_id"] is True

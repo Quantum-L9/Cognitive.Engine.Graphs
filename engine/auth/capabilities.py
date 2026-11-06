@@ -45,6 +45,12 @@ PERM_SYNC_WRITE = "sync:write"
 PERM_ADMIN_WRITE = "admin:write"
 PERM_SCORE_READ = "score:read"
 
+
+def _is_read_capability(capability: str) -> bool:
+    """Return whether an unconfigured capability is an approved public read."""
+    return capability.endswith(":read")
+
+
 # ── W3-03: Action-Level Permission Map ──────────────────────────
 # Maps every engine action to a required capability string.
 # Used by check_action_permission() to enforce at handler entry.
@@ -59,7 +65,7 @@ ACTION_PERMISSION_MAP: dict[str, str] = {
     "calibration_run": PERM_ADMIN_WRITE,
     "score_feedback": PERM_ADMIN_WRITE,
     "apply_weight_proposal": PERM_ADMIN_WRITE,
-    "resolve": PERM_MATCH_READ,
+    "resolve": PERM_SYNC_WRITE,
     "health": PERM_MATCH_READ,
     "healthcheck": PERM_MATCH_READ,
     "score": PERM_SCORE_READ,
@@ -232,10 +238,13 @@ class CapabilityValidator:
         parent: Capability,
         scope_restriction: dict[str, Any],
         expires_in_seconds: float = 0.0,
+        target_tenant: str | None = None,
     ) -> Capability:
         """Derive a more-restricted child capability (seL4 CNode_Mint).
 
-        Enforces monotonicity: child rights ⊆ parent rights.
+        Enforces monotonicity: child rights ⊆ parent rights. Callers that
+        delegate to another tenant provide ``target_tenant`` before the child
+        is registered, so its recorded identity and proof hash agree.
         """
         if not parent.is_active():
             msg = f"Cannot derive from inactive capability {parent.capability_id!r}"
@@ -266,7 +275,7 @@ class CapabilityValidator:
             child_expires = parent.expires_at
 
         child = Capability(
-            tenant_id=parent.tenant_id,
+            tenant_id=target_tenant or parent.tenant_id,
             domain_id=child_domain,
             allowed_actions=child_actions,
             granted_by=parent.capability_id,
@@ -354,16 +363,17 @@ class CapabilitySet:
         """Check if ``tenant`` holds the required capability for ``action``.
 
         Returns True if:
-        - No capabilities are defined (open access)
-        - The action is not in the capability set (no restriction)
+        - The action is an approved public read and has no explicit policy
         - The tenant is in the allowed subjects for the action
         - Wildcard ``"*"`` is in the allowed subjects
+
+        Unconfigured or absent write capabilities are denied. This keeps public
+        read compatibility while preventing a partial or empty domain policy
+        from implicitly granting graph mutation authority.
         """
-        if not self._action_subjects:
-            return True
         subjects = self._action_subjects.get(action)
         if subjects is None:
-            return True
+            return _is_read_capability(action)
         return tenant in subjects or "*" in subjects
 
     def grants_explicitly(self, tenant: str, action: str) -> bool:
@@ -387,14 +397,15 @@ def check_action_permission(tenant: str, action: str, capability_set: Capability
     Maps the engine action to a required capability string via ACTION_PERMISSION_MAP,
     then checks the domain-spec CapabilitySet.
 
-    Returns True if authorized (or if no capability set is configured).
+    An absent capability set retains public reads only. Writes always need an
+    explicit grant in the set supplied by the domain policy.
     """
-    if capability_set is None:
-        return True
     required = ACTION_PERMISSION_MAP.get(action)
     if required is None:
         # Unknown action — deny by default in strict mode
         return False
+    if capability_set is None:
+        return _is_read_capability(required)
     return capability_set.has_capability(tenant, required)
 
 

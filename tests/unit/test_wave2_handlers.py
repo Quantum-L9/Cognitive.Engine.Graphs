@@ -124,6 +124,7 @@ class TestScoreFeedbackSubaction:
         init_dependencies(driver, loader)
 
         with patch("engine.config.settings.settings") as mock_settings:
+            mock_settings.l9_env = "test"
             mock_settings.feedback_enabled = True
             result = await handle_admin(
                 "test_domain",
@@ -165,6 +166,7 @@ class TestApplyWeightProposal:
         init_dependencies(driver, loader)
 
         with patch("engine.config.settings.settings") as mock_settings:
+            mock_settings.l9_env = "test"
             mock_settings.feedback_enabled = True
             result = await handle_admin(
                 "test_tenant",
@@ -213,6 +215,7 @@ class TestOutcomeSyncType:
         init_dependencies(driver, loader)
 
         with patch("engine.config.settings.settings") as mock_settings:
+            mock_settings.l9_env = "test"
             mock_settings.feedback_enabled = True
             result = await handle_sync(
                 "test_tenant",
@@ -236,6 +239,7 @@ class TestOutcomeSyncType:
         init_dependencies(driver, loader)
 
         with patch("engine.config.settings.settings") as mock_settings:
+            mock_settings.l9_env = "test"
             mock_settings.feedback_enabled = True
             result = await handle_sync(
                 "test_tenant",
@@ -278,6 +282,7 @@ class TestFeedbackPredicate:
     async def test_global_on_domain_off_keeps_admin_feedback_disabled(self) -> None:
         init_dependencies(_make_graph_driver(), _make_domain_loader(domain_feedback=False))
         with patch("engine.config.settings.settings") as mock_settings:
+            mock_settings.l9_env = "test"
             mock_settings.feedback_enabled = True
             feedback = await handle_admin("test_domain", {"subaction": "score_feedback", "domain_id": "test_domain"})
             applied = await handle_admin(
@@ -298,6 +303,7 @@ class TestFeedbackPredicate:
 
         init_dependencies(_make_graph_driver(), _make_domain_loader(domain_feedback=False))
         with patch("engine.config.settings.settings") as mock_settings:
+            mock_settings.l9_env = "test"
             mock_settings.feedback_enabled = True
             with pytest.raises(ValidationError, match="No sync endpoints configured"):
                 await handle_sync(

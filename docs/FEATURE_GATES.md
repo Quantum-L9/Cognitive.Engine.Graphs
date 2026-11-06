@@ -513,8 +513,18 @@ last row (admit every tenant, WARNING at startup) without inventing an allowlist
 **Flag**: `CAPABILITY_AUTH_ENABLED=True` (default on)
 
 Enforces the domain-spec capability model, mapping each action to the permissions it
-requires. Disabling it removes per-action authorization while leaving tenant resolution
-intact.
+requires. In deployed environments, a domain policy must explicitly grant every write
+capability (`sync:write` includes `resolve`, `admin:write` includes admin operations).
+An absent or missing policy entry never grants a graph write in production or other
+deployed environments. In `dev`, `local`, and `test`, the capability guard retains
+the established legacy compatibility bypass. `CAPABILITY_AUTH_ENABLED=False` is also
+permitted only in those environments; production and staging-style environments reject
+both bypasses.
+
+To enable a write action in production, add the corresponding capability and allowed
+subject to the domain pack, deploy the pack, and verify a denied read-only request before
+admitting traffic. This CEG mechanism does not replace Gate/SDK caller authentication or
+route authorization.
 
 ---
 
