@@ -111,7 +111,7 @@ class IndexBuildResult:
     questions_generated: int = 0
     edges_created: int = 0
     density_limit: int = 0
-    execution_time_s: float = 0.0  # nosemgrep: float-requires-try-except
+    execution_time_s: float = 0.0  # nosemgrep: semgrep.float-requires-try-except
     errors: list[str] = field(default_factory=list)
 
 

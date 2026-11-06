@@ -22,7 +22,7 @@
         "name": "Beta Recyclers",
         "location": {
           "lat": 32.7767,
-          "lon": -96.7970
+          "lon": -96.797
         },
         "materials_handled": ["PET", "HDPE"],
         "capacity_kg_monthly": 75000,

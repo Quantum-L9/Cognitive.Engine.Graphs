@@ -11,9 +11,9 @@
     "fingerprint": {
       "active_dimensions": ["structural", "geo", "reinforcement"],
       "dimension_weights": {
-        "structural": 0.30,
+        "structural": 0.3,
         "geo": 0.25,
-        "reinforcement": 0.20
+        "reinforcement": 0.2
       },
       "gates_passed": ["material_type_match", "capacity_threshold", "geo_range"],
       "match_direction": "supplier_to_buyer",

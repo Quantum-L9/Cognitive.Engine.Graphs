@@ -52,6 +52,37 @@ class TestEngineState:
         s2 = get_state()
         assert s1 is s2
 
+    def test_get_state_concurrent_first_access_builds_one_instance(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Double-checked locking: racing first callers share one EngineState."""
+        import threading
+
+        import engine.state as state_mod
+
+        built: list[Any] = []
+        real_cls = state_mod.EngineState
+
+        def slow_factory() -> Any:
+            time.sleep(0.01)  # widen the race window between check and assignment
+            instance = real_cls()
+            built.append(instance)
+            return instance
+
+        monkeypatch.setattr(state_mod, "EngineState", slow_factory)
+        barrier = threading.Barrier(8)
+        seen: list[Any] = []
+
+        def worker() -> None:
+            barrier.wait()
+            seen.append(state_mod.get_state())
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert len(built) == 1
+        assert all(s is built[0] for s in seen)
+
     def test_pre_init_graph_driver_raises(self) -> None:
         from engine.state import get_state
 

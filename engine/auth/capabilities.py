@@ -30,6 +30,7 @@ import hashlib
 import logging
 import math
 import secrets
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -411,17 +412,21 @@ def check_action_permission(tenant: str, action: str, capability_set: Capability
 # ── Module-level singleton validator ────────────────────────────
 
 _capability_validator: CapabilityValidator | None = None
+_capability_validator_lock = threading.Lock()
 
 
 def get_capability_validator() -> CapabilityValidator:
     """Return the module-level CapabilityValidator singleton."""
     global _capability_validator
     if _capability_validator is None:
-        _capability_validator = CapabilityValidator()
+        with _capability_validator_lock:
+            if _capability_validator is None:  # Double-check under the lock
+                _capability_validator = CapabilityValidator()
     return _capability_validator
 
 
 def reset_capability_validator() -> None:
     """Reset the singleton (for testing)."""
     global _capability_validator
-    _capability_validator = None
+    with _capability_validator_lock:
+        _capability_validator = None

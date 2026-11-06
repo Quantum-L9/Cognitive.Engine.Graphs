@@ -386,6 +386,14 @@ class TestValidatedLLMClientNoProvider:
         with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
             backend._ensure_client("gpt-4-turbo")
 
+    def test_non_numeric_temperature_names_the_variable(self, monkeypatch):
+        monkeypatch.setenv("LLM_TEMPERATURE", "warm")
+
+        from engine.security.P2_9_llm_schemas import _LLMBackend
+
+        with pytest.raises(ValueError, match="LLM_TEMPERATURE must be a number"):
+            _LLMBackend()
+
     def test_generate_cypher_unsupported_language(self):
         client = ValidatedLLMClient()
         with pytest.raises(ValueError, match="Unsupported language"):

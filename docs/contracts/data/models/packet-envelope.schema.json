@@ -16,12 +16,35 @@
         },
         "packet_type": {
           "type": "string",
-          "enum": ["request", "response", "event", "error", "command", "query", "tool_call", "tool_result", "reasoning", "delegation", "governance", "heartbeat"],
+          "enum": [
+            "request",
+            "response",
+            "event",
+            "error",
+            "command",
+            "query",
+            "tool_call",
+            "tool_result",
+            "reasoning",
+            "delegation",
+            "governance",
+            "heartbeat"
+          ],
           "description": "Packet type. Source: constellation_node_sdk.TransportHeader"
         },
         "action": {
           "type": "string",
-          "enum": ["match", "sync", "admin", "outcomes", "resolve", "health", "healthcheck", "health-assess", "enrich"],
+          "enum": [
+            "match",
+            "sync",
+            "admin",
+            "outcomes",
+            "resolve",
+            "health",
+            "healthcheck",
+            "health-assess",
+            "enrich"
+          ],
           "description": "Engine action routed by chassis."
         },
         "trace_id": {
@@ -139,7 +162,7 @@
         "originator": "plasticos"
       },
       "payload": {
-        "query": {"material_type": "HDPE", "quantity_kg": 500},
+        "query": { "material_type": "HDPE", "quantity_kg": 500 },
         "match_direction": "supplier_to_buyer",
         "top_n": 10
       },

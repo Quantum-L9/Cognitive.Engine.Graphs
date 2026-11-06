@@ -70,7 +70,16 @@ class ShadowComparison:
 
 def _normalize(rows: list[RankedCandidate]) -> list[RankedCandidate]:
     ordered = sorted(rows, key=lambda r: (r.rank, r.candidate_id))
-    return [RankedCandidate(candidate_id=r.candidate_id, score=float(r.score), rank=int(r.rank)) for r in ordered]
+    # ``RankedCandidate.score`` is typed ``float``; this only widens int / numpy
+    # scalars. The one external producer (tools/shadow_comparison.py) validates.
+    return [
+        RankedCandidate(
+            candidate_id=r.candidate_id,
+            score=float(r.score),  # nosemgrep: semgrep.float-requires-try-except
+            rank=int(r.rank),
+        )
+        for r in ordered
+    ]
 
 
 def _first_by_id(
