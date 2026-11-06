@@ -785,6 +785,13 @@ FILE_REGISTRY: list[FileMeta] = [
     FileMeta(
         ".semgrep/semgrep-rules.yaml", "l9-template", ["security"], ["L9_TEMPLATE", "semgrep", "rules"], "platform"
     ),
+    FileMeta(
+        ".semgrep/fixtures/semgrep-rules.py",
+        "engine-specific",
+        ["test"],
+        ["semgrep", "rules", "fixtures"],
+        "platform",
+    ),
     FileMeta("domains/_template.yaml", "domain-specific", ["config"], ["domains", "template"], "domain-team"),
     FileMeta(
         "docs/archive/plasticos/plasticos_domain_spec.yaml",

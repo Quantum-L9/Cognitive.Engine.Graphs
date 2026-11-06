@@ -82,8 +82,8 @@ class MergedEdge:
     similarity: float
     source_question: str = ""
     target_question: str = ""
-    jaccard_score: float = 0.0  # nosemgrep: semgrep.float-requires-try-except
-    cosine_score: float = 0.0  # nosemgrep: semgrep.float-requires-try-except
+    jaccard_score: float = 0.0
+    cosine_score: float = 0.0
 
 
 @dataclass
@@ -334,4 +334,4 @@ class EdgeMerger:
         norm2 = np.linalg.norm(vec2)
         if norm1 == 0 or norm2 == 0:
             return 0.0
-        return float(np.dot(vec1, vec2) / (norm1 * norm2))  # nosemgrep: semgrep.float-requires-try-except
+        return float(np.dot(vec1, vec2) / (norm1 * norm2))

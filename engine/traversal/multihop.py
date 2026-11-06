@@ -114,7 +114,7 @@ class TraversalResult:
     visited_order: list[str] = field(default_factory=list)
     hops_executed: int = 0
     queue_sizes: list[int] = field(default_factory=list)
-    execution_time_ms: float = 0.0  # nosemgrep: semgrep.float-requires-try-except
+    execution_time_ms: float = 0.0
     llm_calls: int = 0
     audit_trail: list[dict[str, Any]] = field(default_factory=list)
 
@@ -457,4 +457,4 @@ class MultiHopTraverser:
         norm_b = np.linalg.norm(b)
         if norm_a == 0 or norm_b == 0:
             return 0.0
-        return float(np.dot(a, b) / (norm_a * norm_b))  # nosemgrep: semgrep.float-requires-try-except
+        return float(np.dot(a, b) / (norm_a * norm_b))

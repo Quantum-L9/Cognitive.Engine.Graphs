@@ -75,7 +75,7 @@ def _normalize(rows: list[RankedCandidate]) -> list[RankedCandidate]:
     return [
         RankedCandidate(
             candidate_id=r.candidate_id,
-            score=float(r.score),  # nosemgrep: semgrep.float-requires-try-except
+            score=float(r.score),
             rank=int(r.rank),
         )
         for r in ordered

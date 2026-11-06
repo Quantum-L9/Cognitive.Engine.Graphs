@@ -386,7 +386,7 @@ def _try_safe_literal(expr_stripped: str, expr_lower: str) -> str | None:
     if expr_lower in ("true", "false", "null"):
         return expr_stripped
     try:
-        float(expr_stripped)  # nosemgrep: semgrep.float-requires-try-except
+        float(expr_stripped)
     except ValueError:
         pass
     else:
@@ -871,7 +871,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 source = projected if isinstance(projected, dict) else row
                 # Only int | float values pass the isinstance filter: float() cannot raise.
                 return {
-                    k: float(v)  # nosemgrep: semgrep.float-requires-try-except
+                    k: float(v)
                     for k, v in source.items()
                     if k not in ("candidate", "score") and isinstance(v, (int, float))
                 }

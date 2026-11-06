@@ -155,8 +155,8 @@ class WeightedDistributionScore(VariantEnsemble):
             VariantScore(
                 variant_id=s.variant_id,
                 variant_type=s.variant_type,
-                score=float(np.clip(s.score, 0.0, 1.0)),  # nosemgrep: semgrep.float-requires-try-except
-                confidence=float(np.clip(s.confidence, 0.0, 1.0)),  # nosemgrep: semgrep.float-requires-try-except
+                score=float(np.clip(s.score, 0.0, 1.0)),
+                confidence=float(np.clip(s.confidence, 0.0, 1.0)),
                 metadata=s.metadata,
             )
             for s in scores
@@ -177,11 +177,7 @@ class WeightedDistributionScore(VariantEnsemble):
             weighted_sum += wi * s.score * ci
             conf_sum += wi * ci
 
-        final = (
-            weighted_sum / conf_sum
-            if conf_sum > 0
-            else float(np.mean([s.score for s in normalized]))  # nosemgrep: semgrep.float-requires-try-except
-        )  # nosemgrep: semgrep.float-requires-try-except
+        final = weighted_sum / conf_sum if conf_sum > 0 else float(np.mean([s.score for s in normalized]))
 
         result = EnsembleResult(
             final_score=final,
@@ -340,7 +336,7 @@ class MixtureOfExpertsEnsemble(VariantEnsemble):
         entropy = -np.sum(p * np.log(p))
         max_entropy = math.log(k)
         confidence = 1.0 - (entropy / max_entropy)
-        return float(max(0.0, min(1.0, confidence)))  # nosemgrep: semgrep.float-requires-try-except
+        return float(max(0.0, min(1.0, confidence)))
 
     def fuse(self, scores: list[VariantScore]) -> EnsembleResult:
         if not scores:
@@ -350,12 +346,9 @@ class MixtureOfExpertsEnsemble(VariantEnsemble):
         gate_logits = competencies / (1.0 + 1e-8)
         gate_weights = np.exp(gate_logits) / np.sum(np.exp(gate_logits))
 
-        final = float(np.clip(np.dot(gate_weights, competencies), 0.0, 1.0))  # nosemgrep: semgrep.float-requires-try-except  # fmt: skip
+        final = float(np.clip(np.dot(gate_weights, competencies), 0.0, 1.0))
 
-        weights = {
-            s.variant_id: float(w)  # nosemgrep: semgrep.float-requires-try-except
-            for s, w in zip(scores, gate_weights, strict=False)
-        }
+        weights = {s.variant_id: float(w) for s, w in zip(scores, gate_weights, strict=False)}
 
         top_3 = sorted(zip(scores, gate_weights, strict=False), key=lambda x: -x[0].score)[:3]
         lines = [f"MoE Ensemble: final_score={final:.4f}"]
@@ -499,7 +492,7 @@ class EnsembleController:
             result = impl.fuse(valid_scores)
         except Exception as e:
             logger.exception("Ensemble fusion failed, falling back to mean")
-            mean_score = float(np.mean([s.score for s in valid_scores]))  # nosemgrep: semgrep.float-requires-try-except
+            mean_score = float(np.mean([s.score for s in valid_scores]))
             weights = {s.variant_id: 1.0 / len(valid_scores) for s in valid_scores}
             return EnsembleResult(
                 final_score=mean_score,

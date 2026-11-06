@@ -71,6 +71,14 @@ status: active
 > failing does not, by itself, prevent merging unless GitHub is configured
 > to require it.
 
+> `ci-quality.yml`'s `semgrep` job runs the policy scan (`semgrep ci` with
+> `.semgrep/` rules, inside `returntocorp/semgrep-agent:v1`, semgrep 1.36.0),
+> then `semgrep --test` on `.semgrep/fixtures/semgrep-rules.py` in the same
+> image. The fixtures pin each rule's true positives and true negatives, so a
+> rule must be precise rather than silenced line by line with `nosemgrep`.
+> `.semgrepignore` restates semgrep's default ignore list and adds the
+> fixture directory.
+
 ---
 
 ## Decision Model

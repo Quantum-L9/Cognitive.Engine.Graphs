@@ -160,7 +160,7 @@ def compute_fingerprint(
         if not isinstance(score, (int, float)):
             score = 0.0
         # Clamp to [0, 1] for bucketing. ``score`` is int | float (isinstance guard above).
-        score = max(0.0, min(1.0, float(score)))  # nosemgrep: semgrep.float-requires-try-except
+        score = max(0.0, min(1.0, float(score)))
         bucket = _bucket_label(score, bucket_boundaries, bucket_labels)
         bucket_counts[bucket] += 1
 
