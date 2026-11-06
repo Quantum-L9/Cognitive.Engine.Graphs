@@ -29,6 +29,8 @@ wheels/
 
 # Virtual environments
 .env
+.env*
+*.env
 .venv
 env/
 venv/
@@ -61,6 +63,22 @@ tests/
 *.local
 *.log
 .DS_Store
+
+# Sensitive credentials and key material
+credentials.json
+secrets.json
+.aws/
+.kube/
+.ssh/
+.netrc
+.npmrc
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keytab
 
 # Current work / staging
 current work/

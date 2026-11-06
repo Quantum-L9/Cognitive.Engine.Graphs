@@ -8,7 +8,7 @@
 # owner: platform
 # status: active
 # --- /L9_META ---
-"""Guard: reject malformed GitHub Actions references in workflow files.
+"""Guard: require immutable GitHub Actions references in workflow files.
 
 Detects the "Frankenref" corruption pattern where a 40-hex commit SHA and a
 version tag are concatenated into a single unusable ref:
@@ -19,10 +19,11 @@ This pattern appeared when an automated edit merged `@<sha>` pinning with
 `@v<version>` tagging in one string. GitHub cannot resolve such a ref, so
 every affected job dies at workflow-parse/setup time.
 
-Also enforces the repository pinning convention for third-party actions:
+Also enforces immutable SHA pinning for every external action, including
+first-party ``actions/*`` and ``github/*`` actions:
 
     uses: owner/action@<40-hex-sha> # v<version>  # OK — SHA-pinned, tag in comment
-    uses: actions/checkout@v6                     # OK — first-party (github.com/actions, github.com/github)
+    uses: ./path/to/action                         # OK — local composite action
 
 Exit codes: 0 = clean, 1 = violations found.
 """
@@ -33,27 +34,27 @@ import pathlib
 import re
 import sys
 
-WORKFLOW_DIR = pathlib.Path(".github/workflows")
+REPOSITORY_ROOT = pathlib.Path(__file__).resolve().parents[1]
+WORKFLOW_DIR = REPOSITORY_ROOT / ".github" / "workflows"
 
 # The corruption pattern: 40-hex SHA immediately followed by a version string.
 FRANKENREF = re.compile(r"uses:\s*[\w.-]+/[\w.-]+(?:/[\w./-]+)?@[0-9a-f]{40}v[\d]")
 
-# Any `uses:` of an external action (owner/repo@ref), for convention checks.
-USES_LINE = re.compile(r"^\s*(?:-\s+)?uses:\s*(?P<action>[\w.-]+/[\w.-]+(?:/[\w./-]+)?)@(?P<ref>\S+)")
+# Any `uses:` line, including local composite actions and reusable workflows.
+USES_LINE = re.compile(r"^\s*(?:-\s+)?uses:\s*(?P<reference>\S+)")
 
-# First-party namespaces that may use tag refs directly.
-FIRST_PARTY = ("actions/", "github/")
+# Remote action or reusable-workflow reference: owner/repo[/path]@ref.
+EXTERNAL_ACTION = re.compile(r"^(?P<action>[\w.-]+/[\w.-]+(?:/[\w./-]+)?)@(?P<ref>[^\s#]+)$")
 
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
 def main() -> int:
     violations: list[str] = []
-    warnings: list[str] = []
 
     if not WORKFLOW_DIR.is_dir():
-        print(f"no {WORKFLOW_DIR} directory — nothing to check")
-        return 0
+        print(f"ERROR: required workflow directory is missing: {WORKFLOW_DIR}")
+        return 1
 
     for path in sorted(WORKFLOW_DIR.glob("*.y*ml")):
         for lineno, line in enumerate(path.read_text().splitlines(), 1):
@@ -64,25 +65,26 @@ def main() -> int:
             m = USES_LINE.match(stripped)
             if not m:
                 continue
-            action, ref = m.group("action"), m.group("ref")
-            if action.startswith(FIRST_PARTY):
-                continue
-            if ref.startswith("./"):
+            reference = m.group("reference")
+            if reference.startswith("./"):
                 continue  # local composite action
+            action_ref = EXTERNAL_ACTION.match(reference)
+            if not action_ref:
+                violations.append(f"{path}:{lineno}: invalid non-local action reference: {line.strip()}")
+                continue
+            action, ref = action_ref.group("action"), action_ref.group("ref")
             if not FULL_SHA.match(ref):
-                warnings.append(
-                    f"{path}:{lineno}: third-party action not SHA-pinned: "
+                violations.append(
+                    f"{path}:{lineno}: external action must be SHA-pinned: "
                     f"{action}@{ref} (convention: @<40-hex-sha> # v<version>)"
                 )
 
-    for w in warnings:
-        print(f"WARNING: {w}")
     if violations:
-        print(f"\n{len(violations)} malformed action reference(s) found:")
+        print(f"\n{len(violations)} invalid action reference(s) found:")
         for v in violations:
             print(f"ERROR: {v}")
         return 1
-    print(f"action-ref check passed ({len(warnings)} pin-convention warning(s))")
+    print("action-ref check passed")
     return 0
 
 

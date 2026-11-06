@@ -29,6 +29,7 @@ from engine.sync.idea_portfolio import (
     compile_hydration_plan,
     state_uniqueness_constraint_present,
 )
+from tools.path_policy import PathPolicyError, resolve_existing_file_under_root, resolve_root
 
 
 def _load(path: Path) -> IdeaPortfolioHydrationEnvelope:
@@ -101,15 +102,34 @@ async def _apply(envelope: IdeaPortfolioHydrationEnvelope) -> dict[str, object]:
         await driver.close()
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate or apply IdeaOS -> CEG portfolio hydration")
     parser.add_argument("envelope", type=Path)
     parser.add_argument("--apply", action="store_true", help="mutate the CEG idea-portfolio graph")
-    args = parser.parse_args()
-    envelope = _load(args.envelope)
+    parser.add_argument(
+        "--root",
+        default=".",
+        help="Allowed root for the hydration envelope (default: current directory)",
+    )
+    args = parser.parse_args(argv)
+    try:
+        input_root = resolve_root(args.root)
+        envelope_path = resolve_existing_file_under_root(args.envelope, input_root, option="envelope")
+    except PathPolicyError as exc:
+        parser.error(str(exc))
+    except OSError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    try:
+        envelope = _load(envelope_path)
+    except OSError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     result = asyncio.run(_apply(envelope)) if args.apply else _dry_run(envelope)
     print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

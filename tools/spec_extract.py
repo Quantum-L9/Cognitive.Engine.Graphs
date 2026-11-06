@@ -42,6 +42,18 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from tools.path_policy import (
+    PathPolicyError,
+    resolve_existing_file_under_root,
+    resolve_root,
+    resolve_under_root,
+    write_text_no_follow,
+)
+
 try:
     import yaml
 except ImportError:
@@ -78,7 +90,7 @@ class SpecFeature:
 
 def load_yaml_file(path: Path) -> dict[str, Any]:
     if yaml is None:
-        raise RuntimeError("PyYAML required: pip install pyyaml")
+        raise RuntimeError("PyYAML required: bash tools/deps/install_locked.sh tools")
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
@@ -378,7 +390,11 @@ def extract_research_features(root: Path) -> list[SpecFeature]:
     skipped and warned about — an unmapped pattern cannot be scanned for, so
     reporting it as MISSING would be indistinguishable from a genuine gap.
     """
-    path = root / RESEARCH_DIR / RESEARCH_PATTERNS_FILE
+    try:
+        path = resolve_under_root(root / RESEARCH_DIR / RESEARCH_PATTERNS_FILE, root, option="research patterns")
+    except PathPolicyError as exc:
+        print(f"WARNING: {exc}", file=sys.stderr)
+        return []
     if not path.exists():
         return []
 
@@ -456,8 +472,9 @@ def scan_codebase(root: Path, features: list[SpecFeature]) -> None:
         if ".venv" in py_file.parts or "__pycache__" in py_file.parts:
             continue
         try:
-            py_cache[str(py_file.relative_to(root))] = py_file.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+            safe_py_file = resolve_under_root(py_file, root, option="discovered Python file")
+            py_cache[str(py_file.relative_to(root))] = safe_py_file.read_text(encoding="utf-8", errors="replace")
+        except (OSError, PathPolicyError):
             # Unreadable file (permissions, transient IO): skip it and keep
             # scanning the rest of the tree.
             pass
@@ -466,8 +483,9 @@ def scan_codebase(root: Path, features: list[SpecFeature]) -> None:
         if ".venv" in yaml_file.parts:
             continue
         try:
-            yaml_cache[str(yaml_file.relative_to(root))] = yaml_file.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+            safe_yaml_file = resolve_under_root(yaml_file, root, option="discovered YAML file")
+            yaml_cache[str(yaml_file.relative_to(root))] = safe_yaml_file.read_text(encoding="utf-8", errors="replace")
+        except (OSError, PathPolicyError):
             # Unreadable file (permissions, transient IO): skip it and keep
             # scanning the rest of the tree.
             pass
@@ -508,13 +526,52 @@ def scan_codebase(root: Path, features: list[SpecFeature]) -> None:
             feature.status = Status.MISSING.value
 
 
-def write_checklist(out_dir: Path, features: list[SpecFeature]) -> None:
+def _artifact_file(out_dir: Path, name: str, root: Path) -> Path:
+    """Resolve one artifact file so a child symlink cannot escape --root."""
+    return resolve_under_root(out_dir / name, root, option=name)
+
+
+def _biome_json(value: object, *, width: int = 100) -> str:
+    """Emit JSON that Biome 2.5.8 keeps stable (indent 2, width 100, bracket spacing)."""
+
+    def compact(node: object) -> str:
+        if node is None or isinstance(node, (bool, int, float, str)):
+            return json.dumps(node)
+        if isinstance(node, list):
+            return "[" + ", ".join(compact(item) for item in node) + "]"
+        if isinstance(node, dict):
+            if not node:
+                return "{}"
+            body = ", ".join(f"{json.dumps(key)}: {compact(item)}" for key, item in node.items())
+            return "{ " + body + " }"
+        raise TypeError(f"unsupported checklist value: {type(node).__name__}")
+
+    def emit(node: object, column: int, level: int) -> str:
+        rendered = compact(node)
+        if column + len(rendered) <= width or not isinstance(node, (list, dict)):
+            return rendered
+        pad = "  " * (level + 1)
+        close = "  " * level
+        if isinstance(node, list):
+            inner = ",\n".join(pad + emit(item, (level + 1) * 2, level + 1) for item in node)
+            return "[\n" + inner + "\n" + close + "]"
+        rows = []
+        for key, item in node.items():
+            prefix = f"{json.dumps(key)}: "
+            rows.append(pad + prefix + emit(item, (level + 1) * 2 + len(prefix), level + 1))
+        return "{\n" + ",\n".join(rows) + "\n" + close + "}"
+
+    return emit(value, 0, 0) + "\n"
+
+
+def write_checklist(out_dir: Path, features: list[SpecFeature], root: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     data = [asdict(f) for f in features]
-    (out_dir / "spec_checklist.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
+    _artifact_file(out_dir, "spec_checklist.json", root)
+    write_text_no_follow(out_dir, "spec_checklist.json", _biome_json(data))
 
 
-def write_coverage_matrix(out_dir: Path, features: list[SpecFeature]) -> None:
+def write_coverage_matrix(out_dir: Path, features: list[SpecFeature], root: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     by_category: dict[str, dict[str, int]] = {}
@@ -531,10 +588,11 @@ def write_coverage_matrix(out_dir: Path, features: list[SpecFeature]) -> None:
             totals[k] += cat_data[k]
 
     matrix = {"categories": by_category, "totals": totals, "generated_at": datetime.now(UTC).isoformat()}
-    (out_dir / COVERAGE_MATRIX_JSON).write_text(json.dumps(matrix, indent=2), encoding="utf-8")
+    _artifact_file(out_dir, COVERAGE_MATRIX_JSON, root)
+    write_text_no_follow(out_dir, COVERAGE_MATRIX_JSON, json.dumps(matrix, indent=2))
 
 
-def write_coverage_report(out_dir: Path, features: list[SpecFeature], matrix: dict) -> None:
+def write_coverage_report(out_dir: Path, features: list[SpecFeature], matrix: dict, root: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     lines: list[str] = []
     lines.append("# L9 Spec Coverage Report")
@@ -547,11 +605,12 @@ def write_coverage_report(out_dir: Path, features: list[SpecFeature], matrix: di
     lines.append("| Category | Implemented | Partial | Missing | Total |")
     lines.append("|----------|-------------|---------|---------|-------|")
 
-    cats = json.loads((out_dir / COVERAGE_MATRIX_JSON).read_text())["categories"]
+    matrix_path = _artifact_file(out_dir, COVERAGE_MATRIX_JSON, root)
+    cats = json.loads(matrix_path.read_text())["categories"]
     for cat, data in cats.items():
         lines.append(f"| {cat} | {data['IMPLEMENTED']} | {data['PARTIAL']} | {data['MISSING']} | {data['total']} |")
 
-    totals = json.loads((out_dir / COVERAGE_MATRIX_JSON).read_text())["totals"]
+    totals = json.loads(matrix_path.read_text())["totals"]
     lines.append(
         f"| **TOTAL** | **{totals['IMPLEMENTED']}** | **{totals['PARTIAL']}** | **{totals['MISSING']}** | **{totals['total']}** |"
     )
@@ -577,10 +636,11 @@ def write_coverage_report(out_dir: Path, features: list[SpecFeature], matrix: di
                 lines.append("- **No code references found**")
             lines.append("")
 
-    (out_dir / "coverage_report.md").write_text("\n".join(lines), encoding="utf-8")
+    _artifact_file(out_dir, "coverage_report.md", root)
+    write_text_no_follow(out_dir, "coverage_report.md", "\n".join(lines))
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="L9 Spec Coverage Extractor")
     parser.add_argument("--spec", default=None, help="Path to spec YAML (auto-detected if omitted)")
     parser.add_argument("--root", default=".", help="Repo root directory")
@@ -590,22 +650,43 @@ def main() -> int:
         choices=["MISSING", "PARTIAL", "NONE"],
         help="Exit 1 if any features have this status (or worse)",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    root = Path(args.root).resolve()
-    out_dir = root / "artifacts"
+    try:
+        root = resolve_root(args.root)
+        out_dir = resolve_under_root("artifacts", root, option="artifact output directory")
+    except PathPolicyError as exc:
+        parser.error(str(exc))
 
-    spec_path = Path(args.spec) if args.spec else None
+    spec_path: Path | None = None
+    if args.spec:
+        try:
+            spec_path = resolve_existing_file_under_root(args.spec, root, option="--spec")
+        except PathPolicyError as exc:
+            parser.error(str(exc))
+        except OSError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
     if spec_path is None:
         candidates = list(root.glob("*spec*.yaml")) + list(root.glob("*spec*.yml"))
         if candidates:
-            spec_path = candidates[0]
+            try:
+                spec_path = resolve_existing_file_under_root(candidates[0], root, option="auto-detected spec")
+            except PathPolicyError as exc:
+                parser.error(str(exc))
+            except OSError as exc:
+                print(f"ERROR: {exc}", file=sys.stderr)
+                return 1
         else:
             print("ERROR: No spec YAML found. Use --spec path/to/spec.yaml", file=sys.stderr)
             return 2
 
     print(f"Loading spec: {spec_path}")
-    spec = load_yaml_file(spec_path)
+    try:
+        spec = load_yaml_file(spec_path)
+    except OSError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     features: list[SpecFeature] = []
     features += extract_gate_features(spec)
@@ -623,11 +704,17 @@ def main() -> int:
 
     scan_codebase(root, features)
 
-    write_checklist(out_dir, features)
-    write_coverage_matrix(out_dir, features)
-
-    matrix_data = json.loads((out_dir / COVERAGE_MATRIX_JSON).read_text())
-    write_coverage_report(out_dir, features, matrix_data)
+    try:
+        write_checklist(out_dir, features, root)
+        write_coverage_matrix(out_dir, features, root)
+        matrix_path = _artifact_file(out_dir, COVERAGE_MATRIX_JSON, root)
+        matrix_data = json.loads(matrix_path.read_text())
+        write_coverage_report(out_dir, features, matrix_data, root)
+    except PathPolicyError as exc:
+        parser.error(str(exc))
+    except OSError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
     totals = matrix_data["totals"]
     print(

@@ -58,12 +58,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install lint tools
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          if [ -f requirements-ci.txt ]; then pip install -r requirements-ci.txt; fi
-          command -v ruff >/dev/null 2>&1 || pip install ruff
-          command -v mypy >/dev/null 2>&1 || pip install mypy
+        run: bash tools/deps/install_locked.sh ci
 
       - name: ruff check
         run: ruff check "${SOURCE_DIR}" --output-format=github
@@ -82,8 +77,7 @@ jobs:
             --config-file=pyproject.toml \
             --ignore-missing-imports \
             --exclude chassis \
-            --show-error-codes --pretty \
-            --install-types --non-interactive
+            --show-error-codes --pretty
 
   test:
     name: Test Suite
@@ -112,16 +106,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install test tools
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          if [ -f requirements-ci.txt ]; then pip install -r requirements-ci.txt; fi
-          pip install -e ".[dev]" || pip install -e . || \
-            echo "::notice::no local editable package to install"
-          command -v pytest >/dev/null 2>&1 || pip install pytest
-          python -c "import pytest_cov" 2>/dev/null || pip install pytest-cov
-          python -c "import xdist" 2>/dev/null || pip install pytest-xdist
-          python -c "import pytest_timeout" 2>/dev/null || pip install pytest-timeout
+        run: bash tools/deps/install_locked.sh full
 
       - name: pytest with coverage
         env:

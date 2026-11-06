@@ -112,7 +112,7 @@ def test_cli_two_runs_identical(tmp_path: Path) -> None:
     out2 = tmp_path / "o2.json"
     inp.write_text(json.dumps(_fixture()), encoding="utf-8")
     for dest in (out1, out2):
-        assert mod.main(["--input", str(inp), "--output", str(dest)]) == 0
+        assert mod.main(["--input", str(inp), "--output", str(dest), "--root", str(tmp_path)]) == 0
     assert out1.read_text(encoding="utf-8") == out2.read_text(encoding="utf-8")
 
 

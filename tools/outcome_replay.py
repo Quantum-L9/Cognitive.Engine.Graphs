@@ -18,20 +18,30 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from engine.replay.outcome import ReplayError, replay_outcomes
+from tools.path_policy import PathPolicyError, resolve_existing_file_under_root, resolve_root, resolve_under_root
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="CEG offline outcome replay")
     parser.add_argument("--input", required=True, help="Recorded-event replay input JSON (registered producer schema)")
     parser.add_argument("--output", required=True, help="Write replay outcome JSON")
+    parser.add_argument(
+        "--root",
+        default=".",
+        help="Allowed root for input and output paths (default: current directory)",
+    )
     args = parser.parse_args(argv)
     try:
-        document = json.loads(Path(args.input).read_text(encoding="utf-8"))
+        root = resolve_root(args.root)
+        input_path = resolve_existing_file_under_root(args.input, root, option="--input")
+        out = resolve_under_root(args.output, root, option="--output")
+        document = json.loads(input_path.read_text(encoding="utf-8"))
         result = replay_outcomes(document)
+    except PathPolicyError as exc:
+        parser.error(str(exc))
     except (OSError, json.JSONDecodeError, ReplayError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
         json.dumps(result, sort_keys=True, indent=2, ensure_ascii=True) + "\n",

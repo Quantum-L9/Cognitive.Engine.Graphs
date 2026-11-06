@@ -5,9 +5,13 @@ Produce observational primary-vs-shadow ranking JSON for a Gate `packet_id`.
 
 ## Emit offline
 ```bash
+ROOT=/tmp/ceg-shadow-comparison
+mkdir -p "$ROOT"
+cp /tmp/shadow-input.json "$ROOT/input.json"
 env PYTHONPATH=. python3.12 tools/shadow_comparison.py \
-  --input /tmp/shadow-input.json \
-  --output /tmp/shadow-comparison.json
+  --root "$ROOT" \
+  --input "$ROOT/input.json" \
+  --output "$ROOT/shadow-comparison.json"
 ```
 
 Input shape:
