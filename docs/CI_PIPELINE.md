@@ -23,6 +23,11 @@ status: active
 ### Phase 1: Validation
 - Check Python syntax (all .py files)
 - Validate YAML files (.github/workflows/*.yml)
+- `sdk-channel` (networked, gated by `ci-gate`): `scripts/validate_sdk_pin.py --verify-tag`, then
+  `tools/deps/lock_requirements.py --check`, which re-renders every `requirements-*.lock` seeded
+  with the committed lock and the upload cutoff in `tools/deps/exclude-newer.txt`. It fails only
+  when a requirements file changed without a re-render (or a pinned release was yanked); only
+  `--upgrade` moves pins and the cutoff.
 
 ### Phase 2: Lint & Type Check
 - Ruff linter (`ruff check`)

@@ -176,3 +176,90 @@ def test_installs_are_wheel_only_and_hash_checked() -> None:
     assert "--only-binary :all:" in script
     assert "--no-binary constellation-node-sdk" in script
     assert "--require-hashes" in script
+
+
+def _capture_render(monkeypatch: pytest.MonkeyPatch, *, upgrade: bool) -> tuple[list[str], str]:
+    """Run render() with uv stubbed out; return uv's argv and the seeded output file."""
+    seen: dict[str, object] = {}
+
+    def fake_run(argv: list[str], **_kwargs: object) -> None:
+        out = Path(argv[argv.index("--output-file") + 1])
+        seen["argv"] = argv
+        seen["seed"] = out.read_text() if out.exists() else ""
+        out.write_text("")
+
+    monkeypatch.setattr(lock_requirements.subprocess, "run", fake_run)
+    lock_requirements.render(
+        "requirements-tools.lock",
+        lock_requirements.SDK_ARCHIVE_COMMIT,
+        exclude_newer="2026-11-06T00:00:00Z",
+        upgrade=upgrade,
+    )
+    return seen["argv"], seen["seed"]  # type: ignore[return-value]
+
+
+def test_render_seeds_uv_with_the_committed_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--check must depend on the repository only: committed pins are uv's preferences."""
+    argv, seed = _capture_render(monkeypatch, upgrade=False)
+    assert seed == (ROOT / "requirements-tools.lock").read_text()
+    assert "--upgrade" not in argv
+
+
+def test_upgrade_renders_without_preferences(monkeypatch: pytest.MonkeyPatch) -> None:
+    argv, seed = _capture_render(monkeypatch, upgrade=True)
+    assert seed == ""
+    assert "--upgrade" in argv
+
+
+def test_tools_lock_pins_the_uv_that_renders_the_locks() -> None:
+    versions, _, _ = _locked("requirements-tools.lock")
+    extras = lock_requirements.EXTRAS["requirements-tools.lock"]
+    assert f"uv=={versions['uv']}" in extras
+
+
+def test_render_passes_the_exclude_newer_cutoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A wheel uploaded later for a pinned version must not change the hashes."""
+    argv, _ = _capture_render(monkeypatch, upgrade=False)
+    assert argv[argv.index("--exclude-newer") + 1] == "2026-11-06T00:00:00Z"
+
+
+def test_committed_cutoff_is_a_utc_timestamp() -> None:
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", lock_requirements.read_exclude_newer())
+
+
+def _fake_repo(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, rendered: dict[str, str]) -> Path:
+    """Point main() at a temporary repository whose renders return *rendered*."""
+    for lock in lock_requirements.LOCKS:
+        (tmp_path / lock).write_text(rendered[lock])
+    cutoff = tmp_path / "exclude-newer.txt"
+    cutoff.write_text("2026-11-06T00:00:00Z\n")
+    monkeypatch.setattr(lock_requirements, "ROOT", tmp_path)
+    monkeypatch.setattr(lock_requirements, "EXCLUDE_NEWER_FILE", cutoff)
+    monkeypatch.setattr(lock_requirements, "sdk_commit", lambda: lock_requirements.SDK_ARCHIVE_COMMIT)
+    monkeypatch.setattr(lock_requirements, "render", lambda lock, _commit, **_kw: rendered[lock])
+    return tmp_path
+
+
+def test_check_passes_when_every_lock_matches_its_render(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    rendered = {lock: f"# {lock}\n" for lock in lock_requirements.LOCKS}
+    _fake_repo(monkeypatch, tmp_path, rendered)
+    assert lock_requirements.main(["--check"]) == 0
+
+
+def test_check_fails_on_a_stale_lock(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rendered = {lock: f"# {lock}\n" for lock in lock_requirements.LOCKS}
+    root = _fake_repo(monkeypatch, tmp_path, rendered)
+    (root / "requirements-ci.lock").write_text("# edited by hand\n")
+    assert lock_requirements.main(["--check"]) == 1
+    assert "stale: requirements-ci.lock" in capsys.readouterr().err
+    assert (root / "requirements-ci.lock").read_text() == "# edited by hand\n"
+
+
+def test_upgrade_records_a_new_cutoff(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    rendered = {lock: f"# {lock}\n" for lock in lock_requirements.LOCKS}
+    _fake_repo(monkeypatch, tmp_path, rendered)
+    assert lock_requirements.main(["--upgrade"]) == 0
+    recorded = lock_requirements.read_exclude_newer(tmp_path / "exclude-newer.txt")
+    assert recorded != "2026-11-06T00:00:00Z"
