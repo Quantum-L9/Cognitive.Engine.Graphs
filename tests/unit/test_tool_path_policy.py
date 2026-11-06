@@ -14,6 +14,7 @@ Regression coverage for explicit CLI path roots.
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
@@ -85,6 +86,41 @@ def test_contract_scanner_skips_symlinked_file_during_default_discovery(
 
     assert contract_scanner.main() == 0
     assert seen == []
+
+
+def _git_repo(root: Path) -> None:
+    subprocess.run(["git", "init", "-q", str(root)], check=True)  # noqa: S603, S607 - fixed argv test fixture
+
+
+def test_discovery_skips_gitignored_runtime_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Central CI provisions l9-ci-sdk at .l9/runtime/sdk/source (gitignored);
+    its deliberate exec() fixtures must not fail CEG's validate."""
+    _git_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text(".l9/runtime/\n", encoding="utf-8")
+    sdk = tmp_path / ".l9" / "runtime" / "sdk" / "source" / "tests"
+    sdk.mkdir(parents=True)
+    (sdk / "example.py").write_text("exec('x')\n", encoding="utf-8")
+    (tmp_path / "engine").mkdir()
+    (tmp_path / "engine" / "ok.py").write_text("x = 1\n", encoding="utf-8")
+    found = contract_scanner._git_python_files(tmp_path)
+    assert found is not None
+    assert {p.relative_to(tmp_path).as_posix() for p in found} == {"engine/ok.py"}
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(contract_scanner.sys, "argv", ["contract_scanner.py"])
+    assert contract_scanner.main() == 0
+
+
+def test_discovery_still_scans_untracked_unignored_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _git_repo(tmp_path)
+    (tmp_path / "engine").mkdir()
+    (tmp_path / "engine" / "x.py").write_text("import fastapi\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(contract_scanner.sys, "argv", ["contract_scanner.py"])
+    assert contract_scanner.main() == 1
+
+
+def test_discovery_falls_back_outside_a_git_work_tree(tmp_path: Path) -> None:
+    assert contract_scanner._git_python_files(tmp_path) is None
 
 
 CliRunner = Callable[[list[str] | None], object]

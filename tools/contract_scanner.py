@@ -23,10 +23,12 @@ from __future__ import annotations
 
 import ast
 import re
+import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 if str(REPOSITORY_ROOT) not in sys.path:
@@ -64,8 +66,8 @@ def _rule(
     exclude_dirs: list[str] | None = None,
     ast_check: AstCheck | None = None,
     path_ast_check: PathAstCheck | None = None,
-) -> dict:
-    r = {
+) -> dict[str, Any]:
+    r: dict[str, Any] = {
         "id": rule_id,
         "contract": contract,
         "severity": severity,
@@ -764,6 +766,30 @@ def scan_file(file_path: Path, content: str, root: Path) -> list[Violation]:
     return violations
 
 
+def _git_python_files(root: Path) -> list[Path] | None:
+    """Python files git considers repository source: tracked, plus untracked
+    files that are not ignored. ``None`` when ``root`` is not a git work tree.
+
+    A blind ``rglob`` also scanned gitignored runtime state: central CI
+    (``Analyze (central Core)``) provisions the l9-ci-sdk checkout at
+    ``.l9/runtime/sdk/source`` inside the workspace, and that checkout's own
+    rule fixtures (deliberate ``exec()`` samples) failed ``make validate`` as
+    if they were CEG code.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.py"],
+            cwd=root,
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    return [root / rel for rel in proc.stdout.decode("utf-8", "surrogateescape").split("\0") if rel]
+
+
 def main() -> int:
     root = resolve_root(Path.cwd())
     skip_dirs = {".venv", "venv", "__pycache__", ".git", "site-packages"}
@@ -780,7 +806,8 @@ def main() -> int:
                 return 2
     else:
         paths = []
-        for discovered_path in root.rglob("*.py"):
+        discovered = _git_python_files(root)
+        for discovered_path in discovered if discovered is not None else root.rglob("*.py"):
             if any(part in skip_dirs for part in discovered_path.parts):
                 continue
             try:
