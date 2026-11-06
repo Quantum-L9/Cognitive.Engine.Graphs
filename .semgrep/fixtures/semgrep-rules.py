@@ -46,7 +46,7 @@ def parsed(text: str) -> float:
 
 
 async def handle_thing(tenant: str, payload: dict) -> dict:
-    raw = payload.get("weight")
+    raw = payload.get("weight", "0")
     # ruleid: float-requires-try-except
     weight = float(raw)
     return {"weight": weight}
@@ -117,7 +117,8 @@ def locked_global() -> object:
 
 
 class Registry:
-    instance = None
+    instance: object | None = None
+    cache: object | None = None
 
     @classmethod
     def get(cls) -> object:
