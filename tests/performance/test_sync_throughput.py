@@ -21,6 +21,7 @@ import time
 import uuid
 
 import pytest
+import pytest_asyncio
 import structlog
 
 from engine.config.schema import SyncEndpointSpec, SyncStrategy
@@ -29,9 +30,46 @@ from engine.sync.generator import SyncGenerator
 logger = structlog.get_logger(__name__)
 
 
+# Production schema setup (admin `init_schema`) gives every node key a
+# uniqueness constraint, so sync MERGE/MATCH by id is an index seek. Without an
+# index here the benchmark measured a :Facility label scan instead, and its
+# speed depended on how many Facility nodes the integration suite had left in
+# the shared database (0.53 s for 500 updates, failing the 1000/sec target).
+_BENCH_INDEXES = (("facility_id", "ceg_bench_facility_id"), ("tenant", "ceg_bench_facility_tenant"))
+
+
+async def _ensure_facility_indexes(graph_driver, db: str) -> None:
+    """Index :Facility(facility_id) and :Facility(tenant) unless already indexed.
+
+    Only a RANGE index serves the benchmark's equality MATCH/MERGE (TEXT,
+    FULLTEXT, POINT and VECTOR indexes do not). A uniqueness constraint's
+    backing index is RANGE, and `CREATE INDEX ... IF NOT EXISTS` can still
+    raise for that conflicting constraint, so only a property with no RANGE
+    index gets one.
+    """
+    rows = await graph_driver.execute_query(
+        "SHOW INDEXES YIELD type, labelsOrTypes, properties "
+        "WHERE type = 'RANGE' AND labelsOrTypes = ['Facility'] AND size(properties) = 1 "
+        "RETURN properties[0] AS prop",
+        database=db,
+    )
+    indexed = {row["prop"] for row in rows}
+    for prop, name in _BENCH_INDEXES:
+        if prop not in indexed:
+            await graph_driver.execute_query(
+                f"CREATE INDEX {name} IF NOT EXISTS FOR (f:Facility) ON (f.{prop})",
+                database=db,
+            )
+    await graph_driver.execute_query("CALL db.awaitIndexes(120)", database=db)
+
+
 @pytest.mark.performance
 class TestSyncThroughput:
     """Benchmark batch sync throughput against live Neo4j."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def _facility_indexes(self, graph_driver) -> None:
+        await _ensure_facility_indexes(graph_driver, "neo4j")
 
     @staticmethod
     def _generate_facility_batch(size: int, tenant: str) -> list[dict]:
