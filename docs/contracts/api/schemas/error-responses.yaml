@@ -1,0 +1,91 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: engine-specific
+# engine: graph
+# layer: [docs, contracts]
+# tags: [contracts, api, schema]
+# owner: engine-team
+# status: active
+# --- /L9_META ---
+schema: l9.ceg.api.error-responses/v1
+contract_id: CEG-API-ERROR-RESPONSES-v1
+campaign_id: CEG-CONTRACT-COMPLETE-2026-10-30
+baseline:
+  repository: Quantum-L9/Cognitive.Engine.Graphs
+  commit: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+authority: candidate_extracted_from_source
+not_a_runtime_feature_flag: true
+artifact: docs/contracts/api/schemas/error-responses.yaml
+owner: CEG API/chassis owner; SDK transport semantics owned by Gate_SDK
+status: derived_contract_with_unverified_live_transport_mapping
+source_refs:
+- path: chassis/errors.py
+  symbols:
+  - ChassisError.to_dict
+  - ValidationError
+  - NotFoundError
+  - AuthorizationError
+  - RateLimitError
+  - ExecutionError
+  - FeatureNotEnabled
+- path: chassis/chassis_app.py
+  symbols:
+  - _raise_for_failed_result
+  - _raise_for_status_hint
+  - _execute_route
+- path: chassis/actions.py
+  symbols:
+  - execute_action
+  - _http_status_hint
+- path: chassis/handler_registration.py
+  symbols:
+  - _with_packet_audit
+modes:
+  legacy_dev_only:
+    transport: legacy ExecuteResponse or HTTP error
+    chassis_exception_codes:
+      ValidationError: 422
+      NotFoundError: 404
+      AuthorizationError: 403
+      RateLimitError: 429
+      ExecutionError: 500
+      FeatureNotEnabled: 422
+    status_values:
+    - success
+    - failed
+    - circuit_open
+    note: HTTP mappings are class declarations in chassis/errors.py, not proof every engine exception reaches
+      those codes.
+    exception_wire_shape:
+      error: exception class name
+      message: str(exception)
+      action: action string
+      tenant: tenant string
+      detail: string or null
+      context: map
+    code_path_preconditions: 'Class status_code in chassis/errors.py is not automatically the final HTTP status:
+      execute_action catches handler errors, constructs a hint, and _execute_route either maps the hint under
+      legacy_chassis_status_mapping_enabled or uses fallback classification. Confirm propagation through a
+      real TestClient.'
+  sdk_production:
+    transport: Gate_SDK TransportPacket response/failure
+    failure_packet_type: failure
+    traceability:
+    - packet id
+    - trace id
+    - lineage
+    http_mapping: SDK-owned; not copied from legacy, verify from active SDK at packaging time
+    exposed_error_ontology: unverified
+    failure_mapping_proven_here: false
+anti_leakage:
+- No secrets or raw PII in error data
+- No caller-provided tenant override
+acceptance:
+  required:
+  - no_legacy_status_assumed_for_sdk
+  - domain_error_visible_not_swallowed
+  - test_actual_http_status_by_exception_class_not_just_class_constant
+  - test_sdk_failure_packet_and_audit_status_propagation
+  - redact_tenant_sensitive_error_context
+  not_proven:
+  - full_gateway_to_sdk_http_mapping

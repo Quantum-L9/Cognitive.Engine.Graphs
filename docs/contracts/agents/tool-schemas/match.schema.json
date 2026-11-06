@@ -1,0 +1,328 @@
+{
+  "_l9_meta": {
+    "l9_schema": 1,
+    "origin": "engine-specific",
+    "engine": "graph",
+    "layer": ["docs", "contracts"],
+    "tags": ["contracts", "tool-schema"],
+    "owner": "engine-team",
+    "status": "active"
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Quantum-L9/Cognitive.Engine.Graphs/docs/contracts/agents/tool-schemas/match.schema.json",
+  "title": "MatchActionPayload",
+  "description": "CEG match handler accepts legacy graph-match input and, when the server's match_request_contract_admission flag is enabled (default True), a contract-versioned MatchRequest from engine/models/payloads.py. Source: engine/handlers.py:_match_request_as_legacy and handle_match at bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0. This schema describes the admitted client shapes; the runtime does not execute this JSON schema. ",
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "object",
+      "description": "Domain-governed field values; exact keys and gate constraints come from the approved tenant domain spec.",
+      "additionalProperties": true
+    },
+    "match_direction": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Direction declared in domain.queryschema.matchdirections."
+    },
+    "top_n": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000,
+      "default": 10,
+      "description": "Client contract bound. Existing handler coerces/clamps out-of-range values rather than rejecting them."
+    },
+    "weights": {
+      "type": "object",
+      "description": "Existing match dimension overrides; keys are domain-controlled and effective sum is checked by handler feature flag.",
+      "additionalProperties": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      },
+      "default": {}
+    },
+    "contract_version": {
+      "const": "1.0.0-draft",
+      "description": "Required for typed MatchRequest; admission is controlled by server flag."
+    },
+    "domain": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+      "description": "Typed request domain. Must match admitted DomainContract and packet tenant at runtime."
+    },
+    "query_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "direction": {
+      "type": "string",
+      "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+      "description": "Typed direction, checked against DomainContract.match_directions."
+    },
+    "query_entity_ref": {
+      "type": "string",
+      "pattern": "^[a-z0-9_.-]+:[^\\s]+$"
+    },
+    "projection_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "policy_ref": {
+      "$ref": "#/$defs/semver_ref"
+    },
+    "field_dictionary_version": {
+      "type": ["string", "null"],
+      "minLength": 1
+    }
+  },
+  "required": [],
+  "additionalProperties": false,
+  "examples": [
+    {
+      "query": {
+        "material_type": "HDPE"
+      },
+      "match_direction": "supplier_to_buyer",
+      "top_n": 10,
+      "weights": {
+        "structural": 0.5
+      }
+    },
+    {
+      "contract_version": "1.0.0-draft",
+      "domain": "plasticos",
+      "query_id": "odoo-match-71-1",
+      "direction": "supply_opportunity_to_buyer_facility",
+      "query_entity_ref": "plasticos.supply.opportunity:42",
+      "query": {
+        "facts": {
+          "polymer_type": "HDPE",
+          "form_code": "REGRIND",
+          "quantity_lbs": 40000
+        },
+        "evidence_summary": [
+          {
+            "feature_id": "material.contamination_pct",
+            "value_state": "observed",
+            "evidence_ref": "plasticos.material.observation:90"
+          }
+        ],
+        "governed_filters": {}
+      },
+      "top_n": 20,
+      "projection_version": "1.0.0",
+      "policy_ref": {
+        "id": "plasticos.match-policy",
+        "version": "1.0.0"
+      },
+      "field_dictionary_version": "1.0.0"
+    }
+  ],
+  "x-negative-examples": [
+    {
+      "match_direction": "supplier_to_buyer"
+    },
+    {
+      "query": {},
+      "match_direction": "supplier_to_buyer",
+      "top_n": 0
+    },
+    {
+      "query": {},
+      "match_direction": "supplier_to_buyer",
+      "weights": {
+        "structural": 1.4
+      }
+    },
+    {
+      "contract_version": "1.0.0-draft",
+      "domain": "plasticos",
+      "query_id": "x",
+      "direction": "supply_opportunity_to_buyer_facility",
+      "query_entity_ref": "crm:1",
+      "query": {
+        "facts": {},
+        "evidence_summary": []
+      },
+      "top_n": 1,
+      "projection_version": "1.0.0"
+    },
+    {
+      "contract_version": "1.0.0-draft",
+      "domain": "plasticos",
+      "query_id": "x",
+      "direction": "supply_opportunity_to_buyer_facility",
+      "query_entity_ref": "crm:1",
+      "query": {
+        "facts": {},
+        "evidence_summary": [
+          {
+            "feature_id": "x",
+            "value_state": "made_up",
+            "evidence_ref": "crm:1"
+          }
+        ]
+      },
+      "top_n": 1,
+      "projection_version": "1.0.0",
+      "policy_ref": {
+        "id": "p",
+        "version": "1"
+      }
+    }
+  ],
+  "x-source-file": "engine/handlers.py:handle_match",
+  "x-source-revision": "bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0",
+  "x-required-capability-current": "match:read",
+  "x-exposure": "gate_advertised",
+  "x-side-effects": "read: matching/graph traversal; no new score route",
+  "x-schema-role": "bounded public client contract; the legacy handler may ignore extra keys",
+  "$defs": {
+    "semver_ref": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["id", "version"],
+      "additionalProperties": false
+    },
+    "evidence_item": {
+      "type": "object",
+      "properties": {
+        "feature_id": {
+          "type": "string"
+        },
+        "value_state": {
+          "enum": [
+            "observed",
+            "reported",
+            "inferred",
+            "unknown",
+            "not_applicable",
+            "stale",
+            "conflicting",
+            "superseded"
+          ]
+        },
+        "evidence_ref": {
+          "type": "string",
+          "pattern": "^[a-z0-9_.-]+:[^\\s]+$"
+        }
+      },
+      "required": ["feature_id", "value_state", "evidence_ref"],
+      "additionalProperties": false
+    },
+    "typed_query": {
+      "type": "object",
+      "properties": {
+        "facts": {
+          "type": "object"
+        },
+        "evidence_summary": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidence_item"
+          }
+        },
+        "governed_filters": {
+          "type": "object"
+        }
+      },
+      "required": ["facts", "evidence_summary"],
+      "additionalProperties": false
+    },
+    "legacy_query": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["contract_version"]
+      },
+      "then": {
+        "required": [
+          "contract_version",
+          "domain",
+          "query_id",
+          "direction",
+          "query_entity_ref",
+          "query",
+          "top_n",
+          "projection_version",
+          "policy_ref"
+        ],
+        "properties": {
+          "query": {
+            "$ref": "#/$defs/typed_query"
+          }
+        },
+        "not": {
+          "anyOf": [
+            {
+              "required": ["match_direction"]
+            },
+            {
+              "required": ["weights"]
+            }
+          ]
+        }
+      },
+      "else": {
+        "required": ["query", "match_direction"],
+        "properties": {
+          "query": {
+            "$ref": "#/$defs/legacy_query"
+          }
+        },
+        "not": {
+          "anyOf": [
+            {
+              "required": ["direction"]
+            },
+            {
+              "required": ["domain"]
+            },
+            {
+              "required": ["policy_ref"]
+            },
+            {
+              "required": ["query_entity_ref"]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "x-admission-mode": {
+    "legacy": "without contract_version; handler retains legacy payload and coerces/clamps top_n",
+    "typed": "contract_version=1.0.0-draft; Pydantic MatchRequest, with DomainContract membership and reject-transport-fields only when flag enabled"
+  },
+  "x-server-authoritative": [
+    "tenant",
+    "domain membership",
+    "match direction membership",
+    "weight ceilings",
+    "graph evidence"
+  ],
+  "x-runtime-validator-applies-this-json-schema": false,
+  "x-source-code-refs": [
+    "engine/handlers.py:_match_request_as_legacy (614-643)",
+    "engine/handlers.py:handle_match (646-715)",
+    "engine/models/payloads.py:MatchRequest (264-276)",
+    "engine/config/settings.py:match_request_contract_admission (712)"
+  ],
+  "x-runtime-validation-boundary": "The SDK routes payload dict to handler; no observed loader validates this JSON Schema. additionalProperties:false and example rejection are candidate client contracts, NOT runtime rejection proofs.",
+  "x-contract-status": "candidate_unenforced_not_release_admitted",
+  "x-source-trace": "Code at engine/handlers.py and declared payload models; see alignment/FILE_LEDGER.yaml for source revision, owner and remaining proof.",
+  "x-authorization-is-runtime-owned": true,
+  "x-prohibited-claim": "Passing this schema proves only candidate JSON Schema validity, not Gate reachability, handler validation, authorization, or safe writes."
+}

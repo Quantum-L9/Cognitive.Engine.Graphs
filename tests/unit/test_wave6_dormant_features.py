@@ -309,6 +309,7 @@ class TestTriggerKGE:
         init_dependencies(driver, loader)
 
         with patch("engine.config.settings.settings") as mock_settings:
+            mock_settings.l9_env = "test"
             mock_settings.kge_enabled = True
             mock_settings.kge_embedding_dim = 256
             with pytest.raises(ValidationError, match="no 'kge' section"):
@@ -329,6 +330,7 @@ class TestTriggerKGE:
         init_dependencies(driver, loader)
 
         with patch("engine.config.settings.settings") as mock_settings:
+            mock_settings.l9_env = "test"
             mock_settings.kge_enabled = True
             mock_settings.kge_embedding_dim = 256
             with pytest.raises(ValidationError, match="differs from"):
@@ -346,6 +348,7 @@ class TestTriggerKGE:
         init_dependencies(driver, loader)
 
         with patch("engine.config.settings.settings") as mock_settings:
+            mock_settings.l9_env = "test"
             mock_settings.kge_enabled = True
             mock_settings.kge_embedding_dim = 256
             mock_settings.kge_confidence_threshold = 0.3
@@ -370,6 +373,7 @@ class TestTriggerKGE:
         init_dependencies(driver, loader)
 
         with patch("engine.config.settings.settings") as mock_settings:
+            mock_settings.l9_env = "test"
             mock_settings.kge_enabled = True
             mock_settings.kge_embedding_dim = 256
             mock_settings.kge_confidence_threshold = 0.3
@@ -448,6 +452,7 @@ class TestEraseSubject:
         init_dependencies(driver, loader)
 
         with patch("engine.config.settings.settings") as mock_settings:
+            mock_settings.l9_env = "test"
             mock_settings.gdpr_erasure_enabled = True
             mock_settings.gdpr_dry_run = True
             # A MagicMock attribute is truthy; name the PacketStore state explicitly.
@@ -608,6 +613,7 @@ class TestEraseSubject:
         init_dependencies(driver, loader)
 
         with patch("engine.config.settings.settings") as mock_settings:
+            mock_settings.l9_env = "test"
             mock_settings.gdpr_erasure_enabled = True
             with pytest.raises(ValidationError, match="data_subject_id"):
                 await handle_admin(
@@ -624,6 +630,7 @@ class TestEraseSubject:
         init_dependencies(driver, loader)
 
         with patch("engine.config.settings.settings") as mock_settings:
+            mock_settings.l9_env = "test"
             mock_settings.gdpr_erasure_enabled = True
             mock_settings.gdpr_dry_run = True
             mock_settings.packet_store_enabled = False
