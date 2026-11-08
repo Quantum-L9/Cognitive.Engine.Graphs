@@ -56,19 +56,39 @@ The repo is cloned directly on the server and containers are built locally.
 
 ### Environment Variables (Production)
 
-Set via docker-compose or systemd environment:
+`docker-compose.prod.yml` sets the fixed values itself (`L9_ENV=prod`, the SDK
+chassis, `NEO4J_URI=bolt://neo4j:7687`, `DOMAINS_ROOT`, ...). Compose refuses to
+start until these are set in `/opt/ceg/.env` (never committed; keep the master
+copies in the secret store):
 
 ```bash
-L9_ENV=prod
-L9_LIFECYCLE_HOOK=engine.boot:GraphLifecycle
-NEO4J_URI=bolt://neo4j:7687
-NEO4J_USERNAME=neo4j
+# Generated per deployment (e.g. openssl rand -hex 32)
 NEO4J_PASSWORD=<from-secrets>
-API_PORT=8000
-LOG_LEVEL=info
-CORS_ORIGINS=[]
-DOMAINS_ROOT=domains
+API_SECRET_KEY=<from-secrets>
+L9_SIGNING_KEY=<from-secrets>            # CEG's own packet-signing key; Gate verifies with it
+POSTGRES_PASSWORD=<from-secrets>         # Postgres superuser; used only at first init
+CEG_APP_DB_PASSWORD=<from-secrets>       # app role the API connects as; URL-safe (hex)
+# From Constellation.Gate
+GATE_URL=<gate base URL>
+GATE_ADMIN_TOKEN=<from-secrets>
+L9_GATE_SIGNING_KEY_IDS=<gate ed25519 key id(s), comma-separated>
+L9_VERIFYING_KEYS_JSON={"<gate key id>":"<gate verifying key>"}
 ```
+
+Optional, with safe defaults: `NEO4J_USERNAME` (`neo4j`), `L9_SIGNING_KEY_ID`
+(`graph-engine-v1`), `POSTGRES_USER` (`l9_owner`), `POSTGRES_DB` (`l9_graph`),
+`CEG_APP_DB_USER` (`ceg_app`), `CORS_ORIGINS` (`[]`).
+
+### PostgreSQL (compliance audit store)
+
+The `postgres` service (`l9-graph-postgres-prod`, no published port) holds the
+compliance audit log (`packet_audit_log`) and the PacketStore tables. On first
+start with an empty volume it applies `engine/packet/packet_store.sql`, then
+`scripts/postgres-init/02_ceg_app_role.sh` creates the app role. The API's
+`POSTGRES_DSN` connects as that role, a member of `l9_product`, which may only
+`INSERT`/`SELECT` the audit log. The log stays append-only because the API never
+connects as the superuser. PacketStore itself stays off (`PACKET_STORE_ENABLED`
+unset); see `docs/FEATURE_GATES.md`.
 
 ## Deployment Commands
 

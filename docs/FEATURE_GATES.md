@@ -316,6 +316,15 @@ Compose changes that provision or wire the store are infrastructure and belong
 to a separately approved change (`CONTRACT-05`); this section documents the
 contract they must satisfy.
 
+**Production provisioning (approved 2026-11-08).** `docker-compose.prod.yml` now
+runs a `postgres` service with `packet_store.sql` applied on first init, and sets
+the API's `POSTGRES_DSN` to the `l9_product` app role created by
+`scripts/postgres-init/02_ceg_app_role.sh`. That satisfies prerequisites 1 and 3
+for the compliance audit flush, which is now on in production. PacketStore
+remains off: enabling it adds `PACKET_STORE_ENABLED=true` and a
+`PACKET_STORE_DSN` with the same app role (prerequisites 2 and 4), a further
+compose change. Guards: `tests/architecture/test_prod_postgres_audit_store.py`.
+
 ### Wiring
 
 1. `engine/boot.py: GraphLifecycle.startup()` reads `settings.postgres_dsn`;
