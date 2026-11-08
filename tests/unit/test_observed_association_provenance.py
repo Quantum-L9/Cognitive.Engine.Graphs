@@ -30,7 +30,7 @@ import yaml
 
 from engine.config.schema import DomainSpec, SyncEndpointSpec
 from engine.config.settings import Settings, settings
-from engine.handlers import ValidationError, handle_sync, init_dependencies
+from engine.handlers import ObservedAssociationRejectedError, ValidationError, handle_sync, init_dependencies
 from engine.state import get_state
 from engine.sync.generator import normalize_relationship_rows, observed_association_defects
 from tests.fixtures.domain_contracts import SYNTHETIC_DOMAINS_ROOT
@@ -243,8 +243,11 @@ async def test_a_refused_row_writes_nothing(
     graph: MagicMock, monkeypatch: pytest.MonkeyPatch, row: dict[str, Any], required: bool, match: str
 ) -> None:
     monkeypatch.setattr(settings, "observed_association_required", required)
-    with pytest.raises(ValidationError, match=match):
+    with pytest.raises(ObservedAssociationRejectedError, match=match) as raised:
         await handle_sync("cheese-aging", {"entity_type": "tended-by", "batch": [row]})
+    # A ValidationError (422); its class name is what a failure packet carries.
+    assert isinstance(raised.value, ValidationError)
+    assert type(raised.value).__name__ == "ObservedAssociationRejectedError"
     graph.execute_query.assert_not_awaited()
     graph.execute_write.assert_not_awaited()
 

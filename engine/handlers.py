@@ -98,6 +98,14 @@ class ValidationError(EngineError):
     """Payload validation failure."""
 
 
+class ObservedAssociationRejectedError(ValidationError):
+    """D-9: an observed row claims a provider association CEG's own tenant spec does not declare.
+
+    Its own class because a failure packet carries the error class name, not the
+    message: the producer reads the name as "my spec mirror has drifted from CEG".
+    """
+
+
 class ExecutionError(EngineError):
     """Neo4j or runtime execution failure."""
 
@@ -1196,16 +1204,23 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     # D-13: node ids outside the tenant's declared ref namespaces are refused
     # before compliance records the request or anything touches the graph.
     identity_defects = ref_namespace_defects(domain_spec, endpoint_spec, batch)
+    if identity_defects:
+        raise ValidationError(
+            f"Sync refused, nothing written: {'; '.join(identity_defects[:10])}",
+            action="sync",
+            tenant=tenant,
+        )
+
     # D-9: an observed row's provider association must be declared in CEG's own
     # copy of the tenant spec, never only in the producer's mirror of it.
     from engine.config.settings import settings as _provenance_settings
 
-    identity_defects += observed_association_defects(
+    provenance_defects = observed_association_defects(
         endpoint_spec, batch, require=_provenance_settings.observed_association_required
     )
-    if identity_defects:
-        raise ValidationError(
-            f"Sync refused, nothing written: {'; '.join(identity_defects[:10])}",
+    if provenance_defects:
+        raise ObservedAssociationRejectedError(
+            f"Sync refused, nothing written: {'; '.join(provenance_defects[:10])}",
             action="sync",
             tenant=tenant,
         )

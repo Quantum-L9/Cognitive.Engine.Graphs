@@ -1033,7 +1033,10 @@ Always, whatever the flag: a present key must name one entry of the endpoint's
 own `observedfrom`, on a row with `assertion_status: observed`. A malformed,
 reversed or undeclared key, a key on an endpoint without `observedfrom`, and a
 key on a `reported`/`inferred` row refuse the whole batch before compliance
-records the request or anything touches the graph.
+records the request or anything touches the graph, with
+`ObservedAssociationRejectedError` (a `ValidationError`, HTTP 422). A failure packet
+carries the error class name, not its message, so that name is how a producer
+learns its spec mirror has drifted from CEG.
 
 `observed_association_required` (`OBSERVED_ASSOCIATION_REQUIRED`, default
 `False`): on, an observed row for an endpoint that declares `observedfrom` must
