@@ -26,76 +26,31 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-import yaml
 
 from engine.config.schema import DomainSpec, SyncEndpointSpec
 from engine.config.settings import Settings, settings
 from engine.handlers import ObservedAssociationRejectedError, ValidationError, handle_sync, init_dependencies
 from engine.state import get_state
 from engine.sync.generator import normalize_relationship_rows, observed_association_defects
-from tests.fixtures.domain_contracts import SYNTHETIC_DOMAINS_ROOT
+from tests.unit.test_observed_association_schema import SOURCE, _raw
+from tests.unit.test_relationship_sync import _row
 
 pytestmark = pytest.mark.unit
 
 OBSERVED_PATH = "/v1/sync/tended-by"
-PLAIN_PATH = "/v1/sync/tended-by-plain"
-
-SOURCE: dict[str, Any] = {
-    "provider": "synthcrm",
-    "fromobjecttype": "caves",
-    "toobjecttype": "affineurs",
-    "associationcategory": "SYNTH_DEFINED",
-    "associationtypeid": 7,
-}
 SECOND_SOURCE: dict[str, Any] = {**SOURCE, "associationtypeid": 8}
 
 
 def _spec(*, plain_endpoint: bool = False) -> DomainSpec:
-    """cheese-aging with namespaced node endpoints and a relationship endpoint observed from two associations."""
-    raw = yaml.safe_load((SYNTHETIC_DOMAINS_ROOT / "cheese-aging" / "spec.yaml").read_text())
-    raw["domain"]["version"] = "1.1.0-reviewed"
-    endpoints = raw["sync"]["endpoints"]
-    endpoints[0]["refnamespace"] = "creamery.cave"
-    endpoints.append(
-        {
-            "path": "/v1/sync/affineurs",
-            "method": "POST",
-            "targetnode": "Affineur",
-            "idproperty": "affineur_id",
-            "batchstrategy": "UNWINDMERGE",
-            "refnamespace": "creamery.affineur",
-        }
-    )
-    relationship = {
-        "method": "POST",
-        "targetedge": "TENDED_BY",
-        "fromnode": "AgingCave",
-        "tonode": "Affineur",
-        "batchstrategy": "UNWINDMERGE",
-    }
+    """cheese-aging with namespaced nodes; the relationship endpoint is observed from two associations, or none."""
+    raw = _raw(observedfrom=[dict(SOURCE), dict(SECOND_SOURCE)])
     if plain_endpoint:
-        endpoints.append({"path": PLAIN_PATH, **relationship})
-    else:
-        endpoints.append({"path": OBSERVED_PATH, **relationship, "observedfrom": [dict(SOURCE), dict(SECOND_SOURCE)]})
+        del raw["sync"]["endpoints"][-1]["observedfrom"]
     return DomainSpec.model_validate(raw)
 
 
 def _endpoint(spec: DomainSpec, path: str) -> SyncEndpointSpec:
     return next(e for e in spec.sync.endpoints if e.path == path)  # type: ignore[union-attr]
-
-
-def _row(**overrides: Any) -> dict[str, Any]:
-    row: dict[str, Any] = {
-        "from_id": "creamery.cave:101",
-        "to_id": "creamery.affineur:7",
-        "evidence_ref": "evidence:1",
-        "source_ref": "source:1",
-        "confidence": 0.8,
-        "assertion_status": "observed",
-        "polarity": "positive",
-    }
-    row.update(overrides)
-    return row
 
 
 # ── The check itself ───────────────────────────────────────────────────────────
@@ -168,7 +123,7 @@ def test_a_malformed_association_is_refused(association: Any) -> None:
 
 
 def test_an_endpoint_without_observedfrom_accepts_no_key_and_is_otherwise_unchanged() -> None:
-    endpoint = _endpoint(_spec(plain_endpoint=True), PLAIN_PATH)
+    endpoint = _endpoint(_spec(plain_endpoint=True), OBSERVED_PATH)
     assert observed_association_defects(endpoint, [_row()], require=True) == []
     defects = observed_association_defects(endpoint, [_row(observed_association=dict(SOURCE))], require=True)
     assert len(defects) == 1
