@@ -21,7 +21,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from engine.config.schema import DomainSpec, EdgeDirection, ManagedByType, SyncEndpointSpec, SyncStrategy
+from engine.config.schema import (
+    DomainSpec,
+    EdgeDirection,
+    ManagedByType,
+    ObservedAssociationSourceSpec,
+    SyncEndpointSpec,
+    SyncStrategy,
+)
 from engine.config.tenant_mapping import declared_ref_namespace
 from engine.utils.security import sanitize_label
 
@@ -195,7 +202,10 @@ POLARITIES = frozenset({"positive", "negative"})
 _REQUIRED_ROW_KEYS = frozenset(
     {"from_id", "to_id", "evidence_ref", "source_ref", "confidence", "assertion_status", "polarity"}
 )
-_OPTIONAL_ROW_KEYS = frozenset({"source_revision", "expires_at"})
+# ``observed_association`` is provenance CEG checks against its own tenant spec
+# before any write (``observed_association_defects``, D-9); it is never stored.
+OBSERVED_ASSOCIATION_KEY = "observed_association"
+_OPTIONAL_ROW_KEYS = frozenset({"source_revision", "expires_at", OBSERVED_ASSOCIATION_KEY})
 # Properties the engine stamps on an evidence edge; never row-supplied.
 RELATIONSHIP_INTERNAL_PROPERTIES = frozenset({"_tenant", "_evidence_schema", "_subject_ref", "_object_ref"})
 
@@ -422,6 +432,58 @@ def ref_namespace_defects(domain_spec: DomainSpec, spec: SyncEndpointSpec, batch
             defect = _ref_defect(row.get(key), namespace)
             if defect is not None:
                 defects.append(f"row {index}: {key} {defect}")
+    return defects
+
+
+def _row_association(value: Any) -> tuple[str, str, str, str, int] | None:
+    """The row's ``observed_association`` as an association key, or None when malformed."""
+    if not isinstance(value, dict):
+        return None
+    try:
+        return ObservedAssociationSourceSpec.model_validate(value).key
+    except ValueError:
+        return None
+
+
+def observed_association_defects(spec: SyncEndpointSpec, batch: list[Any], *, require: bool) -> list[str]:
+    """Observed relationship rows whose claimed provider association CEG's own spec does not declare (D-9).
+
+    The tenant spec held by CEG is the authority for which provider associations a
+    relationship endpoint accepts (``observedfrom``); a producer's mirror of it is
+    not. A row that carries ``observed_association`` must name exactly one entry
+    of this endpoint's ``observedfrom``, with ``assertion_status: observed``. With
+    ``require``, an observed row on an endpoint that declares ``observedfrom``
+    must carry the key. Endpoints without ``observedfrom`` accept no key and are
+    otherwise unchanged. Non-mapping rows are left to the row validators.
+    """
+    if not spec.targetedge:
+        return []
+    declared = {source.key for source in spec.observedfrom or []}
+    defects = []
+    for index, row in enumerate(batch):
+        if not isinstance(row, dict):
+            continue
+        observed = row.get("assertion_status") == "observed"
+        if OBSERVED_ASSOCIATION_KEY not in row:
+            if require and observed and declared:
+                defects.append(
+                    f"row {index}: {OBSERVED_ASSOCIATION_KEY} is required on an observed row for an "
+                    "endpoint that declares observedfrom"
+                )
+            continue
+        if not observed:
+            defects.append(f"row {index}: {OBSERVED_ASSOCIATION_KEY} is accepted only with assertion_status observed")
+            continue
+        key = _row_association(row[OBSERVED_ASSOCIATION_KEY])
+        if key is None:
+            defects.append(
+                f"row {index}: {OBSERVED_ASSOCIATION_KEY} must be an object with exactly provider, "
+                "fromobjecttype, toobjecttype, associationcategory and associationtypeid"
+            )
+        elif key not in declared:
+            defects.append(
+                f"row {index}: {OBSERVED_ASSOCIATION_KEY} {key} is not declared by this endpoint's observedfrom"
+            )
     return defects
 
 

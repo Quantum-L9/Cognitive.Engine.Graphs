@@ -21,10 +21,10 @@ comparison logic. It only:
    at ``.l9/baselines/packet-envelope.yml``.
 4. Exits with the SDK's fail-closed exit code (0 pass, nonzero block).
 
-The same SDK revision and ledger are used by the blocking CI check
-"Baseline Ratchet / Quarantined Debt" (see
-.github/workflows/baseline-ratchet-caller.yml), so local pre-commit and CI
-can never disagree about what constitutes tolerated PacketEnvelope debt.
+CI runs this same hook in ci.yml's ``precommit`` job, so local pre-commit
+and CI can never disagree about what constitutes tolerated PacketEnvelope
+debt. (The l9-ci-core Baseline Ratchet caller that also ran this scan was
+retired in #335: its reusable workflow no longer exists in Core.)
 
 Ledger updates are made ONLY by humans in reviewed PRs (CODEOWNERS-gated);
 neither this wrapper nor CI ever writes the ledger.
@@ -113,8 +113,7 @@ def main() -> int:
             str(repo_root),
             # The scanner matches --exclude-dir against single path
             # components; ".l9" excludes the entire governance/runtime
-            # tree (ledgers plus the provisioned SDK checkout), exactly
-            # matching the Baseline Ratchet workflow invocation.
+            # tree (ledgers plus the provisioned SDK checkout).
             "--exclude-dir",
             ".l9",
             "--output",

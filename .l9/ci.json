@@ -1,4 +1,5 @@
 {
   "schema": "l9.ci-consumer/v1",
-  "repo_class": "python"
+  "repo_class": "python",
+  "product_kind": "node"
 }

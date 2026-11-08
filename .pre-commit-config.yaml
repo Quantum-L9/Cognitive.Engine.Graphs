@@ -166,7 +166,7 @@ repos:
   - repo: local
     hooks:
       - id: packet-envelope-prohibited
-        name: "Deprecated API: PacketEnvelope → transportPacket (baseline ratchet)"
+        name: "Deprecated API: PacketEnvelope → transportPacket (ledger-governed)"
         entry: python3 tools/packet_envelope_gate.py
         language: system
         pass_filenames: false

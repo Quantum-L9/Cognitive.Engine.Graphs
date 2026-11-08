@@ -49,15 +49,14 @@ jobs:
         with:
           python-version: '3.12'
 
-      # The PacketEnvelope prohibition check moved to the baseline ratchet
-      # (.github/workflows/baseline-ratchet-caller.yml → l9-ci-core
-      # "Baseline Ratchet / Quarantined Debt"). The ratchet performs a
-      # FULL-repository AST scan on every PR — strictly stronger than the
-      # changed-file grep this workflow used to run — and compares every
-      # finding fingerprint against the reviewed ledger at
-      # .l9/baselines/packet-envelope.yml, failing closed on any new,
-      # increased, moved, expired, or unowned reference. The legacy
-      # tools/check_packet_envelope_prohibited.py was deleted.
+      # The PacketEnvelope prohibition is the packet-envelope-prohibited
+      # pre-commit hook (tools/packet_envelope_gate.py), which ci.yml's
+      # precommit job runs on every PR: a FULL-repository l9-ci-sdk AST scan
+      # compared against the reviewed ledger at .l9/baselines/packet-envelope.yml,
+      # failing closed on any new, increased, moved, expired, or unowned
+      # reference. (The l9-ci-core Baseline Ratchet caller that also ran it was
+      # retired in #335: its reusable workflow no longer exists in Core.) The
+      # legacy tools/check_packet_envelope_prohibited.py was deleted.
 
       - name: Check Forbidden Terms
         shell: bash

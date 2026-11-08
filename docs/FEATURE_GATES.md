@@ -74,6 +74,7 @@ independently of the code default.
 | Graph Inference Feedback | `GRAPH_INFERENCE_FEEDBACK_ENABLED` (`graph_inference_feedback_enabled`) | `False` | unset | dormant; CEG → Gate → EIE `graph-inference-result` — see §13 |
 | Relationship Evidence Sync | `RELATIONSHIP_SYNC_ENABLED` (`relationship_sync_enabled`) | `True` | unset | active; `sync` to a `targetedge` endpoint writes typed evidence edges; requires Neo4j Enterprise 5.7+ — see §28 |
 | Relationship Sync Audit On Commit | `RELATIONSHIP_SYNC_AUDIT_ON_COMMIT_ENABLED` (`relationship_sync_audit_on_commit_enabled`) | `True` | unset | active (hardening); refused/rolled-back batches leave no success audit record — see §28 |
+| Observed Association Required | `OBSERVED_ASSOCIATION_REQUIRED` (`observed_association_required`) | `False` | unset | staged (D-9, #386); a present `observed_association` is always checked; on, an observed row on an `observedfrom` endpoint must carry one — see §28 |
 | Evidence Identity Per Type | `EVIDENCE_IDENTITY_PER_TYPE_ENABLED` (`evidence_identity_per_type_enabled`) | `False` | unset | dormant; score dedupes on `(relationship_type, evidence_ref)` — see §28 |
 | Domain Database Provisioning | `AUTO_CREATE_DOMAIN_DATABASE` (`auto_create_domain_database`) | `False` | unset | dormant; create the tenant domain database on first use — see §14 |
 | Health API (admin health_* subactions) | `HEALTH_API_ENABLED` (`health_api_enabled`) | `False` | unset | dormant; AI-readiness assess/report surface — see §15 |
@@ -1018,6 +1019,33 @@ graph I/O, but the `Sync <type> batch_size=N` mutation record is buffered only
 after the relationship write committed. A refused or rolled-back batch records
 nothing; no audit entry is ever removed. Off: recorded before the write, as for
 node sync. Tests: `tests/unit/test_relationship_sync.py` (refusal, rollback).
+
+### Observed association provenance (D-9, #386)
+
+The tenant spec held by CEG decides which provider associations a relationship
+endpoint accepts (`observedfrom`). A producer's mirror of that spec is not CEG
+approval. A relationship row may carry an optional `observed_association`
+object with exactly `provider`, `fromobjecttype`, `toobjecttype`,
+`associationcategory` and `associationtypeid`. It is provenance, checked and
+never stored, so `ceg.relationship_evidence.v1` is unchanged (additive key).
+
+Always, whatever the flag: a present key must name one entry of the endpoint's
+own `observedfrom`, on a row with `assertion_status: observed`. A malformed,
+reversed or undeclared key, a key on an endpoint without `observedfrom`, and a
+key on a `reported`/`inferred` row refuse the whole batch before compliance
+records the request or anything touches the graph, with
+`ObservedAssociationRejectedError` (a `ValidationError`, HTTP 422). A failure packet
+carries the error class name, not its message, so that name is how a producer
+learns its spec mirror has drifted from CEG.
+
+`observed_association_required` (`OBSERVED_ASSOCIATION_REQUIRED`, default
+`False`): on, an observed row for an endpoint that declares `observedfrom` must
+carry the key. It ships off because EIE does not send the key yet, and turning
+it on first would refuse every observed row EIE sends. **It must be on before
+production/live acceptance.** Order: deploy this CEG change, then EIE sending
+the key (Quantum-L9/Enrichment.Inference.Engine), then set the flag. Endpoints
+without `observedfrom` are unchanged in both states. Tests:
+`tests/unit/test_observed_association_provenance.py`.
 
 ### Evidence identity per type (`evidence_identity_per_type_enabled`, default `False`)
 

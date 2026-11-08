@@ -19,7 +19,7 @@
 * @cryptoxdog
 
 # ──────────────────────────────────────────────────────────────────────────
-# Baseline-ratchet debt ledgers — human-reviewed only.
+# Debt ledgers (PacketEnvelope, read by tools/packet_envelope_gate.py) — human-reviewed only.
 # CI never writes these files; every entry is owned, expiring debt.
 # Any PR that touches a ledger requires explicit owner review.
 # ──────────────────────────────────────────────────────────────────────────

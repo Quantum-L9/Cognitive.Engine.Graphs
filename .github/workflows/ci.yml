@@ -95,16 +95,15 @@ jobs:
       # event; kept here it failed `validate` and skipped every job that needs
       # it (lint, precommit, test, security, sbom). ci-gate still requires it.
 
-      # PacketEnvelope prohibition is governed by the baseline ratchet
-      # (.github/workflows/baseline-ratchet-caller.yml → l9-ci-core
-      # "Baseline Ratchet / Quarantined Debt", fail-closed). The l9-ci-sdk
-      # scanner performs a full-repository AST scan on every PR and compares
+      # PacketEnvelope prohibition is the packet-envelope-prohibited pre-commit
+      # hook (tools/packet_envelope_gate.py), run by the `precommit` job below.
+      # The l9-ci-sdk scanner performs a full-repository AST scan and compares
       # each finding fingerprint against the human-reviewed ledger at
-      # .l9/baselines/packet-envelope.yml: new, increased, moved, expired,
-      # or unowned PacketEnvelope debt blocks the PR. The legacy grep-based
-      # tools/check_packet_envelope_prohibited.py was deleted — it was
-      # superseded by the deterministic SDK scanner and was itself the
-      # single largest source of PacketEnvelope string references (11).
+      # .l9/baselines/packet-envelope.yml: new, increased, moved, expired, or
+      # unowned PacketEnvelope debt blocks the PR. (The l9-ci-core Baseline
+      # Ratchet caller was retired in #335; its reusable workflow no longer
+      # exists in Core.) The legacy grep-based
+      # tools/check_packet_envelope_prohibited.py was deleted.
 
       - name: Validate YAML Files
         run: |

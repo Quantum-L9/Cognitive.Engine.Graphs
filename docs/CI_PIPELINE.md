@@ -141,7 +141,7 @@ these hooks are enforced regardless of whether a contributor has
   the actual commit range.
 
 `packet-envelope-prohibited` is deliberately **not** skipped — and it is
-now **baseline-ratchet governed**. The hook (`tools/packet_envelope_gate.py`)
+**ledger-governed**. The hook (`tools/packet_envelope_gate.py`)
 provisions the pinned `l9-ci-sdk` revision and runs its deterministic
 full-repository AST scanner, then compares every finding fingerprint
 against the human-reviewed debt ledger at
@@ -151,11 +151,10 @@ deprecated `PacketEnvelope` model (superseded by `TransportPacket`, see
 owner, a tracking issue, an expiry date, and the machine-evaluable removal
 condition "migrated to TransportPacket". Known recorded debt is tolerated
 until expiry; any **new, increased, moved, expired, or unowned** reference
-blocks the commit. The same scanner + ledger comparison runs in CI as the
-blocking check `Baseline Ratchet / Quarantined Debt`
-(`.github/workflows/baseline-ratchet-caller.yml` → the reusable
-`l9-ci-core` baseline-ratchet workflow), so local hooks and CI can never
-disagree. The ledger is CODEOWNERS-protected and is **never** written by
+blocks the commit. CI runs the same hook in `ci.yml`'s `precommit` job,
+so local hooks and CI can never disagree. (The `l9-ci-core` Baseline Ratchet
+caller that also ran it was retired in #335: Core no longer ships its
+reusable workflow.) The ledger is CODEOWNERS-protected and is **never** written by
 CI — only humans change it, in reviewed PRs. The legacy grep-based
 `tools/check_packet_envelope_prohibited.py` was deleted (superseded by the
 SDK scanner). Run `pre-commit run packet-envelope-prohibited --all-files`
@@ -241,7 +240,7 @@ and adding the missing `semgrep` failure check.
 - **GUARDRAILS.md** — Banned patterns registry
 - **docs/TROUBLESHOOTING.md** — Common CI failure resolutions
 - **docs/CI_CONSTELLATION_BOUNDARY.md** — What's wired from the Quantum-L9
-  constellation (`l9-ci-core` baseline-ratchet, `l9-ci-sdk` packet-envelope
+  constellation (`l9-ci-core` `Analyze (central Core)`, `l9-ci-sdk` packet-envelope
   scanner) vs. not (`l9-harness`, `l9-assurance`); read before extending
   that integration or touching `audit.yml`
 - **.github/workflows/ci.yml** — Pipeline definition (source of truth)

@@ -65,6 +65,7 @@ from engine.sync.generator import (
     RELATIONSHIP_EVIDENCE_SCHEMA,
     SyncGenerator,
     normalize_relationship_rows,
+    observed_association_defects,
     ref_namespace_defects,
     relationship_merge_query,
     relationship_precheck_query,
@@ -95,6 +96,14 @@ class EngineError(Exception):
 
 class ValidationError(EngineError):
     """Payload validation failure."""
+
+
+class ObservedAssociationRejectedError(ValidationError):
+    """D-9: an observed row claims a provider association CEG's own tenant spec does not declare.
+
+    Its own class because a failure packet carries the error class name, not the
+    message: the producer reads the name as "my spec mirror has drifted from CEG".
+    """
 
 
 class ExecutionError(EngineError):
@@ -1198,6 +1207,20 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     if identity_defects:
         raise ValidationError(
             f"Sync refused, nothing written: {'; '.join(identity_defects[:10])}",
+            action="sync",
+            tenant=tenant,
+        )
+
+    # D-9: an observed row's provider association must be declared in CEG's own
+    # copy of the tenant spec, never only in the producer's mirror of it.
+    from engine.config.settings import settings as _provenance_settings
+
+    provenance_defects = observed_association_defects(
+        endpoint_spec, batch, require=_provenance_settings.observed_association_required
+    )
+    if provenance_defects:
+        raise ObservedAssociationRejectedError(
+            f"Sync refused, nothing written: {'; '.join(provenance_defects[:10])}",
             action="sync",
             tenant=tenant,
         )

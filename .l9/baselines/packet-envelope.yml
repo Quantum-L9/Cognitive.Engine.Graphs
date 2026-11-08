@@ -1,5 +1,6 @@
 # Baseline ledger: deprecated PacketEnvelope references (fail-closed debt).
-# Enforced by l9-ci-sdk baseline ratchet — see .github/workflows/baseline-ratchet-caller.yml.
+# Enforced by the packet-envelope-prohibited pre-commit hook (tools/packet_envelope_gate.py),
+# locally and in ci.yml's precommit job.
 # Every entry is owned, expiring, and tied to issue Quantum-L9/Cognitive.Engine.Graphs#138.
 # Migrating a file to TransportPacket MUST delete its entries in the same PR.
 # Changes to this file require CODEOWNERS review (.github/CODEOWNERS).
