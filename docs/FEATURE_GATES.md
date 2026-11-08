@@ -320,10 +320,14 @@ contract they must satisfy.
 runs a `postgres` service with `packet_store.sql` applied on first init, and sets
 the API's `POSTGRES_DSN` to the `l9_product` app role created by
 `scripts/postgres-init/02_ceg_app_role.sh`. That satisfies prerequisites 1 and 3
-for the compliance audit flush, which is now on in production. PacketStore
-remains off: enabling it adds `PACKET_STORE_ENABLED=true` and a
-`PACKET_STORE_DSN` with the same app role (prerequisites 2 and 4), a further
-compose change. Guards: `tests/architecture/test_prod_postgres_audit_store.py`.
+for the compliance audit flush, which is now on in production. PacketStore is
+on as well (approved the same day): `PACKET_STORE_ENABLED=true` and
+`PACKET_STORE_DSN` with the same `l9_product` app role (prerequisites 2 and 4),
+and `OUTCOME_PERSISTENCE_ENABLED=true` (prerequisite 5, §10). Verified as that
+role: a packet pair persisted with lineage, a re-delivery was deduplicated,
+another tenant saw no rows, `record_outcome()` succeeded, and an envelope
+`UPDATE` was refused. No TTL pruning is scheduled (`prune_expired_packets()` has
+no caller). Guards: `tests/architecture/test_prod_postgres_audit_store.py`.
 
 ### Wiring
 
@@ -441,7 +445,7 @@ never a cross-node hop.
 
 ## 10. Outcome Persistence (W2-02b)
 
-**State**: Dormant
+**State**: Dormant by default; on in `docker-compose.prod.yml` (2026-11-08)
 **Flag**: `OUTCOME_PERSISTENCE_ENABLED=True`
 **Prerequisites**: PacketStore reachable (`PACKET_STORE_ENABLED`, `PACKET_STORE_DSN`).
 

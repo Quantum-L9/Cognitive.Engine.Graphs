@@ -10,8 +10,8 @@ status: active
 --- /L9_META ---
 
 tests/architecture/test_prod_postgres_audit_store.py
-Production compose provisions the compliance audit store (W4-04) without
-weakening it: Postgres is internal-only, the API connects as the l9_product app
+Production compose provisions the compliance audit store (W4-04) and the
+PacketStore (PERSIST-01, with W2-02b outcome persistence) without weakening them: Postgres is internal-only, the API connects as the l9_product app
 role (never the superuser, which bypasses RLS and the grants that keep
 packet_audit_log append-only), and every secret is required, not defaulted.
 
@@ -93,3 +93,12 @@ def test_l9_product_keeps_the_audit_log_append_only() -> None:
     assert "GRANT INSERT, SELECT ON packet_audit_log TO l9_product;" in schema
     grants = re.findall(r"GRANT ([^;]+) ON packet_audit_log TO l9_product;", schema)
     assert all("UPDATE" not in g and "DELETE" not in g and "TRUNCATE" not in g for g in grants), grants
+
+
+def test_packet_store_and_outcome_persistence_use_the_same_app_role(compose: dict[str, Any]) -> None:
+    env = compose["services"]["api"]["environment"]
+    assert env["PACKET_STORE_ENABLED"] == "true"
+    assert env["OUTCOME_PERSISTENCE_ENABLED"] == "true"
+    assert env["PACKET_STORE_DSN"] == env["POSTGRES_DSN"], (
+        "PacketStore must use the l9_product app role, not the superuser"
+    )

@@ -82,13 +82,22 @@ Optional, with safe defaults: `NEO4J_USERNAME` (`neo4j`), `L9_SIGNING_KEY_ID`
 ### PostgreSQL (compliance audit store)
 
 The `postgres` service (`l9-graph-postgres-prod`, no published port) holds the
-compliance audit log (`packet_audit_log`) and the PacketStore tables. On first
+compliance audit log (`packet_audit_log`) and the PacketStore tables
+(`packet_store`, `lineage_graph`, `hop_trace`, `delegation_chain`). On first
 start with an empty volume it applies `engine/packet/packet_store.sql`, then
 `scripts/postgres-init/02_ceg_app_role.sh` creates the app role. The API's
 `POSTGRES_DSN` connects as that role, a member of `l9_product`, which may only
 `INSERT`/`SELECT` the audit log. The log stays append-only because the API never
-connects as the superuser. PacketStore itself stays off (`PACKET_STORE_ENABLED`
-unset); see `docs/FEATURE_GATES.md`.
+connects as the superuser.
+
+PacketStore is on (`PACKET_STORE_ENABLED=true`, `PACKET_STORE_DSN` = the same app
+role): every request/response packet pair through Gate is stored with its
+lineage, so GDPR erasure also covers packets. `OUTCOME_PERSISTENCE_ENABLED=true`
+links recorded match outcomes to their match packets. A store failure is logged,
+never a request failure. **No pruning runs:** `prune_expired_packets()` exists in
+`packet_store.sql` but nothing schedules it, so the tables grow with traffic.
+They hold full packet payloads, including any personal data, so treat this
+database and its backups as sensitive. See `docs/FEATURE_GATES.md`.
 
 ## Deployment Commands
 

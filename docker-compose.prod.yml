@@ -70,6 +70,16 @@ services:
       # stays append-only), never as the Postgres superuser, which bypasses RLS
       # and grants. Use a URL-safe password (e.g. openssl rand -hex 32).
       POSTGRES_DSN: postgresql://${CEG_APP_DB_USER:-ceg_app}:${CEG_APP_DB_PASSWORD:?CEG_APP_DB_PASSWORD must be set for production}@postgres:5432/${POSTGRES_DB:-l9_graph}
+      # PacketStore (PERSIST-01): every Gate request/response pair, with lineage,
+      # hop trace and delegation, in the same database as the same app role
+      # (l9_product: INSERT, outcome_jsonb-only UPDATE, tenant RLS via
+      # app.current_tenant). Store failures are warnings, never request failures.
+      # No pruning is scheduled: prune_expired_packets() exists in
+      # packet_store.sql but nothing calls it, so rows accumulate.
+      PACKET_STORE_ENABLED: "true"
+      PACKET_STORE_DSN: postgresql://${CEG_APP_DB_USER:-ceg_app}:${CEG_APP_DB_PASSWORD:?CEG_APP_DB_PASSWORD must be set for production}@postgres:5432/${POSTGRES_DB:-l9_graph}
+      # W2-02b: link each recorded match outcome to its match packet in PacketStore.
+      OUTCOME_PERSISTENCE_ENABLED: "true"
       API_SECRET_KEY: ${API_SECRET_KEY:?API_SECRET_KEY must be set for production}
       LOG_LEVEL: info
       CORS_ORIGINS: ${CORS_ORIGINS:-[]}
