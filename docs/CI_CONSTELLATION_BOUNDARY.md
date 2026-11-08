@@ -13,7 +13,7 @@ status: active
 **Read this before wiring `l9-ci-core`, `l9-ci-sdk`, `l9-harness`, or `l9-assurance`
 into this repo, or before proposing any change that touches
 `tools/audit_harness.py`, `.github/workflows/audit.yml`, or
-`.github/workflows/baseline-ratchet-caller.yml`.**
+`tools/packet_envelope_gate.py`.**
 
 ## The non-negotiable rule
 
@@ -29,15 +29,18 @@ into this repo, or before proposing any change that touches
 
 ## Current state: what's already wired (real, not theoretical)
 
-Two of the four constellation repos are already integrated — narrowly, for
-one purpose each, both pinned to immutable commit SHAs, both following the
-"thin caller" pattern (this repo supplies inputs only; all logic lives
+Two of the four constellation repos are integrated. `l9-ci-core` runs as the
+organization-required check `Analyze (central Core)` (org ruleset "L9 canonical
+CI required"), which executes this repo's Repository Execution V2 contract
+(`.l9/repo-workflow.json`, the generated `Makefile` facade and `Repo.mk`, #413).
+CEG adds no caller for it. `l9-ci-sdk` is pinned to an immutable commit SHA
+behind a "thin caller" (this repo supplies inputs only; all logic lives
 upstream):
 
 | Constellation repo | Where it's wired | Purpose | Pinned revision |
 |---|---|---|---|
-| `Quantum-L9/l9-ci-core` | `.github/workflows/baseline-ratchet-caller.yml` (reusable workflow call) | Baseline Ratchet — 4 branch-protection checks: `Required Tests`, `Quarantined Debt`, `Workflow Integrity`, `Ratchet Verdict` | `d81a06ed821106a487df2e5ad06d93e347392af6` |
-| `Quantum-L9/l9-ci-sdk` | `tools/packet_envelope_gate.py` (provisioned via shallow clone into gitignored `.l9/runtime/sdk/`) | `l9_ci baseline scan-packet-envelope` + `compare-scan` — the deterministic AST scanner behind the `packet-envelope-prohibited` pre-commit hook and the `Quarantined Debt` CI check | `0779fca8238011f8abea551895f96584676e9d17` |
+| `Quantum-L9/l9-ci-core` | Organization ruleset (no file in this repo) + `.l9/ci.json`, `.l9/repo-workflow.json` | `Analyze (central Core)`: Semgrep analysis, SDK admission, governance, and the V2 setup/validate/check/test phases | Core-controlled (`main`) |
+| `Quantum-L9/l9-ci-sdk` | `tools/packet_envelope_gate.py` (provisioned via shallow clone into gitignored `.l9/runtime/sdk/`) | `l9_ci baseline scan-packet-envelope` + `compare-scan` — the deterministic AST scanner behind the `packet-envelope-prohibited` pre-commit hook, which CI runs in `ci.yml`'s `precommit` job | `0779fca8238011f8abea551895f96584676e9d17` |
 
 Governed ledgers (human-owned, CODEOWNERS-protected, **never** written by CI
 or an agent):
@@ -45,11 +48,17 @@ or an agent):
 - `.l9/baselines/packet-envelope.yml` — deprecated `PacketEnvelope` debt, one
   entry per owner/issue/expiry (see `docs/contracts/SHARED_MODELS.md` for the
   `TransportPacket` migration this ledger tracks)
-- `.l9/baselines/test-quarantine.yml` — pre-existing test debt; entries may
-  only shrink, never grow
 
-**Scope of this integration: narrow.** It exists solely to run the
-PacketEnvelope-debt ratchet and test-quarantine ratchet. It does **not**
+**Retired 2026-11-08 (#335):** `.github/workflows/baseline-ratchet-caller.yml`
+and `.l9/baselines/test-quarantine.yml`. The caller pinned Core's v1
+`baseline-ratchet.yml`, which Core retired (its 2026-10-22 legacy-retirement
+report), so the workflow failed with no jobs on every push. No ruleset
+required its `Baseline Ratchet / *` checks. The test-quarantine ledger was empty and read only by
+that caller. The PacketEnvelope ban is unaffected: it is the
+`packet-envelope-prohibited` hook, run locally and by CI's `precommit` job.
+
+**Scope of the SDK integration: narrow.** It exists solely to run the
+PacketEnvelope-debt ledger comparison. It does **not**
 mean "CI runs through the constellation" — `ci.yml`, `ci-quality.yml`, and
 `audit.yml` remain fully independent, CEG-owned pipelines. See
 `docs/CI_PIPELINE.md` for the full 8-phase pipeline this sits inside.
@@ -73,7 +82,7 @@ functional call, dependency, or CLI invocation.
 | | `Quantum-L9/l9-ci-core` + `l9-ci-sdk` (wired above) | `Quantum-L9/l9-harness` (not wired) |
 |---|---|---|
 | Role in the 4-party authority model | CI Core orchestrates/publishes; CI SDK executes checks and emits observations | Exercises public contracts, preserves bytes, deterministic local execution/replay/shadow-comparison — explicitly **never** a required hop, never publishes GitHub checks, never issues verdicts |
-| Scope | One narrow gate (PacketEnvelope + test-quarantine debt ratchets) | Whole-constellation conformance/replay/corpus-sync tool, if ever adopted |
+| Scope | One narrow gate (PacketEnvelope debt ledger) plus Core's org-required analysis | Whole-constellation conformance/replay/corpus-sync tool, if ever adopted |
 | Maturity (as of 2026-07-24) | Actively running, gating merges today | Private repo, created 2026-07-04, self-described fail-closed pending upstream authority (`BUILD_AUTHORIZATION.md`, `VALIDATION.md`) |
 | `l9-assurance` | Not present at all — that's the party that would eventually "admit evidence and issue verdicts," a role currently played ad hoc by the `CI Gate` / `quality-gate` fan-in jobs in `ci.yml` / `ci-quality.yml` | Not present |
 
@@ -92,8 +101,7 @@ duplicates it.
    repo:
    - Pin the constellation repo to an immutable commit SHA (never a branch
      or tag that can move).
-   - Add a **thin wrapper/caller** (see `tools/packet_envelope_gate.py` and
-     `.github/workflows/baseline-ratchet-caller.yml`) that supplies
+   - Add a **thin wrapper/caller** (see `tools/packet_envelope_gate.py`) that supplies
      repo-specific inputs only — zero scanning/comparison logic lives
      locally.
    - Provision any cloned SDK/harness code into a gitignored path under

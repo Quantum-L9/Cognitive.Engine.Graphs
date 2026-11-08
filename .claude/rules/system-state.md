@@ -22,7 +22,7 @@ Update this file when merging PRs.
 | GDPR erasure | erase_subject() unwired | Wave 6 merge → erase_subject admin subaction |
 | PostgreSQL persistence | Not in docker-compose | Provision PostgreSQL → wire asyncpg.Pool |
 | LLM security | FeatureNotEnabled | Set LLM_PROVIDER + LLM_API_KEY |
-| `l9-harness` (Quantum-L9 constellation) | Not adopted — only `l9-ci-core`/`l9-ci-sdk` are wired (baseline ratchet); see `docs/CI_CONSTELLATION_BOUNDARY.md` | Explicit human decision; must layer above `audit.yml`, never replace it |
+| `l9-harness` (Quantum-L9 constellation) | Not adopted — only `l9-ci-core` (`Analyze (central Core)`) and `l9-ci-sdk` (PacketEnvelope ledger) are wired; see `docs/CI_CONSTELLATION_BOUNDARY.md` | Explicit human decision; must layer above `audit.yml`, never replace it |
 | `l9-assurance` (Quantum-L9 constellation) | Not adopted — verdict/fan-in role currently played by `ci.yml` CI Gate + `ci-quality.yml` quality-gate | Explicit human decision; see `docs/CI_CONSTELLATION_BOUNDARY.md` |
 
 ## Pending Operator Actions
