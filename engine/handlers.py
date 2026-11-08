@@ -65,6 +65,7 @@ from engine.sync.generator import (
     RELATIONSHIP_EVIDENCE_SCHEMA,
     SyncGenerator,
     normalize_relationship_rows,
+    observed_association_defects,
     ref_namespace_defects,
     relationship_merge_query,
     relationship_precheck_query,
@@ -1195,6 +1196,13 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     # D-13: node ids outside the tenant's declared ref namespaces are refused
     # before compliance records the request or anything touches the graph.
     identity_defects = ref_namespace_defects(domain_spec, endpoint_spec, batch)
+    # D-9: an observed row's provider association must be declared in CEG's own
+    # copy of the tenant spec, never only in the producer's mirror of it.
+    from engine.config.settings import settings as _provenance_settings
+
+    identity_defects += observed_association_defects(
+        endpoint_spec, batch, require=_provenance_settings.observed_association_required
+    )
     if identity_defects:
         raise ValidationError(
             f"Sync refused, nothing written: {'; '.join(identity_defects[:10])}",

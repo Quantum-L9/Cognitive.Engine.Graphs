@@ -306,6 +306,11 @@ class Settings(BaseSettings):
     # write committed (checks still run first), so a refused or rolled-back batch
     # leaves no 'Sync ... batch_size=N' success entry. Off: recorded before the write.
     relationship_sync_audit_on_commit_enabled: bool = True
+    # D-9 (#386): a relationship row's `observed_association` is always checked
+    # against CEG's own `observedfrom`. On: an observed row for an endpoint that
+    # declares `observedfrom` must carry it. Off until EIE sends the key; must be
+    # on before production/live acceptance. §28.
+    observed_association_required: bool = False
     # A1: graph_evidence_priority_v1 dedupes on (relationship_type, evidence_ref),
     # the identity relationship sync writes. Off: evidence_ref alone. §28.
     evidence_identity_per_type_enabled: bool = True
