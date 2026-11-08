@@ -39,7 +39,7 @@ upstream):
 
 | Constellation repo | Where it's wired | Purpose | Pinned revision |
 |---|---|---|---|
-| `Quantum-L9/l9-ci-core` | Organization ruleset (no file in this repo) + `.l9/ci.json`, `.l9/repo-workflow.json` | `Analyze (central Core)`: Semgrep analysis, SDK admission, governance, and the V2 setup/validate/check/test phases | Core-controlled (`main`) |
+| `Quantum-L9/l9-ci-core` | Organization ruleset (no file in this repo) + `.l9/ci.json`, `.l9/repo-workflow.json` | `Analyze (central Core)`: Semgrep analysis, SDK admission, governance, and the V2 setup/validate/check/test phases. `.l9/ci.json` declares `"product_kind": "node"` (#423), so Core runs the four `l9.routing.*` Gate routing rules (`l9-ci-sdk` `l9-routing.yml`) as blocking | Core-controlled (`main`) |
 | `Quantum-L9/l9-ci-sdk` | `tools/packet_envelope_gate.py` (provisioned via shallow clone into gitignored `.l9/runtime/sdk/`) | `l9_ci baseline scan-packet-envelope` + `compare-scan` — the deterministic AST scanner behind the `packet-envelope-prohibited` pre-commit hook, which CI runs in `ci.yml`'s `precommit` job | `0779fca8238011f8abea551895f96584676e9d17` |
 
 Governed ledgers (human-owned, CODEOWNERS-protected, **never** written by CI
