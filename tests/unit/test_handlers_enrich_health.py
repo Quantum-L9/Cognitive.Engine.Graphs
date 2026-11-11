@@ -25,6 +25,8 @@ from engine.handlers import (
     _sanitize_expression,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestSanitizeExpression:
     """Test expression sanitization for handle_enrich."""

@@ -20,6 +20,8 @@ import pytest
 
 from engine.compliance.engine import ComplianceEngine
 
+pytestmark = pytest.mark.unit
+
 
 @dataclass
 class _MockProhibitedFactors:

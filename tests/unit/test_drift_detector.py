@@ -32,6 +32,8 @@ from engine.config.schema import (
 )
 from engine.feedback.drift_detector import DriftDetector
 
+pytestmark = pytest.mark.unit
+
 
 def _minimal_spec(
     drift_threshold: float = 0.15,

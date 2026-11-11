@@ -20,6 +20,8 @@ Covers:
 
 from __future__ import annotations
 
+import pytest
+
 from engine.config.schema import (
     ComputationType,
     DomainSpec,
@@ -30,6 +32,8 @@ from engine.config.schema import (
     SignalWeightSpec,
 )
 from engine.scoring.assembler import ScoringAssembler
+
+pytestmark = pytest.mark.unit
 
 
 def _spec_with_penalty(

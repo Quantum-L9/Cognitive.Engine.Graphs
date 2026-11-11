@@ -55,6 +55,8 @@ from pydantic import ValidationError
 
 from engine.packet.chassis_contract import deflate_egress, delegate_to_node, inflate_ingress
 
+pytestmark = pytest.mark.unit
+
 _DOC = Path(__file__).resolve().parents[2] / "docs" / "contracts" / "PACKET_ENVELOPE_FIELDS.md"
 
 # ── Fixtures ──────────────────────────────────────────────

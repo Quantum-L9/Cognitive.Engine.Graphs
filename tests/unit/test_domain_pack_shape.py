@@ -31,6 +31,8 @@ from engine.config.loader import (
 )
 from engine.config.schema import DomainActivation, DomainSpec
 
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOMAINS_ROOT = REPO_ROOT / "domains"
 

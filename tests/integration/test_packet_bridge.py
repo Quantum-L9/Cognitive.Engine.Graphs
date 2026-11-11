@@ -15,6 +15,8 @@ pytest.importorskip("constellation_node_sdk", reason="constellation-node-sdk not
 
 from engine.packet_bridge import build_request_packet, extract_payload
 
+pytestmark = pytest.mark.unit
+
 
 def test_build_request_packet_valid():
     """build_request_packet creates a TransportPacket with correct fields."""

@@ -7,6 +7,10 @@ Sources:
   engine/config/settings.py
 """
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 # ── Neo4j dependency contract ────────────────────────────────────────────────
 

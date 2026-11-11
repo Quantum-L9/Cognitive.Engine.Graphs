@@ -23,6 +23,8 @@ from engine.scoring.importance import (
     compute_importance,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestImportanceScorer:
     """Tests for ImportanceScorer class."""

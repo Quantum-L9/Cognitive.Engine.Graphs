@@ -28,6 +28,8 @@ from pydantic import ValidationError
 from engine.models.payloads import MatchRequest, MatchResponse
 from tests.fixtures.domain_contracts import PLASTICOS_EXAMPLE_CONTRACT
 
+pytestmark = pytest.mark.unit
+
 _CONTRACTS_ROOT = Path(__file__).resolve().parents[2] / "contracts"
 # These campaign fixtures are the PlasticOS example; they admit against the example contract.
 CTX = PLASTICOS_EXAMPLE_CONTRACT.context()

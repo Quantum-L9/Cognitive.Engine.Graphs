@@ -37,6 +37,8 @@ from engine.config.schema import (
 from engine.scoring.assembler import ScoringAssembler
 from tests.fixtures.benchmark_data import BAD_PAIRS, GOOD_PAIRS, BenchmarkPair
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

@@ -37,6 +37,8 @@ from engine.scoring.evidence_priority import (
 )
 from engine.state import get_state
 
+pytestmark = pytest.mark.unit
+
 ROOT = Path(__file__).resolve().parents[2]
 REL = "SYNTHETIC_POSITIVE_REL"
 A_REF = "hubspot.company:101"

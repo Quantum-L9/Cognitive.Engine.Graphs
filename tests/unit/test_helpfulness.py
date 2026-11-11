@@ -23,6 +23,8 @@ from engine.scoring.helpfulness import (
     compute_helpfulness,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestHelpfulnessScorer:
     """Tests for HelpfulnessScorer class."""

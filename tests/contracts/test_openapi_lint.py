@@ -6,6 +6,8 @@ Source: Phase 4.3 — validation commands.
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 try:
     from openapi_spec_validator import validate
     from openapi_spec_validator.readers import read_from_filename
