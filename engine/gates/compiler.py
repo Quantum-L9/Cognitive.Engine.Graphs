@@ -155,7 +155,7 @@ class GateCompiler:
         threshold → candidate.prop >= $param (or <=, configurable)
         range     → $param_min <= candidate.prop <= $param_max  (or candidate range check)
         enum      → candidate.prop IN $param_list
-        exclusion → NOT (candidate)-[:EXCLUDED_FROM]->(query)
+        exclusion → NOT (candidate)-[:<declared edgetype>]->(query)
         composite → (gate1 AND gate2) OR gate3
         self_range→ candidate.min_prop <= $param AND $param <= candidate.max_prop
         freshness → candidate.prop >= datetime() - duration({days: $days})
@@ -576,15 +576,26 @@ class GateCompiler:
         "candidate has no exclusion edge at all" — conservative but valid.
         """
         from engine.config.settings import settings
+        from engine.config.structural_vocabulary import declared
 
-        edge_type = sanitize_label(gate.edgetype) if gate.edgetype else "EXCLUDED_FROM"
+        # Stage 2 follow-up (item 8): the exclusion edge and its target property
+        # are the domain's declarations (declared_structural_properties_required_enabled).
+        edge_type = sanitize_label(
+            declared(gate.edgetype, "exclusion_edge", f"gate {gate.name!r} (exclusion) declares no edgetype")
+        )
         if settings.exclusion_endpoint_validation:
             self._check_exclusion_endpoints(gate, edge_type)
-        target_prop = sanitize_label(gate.candidateprop) if gate.candidateprop else "entity_id"
         # edge_type and target_prop are sanitized via sanitize_label() above;
         # values only ever flow through $ parameters.
         exclusion_edge = "(candidate)-[:" + edge_type + "]->"
         if gate.queryparam is not None:
+            target_prop = sanitize_label(
+                declared(
+                    gate.candidateprop,
+                    "exclusion_target",
+                    f"gate {gate.name!r} (exclusion) declares no candidateprop (the excluded node's property)",
+                )
+            )
             param = self._operand(gate)
             # candidateprop names the excluded TARGET node's property, never the
             # candidate's, so only the query parameter takes part in null handling.

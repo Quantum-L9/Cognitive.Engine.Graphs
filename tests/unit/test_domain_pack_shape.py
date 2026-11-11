@@ -607,9 +607,14 @@ def test_pre_repair_freight_pack_is_withheld_naming_its_unbound_parameters(monke
         if dim["name"] in ("deadhead_distance", "rate_alignment"):
             for key in ("candidateprop", "candidateprop_lon", "queryprop", "queryprop_lon"):
                 dim.pop(key, None)
-    defects = "\n".join(admission_defects(DomainSpec.model_validate(raw)))
+    spec = DomainSpec.model_validate(raw)
+    # Stage 2 follow-up (item 8): the undeclared geo properties withhold it first.
+    assert any("scoring 'deadhead_distance' (geodecay) declares no candidateprop" in d for d in admission_defects(spec))
+    monkeypatch.setattr(loader_module.settings, "declared_structural_properties_required_enabled", False)
+    defects = "\n".join(admission_defects(spec))
     for param in ("'lat'", "'lon'", "'target_price'"):
         assert param in defects
+    monkeypatch.setattr(loader_module.settings, "declared_structural_properties_required_enabled", True)
     assert admission_defects(_spec(DOMAINS_ROOT / "freight-matching")) == []
 
 

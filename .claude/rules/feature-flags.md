@@ -185,3 +185,5 @@ settings and the boot assertion over them were retired (Stage 2).
 | Flag | Default | Purpose |
 |------|---------|---------|
 | outcome_vocabulary_required_enabled | True | `feedbackloop.outcome_node_label` has no engine default; an outcome write or read on a pack that declares none raises `OutcomeVocabularyUndeclaredError` / `OutcomeNodeLabelUndeclaredError`; freight-matching and mortgage-brokerage declare `TransactionOutcome`; off resolves an undeclared label to `TransactionOutcome` |
+| declared_structural_properties_required_enabled | True | Exclusion edge / target property, community property, geo lat/lon/id properties and the Louvain write property are declarations; a pack using one undeclared is withheld (`undeclared structural property: …`) and the compilers raise `UndeclaredStructuralPropertyError`; off restores `EXCLUDED_FROM` / `entity_id` / `community_id` / `communityId` / `lat` / `lon` |
+| preference_attention_declared_community_enabled | True | `preference_attention` outcome-side community property is `metadata.outcome_community_property`, defaulting to the candidate's declared one; off restores a hardcoded `community_id` |

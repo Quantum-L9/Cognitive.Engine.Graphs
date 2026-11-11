@@ -37,6 +37,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from engine.config.schema import AggregationStrategy, DomainSpec, EdgeCategory, GDSJobSpec
+from engine.config.structural_vocabulary import declared
 from engine.graph.driver import GraphDriver
 from engine.utils.security import cypher_number, sanitize_label
 
@@ -103,6 +104,15 @@ class GDSScheduler:
             if key in prop:
                 return prop[key]
         return None
+
+    @staticmethod
+    def _declared_job_setting(job_spec: GDSJobSpec, key: str, kind: str) -> str:
+        """A structural ``writeproperties`` entry the domain must declare (Stage 2 follow-up, item 8)."""
+        return declared(
+            GDSScheduler._get_job_setting(job_spec, key),
+            kind,
+            f"GDS job {job_spec.name!r} ({job_spec.algorithm}) declares no writeproperties entry {key!r}",
+        )
 
     @staticmethod
     def _require_job_setting(job_spec: GDSJobSpec, key: str) -> Any:
@@ -451,7 +461,15 @@ class GDSScheduler:
         node_labels = json.dumps(job_spec.projection.nodelabels)
         edge_types = json.dumps(job_spec.projection.edgetypes)
         # Sanitize write property name
-        write_prop = sanitize_label(job_spec.writeproperty or "communityId")
+        # Stage 2 follow-up (item 8, M8): the community property Louvain writes is
+        # the job's declaration, the same one the community scoring readers declare.
+        write_prop = sanitize_label(
+            declared(
+                job_spec.writeproperty,
+                "louvain_write",
+                f"GDS job {job_spec.name!r} (louvain) declares no writeproperty",
+            )
+        )
 
         gds_params["write_prop"] = write_prop
         project_cypher = f"""
@@ -872,8 +890,10 @@ class GDSScheduler:
 
         Generic graph algorithm: the only vocabulary it needs is the node label,
         the output edge (``writeedge``, default ``COLOCATED_WITH``) and the
-        coordinate properties (``lat_property``/``lon_property``, default
-        ``lat``/``lon``). Nodes are paired by ``id_property`` (default ``entity_id``).
+        coordinate properties (``lat_property``/``lon_property``). Nodes are paired
+        by ``id_property``. The three properties are the domain's declarations
+        (Stage 2 follow-up, item 8; the former ``lat``/``lon``/``entity_id``
+        defaults return only with declared_structural_properties_required_enabled off).
         """
         db = self.domain_spec.domain.id
 
@@ -881,9 +901,9 @@ class GDSScheduler:
         decay_km = self._get_job_parameter(job_spec, "decay_km", 200.0)
         node_label = self._get_candidate_label(job_spec)
         edge = sanitize_label(job_spec.writeedge or "COLOCATED_WITH")
-        lat = sanitize_label(str(self._get_job_setting(job_spec, "lat_property") or "lat"))
-        lon = sanitize_label(str(self._get_job_setting(job_spec, "lon_property") or "lon"))
-        id_prop = sanitize_label(str(self._get_job_setting(job_spec, "id_property") or "entity_id"))
+        lat = sanitize_label(self._declared_job_setting(job_spec, "lat_property", "latitude"))
+        lon = sanitize_label(self._declared_job_setting(job_spec, "lon_property", "longitude"))
+        id_prop = sanitize_label(self._declared_job_setting(job_spec, "id_property", "geo_id"))
 
         # Use directional MERGE to avoid duplicate edges
         cypher = f"""
