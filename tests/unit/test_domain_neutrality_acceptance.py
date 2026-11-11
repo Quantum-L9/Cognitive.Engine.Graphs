@@ -499,8 +499,9 @@ def test_compilers_refuse_undeclared_structural_properties() -> None:
     from engine.config.structural_vocabulary import UndeclaredStructuralPropertyError
 
     spec = DomainSpec.model_validate(_structural_raw(declared=False))
+    compiler = GateCompiler(spec)
     with pytest.raises(UndeclaredStructuralPropertyError, match="not_barred"):
-        GateCompiler(spec).compile_all_gates("batch_to_cave")
+        compiler.compile_all_gates("batch_to_cave")
     assembler = ScoringAssembler(spec)
     with pytest.raises(UndeclaredStructuralPropertyError, match="cave_distance"):
         assembler.assemble_scoring_clause("batch_to_cave", {})
