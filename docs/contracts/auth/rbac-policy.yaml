@@ -11,7 +11,7 @@ contract_id: CEG-AUTH-RBAC-POLICY-v1
 campaign_id: CEG-CONTRACT-COMPLETE-2026-10-30
 baseline:
   repository: Quantum-L9/Cognitive.Engine.Graphs
-  commit: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  commit: 3379309971f9defa40c393b2292f2f1784aa90ac
 authority: candidate_extracted_from_source
 schema: l9.ceg.auth.rbac-policy/v1
 owner: Gate identity/ingress owner plus CEG action-capability owner
@@ -19,16 +19,16 @@ status: source_controls_verified_locally
 source_refs:
 - path: engine/auth/capabilities.py
   symbol: ACTION_PERMISSION_MAP, CapabilitySet.has_capability, check_action_permission
-  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 - path: engine/handlers.py
   symbol: _enforce_capability, _validate_tenant_access, handle_resolve, handle_admin
-  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 - path: engine/spec.yaml
   symbol: node.actions
-  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 - path: chassis/handler_registration.py
   symbol: register_engine_handlers
-  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 observed:
   role_based_access_control_proven: false
   gate_verified_signing_key_policy: source_present_but_current_live_deployment_unverified
@@ -86,7 +86,7 @@ additional_inconsistencies:
   status: source_remediated_local
 - id: AUTH-GATE-03
   source: engine/spec.yaml vs chassis/handler_registration.py
-  mechanism: Gate node spec advertises 5 actions, SDK wrapper registers all ACTION_HANDLERS including local admin/enrich. Registration is not equivalent to Gate routing authorization.
+  mechanism: Gate node spec (engine/spec.yaml) advertises 6 actions (match, sync, outcomes, resolve, health-assess, score); the SDK wrapper registers all 10 ACTION_HANDLERS including local admin/enrich; production L9_ALLOWED_ACTIONS (docker-compose.prod.yml) excludes enrich but admits admin, which only the handler admin:write check then guards (kept by operator decision 2026-11-11, Quantum-L9/Constellation.Gate#37). Registration is not equivalent to Gate routing authorization.
   required_disposition: prove direct-ingress refusal and owner-admitted route policy for every action
   status: unverified
 - id: AUTH-DELEGATE-04
