@@ -45,7 +45,7 @@ constellation-node-sdk = {git = "https://github.com/Quantum-L9/Gate_SDK.git", re
 and `scripts/validate_sdk_pin.py` fails closed on it. `v1` is the moving major
 compatibility channel owned by Gate_SDK's `contracts/RELEASE_IDENTITY_LEDGER.json`;
 declare that channel, never a commit sha and never a branch. The concrete object
-it resolves to belongs in `poetry.lock` as `resolved_reference`.
+it resolves to belongs in `uv.lock` (the commit in the `?tag=v1#<commit>` source).
 
 ---
 

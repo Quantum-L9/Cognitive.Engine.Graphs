@@ -148,26 +148,26 @@ jobs:
       - name: Gate_SDK lock agrees with the v1 channel (networked)
         # The offline check in `validate` cannot see a stale lock: `v1` moves
         # inside Gate_SDK and nothing here changes. This resolves the channel at
-        # the canonical remote and fails closed if poetry.lock no longer matches.
+        # the canonical remote and fails closed if uv.lock no longer matches.
         # No `needs`, and nothing needs it but ci-gate: a moved tag fails this
         # job and the gate, without starving test signal.
         run: |
           python scripts/validate_sdk_pin.py --verify-tag
 
-      - name: Install lock renderer (uv, hash-locked)
-        run: bash tools/deps/install_locked.sh tools
+      - name: Install uv (hash-locked)
+        run: bash tools/deps/install_locked.sh uv
 
-      - name: Hash locks agree with the requirements files (networked)
-        # Re-renders every requirements-*.lock from its sources with the
-        # committed lock as uv's preference and the upload cutoff recorded in
-        # tools/deps/exclude-newer.txt, so the result depends only on the
-        # repository: this fails when a requirements file changed without
-        # `python tools/deps/lock_requirements.py`, never because PyPI published
-        # a release or a new wheel. Networked (PyPI + the Gate_SDK git source),
-        # hence here. Two failures are not a stale lock: a PyPI/GitHub outage
-        # (re-run), and a pinned release yanked upstream (a real signal: move
-        # off it with `--upgrade`, review the diff).
-        run: python tools/deps/lock_requirements.py --check
+      - name: uv.lock agrees with pyproject.toml (networked)
+        # `uv lock --check` resolves pyproject.toml with uv.lock as the
+        # preference and fails when the result differs from the committed lock:
+        # a dependency edited without `uv lock`. It never moves a locked
+        # version, so a new PyPI release does not fail it. Networked (PyPI +
+        # the Gate_SDK git source), hence here. Two failures are not a stale
+        # lock: a PyPI/GitHub outage (re-run), and a pinned release yanked
+        # upstream (a real signal: `uv lock --upgrade-package <name>`).
+        env:
+          UV_PYTHON_DOWNLOADS: never
+        run: python -m uv lock --check
 
 # ────────────────────────────────────────────────────────────────────────
 # PHASE 2: LINT & TYPE CHECK
@@ -495,11 +495,6 @@ jobs:
           echo "Scanning dependencies for known vulnerabilities..."
           pip-audit --desc || echo "⚠️  Vulnerabilities found (non-blocking)"
 
-      - name: Run Safety Check
-        run: |
-          echo "Running Safety vulnerability scanner..."
-          safety check || echo "⚠️  Safety check warnings (non-blocking)"
-
       - name: Run Bandit (SAST)
         run: |
           echo "Running Bandit static security analysis..."
@@ -590,7 +585,7 @@ jobs:
           publish_results: true
 
       - name: Upload SARIF to GitHub Security
-        uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28  # v4
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
         with:
           sarif_file: scorecard.sarif
 
@@ -643,7 +638,7 @@ jobs:
             echo ""
             echo "Required jobs must pass:"
             echo "  • validate: syntax and structure checks"
-            echo "  • sdk-channel: poetry.lock matches Gate_SDK@v1"
+            echo "  • sdk-channel: uv.lock matches Gate_SDK@v1 and pyproject.toml"
             echo "  • lint: code quality and formatting"
             echo "  • precommit: same hooks contributors run locally"
             echo "  • test: test suite with coverage"

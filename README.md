@@ -199,8 +199,8 @@ Consistent across all L9 repos. Set in `.env` (local) or SSM Parameter Store (pr
 ./scripts/test.sh compliance   # Compliance only (critical)
 
 # Code quality
-poetry run ruff check engine/
-poetry run mypy engine/
+.venv/bin/python -m ruff check engine/   # .venv: make setup (uv.lock)
+.venv/bin/python -m mypy engine/
 
 # Local monitoring
 docker compose -f dashboards/docker-compose.monitoring.yml up -d

@@ -153,7 +153,15 @@ build_sdk_node() {
   archive="${ctx}/gate-sdk.tar.gz"
   git -C "$SDK_REPO" archive --format=tar.gz --output "$archive" "$sha"
   archive_hash="$(sha256sum "$archive" | awk '{print $1}')"
-  cp "${CEG_ROOT}/requirements-runtime.lock" "${ctx}/requirements-runtime.lock"
+  # The runtime set from uv.lock, hashed, without the SDK: the archive below
+  # supplies it at this rail's commit. uv runs from a throwaway venv.
+  python3 -m venv "${ctx}/uv-venv"
+  "${ctx}/uv-venv/bin/python" -m pip install --quiet --no-deps --require-hashes \
+    -r "${CEG_ROOT}/tools/deps/uv-bootstrap.txt"
+  UV_PYTHON_DOWNLOADS=never "${ctx}/uv-venv/bin/python" -m uv export --project "${CEG_ROOT}" \
+    --frozen --no-emit-project --no-default-groups --group licenses \
+    --no-emit-package constellation-node-sdk --format requirements-txt --no-header --quiet \
+    --output-file "${ctx}/requirements-runtime.txt"
   mkdir -p "${ctx}/examples/minimal_node"
   for f in app.py handlers.py spec.yaml; do
     git -C "$SDK_REPO" show "HEAD:examples/minimal_node/${f}" > "${ctx}/examples/minimal_node/${f}"
@@ -162,8 +170,8 @@ build_sdk_node() {
 FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159
 WORKDIR /srv
 ENV PYTHONPATH=/srv PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-COPY requirements-runtime.lock /tmp/requirements-runtime.lock
-RUN pip install --no-cache-dir --only-binary :all: --no-binary constellation-node-sdk --require-hashes -r /tmp/requirements-runtime.lock
+COPY requirements-runtime.txt /tmp/requirements-runtime.txt
+RUN pip install --no-cache-dir --only-binary :all: --require-hashes -r /tmp/requirements-runtime.txt
 COPY gate-sdk.tar.gz /tmp/gate-sdk.tar.gz
 RUN pip install --no-cache-dir --require-hashes --no-deps --force-reinstall /tmp/gate-sdk.tar.gz --hash=sha256:${archive_hash}
 COPY examples/ /srv/examples/

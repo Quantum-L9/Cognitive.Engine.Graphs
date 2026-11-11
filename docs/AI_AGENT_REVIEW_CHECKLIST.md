@@ -169,7 +169,7 @@ status: active
 ### Dependency Update PR
 - [ ] License unchanged or compatible
 - [ ] CVE scan clean (pip-audit passes)
-- [ ] Transitive deps checked (poetry show --tree)
+- [ ] Transitive deps checked (`uv tree`)
 
 ### Domain Spec Change PR
 - [ ] Backward compatible (existing tenants unaffected)

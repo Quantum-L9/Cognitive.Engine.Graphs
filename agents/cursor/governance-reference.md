@@ -39,7 +39,7 @@ No code reaches `main` without Founder approval. This is the zero-bypass rule.
 | Modify `.cursorrules`   | High     | Changes code generation governance for all future sessions|
 | Modify `chassis/`       | High     | Affects all handler routing and auth                      |
 | Add/remove domain YAML in `domains/` | Medium | Changes match/scoring behavior for live tenants |
-| Modify `pyproject.toml` or `poetry.lock` | Medium | Dependency surface change               |
+| Modify `pyproject.toml` or `uv.lock` | Medium | Dependency surface change               |
 
 Cursor prompts **never** call these implicitly. When in doubt: STOP and surface to Founder.
 

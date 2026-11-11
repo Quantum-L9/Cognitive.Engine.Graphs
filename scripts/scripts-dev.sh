@@ -40,8 +40,9 @@ case "$ACTION" in
     echo "Starting API..."
     cd "$ROOT_DIR"
     # Same uvicorn target as scripts/entrypoint.sh (chassis selected by L9_CHASSIS).
-    if command -v poetry >/dev/null 2>&1; then
-      poetry run uvicorn chassis.entrypoint:create_app --factory --reload --host 0.0.0.0 --port "${API_PORT:-8000}" &
+    # .venv is what `make setup` syncs from uv.lock; fall back to the ambient python.
+    if [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
+      "$ROOT_DIR/.venv/bin/python" -m uvicorn chassis.entrypoint:create_app --factory --reload --host 0.0.0.0 --port "${API_PORT:-8000}" &
     else
       python3 -m uvicorn chassis.entrypoint:create_app --factory --reload --host 0.0.0.0 --port "${API_PORT:-8000}" &
     fi

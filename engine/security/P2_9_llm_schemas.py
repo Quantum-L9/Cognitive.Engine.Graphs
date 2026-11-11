@@ -206,7 +206,7 @@ class _LLMBackend:
             return self._client
 
         # Prefer a clear missing-key error over a missing-package error when
-        # both are absent (CI installs requirements-ci.txt without openai).
+        # both are absent (the CI profile installs the ci dependency group, without openai).
         api_key = os.environ.get("OPENAI_API_KEY")
         if not api_key:
             raise RuntimeError(

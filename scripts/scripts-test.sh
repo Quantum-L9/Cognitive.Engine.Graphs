@@ -23,8 +23,9 @@ COV_THRESHOLD="${COV_THRESHOLD:-70}"
 
 run_pytest() {
   local args=("$@")
-  if command -v poetry >/dev/null 2>&1; then
-    poetry run pytest "${args[@]}"
+  # .venv is what `make setup` syncs from uv.lock; fall back to the ambient python.
+  if [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
+    "$ROOT_DIR/.venv/bin/python" -m pytest "${args[@]}"
   else
     python3 -m pytest "${args[@]}"
   fi

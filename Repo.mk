@@ -46,10 +46,9 @@ REPO_PY := $(if $(wildcard $(VENV)/bin/python),$(VENV)/bin/python,python3)
 
 # ── Core Repository Execution V2 phases (make-v1 ABI) ──────
 
-repo-setup:	## Create $(VENV) if absent; install requirements.txt + requirements-dev.txt + requirements-ci.txt
+repo-setup:	## Create $(VENV) if absent; install the full profile (project + every group) from uv.lock
 	@test -x "$(VENV)/bin/python" || python3 -m venv "$(VENV)"
-	@"$(VENV)/bin/python" -m pip install --disable-pip-version-check --quiet \
-		-r requirements.txt -r requirements-dev.txt -r requirements-ci.txt
+	@UV_PROJECT_ENVIRONMENT="$(abspath $(VENV))" PYTHON="$(VENV)/bin/python" bash tools/deps/install_locked.sh full
 
 repo-validate:	## Action refs, contract files + scan, payload contract compiler, C-18 L9_META headers
 	@echo "── Action references ──"

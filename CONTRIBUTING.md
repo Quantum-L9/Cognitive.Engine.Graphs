@@ -50,7 +50,7 @@ Consumer CI is the org `l9-ci-pack` (missing-only seed):
 | Gate | When it runs |
 | --- | --- |
 | Biome | Always (JS/TS/JSON). Idle and green when the tree has no matching files. |
-| Python lint + `Python Test Suite` | Only when `pyproject.toml` or `requirements.txt` exists. |
+| Python lint + `Python Test Suite` | Only when `pyproject.toml` exists. |
 | Node typecheck + `Node Test Suite` | Only when a root `package.json` exists. |
 | L9 Analysis | Semgrep + SDK publish. Fails with `governance-pack-missing` if `.github/governance/` is absent. |
 | Governance caller | PR body / issue triage via `governance.yml@v1`. |
