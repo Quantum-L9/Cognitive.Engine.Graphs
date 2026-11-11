@@ -358,20 +358,37 @@ class ScoringAssembler:
 
         RU-037 / CEG-COR-011: with ``settings.geodecay_declared_longitude`` on
         (default) the longitude operands are the dimension's declared
-        ``candidateprop_lon`` / ``queryprop_lon``, defaulting to
-        ``candidate.lon`` / ``$lon``; off ignores the declarations.
+        ``candidateprop_lon`` / ``queryprop_lon``; off ignores the declarations.
+
+        Stage 2 follow-up (item 8): with
+        ``declared_structural_properties_required_enabled`` on (default) the
+        latitude (``candidateprop``) and longitude (``candidateprop_lon``)
+        properties are the dimension's declarations, and the query operands
+        default to those same declared names; an undeclared one raises
+        ``UndeclaredStructuralPropertyError`` (the loader withholds such a pack).
+        Off: the former ``lat`` / ``lon`` defaults.
         """
         from engine.config.settings import settings
+        from engine.config.structural_vocabulary import declared, required
 
         k = cypher_number(dim.decayconstant or 50000.0)
-        lat_prop = sanitize_label(dim.candidateprop or "lat")
+        lat_prop = sanitize_label(
+            declared(dim.candidateprop, "latitude", f"scoring {dim.name!r} (geodecay) declares no candidateprop")
+        )
         query_lat_param = sanitize_label(dim.queryprop or lat_prop)
         lon_prop = "lon"
         query_lon_param = "lon"
         if settings.geodecay_declared_longitude:
             # getattr: duck-typed dimension doubles predate the fields (cf. soft_match).
-            lon_prop = sanitize_label(getattr(dim, "candidateprop_lon", None) or "lon")
-            query_lon_param = sanitize_label(getattr(dim, "queryprop_lon", None) or "lon")
+            lon_prop = sanitize_label(
+                declared(
+                    getattr(dim, "candidateprop_lon", None),
+                    "longitude",
+                    f"scoring {dim.name!r} (geodecay) declares no candidateprop_lon",
+                )
+            )
+            query_lon_default = lon_prop if required() else "lon"
+            query_lon_param = sanitize_label(getattr(dim, "queryprop_lon", None) or query_lon_default)
         return (
             f"1.0 / (1.0 + point.distance("
             f"point({{latitude: candidate.{lat_prop}, longitude: candidate.{lon_prop}}}),"
@@ -394,9 +411,15 @@ class ScoringAssembler:
         Returns bias score if communities match, graduated score otherwise.
         Does not require APOC - uses native Cypher only.
         """
+        from engine.config.structural_vocabulary import declared, required
+
         bias = cypher_number(dim.bias or 1.5)
-        cand_prop = sanitize_label(dim.candidateprop or "community_id")
-        query_prop = sanitize_label(dim.queryprop or "community_id")
+        # Stage 2 follow-up (item 8): the community property is the domain's
+        # declaration; the query parameter defaults to the same declared name.
+        cand_prop = sanitize_label(
+            declared(dim.candidateprop, "community", f"scoring {dim.name!r} (communitymatch) declares no candidateprop")
+        )
+        query_prop = sanitize_label(dim.queryprop or (cand_prop if required() else "community_id"))
 
         if getattr(dim, "soft_match", False):
             # S2-17: Graduated community scoring — Hierarchical Attention Network pattern.
@@ -598,7 +621,23 @@ class ScoringAssembler:
                 outcome_node_label(self.domain_spec, f"preference_attention dimension '{dim.name}'")
             )
 
-        cand_community_prop = sanitize_label(dim.candidateprop or "community_id")
+        from engine.config.settings import settings
+        from engine.config.structural_vocabulary import declared
+
+        # Stage 2 follow-up (item 8): the candidate's community property is declared.
+        cand_community_prop = sanitize_label(
+            declared(
+                dim.candidateprop, "community", f"scoring {dim.name!r} (preference_attention) declares no candidateprop"
+            )
+        )
+        # Item 7 / M5b: the outcome nodes' community property is the declared
+        # metadata.outcome_community_property, defaulting to the candidate's
+        # declared community property. Off: the hardcoded `community_id` (C-21
+        # rollback of preference_attention_declared_community_enabled).
+        if settings.preference_attention_declared_community_enabled:
+            outcome_community_prop = sanitize_label(metadata.get("outcome_community_property") or cand_community_prop)
+        else:
+            outcome_community_prop = "community_id"
         safe_dim = sanitize_label(dim.name)
         success_key = f"pref_success_{safe_dim}"
         default_key = f"pref_default_{safe_dim}"
@@ -629,7 +668,7 @@ class ScoringAssembler:
             f"LIMIT ${sample_key} }}] | "
             f"CASE WHEN size({sample_var}) = 0 THEN ${default_key} "
             f"ELSE toFloat(size([{member_var} IN {sample_var} "
-            f"WHERE {member_var}.community_id = candidate.{cand_community_prop}])) "
+            f"WHERE {member_var}.{outcome_community_prop} = candidate.{cand_community_prop}])) "
             f"/ toFloat(size({sample_var})) END][0]"
         )
 
@@ -653,8 +692,11 @@ class ScoringAssembler:
         metadata = dim.metadata if hasattr(dim, "metadata") and dim.metadata else {}
         community_props = metadata.get("community_properties", [])
         if not community_props:
-            # Fall back to candidateprop if set, else default single community_id
-            community_props = [dim.candidateprop] if dim.candidateprop else ["community_id"]
+            # Fall back to the declared candidateprop (Stage 2 follow-up, item 8:
+            # no borrowed community property).
+            from engine.config.structural_vocabulary import community_bridge_defect, declared
+
+            community_props = [declared(dim.candidateprop, "community", community_bridge_defect(dim.name))]
 
         # Build CASE expressions for each community property
         match_cases = []

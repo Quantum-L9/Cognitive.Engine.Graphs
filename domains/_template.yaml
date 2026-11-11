@@ -70,7 +70,7 @@ ontology:
           required: false
           nullable: true
         - name: lat                     # geodecay reads candidate.<candidateprop> as latitude
-          type: float                   # and candidate.lon as longitude
+          type: float                   # and candidate.<candidateprop_lon> as longitude
         - name: lon
           type: float
         # list<primitive> is storable: `items` declares the element type
@@ -220,7 +220,7 @@ queryschema:
       type: datetime
     - name: lat                         # geodecay binds $<queryprop> as latitude
       type: float
-    - name: lon                         # ... and $lon as longitude
+    - name: lon                         # ... and $<queryprop_lon> as longitude
       type: float
 
 # ---------------------------------------------------------------------------
@@ -302,10 +302,11 @@ gates:
   - name: exclusion_gate
     description: "Reject if EXCLUDED_FROM edge exists"
     type: exclusion
-    edgetype: EXCLUDED_FROM             # Must exist in ontology.edges, from the candidate label
+    edgetype: EXCLUDED_FROM             # REQUIRED (no engine default); must exist in ontology.edges, from the candidate label
     # No fromnode/tonode: the edge always starts at the candidate. Without a
     # queryparam any outgoing EXCLUDED_FROM edge excludes the candidate; with
-    # one, only an edge to the node whose <candidateprop> equals it does.
+    # one, only an edge to the node whose <candidateprop> equals it does
+    # (candidateprop is then REQUIRED: there is no engine default).
     nullbehavior: pass                  # No edge = passes
     matchdirections: [query_to_candidate]
 
@@ -374,8 +375,10 @@ scoring:
     - name: proximity_score
       description: "Score based on geographic distance"
       source: candidateproperty
-      candidateprop: lat                # candidate latitude (longitude is candidate.lon)
-      queryprop: lat                    # query latitude parameter (longitude is $lon)
+      candidateprop: lat                # REQUIRED: candidate latitude property (no engine default)
+      candidateprop_lon: lon            # REQUIRED: candidate longitude property (no engine default)
+      queryprop: lat                    # query latitude parameter (default: candidateprop)
+      queryprop_lon: lon                # query longitude parameter (default: candidateprop_lon)
       computation: geodecay
       decayconstant: 50000              # Distance in meters where score = 0.5
       defaultwhennull: 0.0

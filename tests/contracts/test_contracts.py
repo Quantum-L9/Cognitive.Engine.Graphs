@@ -917,6 +917,7 @@ def _build_minimal_spec_with_scoring() -> DomainSpec:
                         computation=ComputationType.GEODECAY,
                         candidateprop="lat",
                         queryprop="lat",
+                        candidateprop_lon="lon",
                         weightkey="w_geo",
                         defaultweight=0.3,
                     ),

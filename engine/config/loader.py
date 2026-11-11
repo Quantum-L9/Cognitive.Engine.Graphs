@@ -515,16 +515,21 @@ def admission_defects(spec: DomainSpec, *, complete: bool = False) -> list[str]:
     ``settings.unvalidated_domain_packs_enabled`` is the operator's explicit,
     documented override (docs/FEATURE_GATES.md §16).
     """
+    from engine.config.structural_vocabulary import UndeclaredStructuralPropertyError, structural_property_defects
     from engine.gates.compiler import GateCompiler
 
     compiler = GateCompiler(spec)
-    defects: list[str] = []
+    # Stage 2 follow-up (item 8): structural properties a gate, scoring
+    # dimension or GDS job uses are declarations (declared_structural_properties_required_enabled).
+    defects: list[str] = structural_property_defects(spec)
     for gate in spec.gates:
         if gate.strictwhen:
             defects.append(f"{gate.name}: strictwhen {gate.strictwhen!r} is not consumed by any compiler")
         defects.extend(_role_field_defects(gate))
         try:
             cypher = compiler.compile(gate)
+        except UndeclaredStructuralPropertyError:
+            continue  # reported above, once, by structural_property_defects
         except (ValueError, KeyError) as exc:
             defects.append(f"{gate.name}: refused by the compiler — {exc}")
             continue
@@ -781,7 +786,11 @@ def withholding_reason(spec: DomainSpec, *, complete: bool = False) -> str | Non
     if complete or not settings.unvalidated_domain_packs_enabled:
         defects = admission_defects(spec, complete=complete)
         if defects:
-            sync_shape = any(defect.startswith(_SYNC_SHAPE_PREFIXES) for defect in defects)
+            # Sync-shape and undeclared-structural-property defects are not gate
+            # compilation defects, so the reason names every defect.
+            from engine.config.structural_vocabulary import STRUCTURAL_DEFECT_PREFIX
+
+            sync_shape = any(defect.startswith((*_SYNC_SHAPE_PREFIXES, STRUCTURAL_DEFECT_PREFIX)) for defect in defects)
             if not complete and not _match_admission_checks_enabled() and not sync_shape:
                 return (
                     f"Domain '{spec.domain.id}' is withheld: {len(defects)} gate(s) do not compile to executable "

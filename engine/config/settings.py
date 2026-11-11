@@ -777,6 +777,23 @@ class Settings(BaseSettings):
     # truth" (C-21) and changes nothing for a pack that declares its label. Off:
     # an undeclared label resolves to the former default (C-21 rollback).
     outcome_vocabulary_required_enabled: bool = True
+    # Stage 2 follow-up (owner decision, item 8 / M5-M8, "declare all,
+    # including geo"): the exclusion gate fell back to EXCLUDED_FROM /
+    # entity_id, community scoring to community_id, Louvain wrote communityId
+    # (so writer and readers disagreed, M8), and geo scoring / geoproximity to
+    # lat / lon / entity_id. On: those are declarations; a gate, scoring
+    # dimension or GDS job that uses one undeclared withholds the pack at
+    # admission (engine.config.loader.admission_defects, "undeclared structural
+    # property: ...") and the compilers raise UndeclaredStructuralPropertyError.
+    # Ships on: every served pack declares what it uses (hardening, C-21). Off:
+    # the former defaults (C-21 rollback).
+    declared_structural_properties_required_enabled: bool = True
+    # Stage 2 follow-up (item 7 / M5b): preference_attention compared the
+    # outcome nodes' hardcoded `community_id` with the candidate's declared
+    # property. On: the outcome side reads metadata.outcome_community_property,
+    # defaulting to the candidate's declared community property. Off: the
+    # hardcoded `community_id` (C-21 rollback).
+    preference_attention_declared_community_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

@@ -32,6 +32,8 @@ def make_mock_domain_spec(dimensions: list[dict] | None = None) -> MagicMock:
         dim.name = dim_dict.get("name", "test_dim")
         dim.candidateprop = dim_dict.get("candidateprop")
         dim.queryprop = dim_dict.get("queryprop")
+        dim.candidateprop_lon = dim_dict.get("candidateprop_lon")
+        dim.queryprop_lon = dim_dict.get("queryprop_lon")
         dim.computation = ComputationType(dim_dict.get("computation", "candidateproperty"))
         dim.weightkey = dim_dict.get("weightkey", "w")
         dim.defaultweight = dim_dict.get("defaultweight", 1.0)
@@ -60,6 +62,8 @@ class TestScoringAssembler:
                 {
                     "name": "distance_score",
                     "computation": "geodecay",
+                    "candidateprop": "site_lat",
+                    "candidateprop_lon": "site_lon",
                     "weightkey": "wgeo",
                     "defaultweight": 0.35,
                 }

@@ -101,12 +101,18 @@ def _pre_repair_freight(raw: dict) -> None:
 # remediation unit repaired on a temporary copy, so the withholding mechanism
 # stays covered after the repository pack is fixed.
 WITHHELD_UNTIL_REPAIRED = {
-    # RU-020: scoring references $lat/$lon/$target_price nothing binds (CEG-COR-011).
+    # RU-020: scoring references $target_price nothing binds (CEG-COR-011), and
+    # (Stage 2 follow-up, item 8) deadhead_distance declares no geo properties —
+    # before the follow-up the latter surfaced as unbound $lat / $lon.
     # Repaired by RU-037; re-created on a copy.
     "freight-matching": (
         _pre_repair_freight,
-        ("'lat'", "'lon'", "'target_price'"),
-        ("scoring_admission_check_enabled", "admission_checks_full_match"),
+        ("scoring 'deadhead_distance' (geodecay) declares no candidateprop", "'target_price'"),
+        (
+            "scoring_admission_check_enabled",
+            "admission_checks_full_match",
+            "declared_structural_properties_required_enabled",
+        ),
     ),
     # RU-039: traversal step 'lenderresolve' is not in the assembler's grammar (CEG-COR-012).
     # RU-041: blacklist_exclusion declares fromnode/tonode the compiler cannot honour (CEG-COR-019).

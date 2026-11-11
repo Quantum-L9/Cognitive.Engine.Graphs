@@ -424,6 +424,8 @@ scoring:
     computation: geodecay
     candidateprop: lat
     queryprop: lat
+    candidateprop_lon: lon
+    queryprop_lon: lon
     decayconstant: 800000.0
     weightkey: w_geo
     defaultweight: 0.25
@@ -498,6 +500,8 @@ scoring:
     computation: geodecay
     candidateprop: lat
     queryprop: lat
+    candidateprop_lon: lon
+    queryprop_lon: lon
     decayconstant: 800000.0
     weightkey: w_active_geo
     defaultweight: 0.5

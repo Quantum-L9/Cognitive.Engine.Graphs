@@ -345,3 +345,30 @@ followup:
       evidence:
         - "docs/contracts/data/graph-schema.yaml, docs/contracts/agents/tool-schemas/_index.yaml, docs/contracts/FEEDBACK_LOOPS.md: the outcome node / edge / community key are the domain's feedbackloop.* (or declared community property) declaration, example PlasticOS"
         - tests/contracts/test_data_models.py (outcome node and edge are declared placeholders with PlasticOS examples)
+  closures_structural_properties:
+    - item: 8
+      findings: [M5, M6, M7, M8]
+      owner_decision: "Declare all, including geo"
+      disposition: CLOSED
+      evidence:
+        - "engine/config/structural_vocabulary.py: exclusion edgetype / target candidateprop, geodecay candidateprop / candidateprop_lon, communitymatch / preference_attention / community_bridge community property, louvain writeproperty, geoproximity lat_property / lon_property / id_property are declarations; the former defaults live only in its C-21 rollback table"
+        - "engine/config/loader.py::admission_defects: a pack using one undeclared is withheld ('undeclared structural property: ...'); engine/gates/compiler.py, engine/scoring/assembler.py, engine/gds/scheduler.py raise UndeclaredStructuralPropertyError instead of borrowing"
+        - "M8: Louvain writes and community scoring reads the same declared property (no communityId / community_id defaults); proved in test_declared_structural_properties_compile_from_the_pack"
+        - "flag declared_structural_properties_required_enabled (default on; off restores the defaults) — docs/FEATURE_GATES.md §32"
+        - "domains/plasticos: geodecay dimensions now also declare candidateprop_lon / queryprop_lon: lon (the names they used); freight-matching already declared all four; mortgage-brokerage uses none. Served set unchanged; the served packs' compiled gates, traversal, scoring and GDS Cypher are byte-identical before and after (probe over every direction and GDS job)"
+        - "domains/_template.yaml declares the geo and exclusion properties it uses"
+        - tests/unit/test_domain_neutrality_acceptance.py (declared / undeclared cheese-aging variants; compilers refuse; flag-off rollback; served packs have no structural defect)
+      left_for_owner:
+        - "healthcare-referral (unserved) declares no geodecay properties; it gains a structural defect on top of its existing withholding reason"
+        - "geoproximity writeedge still defaults to COLOCATED_WITH (generic; not in the owner's list)"
+    - item: 7
+      finding: M5b
+      disposition: CLOSED
+      evidence:
+        - "engine/scoring/assembler.py: preference_attention compares the outcome nodes' metadata.outcome_community_property (default: the candidate's declared community property); flag preference_attention_declared_community_enabled (default on; off restores community_id)"
+        - tests/unit/test_domain_neutrality_acceptance.py::test_preference_attention_reads_the_declared_outcome_community_property
+    - item: 10
+      finding: M9
+      disposition: KEPT (owner decision)
+      evidence:
+        - "the C-21 flag-off rollback branches (spec_declared_candidate_id, counterfactual_dedupe_and_spec_label, geodecay_declared_longitude, causal_edge_declared_identity) are unchanged"

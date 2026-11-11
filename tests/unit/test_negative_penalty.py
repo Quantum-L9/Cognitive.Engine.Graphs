@@ -83,6 +83,7 @@ def _spec_with_penalty(
                     name="geo_score",
                     source=ScoringSource.CANDIDATEPROPERTY,
                     candidateprop="lat",
+                    candidateprop_lon="lon",
                     computation=ComputationType.GEODECAY,
                     weightkey="w_geo",
                     defaultweight=0.5,

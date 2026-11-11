@@ -79,6 +79,7 @@ def _build_benchmark_spec() -> DomainSpec:
                 computation=ComputationType.GEODECAY,
                 candidateprop="lat",
                 queryprop="lat",
+                candidateprop_lon="lon",
                 decayconstant=50000.0,
                 weightkey="w_geo",
                 defaultweight=0.30,
