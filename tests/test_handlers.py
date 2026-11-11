@@ -30,6 +30,8 @@ from engine.handlers import (
     init_dependencies,
 )
 
+pytestmark = pytest.mark.unit
+
 # ── Stage 2 P4: candidate identity comes from the domain, not a hardcoded entity_id ──
 
 

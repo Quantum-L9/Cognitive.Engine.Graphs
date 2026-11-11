@@ -45,6 +45,8 @@ from chassis.auth.auth import BearerAuthMiddleware
 from chassis.chassis_app import ChassisSettings, LifecycleHook, create_app
 from engine.config.settings import Settings, settings
 
+pytestmark = pytest.mark.unit
+
 # ── Test fixtures ────────────────────────────────────────────
 
 TEST_API_KEY = "test-key-abc123-secure-token-xyz789"

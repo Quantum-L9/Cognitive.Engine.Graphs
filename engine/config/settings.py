@@ -440,6 +440,12 @@ class Settings(BaseSettings):
     # DimensionWeight and the result is clamped to signal_weights
     # [min_weight, max_weight]. Off: the legacy query.
     propagation_single_application: bool = True
+    # FEEDBACK-PARTIAL-01: a ConvergenceLoop stage that raised escaped
+    # handle_outcomes after the outcome node was written, so the caller got an
+    # error with no record of what was applied. On: each stage is isolated and
+    # the feedback metadata reports status complete|partial with per-stage
+    # results. Off: the first stage failure propagates.
+    feedback_partial_results_enabled: bool = True
     # RU-029 / CEG-COR-118: DriftDetector treated only a both-empty window pair
     # as insufficient data, so an empty baseline (the first drift_window_days)
     # scored divergence 1.0 and raised alert=True. On: either window empty is

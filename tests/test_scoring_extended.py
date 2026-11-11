@@ -20,6 +20,8 @@ import pytest
 from engine.config.schema import ComputationType
 from engine.scoring.assembler import ScoringAssembler
 
+pytestmark = pytest.mark.unit
+
 
 def _dim(
     *,

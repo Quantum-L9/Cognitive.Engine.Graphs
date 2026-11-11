@@ -7,11 +7,14 @@ that compilation always produces safe, well-formed output.
 
 from __future__ import annotations
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from engine.config.schema import GateSpec, GateType, NullBehavior
 from engine.gates.compiler import GateCompiler
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Custom Hypothesis strategies

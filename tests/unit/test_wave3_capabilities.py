@@ -40,6 +40,8 @@ from engine.auth.capabilities import (
 )
 from engine.config.schema import CapabilitySpec, DomainSpec
 
+pytestmark = pytest.mark.unit
+
 # ═══════════════════════════════════════════════════════════════════
 #  Fixtures
 # ═══════════════════════════════════════════════════════════════════

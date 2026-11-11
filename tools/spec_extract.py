@@ -63,6 +63,7 @@ except ImportError:
 L9_TEMPLATE_TAG = "L9_TEMPLATE"
 RESEARCH_DIR = "tools/research"
 RESEARCH_PATTERNS_FILE = "top5_leverage_patterns_detailed.json"
+RESEARCH_CATEGORY = "research_pattern"
 GATES_GLOB = "engine/gates/**/*.py"
 SCORING_GLOB = "engine/scoring/**/*.py"
 ENGINE_GLOB = "engine/**/*.py"
@@ -416,7 +417,7 @@ def extract_research_features(root: Path) -> list[SpecFeature]:
 
         features.append(
             SpecFeature(
-                category="research_pattern",
+                category=RESEARCH_CATEGORY,
                 name=str(pattern.get("pattern_name", key)),
                 spec_reference=f"{RESEARCH_DIR}/{RESEARCH_PATTERNS_FILE}#{key}",
                 search_tokens=[str(t) for t in tokens],
@@ -424,6 +425,24 @@ def extract_research_features(root: Path) -> list[SpecFeature]:
             )
         )
 
+    return features
+
+
+def spec_candidates(root: Path) -> list[Path]:
+    """Root-level spec YAMLs ``main`` auto-detects from, in a stable order (it takes the first)."""
+    return sorted(root.glob("*spec*.yaml")) + sorted(root.glob("*spec*.yml"))
+
+
+def collect_features(spec: dict, root: Path) -> list[SpecFeature]:
+    """Every feature the coverage report counts: the spec's, then the research patterns, each once."""
+    features: list[SpecFeature] = []
+    features += extract_gate_features(spec)
+    features += extract_scoring_features(spec)
+    features += extract_ontology_features(spec)
+    features += extract_v11_additions(spec)
+    features += extract_action_features(spec)
+    features += extract_gds_features(spec)
+    features += extract_research_features(root)
     return features
 
 
@@ -668,7 +687,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
     if spec_path is None:
-        candidates = list(root.glob("*spec*.yaml")) + list(root.glob("*spec*.yml"))
+        candidates = spec_candidates(root)
         if candidates:
             try:
                 spec_path = resolve_existing_file_under_root(candidates[0], root, option="auto-detected spec")
@@ -688,18 +707,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    features: list[SpecFeature] = []
-    features += extract_gate_features(spec)
-    features += extract_scoring_features(spec)
-    features += extract_ontology_features(spec)
-    features += extract_v11_additions(spec)
-    features += extract_action_features(spec)
-    features += extract_gds_features(spec)
+    features = collect_features(spec, root)
+    research_count = sum(1 for f in features if f.category == RESEARCH_CATEGORY)
 
-    research = extract_research_features(root)
-    features += research
-
-    print(f"Extracted {len(features)} features from spec ({len(research)} from {RESEARCH_DIR})")
+    print(f"Extracted {len(features)} features from spec ({research_count} from {RESEARCH_DIR})")
     print(f"Scanning codebase at {root} ...")
 
     scan_codebase(root, features)

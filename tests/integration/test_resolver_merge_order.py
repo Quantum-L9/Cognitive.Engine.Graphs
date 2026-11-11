@@ -32,6 +32,8 @@ import pytest
 from engine.config.schema import SemanticRegistrySpec
 from engine.resolution.resolver import EntityResolver
 
+pytestmark = pytest.mark.integration
+
 DB = "neo4j"  # wiped by clean_db
 
 SEED_CYPHER = """

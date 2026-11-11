@@ -37,6 +37,8 @@ from engine.config.schema import (
 )
 from engine.gds.scheduler import GDSScheduler
 
+pytestmark = pytest.mark.unit
+
 # ── Helpers ───────────────────────────────────────────────
 
 

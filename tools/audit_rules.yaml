@@ -50,10 +50,19 @@ rules:
     # interpolated expression); every blocking finding is reported here.
     check: "cypher_lint"
 
+  # The two TRACE_*_FLOW_ANCHORS rules below are evaluated per file, so their
+  # scope is the set of files expected to anchor the flow: the top-level
+  # engine lifecycle modules (engine/handlers.py, engine/boot.py, ...), never
+  # the subpackages that implement the pieces. That is the scope they have
+  # evaluated since the template landed (8aca61a): the old glob code turned
+  # "engine/**/*.py" into rglob("engine/*.py"). RU-132 (#353) made "**"
+  # recursive, which is right for the CRITICAL/HIGH rules above, and silently
+  # widened these two to every engine module. Pinned by
+  # tests/unit/test_audit_rule_scope.py.
   - id: "TRACE_MATCH_FLOW_ANCHORS"
     severity: "MEDIUM"
     description: "Match flow should reference GateCompiler, TraversalAssembler, ScoringAssembler, GraphDriver.execute_query."
-    include_globs: ["engine/**/*.py"]
+    include_globs: ["engine/*.py"]
     required_any:
       - "handle_match"
       - "GateCompiler("
@@ -64,7 +73,7 @@ rules:
   - id: "TRACE_SYNC_FLOW_ANCHORS"
     severity: "MEDIUM"
     description: "Sync flow should reference SyncGenerator and execute_query."
-    include_globs: ["engine/**/*.py"]
+    include_globs: ["engine/*.py"]
     required_any:
       - "handle_sync"
       - "SyncGenerator("

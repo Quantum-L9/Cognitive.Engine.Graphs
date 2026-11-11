@@ -24,6 +24,8 @@ from fastapi.testclient import TestClient
 
 from chassis.chassis_app import ChassisSettings, LifecycleHook, create_app
 
+pytestmark = pytest.mark.unit
+
 
 class MockLifecycleHook(LifecycleHook):
     """Test implementation of LifecycleHook for error handling tests."""

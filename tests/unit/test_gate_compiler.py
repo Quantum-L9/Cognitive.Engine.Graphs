@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _admission_hardening_on(monkeypatch: pytest.MonkeyPatch) -> None:

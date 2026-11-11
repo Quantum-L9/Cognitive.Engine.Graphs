@@ -28,6 +28,8 @@ import pytest
 
 from engine.utils.safe_eval import safe_eval
 
+pytestmark = pytest.mark.unit
+
 # ── Arithmetic Operators ──────────────────────────────────
 
 

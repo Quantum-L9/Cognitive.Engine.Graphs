@@ -13,6 +13,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  Milestone 2.1: Schema Extension
 # ═══════════════════════════════════════════════════════════════════════════

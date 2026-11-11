@@ -23,6 +23,8 @@ import pytest
 
 from engine.handlers import handle_admin, init_dependencies
 
+pytestmark = pytest.mark.unit
+
 # ── Fixtures ────────────────────────────────────────────────
 
 
