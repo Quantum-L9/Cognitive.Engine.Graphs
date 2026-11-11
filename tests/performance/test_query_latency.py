@@ -34,6 +34,8 @@ from engine.gates.compiler import GateCompiler
 from engine.scoring.assembler import ScoringAssembler
 from engine.traversal.assembler import TraversalAssembler
 
+pytestmark = pytest.mark.integration
+
 logger = structlog.get_logger(__name__)
 
 

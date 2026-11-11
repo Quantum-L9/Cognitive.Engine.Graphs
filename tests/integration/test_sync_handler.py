@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_sync_merges_facilities(engine_deps, clean_db):
     from engine.handlers import handle_sync
@@ -23,6 +24,7 @@ async def test_sync_merges_facilities(engine_deps, clean_db):
     assert result.get("status") in ("ok", "success")
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_sync_idempotent_on_second_call(engine_deps, clean_db):
     from engine.handlers import handle_sync
@@ -37,6 +39,7 @@ async def test_sync_idempotent_on_second_call(engine_deps, clean_db):
     assert r2.get("status") in ("ok", "success")
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_sync_unknown_entity_type_raises(domain_loader):
     """RULE 3: an unknown entity_type is rejected, not silently passed through.
@@ -66,6 +69,7 @@ async def test_sync_unknown_entity_type_raises(domain_loader):
         get_state().reset()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_synced_facility_matches_on_its_processed_polymer(engine_deps, clean_db):
     """RG-062 (RU-048 / CEG-COR-071): sync then match returns the synced facility.
