@@ -120,7 +120,6 @@ FILE_REGISTRY: list[FileMeta] = [
         ["L9_TEMPLATE", "governance", "pr-review"],
         "platform",
     ),
-    FileMeta(".github/dependabot.yml", "l9-template", ["governance"], ["L9_TEMPLATE", "security", "deps"], "platform"),
     FileMeta(
         ".github/scripts/setup-repo-vars.sh",
         "l9-template",
@@ -1485,6 +1484,11 @@ EXCLUDED_PATTERNS: dict[str, str] = {
     ".l9/repo-workflow.json": (
         "Core repository execution contract (l9.repo-execution/v2): Core rejects any key besides "
         "schema, facade and required_phases, so the JSON header's _l9_meta key fails the contract"
+    ),
+    ".github/dependabot.yml": (
+        "org-managed render (Quantum-L9/.github ops/render-dependabot.js, ADR-0019): the org seed "
+        "restores it byte-for-byte to the render, which carries its own provenance comment, so a "
+        "header here would be stripped on the next seed"
     ),
 }
 
