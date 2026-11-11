@@ -140,8 +140,9 @@ class TestOutcomeReplayKey:
 
         driver = _Driver(constraint_error=RuntimeError("no schema rights"))
         _wire(driver, _spec())
+        payload = _payload(outcome_id="replay-1")
         with pytest.raises(ExecutionError, match="could not enforce outcome_id uniqueness"):
-            await handle_outcomes(_TENANT, _payload(outcome_id="replay-1"))
+            await handle_outcomes(_TENANT, payload)
         assert len(driver.calls) == 1
 
     async def test_replay_reports_replayed_and_skips_first_write_side_effects(self, monkeypatch) -> None:
@@ -165,8 +166,9 @@ class TestOutcomeReplayKey:
 
         driver = _Driver(write_rows=[_stored()])
         _wire(driver, _spec())
+        payload = _payload(outcome_id="replay-1", **{field: value})
         with pytest.raises(ValidationError, match=f"already recorded with different {field}"):
-            await handle_outcomes(_TENANT, _payload(outcome_id="replay-1", **{field: value}))
+            await handle_outcomes(_TENANT, payload)
 
     async def test_flag_off_ignores_the_caller_id(self, monkeypatch) -> None:
         from engine.handlers import handle_outcomes

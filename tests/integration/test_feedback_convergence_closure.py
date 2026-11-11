@@ -207,7 +207,8 @@ async def test_tenant_outside_allowlist_is_refused_before_any_write(feedback_gra
     from engine.state import get_state
 
     monkeypatch.setattr(get_state(), "_tenant_allowlist", {_TENANT})
+    payload = _payload("fbk-intruder-1")
     with pytest.raises(ValidationError):
-        await handle_outcomes(_FOREIGN_TENANT, _payload("fbk-intruder-1"))
+        await handle_outcomes(_FOREIGN_TENANT, payload)
     assert await _outcome_nodes(feedback_graph, "fbk-intruder-1") == []
     assert await _boosts(feedback_graph) == [pytest.approx(1.0)] * len(_DIMS)
