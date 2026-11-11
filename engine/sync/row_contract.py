@@ -324,38 +324,70 @@ def _iso(value: str, parse: Any) -> bool:
     return True
 
 
+# ── scalar checks: one per declared type, each returning the ``got`` of a defect ──
+
+
+ScalarCheck = Callable[[Any, list[str] | None], str | None]
+
+
+def _type_check(accepts: Callable[[Any], bool]) -> ScalarCheck:
+    """A check that only tests the JSON type."""
+
+    def check(value: Any, _values: list[str] | None) -> str | None:
+        return None if accepts(value) else actual_type(value)
+
+    return check
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _check_float(value: Any, _values: list[str] | None) -> str | None:
+    if not _is_number(value):
+        return actual_type(value)
+    return None if math.isfinite(value) else f"{actual_type(value)} (non-finite)"
+
+
+def _text_check(valid: Callable[[str], bool], what: str) -> ScalarCheck:
+    """A string whose text must also be ``valid`` (an ISO-8601 form)."""
+
+    def check(value: Any, _values: list[str] | None) -> str | None:
+        if not isinstance(value, str):
+            return actual_type(value)
+        return None if valid(value) else f"string (not an ISO-8601 {what})"
+
+    return check
+
+
+def _check_enum(value: Any, values: list[str] | None) -> str | None:
+    if not isinstance(value, str):
+        return actual_type(value)
+    return "string (not a declared value)" if values and value not in values else None
+
+
+_SCALAR_CHECKS: dict[PropertyType, ScalarCheck] = {
+    PropertyType.STRING: _type_check(lambda value: isinstance(value, str)),
+    PropertyType.INT: _type_check(_is_int),
+    PropertyType.FLOAT: _check_float,
+    PropertyType.BOOL: _type_check(lambda value: isinstance(value, bool)),
+    PropertyType.DATETIME: _text_check(lambda text: _iso(text, datetime.fromisoformat), "datetime"),
+    PropertyType.DATE: _text_check(lambda text: _iso(text, date.fromisoformat), "date"),
+    PropertyType.DURATION: _text_check(lambda text: _ISO_DURATION.fullmatch(text) is not None, "duration"),
+    PropertyType.ENUM: _check_enum,
+}
+
+
 def _scalar_mismatch(type_: PropertyType, values: list[str] | None, value: Any) -> str | None:
     """How ``value`` fails a scalar declaration (the ``got`` part of a defect), else None."""
-    got = actual_type(value)
-    if type_ is PropertyType.STRING:
-        ok = isinstance(value, str)
-    elif type_ is PropertyType.INT:
-        ok = isinstance(value, int) and not isinstance(value, bool)
-    elif type_ is PropertyType.FLOAT:
-        ok = isinstance(value, int | float) and not isinstance(value, bool)
-        if ok and not math.isfinite(value):
-            return f"{got} (non-finite)"
-    elif type_ is PropertyType.BOOL:
-        ok = isinstance(value, bool)
-    elif type_ is PropertyType.DATETIME:
-        ok = isinstance(value, str)
-        if ok and not _iso(value, datetime.fromisoformat):
-            return f"{got} (not an ISO-8601 datetime)"
-    elif type_ is PropertyType.DATE:
-        ok = isinstance(value, str)
-        if ok and not _iso(value, date.fromisoformat):
-            return f"{got} (not an ISO-8601 date)"
-    elif type_ is PropertyType.DURATION:
-        ok = isinstance(value, str)
-        if ok and _ISO_DURATION.fullmatch(value) is None:
-            return f"{got} (not an ISO-8601 duration)"
-    elif type_ is PropertyType.ENUM:
-        ok = isinstance(value, str)
-        if ok and values and value not in values:
-            return f"{got} (not a declared value)"
-    else:  # pragma: no cover - shapes are dispatched before scalars
-        ok = False
-    return None if ok else got
+    check = _SCALAR_CHECKS.get(type_)
+    if check is None:  # shapes are dispatched before scalars
+        return actual_type(value)
+    return check(value, values)
 
 
 @dataclass
@@ -376,61 +408,82 @@ class _Walk:
             self.undeclared[counted_as] += 1
 
 
-def _check_value(
-    walk: _Walk,
-    row: int,
-    path: str,
-    *,
-    counted_as: str,
-    decl: PropertySpec | ItemSpec,
-    value: Any,
-) -> None:
-    """Check a non-null ``value`` against ``decl``; recurse into lists and maps."""
+@dataclass(frozen=True)
+class _At:
+    """Where a value sits: its row, its defect path and the key path undeclared keys count under."""
+
+    walk: _Walk
+    row: int
+    path: str
+    counted_as: str
+
+    def defect(self, declared: str, got: str) -> None:
+        self.walk.defect(self.row, self.path, declared, got)
+
+    def child(self, path_suffix: str, counted_suffix: str) -> _At:
+        return _At(self.walk, self.row, f"{self.path}{path_suffix}", f"{self.counted_as}{counted_suffix}")
+
+
+def _check_list(at: _At, decl: PropertySpec | ItemSpec, value: Any) -> None:
     items = getattr(decl, "items", None)
-    declared = render_declared_type(decl.type, decl.values, items)
-    if decl.type is PropertyType.LIST:
-        if not isinstance(value, list):
-            walk.defect(row, path, declared, actual_type(value))
-            return
-        if items is None:  # unreachable: PropertySpec.validate_shape requires items
-            walk.defect(row, path, declared, "undeclared element type")
-            return
-        item_declared = render_declared_type(items.type, items.values, None)
-        for index, element in enumerate(value):
-            if element is None:
-                walk.defect(row, f"{path}[{index}]", item_declared, "null")
-            else:
-                _check_value(walk, row, f"{path}[{index}]", counted_as=f"{counted_as}[]", decl=items, value=element)
+    if not isinstance(value, list):
+        at.defect(render_declared_type(decl.type, decl.values, items), actual_type(value))
         return
-    if decl.type is PropertyType.MAP:
-        if not isinstance(value, dict):
-            walk.defect(row, path, declared, actual_type(value))
-            return
-        _check_map(walk, row, path, counted_as=counted_as, properties=decl.properties or [], value=value)
+    if items is None:  # unreachable: PropertySpec.validate_shape requires items
+        at.defect(render_declared_type(decl.type, decl.values, items), "undeclared element type")
         return
+    item_declared = render_declared_type(items.type, items.values, None)
+    for index, element in enumerate(value):
+        element_at = at.child(f"[{index}]", "[]")
+        if element is None:
+            element_at.defect(item_declared, "null")
+        else:
+            _check_value(element_at, items, element)
+
+
+def _check_map_value(at: _At, decl: PropertySpec | ItemSpec, value: Any) -> None:
+    if not isinstance(value, dict):
+        at.defect(render_declared_type(decl.type, decl.values, None), actual_type(value))
+        return
+    _check_map(at, decl.properties or [], value)
+
+
+def _check_scalar(at: _At, decl: PropertySpec | ItemSpec, value: Any) -> None:
     got = _scalar_mismatch(decl.type, decl.values, value)
     if got is not None:
-        walk.defect(row, path, declared, got)
+        at.defect(render_declared_type(decl.type, decl.values, None), got)
 
 
-def _check_map(
-    walk: _Walk, row: int, path: str, *, counted_as: str, properties: list[PropertySpec], value: dict[str, Any]
-) -> None:
+_SHAPE_CHECKS: dict[PropertyType, Callable[[_At, PropertySpec | ItemSpec, Any], None]] = {
+    PropertyType.LIST: _check_list,
+    PropertyType.MAP: _check_map_value,
+}
+
+
+def _check_value(at: _At, decl: PropertySpec | ItemSpec, value: Any) -> None:
+    """Check a non-null ``value`` against ``decl``; lists and maps recurse."""
+    _SHAPE_CHECKS.get(decl.type, _check_scalar)(at, decl, value)
+
+
+def _check_member(at: _At, prop: PropertySpec, member: Any) -> None:
+    """One declared map member: missing, null, or a value to check."""
+    if member is _MISSING:
+        if prop.required:
+            at.defect(f"{prop.declared_type} (required)", "missing")
+    elif member is None:
+        if prop.required or not prop.nullable:
+            at.defect(f"{prop.declared_type} (non-null)", "null")
+    else:
+        _check_value(at, prop, member)
+
+
+def _check_map(at: _At, properties: list[PropertySpec], value: dict[str, Any]) -> None:
     declared = {prop.name: prop for prop in properties}
     for prop in properties:
-        member = value.get(prop.name, _MISSING)
-        member_path = f"{path}.{prop.name}"
-        if member is _MISSING:
-            if prop.required:
-                walk.defect(row, member_path, f"{prop.declared_type} (required)", "missing")
-        elif member is None:
-            if prop.required or not prop.nullable:
-                walk.defect(row, member_path, f"{prop.declared_type} (non-null)", "null")
-        else:
-            _check_value(walk, row, member_path, counted_as=f"{counted_as}.{prop.name}", decl=prop, value=member)
+        _check_member(at.child(f".{prop.name}", f".{prop.name}"), prop, value.get(prop.name, _MISSING))
     for key in value:
         if key not in declared:
-            walk.undeclared_key(row, f"{path}.{key}", counted_as=f"{counted_as}.{key}", value=value[key])
+            at.walk.undeclared_key(at.row, f"{at.path}.{key}", counted_as=f"{at.counted_as}.{key}", value=value[key])
 
 
 @dataclass(frozen=True)
@@ -442,6 +495,27 @@ class ChildProjection:
     item: PropertySpec  # the list<map> declaration on the parent
     writable: frozenset[str]  # item ∩ child node declared, storable
     static: bool
+
+    @classmethod
+    def from_spec(cls, domain_spec: DomainSpec, item: PropertySpec, child: ChildSyncSpec) -> ChildProjection:
+        """Writable keys: declared by the item map and by the child node, storable on both."""
+        child_node = _node(domain_spec, child.targetnode)
+        child_props = _properties(child_node)
+        writable = frozenset(
+            prop.name
+            for prop in _item_properties(item)
+            if prop.name in child_props and not prop.wire_only and not child_props[prop.name].wire_only
+        )
+        static = child_node is not None and child_node.managedby is ManagedByType.STATIC
+        return cls(child.field, child.targetid, item, writable, static)
+
+    def project(self, items: Any) -> list[dict[str, Any]]:
+        """Each item map keeping only the writable keys; non-maps are dropped."""
+        return [
+            {key: value for key, value in item.items() if key in self.writable}
+            for item in items or []
+            if isinstance(item, dict)
+        ]
 
 
 @dataclass(frozen=True)
@@ -463,31 +537,18 @@ class SyncRowContract:
             defects = defects or [f"sync {endpoint.path}: not a node sync endpoint (targetnode + idproperty)"]
         if defects:
             raise ValueError("; ".join(defects))
-        target = _node(domain_spec, endpoint.targetnode)
-        props = _properties(target)
-        children: list[ChildProjection] = []
-        for child in endpoint.childsync or []:
-            item = props[child.field]
-            item_properties = item.items.properties if item.items is not None else None
-            child_node = _node(domain_spec, child.targetnode)
-            child_props = _properties(child_node)
-            writable = frozenset(
-                prop.name
-                for prop in item_properties or []
-                if prop.name in child_props and not prop.wire_only and not child_props[prop.name].wire_only
-            )
-            static = child_node is not None and child_node.managedby is ManagedByType.STATIC
-            children.append(ChildProjection(child.field, child.targetid, item, writable, static))
-        taxonomy_lists = frozenset(
-            edge.field for edge in endpoint.taxonomyedges or [] if props[edge.field].type is PropertyType.LIST
-        )
+        props = _properties(_node(domain_spec, endpoint.targetnode))
         return cls(
             path=endpoint.path,
             target_label=str(endpoint.targetnode),
             idproperty=str(endpoint.idproperty),
             properties=props,
-            children=tuple(children),
-            taxonomy_lists=taxonomy_lists,
+            children=tuple(
+                ChildProjection.from_spec(domain_spec, props[child.field], child) for child in endpoint.childsync or []
+            ),
+            taxonomy_lists=frozenset(
+                edge.field for edge in endpoint.taxonomyedges or [] if props[edge.field].type is PropertyType.LIST
+            ),
         )
 
     @property
@@ -495,30 +556,43 @@ class SyncRowContract:
         """Node properties the generator writes: declared and storable."""
         return frozenset(name for name, prop in self.properties.items() if not prop.wire_only)
 
+    def _walk_field(self, walk: _Walk, index: int, key: str, value: Any) -> None:
+        """One top-level key of a row: undeclared, null, or a value to check."""
+        prop = self.properties.get(key)
+        if prop is None:
+            walk.undeclared_key(index, key, counted_as=key, value=value)
+        elif value is None:
+            if key != self.idproperty and not prop.nullable:
+                walk.defect(index, key, f"{prop.declared_type} (non-null)", "null")
+        else:
+            _check_value(_At(walk, index, key, key), prop, value)
+
+    def _walk_row(self, walk: _Walk, index: int, row: Any) -> None:
+        if not isinstance(row, dict):
+            walk.defects.append(f"row {index}: expected map, got {actual_type(row)}")
+            return
+        if row.get(self.idproperty) is None:
+            got = "missing" if self.idproperty not in row else "null"
+            id_declared = self.properties[self.idproperty].declared_type
+            walk.defect(index, self.idproperty, f"{id_declared} (required id)", got)
+        for key, value in row.items():
+            self._walk_field(walk, index, key, value)
+
     def _walk(self, batch: list[Any], *, refuse_undeclared: bool) -> _Walk:
         walk = _Walk(refuse_undeclared=refuse_undeclared)
-        id_decl = self.properties[self.idproperty]
         for index, row in enumerate(batch):
-            if not isinstance(row, dict):
-                walk.defects.append(f"row {index}: expected map, got {actual_type(row)}")
-                continue
-            if row.get(self.idproperty) is None:
-                got = "missing" if self.idproperty not in row else "null"
-                walk.defect(index, self.idproperty, f"{id_decl.declared_type} (required id)", got)
-            for key, value in row.items():
-                prop = self.properties.get(key)
-                if prop is None:
-                    walk.undeclared_key(index, key, counted_as=key, value=value)
-                elif value is None:
-                    if key != self.idproperty and not prop.nullable:
-                        walk.defect(index, key, f"{prop.declared_type} (non-null)", "null")
-                else:
-                    _check_value(walk, index, key, counted_as=key, decl=prop, value=value)
+            self._walk_row(walk, index, row)
         return walk
 
     def defects(self, batch: list[Any], *, refuse_undeclared: bool) -> list[str]:
         """Every defect of every row; empty when the whole batch conforms."""
         return self._walk(batch, refuse_undeclared=refuse_undeclared).defects
+
+    def _project_row(self, row: dict[str, Any], stored: frozenset[str]) -> dict[str, Any]:
+        return {
+            "node": {key: value for key, value in row.items() if key in stored},
+            "children": {child.field: child.project(row.get(child.field)) for child in self.children},
+        }
 
     def project(self, batch: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
         """Rows in write shape, plus how often each undeclared key was dropped.
@@ -530,16 +604,4 @@ class SyncRowContract:
         """
         dropped = self._walk(batch, refuse_undeclared=False).undeclared
         stored = self.stored
-        rows: list[dict[str, Any]] = []
-        for row in batch:
-            node = {key: value for key, value in row.items() if key in stored}
-            children = {
-                child.field: [
-                    {key: value for key, value in item.items() if key in child.writable}
-                    for item in row.get(child.field) or []
-                    if isinstance(item, dict)
-                ]
-                for child in self.children
-            }
-            rows.append({"node": node, "children": children})
-        return rows, dict(sorted(dropped.items()))
+        return [self._project_row(row, stored) for row in batch], dict(sorted(dropped.items()))
