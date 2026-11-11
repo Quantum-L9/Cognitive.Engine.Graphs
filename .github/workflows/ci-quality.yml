@@ -233,6 +233,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
 
+      # uv.lock targets Python 3.12 (pyproject requires-python); the runner's
+      # system Python is not 3.12, so install_locked.sh needs this interpreter.
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
       - name: Validate YAML files
         # Fail-closed: no `|| true`, no continue-on-error. Severity policy
         # and per-file exclusions live in .yamllint.yml (errors block,
