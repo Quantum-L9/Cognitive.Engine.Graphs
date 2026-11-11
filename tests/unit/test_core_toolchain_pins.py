@@ -106,6 +106,21 @@ def test_install_script_takes_core_tools_from_core() -> None:
     assert re.search(r"^\s*ci\|full\) ;;$", script, re.M), "ci and full must install the Core tools"
 
 
+def test_no_workflow_chooses_a_core_tool_version() -> None:
+    # A workflow that pins, upgrades or installs a Core tool by itself is a copy
+    # that a Core bump would have to edit (or, unpinned, one that floats).
+    pattern = re.compile(
+        r"pip\s+install\b[^\n]*?(?:--upgrade\s+pip\b|\bpip==|\b(?:ruff|mypy|pytest|pre-commit)(?:[=<>~ ]|$))",
+        re.M,
+    )
+    found = sorted(
+        f"{workflow.name}: {match.group(0).strip()}"
+        for workflow in (ROOT / ".github" / "workflows").glob("*.y*ml")
+        for match in pattern.finditer(workflow.read_text(encoding="utf-8"))
+    )
+    assert not found, f"Core tools come from tools/deps/install_locked.sh: {found}"
+
+
 def test_dependabot_ignores_core_owned_tools() -> None:
     config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
     # uv when uv.lock exists (the org render's rule), which is the case here.
