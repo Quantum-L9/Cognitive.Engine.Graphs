@@ -10,7 +10,7 @@
 #
 # L9 Graph Cognitive Engine — Production Docker Compose
 # Usage: docker compose -f docker-compose.prod.yml up -d
-# Requires: NEO4J_PASSWORD and API_SECRET_KEY env vars set (no defaults in prod)
+# Requires: NEO4J_PASSWORD, API_SECRET_KEY, POSTGRES_PASSWORD and CEG_APP_DB_PASSWORD env vars set (no defaults in prod)
 
 services:
 
@@ -65,6 +65,21 @@ services:
       NEO4J_USERNAME: ${NEO4J_USERNAME:-neo4j}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:?NEO4J_PASSWORD must be set for production}
       NEO4J_POOL_SIZE: "50"
+      # W4-04 compliance audit flush -> packet_audit_log. CEG connects as the
+      # app role (member of l9_product: INSERT/SELECT on the audit log, so it
+      # stays append-only), never as the Postgres superuser, which bypasses RLS
+      # and grants. Use a URL-safe password (e.g. openssl rand -hex 32).
+      POSTGRES_DSN: postgresql://${CEG_APP_DB_USER:-ceg_app}:${CEG_APP_DB_PASSWORD:?CEG_APP_DB_PASSWORD must be set for production}@postgres:5432/${POSTGRES_DB:-l9_graph}
+      # PacketStore (PERSIST-01): every Gate request/response pair, with lineage,
+      # hop trace and delegation, in the same database as the same app role
+      # (l9_product: INSERT, outcome_jsonb-only UPDATE, tenant RLS via
+      # app.current_tenant). Store failures are warnings, never request failures.
+      # No pruning is scheduled: prune_expired_packets() exists in
+      # packet_store.sql but nothing calls it, so rows accumulate.
+      PACKET_STORE_ENABLED: "true"
+      PACKET_STORE_DSN: postgresql://${CEG_APP_DB_USER:-ceg_app}:${CEG_APP_DB_PASSWORD:?CEG_APP_DB_PASSWORD must be set for production}@postgres:5432/${POSTGRES_DB:-l9_graph}
+      # W2-02b: link each recorded match outcome to its match packet in PacketStore.
+      OUTCOME_PERSISTENCE_ENABLED: "true"
       API_SECRET_KEY: ${API_SECRET_KEY:?API_SECRET_KEY must be set for production}
       LOG_LEVEL: info
       CORS_ORIGINS: ${CORS_ORIGINS:-[]}
@@ -77,6 +92,8 @@ services:
     # no code imports.
     depends_on:
       neo4j:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/v1/health')"]
@@ -120,9 +137,40 @@ services:
       retries: 10
     restart: always
 
+  # ── PostgreSQL 16: compliance audit store ───────────────
+  # Schema (packet_store, lineage_graph, hop_trace, delegation_chain,
+  # packet_audit_log; roles l9_product / l9_admin / l9_auditor) is applied from
+  # engine/packet/packet_store.sql, then the CEG app login role is created.
+  # Both run once, on an empty data volume. No published port: reachable only
+  # from l9-net. Re-apply packet_store.sql by hand to upgrade an existing
+  # database (safe since RU-080; see docs/FEATURE_GATES.md).
+  postgres:
+    image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    container_name: l9-graph-postgres-prod
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-l9_owner}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set for production}
+      POSTGRES_DB: ${POSTGRES_DB:-l9_graph}
+      CEG_APP_DB_USER: ${CEG_APP_DB_USER:-ceg_app}
+      CEG_APP_DB_PASSWORD: ${CEG_APP_DB_PASSWORD:?CEG_APP_DB_PASSWORD must be set for production}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./engine/packet/packet_store.sql:/docker-entrypoint-initdb.d/01_packet_store.sql:ro
+      - ./scripts/postgres-init/02_ceg_app_role.sh:/docker-entrypoint-initdb.d/02_ceg_app_role.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: always
+    networks:
+      - l9-net
+
 volumes:
   neo4j-data:
   neo4j-logs:
+  postgres-data:
 
 networks:
   l9-net:
