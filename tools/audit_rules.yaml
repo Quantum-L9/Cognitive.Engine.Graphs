@@ -50,21 +50,25 @@ rules:
     # interpolated expression); every blocking finding is reported here.
     check: "cypher_lint"
 
-  # The two TRACE_*_FLOW_ANCHORS rules below are evaluated per file, so their
-  # scope is the set of files expected to anchor the flow: the top-level
-  # engine lifecycle modules (engine/handlers.py, engine/boot.py, ...), never
-  # the subpackages that implement the pieces. That is the scope they have
-  # evaluated since the template landed (8aca61a): the old glob code turned
-  # "engine/**/*.py" into rglob("engine/*.py"). RU-132 (#353) made "**"
-  # recursive, which is right for the CRITICAL/HIGH rules above, and silently
-  # widened these two to every engine module. Pinned by
+  # The TRACE_*_FLOW_ANCHORS rules state where each flow is anchored, as
+  # required_all checks scoped to one module-level definition (within_function
+  # / within_class, tools/audit_engine.py). Before, they were per-file checks
+  # over a glob: TRACE_MATCH / TRACE_SYNC were required_any over every
+  # top-level engine/*.py module (#456), so 16 modules that can never hold a
+  # flow (engine/__init__.py, engine/state.py, ...) were reported on every run,
+  # and any one token anywhere in engine/handlers.py satisfied them. TRACE_GDS
+  # was evaluated against engine/gds/__init__.py too. Now each rule names the
+  # entrypoint that owns the flow and requires every component it promises:
+  # removing GateCompiler(...) from handle_match, or _run_louvain from
+  # GDSScheduler, is a finding, and so is renaming or moving the definition or
+  # its file (an empty scope is a finding, never a vacuous pass). Pinned by
   # tests/unit/test_audit_rule_scope.py.
   - id: "TRACE_MATCH_FLOW_ANCHORS"
     severity: "MEDIUM"
     description: "Match flow should reference GateCompiler, TraversalAssembler, ScoringAssembler, GraphDriver.execute_query."
-    include_globs: ["engine/*.py"]
-    required_any:
-      - "handle_match"
+    include_globs: ["engine/handlers.py"]
+    within_function: "handle_match"
+    required_all:
       - "GateCompiler("
       - "TraversalAssembler("
       - "ScoringAssembler("
@@ -73,9 +77,9 @@ rules:
   - id: "TRACE_SYNC_FLOW_ANCHORS"
     severity: "MEDIUM"
     description: "Sync flow should reference SyncGenerator and execute_query."
-    include_globs: ["engine/*.py"]
-    required_any:
-      - "handle_sync"
+    include_globs: ["engine/handlers.py"]
+    within_function: "handle_sync"
+    required_all:
       - "SyncGenerator("
       - "generate_sync_query("
       - "execute_query("
@@ -83,12 +87,12 @@ rules:
   - id: "TRACE_GDS_FLOW_ANCHORS"
     severity: "MEDIUM"
     description: "GDS scheduler should exist and include known algorithms."
-    include_globs: ["engine/gds/**/*.py"]
+    include_globs: ["engine/gds/scheduler.py"]
+    within_class: "GDSScheduler"
     required_all:
-      - "class GDSScheduler"
-      - "register_jobs"
-      - "execute_job"
-      - "_run_louvain"
-      - "_run_cooccurrence"
-      - "_run_reinforcement"
-      - "_run_temporal_recency"
+      - "def register_jobs("
+      - "def execute_job("
+      - "def _run_louvain("
+      - "def _run_cooccurrence("
+      - "def _run_reinforcement("
+      - "def _run_temporal_recency("
