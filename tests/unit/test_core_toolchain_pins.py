@@ -1,0 +1,135 @@
+"""
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [test, unit, ci, dependencies, toolchain]
+owner: engine-team
+status: active
+--- /L9_META ---
+
+Core-owned tools sit on one version across every CEG file.
+
+Quantum-L9/l9-ci-core owns the versions of the shared tools
+(.github/actions/install-consumer-ci/toolchain-lock.json); version drift from
+Core is prohibited org-wide. The required ``Analyze (central Core)`` check
+compares CEG's requirements*.txt with that lock, but it does not read the
+Poetry dependency groups, poetry.lock, the uv locks or the pre-commit rev
+comments. These tests close that gap from CEG's side without copying the Core
+lock: every declaration of a Core-owned tool must name the same version, so
+Core's comparison of requirements*.txt covers all of them.
+
+They also keep the two Dependabot rules that stop drift recurring: Core-owned
+tools are ignored, and every github/codeql-action step runs one version.
+"""
+
+from __future__ import annotations
+
+import re
+import tomllib
+from collections import defaultdict
+from pathlib import Path
+
+import pytest
+import yaml
+
+ROOT = Path(__file__).resolve().parents[2]
+
+pytestmark = pytest.mark.unit
+
+# Core-owned tools CEG declares through Python packaging (biome, python and pip
+# are pinned elsewhere and have no CEG package declaration to compare).
+CORE_TOOLS = ("pytest", "ruff", "mypy", "pre-commit", "semgrep")
+
+_REQ_PIN = re.compile(r"^([A-Za-z0-9_.\-]+)==([^\s\\;#]+)")
+# Poetry reads a bare version ("9.1.1") as exact, like "==9.1.1".
+_EXACT = re.compile(r"^(?:==?)?\s*(\d+(?:\.\d+)*)$")
+_PRECOMMIT_REPOS = {
+    "https://github.com/astral-sh/ruff-pre-commit": "ruff",
+    "https://github.com/pre-commit/mirrors-mypy": "mypy",
+}
+
+
+def _declarations() -> dict[str, set[tuple[str, str]]]:
+    """Map each Core-owned tool to the (version, source) pairs CEG declares."""
+    found: dict[str, set[tuple[str, str]]] = defaultdict(set)
+
+    for path in sorted(ROOT.glob("requirements*.txt")) + sorted(ROOT.glob("requirements*.lock")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            match = _REQ_PIN.match(line.strip())
+            if match and match.group(1).lower() in CORE_TOOLS:
+                found[match.group(1).lower()].add((match.group(2), path.name))
+
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    groups = pyproject.get("tool", {}).get("poetry", {}).get("group", {})
+    sections = {"tool.poetry.dependencies": pyproject.get("tool", {}).get("poetry", {}).get("dependencies", {})}
+    sections.update({f"tool.poetry.group.{name}": body.get("dependencies", {}) for name, body in groups.items()})
+    for section, deps in sections.items():
+        for name, spec in deps.items():
+            if name.lower() not in CORE_TOOLS:
+                continue
+            raw = spec if isinstance(spec, str) else spec.get("version", "")
+            match = _EXACT.match(raw.strip())
+            version = match.group(1) if match else f"non-exact:{raw}"
+            found[name.lower()].add((version, f"pyproject.toml [{section}]"))
+
+    lock = tomllib.loads((ROOT / "poetry.lock").read_text(encoding="utf-8"))
+    for package in lock.get("package", []):
+        if package["name"].lower() in CORE_TOOLS:
+            found[package["name"].lower()].add((package["version"], "poetry.lock"))
+
+    config = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
+    raw_lines = (ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8").splitlines()
+    for repo in config.get("repos", []):
+        tool = _PRECOMMIT_REPOS.get(repo.get("repo", ""))
+        if tool is None:
+            continue
+        rev_line = next(line for line in raw_lines if repo["rev"] in line)
+        match = re.search(r"#\s*v?(\d+(?:\.\d+)*)", rev_line)
+        version = match.group(1) if match else f"unlabelled-rev:{repo['rev']}"
+        found[tool].add((version, ".pre-commit-config.yaml"))
+
+    return found
+
+
+def test_every_core_owned_tool_has_a_single_version() -> None:
+    drift = {
+        tool: sorted(pairs) for tool, pairs in _declarations().items() if len({version for version, _ in pairs}) > 1
+    }
+    assert not drift, (
+        "Core-owned tool declared at more than one version; align every file to "
+        f"Quantum-L9/l9-ci-core toolchain-lock.json: {drift}"
+    )
+
+
+def test_core_owned_tools_are_declared_somewhere() -> None:
+    # Guards the scan itself: if it stopped finding the tools CEG pins, the
+    # single-version test above would pass vacuously.
+    found = _declarations()
+    assert {"pytest", "ruff", "mypy", "pre-commit"} <= set(found), sorted(found)
+
+
+def test_dependabot_ignores_core_owned_tools() -> None:
+    config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
+    pip = next(u for u in config["updates"] if u["package-ecosystem"] == "pip")
+    ignored = {entry["dependency-name"].lower() for entry in pip.get("ignore", []) if "versions" not in entry}
+    assert set(CORE_TOOLS) <= ignored, (
+        f"Dependabot must not propose Core-owned tools: missing {set(CORE_TOOLS) - ignored}"
+    )
+
+
+def test_dependabot_groups_every_codeql_action_step() -> None:
+    config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
+    actions = next(u for u in config["updates"] if u["package-ecosystem"] == "github-actions")
+    patterns = [p for group in actions.get("groups", {}).values() for p in group.get("patterns", [])]
+    assert "github/codeql-action*" in patterns, patterns
+
+
+def test_every_codeql_action_step_runs_one_version() -> None:
+    refs = set()
+    for workflow in sorted((ROOT / ".github" / "workflows").glob("*.y*ml")):
+        refs.update(
+            re.findall(r"uses:\s*github/codeql-action/[\w-]+@([0-9a-f]{40})", workflow.read_text(encoding="utf-8"))
+        )
+    assert len(refs) <= 1, f"github/codeql-action steps must share one SHA, found {sorted(refs)}"

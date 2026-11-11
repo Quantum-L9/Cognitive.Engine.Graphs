@@ -48,6 +48,19 @@ updates:
     assignees:
       - "YOUR_GITHUB_USERNAME"
 
+    # Core-owned tools: their versions come only from Quantum-L9/l9-ci-core
+    # .github/actions/install-consumer-ci/toolchain-lock.json. Version drift
+    # from Core is prohibited org-wide, so Dependabot never proposes them; a
+    # bump lands here only after the Core lock moves.
+    # tests/unit/test_core_toolchain_pins.py keeps every CEG declaration of
+    # these tools on one version.
+    ignore:
+      - dependency-name: "pytest"
+      - dependency-name: "ruff"
+      - dependency-name: "mypy"
+      - dependency-name: "pre-commit"
+      - dependency-name: "semgrep"
+
     # Dependency groups — customize for your stack
     groups:
       # Web frameworks
@@ -118,6 +131,14 @@ updates:
 
     commit-message:
       prefix: "chore(ci)"
+
+    # Every github/codeql-action step (init, analyze, upload-sarif) must run
+    # the same version: a split bump fails with "Loaded a configuration file
+    # for version X, but running version Y".
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
 
     labels:
       - "dependencies"
