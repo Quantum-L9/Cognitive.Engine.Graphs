@@ -26,3 +26,4 @@ status: active
 
 - T5: the SDK answers a refused action with HTTP 200 and a `failure` packet (`return_transport_errors`), not a non-2xx status. The tests assert the failure packet and its error class: `TransportAuthorizationError` for `enrich` (allowlist, before dispatch), `ValidationError` for `admin` without `admin:write`. A positive control with the grant revokes successfully.
 - Validation: make test scope 4398 passed, 6 xfailed; contracts 357 passed, 6 strict xfails (rbac now open only on Constellation.Gate#37); ruff, mypy, cypher-lint, C-18 clean.
+- T1: main gained its own sections 31 and 32 while W2 was in flight, so the flag is documented in FEATURE_GATES section 33, placed after section 32 (clear of open PR #461's edits to section 30).
