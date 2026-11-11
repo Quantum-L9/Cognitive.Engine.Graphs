@@ -147,6 +147,20 @@ These are semantic changes, never parameter tuning:
 | Change or remove a label's `refnamespace` once nodes exist under it | major — it renames every node identity of that label |
 | Rename or remove the target edge type of an observed endpoint | major |
 
+### Typed property shapes (typed sync contract, 2026-11-11)
+
+The `list` / `map` property types are a purely additive schema change: every
+spec that validated before validates unchanged. In a spec:
+
+| Change | Bump |
+|---|---|
+| Declare a property a sync endpoint already carries (e.g. a childsync field as `list<map>`) | minor |
+| Add a `list<primitive>` property, or a `list<map>` consumed by a new childsync | minor |
+| Change a declared property's type or its `items` / `properties` (e.g. `list<string>` → `list<map>`, a map member becomes `required`) | major — producers' rows that conformed are refused |
+| Remove a map member or a declared property producers send | major |
+
+PlasticOS 1.4.0 declares `Facility.processed_polymers` (minor).
+
 `evidencerelevance` reaches scoring only from a `-reviewed` or `-production`
 spec (D-8b). A spec carrying `observedfrom` or `evidencerelevance` is promoted
 to `-production` only after human review.

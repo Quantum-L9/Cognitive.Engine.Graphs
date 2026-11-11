@@ -72,11 +72,11 @@ class Settings(BaseSettings):
     # --- GDS ---
     gds_enabled: bool = True
 
-    # --- Scoring Weights (defaults, overridable per-request) ---
-    w_structural: float = 0.30
-    w_geo: float = 0.25
-    w_reinforcement: float = 0.20
-    w_freshness: float = 0.10
+    # --- Match result bound ---
+    # Scoring dimensions and their default weights are the domain's
+    # (scoring.dimensions[*].defaultweight, ceiling checked per direction at
+    # spec load, C-22). The former fixed four-dimension weights (structural,
+    # geo, reinforcement, freshness) reached no scoring path and were retired.
     max_results: int = 25
 
     # --- Temporal Decay ---

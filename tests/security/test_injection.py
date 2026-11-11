@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 INJECTION_STRINGS = [
     "'; DROP DATABASE neo4j;",
     "MATCH (n) DETACH DELETE n RETURN 1 AS",

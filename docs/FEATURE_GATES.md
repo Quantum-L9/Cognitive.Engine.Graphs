@@ -88,6 +88,9 @@ independently of the code default.
 | Spec-declared Candidate Id | `SPEC_DECLARED_CANDIDATE_ID` (`spec_declared_candidate_id`) | `True` | unset | active; `handle_match` identifies candidates by the domain's declared id property, not `entity_id`; since RU-002 the outcome edges, legacy `resolve`, `enrich` by ids and admin `evaluate` do too — see §20 |
 | Traversal Gate EXISTS Subquery | `TRAVERSAL_GATE_EXISTS_SUBQUERY` (`traversal_gate_exists_subquery`) | `True` | unset | active; traversal gates compile to an `EXISTS { … }` subquery Neo4j 5 accepts — see §20 |
 | Childsync FOREACH Projection | `CHILDSYNC_FOREACH_PROJECTION` (`childsync_foreach_projection`) | `True` | unset | active; childsync writes children in `FOREACH` without copying them onto the parent — see §20 |
+| Sync Declared Projection | `SYNC_DECLARED_PROJECTION_ENABLED` (`sync_declared_projection_enabled`) | `True` | unset | active (restores "the domain spec is the single source of truth"); node sync writes only the target node's declared, storable properties (`SET n += row.node`), each childsync child only what its item map and node declare (a `static` child on create only), a `list<scalar>` taxonomy field links one node per element; off restores `row{.*}` — see §31 |
+| Sync Row Type Validation | `SYNC_ROW_TYPE_VALIDATION_ENABLED` (`sync_row_type_validation_enabled`) | `True` | unset | active; every node-sync row is validated against the spec's declared types before compliance logging or Cypher; any defect refuses the batch (`SyncRowRejectedError`, nothing written) listing every `row <i> <field>: expected <declared>, got <actual>` — see §31 |
+| Sync Undeclared Property Refusal | `SYNC_UNDECLARED_PROPERTY_REFUSAL_ENABLED` (`sync_undeclared_property_refusal_enabled`) | `False` | unset | staged; off, undeclared row keys are dropped by the projection and counted in `undeclared_properties`; on, they are row defects that refuse the batch — see §31 |
 | Match Dimension Projection | `MATCH_DIMENSION_PROJECTION` (`match_dimension_projection`) | `True` | unset | active (correctness, RU-001); match RETURNs the active dimension scores as `dimension_scores` so Pareto, arbitration and confidence checks see real values; off restores `RETURN candidate, score` |
 | Gate WHERE Row Scope | `GATE_WHERE_ROW_SCOPE` (`gate_where_row_scope`) | `True` | unset | active (correctness, RU-011); match emits `WITH *` before the gate `WHERE` so gates remove candidate rows even after a trailing `OPTIONAL MATCH`; off restores `WHERE` directly after the traversal |
 | Match Collapse Traversal Rows | `MATCH_COLLAPSE_TRAVERSAL_ROWS` (`match_collapse_traversal_rows`) | `True` | unset | active (correctness, RU-036); match keeps each candidate's best-scoring traversal row before `ORDER BY … LIMIT $top_n`, so `top_n` counts distinct candidates; off restores one row per path |
@@ -124,10 +127,13 @@ independently of the code default.
 | safe_eval Rejects Keywords | `SAFE_EVAL_REJECT_KEYWORDS` (`safe_eval_reject_keywords`) | `True` | unset | active; keyword arguments in derived-parameter / unit expressions raise instead of being dropped — see lane D |
 | Causal Serializer Variable Depth | `CAUSAL_SERIALIZER_VARIABLE_DEPTH` (`causal_serializer_variable_depth`) | `True` | unset | active; causal match explanations follow chains up to the requested depth — see lane D |
 | Counterfactual Dedupe and Spec Label | `COUNTERFACTUAL_DEDUPE_AND_SPEC_LABEL` (`counterfactual_dedupe_and_spec_label`) | `True` | unset | active; no duplicate counterfactual scenarios, fingerprints read from the domain's outcome label — see lane D |
+| Outcome Vocabulary Required | `OUTCOME_VOCABULARY_REQUIRED_ENABLED` (`outcome_vocabulary_required_enabled`) | `True` | unset | active (hardening, Stage 2 follow-up); `feedbackloop.outcome_node_label` has no engine default, and an outcome write or read on a pack that declares none raises `OutcomeVocabularyUndeclaredError`; every served pack declares its label — see §32 |
+| Declared Structural Properties Required | `DECLARED_STRUCTURAL_PROPERTIES_REQUIRED_ENABLED` (`declared_structural_properties_required_enabled`) | `True` | unset | active (hardening, Stage 2 follow-up); the exclusion edge / target property, community property and geo coordinate / id properties are declarations; a pack whose gate, scoring dimension or GDS job uses one undeclared is withheld (`undeclared structural property: …`); every served pack declares what it uses — see §32 |
+| Preference Attention Declared Community | `PREFERENCE_ATTENTION_DECLARED_COMMUNITY_ENABLED` (`preference_attention_declared_community_enabled`) | `True` | unset | active (correctness, Stage 2 follow-up); `preference_attention` compares the outcome nodes' `metadata.outcome_community_property` (default: the candidate's declared community property) instead of a hardcoded `community_id`; no served pack uses the dimension — see §32 |
 | PacketStore Packet-Identity Dedup | `PACKET_STORE_PACKET_IDENTITY_DEDUP_ENABLED` (`packet_store_packet_identity_dedup_enabled`) | `True` | unset | active (hardening, RU-078); `packet_store.content_hash` is the SDK `transport_hash`, so distinct packets with equal payloads are both stored, and a packet whose INSERT is skipped as a duplicate writes no hop/delegation/lineage rows; off restores the `payload_hash` key and unconditional child rows — see §7 |
 | PacketStore RLS Tenant Session | `PACKET_STORE_RLS_TENANT_SESSION_ENABLED` (`packet_store_rls_tenant_session_enabled`) | `True` | unset | active (hardening, RU-079); `persist` and `record_outcome` set the transaction-local `app.current_tenant` GUC to the packet's / call's tenant before writing, so an `l9_product` DSN satisfies the DDL's RLS policies; off issues no `set_config` — see §7 |
 | Inference Geography USPS Zones | `INFERENCE_GEO_USPS_ZONES_ENABLED` (`inference_geo_usps_zones_enabled`) | `True` | unset | active (correctness, RU-084); `infer_geography_from_postal_code` maps the ZIP first digit to its USPS zone (0-1 Northeast, 2-3 Southeast, 4-6 Midwest, 7 South, 8-9 West) and emits nothing when the entity declares a non-US `country`; off restores the five-digit threshold ladder. The rule also needs `graph_inference_feedback_enabled` and domain authorization — see §13 |
-| Inference Persona Token Match | `INFERENCE_PERSONA_TOKEN_MATCH_ENABLED` (`inference_persona_token_match_enabled`) | `True` | unset | active (correctness, RU-088); `infer_buyer_persona` matches a keyword only as a whole job-title token (split on `[^a-z0-9&]+`), so "Marketing Coordinator" is no longer executive; keyword sets, precedence and confidences unchanged; off restores substring matching — see §13 |
+| Inference Persona Token Match | `INFERENCE_PERSONA_TOKEN_MATCH_ENABLED` (`inference_persona_token_match_enabled`) | `True` | unset | active (correctness, RU-088); `infer_buyer_persona` matches a keyword only as a whole job-title token (split on `[^a-z0-9&]+`), so "Marketing Coordinator" no longer matches `coo`; the personas, keywords, precedence and confidences are the domain's declaration (`plugins.inference_rule_parameters.infer_buyer_persona`; Stage 2 follow-up — the engine carries no keyword list and an undeclared rule infers nothing, an authorized but undeclared one withholds the pack); off restores substring matching — see §13 |
 | Inference Input Parsing Strict | `INFERENCE_INPUT_PARSING_STRICT_ENABLED` (`inference_input_parsing_strict_enabled`) | `True` | unset | active (correctness, RU-089); `infer_company_size_tier` falls back to `employees`/`revenue` only when the primary field is absent and parses each value separately (an unparseable employee count falls back to revenue), and `infer_email_domain_from_website` emits the URL hostname without port, userinfo or `www.`; off restores the legacy parsing — see §13 |
 | Packet Audit on Cancel | `PACKET_AUDIT_ON_CANCEL_ENABLED` (`packet_audit_on_cancel_enabled`) | `True` | unset | active (correctness, RU-086); a handler the SDK cancels on timeout persists one failed request/response pair (`engine_data={"error": "handler_cancelled"}`) under `asyncio.shield` before the cancellation is re-raised; off records no pair for a cancelled handler — see §19 |
 | Capability Record Binding | `CAPABILITY_RECORD_BINDING_ENABLED` (`capability_record_binding_enabled`) | `True` | unset | active (hardening, RU-090); `CapabilityValidator.validate_action` authorizes only an object equal to the registered record (incl. `proof_hash`) and reads revocation, expiry, tenant and actions from that record; `expires_at` is part of `proof_hash`, so the admin `delegate_capability` response carries a different `proof_hash` value; off restores the legacy checks and hash input — see §12 |
@@ -1066,6 +1072,89 @@ On: `handle_score` dedupes on `(relationship_type, evidence_ref)`, the identity
 this sync writes, so one `evidence_ref` under two types is not
 `conflicting_evidence`. Off: `evidence_ref` alone. Tests:
 `tests/unit/test_graph_evidence_binding.py`.
+
+## 31. Typed sync contract — list and map shapes (2026-11-11)
+
+**Flags**: `SYNC_DECLARED_PROJECTION_ENABLED=True`, `SYNC_ROW_TYPE_VALIDATION_ENABLED=True`,
+`SYNC_UNDECLARED_PROPERTY_REFUSAL_ENABLED=False`
+
+The sync generator relied on shapes the spec could not declare: childsync
+assumed a list of maps under an untyped `field`, taxonomy edges assumed a
+scalar (a list silently created no edge while the sync reported success), and
+`SET n += row{.*}` stored whatever a row carried. `PropertySpec` now declares
+`list` (element type in `items`) and `map` (keys in `properties`):
+
+```yaml
+- {name: certifications, type: list, items: {type: string}}
+- name: processed_polymers
+  type: list
+  items:
+    type: map
+    properties:
+      - {name: code, type: string, required: true}
+```
+
+Storage rule: `list<primitive>` is storable; `map` and `list<map>` are wire-only
+and legal on a node only as the `field` of a childsync on a sync endpoint
+targeting that node. Admission (`admission_defects`, unconditional — the
+override is `UNVALIDATED_DOMAIN_PACKS_ENABLED`, §16) refuses a declared `map` /
+`list<map>` nothing consumes (Neo4j cannot store either), and a node sync
+endpoint whose childsync field is not declared `list<map>` on `targetnode`,
+whose `targetid` is not a required scalar of the item map (and a scalar of the
+child node), whose taxonomy field is not a scalar or `list<scalar>`, or whose
+`fieldsupdated` names an undeclared or wire-only property.
+
+| Flag | On | Off |
+|---|---|---|
+| `sync_declared_projection_enabled` | `SyncGenerator.project_batch` binds `$batch` as `{node: <declared storable keys present>, children: {<field>: [<item keys the child node declares>]}}`; the Cypher is `SET n += row.node`, `FOREACH (child_row IN coalesce(row.children.<field>, []) \| MERGE ... SET c += child_row ...)` (`ON CREATE SET` for a `managedby: static` child), and a `list<scalar>` taxonomy field `OPTIONAL MATCH (tax:L) WHERE tax.<id> IN coalesce(row.node.<field>, [])` → one edge per element | `SET n += row{.*, <child fields>: null}` / `SET n += row` and the §20 paths |
+| `sync_row_type_validation_enabled` | `handle_sync` builds a `SyncRowContract` (`engine/sync/row_contract.py`) for a node endpoint and refuses the whole batch on any defect, before compliance logging and before any Cypher, with `SyncRowRejectedError` (a `ValidationError`) listing every defect: `row 0 processed_polymers: expected list<map>, got string`, `row 1 processed_polymers[0]: expected map, got string`, `row 2 rate_per_ton: expected float, got string`, `row 3 processed_polymers[0].code: expected string (required), got missing`. No coercion; values are never echoed (only JSON types). `required` is enforced on the endpoint's `idproperty` and on map members; `nullable: false` refuses null | No ingress check; a mistyped row fails the whole statement inside Neo4j (`ExecutionError`) |
+| `sync_undeclared_property_refusal_enabled` | Undeclared keys (top level or inside a map) are row defects: `row 0 color: expected no such declared property, got string` | Undeclared keys are dropped by the projection (never written), counted in the response as `undeclared_properties: {<key path>: <rows>}` and logged by name |
+
+Rollback of the write and ingress behaviour is `SYNC_DECLARED_PROJECTION_ENABLED=false`
+and `SYNC_ROW_TYPE_VALIDATION_ENABLED=false`; a pack whose declarations admission
+refuses is served only with `UNVALIDATED_DOMAIN_PACKS_ENABLED=true`. Domain-spec
+changes of this section: plasticos 1.4.0 declares `Facility.processed_polymers`
+as `list<map{code: string required}>`; the synthetic `orbital-logistics` 0.2.0
+fixture carries a `list<string>` property, a `list<string>` taxonomy field and a
+`list<map>` childsync.
+
+## 32. Stage 2 follow-up — declared domain vocabulary (owner decisions 2026-11-11)
+
+The engine borrows no pack's vocabulary as a default. Each behaviour below ships
+`True` because it restores "the domain spec is the single source of truth" and
+changes nothing for a pack that declares what it uses; every served pack
+(freight-matching, mortgage-brokerage, plasticos) declares it. Set the env var to
+`false` to restore the previous behaviour verbatim (C-21 rollback).
+
+| Flag (env var) | Default | Behaviour on | Off (rollback) |
+|---|---|---|---|
+| `outcome_vocabulary_required_enabled` (`OUTCOME_VOCABULARY_REQUIRED_ENABLED`) | `true` | `FeedbackLoopSpec.outcome_node_label` defaults to `None`. `handle_outcomes`, sync `entity_type=outcome`, admin `score_feedback` / `generate_calibration_pairs` / `discover_weights`, the feedback loop (signal weights, propagation, pattern matching, drift), causal attribution and a `preference_attention` dimension without `metadata.outcome_node` read the domain's declared label; on a pack that declares none they raise before any Cypher — `OutcomeVocabularyUndeclaredError` (a `ValidationError`) from handlers, `OutcomeNodeLabelUndeclaredError` (a `ValueError`) from the engine modules — naming the domain and the operation. freight-matching and mortgage-brokerage declare `outcome_node_label: TransactionOutcome` (the label their graphs already hold), plasticos already declared it, so no graph migrates | An undeclared label resolves to the former default `TransactionOutcome` |
+| `declared_structural_properties_required_enabled` (`DECLARED_STRUCTURAL_PROPERTIES_REQUIRED_ENABLED`) | `true` | No borrowed structural names. An `exclusion` gate declares `edgetype`, and `candidateprop` (the excluded node's property) when it names a `queryparam`; `geodecay` declares `candidateprop` (latitude) and `candidateprop_lon` (longitude), its query operands defaulting to those declared names; `communitymatch` / `preference_attention` declare `candidateprop` (the community property; communitymatch's `queryprop` defaults to it); `community_bridge` declares `candidateprop` or `metadata.community_properties`; GDS `louvain` declares `writeproperty` (so writer and readers use the same declared property, M8) and `geoproximity` declares `writeproperties` `lat_property` / `lon_property` / `id_property`. `engine.config.loader.admission_defects` withholds a pack that uses one undeclared with `undeclared structural property: <gate/scoring/GDS job> …` (`engine/config/structural_vocabulary.py`); the compilers raise `UndeclaredStructuralPropertyError` for callers that bypass admission. plasticos now also declares `candidateprop_lon` / `queryprop_lon: lon` on its two geodecay dimensions (the names it used), so its generated Cypher is byte-identical | The gate compiler, scoring assembler and GDS scheduler substitute `EXCLUDED_FROM`, `entity_id`, `community_id`, `communityId`, `lat`, `lon` |
+| `preference_attention_declared_community_enabled` (`PREFERENCE_ATTENTION_DECLARED_COMMUNITY_ENABLED`) | `true` | `preference_attention` reads the outcome nodes' community from `metadata.outcome_community_property`, defaulting to the candidate's declared community property (item 7 / M5b). Note: `ScoringDimensionSpec` declares no `metadata` field, so the dimension's metadata is reachable only from duck-typed callers today | The outcome side reads a hardcoded `community_id` |
+
+The outcome *edge* (`feedbackloop.outcome_edge_type`, default `RESULTED_IN`) is
+not part of this section: its split stays deferred with A09.
+
+**Persona vocabulary (no flag).** `infer_buyer_persona` reads its personas, keywords,
+precedence and confidences from `plugins.inference_rule_parameters.infer_buyer_persona`
+(`personas: [{persona, keywords, confidence}]`, optional `unmatched: {persona, confidence}`);
+the hardcoded keyword lists (which included `plant` / `facility`) are gone. Admission
+withholds a pack that authorizes the rule without a valid declaration, or declares
+parameters for a rule it does not authorize. No pack authorizes the rule, so no served
+behaviour changes and there is no rollback flag.
+
+### Validation
+
+`tests/unit/test_outcome_vocabulary_required.py` (synthetic packs: orbital-logistics
+declares `DockingResult`, cheese-aging declares nothing).
+`tests/unit/test_domain_neutrality_acceptance.py` (structural properties: a declared and an
+undeclared cheese-aging variant with an exclusion gate, geo and community scoring, Louvain and
+geoproximity jobs; `preference_attention` outcome community property).
+
+### Rollback
+
+Set `OUTCOME_VOCABULARY_REQUIRED_ENABLED=false`, `DECLARED_STRUCTURAL_PROPERTIES_REQUIRED_ENABLED=false` or
+`PREFERENCE_ATTENTION_DECLARED_COMMUNITY_ENABLED=false` and restart.
 
 ## 29. Gate-routed score and Gate key binding (SCORING-GATE-01)
 

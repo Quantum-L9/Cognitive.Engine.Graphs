@@ -26,6 +26,8 @@ from engine.handlers import (
     init_dependencies,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _make_domain_spec() -> MagicMock:
     """Create a minimal mock domain spec for enrich tests."""

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from engine.config.explanations import (
     assert_no_tensor_runtime,
     order_feature_contributions,
@@ -11,6 +13,8 @@ from engine.config.explanations import (
 )
 from engine.config.loader import DomainPackLoader
 from engine.gates.compiler import GateCompiler
+
+pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[2]
 DIR2 = "buyer_demand_to_supply_opportunity"
@@ -38,7 +42,7 @@ def test_no_tensor_runtime_package() -> None:
 
 def test_domain_version_and_feedbackloop_enabled() -> None:
     spec = _spec()
-    assert spec.domain.version == "1.3.0"
+    assert spec.domain.version == "1.4.0"
     assert spec.feedbackloop.enabled is True
 
 

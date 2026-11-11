@@ -59,6 +59,9 @@ def _domain_spec(base: DomainSpec, *, causal_enabled: bool = True) -> DomainSpec
     raw = base.model_dump(by_alias=True)
     raw["domain"]["id"] = _DB
     raw["causal"] = {"enabled": causal_enabled, "causal_edges": [_RESULTED_IN]}
+    # The outcome node label is the domain's declaration (Stage 2 follow-up):
+    # these tests read back the TransactionOutcome node, so the spec declares it.
+    raw["feedbackloop"] = {**raw.get("feedbackloop", {}), "outcome_node_label": "TransactionOutcome"}
     return DomainSpec.model_validate(raw)
 
 

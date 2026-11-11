@@ -51,7 +51,19 @@ def make_mock_sync_endpoint(
 
 @pytest.mark.unit
 class TestSyncGenerator:
-    """Test sync Cypher generation."""
+    """Test sync Cypher generation on the legacy (``row{.*}``) contract.
+
+    These mock specs declare no ontology, so they exercise the C-21 rollback
+    path, ``sync_declared_projection_enabled=False``. The declared projection
+    (the default) is covered against real specs in
+    ``tests/unit/test_sync_declared_projection.py``.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _legacy_row_contract(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "sync_declared_projection_enabled", False)
 
     def test_unwind_merge_generates_merge(self) -> None:
         """UNWINDMERGE strategy generates MERGE statements."""

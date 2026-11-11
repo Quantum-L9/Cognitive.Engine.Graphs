@@ -105,6 +105,34 @@ endpoint.refnamespace  # str | None — node endpoints only; ids are "<refnamesp
 endpoint.observedfrom  # list[ObservedAssociationSourceSpec] | None — relationship endpoints only
 ```
 
+`ChildSyncSpec` / `TaxonomyEdgeSpec` (typed sync contract, 2026-11-11):
+
+```python
+child.field  # str — targetnode property declared list<map>; one child per element
+child.targetnode  # str — child node label
+child.targetid  # str — a REQUIRED scalar property of the item map (and of the child node)
+child.edgetype  # str
+child.edgedirection  # str — "parenttochild" | "childtoparent"
+taxonomy.field  # str — targetnode property declared scalar (one edge) or list<scalar> (one edge per element)
+taxonomy.edgetype  # str
+taxonomy.targetlabel  # str
+taxonomy.targetid  # str — scalar property of targetlabel
+```
+
+A row carries a childsync field as a JSON array of objects, never a
+JSON-encoded string; CEG does not parse strings into structures.
+
+`PropertySpec` shape keys:
+
+```python
+prop.type  # PropertyType — string|int|float|bool|datetime|date|duration|enum|list|map
+prop.items  # ItemSpec | None — element type; required iff type == "list"
+prop.properties  # list[PropertySpec] | None — map keys; required iff type == "map"
+item.type  # PropertyType — never "list"
+item.values  # list[str] | None — enum items
+item.properties  # list[PropertySpec] | None — required iff item.type == "map"
+```
+
 `ObservedAssociationSourceSpec` (unknown keys refused):
 
 ```python

@@ -26,6 +26,8 @@ from engine.config.loader import (
     DomainSpecError,
 )
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def _zero_cache_ttl(monkeypatch: pytest.MonkeyPatch) -> None:

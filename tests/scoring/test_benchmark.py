@@ -37,6 +37,8 @@ from engine.config.schema import (
 from engine.scoring.assembler import ScoringAssembler
 from tests.fixtures.benchmark_data import BAD_PAIRS, GOOD_PAIRS, BenchmarkPair
 
+pytestmark = pytest.mark.unit
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -77,6 +79,7 @@ def _build_benchmark_spec() -> DomainSpec:
                 computation=ComputationType.GEODECAY,
                 candidateprop="lat",
                 queryprop="lat",
+                candidateprop_lon="lon",
                 decayconstant=50000.0,
                 weightkey="w_geo",
                 defaultweight=0.30,

@@ -13,9 +13,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from engine.config.loader import DomainPackLoader
+from engine.config.schema import NodeSpec, PropertySpec
 from engine.graph.driver import GraphDriver
 from engine.handlers import handle_admin, handle_match, handle_sync, init_dependencies
 from engine.state import get_state
+
+pytestmark = pytest.mark.unit
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -93,6 +96,16 @@ def test_handle_sync_returns_success_shape() -> None:
     endpoint.path = "/sync/Buyer"
     endpoint.targetedge = None  # a node endpoint, as SyncEndpointSpec defaults it
     endpoint.refnamespace = None  # no graph-ref namespace declared, as SyncEndpointSpec defaults it
+    # The node it writes, declared with its types: sync validates rows against
+    # the spec before anything runs (typed sync contract).
+    endpoint.targetnode = "Buyer"
+    endpoint.idproperty = "entity_id"
+    endpoint.taxonomyedges = []
+    endpoint.childsync = []
+    endpoint.fieldsupdated = None
+    spec.ontology.nodes = [
+        NodeSpec(label="Buyer", properties=[PropertySpec(name="entity_id", type="string", required=True)])
+    ]
     spec.sync = MagicMock()
     spec.sync.endpoints = [endpoint]
 
@@ -104,6 +117,7 @@ def test_handle_sync_returns_success_shape() -> None:
 
     with patch("engine.handlers.SyncGenerator") as mock_gen_cls:
         mock_gen_cls.return_value.generate_sync_query.return_value = "MERGE (n:Buyer {entity_id: $entity_id})"
+        mock_gen_cls.return_value.project_batch.return_value = ([{"node": {"entity_id": "buyer-1"}}], {})
         result = asyncio.run(
             handle_sync(
                 "tenant-a",

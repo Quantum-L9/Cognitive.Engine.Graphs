@@ -20,6 +20,8 @@ import pytest
 
 from engine.config.loader import DomainPackLoader
 
+pytestmark = pytest.mark.unit
+
 ROOT = Path(__file__).resolve().parents[2]
 DOMAINS = ROOT / "domains"
 EXECUTABLE = DOMAINS / "plasticos" / "spec.yaml"

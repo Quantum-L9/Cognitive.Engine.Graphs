@@ -15,6 +15,8 @@ import pytest
 
 from engine.causal.serializer import CausalSubgraphSerializer
 
+pytestmark = pytest.mark.integration
+
 SEED_CYPHER = """
 MERGE (a:Facility {facility_id: 'F-1', entity_id: 'F-1'})
 MERGE (b:Facility {facility_id: 'F-2', entity_id: 'F-2'})

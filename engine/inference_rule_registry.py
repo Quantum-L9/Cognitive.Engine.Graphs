@@ -52,6 +52,9 @@ class InferenceContext:
     known_fields: dict[str, Any] = field(default_factory=dict)
     # Optional caller-supplied tuning context. DomainSpec/DomainPackLoader do not populate it.
     domain_kb: dict[str, Any] = field(default_factory=dict)
+    # Per-rule parameters the domain declares (DomainSpec.plugins.inference_rule_parameters),
+    # keyed by rule name. A rule whose business vocabulary is the domain's reads it here.
+    rule_parameters: dict[str, dict[str, Any]] = field(default_factory=dict)
     confidence_floor: float = 0.55
 
 
@@ -406,20 +409,117 @@ def infer_icp_fit_score(entity: dict, ctx: InferenceContext) -> InferenceResult 
     )
 
 
-# Job-title tokenizer for infer_buyer_persona (RU-088): '&' is kept so the
-# declared 'r&d' keyword remains matchable.
+# Job-title tokenizer for infer_buyer_persona (RU-088): '&' is kept so a
+# declared keyword such as 'r&d' remains matchable.
 _TITLE_TOKEN_SPLIT = re.compile(r"[^a-z0-9&]+")
+
+
+_PERSONA_PARAMETERS_PREFIX = "plugins.inference_rule_parameters.infer_buyer_persona"
+
+
+def _is_confidence(value: Any) -> bool:
+    """A number in (0, 1]; a bool is not a confidence."""
+    return not isinstance(value, bool) and isinstance(value, int | float) and 0.0 < value <= 1.0
+
+
+def _is_keyword_list(value: Any) -> bool:
+    """A non-empty list of non-blank strings."""
+    return isinstance(value, list) and bool(value) and all(isinstance(k, str) and k.strip() for k in value)
+
+
+def _persona_entry_defects(location: str, entry: Any, *, needs_keywords: bool) -> list[str]:
+    """One ``personas[i]`` (``needs_keywords``) or ``unmatched`` entry."""
+    if not isinstance(entry, dict):
+        return [f"{location}: must be a mapping"]
+    defects: list[str] = []
+    persona = entry.get("persona")
+    if not isinstance(persona, str) or not persona.strip():
+        defects.append(f"{location}.persona: must be a non-empty string")
+    if not _is_confidence(entry.get("confidence")):
+        defects.append(f"{location}.confidence: must be a number in (0, 1]")
+    if needs_keywords and not _is_keyword_list(entry.get("keywords")):
+        defects.append(f"{location}.keywords: must be a non-empty list of strings")
+    return defects
+
+
+def _persona_parameter_defects(params: Any) -> list[str]:
+    """``plugins.inference_rule_parameters.infer_buyer_persona``: personas in precedence order.
+
+    Shape::
+
+        personas:                     # required, non-empty, first match wins
+          - {persona: <str>, keywords: [<str>, ...], confidence: <0..1>}
+        unmatched: {persona: <str>, confidence: <0..1>}   # optional
+    """
+    prefix = _PERSONA_PARAMETERS_PREFIX
+    if not isinstance(params, dict):
+        return [f"{prefix}: must be a mapping"]
+    defects: list[str] = []
+    unknown = sorted(set(params) - {"personas", "unmatched"})
+    if unknown:
+        defects.append(f"{prefix}: unknown key(s) {unknown}")
+    personas = params.get("personas")
+    if not isinstance(personas, list) or not personas:
+        defects.append(f"{prefix}.personas: must be a non-empty list")
+        personas = []
+    for index, entry in enumerate(personas):
+        defects.extend(_persona_entry_defects(f"{prefix}.personas[{index}]", entry, needs_keywords=True))
+    if "unmatched" in params:
+        defects.extend(_persona_entry_defects(f"{prefix}.unmatched", params["unmatched"], needs_keywords=False))
+    return defects
+
+
+# Rules whose business vocabulary the domain declares as parameters. An
+# authorized rule listed here without a valid declaration withholds the pack
+# (engine.config.loader.admission_defects).
+_PARAMETER_VALIDATORS: dict[str, Callable[[Any], list[str]]] = {
+    "infer_buyer_persona": _persona_parameter_defects,
+}
+
+
+def rule_parameter_defects(domain_spec: Any) -> list[str]:
+    """Defects in ``plugins.inference_rule_parameters`` against ``plugins.inference_rules``.
+
+    A declaration for a rule the domain does not authorize, an authorized rule
+    that needs parameters and declares none, and a malformed declaration are
+    each an admission defect, so a pack never reaches ``emit_inference_feedback``
+    with a rule that would silently do nothing.
+    """
+    plugins = getattr(domain_spec, "plugins", None)
+    authorized = set(authorized_rules(domain_spec))
+    declared = dict(getattr(plugins, "inference_rule_parameters", None) or {}) if plugins is not None else {}
+    defects = [
+        f"plugins.inference_rule_parameters: {name!r} is not authorized by plugins.inference_rules"
+        for name in sorted(set(declared) - authorized)
+    ]
+    for name in sorted(authorized & set(_PARAMETER_VALIDATORS)):
+        if name not in declared:
+            defects.append(
+                f"plugins.inference_rules: {name!r} requires plugins.inference_rule_parameters.{name} "
+                "(its vocabulary is the domain's; the engine has none)"
+            )
+        else:
+            defects.extend(_PARAMETER_VALIDATORS[name](declared[name]))
+    return defects
 
 
 @register_inference_rule("infer_buyer_persona")
 def infer_buyer_persona(entity: dict, ctx: InferenceContext) -> InferenceResult | None:
-    """Infer buyer_persona from job_title if present.
+    """Infer buyer_persona from job_title with the personas the domain declares.
+
+    The persona names, their keywords, precedence and confidences are the
+    domain's (``plugins.inference_rule_parameters.infer_buyer_persona``, passed
+    in ``ctx.rule_parameters``); the engine carries no keyword list. With no
+    declaration the rule infers nothing. ``unmatched`` (optional) is the result
+    for a title no keyword matches; without it, no inference.
 
     With ``inference_persona_token_match_enabled`` a keyword matches only a
     whole token of the title, split on ``[^a-z0-9&]+`` so ``r&d`` stays one
-    token ('Marketing Coordinator' no longer matches 'coo'). Off: the legacy
-    substring test. Keyword sets, precedence and confidences are unchanged.
+    token ('Marketing Coordinator' does not match 'coo'). Off: substring test.
     """
+    params = ctx.rule_parameters.get("infer_buyer_persona")
+    if not params or _persona_parameter_defects(params):
+        return None
     title = entity.get("job_title") or entity.get("title") or ""
     title_lower = str(title).lower()
     if not title_lower:
@@ -434,32 +534,24 @@ def infer_buyer_persona(entity: dict, ctx: InferenceContext) -> InferenceResult 
         def _has(kw: str) -> bool:
             return kw in title_lower
 
-    exec_keywords = {"ceo", "coo", "president", "owner", "founder", "vp", "svp", "evp"}
-    ops_keywords = {"operations", "ops", "plant", "facility", "production", "supply"}
-    proc_keywords = {"procurement", "purchasing", "buyer", "sourcing"}
-    tech_keywords = {"engineer", "technical", "r&d", "research", "quality"}
-    for kw in exec_keywords:
-        if _has(kw):
+    for entry in params["personas"]:
+        if any(_has(str(keyword).lower()) for keyword in entry["keywords"]):
             return InferenceResult(
-                "buyer_persona", "executive", 0.85, "infer_buyer_persona", rationale=f"title={title}"
+                "buyer_persona",
+                entry["persona"],
+                float(entry["confidence"]),
+                "infer_buyer_persona",
+                rationale=f"title={title}",
             )
-    for kw in proc_keywords:
-        if _has(kw):
-            return InferenceResult(
-                "buyer_persona", "procurement", 0.83, "infer_buyer_persona", rationale=f"title={title}"
-            )
-    for kw in ops_keywords:
-        if _has(kw):
-            return InferenceResult(
-                "buyer_persona", "operations", 0.80, "infer_buyer_persona", rationale=f"title={title}"
-            )
-    for kw in tech_keywords:
-        if _has(kw):
-            return InferenceResult(
-                "buyer_persona", "technical", 0.78, "infer_buyer_persona", rationale=f"title={title}"
-            )
+    unmatched = params.get("unmatched")
+    if unmatched is None:
+        return None
     return InferenceResult(
-        "buyer_persona", "unknown", 0.55, "infer_buyer_persona", rationale=f"title={title} — no match"
+        "buyer_persona",
+        unmatched["persona"],
+        float(unmatched["confidence"]),
+        "infer_buyer_persona",
+        rationale=f"title={title} — no match",
     )
 
 

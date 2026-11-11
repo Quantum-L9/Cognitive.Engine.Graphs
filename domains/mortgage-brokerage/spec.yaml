@@ -239,3 +239,9 @@ compliance:
     logmatchrequests: true
     logmatchresults: true
     retentiondays: 90
+# Outcome vocabulary (Stage 2 follow-up): the engine borrows no outcome node
+# label, so a pack that records outcomes declares its own. TransactionOutcome
+# is the label this pack's existing graphs already hold (the former schema
+# default), so no migration is needed.
+feedbackloop:
+  outcome_node_label: TransactionOutcome

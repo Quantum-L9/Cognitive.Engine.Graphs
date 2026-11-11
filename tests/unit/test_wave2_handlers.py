@@ -347,7 +347,7 @@ class TestFeedbackPredicate:
 
 
 def _match_set_spec() -> MagicMock:
-    from engine.config.schema import SyncStrategy
+    from engine.config.schema import NodeSpec, PropertySpec, SyncStrategy
 
     endpoint = MagicMock()
     endpoint.path = "/v1/sync/depot"
@@ -367,6 +367,17 @@ def _match_set_spec() -> MagicMock:
     spec.causal.enabled = False
     spec.sync.endpoints = [endpoint]
     spec.feedbackloop.enabled = False
+    # The node the endpoint writes, with its declared types: sync validates rows
+    # against them and writes only declared properties (typed sync contract).
+    spec.ontology.nodes = [
+        NodeSpec(
+            label="Depot",
+            properties=[
+                PropertySpec(name="depot_id", type="string", required=True),
+                PropertySpec(name="status", type="string"),
+            ],
+        )
+    ]
     return spec
 
 

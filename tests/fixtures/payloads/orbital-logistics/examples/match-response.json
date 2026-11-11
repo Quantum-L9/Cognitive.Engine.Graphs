@@ -1,0 +1,39 @@
+{
+  "_l9_meta": {
+    "l9_schema": 1,
+    "origin": "engine-specific",
+    "engine": "graph",
+    "layer": ["test"],
+    "tags": ["test", "fixtures", "domain-neutrality", "payload-contracts"],
+    "owner": "engine-team",
+    "status": "active"
+  },
+  "contract_version": "1.0.0-draft",
+  "domain": "orbital-logistics",
+  "query_id": "odoo-match-71-1",
+  "direction": "window_to_depot",
+  "candidates": [
+    {
+      "entity_ref": "res.partner:102",
+      "eligible": true,
+      "score": 91.4,
+      "score_scale": "0_to_100",
+      "rank": 1,
+      "failed_gates": [],
+      "feature_contributions": [
+        {
+          "feature_id": "orbit_fit",
+          "contribution": 0.4,
+          "evidence_refs": ["orbital.depot.docking.rule:22"]
+        }
+      ],
+      "missing_evidence": ["depot.ports.available"],
+      "explanation": "Orbit and payload accepted; port evidence is incomplete."
+    }
+  ],
+  "total_candidates": 1,
+  "execution_time_ms": 18.2,
+  "domain_spec_version": "orbital-0.2.0",
+  "model_version": "ceg-scoring-3.0.0",
+  "projection_version": "1.0.0"
+}

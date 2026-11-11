@@ -60,7 +60,43 @@ class SyncResponse(BaseModel):
     entity_type: str
     synced_count: int  # UNWINDMATCHSET: rows that matched an existing node (RU-060)
     unmatched_count: int | None = None  # UNWINDMATCHSET only: len(batch) - synced_count
+    undeclared_properties: dict[str, int] | None = None  # present only when keys were dropped
 ```
+
+**Typed rows (CEG validates the batch against the tenant's spec).** For a node
+endpoint (`targetnode`), every row is checked against the properties its
+`targetnode` declares before compliance logging and before any Cypher
+(`SYNC_ROW_TYPE_VALIDATION_ENABLED`, default on). Types are JSON types, never
+coerced: `string`, `int` (not bool), `float` (int or float, not bool, finite),
+`bool`, `datetime` / `date` / `duration` (ISO-8601 strings), `enum` (a declared
+value), `list<T>` (a JSON array whose every element is `T`, no nulls),
+`map` (a JSON object checked against its declared `properties`). A childsync
+field declared `list<map>` must be a JSON array of objects — a JSON-encoded
+string is refused, not parsed. `required` applies to the endpoint's
+`idproperty` and to map members; `nullable: false` refuses an explicit null.
+
+Any defect refuses the whole batch — nothing is written — with
+`SyncRowRejectedError` (a `ValidationError`, HTTP 422) whose message is
+`Sync refused, nothing written: <n> defect(s): <defect>; <defect>; ...` and
+whose `defects` attribute carries the same list. Every defect, every row:
+
+```text
+row 0 processed_polymers: expected list<map>, got string
+row 1 processed_polymers[0]: expected map, got string
+row 2 rate_per_ton: expected float, got string
+row 3 processed_polymers[0].code: expected string (required), got missing
+row 4 facility_id: expected string (required id), got missing
+row 5 colour: expected no such declared property, got string   # only with SYNC_UNDECLARED_PROPERTY_REFUSAL_ENABLED
+```
+
+Values are never echoed (only their JSON type). Undeclared keys, with
+`SYNC_UNDECLARED_PROPERTY_REFUSAL_ENABLED` off (default), are dropped — never
+written — and counted by key path in `undeclared_properties`
+(`{"colour": 2, "processed_polymers[].lot": 1}`). Only declared, storable
+properties reach the node; a childsync child receives only the properties its
+item map and its node both declare (a `managedby: static` child only when it
+is created). Relationship endpoints (`targetedge`) keep their own row
+contract (`engine/sync/generator.py::normalize_relationship_rows`).
 
 RU-060 (`SYNC_COUNT_FROM_WRITE_RESULT`, default on): an `UNWINDMATCHSET`
 endpoint updates only rows whose node already exists, so its statement ends

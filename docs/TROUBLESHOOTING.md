@@ -207,36 +207,25 @@ make dev
 
 ---
 
-## Weight Sum Assertion Failure at Startup
+## Scoring Weight Ceiling Refusal at Spec Load
 
 ### Symptom
 ```
-AssertionError: Default scoring weights sum to 0.95, exceeds ceiling of 1.0
-File: engine/boot.py::_assert_default_weight_sum
+ValueError: Scoring dimension default weights sum to 1.2000 for direction 'batch_to_cave', exceeding 1.0
+File: engine/config/schema.py (DomainSpec cross-reference validation)
 ```
 
 ### Diagnosis
-This violates **Contract C-022** (Scoring Weight Ceiling). You added a new weight without reducing existing ones.
+This violates **Contract C-022** (Scoring Weight Ceiling). A domain spec declares scoring
+dimensions whose `defaultweight` values sum to more than 1.0 for one match direction (an
+unscoped dimension counts in every direction).
 
 ### Resolution
-```python
-# In engine/config/settings.py
-# Before (sum = 0.95):
-w_structural = 0.30
-w_geo = 0.25
-w_reinforcement = 0.20
-w_freshness = 0.10
-w_new_dimension = 0.10  # ❌ causes sum = 0.95
+Rebalance that domain's `scoring.dimensions[*].defaultweight` in its `spec.yaml` so each
+direction sums to ≤ 1.0. The engine has no engine-wide weights to adjust.
 
-# After (sum = 0.95 → 0.90):
-w_structural = 0.28  # reduced
-w_geo = 0.23  # reduced
-w_reinforcement = 0.19  # reduced
-w_freshness = 0.10  # unchanged
-w_new_dimension = 0.10  # new
-```
-
-**Agent Action**: When adding a scoring weight, proportionally reduce existing weights to keep sum ≤ 1.0.
+**Agent Action**: When adding a scoring dimension to a pack, take its weight from the direction's
+headroom or proportionally reduce that pack's other dimensions.
 
 ---
 

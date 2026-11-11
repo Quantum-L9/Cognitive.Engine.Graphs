@@ -86,11 +86,11 @@ class Settings(BaseSettings):
     # --- GDS ---
     gds_enabled: bool = True
 
-    # --- Scoring Weights (defaults, overridable per-request) ---
-    w_structural: float = 0.30
-    w_geo: float = 0.25
-    w_reinforcement: float = 0.20
-    w_freshness: float = 0.10
+    # --- Match result bound ---
+    # Scoring dimensions and their default weights are the domain's
+    # (scoring.dimensions[*].defaultweight, ceiling checked per direction at
+    # spec load, C-22). The former fixed four-dimension weights (structural,
+    # geo, reinforcement, freshness) reached no scoring path and were retired.
     max_results: int = 25
 
     # --- Temporal Decay ---
@@ -276,6 +276,28 @@ class Settings(BaseSettings):
     # FOREACH, and childtoparent emits `(n)<-[:T]-(c)`. Off: the legacy
     # UNWIND-based path. Ships on — the legacy path cannot execute.
     childsync_foreach_projection: bool = True
+    # Typed sync contract (2026-11-11): node sync wrote `SET n += row{.*}`, so a
+    # row stored every key it carried, declared or not, and the childsync and
+    # taxonomy Cypher assumed shapes the spec could not declare. On: the
+    # generator writes only the target node's declared, storable properties
+    # (`SET n += row.node`, built by `SyncGenerator.project_batch` from the
+    # spec), each childsync child only the properties its item map and child
+    # node both declare (a `managedby: static` child is written on create
+    # only) and a `list<scalar>` taxonomy field links one node per element.
+    # Ships on — it restores "the domain spec is the single source of truth".
+    # Off: the `row{.*}` contract and the childsync_foreach_projection paths.
+    # (Admission of the declarations themselves is unconditional: loader.py.)
+    sync_declared_projection_enabled: bool = True
+    # Sync ingress validation: every node-endpoint row is checked against the
+    # tenant spec's declared types (SyncRowContract) before compliance logs the
+    # request or any Cypher runs; any defect refuses the whole batch, listing
+    # every defect as `row <i> <field>: expected <declared>, got <actual>`.
+    # No coercion (a JSON string is never parsed into a list). Ships on.
+    sync_row_type_validation_enabled: bool = True
+    # Undeclared row keys. Off (default): dropped by the declared projection,
+    # counted in the response (`undeclared_properties`) and logged by name.
+    # On: refused as defects with the rest of the batch.
+    sync_undeclared_property_refusal_enabled: bool = False
     # CEG-009b: GateSpec declares `queryparam_min` / `queryparam_max` (range,
     # query-window form) and `candidateprop_start` / `candidateprop_end`
     # (temporalrange, candidate-window form), and GateCompiler ignored all
@@ -586,6 +608,7 @@ class Settings(BaseSettings):
     # RU-088 / CEG-COR-097: infer_buyer_persona matched keywords as substrings
     # ('Marketing Coordinator' -> executive via 'coo', 'DevOps Engineer' ->
     # operations via 'ops'). On: whole title tokens only. Off: substrings.
+    # The keywords themselves are the domain's declaration (Stage 2 follow-up).
     inference_persona_token_match_enabled: bool = True
     # RU-089 / CEG-COR-098: infer_company_size_tier used `or` to pick a field
     # (employee_count=0 fell through to employees) and parsed both values in
@@ -753,6 +776,33 @@ class Settings(BaseSettings):
     # engine.config.loader.admission_defects reports a pack declaring either and
     # the loader withholds it until a domain needs roles. Off: accepted, ignored.
     gate_role_exemption: bool = True
+    # CEG domain-neutrality Stage 2 follow-up (owner decision, item 5 / M2):
+    # FeedbackLoopSpec.outcome_node_label defaulted to one pack's label, so a
+    # pack that declared none wrote and read that pack's outcome nodes. The
+    # schema default is now None and every served pack declares its label. On:
+    # an outcome write or read on a pack that declares none raises
+    # OutcomeNodeLabelUndeclaredError (handlers: OutcomeVocabularyUndeclaredError).
+    # Ships on: hardening that restores "the domain spec is the single source of
+    # truth" (C-21) and changes nothing for a pack that declares its label. Off:
+    # an undeclared label resolves to the former default (C-21 rollback).
+    outcome_vocabulary_required_enabled: bool = True
+    # Stage 2 follow-up (owner decision, item 8 / M5-M8, "declare all,
+    # including geo"): the exclusion gate fell back to EXCLUDED_FROM /
+    # entity_id, community scoring to community_id, Louvain wrote communityId
+    # (so writer and readers disagreed, M8), and geo scoring / geoproximity to
+    # lat / lon / entity_id. On: those are declarations; a gate, scoring
+    # dimension or GDS job that uses one undeclared withholds the pack at
+    # admission (engine.config.loader.admission_defects, "undeclared structural
+    # property: ...") and the compilers raise UndeclaredStructuralPropertyError.
+    # Ships on: every served pack declares what it uses (hardening, C-21). Off:
+    # the former defaults (C-21 rollback).
+    declared_structural_properties_required_enabled: bool = True
+    # Stage 2 follow-up (item 7 / M5b): preference_attention compared the
+    # outcome nodes' hardcoded `community_id` with the candidate's declared
+    # property. On: the outcome side reads metadata.outcome_community_property,
+    # defaulting to the candidate's declared community property. Off: the
+    # hardcoded `community_id` (C-21 rollback).
+    preference_attention_declared_community_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

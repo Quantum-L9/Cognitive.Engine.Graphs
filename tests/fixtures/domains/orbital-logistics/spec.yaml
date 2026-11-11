@@ -16,7 +16,7 @@
 domain:
   id: orbital-logistics
   name: Orbital Logistics (synthetic verification domain)
-  version: 0.1.0
+  version: 0.2.0
   description: Launch windows seeking orbital depots that can receive their payload.
 ontology:
   nodes:
@@ -38,6 +38,22 @@ ontology:
       type: float
     - name: lon
       type: float
+    # Typed sync contract: a stored list<primitive>, a list<scalar> taxonomy
+    # field (one SERVES_ORBIT edge per element) and a wire-only list<map>
+    # consumed by childsync (one PropellantGrade + STOCKS edge per element).
+    - name: certifications
+      type: list
+      items: {type: string}
+    - name: served_orbits
+      type: list
+      items: {type: string}
+    - name: stocked_grades
+      type: list
+      items:
+        type: map
+        properties:
+        - {name: grade_code, type: string, required: true}
+        - {name: purity, type: float}
   - label: LaunchWindow
     managedby: api
     queryentity: true
@@ -54,12 +70,29 @@ ontology:
     - name: grade_code
       type: string
       required: true
+    - name: purity
+      type: float
+  - label: OrbitClass
+    managedby: static
+    taxonomy: true
+    properties:
+    - name: class_code
+      type: string
+      required: true
+    - name: altitude_km
+      type: float
   edges:
   - type: STOCKS
     from: OrbitalDepot
     to: PropellantGrade
     direction: DIRECTED
     category: capability
+    managedby: sync
+  - type: SERVES_ORBIT
+    from: OrbitalDepot
+    to: OrbitClass
+    direction: DIRECTED
+    category: taxonomy
     managedby: sync
   - type: RESUPPLIED_BY
     from: OrbitalDepot
@@ -121,10 +154,26 @@ sync:
     targetnode: OrbitalDepot
     idproperty: depot_id
     batchstrategy: UNWINDMERGE
+    taxonomyedges:
+    - field: served_orbits
+      edgetype: SERVES_ORBIT
+      targetlabel: OrbitClass
+      targetid: class_code
+    childsync:
+    - field: stocked_grades
+      targetnode: PropellantGrade
+      targetid: grade_code
+      edgetype: STOCKS
+      edgedirection: parenttochild
   - path: /v1/sync/propellant-grades
     method: POST
     targetnode: PropellantGrade
     idproperty: grade_code
+    batchstrategy: UNWINDMERGE
+  - path: /v1/sync/orbit-classes
+    method: POST
+    targetnode: OrbitClass
+    idproperty: class_code
     batchstrategy: UNWINDMERGE
 gdsjobs:
 - name: depot_reinforcement
@@ -160,3 +209,7 @@ outcome_signals:
   calibration_label: true
 - signal: aborted
   calibration_label: false
+# Outcome vocabulary is the pack's declaration (Stage 2 follow-up). cheese-aging
+# deliberately declares none, so it proves the refusal.
+feedbackloop:
+  outcome_node_label: DockingResult

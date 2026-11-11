@@ -1,0 +1,28 @@
+{
+  "_l9_meta": {
+    "l9_schema": 1,
+    "origin": "engine-specific",
+    "engine": "graph",
+    "layer": ["test"],
+    "tags": ["test", "fixtures", "domain-neutrality", "payload-contracts"],
+    "owner": "engine-team",
+    "status": "active"
+  },
+  "contract_version": "1.0.0-draft",
+  "domain": "orbital-logistics",
+  "entity_ref": "orbital.payload.manifest:9",
+  "entity_type": "payload_manifest",
+  "revision": 3,
+  "source_record": {
+    "system": "station_ledger",
+    "record_ref": "orbital.payload.manifest:9",
+    "revision": 3
+  },
+  "projection_version": "1.0.0",
+  "field_dictionary_version": "1.0.0",
+  "properties": {
+    "grade_code": "LOX"
+  },
+  "generated_at": "2026-08-01T13:30:00Z",
+  "packet_uuid": "00000000-0000-0000-0000-000000000000"
+}

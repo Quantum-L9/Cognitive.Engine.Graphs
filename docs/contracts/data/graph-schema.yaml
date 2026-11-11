@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════════════
 # Contract: Neo4j Graph Schema
 # Source:   engine/config/schema.py (NodeSpec, EdgeSpec, OntologySpec)
-#           engine/handlers.py (handle_outcomes — TransactionOutcome node)
+#           engine/handlers.py (handle_outcomes — the domain's outcome node)
 #           engine/handlers.py (handle_resolve — RESOLVED_FROM edge)
 #           engine/packet/packet_store.sql (PacketEnvelope node)
 # Version:  1.0.0
@@ -9,16 +9,22 @@
 # ═══════════════════════════════════════════════════════════════
 
 # NOTE: The graph schema is DOMAIN-DRIVEN. Node labels, properties,
-# and edge types are declared per-tenant in domains/*.yaml (OntologySpec).
-# This file documents the SYSTEM nodes that exist across all domains,
-# plus the schema abstraction layer used to declare domain schemas.
+# and edge types are declared per-tenant in domains/*/spec.yaml (OntologySpec).
+# This file documents the SYSTEM node and edge SHAPES the engine writes in every
+# domain, plus the schema abstraction layer used to declare domain schemas.
+# Their labels / types are the domain's declarations, not engine vocabulary.
 
 system_nodes:
 
-  - label: TransactionOutcome
+  - label: "< the domain's feedbackloop.outcome_node_label >"
+    example: TransactionOutcome   # PlasticOS, freight-matching, mortgage-brokerage declare this label
     description: |
       Records the result of a match transaction. Created by handle_outcomes().
-      Has a RESULTED_IN edge from the matched candidate entity.
+      The label is the domain's feedbackloop.outcome_node_label declaration; the
+      engine has no default, and an outcome write or read on a domain that
+      declares none fails (OutcomeVocabularyUndeclaredError,
+      outcome_vocabulary_required_enabled). Has an outcome edge from the matched
+      candidate entity (see system_edges).
     source: engine/handlers.py:handle_outcomes()
     properties:
       - name: outcome_id
@@ -47,9 +53,10 @@ system_nodes:
 
 system_edges:
 
-  - type: RESULTED_IN
+  - type: "< the domain's feedbackloop.outcome_edge_type >"
+    example: RESULTED_IN   # PlasticOS declares it; the write path still emits RESULTED_IN (split deferred with A09)
     from: "< matched candidate node >"
-    to: TransactionOutcome
+    to: "< the domain's feedbackloop.outcome_node_label >"
     description: |
       Causal edge from a candidate entity to its outcome record.
       Validated by CausalEdgeRuntimeValidator (R3) when causal.enabled=true

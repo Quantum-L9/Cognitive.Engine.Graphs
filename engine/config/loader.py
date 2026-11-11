@@ -515,16 +515,21 @@ def admission_defects(spec: DomainSpec, *, complete: bool = False) -> list[str]:
     ``settings.unvalidated_domain_packs_enabled`` is the operator's explicit,
     documented override (docs/FEATURE_GATES.md §16).
     """
+    from engine.config.structural_vocabulary import UndeclaredStructuralPropertyError, structural_property_defects
     from engine.gates.compiler import GateCompiler
 
     compiler = GateCompiler(spec)
-    defects: list[str] = []
+    # Stage 2 follow-up (item 8): structural properties a gate, scoring
+    # dimension or GDS job uses are declarations (declared_structural_properties_required_enabled).
+    defects: list[str] = structural_property_defects(spec)
     for gate in spec.gates:
         if gate.strictwhen:
             defects.append(f"{gate.name}: strictwhen {gate.strictwhen!r} is not consumed by any compiler")
         defects.extend(_role_field_defects(gate))
         try:
             cypher = compiler.compile(gate)
+        except UndeclaredStructuralPropertyError:
+            continue  # reported above, once, by structural_property_defects
         except (ValueError, KeyError) as exc:
             defects.append(f"{gate.name}: refused by the compiler — {exc}")
             continue
@@ -533,16 +538,8 @@ def admission_defects(spec: DomainSpec, *, complete: bool = False) -> list[str]:
         for param in _PARAM_REF.findall(cypher):
             if not _IDENTIFIER.fullmatch(param):
                 defects.append(f"{gate.name}: parameter {param!r} is not an identifier — {cypher}")
-    # plugins.inference_rules authorizes registered rules by name; a name the
-    # registry does not know would surface only when emit_inference_feedback
-    # runs it (KeyError), so it is an admission defect, not a runtime surprise.
-    if spec.plugins and spec.plugins.inference_rules:
-        from engine.inference_rule_registry import list_registered_rules
-
-        registered = set(list_registered_rules())
-        for rule_name in spec.plugins.inference_rules:
-            if rule_name not in registered:
-                defects.append(f"plugins.inference_rules: {rule_name!r} is not a registered inference rule")
+    defects.extend(_plugin_defects(spec))
+    defects.extend(_sync_shape_defects(spec))
     if complete or settings.scoring_admission_check_enabled or settings.admission_checks_full_match:
         defects.extend(_scoring_defects(spec, check_producers=complete or settings.scoring_admission_check_enabled))
     if complete or settings.admission_checks_full_match:
@@ -550,6 +547,50 @@ def admission_defects(spec: DomainSpec, *, complete: bool = False) -> list[str]:
     if complete:
         defects.extend(_complete_native_defects(spec))
     return list(dict.fromkeys(defects))
+
+
+def _plugin_defects(spec: DomainSpec) -> list[str]:
+    """Inference-rule authorization and parameters (``plugins``) as admission defects."""
+    plugins = spec.plugins
+    if not plugins or not (plugins.inference_rules or plugins.inference_rule_parameters):
+        return []
+    from engine.inference_rule_registry import list_registered_rules, rule_parameter_defects
+
+    # plugins.inference_rules authorizes registered rules by name; a name the
+    # registry does not know would surface only when emit_inference_feedback
+    # runs it (KeyError), so it is an admission defect, not a runtime surprise.
+    registered = set(list_registered_rules())
+    defects = [
+        f"plugins.inference_rules: {rule_name!r} is not a registered inference rule"
+        for rule_name in plugins.inference_rules
+        if rule_name not in registered
+    ]
+    # Rule parameters (the domain's vocabulary for rules such as
+    # infer_buyer_persona) are checked against the authorized rules.
+    defects.extend(rule_parameter_defects(spec))
+    return defects
+
+
+# Prefixes of the typed sync contract's admission defects (row_contract.py).
+_SYNC_SHAPE_PREFIXES = ("sync ", "ontology node ", "ontology edge ")
+
+
+def _sync_shape_defects(spec: DomainSpec) -> list[str]:
+    """Typed sync contract at admission (``engine/sync/row_contract.py``).
+
+    A declared ``map`` / ``list<map>`` no childsync consumes (Neo4j cannot
+    store either), and a node sync endpoint whose ``childsync`` /
+    ``taxonomyedges`` / ``fieldsupdated`` fields its ``targetnode`` does not
+    declare in a writable shape. Unconditional, like the tenant-mapping
+    declarations (D-7): a pack whose sync contract the spec cannot state is
+    withheld; ``unvalidated_domain_packs_enabled`` remains the operator override.
+    """
+    from engine.sync.row_contract import endpoint_shape_defects, stored_shape_defects
+
+    defects = stored_shape_defects(spec)
+    for endpoint in spec.sync.endpoints if spec.sync else []:
+        defects.extend(endpoint_shape_defects(spec, endpoint))
+    return defects
 
 
 def _complete_native_defects(spec: DomainSpec) -> list[str]:
@@ -758,14 +799,19 @@ def withholding_reason(spec: DomainSpec, *, complete: bool = False) -> str | Non
     if complete or not settings.unvalidated_domain_packs_enabled:
         defects = admission_defects(spec, complete=complete)
         if defects:
-            if not complete and not _match_admission_checks_enabled():
+            # Sync-shape and undeclared-structural-property defects are not gate
+            # compilation defects, so the reason names every defect.
+            from engine.config.structural_vocabulary import STRUCTURAL_DEFECT_PREFIX
+
+            sync_shape = any(defect.startswith((*_SYNC_SHAPE_PREFIXES, STRUCTURAL_DEFECT_PREFIX)) for defect in defects)
+            if not complete and not _match_admission_checks_enabled() and not sync_shape:
                 return (
                     f"Domain '{spec.domain.id}' is withheld: {len(defects)} gate(s) do not compile to executable "
                     f"Cypher ({defects[0]}); set UNVALIDATED_DOMAIN_PACKS_ENABLED=true to serve it anyway"
                 )
             return (
-                f"Domain '{spec.domain.id}' is withheld: {len(defects)} admission defect(s) — its gates, traversal "
-                f"or scoring do not compile to executable Cypher ({'; '.join(defects)}); "
+                f"Domain '{spec.domain.id}' is withheld: {len(defects)} admission defect(s) — its gates, traversal, "
+                f"scoring or sync declarations do not compile to executable Cypher ({'; '.join(defects)}); "
                 "set UNVALIDATED_DOMAIN_PACKS_ENABLED=true to serve it anyway"
             )
     return None

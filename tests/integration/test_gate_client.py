@@ -15,6 +15,8 @@ pytest.importorskip("constellation_node_sdk", reason="constellation-node-sdk not
 
 from engine.gate_client import get_gate_client, reset_gate_client
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.fixture(autouse=True)
 def clean_singleton():

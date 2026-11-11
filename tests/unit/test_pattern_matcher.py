@@ -28,6 +28,8 @@ import pytest
 from engine.config.schema import DomainSpec, FeedbackLoopSpec
 from engine.feedback.pattern_matcher import ConfigurationMatcher, jaccard_similarity
 
+pytestmark = pytest.mark.unit
+
 # ── Jaccard Similarity (pure function) ──────────────────
 
 
@@ -128,7 +130,7 @@ def _minimal_spec() -> DomainSpec:
         queryschema={"matchdirections": ["d1"], "fields": []},
         gates=[],
         scoring={"dimensions": []},
-        feedbackloop=FeedbackLoopSpec(enabled=True),
+        feedbackloop=FeedbackLoopSpec(enabled=True, outcome_node_label="TransactionOutcome"),
     )
 
 

@@ -376,10 +376,13 @@ def _pre_repair_freight_spec():  # type: ignore[no-untyped-def]
     return DomainSpec.model_validate(raw)
 
 
+# Community dimensions declare the community property they read (Stage 2
+# follow-up, item 8); these fixtures exercise the scoring admission checks.
 _BRIDGE = {
     "name": "bridge",
     "source": "computed",
     "computation": "community_bridge",
+    "candidateprop": "community_id",
     "weightkey": "wb",
     "defaultweight": 0.1,
 }
@@ -387,6 +390,7 @@ _ATTENTION = {
     "name": "attention",
     "source": "computed",
     "computation": "preference_attention",
+    "candidateprop": "community_id",
     "weightkey": "wa",
     "defaultweight": 0.1,
 }
@@ -543,15 +547,24 @@ class TestScoringAdmission:
             ["scoring[d1] bridge", "scoring[d1] attention", "scoring prior"]
         )
 
-    def test_freight_matching_is_withheld_for_its_unbound_scoring_parameters(self) -> None:
+    def test_freight_matching_is_withheld_for_its_unbound_scoring_parameters(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The pre-RU-037 freight shape: geodecay/pricealignment reference $lat, $lon, $target_price."""
+        from engine.config import loader as loader_module
         from engine.config.loader import admission_defects, withholding_reason
 
         spec = _pre_repair_freight_spec()
+        # Stage 2 follow-up (item 8): the undeclared geo properties are named first.
+        defects = "\n".join(admission_defects(spec))
+        assert "scoring 'deadhead_distance' (geodecay) declares no candidateprop" in defects
+        assert "'target_price'" in defects
+        assert withholding_reason(spec) is not None
+        # The RU-020 unbound-parameter check underneath, with that requirement off.
+        monkeypatch.setattr(loader_module.settings, "declared_structural_properties_required_enabled", False)
         defects = "\n".join(admission_defects(spec))
         for param in ("'lat'", "'lon'", "'target_price'"):
             assert param in defects
-        assert withholding_reason(spec) is not None
         # RU-037 declared the operands: the repository pack is admitted.
         assert admission_defects(_repo_spec("freight-matching")) == []
 
@@ -561,6 +574,8 @@ class TestScoringAdmission:
         monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", False)
         # RU-039's full-match check also compiles scoring; isolate this unit's flag.
         monkeypatch.setattr(loader_module.settings, "admission_checks_full_match", False)
+        # Gate-only admission: the undeclared-structural-property check is its own unit.
+        monkeypatch.setattr(loader_module.settings, "declared_structural_properties_required_enabled", False)
         for spec in (_spec_with_dimensions([_BRIDGE, _ATTENTION, _POPMEAN, _PRIOR]), _pre_repair_freight_spec()):
             assert loader_module.admission_defects(spec) == []
             assert loader_module.withholding_reason(spec) is None

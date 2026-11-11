@@ -32,8 +32,8 @@
   "fixtures": {
     "plasticos": {
       "path": "domains/plasticos/spec.yaml",
-      "git_blob_sha1": "a05b70f2d731ff6879ca006213f3589367088adf",
-      "sha256": "855fbf8e894392b951c294582a7b518db8b8cbf702bd617748037e3ecb44e435",
+      "git_blob_sha1": "39f2807b992c2c5761e5dff5927a3a06067e37ac",
+      "sha256": "5101ff7d1b9e5ddc2aefc964f131fc9faf23e8b368f097d49ee6baf8e51e4f18",
       "verdicts": {
         "default": {
           "flags": [],
@@ -64,7 +64,7 @@
     "freight-matching": {
       "path": "domains/freight-matching/spec.yaml",
       "git_blob_sha1": "95eae0a76e5578e4298bec98bfaad5d29eca2583",
-      "sha256": "7e3f4a21ab935d37ac33a0f8577a9e72d584d0ee76e5ac067fddf830694044c7",
+      "sha256": "aa53234193913cc683e8e1c46e153eaadf3c9956c102ae17585d1a89f1173d94",
       "verdicts": {
         "default": {
           "flags": [],

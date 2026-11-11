@@ -25,6 +25,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+import yaml
+
+pytestmark = pytest.mark.unit
 
 if TYPE_CHECKING:
     from engine.config.schema import DomainSpec
@@ -712,31 +715,52 @@ class TestContract21FeatureFlagDiscipline:
 
 
 class TestContract22ScoringWeightCeiling:
-    """CONTRACT 22: default scoring weights sum to <= 1.0, asserted at startup."""
+    """CONTRACT 22: a domain's default scoring weights sum to <= 1.0 per match direction, checked at spec load.
+
+    The engine declares no scoring dimensions of its own: the former fixed
+    four-dimension settings (structural, geo, reinforcement, freshness) and the
+    boot assertion over them were retired (CEG domain-neutrality Stage 2).
+    """
+
+    @staticmethod
+    def _spec(weights: list[float]) -> dict:
+        raw = yaml.safe_load((ROOT / "tests" / "fixtures" / "domains" / "cheese-aging" / "spec.yaml").read_text())
+        raw["scoring"]["dimensions"] = [
+            {
+                "name": f"dim_{i}",
+                "source": "candidateproperty",
+                "candidateprop": "humidity_pct",
+                "computation": "candidateproperty",
+                "weightkey": f"w_{i}",
+                "defaultweight": weight,
+            }
+            for i, weight in enumerate(weights)
+        ]
+        raw["feature_catalog"] = []
+        return raw
 
     @pytest.mark.contract
-    def test_weight_sum_assertion_exists(self):
+    def test_no_engine_wide_weight_set(self):
         from engine import boot
+        from engine.config.settings import Settings
 
-        assert callable(boot._assert_default_weight_sum)
-        assert boot._WEIGHT_CEILING == 1.0
-
-    @pytest.mark.contract
-    def test_default_weights_within_ceiling(self):
-        from engine.boot import _WEIGHT_CEILING
-        from engine.config.settings import settings
-
-        total = settings.w_structural + settings.w_geo + settings.w_reinforcement + settings.w_freshness
-        assert total <= _WEIGHT_CEILING + 1e-9, f"Default weight sum {total} exceeds {_WEIGHT_CEILING}"
+        assert not hasattr(boot, "_assert_default_weight_sum")
+        for retired in ("w_structural", "w_geo", "w_reinforcement", "w_freshness"):
+            assert retired not in Settings.model_fields
 
     @pytest.mark.contract
-    def test_assertion_raises_when_exceeded(self, monkeypatch):
-        from engine import boot
+    def test_spec_within_ceiling_is_accepted(self):
+        from engine.config.schema import DomainSpec
 
-        monkeypatch.setattr(boot.settings, "w_structural", 0.9)
-        monkeypatch.setattr(boot.settings, "w_geo", 0.9)
-        with pytest.raises(ValueError, match="exceeding"):
-            boot._assert_default_weight_sum()
+        DomainSpec.model_validate(self._spec([0.6, 0.4]))
+
+    @pytest.mark.contract
+    def test_spec_exceeding_ceiling_is_refused(self):
+        from engine.config.schema import DomainSpec
+
+        raw = self._spec([0.6, 0.6])
+        with pytest.raises(ValueError, match="exceeding 1.0"):
+            DomainSpec.model_validate(raw)
 
 
 class TestContract23AdminSubactionRegistration:
@@ -893,6 +917,7 @@ def _build_minimal_spec_with_scoring() -> DomainSpec:
                         computation=ComputationType.GEODECAY,
                         candidateprop="lat",
                         queryprop="lat",
+                        candidateprop_lon="lon",
                         weightkey="w_geo",
                         defaultweight=0.3,
                     ),

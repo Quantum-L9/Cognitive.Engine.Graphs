@@ -243,3 +243,158 @@ collision_probe:
 stage_dependencies:
   stage_3: CI guard that fails on reintroduced product vocabulary in generic executable paths (not implemented here by contract)
   stage_4: container-backed graph integration campaign; migrates tests/conftest.py and the Neo4j-backed suites off the PlasticOS database (A16)
+
+# ── Stage 2 removal follow-up (2026-11-11) ──────────────────────────────────
+# Appended, not rewritten: the entries above are the record as it was made.
+# Source: re-audit of origin/main @ 9251333 (findings M1-M12, D1-D6, removal
+# items 1-19) and the owner decisions taken on it. Each closure names the
+# executable proof; corrections name the entry above that they correct.
+followup:
+  audit_base: 9251333
+  corrections:
+    - corrects: A08
+      claim: "Makefile: ... seed target label neutral"
+      finding: >
+        False when made. Repo.mk:124 still read "Seed PlasticOS domain data into Neo4j"
+        on 9251333. The label is neutral as of this follow-up (item 2); the seed
+        target itself (it runs engine.scripts.seed, which does not exist) stays
+        owner-deferred.
+    - corrects: A10
+      claim: "kept: ... w_* weights (boot + handlers)"
+      finding: >
+        False when made. w_structural / w_geo / w_reinforcement / w_freshness were read
+        only by engine/boot.py::_assert_default_weight_sum; no scoring path or handler
+        read them. Retired in this follow-up (item 3 / M4 / D6).
+    - corrects: A11
+      claim: "disposition CLOSED"
+      finding: >
+        Closed but untested: nothing failed if CANONICAL_ENTITY_TYPES came back.
+        Guarded in this follow-up (item 13).
+  closures:
+    - item: 1
+      finding: M11
+      disposition: CLOSED
+      evidence:
+        - "engine/scoring/weight_discovery.py, engine/gates/types/all_gates.py, engine/compliance/audit.py, engine/compliance/pii.py, engine/packet/packet_store.sql, engine/packet/packet_store.py, engine/scoring/hgkr_utils.py, engine/feedback/{convergence,signal_weights,pattern_matcher}.py, engine/causal/{attribution,counterfactual}.py, engine/handlers.py, engine/config/schema.py: PlasticOS examples in comments/docstrings neutralized"
+      left_for_owner:
+        - ".env.template:138 comment (protected .env* file, not approved)"
+    - item: 2
+      finding: A08 (seed label)
+      disposition: CLOSED
+      evidence:
+        - "Repo.mk:124: seed target help text is 'Seed domain pack data into Neo4j'; the target is unchanged (owner-deferred)"
+    - item: 3
+      finding: M4 / D6
+      disposition: CLOSED
+      evidence:
+        - "engine/config/settings.py, chassis/auth/settings.py: w_structural / w_geo / w_reinforcement / w_freshness deleted"
+        - "engine/boot.py: _assert_default_weight_sum deleted; the per-spec, per-direction ceiling (DomainSpec validation, loader W1-01-weight-sum) is the C-22 check"
+        - "docs/contracts/SCORING_WEIGHT_CEILING.md, contracts/contract_22.yaml, docs/contracts/config/env-contract.yaml, .claude/rules/feature-flags.md, docs/TROUBLESHOOTING.md: fixed four-dimension set removed"
+        - "tests/contracts/test_contracts.py::TestContract22ScoringWeightCeiling, tests/contracts/test_env_contract.py::test_retired_scoring_weight_vars_not_declared, tests/unit/test_settings.py::test_no_engine_wide_scoring_weights, tests/unit/test_wave1_invariants.py::TestW102ScoreRange::test_no_engine_wide_default_weight_set"
+      left_for_owner:
+        - "docker-compose.yml:90-93 and .env.template:30-33 still set W_STRUCTURAL / W_GEO / W_REINFORCEMENT / W_FRESHNESS (protected files, not approved); Settings ignores them (extra=ignore)"
+    - item: 4
+      finding: A08 (compose variables)
+      disposition: LEFT_FOR_OWNER
+      reason: "docker-compose.yml:94-95 GEO_DECAY_KM / COMMUNITY_CROSS_BIAS are dead (Settings ignores them) but the file is protected and the change is not approved"
+    - item: 13
+      finding: A11
+      disposition: CLOSED
+      evidence:
+        - tests/unit/test_domain_neutrality_acceptance.py::test_semantic_registry_allowlist_stays_retired (AST scan of engine/; fails on a definition, read or import)
+    - item: banned_terms
+      disposition: CLOSED
+      evidence:
+        - "tests/unit/test_domain_neutrality_acceptance.py: _FORMER_BUILT_INS gains TransactionOutcome, RESULTED_IN, EXCLUDED_FROM, community_id, communityId; lat / lon are matched as whole identifiers (_FORMER_BUILT_IN_IDENTIFIERS) because as substrings they occur in generic Cypher"
+    - items: [14, 15, 17]
+      findings: [D1, D2, D5]
+      disposition: CLOSED
+      evidence:
+        - "docs/contracts/ENV_VARS.md: L9_API_KEY_PREFIX=pk_plasticos_ and L9_DEFAULT_TENANT=plasticos removed (no code reads either)"
+        - "docs/contracts/CYPHER_SAFETY.md Rule 4: the declared queryschema / derived parameters / scoring queryprop are the allowlist; no static key list"
+        - "docs/contracts/TEST_PATTERNS.md: generic tests load a synthetic pack (tests/fixtures/domains)"
+    - item: 19
+      finding: A15 test literals
+      disposition: OWNER_DEFERRED
+  closures_outcome_vocabulary:
+    - item: 5
+      finding: M2 (A09 node-label half)
+      owner_decision: "Require it, packs declare"
+      disposition: CLOSED
+      evidence:
+        - "engine/config/schema.py: FeedbackLoopSpec.outcome_node_label defaults to None"
+        - "engine/config/outcome_vocabulary.py: outcome_node_label() resolves the declared label or raises OutcomeNodeLabelUndeclaredError; engine/handlers.py raises OutcomeVocabularyUndeclaredError (ValidationError) for handle_outcomes, sync outcome items, admin score_feedback / generate_calibration_pairs / discover_weights"
+        - "engine/feedback/*, engine/causal/attribution.py, engine/causal/identity.py, engine/scoring/assembler.py (preference_attention): declared label only"
+        - "flag outcome_vocabulary_required_enabled (default on; off restores the former default) — docs/FEATURE_GATES.md §32"
+        - "domains/freight-matching, domains/mortgage-brokerage: declare outcome_node_label TransactionOutcome (no graph migration); plasticos already declared it"
+        - tests/unit/test_outcome_vocabulary_required.py (orbital-logistics declares DockingResult; cheese-aging declares nothing and is refused)
+      deferred:
+        - "outcome_edge_type / RESULTED_IN half stays deferred with A09 (not touched)"
+      left_for_owner:
+        - "the eight unserved packs declare no outcome_node_label; an outcome write on them fails once served"
+        - "ScoringDimensionSpec declares no `metadata` field, so preference_attention / community_bridge metadata cannot be declared in YAML (pydantic drops it); preference_attention can therefore never compile from a pack (it always lacks success_value). Not changed: schema.py changes are ask-first"
+    - item: 6
+      finding: M3
+      disposition: CLOSED
+      evidence:
+        - "engine/causal/counterfactual.py: outcome_label has no default; handle_outcomes passes the resolved declared label. The flag-off literal in _label() is the counterfactual_dedupe_and_spec_label C-21 rollback and stays (item 10)"
+        - tests/unit/test_counterfactual.py::TestCounterfactualDedupeAndLabel::test_outcome_label_has_no_default
+    - item: 16
+      findings: [D3, D4]
+      disposition: CLOSED
+      evidence:
+        - "docs/contracts/data/graph-schema.yaml, docs/contracts/agents/tool-schemas/_index.yaml, docs/contracts/FEEDBACK_LOOPS.md: the outcome node / edge / community key are the domain's feedbackloop.* (or declared community property) declaration, example PlasticOS"
+        - tests/contracts/test_data_models.py (outcome node and edge are declared placeholders with PlasticOS examples)
+  closures_structural_properties:
+    - item: 8
+      findings: [M5, M6, M7, M8]
+      owner_decision: "Declare all, including geo"
+      disposition: CLOSED
+      evidence:
+        - "engine/config/structural_vocabulary.py: exclusion edgetype / target candidateprop, geodecay candidateprop / candidateprop_lon, communitymatch / preference_attention / community_bridge community property, louvain writeproperty, geoproximity lat_property / lon_property / id_property are declarations; the former defaults live only in its C-21 rollback table"
+        - "engine/config/loader.py::admission_defects: a pack using one undeclared is withheld ('undeclared structural property: ...'); engine/gates/compiler.py, engine/scoring/assembler.py, engine/gds/scheduler.py raise UndeclaredStructuralPropertyError instead of borrowing"
+        - "M8: Louvain writes and community scoring reads the same declared property (no communityId / community_id defaults); proved in test_declared_structural_properties_compile_from_the_pack"
+        - "flag declared_structural_properties_required_enabled (default on; off restores the defaults) — docs/FEATURE_GATES.md §32"
+        - "domains/plasticos: geodecay dimensions now also declare candidateprop_lon / queryprop_lon: lon (the names they used); freight-matching already declared all four; mortgage-brokerage uses none. Served set unchanged; the served packs' compiled gates, traversal, scoring and GDS Cypher are byte-identical before and after (probe over every direction and GDS job)"
+        - "domains/_template.yaml declares the geo and exclusion properties it uses"
+        - tests/unit/test_domain_neutrality_acceptance.py (declared / undeclared cheese-aging variants; compilers refuse; flag-off rollback; served packs have no structural defect)
+      left_for_owner:
+        - "healthcare-referral (unserved) declares no geodecay properties; it gains a structural defect on top of its existing withholding reason"
+        - "geoproximity writeedge still defaults to COLOCATED_WITH (generic; not in the owner's list)"
+    - item: 7
+      finding: M5b
+      disposition: CLOSED
+      evidence:
+        - "engine/scoring/assembler.py: preference_attention compares the outcome nodes' metadata.outcome_community_property (default: the candidate's declared community property); flag preference_attention_declared_community_enabled (default on; off restores community_id)"
+        - tests/unit/test_domain_neutrality_acceptance.py::test_preference_attention_reads_the_declared_outcome_community_property
+    - item: 10
+      finding: M9
+      disposition: KEPT (owner decision)
+      evidence:
+        - "the C-21 flag-off rollback branches (spec_declared_candidate_id, counterfactual_dedupe_and_spec_label, geodecay_declared_longitude, causal_edge_declared_identity) are unchanged"
+  closures_persona_and_tooling:
+    - item: crm_inference_rules
+      owner_decision: "Keep, neutralize persona"
+      disposition: CLOSED
+      evidence:
+        - "engine/inference_rule_registry.py: the five generic rules stay; infer_buyer_persona reads personas / keywords / precedence / confidences from InferenceContext.rule_parameters (no keyword list in the engine; no declaration -> no inference)"
+        - "engine/config/schema.py: PluginsSpec.inference_rule_parameters (per-rule parameters keyed by rule name)"
+        - "engine/config/loader.py::admission_defects + rule_parameter_defects: an authorized rule that needs parameters and declares none, parameters for an unauthorized rule, or a malformed declaration withholds the pack (mirrors the plugins.inference_rules check)"
+        - "engine/handlers.py emit_inference_feedback: passes the pack's declared parameters"
+        - "no flag: no pack authorizes infer_buyer_persona, so no deployment's behaviour changes"
+        - tests/unit/test_domain_neutrality_acceptance.py (persona admission + handler), tests/gap_fixes/test_gap3_inference_registry.py
+    - item: 9
+      finding: M1 (A04 make gates)
+      disposition: CLOSED
+      evidence:
+        - "Repo.mk: repo-validate, agent-check and agent-check-unit run tools/payload_contract_compiler.py $(PAYLOAD_COMPILER_ARGS) = --domains-root tests/fixtures/domains --fixtures-root tests/fixtures/payloads/orbital-logistics --domain orbital-logistics"
+        - "tests/fixtures/payloads/orbital-logistics: neutral examples / negative_examples (generated by write_synthetic_fixture_set, residual vertical refs neutralized); the PlasticOS example fixtures stay covered by tests/unit/test_payload_contract_compiler.py"
+        - "the fixtures carry C-18 headers (registered in tools/l9_meta_injector.py); tools/payload_contract_compiler.py drops the `_l9_meta` header key before admission"
+        - tests/unit/test_payload_contract_compiler.py (make gates name the neutral roots; neutral fixtures pass with no product pack; header key stripped)
+        - "proof: make repo-validate passes on a copy of the tree with domains/plasticos removed"
+    - item: 12
+      finding: M12
+      disposition: CLOSED
+      evidence:
+        - ".github/workflows/compliance.yml 'Validate domain specs': globs domains/*/spec.yaml and fails on a spec that does not validate or on an empty match (it previously matched nothing and warned non-blocking)"
+        - "run locally: all 11 packs validate (aios-god-agent, executive-assistant, freight-matching, healthcare-referral, idea-portfolio, legal-discovery, mortgage-brokerage, plasticos, repo-as-agent, research-agent, roofing-company); no pack fix was needed"

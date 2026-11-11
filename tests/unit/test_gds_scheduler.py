@@ -213,7 +213,7 @@ class TestAlgorithmDispatch:
     @pytest.mark.asyncio
     async def test_louvain_executes_project_and_write(self):
         driver = _mock_driver([{"communityCount": 5, "modularity": 0.42}])
-        job = _job("test_louvain", "louvain")
+        job = _job("test_louvain", "louvain", writeproperty="cluster_id")
         spec = _minimal_spec([job])
         scheduler = GDSScheduler(spec, driver)
 
@@ -437,7 +437,11 @@ class TestAlgorithmDispatch:
     @pytest.mark.asyncio
     async def test_geoproximity_creates_proximity_edges(self):
         driver = _mock_driver([{"edges_created": 8}])
-        job = _job("test_geo", "geoproximity")
+        job = _job(
+            "test_geo",
+            "geoproximity",
+            writeproperties=[{"lat_property": "northing", "lon_property": "easting", "id_property": "site_ref"}],
+        )
         spec = _minimal_spec([job])
         scheduler = GDSScheduler(spec, driver)
 
@@ -526,7 +530,7 @@ class TestErrorHandling:
     async def test_execute_job_catches_exception(self):
         driver = _mock_driver()
         driver.execute_query = AsyncMock(side_effect=RuntimeError("Neo4j down"))
-        job = _job("test_fail", "louvain")
+        job = _job("test_fail", "louvain", writeproperty="cluster_id")
         spec = _minimal_spec([job])
         scheduler = GDSScheduler(spec, driver)
 
@@ -538,7 +542,7 @@ class TestErrorHandling:
     async def test_job_history_records_failures(self):
         driver = _mock_driver()
         driver.execute_query = AsyncMock(side_effect=RuntimeError("boom"))
-        job = _job("history_test", "louvain")
+        job = _job("history_test", "louvain", writeproperty="cluster_id")
         spec = _minimal_spec([job])
         scheduler = GDSScheduler(spec, driver)
 
@@ -677,7 +681,7 @@ class TestStableLouvainContract:
     @pytest.mark.asyncio
     async def test_stability_runs_report_no_consensus(self):
         driver = _mock_driver([{"communityCount": 4, "modularity": 0.40}])
-        job = _job("stable_louvain", "louvain").model_copy(update={"stability_runs": 3})
+        job = _job("stable_louvain", "louvain", writeproperty="cluster_id").model_copy(update={"stability_runs": 3})
         scheduler = GDSScheduler(_minimal_spec([job]), driver)
 
         result = await scheduler.execute_job(job)

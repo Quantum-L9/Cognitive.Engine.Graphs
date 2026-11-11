@@ -40,6 +40,8 @@ from engine.traversal.multihop import (
 )
 from engine.traversal.pseudo_query import PseudoQueryGenerator
 
+pytestmark = pytest.mark.unit
+
 # ── Mock Implementations ─────────────────────────────────────────────
 
 

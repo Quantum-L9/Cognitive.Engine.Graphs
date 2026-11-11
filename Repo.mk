@@ -38,6 +38,12 @@
 # provisioned environment). Override with `make <phase> VENV=/path/to/venv`.
 VENV ?= .venv
 REPO_PY := $(if $(wildcard $(VENV)/bin/python),$(VENV)/bin/python,python3)
+# Payload contract compiler gate: a synthetic verification pack and its neutral
+# fixtures, so no make gate depends on a product pack under domains/ (Stage 2
+# follow-up, item 9). The PlasticOS example fixtures are validated by
+# tests/unit/test_payload_contract_compiler.py.
+PAYLOAD_COMPILER_ARGS := --stdout-only --domains-root tests/fixtures/domains \
+	--fixtures-root tests/fixtures/payloads/orbital-logistics --domain orbital-logistics
 
 .PHONY: repo-setup repo-validate repo-check repo-test
 .PHONY: dev dev-build dev-down dev-logs dev-restart health
@@ -58,7 +64,7 @@ repo-validate:	## Action refs, contract files + scan, payload contract compiler,
 	@echo "── Contract violation scan ──"
 	@$(REPO_PY) tools/contract_scanner.py
 	@echo "── Payload contract compiler validator ──"
-	@PYTHONPATH="$${PYTHONPATH:-}:." $(REPO_PY) tools/payload_contract_compiler.py --stdout-only
+	@PYTHONPATH="$${PYTHONPATH:-}:." $(REPO_PY) tools/payload_contract_compiler.py $(PAYLOAD_COMPILER_ARGS)
 	@echo "── L9_META headers (C-18) ──"
 	@$(REPO_PY) tools/l9_meta_injector.py check
 
@@ -121,7 +127,7 @@ test-integration:	## Integration tests (needs Neo4j)
 
 # ── Data Seeding ───────────────────────────────────────────
 
-seed:	## Seed PlasticOS domain data into Neo4j
+seed:	## Seed domain pack data into Neo4j
 	docker compose exec api python -m engine.scripts.seed
 
 # ── Shell Access ───────────────────────────────────────────
@@ -310,7 +316,7 @@ agent-check:	## Agent completion gate: CI's blocking set + audit harness, run lo
 	@echo "── [3/8] Contract violation scan ──"
 	@python3 tools/contract_scanner.py
 	@echo "── [4/8] Payload contract compiler validator ──"
-	@PYTHONPATH="$${PYTHONPATH:-}:." python3 tools/payload_contract_compiler.py --stdout-only
+	@PYTHONPATH="$${PYTHONPATH:-}:." python3 tools/payload_contract_compiler.py $(PAYLOAD_COMPILER_ARGS)
 	@echo "── [5/8] Lint + format ──"
 	@ruff check .
 	@ruff format --check .
@@ -334,7 +340,7 @@ agent-check-unit:	## Local agent gate (skips Docker integration/perf): CI's bloc
 	@echo "── [3/8] Contract violation scan ──"
 	@python3 tools/contract_scanner.py
 	@echo "── [4/8] Payload contract compiler validator ──"
-	@PYTHONPATH="$${PYTHONPATH:-}:." python3 tools/payload_contract_compiler.py --stdout-only
+	@PYTHONPATH="$${PYTHONPATH:-}:." python3 tools/payload_contract_compiler.py $(PAYLOAD_COMPILER_ARGS)
 	@echo "── [5/8] Lint + format ──"
 	@ruff check .
 	@ruff format --check .

@@ -35,6 +35,8 @@ from engine.handlers import (
 )
 from engine.state import _reset_singleton, get_state
 
+pytestmark = pytest.mark.unit
+
 # ============================================================================
 # FIXTURES
 # ============================================================================

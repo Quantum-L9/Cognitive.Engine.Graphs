@@ -20,6 +20,8 @@ Covers:
 
 from __future__ import annotations
 
+import pytest
+
 from engine.config.schema import (
     ComputationType,
     DomainSpec,
@@ -30,6 +32,8 @@ from engine.config.schema import (
     SignalWeightSpec,
 )
 from engine.scoring.assembler import ScoringAssembler
+
+pytestmark = pytest.mark.unit
 
 
 def _spec_with_penalty(
@@ -79,6 +83,7 @@ def _spec_with_penalty(
                     name="geo_score",
                     source=ScoringSource.CANDIDATEPROPERTY,
                     candidateprop="lat",
+                    candidateprop_lon="lon",
                     computation=ComputationType.GEODECAY,
                     weightkey="w_geo",
                     defaultweight=0.5,

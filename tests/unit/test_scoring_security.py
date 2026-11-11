@@ -20,6 +20,8 @@ import pytest
 
 from engine.scoring.assembler import _validate_custom_expression
 
+pytestmark = pytest.mark.unit
+
 
 class TestValidateCustomExpression:
     """Test _validate_custom_expression() for CUSTOMCYPHER security."""

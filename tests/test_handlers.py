@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from engine.config.schema import PropertySpec
 from engine.handlers import (
     ValidationError,
     handle_admin,
@@ -28,6 +29,8 @@ from engine.handlers import (
     handle_sync,
     init_dependencies,
 )
+
+pytestmark = pytest.mark.unit
 
 # ── Stage 2 P4: candidate identity comes from the domain, not a hardcoded entity_id ──
 
@@ -148,10 +151,8 @@ def _make_domain_spec() -> MagicMock:
 
     node = MagicMock()
     node.label = "Facility"
-    prop = MagicMock()
-    prop.name = "facility_id"
-    prop.required = True
-    node.properties = [prop]
+    # A declared type: sync validates rows against it (typed sync contract).
+    node.properties = [PropertySpec(name="facility_id", type="string", required=True)]
     spec.ontology.nodes = [node]
 
     # Feedback loop: unset MagicMock attribute chains would leak into

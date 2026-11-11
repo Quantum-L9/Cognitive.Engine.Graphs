@@ -6,6 +6,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 DOMAINS_DIR = Path(__file__).parent.parent.parent / "domains"
 
 ECOA_PROHIBITED = [

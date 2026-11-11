@@ -34,6 +34,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 _SQL_PATH = Path(__file__).resolve().parents[2] / "engine" / "packet" / "packet_store.sql"
 
 
