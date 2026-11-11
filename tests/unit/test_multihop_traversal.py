@@ -26,6 +26,8 @@ from engine.traversal.multihop import (
     TraversalResult,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class MockNeighborFetcher:
     """Mock neighbor fetcher for testing."""
