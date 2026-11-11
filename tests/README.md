@@ -110,8 +110,8 @@ open htmlcov/index.html
 ## Prerequisites
 
 ```bash
-# Install test dependencies
-poetry add --group dev pytest pytest-asyncio pytest-cov pytest-mock testcontainers faker
+# Install test dependencies (project + every group, from uv.lock)
+make setup
 
 # Start Neo4j for integration tests (or use TestContainers)
 docker run -d --name neo4j-test \
@@ -184,9 +184,8 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
-      - run: pip install poetry
-      - run: poetry install
-      - run: poetry run pytest --cov=engine --cov-fail-under=70
+      - run: bash tools/deps/install_locked.sh full
+      - run: python -m pytest --cov=engine --cov-fail-under=70
 ```
 
 ## Test Data Management
@@ -335,8 +334,8 @@ mv test-gates-all-types.py tests/unit/test_gates_all_types.py
 # 3. Extract consolidated file
 python extract_tests.py  # Split tests-consolidated.py into 11 files
 
-# 4. Install dependencies
-poetry add --group dev pytest pytest-asyncio pytest-cov pytest-mock testcontainers faker
+# 4. Install dependencies (from uv.lock)
+make setup
 
 # 5. Run tests
 pytest tests/ -v --cov=engine --cov-report=html

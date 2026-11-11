@@ -330,7 +330,7 @@ python --version  # Local: 3.12.2
 # Use exact CI environment locally
 docker run -it --rm -v $(pwd):/workspace python:3.12 bash
 cd /workspace
-pip install -r requirements-ci.txt
+bash tools/deps/install_locked.sh full
 pytest tests/integration/
 ```
 

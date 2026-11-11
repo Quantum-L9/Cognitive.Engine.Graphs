@@ -18,9 +18,12 @@ WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements-runtime.lock requirements-runtime.lock
-COPY tools/deps/install_locked.sh tools/deps/install_locked.sh
-RUN PIP_PREFIX=/install bash tools/deps/install_locked.sh runtime
+# uv.lock is the single lock: install_locked.sh bootstraps a hash-pinned uv into
+# this stage's interpreter and syncs the runtime profile into /opt/venv, which
+# is all the final stage copies (uv itself stays behind).
+COPY pyproject.toml uv.lock ./
+COPY tools/deps/install_locked.sh tools/deps/uv-bootstrap.txt tools/deps/
+RUN UV_PROJECT_ENVIRONMENT=/opt/venv bash tools/deps/install_locked.sh runtime
 
 COPY engine/ ./engine/
 COPY domains/ ./domains/
@@ -34,8 +37,10 @@ ARG L9_ENV=prod
 
 WORKDIR /app
 
-# Copy installed packages + app code
-COPY --from=builder /install /usr/local
+# Copy the locked environment + app code. The venv's interpreter links to
+# /usr/local/bin/python3.12, which this stage shares (same base digest).
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 COPY --from=builder /build/engine ./engine
 COPY --from=builder /build/domains ./domains
 COPY --from=builder /build/chassis ./chassis

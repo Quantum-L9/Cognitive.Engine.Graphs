@@ -112,7 +112,7 @@ jobs:
             ```
 
             on `main`, using the ruff version pinned in
-            `requirements-ci.txt` / `pyproject.toml`.
+            `pyproject.toml` (dependency groups, locked in `uv.lock`).
 
             **Validation status:**
             - Syntax validation passed (`python -m py_compile`)

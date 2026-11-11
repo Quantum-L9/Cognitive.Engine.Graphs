@@ -14,11 +14,11 @@ Core-owned tools sit on one version across every CEG file.
 Quantum-L9/l9-ci-core owns the versions of the shared tools
 (.github/actions/install-consumer-ci/toolchain-lock.json); version drift from
 Core is prohibited org-wide. The required ``Analyze (central Core)`` check
-compares CEG's requirements*.txt with that lock, but it does not read the
-Poetry dependency groups, poetry.lock, the uv locks or the pre-commit rev
-comments. These tests close that gap from CEG's side without copying the Core
-lock: every declaration of a Core-owned tool must name the same version, so
-Core's comparison of requirements*.txt covers all of them.
+compares CEG's declarations with that lock, and only warns. These tests make
+the rule fail from CEG's side without copying the Core lock: every declaration
+of a Core-owned tool (pyproject.toml [project] and [dependency-groups],
+uv.lock, the pre-commit rev comments) must name the same version, so Core's
+comparison of any one of them covers all of them.
 
 They also keep the two Dependabot rules that stop drift recurring: Core-owned
 tools are ignored, and every github/codeql-action step runs one version.
@@ -33,6 +33,8 @@ from pathlib import Path
 
 import pytest
 import yaml
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -42,9 +44,6 @@ pytestmark = pytest.mark.unit
 # are pinned elsewhere and have no CEG package declaration to compare).
 CORE_TOOLS = ("pytest", "ruff", "mypy", "pre-commit", "semgrep")
 
-_REQ_PIN = re.compile(r"^([A-Za-z0-9_.\-]+)==([^\s\\;#]+)")
-# Poetry reads a bare version ("9.1.1") as exact, like "==9.1.1".
-_EXACT = re.compile(r"^(?:==?)?\s*(\d+(?:\.\d+)*)$")
 _PRECOMMIT_REPOS = {
     "https://github.com/astral-sh/ruff-pre-commit": "ruff",
     "https://github.com/pre-commit/mirrors-mypy": "mypy",
@@ -55,29 +54,25 @@ def _declarations() -> dict[str, set[tuple[str, str]]]:
     """Map each Core-owned tool to the (version, source) pairs CEG declares."""
     found: dict[str, set[tuple[str, str]]] = defaultdict(set)
 
-    for path in sorted(ROOT.glob("requirements*.txt")) + sorted(ROOT.glob("requirements*.lock")):
-        for line in path.read_text(encoding="utf-8").splitlines():
-            match = _REQ_PIN.match(line.strip())
-            if match and match.group(1).lower() in CORE_TOOLS:
-                found[match.group(1).lower()].add((match.group(2), path.name))
-
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    groups = pyproject.get("tool", {}).get("poetry", {}).get("group", {})
-    sections = {"tool.poetry.dependencies": pyproject.get("tool", {}).get("poetry", {}).get("dependencies", {})}
-    sections.update({f"tool.poetry.group.{name}": body.get("dependencies", {}) for name, body in groups.items()})
-    for section, deps in sections.items():
-        for name, spec in deps.items():
-            if name.lower() not in CORE_TOOLS:
+    sections = {"project.dependencies": pyproject.get("project", {}).get("dependencies", [])}
+    sections.update(
+        {f"dependency-groups.{name}": specs for name, specs in pyproject.get("dependency-groups", {}).items()}
+    )
+    for section, specs in sections.items():
+        for spec in specs:
+            req = Requirement(spec)
+            name = canonicalize_name(req.name)
+            if name not in CORE_TOOLS:
                 continue
-            raw = spec if isinstance(spec, str) else spec.get("version", "")
-            match = _EXACT.match(raw.strip())
-            version = match.group(1) if match else f"non-exact:{raw}"
-            found[name.lower()].add((version, f"pyproject.toml [{section}]"))
+            exact = [s.version for s in req.specifier if s.operator in ("==", "===")]
+            version = exact[0] if len(exact) == 1 and len(req.specifier) == 1 else f"non-exact:{req.specifier}"
+            found[name].add((version, f"pyproject.toml [{section}]"))
 
-    lock = tomllib.loads((ROOT / "poetry.lock").read_text(encoding="utf-8"))
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
     for package in lock.get("package", []):
-        if package["name"].lower() in CORE_TOOLS:
-            found[package["name"].lower()].add((package["version"], "poetry.lock"))
+        if canonicalize_name(package["name"]) in CORE_TOOLS:
+            found[canonicalize_name(package["name"])].add((package["version"], "uv.lock"))
 
     config = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
     raw_lines = (ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8").splitlines()
@@ -112,8 +107,9 @@ def test_core_owned_tools_are_declared_somewhere() -> None:
 
 def test_dependabot_ignores_core_owned_tools() -> None:
     config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
-    pip = next(u for u in config["updates"] if u["package-ecosystem"] == "pip")
-    ignored = {entry["dependency-name"].lower() for entry in pip.get("ignore", []) if "versions" not in entry}
+    # uv when uv.lock exists (the org render's rule), which is the case here.
+    python = next(u for u in config["updates"] if u["package-ecosystem"] == "uv")
+    ignored = {entry["dependency-name"].lower() for entry in python.get("ignore", []) if "versions" not in entry}
     assert set(CORE_TOOLS) <= ignored, (
         f"Dependabot must not propose Core-owned tools: missing {set(CORE_TOOLS) - ignored}"
     )

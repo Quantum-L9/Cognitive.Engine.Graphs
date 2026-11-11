@@ -21,17 +21,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
-COPY requirements-runtime.lock requirements-runtime.lock
-COPY tools/deps/install_locked.sh tools/deps/install_locked.sh
-RUN PIP_PREFIX=/install bash tools/deps/install_locked.sh runtime
+# uv.lock is the single lock: install_locked.sh bootstraps a hash-pinned uv into
+# this stage's interpreter and syncs the runtime profile into /opt/venv, which
+# is all the runtime stage copies (uv itself stays behind).
+COPY pyproject.toml uv.lock ./
+COPY tools/deps/install_locked.sh tools/deps/uv-bootstrap.txt tools/deps/
+RUN UV_PROJECT_ENVIRONMENT=/opt/venv bash tools/deps/install_locked.sh runtime
 
 # ── Stage 2: Runtime ───────────────────────────────────────
 FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS runtime
 
 WORKDIR /app
 
-# Copy installed packages from deps stage
-COPY --from=deps /install /usr/local
+# Copy the locked environment from the deps stage. Its interpreter links to
+# /usr/local/bin/python3.12, which this stage shares (same base digest).
+COPY --from=deps /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy application code
 COPY engine/ /app/engine/

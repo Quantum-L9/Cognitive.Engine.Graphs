@@ -832,9 +832,7 @@ FILE_REGISTRY: list[FileMeta] = [
         ["chassis", "auth", "test"],
         "platform-team",
     ),
-    FileMeta(
-        "pyproject.toml", "engine-specific", ["build", "config"], ["build", "dependencies", "poetry"], "engine-team"
-    ),
+    FileMeta("pyproject.toml", "engine-specific", ["build", "config"], ["build", "dependencies", "uv"], "engine-team"),
     FileMeta(
         "graph-cognitive-engine-spec-v1.1.0.yaml", "engine-specific", ["config"], ["spec", "engine-spec"], "engine-team"
     ),

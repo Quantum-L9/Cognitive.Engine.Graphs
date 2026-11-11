@@ -132,9 +132,13 @@ def test_committed_runtime_installers_do_not_resolve_dependencies() -> None:
 def test_locked_installer_is_rooted_and_hash_enforced() -> None:
     script = (ROOT / "tools" / "deps" / "install_locked.sh").read_text()
     assert 'ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"' in script
-    assert "--only-binary :all:" in script
-    assert "--no-binary constellation-node-sdk" in script
-    assert "--require-hashes" in script
+    # uv itself installs by hash; every other package syncs from uv.lock, which
+    # verifies each distribution's sha256 (tests/unit/test_uv_lock.py keeps every
+    # registry package a hashed wheel). --locked refuses a stale lock.
+    assert '--require-hashes -r "$ROOT/tools/deps/uv-bootstrap.txt"' in script
+    assert "uv sync" in script
+    assert "--locked" in script
+    assert "--no-verify-hashes" not in script
 
 
 def test_docker_context_excludes_sensitive_local_material() -> None:
@@ -179,4 +183,5 @@ def test_docker_run_and_e2e_sdk_installs_are_immutable_and_hash_checked() -> Non
     assert "archive --format=tar.gz" in e2e
     assert "FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159" in e2e
     assert "--require-hashes" in e2e
-    assert "requirements-runtime.lock" in e2e
+    assert "uv export" in e2e
+    assert "--no-emit-package constellation-node-sdk" in e2e

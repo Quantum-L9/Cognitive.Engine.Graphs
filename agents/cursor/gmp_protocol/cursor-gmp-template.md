@@ -749,7 +749,7 @@ Scope: [Which modules are affected]
 - Impact: [What breaks downstream]
 
 ### Change Items:
-1. [ ] Update requirements.txt
+1. [ ] Update pyproject.toml and run `uv lock` (uv.lock)
    - Old: [old dependency]
    - New: [new dependency]
    - Reason: [Why upgrade]

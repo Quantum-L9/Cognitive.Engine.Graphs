@@ -52,15 +52,12 @@ def test_lock_requires_tag_reference_and_resolved_sha() -> None:
     lock = (
         'name = "constellation-node-sdk"\n'
         'version = "1.1.0"\n'
-        "[package.source]\n"
-        'type = "git"\n'
-        'url = "https://github.com/Quantum-L9/Gate_SDK.git"\n'
-        'reference = "v1"\n'
-        'resolved_reference = "e9f829f982110be13752da8f18c7a9692e8ed908"\n'
+        'source = { git = "https://github.com/Quantum-L9/Gate_SDK.git?tag=v1'
+        '#e9f829f982110be13752da8f18c7a9692e8ed908" }\n'
     )
-    assert check_text("poetry.lock", lock) == []
-    stale = lock.replace('reference = "v1"', 'reference = "69c6c67060b08440734a61473c03663423709964"')
-    assert check_text("poetry.lock", stale)
+    assert check_text("uv.lock", lock) == []
+    stale = lock.replace("?tag=v1#", "?tag=69c6c67060b08440734a61473c03663423709964#")
+    assert check_text("uv.lock", stale)
 
 
 @pytest.mark.unit
@@ -80,10 +77,8 @@ def test_repo_tree_matches_v1_policy() -> None:
 def test_lock_resolution_reads_the_resolved_object() -> None:
     lock = (
         'name = "constellation-node-sdk"\n'
-        "[package.source]\n"
-        'url = "https://github.com/Quantum-L9/Gate_SDK.git"\n'
-        'reference = "v1"\n'
-        f'resolved_reference = "{CHANNEL_OBJECT}"\n'
+        'version = "1.1.0"\n'
+        f'source = {{ git = "https://github.com/Quantum-L9/Gate_SDK.git?tag=v1#{CHANNEL_OBJECT}" }}\n'
     )
     assert lock_resolution(lock) == CHANNEL_OBJECT
     assert lock_resolution("no sdk source block here\n") is None
@@ -110,7 +105,7 @@ def test_an_unresolvable_channel_fails_closed() -> None:
 @pytest.mark.unit
 def test_a_lock_without_a_resolved_reference_fails_closed() -> None:
     errors = compare_lock_to_tag(None, CHANNEL_OBJECT)
-    assert any("no resolved_reference" in item for item in errors), errors
+    assert any("no resolved commit" in item for item in errors), errors
 
 
 # ── remote validation (SonarCloud pythonsecurity:S8705) ──────────────────────

@@ -62,11 +62,11 @@ else
 fi
 
 # --- Install Python dependencies ---
-if [[ -f "$ROOT_DIR/requirements-full.lock" ]]; then
+if [[ -f "$ROOT_DIR/uv.lock" ]]; then
   echo "📦 Installing hash-locked development dependencies..."
   bash "$ROOT_DIR/tools/deps/install_locked.sh" full
 else
-  echo "⚠️  No requirements-full.lock found — skipping Python deps"
+  echo "⚠️  No uv.lock found — skipping Python deps"
 fi
 
 # --- Pull Docker images ---

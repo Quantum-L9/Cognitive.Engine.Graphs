@@ -24,10 +24,9 @@ status: active
 - Check Python syntax (all .py files)
 - Validate YAML files (.github/workflows/*.yml)
 - `sdk-channel` (networked, gated by `ci-gate`): `scripts/validate_sdk_pin.py --verify-tag`, then
-  `tools/deps/lock_requirements.py --check`, which re-renders every `requirements-*.lock` seeded
-  with the committed lock and the upload cutoff in `tools/deps/exclude-newer.txt`. It fails only
-  when a requirements file changed without a re-render (or a pinned release was yanked); only
-  `--upgrade` moves pins and the cutoff.
+  `uv lock --check`, which resolves `pyproject.toml` with `uv.lock` as the preference and fails
+  when a dependency changed without `uv lock` (or a pinned release was yanked). It never moves a
+  locked version; `uv lock --upgrade-package <name>` (or Dependabot's uv PR) does.
 
 ### Phase 2: Lint & Type Check
 - Ruff linter (`ruff check`)

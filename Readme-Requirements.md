@@ -16,8 +16,8 @@ status: active
 
 | Generated File | Target Path | Purpose |
 | :-- | :-- | :-- |
-| `requirements.txt` | `requirements.txt` | Pinned production deps from pyproject.toml |
-| `requirements-dev.txt` | `requirements-dev.txt` | Test/lint deps, includes `-r requirements.txt` |
+| `pyproject.toml` | `pyproject.toml` | `[project]` runtime deps + `[dependency-groups]` (dev, ci, tools, licenses) |
+| `uv.lock` | `uv.lock` | The single lock: every version and sha256, installed by `tools/deps/install_locked.sh` |
 | `engine-config-settings.py` | `engine/config/settings.py` | pydantic-settings `Settings` class |
 | `engine-api-dependencies.py` | `engine/api/dependencies.py` | FastAPI `Depends()` injection |
 
@@ -39,5 +39,5 @@ status: active
 - `get_domain_loader()` → returns the cached domain pack loader
 - `startup()` / `shutdown()` → called from `create_app()` lifespan
 
-**`requirements.txt`** pins every dep from `pyproject.toml` with `>=X,<Y` bounds — works for Docker builds and non-Poetry envs .
+**`uv.lock`** is the only lock (2026-11-11: it replaced `poetry.lock`, the `requirements*.txt` files and the hashed `requirements-*.lock` files). Edit `pyproject.toml`, run `uv lock`, commit both.
 <span style="display:none">[^5]<

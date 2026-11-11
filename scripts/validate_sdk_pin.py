@@ -2,8 +2,9 @@
 """Fail closed unless Gate_SDK is pinned to the moving major tag.
 
 Policy (CEG#266 / PR #263): constellation-node-sdk tracks ``Quantum-L9/Gate_SDK@v1``.
-Manifests name the major tag. poetry.lock records that tag as ``reference`` and
-the resolved object as ``resolved_reference``.
+The manifest (pyproject.toml ``[tool.uv.sources]``) names the major tag. uv.lock
+records that tag in the source URL query and the resolved commit in its fragment:
+``git = "https://github.com/Quantum-L9/Gate_SDK.git?tag=v1#<commit>"``.
 
 Gate_SDK owns what ``v1`` means (``contracts/RELEASE_IDENTITY_LEDGER.json``,
 schema v2).
@@ -18,7 +19,7 @@ validate_sdk_pin.py`` enforces the same contract over that repo's
 
 That left one trade-off documented as accepted: a build resolving the manifest
 live takes whatever ``v1`` points at that minute, while a lock-driven build
-takes ``resolved_reference``, and moving the tag without refreshing the lock
+takes the commit uv.lock records, and moving the tag without refreshing the lock
 separates them. ``--verify-tag`` turns that accepted risk into a detected
 failure — it resolves the channel at the canonical remote and compares. The
 divergence is still a deliberate act, but it is no longer one this repository
@@ -28,7 +29,7 @@ Modes
 -----
 default        Offline structural checks over the active surfaces.
 --verify-tag   Resolves ``v1`` at the canonical remote and requires
-               ``resolved_reference`` to match. Fails closed when the remote
+               uv.lock's resolved commit to match. Fails closed when the remote
                cannot be resolved — a lock that cannot be checked has not been
                checked.
 """
@@ -46,10 +47,12 @@ CANONICAL_REPO = "Quantum-L9/Gate_SDK"
 CANONICAL_REMOTE = f"https://github.com/{CANONICAL_REPO}.git"
 FORBIDDEN_FORK = "cryptoxdog/Gate_SDK"
 SHA_RE = re.compile(r"\b[0-9a-f]{40}\b")
+LOCK_FILE = "uv.lock"
+# The constellation-node-sdk entry of uv.lock: its git source carries the
+# requested tag in the query and the resolved commit in the fragment.
 LOCK_REFERENCE_RE = re.compile(
-    r'name = "constellation-node-sdk".*?\[package\.source\].*?'
-    r'reference = "([^"]+)".*?resolved_reference = "([0-9a-f]{40})"',
-    re.DOTALL,
+    r'name = "constellation-node-sdk"\nversion = "[^"]*"\n'
+    r'source = \{ git = "[^"?#]+\?tag=([^"#&]+)#([0-9a-f]{40})" \}'
 )
 
 
@@ -59,7 +62,7 @@ def check_text(rel: str, text: str) -> list[str]:
         errors.append(f"{rel}: missing {CANONICAL_REPO}")
     if FORBIDDEN_FORK in text:
         errors.append(f"{rel}: {FORBIDDEN_FORK} remains")
-    if rel == "poetry.lock":
+    if rel == LOCK_FILE:
         match = LOCK_REFERENCE_RE.search(text)
         if match is None:
             errors.append(f"{rel}: constellation-node-sdk source block missing")
@@ -68,7 +71,7 @@ def check_text(rel: str, text: str) -> list[str]:
             if reference != MAJOR_TAG:
                 errors.append(f"{rel}: reference={reference!r} (want {MAJOR_TAG!r})")
             if not SHA_RE.fullmatch(resolved):
-                errors.append(f"{rel}: resolved_reference is not a SHA")
+                errors.append(f"{rel}: resolved commit is not a SHA")
     else:
         if MAJOR_TAG not in text:
             errors.append(f"{rel}: missing moving major tag {MAJOR_TAG}")
@@ -79,7 +82,7 @@ def check_text(rel: str, text: str) -> list[str]:
 
 def check_tree(root: Path) -> list[str]:
     errors: list[str] = []
-    for rel in ("pyproject.toml", "requirements.txt", "poetry.lock"):
+    for rel in ("pyproject.toml", LOCK_FILE):
         path = root / rel
         if not path.exists():
             continue
@@ -88,7 +91,7 @@ def check_tree(root: Path) -> list[str]:
 
 
 def lock_resolution(text: str) -> str | None:
-    """The concrete object poetry recorded for the moving tag."""
+    """The concrete object uv.lock recorded for the moving tag."""
     match = LOCK_REFERENCE_RE.search(text)
     return match.group(2) if match else None
 
@@ -151,8 +154,8 @@ def resolve_remote_tag(remote: str, tag: str) -> str | None:
 
 
 def resolved_commit(root: Path) -> str | None:
-    """The commit poetry.lock records for the major tag, for the PASS line."""
-    path = root / "poetry.lock"
+    """The commit uv.lock records for the major tag, for the PASS line."""
+    path = root / LOCK_FILE
     if not path.exists():
         return None
     match = LOCK_REFERENCE_RE.search(path.read_text(encoding="utf-8"))
@@ -164,12 +167,12 @@ def compare_lock_to_tag(resolved: str | None, tag_sha: str | None) -> list[str]:
     if tag_sha is None:
         return [f"--verify-tag: could not resolve {CANONICAL_REPO}@{MAJOR_TAG}; an unverifiable lock does not pass"]
     if resolved is None:
-        return ["--verify-tag: poetry.lock carries no resolved_reference to compare"]
+        return ["--verify-tag: uv.lock carries no resolved commit to compare"]
     if resolved != tag_sha:
         return [
             (
-                f"--verify-tag: poetry.lock resolved_reference is {resolved} but "
-                f"{MAJOR_TAG} now points at {tag_sha} — the lock is stale; re-run `poetry lock`"
+                f"--verify-tag: uv.lock resolves to {resolved} but "
+                f"{MAJOR_TAG} now points at {tag_sha} — the lock is stale; run `uv lock --upgrade-package constellation-node-sdk`"
             )
         ]
     return []
@@ -181,7 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--verify-tag",
         action="store_true",
-        help="resolve the channel at the canonical remote and compare to poetry.lock",
+        help="resolve the channel at the canonical remote and compare to uv.lock",
     )
     args = parser.parse_args(argv)
 
@@ -197,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             errors.extend(compare_lock_to_tag(resolved_commit(args.root), tag_sha))
             if not errors:
-                print(f"NETWORK: {CANONICAL_REPO}@{MAJOR_TAG} == poetry.lock {tag_sha}")
+                print(f"NETWORK: {CANONICAL_REPO}@{MAJOR_TAG} == uv.lock {tag_sha}")
 
     if errors:
         print("FAIL")
@@ -206,10 +209,10 @@ def main(argv: list[str] | None = None) -> int:
     mode = "offline + networked" if args.verify_tag else "offline"
     resolved = resolved_commit(args.root)
     if resolved is None:
-        # check_tree() already accepts a tree with no poetry.lock, so this is
+        # check_tree() already accepts a tree with no uv.lock, so this is
         # reachable. Printing "PASS ... -> None" in a build log reads as a pin
         # that resolved to nothing; say what is actually true instead.
-        print(f"PASS CEG pin {CANONICAL_REPO}@{MAJOR_TAG} ({mode}; no poetry.lock, no resolved commit recorded)")
+        print(f"PASS CEG pin {CANONICAL_REPO}@{MAJOR_TAG} ({mode}; no uv.lock, no resolved commit recorded)")
         return 0
     print(f"PASS CEG pin {CANONICAL_REPO}@{MAJOR_TAG} ({mode}) -> {resolved}")
     return 0

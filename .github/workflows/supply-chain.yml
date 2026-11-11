@@ -194,7 +194,7 @@ jobs:
       - name: Install Dependencies
         run: |
           # pip-licenses reports on what is installed: the locked runtime set
-          # (requirements.txt + the Gate SDK) plus pip-licenses itself.
+          # (pyproject.toml [project] dependencies + the Gate SDK) plus pip-licenses.
           bash tools/deps/install_locked.sh runtime
 
       - name: Check License Compliance

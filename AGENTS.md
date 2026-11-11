@@ -169,3 +169,13 @@ Exactly one formatter owns each language. Do not reformat a file with a tool oth
 Generated from `environment/ide/policy.json` in the governance clone by `ops/scripts/adapters/agentdocs.sh`. Edit the policy, not this block.
 
 <!-- END L9 FORMATTER OWNERSHIP -->
+
+> **2026-11-11 correction (additive; append-only):** the `make setup` line in the
+> Commands block above is superseded. `pyproject.toml` (`[project]` +
+> `[dependency-groups]` dev, ci, tools, licenses) and `uv.lock` are the only
+> dependency manifest and lock; `poetry.lock`, `requirements*.txt`,
+> `requirements-*.lock` and `tools/deps/lock_requirements.py` are retired.
+> `make setup` syncs the full profile from `uv.lock` into `.venv`; CI and the
+> images use `tools/deps/install_locked.sh ci|full|runtime|tools`. Change a
+> dependency with `uv add` / edit + `uv lock`, and commit `uv.lock`.
+> `tests/unit/test_uv_lock.py` fails on a stale lock or a second manifest.
