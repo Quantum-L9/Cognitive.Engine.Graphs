@@ -16,8 +16,8 @@ async def test_sync_merges_facilities(engine_deps, clean_db):
             "entity_type": "facilities",
             # Spec sync endpoint /v1/sync/facilities declares idproperty: facility_id
             "batch": [
-                {"facility_id": 9001, "name": "Omega Plastics", "contamination_tolerance": 0.03},
-                {"facility_id": 9002, "name": "Delta Recycle", "contamination_tolerance": 0.07},
+                {"facility_id": "9001", "name": "Omega Plastics", "contamination_tolerance": 0.03},
+                {"facility_id": "9002", "name": "Delta Recycle", "contamination_tolerance": 0.07},
             ],
         },
     )
@@ -31,7 +31,7 @@ async def test_sync_idempotent_on_second_call(engine_deps, clean_db):
 
     payload = {
         "entity_type": "facilities",
-        "batch": [{"facility_id": 9003, "name": "Idem Facility"}],
+        "batch": [{"facility_id": "9003", "name": "Idem Facility"}],
     }
     r1 = await handle_sync("plasticos", payload)
     r2 = await handle_sync("plasticos", payload)

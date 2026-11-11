@@ -37,11 +37,15 @@ logger = structlog.get_logger(__name__)
 # index here the benchmark measured a :Facility label scan instead, and its
 # speed depended on how many Facility nodes the integration suite had left in
 # the shared database (0.53 s for 500 updates, failing the 1000/sec target).
-_BENCH_INDEXES = (("facility_id", "ceg_bench_facility_id"), ("tenant", "ceg_bench_facility_tenant"))
+_BENCH_INDEXES = (
+    ("facility_id", "ceg_bench_facility_id"),
+    ("tenant", "ceg_bench_facility_tenant"),
+    ("_tenant", "ceg_bench_facility_stamp"),
+)
 
 
 async def _ensure_facility_indexes(graph_driver, db: str) -> None:
-    """Index :Facility(facility_id) and :Facility(tenant) unless already indexed.
+    """Index :Facility(facility_id), :Facility(tenant) and :Facility(_tenant) unless already indexed.
 
     Only a RANGE index serves the benchmark's equality MATCH/MERGE (TEXT,
     FULLTEXT, POINT and VECTOR indexes do not). A uniqueness constraint's
@@ -119,13 +123,18 @@ class TestSyncThroughput:
         )
         generator = SyncGenerator(domain_spec)
         cypher = generator.generate_sync_query(sync_spec, batch)
+        # The statement reads the declared projection (`row.node`), exactly as
+        # handle_sync binds it; undeclared keys (`tenant`, `gate_mode`, ...) are
+        # dropped, so this benchmark identifies its rows by the engine stamp
+        # `_tenant`, which the statement sets from $tenant.
+        write_batch, _dropped = generator.project_batch(sync_spec, batch)
 
         # Benchmark: 5 iterations
         latencies: list[float] = []
         for _ in range(5):
             # Clean before each iteration
             await graph_driver.execute_query(
-                "MATCH (f:Facility {tenant: $tenant}) DETACH DELETE f",
+                "MATCH (f:Facility {_tenant: $tenant}) DETACH DELETE f",
                 parameters={"tenant": tenant},
                 database=db,
             )
@@ -133,7 +142,7 @@ class TestSyncThroughput:
             t0 = time.perf_counter()
             await graph_driver.execute_query(
                 cypher,
-                parameters={"batch": batch, "tenant": tenant},
+                parameters={"batch": write_batch, "tenant": tenant},
                 database=db,
             )
             elapsed = time.perf_counter() - t0
@@ -153,7 +162,7 @@ class TestSyncThroughput:
 
         # Verify data landed
         count_result = await graph_driver.execute_query(
-            "MATCH (f:Facility {tenant: $tenant}) RETURN count(f) AS cnt",
+            "MATCH (f:Facility {_tenant: $tenant}) RETURN count(f) AS cnt",
             parameters={"tenant": tenant},
             database=db,
         )
@@ -163,7 +172,7 @@ class TestSyncThroughput:
 
         # Cleanup
         await graph_driver.execute_query(
-            "MATCH (f:Facility {tenant: $tenant}) DETACH DELETE f",
+            "MATCH (f:Facility {_tenant: $tenant}) DETACH DELETE f",
             parameters={"tenant": tenant},
             database=db,
         )

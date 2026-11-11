@@ -276,6 +276,28 @@ class Settings(BaseSettings):
     # FOREACH, and childtoparent emits `(n)<-[:T]-(c)`. Off: the legacy
     # UNWIND-based path. Ships on — the legacy path cannot execute.
     childsync_foreach_projection: bool = True
+    # Typed sync contract (2026-11-11): node sync wrote `SET n += row{.*}`, so a
+    # row stored every key it carried, declared or not, and the childsync and
+    # taxonomy Cypher assumed shapes the spec could not declare. On: the
+    # generator writes only the target node's declared, storable properties
+    # (`SET n += row.node`, built by `SyncGenerator.project_batch` from the
+    # spec), each childsync child only the properties its item map and child
+    # node both declare (a `managedby: static` child is written on create
+    # only) and a `list<scalar>` taxonomy field links one node per element.
+    # Ships on — it restores "the domain spec is the single source of truth".
+    # Off: the `row{.*}` contract and the childsync_foreach_projection paths.
+    # (Admission of the declarations themselves is unconditional: loader.py.)
+    sync_declared_projection_enabled: bool = True
+    # Sync ingress validation: every node-endpoint row is checked against the
+    # tenant spec's declared types (SyncRowContract) before compliance logs the
+    # request or any Cypher runs; any defect refuses the whole batch, listing
+    # every defect as `row <i> <field>: expected <declared>, got <actual>`.
+    # No coercion (a JSON string is never parsed into a list). Ships on.
+    sync_row_type_validation_enabled: bool = True
+    # Undeclared row keys. Off (default): dropped by the declared projection,
+    # counted in the response (`undeclared_properties`) and logged by name.
+    # On: refused as defects with the rest of the batch.
+    sync_undeclared_property_refusal_enabled: bool = False
     # CEG-009b: GateSpec declares `queryparam_min` / `queryparam_max` (range,
     # query-window form) and `candidateprop_start` / `candidateprop_end`
     # (temporalrange, candidate-window form), and GateCompiler ignored all

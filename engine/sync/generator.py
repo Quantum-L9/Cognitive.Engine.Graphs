@@ -30,6 +30,7 @@ from engine.config.schema import (
     SyncStrategy,
 )
 from engine.config.tenant_mapping import declared_ref_namespace
+from engine.sync.row_contract import SyncRowContract
 from engine.utils.security import sanitize_label
 
 logger = logging.getLogger(__name__)
@@ -53,11 +54,102 @@ class SyncGenerator:
             return self._generate_unwind_match_set(endpoint_spec)
         raise ValueError(f"Unknown sync strategy: {endpoint_spec.batchstrategy}")
 
+    def row_contract(self, endpoint_spec: SyncEndpointSpec) -> SyncRowContract:
+        """The endpoint's typed row contract; ``ValueError`` names every undeclared shape."""
+        return SyncRowContract.from_spec(self.domain_spec, endpoint_spec)
+
+    def project_batch(
+        self, endpoint_spec: SyncEndpointSpec, batch_data: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], dict[str, int]]:
+        """The ``$batch`` the declared-projection Cypher reads, and the undeclared keys it dropped.
+
+        Each row becomes ``{"node": {...}, "children": {<field>: [...]}}`` holding
+        only properties the spec declares writable (``SyncRowContract.project``).
+        Used with ``sync_declared_projection_enabled``.
+        """
+        return self.row_contract(endpoint_spec).project(batch_data)
+
+    def _generate_declared_merge(self, spec: SyncEndpointSpec) -> str:
+        """UNWINDMERGE over ``project_batch`` rows: every identifier and shape from the spec.
+
+        The parent receives ``row.node`` (declared, storable, present keys), so
+        a key the spec does not declare — or a wire-only ``list<map>`` — never
+        reaches ``SET``. A ``list<scalar>`` taxonomy field links one taxonomy
+        node per element; a scalar field one. Each childsync child receives only
+        the properties its item map and its node both declare; a
+        ``managedby: static`` child is written only when the MERGE creates it.
+        """
+        contract = self.row_contract(spec)
+        target = sanitize_label(contract.target_label)
+        id_property = sanitize_label(contract.idproperty)
+        cypher_parts = [
+            "UNWIND $batch AS row",
+            f"MERGE (n:{target} {{{id_property}: row.node.{id_property}}})",
+            "SET n += row.node, n._tenant = $tenant",
+        ]
+        for tax_edge in spec.taxonomyedges or []:
+            edge_type = sanitize_label(tax_edge.edgetype)
+            tax_label = sanitize_label(tax_edge.targetlabel)
+            tax_id = sanitize_label(tax_edge.targetid)
+            tax_field = sanitize_label(tax_edge.field)
+            if tax_edge.field in contract.taxonomy_lists:
+                # One edge per element; an element naming no taxonomy node links nothing.
+                cypher_parts.extend(
+                    [
+                        "WITH n, row",
+                        f"OPTIONAL MATCH (tax:{tax_label}) WHERE tax.{tax_id} IN coalesce(row.node.{tax_field}, [])",
+                        "WITH n, row, collect(tax) AS taxonomy_nodes",
+                        f"FOREACH (tax IN taxonomy_nodes | MERGE (n)-[:{edge_type}]->(tax))",
+                    ]
+                )
+            else:
+                cypher_parts.extend(
+                    [
+                        "WITH n, row",
+                        f"OPTIONAL MATCH (tax:{tax_label} {{{tax_id}: row.node.{tax_field}}})",
+                        "FOREACH (_ IN CASE WHEN tax IS NOT NULL THEN [1] ELSE [] END |",
+                        f"  MERGE (n)-[:{edge_type}]->(tax)",
+                        ")",
+                    ]
+                )
+        for child, projection in zip(spec.childsync or [], contract.children, strict=True):
+            child_label = sanitize_label(child.targetnode)
+            child_edge = sanitize_label(child.edgetype)
+            child_field = sanitize_label(projection.field)
+            child_id = sanitize_label(projection.targetid)
+            if child.edgedirection == "parenttochild":
+                edge_pattern = f"(n)-[:{child_edge}]->(c)"
+            elif child.edgedirection == "childtoparent":
+                edge_pattern = f"(n)<-[:{child_edge}]-(c)"
+            else:
+                msg = (
+                    f"Endpoint '{spec.path}': childsync '{child.field}' edgedirection must be "
+                    f"'parenttochild' or 'childtoparent', got {child.edgedirection!r}"
+                )
+                raise ValueError(msg)
+            write = "ON CREATE SET" if projection.static else "SET"
+            cypher_parts.extend(
+                [
+                    "WITH n, row",
+                    f"FOREACH (child_row IN coalesce(row.children.{child_field}, []) |",
+                    f"  MERGE (c:{child_label} {{{child_id}: child_row.{child_id}}})",
+                    f"  {write} c += child_row, c._tenant = $tenant",
+                    f"  MERGE {edge_pattern}",
+                    ")",
+                ]
+            )
+        return "\n".join(cypher_parts)
+
     def _generate_unwind_merge(self, spec: SyncEndpointSpec) -> str:
         if not spec.targetnode:
             raise ValueError(f"Endpoint '{spec.path}': targetnode required for MERGE")
         if not spec.idproperty:
             raise ValueError(f"Endpoint '{spec.path}': idproperty required for MERGE")
+
+        from engine.config.settings import settings
+
+        if settings.sync_declared_projection_enabled:
+            return self._generate_declared_merge(spec)
 
         sanitized_target = sanitize_label(spec.targetnode)
         sanitized_id = sanitize_label(spec.idproperty)
@@ -68,8 +160,6 @@ class SyncGenerator:
         # can only be of primitive types or arrays thereof"), so childsync could
         # never execute. Null-override the child fields in a map projection so
         # the parent receives only its own properties.
-        from engine.config.settings import settings
-
         child_fields = [sanitize_label(child.field) for child in spec.childsync or []]
         if child_fields and settings.childsync_foreach_projection:
             null_overrides = ", ".join(f"{field}: null" for field in child_fields)
@@ -151,20 +241,28 @@ class SyncGenerator:
         if not spec.idproperty:
             raise ValueError(f"Endpoint '{spec.path}': idproperty required")
 
+        from engine.config.settings import settings
+
+        # Declared projection: rows are `project_batch` rows; read `row.node`.
+        row_source = "row"
+        if settings.sync_declared_projection_enabled:
+            self.row_contract(spec)  # refuses an endpoint whose fields are not declared
+            row_source = "row.node"
+
         cypher_parts = [
             "UNWIND $batch AS row",
-            f"MATCH (n:{sanitize_label(spec.targetnode)} {{{sanitize_label(spec.idproperty)}: row.{sanitize_label(spec.idproperty)}}})",
+            f"MATCH (n:{sanitize_label(spec.targetnode)} {{{sanitize_label(spec.idproperty)}: {row_source}.{sanitize_label(spec.idproperty)}}})",
         ]
 
         if spec.fieldsupdated:
-            set_clauses = [f"n.{sanitize_label(field)} = row.{sanitize_label(field)}" for field in spec.fieldsupdated]
+            set_clauses = [
+                f"n.{sanitize_label(field)} = {row_source}.{sanitize_label(field)}" for field in spec.fieldsupdated
+            ]
             set_clauses.append("n._tenant = $tenant")
             set_clauses.append("n.updated_at = datetime()")
             cypher_parts.append("SET " + ",\n    ".join(set_clauses))
         else:
-            cypher_parts.append("SET n += row, n._tenant = $tenant")
-
-        from engine.config.settings import settings
+            cypher_parts.append(f"SET n += {row_source}, n._tenant = $tenant")
 
         # RU-060 / CEG-COR-169: MATCH drops rows with no existing node; report how
         # many rows actually matched (and were updated) so the handler need not
