@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from engine.config.loader import DomainPackLoader
 from engine.config.schema import DomainSpec
 from engine.traversal.assembler import TraversalAssembler
+
+pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[2]
 DIRECTION = "supply_opportunity_to_buyer_facility"

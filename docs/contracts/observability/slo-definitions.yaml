@@ -11,7 +11,7 @@ contract_id: CEG-OBS-SLO-DEFINITIONS-v1
 campaign_id: CEG-CONTRACT-COMPLETE-2026-10-30
 baseline:
   repository: Quantum-L9/Cognitive.Engine.Graphs
-  commit: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  commit: 3379309971f9defa40c393b2292f2f1784aa90ac
 authority: candidate_extracted_from_source
 schema: l9.ceg.observability.slo-definitions/v1
 owner: CEG SRE/service owner with chassis metrics owner
@@ -19,13 +19,13 @@ status: slo_targets_not_approved_or_measured
 source_refs:
 - path: chassis/handler_registration.py
   symbol: audit/status
-  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 - path: tests/performance/test_query_latency.py
   symbol: test-specific thresholds
-  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 - path: chassis/chassis_app.py
   symbol: _execute_route
-  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 observed:
   fixture_latency_tests: true
   observed_production_sli_stream_proven: false

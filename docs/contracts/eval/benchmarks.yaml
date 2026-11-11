@@ -11,7 +11,7 @@ contract_id: CEG-EVAL-BENCHMARKS-v1
 campaign_id: CEG-CONTRACT-COMPLETE-2026-10-30
 baseline:
   repository: Quantum-L9/Cognitive.Engine.Graphs
-  commit: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  commit: 3379309971f9defa40c393b2292f2f1784aa90ac
 authority: candidate_extracted_from_source
 schema: l9.ceg.eval.benchmarks/v1
 owner: CEG evaluation/quality owner
@@ -19,13 +19,13 @@ status: partial_test_coverage_not_release_benchmark
 source_refs:
 - path: tests/performance/test_query_latency.py
   symbol: fixture p95 tests
-  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 - path: tests/performance/test_sync_throughput.py
   symbol: throughput tests
-  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 - path: tools/hoprag_benchmark.py
   symbol: standalone benchmark
-  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 observed:
   scenario_tests:
   - source: tests/performance/test_query_latency.py

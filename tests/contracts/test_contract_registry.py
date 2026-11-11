@@ -21,6 +21,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 CONTRACTS_DIR = ROOT / "contracts"
 SCANNER = ROOT / "tools" / "contract_scanner.py"

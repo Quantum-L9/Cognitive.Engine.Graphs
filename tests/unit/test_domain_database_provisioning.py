@@ -24,6 +24,8 @@ from engine.graph.driver import (
     _looks_like_absent_database,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class _RecordingDriver(GraphDriver):
     """GraphDriver with the Neo4j round trip replaced by a recorder."""

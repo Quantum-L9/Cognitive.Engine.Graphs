@@ -18,7 +18,10 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
 import yaml
+
+pytestmark = pytest.mark.unit
 
 REPO = Path(__file__).resolve().parents[2]
 

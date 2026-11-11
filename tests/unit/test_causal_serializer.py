@@ -31,6 +31,8 @@ from engine.config.schema import (
     DomainSpec,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _spec_with_causal(enabled: bool = True) -> DomainSpec:
     return DomainSpec(

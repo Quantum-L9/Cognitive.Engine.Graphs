@@ -27,6 +27,8 @@ from jsonschema import Draft202012Validator
 
 from tests.contracts._constants import CONTRACTS_ROOT
 
+pytestmark = pytest.mark.unit
+
 REPO = Path(__file__).resolve().parents[2]
 TOOL_NAMES = {"match", "sync", "admin", "outcomes", "resolve", "enrich"}
 

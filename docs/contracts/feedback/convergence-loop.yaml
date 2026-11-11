@@ -11,7 +11,7 @@ contract_id: CEG-FEEDBACK-CONVERGENCE-v1
 campaign_id: CEG-CONTRACT-COMPLETE-2026-10-30
 baseline:
   repository: Quantum-L9/Cognitive.Engine.Graphs
-  commit: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  commit: 3379309971f9defa40c393b2292f2f1784aa90ac
 authority: candidate_extracted_from_source
 schema: l9.ceg.feedback.convergence/v1
 owner: CEG feedback domain owner
@@ -19,13 +19,13 @@ status: implemented_code_path_gated_not_deployment_proven
 source_refs:
 - path: engine/feedback/convergence.py
   symbol: ConvergenceLoop.on_outcome_recorded
-  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 - path: engine/handlers.py
   symbol: _feedback_effective,handle_outcomes,handle_sync
-  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 - path: engine/config/settings.py
   symbol: feedback_enabled
-  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 activation:
   global_setting: feedback_enabled
   global_default: false

@@ -20,6 +20,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
+pytestmark = pytest.mark.unit
+
 ROOT = Path(__file__).resolve().parents[2]
 ENGINE = ROOT / "engine"
 CHASSIS = ROOT / "chassis"

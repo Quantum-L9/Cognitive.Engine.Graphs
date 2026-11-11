@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 def test_sanitize_label_accepts_valid():
     from engine.utils.security import sanitize_label

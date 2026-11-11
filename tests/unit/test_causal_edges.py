@@ -37,6 +37,8 @@ from engine.config.schema import (
     FeedbackLoopSpec,
 )
 
+pytestmark = pytest.mark.unit
+
 # ── CausalEdgeType Enum ────────────────────────────────
 
 

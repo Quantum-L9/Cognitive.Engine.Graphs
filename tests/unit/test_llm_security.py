@@ -19,6 +19,8 @@ import pytest
 
 from engine.security.llm import sanitize_llm_input
 
+pytestmark = pytest.mark.unit
+
 
 class TestSanitizeNormalizesBeforeMatching:
     @pytest.mark.parametrize(

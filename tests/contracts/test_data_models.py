@@ -10,6 +10,8 @@ Sources:
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 try:
     from jsonschema import ValidationError, validate
 except ImportError:

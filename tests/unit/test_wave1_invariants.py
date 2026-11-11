@@ -29,6 +29,8 @@ from engine.config.schema import (
 )
 from engine.config.settings import Settings
 
+pytestmark = pytest.mark.unit
+
 # Canonical patch target — all `from engine.config.settings import settings`
 # binds the module-level singleton, so we patch the object at its source.
 _SETTINGS_TARGET = "engine.config.settings.settings"

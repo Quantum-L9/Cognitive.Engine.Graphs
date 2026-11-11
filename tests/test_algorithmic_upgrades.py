@@ -44,6 +44,8 @@ from engine.security.P2_9_llm_schemas import (
     validate_llm_json,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestComputeFingerprint:
     """Tests for compute_fingerprint()."""
