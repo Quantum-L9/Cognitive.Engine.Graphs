@@ -548,6 +548,12 @@ def admission_defects(spec: DomainSpec, *, complete: bool = False) -> list[str]:
         for rule_name in spec.plugins.inference_rules:
             if rule_name not in registered:
                 defects.append(f"plugins.inference_rules: {rule_name!r} is not a registered inference rule")
+    # Rule parameters (the domain's vocabulary for rules such as
+    # infer_buyer_persona) are checked against the authorized rules.
+    if spec.plugins and (spec.plugins.inference_rules or spec.plugins.inference_rule_parameters):
+        from engine.inference_rule_registry import rule_parameter_defects
+
+        defects.extend(rule_parameter_defects(spec))
     defects.extend(_sync_shape_defects(spec))
     if complete or settings.scoring_admission_check_enabled or settings.admission_checks_full_match:
         defects.extend(_scoring_defects(spec, check_producers=complete or settings.scoring_admission_check_enabled))

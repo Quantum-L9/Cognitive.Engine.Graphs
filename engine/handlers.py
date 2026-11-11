@@ -2236,7 +2236,8 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         # not authorize is rejected rather than executed. A non-list is rejected
         # rather than iterated — a bare string would otherwise be walked
         # character by character and every char looked up as a rule name.
-        authorized = authorized_rules(domain_loader.load_domain(domain_id))
+        inference_spec = domain_loader.load_domain(domain_id)
+        authorized = authorized_rules(inference_spec)
         if "rules" in payload:
             requested = payload["rules"]
             if not isinstance(requested, list) or not all(isinstance(r, str) for r in requested):
@@ -2261,6 +2262,8 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             domain_id=domain_id,
             pass_number=int(payload.get("pass_number", 1)),
             known_fields=dict(entity),
+            # The domain's declared vocabulary for rules that need one (infer_buyer_persona).
+            rule_parameters=dict(inference_spec.plugins.inference_rule_parameters) if inference_spec.plugins else {},
         )
         # Named `inferred`, not `result`: `result` is already bound to a
         # dict[str, Any] earlier in this function, and reusing it here is a type

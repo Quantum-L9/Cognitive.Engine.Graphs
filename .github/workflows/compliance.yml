@@ -67,22 +67,27 @@ jobs:
 
       - name: Validate domain specs
         run: |
-          # Ensure all YAML specs can be loaded by Pydantic
-          # Schema drift (snake_case YAML vs camelCase Pydantic) tracked in issue #XXX
+          # Every pack under domains/<id>/spec.yaml must load as a DomainSpec.
+          # The former glob ('*_domain_spec.yaml') matched no file, so this step
+          # validated nothing (Stage 2 follow-up, M12). A pack that does not
+          # validate, or an empty match, fails the step.
           python -c "
+          import sys
           from pathlib import Path
           import yaml
           from engine.config.schema import DomainSpec
-          warnings = []
-          for path in Path('domains/').glob('*_domain_spec.yaml'):
-              with open(path) as f:
-                  try:
-                      DomainSpec.model_validate(yaml.safe_load(f))
-                      print(f'  {path}: OK')
-                  except Exception as e:
-                      warnings.append(str(path))
-                      print(f'  WARNING {path}: schema drift (non-blocking)')
-          if warnings:
-              print(f'Note: {len(warnings)} domain spec(s) need schema alignment (tracked separately)')
-          print('Domain spec validation complete')
+          paths = sorted(Path('domains').glob('*/spec.yaml'))
+          if not paths:
+              sys.exit('no domains/*/spec.yaml found: the glob matches nothing')
+          failures = []
+          for path in paths:
+              try:
+                  DomainSpec.model_validate(yaml.safe_load(path.read_text()))
+                  print(f'  {path}: OK')
+              except Exception as e:
+                  failures.append(str(path))
+                  print(f'  FAIL {path}: {e}')
+          if failures:
+              sys.exit(f'{len(failures)} of {len(paths)} domain spec(s) do not validate: {failures}')
+          print(f'Domain spec validation complete: {len(paths)} spec(s) OK')
           "

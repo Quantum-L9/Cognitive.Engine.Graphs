@@ -594,6 +594,7 @@ class Settings(BaseSettings):
     # RU-088 / CEG-COR-097: infer_buyer_persona matched keywords as substrings
     # ('Marketing Coordinator' -> executive via 'coo', 'DevOps Engineer' ->
     # operations via 'ops'). On: whole title tokens only. Off: substrings.
+    # The keywords themselves are the domain's declaration (Stage 2 follow-up).
     inference_persona_token_match_enabled: bool = True
     # RU-089 / CEG-COR-098: infer_company_size_tier used `or` to pick a field
     # (employee_count=0 fell through to employees) and parsed both values in

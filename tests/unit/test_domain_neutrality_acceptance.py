@@ -593,3 +593,76 @@ def test_preference_attention_reads_the_declared_outcome_community_property(
     monkeypatch.setattr(settings, "preference_attention_declared_community_enabled", False)
     rollback = ScoringAssembler(spec)._compile_preference_attention(_attention_dim())
     assert ".community_id = candidate.culture_cluster" in rollback
+
+
+# ── Persona vocabulary is the domain's declaration (CRM rules, owner decision) ─
+
+_PERSONAS = {
+    "personas": [{"persona": "dock_lead", "keywords": ["dockmaster", "berth"], "confidence": 0.9}],
+    "unmatched": {"persona": "crew", "confidence": 0.6},
+}
+
+
+def _cheese_with_plugins(plugins: dict[str, Any]) -> DomainSpec:
+    raw = yaml.safe_load((SYNTHETIC_DOMAINS_ROOT / "cheese-aging" / "spec.yaml").read_text())
+    return DomainSpec.model_validate({**raw, "plugins": plugins})
+
+
+@pytest.mark.parametrize(
+    ("plugins", "defect"),
+    [
+        (
+            {"inference_rules": ["infer_buyer_persona"]},
+            "'infer_buyer_persona' requires plugins.inference_rule_parameters.infer_buyer_persona",
+        ),
+        (
+            {"inference_rules": [], "inference_rule_parameters": {"infer_buyer_persona": _PERSONAS}},
+            "'infer_buyer_persona' is not authorized by plugins.inference_rules",
+        ),
+        (
+            {
+                "inference_rules": ["infer_buyer_persona"],
+                "inference_rule_parameters": {"infer_buyer_persona": {"personas": [{"persona": "x"}]}},
+            },
+            "infer_buyer_persona.personas[0].keywords: must be a non-empty list of strings",
+        ),
+    ],
+    ids=["authorized-undeclared", "declared-unauthorized", "malformed"],
+)
+def test_persona_rule_parameters_are_checked_at_admission(plugins: dict[str, Any], defect: str) -> None:
+    from engine.config.loader import admission_defects
+
+    defects = admission_defects(_cheese_with_plugins(plugins))
+    assert any(defect in d for d in defects), defects
+
+
+def test_declared_persona_parameters_are_admitted() -> None:
+    from engine.config.loader import admission_defects
+
+    spec = _cheese_with_plugins(
+        {"inference_rules": ["infer_buyer_persona"], "inference_rule_parameters": {"infer_buyer_persona": _PERSONAS}}
+    )
+    assert admission_defects(spec) == []
+
+
+@pytest.mark.asyncio
+async def test_inference_feedback_passes_the_declared_persona_vocabulary(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.config.settings import settings
+    from engine.handlers import handle_admin
+    from engine.state import _reset_singleton
+
+    monkeypatch.setattr(settings, "graph_inference_feedback_enabled", True)
+    spec = _cheese_with_plugins(
+        {"inference_rules": ["infer_buyer_persona"], "inference_rule_parameters": {"infer_buyer_persona": _PERSONAS}}
+    )
+    _bind_handlers(spec)
+    emit = AsyncMock(return_value={"status": "ok"})
+    payload = {"subaction": "emit_inference_feedback", "entity": {"job_title": "Night Dockmaster"}, "entity_id": "c-1"}
+    try:
+        with patch("engine.gate_egress.emit_graph_inference_result", emit):
+            result = await handle_admin("cheese-aging", payload)
+    finally:
+        _reset_singleton()
+    assert result["results_produced"] == 1
+    [inferred] = emit.call_args.kwargs["results"]
+    assert (inferred.field_name, inferred.value, inferred.confidence) == ("buyer_persona", "dock_lead", 0.9)

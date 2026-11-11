@@ -1,0 +1,29 @@
+{
+  "contract_version": "1.0.0-draft",
+  "domain": "orbital-logistics",
+  "projection_version": "1.0.0",
+  "records": [
+    {
+      "entity_ref": "res.partner:102",
+      "entity_type": "OrbitalDepot",
+      "revision": 8,
+      "operation": "merge",
+      "properties": {
+        "name": "Example Recycler",
+        "state": "NC"
+      },
+      "relationship_refs": [
+        "orbital.depot.docking.rule:22"
+      ],
+      "evidence_refs": [
+        "orbital.port.observation:44"
+      ],
+      "source_record": {
+        "system": "station_ledger",
+        "record_ref": "res.partner:102",
+        "revision": 8
+      },
+      "field_dictionary_version": "1.0.0"
+    }
+  ]
+}
