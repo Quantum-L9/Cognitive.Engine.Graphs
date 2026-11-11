@@ -28,6 +28,8 @@ from constellation_node_sdk import clear_handlers, registered_actions
 from chassis.handler_registration import register_engine_handlers
 from engine.handlers import ACTION_HANDLERS
 
+pytestmark = pytest.mark.unit
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 

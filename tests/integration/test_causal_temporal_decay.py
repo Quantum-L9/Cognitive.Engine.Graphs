@@ -19,6 +19,8 @@ import pytest
 
 from engine.causal.attribution import AttributionCalculator
 
+pytestmark = pytest.mark.integration
+
 # touchpoint -> outcome causal links; tp_recent is fresh, tp_old is one year old.
 SEED_CYPHER = """
 MERGE (o:TransactionOutcome {outcome_id: $outcome_id, entity_id: $outcome_id})

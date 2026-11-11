@@ -4,6 +4,8 @@ from engine.arbitration.engine import ArbitrationEngine
 from engine.arbitration.schema import ArbitrationInput
 from engine.config.schema import DecisionPolicy, HardConstraint, PolicyThresholds, PolicyWeights
 
+pytestmark = pytest.mark.unit
+
 
 def _make_test_policy() -> DecisionPolicy:
     """Create a test policy matching domains/plasticos/spec.yaml decision_policy section."""

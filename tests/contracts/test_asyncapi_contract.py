@@ -29,6 +29,8 @@ from constellation_node_sdk.transport.models import _ALLOWED_PACKET_TYPES as _SD
 from engine.packet.chassis_contract import deflate_egress, inflate_ingress
 from tests.contracts._constants import KNOWN_ACTIONS
 
+pytestmark = pytest.mark.unit
+
 jsonschema = pytest.importorskip("jsonschema")
 
 

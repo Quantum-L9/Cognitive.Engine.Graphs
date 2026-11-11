@@ -25,6 +25,8 @@ from engine.traversal.edge_merger import (
     MergeResult,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def _make_triplet(
     vertex_id: str,

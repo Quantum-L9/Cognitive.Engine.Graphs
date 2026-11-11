@@ -17,6 +17,7 @@ and drift detection.
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from engine.config.schema import DomainSpec
@@ -68,6 +69,77 @@ class ConvergenceLoop:
         if not self._feedback_spec.enabled:
             return {"feedback_loop": "disabled"}
 
+        from engine.config.settings import settings
+
+        if not settings.feedback_partial_results_enabled:
+            return await self._run_stages_unisolated(outcome_data)
+
+        # FEEDBACK-PARTIAL-01: the outcome node is already written when this
+        # runs, so a stage failure must not erase the record of what did apply.
+        # Each stage runs isolated; a failed one is reported by exception class
+        # (the message can carry Cypher or driver detail) and logged in full.
+        metadata: dict[str, Any] = {"feedback_loop": "enabled"}
+        stages: dict[str, str] = {}
+
+        async def _stage(name: str, run: Callable[[], Awaitable[Any]]) -> Any:
+            try:
+                value = await run()
+            except Exception as exc:
+                stages[name] = f"failed:{type(exc).__name__}"
+                logger.warning(
+                    "Feedback stage %s failed for domain=%s outcome_id=%s",
+                    name,
+                    self._spec.domain.id,
+                    outcome_data.get("outcome_id"),
+                    exc_info=True,
+                )
+                return None
+            stages[name] = "ok"
+            return value
+
+        propagation = await _stage(
+            "propagation",
+            lambda: self._score_propagator.propagate_outcome(
+                outcome_data,
+                boost_factor=self._feedback_spec.propagation_boost_factor,
+            ),
+        )
+        if propagation is not None:
+            metadata["propagation"] = propagation
+
+        async def _recalculate() -> dict[str, Any] | None:
+            if await self._weight_calculator.should_recalculate():
+                weights: dict[str, Any] = await self._weight_calculator.recalculate_weights()
+                return weights
+            return None
+
+        new_weights = await _stage("weights", _recalculate)
+        metadata["weights_recalculated"] = stages["weights"] == "ok" and new_weights is not None
+        if new_weights is not None:
+            metadata["new_weights"] = new_weights
+
+        drift_data = await _stage(
+            "drift",
+            lambda: self._drift_detector.check_and_alert(
+                threshold=self._feedback_spec.drift_threshold,
+                window_days=self._feedback_spec.drift_window_days,
+            ),
+        )
+        if drift_data is not None:
+            metadata["drift"] = drift_data
+
+        metadata["stages"] = stages
+        metadata["status"] = "complete" if all(v == "ok" for v in stages.values()) else "partial"
+        logger.info(
+            "Feedback loop %s for domain=%s outcome=%s",
+            metadata["status"],
+            self._spec.domain.id,
+            outcome_data.get("outcome"),
+        )
+        return metadata
+
+    async def _run_stages_unisolated(self, outcome_data: dict[str, Any]) -> dict[str, Any]:
+        """Legacy path (feedback_partial_results_enabled off): the first stage failure propagates."""
         metadata: dict[str, Any] = {"feedback_loop": "enabled"}
 
         # Step 1: Propagate score adjustments

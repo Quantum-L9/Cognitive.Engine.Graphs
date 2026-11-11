@@ -7,10 +7,13 @@ that assembled score expressions maintain [0, 1] bounds and idempotency.
 
 from __future__ import annotations
 
+import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from engine.scoring.assembler import ScoringAssembler
+
+pytestmark = pytest.mark.unit
 
 # ---------------------------------------------------------------------------
 # Custom strategies

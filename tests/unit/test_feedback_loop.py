@@ -31,6 +31,8 @@ from engine.config.schema import (
 )
 from engine.feedback.convergence import ConvergenceLoop
 
+pytestmark = pytest.mark.unit
+
 
 def _minimal_spec(
     feedback_enabled: bool = False,

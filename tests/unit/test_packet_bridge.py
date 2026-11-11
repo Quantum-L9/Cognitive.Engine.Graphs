@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 def test_transport_packet_payload_hash_is_deterministic():
     """TransportPacket payload hash is deterministic for same payload."""

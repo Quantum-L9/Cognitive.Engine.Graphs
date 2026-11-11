@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 def test_load_plasticos_returns_domain_spec():
     """Load plasticos domain — skips if spec doesn't match current schema."""
