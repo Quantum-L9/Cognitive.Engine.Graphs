@@ -1,3 +1,13 @@
+<!-- L9_META
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [reports]
+tags: [gmp-report]
+owner: engine-team
+status: active
+/L9_META -->
+
 # GMP-135
 
 **Task:** W2 CEG-side RBAC: tenant-bound capability revoke and audit
@@ -11,3 +21,8 @@
 - T4:  REPLACE Unit tests for the boundary: cross-tenant revoke refused and capability unchanged; owner revoke; delegator revokes child in another tenant; '*' refused; unknown and not-owned give the same message; audit scoped; flag off restores legacy
 - T5:  REPLACE SDK ingress tests: build the node app with the production L9_ALLOWED_ACTIONS parsed from docker-compose.prod.yml and prove /v1/execute refuses enrich and refuses admin for a tenant without an admin:write grant (no handler side effect); evidence: the SDK execute route validates execute_allowed_actions or allowed_actions before dispatch (constellation_node_sdk runtime/app.py:73-74,138); parse the allowlist the way tests/architecture/test_seam_gate_only.py::_allowed_actions_in does; assert a non-2xx response and that the handler was never invoked
 - T6:  REPLACE Bind rbac-policy.yaml required_proof items to the new tests (verified_local) and keep external items pending on Constellation.Gate#37; switch the rbac known-gap probe to the remaining external evidence so it stays a meaningful strict xfail
+
+## Outcome notes
+
+- T5: the SDK answers a refused action with HTTP 200 and a `failure` packet (`return_transport_errors`), not a non-2xx status. The tests assert the failure packet and its error class: `TransportAuthorizationError` for `enrich` (allowlist, before dispatch), `ValidationError` for `admin` without `admin:write`. A positive control with the grant revokes successfully.
+- Validation: make test scope 4398 passed, 6 xfailed; contracts 357 passed, 6 strict xfails (rbac now open only on Constellation.Gate#37); ruff, mypy, cypher-lint, C-18 clean.

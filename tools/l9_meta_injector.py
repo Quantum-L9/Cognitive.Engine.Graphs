@@ -785,6 +785,13 @@ FILE_REGISTRY: list[FileMeta] = [
         ["gmp-report"],
         "engine-team",
     ),
+    FileMeta(
+        "reports/gmp/GMP-Report-135-W2-CEG-side-RBAC-tenant-bound-capability-revoke-and-audit.md",
+        "engine-specific",
+        ["reports"],
+        ["gmp-report"],
+        "engine-team",
+    ),
     # --- templates ---
     FileMeta(
         "templates/styleguide.template.md", "l9-template", ["templates"], ["L9_TEMPLATE", "styleguide"], "platform"
