@@ -43,6 +43,8 @@ from engine.health.readiness_scorer import (
     get_grade,
 )
 
+pytestmark = pytest.mark.unit
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 #  FIXTURES
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

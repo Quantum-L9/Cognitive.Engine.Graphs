@@ -48,6 +48,8 @@ from engine.intake.intake_schema import (
 )
 from engine.intake.vertical_discovery import discover_vertical_fields
 
+pytestmark = pytest.mark.unit
+
 # ── Fixtures ───────────────────────────────────────────────
 
 
