@@ -76,8 +76,8 @@ required_proof_status:
   status: verified_local
   evidence: tests/unit/test_wave3_capabilities.py::TestResolveCapabilityEnforcement::test_read_only_tenant_cannot_create_resolution_edge
 - item: write-authorized caller can resolve in correct tenant
-  status: partial
-  evidence: tests/unit/test_wave3_capabilities.py::TestActionPermissions::test_resolve_requires_sync_write proves the permission only; no production-mode handler test with a write grant
+  status: verified_local
+  evidence: tests/unit/test_rbac_required_proofs.py::TestWriteAuthorizedResolveInCorrectTenant (l9_env=prod; a sync:write grant naming the caller resolves in the caller's own database with the caller's tenant on the edge; a grant naming another tenant is refused before any query)
 - item: wrong-tenant refusal
   status: verified_local
   evidence: tests/unit/test_wave3_capabilities.py::TestTenantAuthEnforcement
@@ -85,8 +85,8 @@ required_proof_status:
   status: external
   evidence: Quantum-L9/Constellation.Gate#37
 - item: existing match permission not expanded
-  status: partial
-  evidence: no test pins match to match:read; tests/unit/test_handle_score.py covers score:read only
+  status: verified_local
+  evidence: tests/unit/test_rbac_required_proofs.py::TestMatchPermissionNotExpanded (match requires exactly match:read; no write action maps to a read permission; in prod a match:read grant authorizes match and refuses sync, outcomes, resolve, enrich and admin)
 - item: unconfigured CapabilitySet cannot authorize untrusted writes in production
   status: verified_local
   evidence: tests/unit/test_wave3_capabilities.py::TestActionPermissions::test_enforce_capability_no_caps_in_spec

@@ -316,6 +316,13 @@ FILE_REGISTRY: list[FileMeta] = [
         "tests/unit/test_handlers_extended.py", "engine-specific", ["test"], ["test", "unit", "handlers"], "engine-team"
     ),
     FileMeta(
+        "tests/unit/test_rbac_required_proofs.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "capability", "auth"],
+        "engine-team",
+    ),
+    FileMeta(
         "tests/unit/test_capability_tenant_binding.py",
         "engine-specific",
         ["test"],
