@@ -40,6 +40,8 @@ from chassis.handler_registration import _with_packet_audit, register_engine_han
 from chassis.node_app import _gate_ingress_violation, _install_gate_only_ingress
 from engine.handlers import ACTION_HANDLERS
 
+pytestmark = pytest.mark.unit
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 

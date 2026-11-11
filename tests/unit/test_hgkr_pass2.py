@@ -64,6 +64,8 @@ from engine.config.schema import (
 )
 from engine.scoring.assembler import ScoringAssembler
 
+pytestmark = pytest.mark.unit
+
 # ── Fixtures ──────────────────────────────────────────────
 
 

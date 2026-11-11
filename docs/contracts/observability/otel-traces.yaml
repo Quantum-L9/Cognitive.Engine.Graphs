@@ -11,7 +11,7 @@ contract_id: CEG-OBS-OTEL-TRACES-v1
 campaign_id: CEG-CONTRACT-COMPLETE-2026-10-30
 baseline:
   repository: Quantum-L9/Cognitive.Engine.Graphs
-  commit: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  commit: 3379309971f9defa40c393b2292f2f1784aa90ac
 authority: candidate_extracted_from_source
 schema: l9.ceg.observability.otel-traces/v1
 owner: Gate_SDK/chassis instrumentation owner; CEG consumer
@@ -19,13 +19,13 @@ status: otel_export_not_verified
 source_refs:
 - path: chassis/handler_registration.py
   symbol: _with_packet_audit, reconstructed vs original
-  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 - path: engine/packet/chassis_contract.py
   symbol: inflate_ingress/deflate_egress
-  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 - path: chassis/actions.py
   symbol: legacy trace_id execution
-  revision: bcf66bdbf56f7c35d059a6e16c3006bcc1395ba0
+  revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 observed:
   transport_trace_id: legacy_trace_id_present; sdk_original_packet_when_flag_true_else_reconstructed
   packet_hop_lineage: conditional_not_an_otel_span
@@ -62,7 +62,7 @@ operational_proof:
   blocked_until: owner-native executable and integration evidence, not this file presence
 contract_status_is_not_runtime_status: true
 root_correlation_risk:
-  source: chassis/handler_registration.py:_with_packet_audit (116-132)
+  source: chassis/handler_registration.py:_with_packet_audit (122-133)
   condition: ingress_packet_audit_enabled=False
   mechanism: reconstructed path calls inflate_ingress(trace_id=str(uuid.uuid4()))
   required_proof: original transport packet and trace context propagated with flag enabled; no invented root

@@ -31,6 +31,8 @@ import engine.config.loader as loader_module
 from engine.config.schema import DomainActivation, DomainSpec
 from engine.config.settings import Settings
 
+pytestmark = pytest.mark.unit
+
 DOMAINS = Path(__file__).resolve().parents[2] / "domains"
 
 RETIRED_LEGACY_PACKS = (

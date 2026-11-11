@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.parametrize("value", ["Facility", "LoanProduct", "A1b2C3"])
 def test_valid_labels(value):

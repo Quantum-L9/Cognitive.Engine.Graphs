@@ -17,6 +17,8 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 
+pytestmark = pytest.mark.unit
+
 pytest.importorskip("constellation_node_sdk", reason="constellation-node-sdk not installed")
 
 

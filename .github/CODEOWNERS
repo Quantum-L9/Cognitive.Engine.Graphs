@@ -1,48 +1,18 @@
-# --- L9_META ---
-# l9_schema: 1
-# origin: l9-template
-# engine: graph
-# layer: [governance]
-# tags: [L9_TEMPLATE, governance, ownership]
-# owner: platform
-# status: active
-# --- /L9_META ---
+# Managed by Quantum-L9/.github — do not edit here.
+# Edit policies/CODEOWNERS in the .github repo; changes are re-seeded by PR.
+# CODEOWNERS is not inheritable, so this file is physically copied per repo.
 #
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Cognitive.Engine.Graphs — Code Owners
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# SYNTAX: path/pattern @github-username @github-org/team-name
-# DOCS: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Path-scoped only. Do not seed `* @Quantum-L9/platform` — that makes every
+# file a required review and the whole rule goes inert if the team slug
+# cannot resolve. Team slugs verified against the live org
+# (gh api orgs/Quantum-L9/teams): only `platform` exists.
+#
+# Seeded as .github/CODEOWNERS into every repository the seeders reach,
+# replacing an older copy; GitHub reads .github/CODEOWNERS before a root file.
 
-# Default owner for everything in the repo (unless overridden below)
-* @cryptoxdog
-
-# ──────────────────────────────────────────────────────────────────────────
-# Debt ledgers (PacketEnvelope, read by tools/packet_envelope_gate.py) — human-reviewed only.
-# CI never writes these files; every entry is owned, expiring debt.
-# Any PR that touches a ledger requires explicit owner review.
-# ──────────────────────────────────────────────────────────────────────────
-/.l9/baselines/ @cryptoxdog
-
-# ──────────────────────────────────────────────────────────────────────────
-# CI/CD workflows and gate tooling
-# ──────────────────────────────────────────────────────────────────────────
-/.github/ @cryptoxdog
-/.github/workflows/ @cryptoxdog
-/.pre-commit-config.yaml @cryptoxdog
-/tools/ @cryptoxdog
-
-# ──────────────────────────────────────────────────────────────────────────
-# Infrastructure and package configuration
-# ──────────────────────────────────────────────────────────────────────────
-/docker-compose.yml @cryptoxdog
-/Dockerfile @cryptoxdog
-/pyproject.toml @cryptoxdog
-/requirements*.txt @cryptoxdog
-
-# ──────────────────────────────────────────────────────────────────────────
-# Documentation
-# ──────────────────────────────────────────────────────────────────────────
-/docs/ @cryptoxdog
-/README.md @cryptoxdog
+/.github/                 @Quantum-L9/platform @cryptoxdog
+/.github/workflows/       @Quantum-L9/platform @cryptoxdog
+/infra/                   @Quantum-L9/platform @cryptoxdog
+/terraform/               @Quantum-L9/platform @cryptoxdog
+SECURITY.md               @Quantum-L9/platform @cryptoxdog
+CODEOWNERS                @Quantum-L9/platform @cryptoxdog

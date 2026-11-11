@@ -11,6 +11,8 @@ import inspect
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 @pytest.mark.finding("T3-01")
 class TestT301GDSSchedulerStart:

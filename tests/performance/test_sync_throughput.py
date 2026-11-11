@@ -27,6 +27,8 @@ import structlog
 from engine.config.schema import SyncEndpointSpec, SyncStrategy
 from engine.sync.generator import SyncGenerator
 
+pytestmark = pytest.mark.integration
+
 logger = structlog.get_logger(__name__)
 
 

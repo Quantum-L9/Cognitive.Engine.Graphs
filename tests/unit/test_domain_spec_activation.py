@@ -33,6 +33,8 @@ import yaml
 from engine.config.schema import DomainSpec
 from engine.config.settings import Settings
 
+pytestmark = pytest.mark.unit
+
 _SETTINGS_TARGET = "engine.config.settings.settings"
 
 

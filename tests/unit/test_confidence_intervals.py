@@ -36,6 +36,8 @@ from engine.config.schema import (
 )
 from engine.feedback.signal_weights import SignalWeightCalculator
 
+pytestmark = pytest.mark.unit
+
 
 def _spec_with_confidence(
     confidence_dampening: bool = True,

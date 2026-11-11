@@ -27,6 +27,8 @@ from engine.gate_egress import (
 )
 from engine.inference_rule_registry import InferenceResult
 
+pytestmark = pytest.mark.unit
+
 
 def _result(field: str, value: Any, confidence: float, rule: str = "r") -> InferenceResult:
     return InferenceResult(field_name=field, value=value, confidence=confidence, rule_name=rule)

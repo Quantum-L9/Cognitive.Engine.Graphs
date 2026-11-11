@@ -17,6 +17,8 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 
+pytestmark = pytest.mark.integration
+
 SEED_CYPHER = """
 UNWIND $batch AS row
 MERGE (n:Facility {entity_id: row.entity_id})

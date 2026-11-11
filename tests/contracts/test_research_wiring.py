@@ -29,6 +29,8 @@ from tools.spec_extract import (  # noqa: E402
     extract_research_features,
 )
 
+pytestmark = pytest.mark.unit
+
 RESEARCH_FILE = REPO_ROOT / RESEARCH_DIR / RESEARCH_PATTERNS_FILE
 
 
