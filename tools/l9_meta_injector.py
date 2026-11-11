@@ -354,13 +354,6 @@ FILE_REGISTRY: list[FileMeta] = [
         "tests/unit/test_handlers_extended.py", "engine-specific", ["test"], ["test", "unit", "handlers"], "engine-team"
     ),
     FileMeta(
-        "tests/unit/test_test_classification_guard.py",
-        "engine-specific",
-        ["test"],
-        ["test", "unit", "ci"],
-        "engine-team",
-    ),
-    FileMeta(
         "tests/unit/test_feedback_convergence_closure.py",
         "engine-specific",
         ["test"],
@@ -392,6 +385,13 @@ FILE_REGISTRY: list[FileMeta] = [
     ),
     FileMeta("tests/unit/test_settings.py", "engine-specific", ["test"], ["test", "unit", "config"], "engine-team"),
     FileMeta("tests/unit/test_sync.py", "engine-specific", ["test"], ["test", "unit", "sync"], "engine-team"),
+    FileMeta(
+        "tests/unit/test_test_classification_guard.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "ci"],
+        "engine-team",
+    ),
     FileMeta("tests/unit/test_traversal.py", "engine-specific", ["test"], ["test", "unit", "traversal"], "engine-team"),
     FileMeta("tests/unit/test_units.py", "engine-specific", ["test"], ["test", "unit", "units"], "engine-team"),
     # =========================================================================
