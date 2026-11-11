@@ -101,7 +101,9 @@ partial_proof:
     command: CEG_REQUIRE_INTEGRATION=1 pytest tests/integration/test_feedback_convergence_closure.py tests/integration/test_score_propagator_integration.py tests/integration/test_outcomes_handler.py tests/integration/test_outcomes_causal_integrity.py tests/integration/test_dimension_weight_roundtrip.py
     result: 20 passed
     date: '2026-11-11'
-  CI_run_id: null
+  CI_run_id: 43077639971
+  CI_head: 83c9d377dccdcf519d071733c43df7bab63e26a9
+  CI_job: Integration Tests (Neo4j Enterprise + PostgreSQL) - tests/integration/test_feedback_convergence_closure.py 7 passed, 156 passed in job
 operational_proof:
   observed_in_this_pack: false
   runtime_test_receipt: null
