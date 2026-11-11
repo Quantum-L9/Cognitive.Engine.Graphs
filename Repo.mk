@@ -359,7 +359,7 @@ agent-check-unit:	## Local agent gate (skips Docker integration/perf): CI's bloc
 
 # ── L9_TEMPLATE Audit Harness ─────────────────────────────
 
-.PHONY: harness harness-strict audit audit-strict coverage
+.PHONY: harness harness-strict harness-baseline audit audit-strict coverage
 
 harness:                   ## Run full audit harness (recommended)
 	python3 tools/audit_harness.py
@@ -370,6 +370,10 @@ harness-strict:            ## Audit harness + fail on MISSING spec features
 
 harness-json:              ## Audit harness with JSON output (for CI)
 	python3 tools/audit_harness.py --json
+
+harness-baseline:          ## Re-baseline the audit ratchet (tools/audit_baseline.json); commit it deliberately
+	python3 tools/audit_harness.py --update-baseline
+	@echo "Review and commit tools/audit_baseline.json with the reason for the new numbers."
 
 audit:                     ## Run architecture audit only (legacy)
 	python3 tools/audit_engine.py

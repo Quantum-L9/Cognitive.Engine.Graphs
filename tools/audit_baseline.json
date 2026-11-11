@@ -1,0 +1,15 @@
+{
+  "_l9_meta": {
+    "l9_schema": 1,
+    "origin": "engine-specific",
+    "engine": "graph",
+    "layer": ["audit"],
+    "tags": ["audit", "baseline", "ratchet"],
+    "owner": "platform",
+    "status": "active"
+  },
+  "schema": "l9.audit_baseline.v1",
+  "description": "Audit-harness ratchet (tools/audit_harness.py). The harness fails when a finding count rises, spec IMPLEMENTED drops or spec MISSING rises against these numbers. Re-baseline deliberately with `make harness-baseline` and commit the result.",
+  "findings": { "CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0 },
+  "spec_coverage": { "IMPLEMENTED": 21, "PARTIAL": 15, "MISSING": 5, "total": 41 }
+}
