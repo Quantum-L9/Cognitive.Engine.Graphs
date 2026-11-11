@@ -35,6 +35,8 @@ from tests.fixtures.domain_contracts import (
     synthetic_contract,
 )
 
+pytestmark = pytest.mark.unit
+
 ROOT = Path(__file__).resolve().parents[2]
 PAYLOADS = ROOT / "contracts" / "payloads"
 EXAMPLES = PAYLOADS / "examples"

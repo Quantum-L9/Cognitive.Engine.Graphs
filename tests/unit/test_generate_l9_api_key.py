@@ -31,6 +31,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 _MODULE_PATH = Path(__file__).resolve().parents[2] / "chassis" / "auth" / "generate_l9_api_key.py"
 
 
