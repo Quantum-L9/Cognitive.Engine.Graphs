@@ -66,6 +66,45 @@ class GateSpec(BaseModel):
 ```
 
 
+## Property shapes: `list` and `map` (typed sync contract)
+
+`PropertySpec.type` is one of `string | int | float | bool | datetime | date |
+duration | enum | list | map`. The two shape types carry their structure in
+keys that are, like every other key, the Pydantic field names verbatim:
+
+```yaml
+- {name: certifications, type: list, items: {type: string}}
+- name: processed_polymers
+  type: list
+  items:                       # ← PropertySpec.items (ItemSpec); required iff type is list
+    type: map
+    properties:                # ← ItemSpec.properties / PropertySpec.properties; required iff type is map
+      - {name: code, type: string, required: true}
+- name: location
+  type: map
+  properties:
+    - {name: lat, type: float}
+```
+
+```python
+class ItemSpec(BaseModel):  # extra="forbid"
+    type: PropertyType  # any primitive, enum or map — never list (no list of lists)
+    values: list[str] | None = None
+    properties: list[PropertySpec] | None = None
+
+
+class PropertySpec(BaseModel):
+    ...
+    items: ItemSpec | None = None  # iff type == list
+    properties: list[PropertySpec] | None = None  # iff type == map
+```
+
+`list<primitive>` is storable on a node. `map` and `list<map>` are wire-only:
+legal on a node only as the `field` of a `childsync` on a sync endpoint that
+targets that node (admission refuses any other use; Neo4j cannot store them).
+Query fields and derived parameters stay scalars. The same syntax is used by
+EIE.
+
 ## BANNED Patterns
 
 ```python

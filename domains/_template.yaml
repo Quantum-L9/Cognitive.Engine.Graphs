@@ -54,7 +54,7 @@ ontology:
       matchdirection: query_to_candidate  # Direction identifier
       properties:
         - name: id                      # REQUIRED: Property name (snake_case)
-          type: string                  # REQUIRED: string | int | float | bool | datetime | date | duration | enum
+          type: string                  # REQUIRED: string | int | float | bool | datetime | date | duration | enum | list | map
           required: true
           nullable: false
           unit: null                    # Optional: currency | percentage | meters | etc.
@@ -73,6 +73,43 @@ ontology:
           type: float                   # and candidate.lon as longitude
         - name: lon
           type: float
+        # list<primitive> is storable: `items` declares the element type
+        # (required iff type is list; any primitive or enum, or map; never list).
+        - name: tags
+          type: list
+          items: {type: string}
+        # Taxonomy field read by the sync endpoint's taxonomyedges: a scalar
+        # links one Category, a list<scalar> one Category per element.
+        - name: category_codes
+          type: list
+          items: {type: string}
+        # list<map> is a wire-only shape: legal only as the `field` of a
+        # childsync on a sync endpoint targeting this node, never stored here.
+        # A `map` declares its keys in `properties` (required iff type is map);
+        # the childsync `targetid` must be a required property of the map.
+        # A bare `map` property (e.g. {name: location, type: map, properties:
+        # [{name: lat, type: float}]}) has no consumer on a node and is refused.
+        - name: credentials
+          type: list
+          items:
+            type: map
+            properties:
+              - {name: credential_id, type: string, required: true}
+              - {name: name, type: string}
+              - {name: expires_on, type: date}
+
+    # Child node written by the candidate endpoint's childsync
+    - label: Credential
+      description: "Credential held by a candidate"
+      managedby: sync
+      properties:
+        - name: credential_id
+          type: string
+          required: true
+        - name: name
+          type: string
+        - name: expires_on
+          type: date
 
     # Query entity node (what we match FROM)
     - label: QueryEntity
@@ -107,7 +144,16 @@ ontology:
       direction: DIRECTED               # REQUIRED: DIRECTED | UNDIRECTED
       category: capability              # REQUIRED: capability | taxonomy | transaction | exclusion | precomputed | market | context | referral | intent
       managedby: sync                   # REQUIRED: sync | gds | static | api | computed
-      properties: []                    # Optional: Edge properties
+      properties: []                    # Optional: Edge properties (scalars and list<primitive> only)
+
+    # Child edge written by childsync
+    - type: HOLDS
+      from: Candidate
+      to: Credential
+      direction: DIRECTED
+      category: capability
+      managedby: sync
+      properties: []
 
     # Exclusion edge (for hard exclusion gates)
     - type: EXCLUDED_FROM
@@ -459,16 +505,24 @@ sync:
       targetnode: Candidate
       idproperty: id
       batchstrategy: UNWINDMERGE        # UNWINDMERGE | UNWINDMATCHSET
+      # Every field a row carries is declared on the targetnode with its real
+      # type; rows are validated against it before anything is written, and
+      # only declared, storable properties are SET.
       taxonomyedges:
-        - field: category_code          # scalar payload field naming one taxonomy node
+        - field: category_codes         # declared scalar or list<scalar> on Candidate
           edgetype: HAS_CAPABILITY
           targetlabel: Category
           targetid: code
-      childsync: []
+      childsync:
+        - field: credentials            # declared list<map> on Candidate
+          targetnode: Credential
+          targetid: credential_id       # a required property of the item map
+          edgetype: HOLDS
+          edgedirection: parenttochild  # parenttochild | childtoparent
     # Edge-only endpoints (targetedge / fromnode / tonode) are declared by the
     # schema but the sync generator requires targetnode + idproperty, so they
-    # are not shown. Create edges with taxonomyedges (scalar field -> existing
-    # node) or childsync (list of child maps) on a node endpoint.
+    # are not shown. Create edges with taxonomyedges (scalar or list<scalar>
+    # field -> existing node) or childsync (list<map> field) on a node endpoint.
 
 # ---------------------------------------------------------------------------
 # GDS JOBS (Optional)
