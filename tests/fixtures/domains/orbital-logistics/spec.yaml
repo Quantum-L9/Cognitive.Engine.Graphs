@@ -209,3 +209,7 @@ outcome_signals:
   calibration_label: true
 - signal: aborted
   calibration_label: false
+# Outcome vocabulary is the pack's declaration (Stage 2 follow-up). cheese-aging
+# deliberately declares none, so it proves the refusal.
+feedbackloop:
+  outcome_node_label: DockingResult

@@ -83,7 +83,8 @@ CREATE TABLE IF NOT EXISTS packet_store (
 
 -- Outcome feedback linkage written by PacketStore.record_outcome()
 -- (RU-081 / CEG-COR-041, DEC-31 option 1). The one packet column that may be
--- updated after insert: an annotation linking the Neo4j TransactionOutcome
+-- updated after insert: an annotation linking the Neo4j outcome node (the
+-- domain's feedbackloop.outcome_node_label)
 -- back to the match packet. ADD COLUMN IF NOT EXISTS so re-applying this file
 -- brings an existing database up to date.
 ALTER TABLE packet_store ADD COLUMN IF NOT EXISTS outcome_jsonb JSONB;
@@ -142,8 +143,8 @@ CREATE TABLE IF NOT EXISTS packet_audit_log (
     actor               TEXT NOT NULL,                 -- who performed the action
     tenant              TEXT NOT NULL,                 -- org isolation key (actor_tenant)
     trace_id            TEXT,                          -- W3C trace context
-    resource            TEXT,                          -- e.g., "Facility:42"
-    resource_type       TEXT,                          -- e.g., "Facility"
+    resource            TEXT,                          -- e.g., "<NodeLabel>:42"
+    resource_type       TEXT,                          -- e.g., the domain's node label
     detail              TEXT,                          -- human-readable description
     payload_hash        TEXT,                          -- SHA-256 of related payload
     compliance_tags     TEXT[] DEFAULT '{}',           -- GDPR, SOC2, ECOA

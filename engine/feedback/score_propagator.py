@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from engine.config.outcome_vocabulary import outcome_node_label
 from engine.config.schema import DomainSpec
 from engine.graph.driver import GraphDriver
 from engine.utils.security import sanitize_label
@@ -90,7 +91,7 @@ class ScorePropagator:
         """
         from engine.config.settings import settings
 
-        outcome_label = sanitize_label(self._spec.feedbackloop.outcome_node_label)
+        outcome_label = sanitize_label(outcome_node_label(self._spec, "score propagation"))
         parameters: dict[str, Any] = {
             "candidate_id": candidate_id,
             "tenant": self._db,

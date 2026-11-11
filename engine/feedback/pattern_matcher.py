@@ -19,6 +19,7 @@ import logging
 import math
 from typing import Any
 
+from engine.config.outcome_vocabulary import outcome_node_label
 from engine.config.schema import DomainSpec
 from engine.graph.driver import GraphDriver
 from engine.utils.security import sanitize_label
@@ -66,7 +67,8 @@ class ConfigurationMatcher:
     using Jaccard similarity on dimension/gate profiles.
 
     When a new match request comes in, compares its gate+scoring configuration
-    against historical TransactionOutcome configurations that resulted in
+    against historical outcome-node configurations (the domain's
+    feedbackloop.outcome_node_label) that resulted in
     positive outcomes. Returns similarity scores and pattern metadata.
     """
 
@@ -92,7 +94,7 @@ class ConfigurationMatcher:
         nothing). ``current_config["active_dimensions"]``, when given, is the
         caller's set of active dimension names.
         """
-        outcome_label = sanitize_label(self._spec.feedbackloop.outcome_node_label)
+        outcome_label = sanitize_label(outcome_node_label(self._spec, "configuration pattern matching"))
 
         cypher = f"""
         MATCH (o:{outcome_label})

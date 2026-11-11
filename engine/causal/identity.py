@@ -23,8 +23,6 @@ sanitized and safe to interpolate as Cypher property keys (C-9).
 
 from __future__ import annotations
 
-from typing import Any
-
 from engine.config.schema import DomainSpec
 from engine.utils.security import sanitize_label
 
@@ -53,7 +51,9 @@ def declared_id_property(domain_spec: DomainSpec, label: str) -> str:
 
 def node_id_property(domain_spec: DomainSpec, label: str) -> str:
     """``outcome_id`` for the domain's outcome label, else the declared id property."""
-    feedbackloop: Any = getattr(domain_spec, "feedbackloop", None)
-    if feedbackloop is not None and label == feedbackloop.outcome_node_label:
+    from engine.config.outcome_vocabulary import declared_outcome_node_label
+
+    outcome_label = declared_outcome_node_label(domain_spec)
+    if outcome_label is not None and label == outcome_label:
         return OUTCOME_ID_PROPERTY
     return declared_id_property(domain_spec, label)

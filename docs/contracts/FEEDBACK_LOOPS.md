@@ -39,7 +39,7 @@ implement their inbound loops and fire their outbound loops.
 ### ROUTE → (outbound)
 | # | To | Trigger | packet_type | Action | Payload Keys |
 |---|-----|---------|-------------|--------|-------------|
-| 8 | GRAPH | Outcome recorded | `graph_sync` | `sync_outcome` | `entity_id`, `outcome`, `edge_type: "RESULTED_IN"` |
+| 8 | GRAPH | Outcome recorded | `graph_sync` | `sync_outcome` | `entity_id`, `outcome`, `edge_type` = the domain's `feedbackloop.outcome_edge_type` declaration (example: PlasticOS `RESULTED_IN`) |
 | 9 | FORECAST | Routing velocity | `routing_decision` | `update_feature` | `entity_id`, `routing_velocity`, `rep_id` |
 | 10 | SIGNAL | Route event | `signal_event` | `ingest` | `entity_id`, `signal_type: "routed"`, `assigned_to` |
 
@@ -75,9 +75,9 @@ implement their inbound loops and fire their outbound loops.
 ### GRAPH → (outbound)
 | # | To | Trigger | packet_type | Action | Payload Keys |
 |---|-----|---------|-------------|--------|-------------|
-| 24 | SCORE | Graph affinity computed | `graph_match` | `update_score` | `entity_id`, `graph_affinity`, `community_id` |
+| 24 | SCORE | Graph affinity computed | `graph_match` | `update_score` | `entity_id`, `graph_affinity`, the domain's declared community property (example: PlasticOS `community_id`) |
 | 25 | ROUTE | Match rankings | `graph_match` | `inform_routing` | `entity_id`, `match_rank`, `community_win_rate` |
-| 26 | FORECAST | Community signals | `graph_match` | `update_feature` | `entity_id`, `community_id`, `community_win_rate` |
+| 26 | FORECAST | Community signals | `graph_match` | `update_feature` | `entity_id`, the domain's declared community property (example: PlasticOS `community_id`), `community_win_rate` |
 
 ## Implementation Rule
 When building a service, check this table for:

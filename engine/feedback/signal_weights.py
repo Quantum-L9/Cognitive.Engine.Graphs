@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import math
 
+from engine.config.outcome_vocabulary import outcome_node_label
 from engine.config.schema import DomainSpec
 from engine.config.settings import settings
 from engine.graph.driver import GraphDriver
@@ -63,12 +64,12 @@ class SignalWeightCalculator:
 
     async def recalculate_weights(self) -> dict[str, float]:
         """
-        Query all TransactionOutcome nodes, compute win rates per dimension config,
+        Query the domain's outcome nodes (feedbackloop.outcome_node_label), compute win rates per dimension config,
         update DimensionWeight nodes in Neo4j.
 
         Returns mapping of dimension name to computed weight.
         """
-        outcome_label = sanitize_label(self._spec.feedbackloop.outcome_node_label)
+        outcome_label = sanitize_label(outcome_node_label(self._spec, "signal weight recalculation"))
 
         # Step 1: Get total outcome counts
         totals_cypher = f"""
@@ -220,7 +221,7 @@ class SignalWeightCalculator:
 
     async def should_recalculate(self) -> bool:
         """Check if recalculation threshold met (outcome count since last recalc)."""
-        outcome_label = sanitize_label(self._spec.feedbackloop.outcome_node_label)
+        outcome_label = sanitize_label(outcome_node_label(self._spec, "signal weight recalculation check"))
 
         cypher = f"""
         OPTIONAL MATCH (dw:DimensionWeight {{tenant: $tenant}})

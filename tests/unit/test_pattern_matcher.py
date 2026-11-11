@@ -130,7 +130,7 @@ def _minimal_spec() -> DomainSpec:
         queryschema={"matchdirections": ["d1"], "fields": []},
         gates=[],
         scoring={"dimensions": []},
-        feedbackloop=FeedbackLoopSpec(enabled=True),
+        feedbackloop=FeedbackLoopSpec(enabled=True, outcome_node_label="TransactionOutcome"),
     )
 
 

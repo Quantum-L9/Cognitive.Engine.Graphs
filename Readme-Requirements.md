@@ -30,7 +30,7 @@ status: active
 
 - `neo4j_uri`, `neo4j_username`, `neo4j_password` → consumed by `dependencies.py` to init `GraphDriver`[^1]
 - `domains_root` → consumed by `dependencies.py` to init `DomainPackLoader`[^2]
-- Scoring weights (`w_structural`, `w_geo`, etc.) → match the spec's config reference[^3]
+- Scoring weights → declared per domain (`scoring.dimensions[*].defaultweight`); the former engine-wide `w_*` settings were retired (Stage 2)[^3]
 - Decay half-lives → match the temporal decay system in `engine-core-modules.py`[^1]
 
 **`dependencies.py`** provides the `Depends()` functions that `match.py`, `sync.py`, and `health.py` already import:[^4]

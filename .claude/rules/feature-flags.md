@@ -88,14 +88,11 @@ were industry-specific and had no caller).
 | remote_score_enabled | False | Gate-routed `score` (`handle_score_remote`); off refuses before any spec load or read. On still needs explicit tenant `score:read`, an admissible spec and typed identity (SCORING-GATE-01, FEATURE_GATES §29) |
 | gate_signing_key_binding_enabled | True | SDK `/v1/execute` accepts a Gate claim only under a key id in `L9_GATE_SIGNING_KEY_IDS` (required in staging/prod, where hmac-sha256 is refused) (GATE-KEY-01); off restores the claim-only check |
 
-## Scoring Weights (Contract 22: sum ≤ 1.0)
-| Weight | Default | Enforced by |
-|--------|---------|-------------|
-| w_structural | 0.30 | boot.py _assert_default_weight_sum() |
-| w_geo | 0.25 | boot.py _assert_default_weight_sum() |
-| w_reinforcement | 0.20 | boot.py _assert_default_weight_sum() |
-| w_freshness | 0.10 | boot.py _assert_default_weight_sum() |
-| **Sum** | **0.85** | Must be ≤ 1.0 |
+## Scoring Weights (Contract 22: sum ≤ 1.0 per direction)
+Scoring dimensions and their default weights are the domain's (`scoring.dimensions[*].defaultweight`);
+`DomainSpec` validation refuses a spec whose weights for any match direction exceed 1.0. The engine
+declares no weights of its own: the fixed `w_structural` / `w_geo` / `w_reinforcement` / `w_freshness`
+settings and the boot assertion over them were retired (Stage 2).
 
 ## Stage 2 — Domain-neutral Cypher (CEG Stage 4 proof)
 | Flag | Default | Purpose |
@@ -185,3 +182,8 @@ were industry-specific and had no caller).
 | outcome_schema_unified | True | One outcome record schema (R1a-DEC-02): sync `entity_type=outcome` writes through the `handle_outcomes` writer (domain `feedbackloop.outcome_node_label`, `positive`/`negative`/`neutral` → `success`/`failure`/`partial`, RESULTED_IN, same causal check); outcomes persist optional `fingerprint.dimension_scores` (JSON) and `was_selected`; `score_feedback` projects decoded `dimension_scores` and `OutcomeFeedback` counts success/failure (RU-006 / CEG-COR-015); off restores `:Outcome` + HAS_OUTCOME, no scores, positive/negative classes |
 | match_request_contract_admission | True | `handle_match` admits a payload carrying `contract_version` as `MatchRequest` against the tenant's `DomainContract` and maps `direction`/`query.facts`/`top_n` onto the legacy internals; legacy `MatchPayload` unchanged (RU-012 / CEG-COR-063, R1a-DEC-04); off rejects such a payload (no `match_direction`) |
 | gate_role_exemption | True | `admission_defects` reports a gate declaring `roleexempt` or `relaxedpenalty` (accepted by the schema, ignored by match: no request role, no relaxed mode), so the loader withholds the pack until a domain needs roles (RU-015 / CEG-COR-080, R1a-DEC-05); no served pack declares them; off admits them (ignored) |
+
+## Stage 2 follow-up — declared domain vocabulary (FEATURE_GATES §32)
+| Flag | Default | Purpose |
+|------|---------|---------|
+| outcome_vocabulary_required_enabled | True | `feedbackloop.outcome_node_label` has no engine default; an outcome write or read on a pack that declares none raises `OutcomeVocabularyUndeclaredError` / `OutcomeNodeLabelUndeclaredError`; freight-matching and mortgage-brokerage declare `TransactionOutcome`; off resolves an undeclared label to `TransactionOutcome` |

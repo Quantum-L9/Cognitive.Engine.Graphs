@@ -48,7 +48,7 @@ class CounterfactualGenerator:
         counterfactual_spec: CounterfactualSpec,
         graph_driver: GraphDriver,
         domain_id: str,
-        outcome_label: str = "TransactionOutcome",
+        outcome_label: str,
     ) -> None:
         self._spec = counterfactual_spec
         self._graph_driver = graph_driver
@@ -70,7 +70,7 @@ class CounterfactualGenerator:
         """Generate counterfactual scenarios for a negative outcome.
 
         Args:
-            outcome_node_id: The outcome_id of the negative TransactionOutcome.
+            outcome_node_id: The outcome_id of the negative outcome node.
 
         Returns:
             List of created CounterfactualScenario dicts.
@@ -102,7 +102,7 @@ class CounterfactualGenerator:
         return scenarios
 
     async def _get_outcome_fingerprint(self, outcome_node_id: str) -> dict[str, Any] | None:
-        """Retrieve the match fingerprint from a TransactionOutcome node."""
+        """Retrieve the match fingerprint from the domain's outcome node."""
         label = self._label()
         cypher = f"""
         MATCH (o:{label} {{outcome_id: $outcome_id}})

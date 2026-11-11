@@ -423,7 +423,7 @@ def _spec_with_attribution() -> DomainSpec:
         queryschema={"matchdirections": ["d1"], "fields": []},
         gates=[],
         scoring={"dimensions": []},
-        feedbackloop=FeedbackLoopSpec(enabled=True),
+        feedbackloop=FeedbackLoopSpec(enabled=True, outcome_node_label="TransactionOutcome"),
         causal=CausalSubgraphSpec(
             enabled=True,
             attribution_enabled=True,

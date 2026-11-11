@@ -77,6 +77,7 @@ def _minimal_spec(
         gates=[],
         scoring={"dimensions": []},
         feedbackloop=FeedbackLoopSpec(
+            outcome_node_label="TransactionOutcome",
             enabled=True,
             signal_weights=SignalWeightSpec(enabled=True),
             drift_threshold=drift_threshold,

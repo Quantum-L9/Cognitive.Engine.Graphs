@@ -173,46 +173,6 @@ variables:
     sensitive: false
     validation: "enum: DEBUG | INFO | WARNING | ERROR | CRITICAL"
 
-  # ── Scoring Weights (defaults) ────────────────────────────
-  - name: W_STRUCTURAL
-    type: number
-    required: false
-    default: 0.30
-    description: |
-      Default weight for the structural graph scoring dimension.
-      Overridable per-request via payload.weights.structural.
-      Sum of all W_* defaults must be <= 1.0 (CONTRACT-22).
-    source: env
-    sensitive: false
-    validation: "range: [0.0, 1.0]"
-
-  - name: W_GEO
-    type: number
-    required: false
-    default: 0.25
-    description: Default weight for geographic proximity dimension.
-    source: env
-    sensitive: false
-    validation: "range: [0.0, 1.0]"
-
-  - name: W_REINFORCEMENT
-    type: number
-    required: false
-    default: 0.20
-    description: Default weight for reinforcement/historical dimension.
-    source: env
-    sensitive: false
-    validation: "range: [0.0, 1.0]"
-
-  - name: W_FRESHNESS
-    type: number
-    required: false
-    default: 0.10
-    description: Default weight for data freshness dimension.
-    source: env
-    sensitive: false
-    validation: "range: [0.0, 1.0]"
-
   - name: MAX_RESULTS
     type: integer
     required: false

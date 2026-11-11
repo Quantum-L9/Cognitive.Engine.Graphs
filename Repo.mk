@@ -121,7 +121,7 @@ test-integration:	## Integration tests (needs Neo4j)
 
 # ── Data Seeding ───────────────────────────────────────────
 
-seed:	## Seed PlasticOS domain data into Neo4j
+seed:	## Seed domain pack data into Neo4j
 	docker compose exec api python -m engine.scripts.seed
 
 # ── Shell Access ───────────────────────────────────────────

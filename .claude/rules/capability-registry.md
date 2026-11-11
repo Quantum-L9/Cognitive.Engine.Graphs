@@ -10,7 +10,7 @@ Before building any of these, check if it already exists. Use the existing imple
 |-----------|------|-------------------|
 | Score clamping [0, 1] | engine/scoring/assembler.py | `_clamp_expression()` |
 | Weight-sum validation | engine/handlers.py | `handle_match()` weight check |
-| Startup weight assertion | engine/boot.py | `_assert_default_weight_sum()` |
+| Per-spec weight ceiling (C-22) | engine/config/schema.py | `DomainSpec` cross-reference validation (per match direction) |
 | Domain cross-ref validation | engine/config/schema.py | Pydantic model validators |
 | Gate null-param checking | engine/gates/compiler.py | `validate_gates()` |
 | Traversal bounds | engine/traversal/assembler.py | `validate_traversal()` |

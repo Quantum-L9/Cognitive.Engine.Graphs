@@ -22,10 +22,8 @@ Engine-specific vars use `{ENGINE}_` prefix. Names are UPPER_SNAKE_CASE.
 ```bash
 # Auth
 L9_API_KEY_HASH=sha256:...           # SHA-256 hash of the API key
-L9_API_KEY_PREFIX=pk_plasticos_      # Key prefix for tenant detection
 
 # Tenant
-L9_DEFAULT_TENANT=plasticos          # Fallback tenant ID
 L9_TENANT_RESOLUTION=header          # header | subdomain | key_prefix | envelope
 
 # Observability

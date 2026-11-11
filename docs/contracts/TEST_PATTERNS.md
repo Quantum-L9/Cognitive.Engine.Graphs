@@ -23,17 +23,23 @@ from engine.config.schema import DomainSpec, GateSpec, GateType
 
 @pytest.fixture
 def sample_spec() -> DomainSpec:
-    """Load a real domain spec — do NOT construct manually."""
-    from engine.config.loader import DomainPackLoader
+    """Load a synthetic verification pack — do NOT construct manually.
 
-    loader = DomainPackLoader(domains_dir=Path("domains"))
-    return loader.load_domain("plasticos")
+    Generic engine tests run on the synthetic packs under tests/fixtures/domains
+    (orbital-logistics, cheese-aging), whose vocabulary no shipped pack shares,
+    so a passing test proves the engine executed the declared contract rather
+    than one product pack's conventions. Load a shipped pack (e.g. PlasticOS)
+    only in a test that is explicitly about that pack.
+    """
+    from tests.fixtures.domain_contracts import synthetic_loader
+
+    return synthetic_loader().load_domain("cheese-aging")
 
 
-def test_range_gate_compilation(sample_spec: DomainSpec):
+def test_gate_compilation(sample_spec: DomainSpec):
     compiler = GateCompiler(sample_spec)  # Match METHOD_SIGNATURES.md
-    result = compiler.compile_gate(sample_spec.gates, "buyer_to_seller")
-    assert "WHERE" not in result  # compile_gate returns clause fragment, not full WHERE
+    result = compiler.compile_all_gates("batch_to_cave")
+    assert "WHERE" not in result  # compile_all_gates returns the predicate, not a WHERE clause
     assert "candidate." in result
 ```
 

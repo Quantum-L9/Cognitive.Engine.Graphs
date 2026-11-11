@@ -86,11 +86,11 @@ class Settings(BaseSettings):
     # --- GDS ---
     gds_enabled: bool = True
 
-    # --- Scoring Weights (defaults, overridable per-request) ---
-    w_structural: float = 0.30
-    w_geo: float = 0.25
-    w_reinforcement: float = 0.20
-    w_freshness: float = 0.10
+    # --- Match result bound ---
+    # Scoring dimensions and their default weights are the domain's
+    # (scoring.dimensions[*].defaultweight, ceiling checked per direction at
+    # spec load, C-22). The former fixed four-dimension weights (structural,
+    # geo, reinforcement, freshness) reached no scoring path and were retired.
     max_results: int = 25
 
     # --- Temporal Decay ---
@@ -775,6 +775,16 @@ class Settings(BaseSettings):
     # engine.config.loader.admission_defects reports a pack declaring either and
     # the loader withholds it until a domain needs roles. Off: accepted, ignored.
     gate_role_exemption: bool = True
+    # CEG domain-neutrality Stage 2 follow-up (owner decision, item 5 / M2):
+    # FeedbackLoopSpec.outcome_node_label defaulted to one pack's label, so a
+    # pack that declared none wrote and read that pack's outcome nodes. The
+    # schema default is now None and every served pack declares its label. On:
+    # an outcome write or read on a pack that declares none raises
+    # OutcomeNodeLabelUndeclaredError (handlers: OutcomeVocabularyUndeclaredError).
+    # Ships on: hardening that restores "the domain spec is the single source of
+    # truth" (C-21) and changes nothing for a pack that declares its label. Off:
+    # an undeclared label resolves to the former default (C-21 rollback).
+    outcome_vocabulary_required_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

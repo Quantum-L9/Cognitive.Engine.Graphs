@@ -4,13 +4,15 @@ layer: hardening
 level: MUST
 scope:
   paths:
-  - engine/config/settings.py
-  - engine/boot.py
+  - engine/config/schema.py
+  - engine/config/loader.py
+  - domains/*/spec.yaml
 preconditions:
-- Scoring weight modified or added
+- Scoring dimension added or its defaultweight modified in a domain spec
 postconditions:
-- Sum of defaults <= 1.0
-- Enforced by _assert_default_weight_sum()
+- Per match direction, the domain's default dimension weights sum to <= 1.0
+- Enforced at spec load by DomainSpec cross-reference validation (domain_strict_validation)
+- The engine declares no engine-wide scoring weights
 docs:
 - docs/contracts/SCORING_WEIGHT_CEILING.md
 verification:
