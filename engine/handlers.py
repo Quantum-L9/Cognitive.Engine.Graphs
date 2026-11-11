@@ -2795,7 +2795,9 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
     if keyed:
         try:
             await graph_driver.execute_query(
-                cypher=_outcome_id_constraint_query(domain_spec.feedbackloop.outcome_node_label),
+                cypher=_outcome_id_constraint_query(
+                    _outcome_label(domain_spec, tenant, "outcomes", "an outcome write")
+                ),
                 database=domain_spec.domain.id,
             )
         except Exception as exc:

@@ -168,7 +168,7 @@ class ScorePropagator:
         Returns ``(applied, affected)``, or None when no outcome node carries
         ``outcome_id`` for this tenant.
         """
-        outcome_label = sanitize_label(self._spec.feedbackloop.outcome_node_label)
+        outcome_label = sanitize_label(outcome_node_label(self._spec, "keyed score propagation"))
         sw_spec = self._spec.feedbackloop.signal_weights
         cypher = f"""
         MATCH (claim:{outcome_label} {{outcome_id: $outcome_id, tenant: $tenant}})
