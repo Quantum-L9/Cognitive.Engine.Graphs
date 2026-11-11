@@ -422,8 +422,9 @@ class TestCounterfactualDedupeAndLabel:
 
         parameter = inspect.signature(CounterfactualGenerator).parameters["outcome_label"]
         assert parameter.default is inspect.Parameter.empty
+        spec, driver = _make_spec(), _mock_driver()
         with pytest.raises(TypeError):
-            CounterfactualGenerator(_make_spec(), _mock_driver(), "test_db")  # type: ignore[call-arg]
+            CounterfactualGenerator(spec, driver, "test_db")  # type: ignore[call-arg]
 
     def test_unsafe_label_is_refused(self) -> None:
         with pytest.raises(ValueError):

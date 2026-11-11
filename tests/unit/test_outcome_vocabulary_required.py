@@ -87,8 +87,9 @@ async def test_outcome_write_on_an_undeclared_pack_is_refused_before_any_cypher(
     from engine.handlers import OutcomeVocabularyUndeclaredError, ValidationError, handle_outcomes
 
     sent = _bind(synthetic_loader().load_domain("cheese-aging"))
+    payload = dict(_OUTCOME)
     with pytest.raises(OutcomeVocabularyUndeclaredError, match="'cheese-aging' declares no feedbackloop") as info:
-        await handle_outcomes("cheese-aging", dict(_OUTCOME))
+        await handle_outcomes("cheese-aging", payload)
     assert isinstance(info.value, ValidationError)
     assert sent == []
 
@@ -167,10 +168,10 @@ def _attention_dimension() -> MagicMock:
 def test_preference_attention_reads_the_declared_outcome_label() -> None:
     from engine.scoring.assembler import ScoringAssembler
 
+    undeclared = ScoringAssembler(synthetic_loader().load_domain("cheese-aging"))
+    dimension = _attention_dimension()
     with pytest.raises(OutcomeNodeLabelUndeclaredError, match="preference_attention dimension 'tasting_history'"):
-        ScoringAssembler(synthetic_loader().load_domain("cheese-aging"))._compile_preference_attention(
-            _attention_dimension()
-        )
+        undeclared._compile_preference_attention(dimension)
     expression = ScoringAssembler(synthetic_loader().load_domain("orbital-logistics"))._compile_preference_attention(
         _attention_dimension()
     )
