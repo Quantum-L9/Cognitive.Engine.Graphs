@@ -179,3 +179,15 @@ Generated from `environment/ide/policy.json` in the governance clone by `ops/scr
 > images use `tools/deps/install_locked.sh ci|full|runtime|tools`. Change a
 > dependency with `uv add` / edit + `uv lock`, and commit `uv.lock`.
 > `tests/unit/test_uv_lock.py` fails on a stale lock or a second manifest.
+
+> **2026-11-11 correction (additive; append-only):** Core-owned tools (pip,
+> pre-commit, ruff, mypy, pytest, semgrep) are declared nowhere in this
+> repository. `pyproject.toml` names none of them, `[tool.uv]
+> exclude-dependencies` keeps them (and transitive copies via pytest plugins or
+> pip-audit) out of `uv.lock`, the ruff and mypy pre-commit hooks are
+> `repo: local` / `language: system`, and `tools/deps/install_locked.sh ci|full`
+> installs Quantum-L9/l9-ci-core's installer pins from the `v2` tag
+> (`L9_CI_CORE_REF` overrides it). A Core version bump needs no edit here.
+> Run tools through `install_locked.sh` or `make setup`: a plain `uv sync`
+> without `--inexact` removes them. `tests/unit/test_core_toolchain_pins.py`
+> fails on any declaration.

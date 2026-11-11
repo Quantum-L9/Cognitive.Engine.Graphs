@@ -13,13 +13,23 @@
 # Run manually: pre-commit run --all-files
 
 repos:
-  # Code formatting
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: 39d9ac5938dadb73df0564a45f163e25ff9fa6e2  # v0.16.1
+  # Code formatting. ruff is Core-owned (Quantum-L9/l9-ci-core installer pins,
+  # installed by tools/deps/install_locked.sh): a local system hook runs that
+  # installed ruff, so no hook rev repeats its version.
+  - repo: local
     hooks:
       - id: ruff
-        args: [--fix]
+        name: ruff
+        entry: ruff check --force-exclude --fix
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
       - id: ruff-format
+        name: ruff-format
+        entry: ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
 
   # Secrets scanning (harvested concept from L9 Kernel — fresh config)
   - repo: https://github.com/gitleaks/gitleaks
