@@ -495,11 +495,6 @@ jobs:
           echo "Scanning dependencies for known vulnerabilities..."
           pip-audit --desc || echo "⚠️  Vulnerabilities found (non-blocking)"
 
-      - name: Run Safety Check
-        run: |
-          echo "Running Safety vulnerability scanner..."
-          safety check || echo "⚠️  Safety check warnings (non-blocking)"
-
       - name: Run Bandit (SAST)
         run: |
           echo "Running Bandit static security analysis..."
