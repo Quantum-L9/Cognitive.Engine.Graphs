@@ -543,8 +543,11 @@ class TestScoringAdmission:
 
         ok = {**_POPMEAN, "name": "plain", "null_strategy": "zero"}
         defects = admission_defects(_spec_with_dimensions([_BRIDGE, _ATTENTION, _PRIOR, ok]))
+        # attention's missing success value is the named admission defect
+        # (preference_attention_metadata_required_enabled), reported once and
+        # not again by the scoring compiler.
         assert sorted(d.split(":", 1)[0] for d in defects) == sorted(
-            ["scoring[d1] bridge", "scoring[d1] attention", "scoring prior"]
+            ["scoring[d1] bridge", "undeclared scoring metadata", "scoring prior"]
         )
 
     def test_freight_matching_is_withheld_for_its_unbound_scoring_parameters(
@@ -576,6 +579,8 @@ class TestScoringAdmission:
         monkeypatch.setattr(loader_module.settings, "admission_checks_full_match", False)
         # Gate-only admission: the undeclared-structural-property check is its own unit.
         monkeypatch.setattr(loader_module.settings, "declared_structural_properties_required_enabled", False)
+        # So is the preference_attention success-value check (test_scoring_dimension_metadata.py).
+        monkeypatch.setattr(loader_module.settings, "preference_attention_metadata_required_enabled", False)
         for spec in (_spec_with_dimensions([_BRIDGE, _ATTENTION, _POPMEAN, _PRIOR]), _pre_repair_freight_spec()):
             assert loader_module.admission_defects(spec) == []
             assert loader_module.withholding_reason(spec) is None

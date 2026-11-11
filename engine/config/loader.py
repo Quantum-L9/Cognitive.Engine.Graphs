@@ -515,6 +515,7 @@ def admission_defects(spec: DomainSpec, *, complete: bool = False) -> list[str]:
     ``settings.unvalidated_domain_packs_enabled`` is the operator's explicit,
     documented override (docs/FEATURE_GATES.md §16).
     """
+    from engine.config.outcome_vocabulary import scoring_metadata_defects, undeclared_success_value_dimensions
     from engine.config.structural_vocabulary import UndeclaredStructuralPropertyError, structural_property_defects
     from engine.gates.compiler import GateCompiler
 
@@ -522,6 +523,10 @@ def admission_defects(spec: DomainSpec, *, complete: bool = False) -> list[str]:
     # Stage 2 follow-up (item 8): structural properties a gate, scoring
     # dimension or GDS job uses are declarations (declared_structural_properties_required_enabled).
     defects: list[str] = structural_property_defects(spec)
+    # A preference_attention dimension declares its success value
+    # (preference_attention_metadata_required_enabled); reported once, here.
+    undeclared_success = undeclared_success_value_dimensions(spec)
+    defects.extend(scoring_metadata_defects(undeclared_success))
     for gate in spec.gates:
         if gate.strictwhen:
             defects.append(f"{gate.name}: strictwhen {gate.strictwhen!r} is not consumed by any compiler")
@@ -541,7 +546,13 @@ def admission_defects(spec: DomainSpec, *, complete: bool = False) -> list[str]:
     defects.extend(_plugin_defects(spec))
     defects.extend(_sync_shape_defects(spec))
     if complete or settings.scoring_admission_check_enabled or settings.admission_checks_full_match:
-        defects.extend(_scoring_defects(spec, check_producers=complete or settings.scoring_admission_check_enabled))
+        defects.extend(
+            _scoring_defects(
+                spec,
+                check_producers=complete or settings.scoring_admission_check_enabled,
+                reported=set(undeclared_success),
+            )
+        )
     if complete or settings.admission_checks_full_match:
         defects.extend(_match_defects(spec))
     if complete:
@@ -734,16 +745,19 @@ def _no_producer_defect(dim: object, *, candidate_properties: set[str]) -> str |
     return None
 
 
-def _scoring_defects(spec: DomainSpec, *, check_producers: bool) -> list[str]:
+def _scoring_defects(spec: DomainSpec, *, check_producers: bool, reported: set[str] | None = None) -> list[str]:
     """Scoring dimensions that cannot execute in a declared match direction.
 
     For each direction, every applicable dimension is compiled exactly as
     ``ScoringAssembler.assemble_scoring_clause`` compiles it: a ``ValueError``
     is a defect quoting the compiler, and every ``$parameter`` the expression
     references must be one ``handle_match`` binds, or the match fails with
-    ``ParameterMissing``. One defect per offending dimension.
+    ``ParameterMissing``. One defect per offending dimension. A dimension in
+    ``reported`` already carries a named admission defect and is not compiled.
     """
     from engine.scoring.assembler import ScoringAssembler
+
+    reported = reported or set()
 
     defects: list[str] = []
     bindable = _bindable_parameters(spec)
@@ -755,8 +769,12 @@ def _scoring_defects(spec: DomainSpec, *, check_producers: bool) -> list[str]:
                 defects.append(producer)
     for direction in spec.queryschema.matchdirections:
         assembler = ScoringAssembler(spec)
+        skipped = False
         for dim in spec.scoring.dimensions:
             if dim.matchdirections and direction not in dim.matchdirections:
+                continue
+            if dim.name in reported:
+                skipped = True
                 continue
             try:
                 expression = assembler._compile_dimension(dim)
@@ -768,7 +786,7 @@ def _scoring_defects(spec: DomainSpec, *, check_producers: bool) -> list[str]:
             if unbound:
                 names = ", ".join(repr(p) for p in unbound)
                 defects.append(f"scoring[{direction}] {dim.name}: references parameter(s) {names}, which nothing binds")
-        if not any(d.startswith(f"scoring[{direction}]") for d in defects):
+        if not skipped and not any(d.startswith(f"scoring[{direction}]") for d in defects):
             # The clause as handle_match assembles it (aliases, weights, clamp).
             try:
                 ScoringAssembler(spec).assemble_scoring_clause(direction, {})
@@ -799,11 +817,15 @@ def withholding_reason(spec: DomainSpec, *, complete: bool = False) -> str | Non
     if complete or not settings.unvalidated_domain_packs_enabled:
         defects = admission_defects(spec, complete=complete)
         if defects:
-            # Sync-shape and undeclared-structural-property defects are not gate
-            # compilation defects, so the reason names every defect.
+            # Sync-shape, undeclared-structural-property and scoring-metadata
+            # defects are not gate compilation defects, so the reason names every defect.
+            from engine.config.outcome_vocabulary import SCORING_METADATA_DEFECT_PREFIX
             from engine.config.structural_vocabulary import STRUCTURAL_DEFECT_PREFIX
 
-            sync_shape = any(defect.startswith((*_SYNC_SHAPE_PREFIXES, STRUCTURAL_DEFECT_PREFIX)) for defect in defects)
+            sync_shape = any(
+                defect.startswith((*_SYNC_SHAPE_PREFIXES, STRUCTURAL_DEFECT_PREFIX, SCORING_METADATA_DEFECT_PREFIX))
+                for defect in defects
+            )
             if not complete and not _match_admission_checks_enabled() and not sync_shape:
                 return (
                     f"Domain '{spec.domain.id}' is withheld: {len(defects)} gate(s) do not compile to executable "

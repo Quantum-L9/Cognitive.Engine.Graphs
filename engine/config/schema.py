@@ -650,6 +650,57 @@ class GateSpec(BaseModel):
     condition: str | None = None
 
 
+class ScoringDimensionMetadata(BaseModel):
+    """Computation-specific declarations of a scoring dimension (``metadata:``).
+
+    Exactly the keys ``ScoringAssembler`` reads, typed. Unknown keys are refused
+    (a new model, strict from the start), so a misspelled key fails validation
+    instead of being dropped; a key the dimension's computation does not read is
+    refused by ``ScoringDimensionSpec``.
+
+    ``preference_attention``: ``success_value`` (required at admission — which
+    outcome value counts as success is the domain's declaration),
+    ``success_property``, ``outcome_relation``, ``outcome_node``,
+    ``outcome_community_property``. ``community_bridge``: ``community_properties``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # --- preference_attention ---
+    success_value: str | None = None
+    success_property: str | None = None
+    outcome_relation: str | None = None
+    outcome_node: str | None = None
+    outcome_community_property: str | None = None
+    # --- community_bridge ---
+    community_properties: list[str] | None = None
+
+
+# The metadata keys each computation reads (engine/scoring/assembler.py).
+_METADATA_KEYS_READ: dict[ComputationType, frozenset[str]] = {
+    ComputationType.PREFERENCEATTENTION: frozenset(
+        {"success_value", "success_property", "outcome_relation", "outcome_node", "outcome_community_property"}
+    ),
+    ComputationType.COMMUNITYBRIDGE: frozenset({"community_properties"}),
+}
+
+
+def dimension_metadata(dim: Any) -> Any:
+    """A scoring dimension's metadata as the mapping the compilers read.
+
+    A pack-declared ``ScoringDimensionMetadata`` yields its declared keys (an
+    unset or null key is absent, so the compilers' defaults apply). A mapping
+    assigned by code that builds a dimension directly is returned unchanged; no
+    metadata is ``{}``.
+    """
+    raw = getattr(dim, "metadata", None)
+    if not raw:
+        return {}
+    if isinstance(raw, ScoringDimensionMetadata):
+        return raw.model_dump(exclude_none=True)
+    return raw
+
+
 class ScoringDimensionSpec(BaseModel):
     """Scoring dimension definition."""
 
@@ -683,6 +734,23 @@ class ScoringDimensionSpec(BaseModel):
     entity_types: list[str] = Field(default_factory=list)  # S2-12: entity type tracking
     cold_start_fallback: ColdStartFallback = ColdStartFallback.ZERO  # S2-20: cold-start
     soft_match: bool = False  # S2-17: graduated community scoring (communitymatch only)
+    # Computation-specific declarations (preference_attention, community_bridge).
+    metadata: ScoringDimensionMetadata | None = None
+
+    @model_validator(mode="after")
+    def validate_metadata_keys(self) -> ScoringDimensionSpec:
+        """Refuse a metadata key the dimension's computation does not read."""
+        if self.metadata is None:
+            return self
+        read = _METADATA_KEYS_READ.get(self.computation, frozenset())
+        unread = sorted(self.metadata.model_fields_set - read)
+        if unread:
+            msg = (
+                f"Scoring dimension {self.name!r}: metadata key(s) {', '.join(unread)} are not read by "
+                f"computation {self.computation.value!r}"
+            )
+            raise ValueError(msg)
+        return self
 
 
 class AdaptiveSampleSizeSpec(BaseModel):

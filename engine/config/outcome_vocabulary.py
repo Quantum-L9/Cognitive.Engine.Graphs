@@ -76,3 +76,53 @@ def outcome_node_label(domain_spec: Any, operation: str) -> str:
         domain = getattr(domain_spec, "domain", None)
         raise OutcomeNodeLabelUndeclaredError(str(getattr(domain, "id", "?")), operation)
     return label
+
+
+# ── preference_attention success value (scoring dimension metadata) ──────────
+
+# Prefix of the admission defect for a preference_attention dimension that
+# declares no metadata.success_value
+# (settings.preference_attention_metadata_required_enabled).
+SCORING_METADATA_DEFECT_PREFIX = "undeclared scoring metadata: "
+
+
+def preference_attention_success_value_defect(name: str) -> str:
+    """The refusal for a ``preference_attention`` dimension without ``metadata.success_value``.
+
+    One text for the scoring compiler's ``ValueError`` and the admission defect,
+    so admission quotes the compiler verbatim.
+    """
+    return (
+        f"Dimension '{name}': preference_attention requires metadata.success_value "
+        "(the outcome value the domain counts as success); the engine has no default"
+    )
+
+
+def undeclared_success_value_dimensions(spec: Any) -> list[str]:
+    """Names of ``preference_attention`` dimensions that declare no ``metadata.success_value`` (flag on only).
+
+    Which outcome value counts as success is the domain's declaration; the
+    scoring compiler has no default and refuses the dimension on every match.
+    With ``settings.preference_attention_metadata_required_enabled`` on the
+    loader withholds such a pack at admission (:func:`scoring_metadata_defects`)
+    instead; off, nothing is reported and the compiler's refusal stands.
+    """
+    from engine.config.schema import dimension_metadata
+    from engine.config.settings import settings
+
+    if not settings.preference_attention_metadata_required_enabled:
+        return []
+    scoring = getattr(spec, "scoring", None)
+    names: list[str] = []
+    for dim in getattr(scoring, "dimensions", None) or []:
+        computation = getattr(dim, "computation", None)
+        if str(getattr(computation, "value", computation)) != "preference_attention":
+            continue
+        if dimension_metadata(dim).get("success_value") is None:
+            names.append(str(dim.name))
+    return names
+
+
+def scoring_metadata_defects(names: list[str]) -> list[str]:
+    """The named admission defects for :func:`undeclared_success_value_dimensions`."""
+    return [SCORING_METADATA_DEFECT_PREFIX + preference_attention_success_value_defect(name) for name in names]

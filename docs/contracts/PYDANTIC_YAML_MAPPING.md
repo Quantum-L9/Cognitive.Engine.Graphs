@@ -105,6 +105,55 @@ targets that node (admission refuses any other use; Neo4j cannot store them).
 Query fields and derived parameters stay scalars. The same syntax is used by
 EIE.
 
+## Scoring dimension `metadata` (typed, computation-specific)
+
+`ScoringDimensionSpec.metadata` is a `ScoringDimensionMetadata` model
+(`extra="forbid"`). Its keys are exactly the ones the scoring assembler reads,
+and like every other key they are the Pydantic field names verbatim. A key the
+dimension's `computation` does not read is a validation error, so a misspelled
+or misplaced key is refused at load instead of being dropped.
+
+```yaml
+scoring:
+  dimensions:
+    - name: docking_history
+      source: computed
+      computation: preference_attention
+      candidateprop: depot_cluster          # the candidate's community property
+      weightkey: w_history
+      defaultweight: 0.1
+      metadata:                              # ← ScoringDimensionSpec.metadata
+        success_value: docked                # required at admission; no engine default
+        outcome_community_property: docking_cluster   # optional; default: candidateprop
+        # success_property, outcome_relation, outcome_node — optional
+    - name: cluster_bridge
+      source: computed
+      computation: community_bridge
+      weightkey: w_bridge
+      defaultweight: 0.1
+      metadata:
+        community_properties: [orbit_cluster, supply_cluster]   # or declare candidateprop
+```
+
+```python
+class ScoringDimensionMetadata(BaseModel):  # extra="forbid"
+    success_value: str | None = None  # preference_attention
+    success_property: str | None = None  # preference_attention
+    outcome_relation: str | None = None  # preference_attention
+    outcome_node: str | None = None  # preference_attention
+    outcome_community_property: str | None = None  # preference_attention
+    community_properties: list[str] | None = None  # community_bridge
+
+
+class ScoringDimensionSpec(BaseModel):
+    ...
+    metadata: ScoringDimensionMetadata | None = None
+```
+
+A `preference_attention` dimension without `success_value` is withheld at
+admission (`undeclared scoring metadata: …`, flag
+`preference_attention_metadata_required_enabled`).
+
 ## BANNED Patterns
 
 ```python

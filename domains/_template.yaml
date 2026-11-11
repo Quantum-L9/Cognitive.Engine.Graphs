@@ -367,7 +367,9 @@ gates:
 # ---------------------------------------------------------------------------
 # Computation types: geodecay | lognormalized | communitymatch | inverselinear |
 #                    candidateproperty | weightedrate | pricealignment |
-#                    temporalproximity | customcypher | traversalalias | kge
+#                    temporalproximity | customcypher | traversalalias | kge |
+#                    variantdiscovery | ensembleconfidence | preference_attention |
+#                    community_bridge
 # Default weights of the dimensions active in one direction must sum to <= 1.0.
 scoring:
   dimensions:
@@ -490,6 +492,33 @@ scoring:
       defaultweight: 0.05
       aggregation: additive
       matchdirections: [query_to_candidate]
+
+    # ─── PREFERENCE ATTENTION / COMMUNITY BRIDGE (metadata) ────────────────
+    # Shown commented out (the weights above already sum to 1.0). `metadata`
+    # takes exactly the keys the computation reads; any other key, or a key the
+    # computation does not read, fails validation.
+    # - name: outcome_history_score
+    #   description: "Share of recent successful outcomes in the candidate's community"
+    #   source: computed
+    #   computation: preference_attention
+    #   candidateprop: louvain_community_id  # REQUIRED: the candidate's community property
+    #   weightkey: w_history
+    #   defaultweight: 0.1
+    #   metadata:
+    #     success_value: completed         # REQUIRED: the outcome value counted as success (no engine default;
+    #                                      #   a pack without it is withheld at admission)
+    #     success_property: outcome_type   # optional (default: outcome_type)
+    #     outcome_relation: RESULTED_IN    # optional (default: feedbackloop.outcome_edge_type)
+    #     outcome_node: TransactionOutcome # optional (default: feedbackloop.outcome_node_label)
+    #     outcome_community_property: louvain_community_id  # optional (default: candidateprop)
+    # - name: bridge_score
+    #   source: computed
+    #   computation: community_bridge
+    #   weightkey: w_bridge
+    #   defaultweight: 0.1
+    #   metadata:
+    #     community_properties: [community_id_supply, community_id_geo]  # or declare candidateprop;
+    #                                      #   each needs a query_<prop> queryschema field
 
 # ---------------------------------------------------------------------------
 # SOFT SIGNALS — not shown

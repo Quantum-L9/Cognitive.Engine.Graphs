@@ -130,6 +130,7 @@ independently of the code default.
 | Outcome Vocabulary Required | `OUTCOME_VOCABULARY_REQUIRED_ENABLED` (`outcome_vocabulary_required_enabled`) | `True` | unset | active (hardening, Stage 2 follow-up); `feedbackloop.outcome_node_label` has no engine default, and an outcome write or read on a pack that declares none raises `OutcomeVocabularyUndeclaredError`; every served pack declares its label — see §32 |
 | Declared Structural Properties Required | `DECLARED_STRUCTURAL_PROPERTIES_REQUIRED_ENABLED` (`declared_structural_properties_required_enabled`) | `True` | unset | active (hardening, Stage 2 follow-up); the exclusion edge / target property, community property and geo coordinate / id properties are declarations; a pack whose gate, scoring dimension or GDS job uses one undeclared is withheld (`undeclared structural property: …`); every served pack declares what it uses — see §32 |
 | Preference Attention Declared Community | `PREFERENCE_ATTENTION_DECLARED_COMMUNITY_ENABLED` (`preference_attention_declared_community_enabled`) | `True` | unset | active (correctness, Stage 2 follow-up); `preference_attention` compares the outcome nodes' `metadata.outcome_community_property` (default: the candidate's declared community property) instead of a hardcoded `community_id`; no served pack uses the dimension — see §32 |
+| Preference Attention Metadata Required | `PREFERENCE_ATTENTION_METADATA_REQUIRED_ENABLED` (`preference_attention_metadata_required_enabled`) | `True` | unset | active (hardening); a pack whose `preference_attention` dimension declares no `metadata.success_value` is withheld at admission (`undeclared scoring metadata: …`) instead of failing every match in the scoring compiler; no served pack uses the dimension — see §32 |
 | PacketStore Packet-Identity Dedup | `PACKET_STORE_PACKET_IDENTITY_DEDUP_ENABLED` (`packet_store_packet_identity_dedup_enabled`) | `True` | unset | active (hardening, RU-078); `packet_store.content_hash` is the SDK `transport_hash`, so distinct packets with equal payloads are both stored, and a packet whose INSERT is skipped as a duplicate writes no hop/delegation/lineage rows; off restores the `payload_hash` key and unconditional child rows — see §7 |
 | PacketStore RLS Tenant Session | `PACKET_STORE_RLS_TENANT_SESSION_ENABLED` (`packet_store_rls_tenant_session_enabled`) | `True` | unset | active (hardening, RU-079); `persist` and `record_outcome` set the transaction-local `app.current_tenant` GUC to the packet's / call's tenant before writing, so an `l9_product` DSN satisfies the DDL's RLS policies; off issues no `set_config` — see §7 |
 | Inference Geography USPS Zones | `INFERENCE_GEO_USPS_ZONES_ENABLED` (`inference_geo_usps_zones_enabled`) | `True` | unset | active (correctness, RU-084); `infer_geography_from_postal_code` maps the ZIP first digit to its USPS zone (0-1 Northeast, 2-3 Southeast, 4-6 Midwest, 7 South, 8-9 West) and emits nothing when the entity declares a non-US `country`; off restores the five-digit threshold ladder. The rule also needs `graph_inference_feedback_enabled` and domain authorization — see §13 |
@@ -835,8 +836,11 @@ from gates to scoring. For every declared match direction each applicable
 dimension is compiled as `ScoringAssembler` compiles it, and the pack is
 withheld when:
 
-- the scoring compiler refuses a dimension (`preference_attention` without
-  `metadata.success_value`, which the schema cannot declare);
+- the scoring compiler refuses a dimension (for example a `community_bridge`
+  whose `query_<prop>` is unbound; `preference_attention` without
+  `metadata.success_value` is reported once, as the named
+  `undeclared scoring metadata: …` defect, by
+  `PREFERENCE_ATTENTION_METADATA_REQUIRED_ENABLED` — see §32);
 - a dimension references a `$parameter` that `handle_match` does not bind —
   not a queryschema field, derived parameter, scoring `queryprop`, `top_n`, or
   a value the assembler binds itself (`community_bridge` without a
@@ -1130,7 +1134,8 @@ changes nothing for a pack that declares what it uses; every served pack
 |---|---|---|---|
 | `outcome_vocabulary_required_enabled` (`OUTCOME_VOCABULARY_REQUIRED_ENABLED`) | `true` | `FeedbackLoopSpec.outcome_node_label` defaults to `None`. `handle_outcomes`, sync `entity_type=outcome`, admin `score_feedback` / `generate_calibration_pairs` / `discover_weights`, the feedback loop (signal weights, propagation, pattern matching, drift), causal attribution and a `preference_attention` dimension without `metadata.outcome_node` read the domain's declared label; on a pack that declares none they raise before any Cypher — `OutcomeVocabularyUndeclaredError` (a `ValidationError`) from handlers, `OutcomeNodeLabelUndeclaredError` (a `ValueError`) from the engine modules — naming the domain and the operation. freight-matching and mortgage-brokerage declare `outcome_node_label: TransactionOutcome` (the label their graphs already hold), plasticos already declared it, so no graph migrates | An undeclared label resolves to the former default `TransactionOutcome` |
 | `declared_structural_properties_required_enabled` (`DECLARED_STRUCTURAL_PROPERTIES_REQUIRED_ENABLED`) | `true` | No borrowed structural names. An `exclusion` gate declares `edgetype`, and `candidateprop` (the excluded node's property) when it names a `queryparam`; `geodecay` declares `candidateprop` (latitude) and `candidateprop_lon` (longitude), its query operands defaulting to those declared names; `communitymatch` / `preference_attention` declare `candidateprop` (the community property; communitymatch's `queryprop` defaults to it); `community_bridge` declares `candidateprop` or `metadata.community_properties`; GDS `louvain` declares `writeproperty` (so writer and readers use the same declared property, M8) and `geoproximity` declares `writeproperties` `lat_property` / `lon_property` / `id_property`. `engine.config.loader.admission_defects` withholds a pack that uses one undeclared with `undeclared structural property: <gate/scoring/GDS job> …` (`engine/config/structural_vocabulary.py`); the compilers raise `UndeclaredStructuralPropertyError` for callers that bypass admission. plasticos now also declares `candidateprop_lon` / `queryprop_lon: lon` on its two geodecay dimensions (the names it used), so its generated Cypher is byte-identical | The gate compiler, scoring assembler and GDS scheduler substitute `EXCLUDED_FROM`, `entity_id`, `community_id`, `communityId`, `lat`, `lon` |
-| `preference_attention_declared_community_enabled` (`PREFERENCE_ATTENTION_DECLARED_COMMUNITY_ENABLED`) | `true` | `preference_attention` reads the outcome nodes' community from `metadata.outcome_community_property`, defaulting to the candidate's declared community property (item 7 / M5b). Note: `ScoringDimensionSpec` declares no `metadata` field, so the dimension's metadata is reachable only from duck-typed callers today | The outcome side reads a hardcoded `community_id` |
+| `preference_attention_declared_community_enabled` (`PREFERENCE_ATTENTION_DECLARED_COMMUNITY_ENABLED`) | `true` | `preference_attention` reads the outcome nodes' community from `metadata.outcome_community_property`, defaulting to the candidate's declared community property (item 7 / M5b). `ScoringDimensionSpec.metadata` (`ScoringDimensionMetadata`) makes the key reachable from pack YAML | The outcome side reads a hardcoded `community_id` |
+| `preference_attention_metadata_required_enabled` (`PREFERENCE_ATTENTION_METADATA_REQUIRED_ENABLED`) | `true` | `engine.config.loader.admission_defects` withholds a pack whose `preference_attention` dimension declares no `metadata.success_value` with `undeclared scoring metadata: Dimension '<name>': preference_attention requires metadata.success_value …` (`engine/config/outcome_vocabulary.py`) — the scoring compiler's own refusal text, reported once (the scoring admission check does not repeat it). No served pack declares the dimension | The pack is admitted and the scoring compiler refuses the dimension at match time, as before |
 
 The outcome *edge* (`feedbackloop.outcome_edge_type`, default `RESULTED_IN`) is
 not part of this section: its split stays deferred with A09.
@@ -1150,11 +1155,24 @@ declares `DockingResult`, cheese-aging declares nothing).
 `tests/unit/test_domain_neutrality_acceptance.py` (structural properties: a declared and an
 undeclared cheese-aging variant with an exclusion gate, geo and community scoring, Louvain and
 geoproximity jobs; `preference_attention` outcome community property).
+`tests/unit/test_scoring_dimension_metadata.py` (a `preference_attention` dimension declared in
+orbital-logistics YAML keeps its metadata and compiles with it; without `success_value` it is withheld
+by name; a misspelled or unread metadata key fails validation).
+
+**Scoring dimension metadata (schema, no flag).** `ScoringDimensionSpec.metadata` is a typed
+`ScoringDimensionMetadata` (`extra="forbid"`) declaring exactly the keys the scoring assembler reads:
+`preference_attention` — `success_value`, `success_property`, `outcome_relation`, `outcome_node`,
+`outcome_community_property`; `community_bridge` — `community_properties`. A key the dimension's
+computation does not read is a validation error. Before, pydantic dropped `metadata:` from pack YAML,
+so these keys were reachable only from code building the dimension directly. No served or fixture pack
+declared `metadata:` on a scoring dimension, so no pack's output changes and there is no rollback flag;
+code-built dimensions (a mapping assigned to `dim.metadata`) are read exactly as before.
 
 ### Rollback
 
-Set `OUTCOME_VOCABULARY_REQUIRED_ENABLED=false`, `DECLARED_STRUCTURAL_PROPERTIES_REQUIRED_ENABLED=false` or
-`PREFERENCE_ATTENTION_DECLARED_COMMUNITY_ENABLED=false` and restart.
+Set `OUTCOME_VOCABULARY_REQUIRED_ENABLED=false`, `DECLARED_STRUCTURAL_PROPERTIES_REQUIRED_ENABLED=false`,
+`PREFERENCE_ATTENTION_DECLARED_COMMUNITY_ENABLED=false` or
+`PREFERENCE_ATTENTION_METADATA_REQUIRED_ENABLED=false` and restart.
 
 
 ## 33. Capability tenant binding (CAP-TENANT-01, W2)

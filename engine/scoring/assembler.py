@@ -25,6 +25,7 @@ from engine.config.schema import (
     DomainSpec,
     NullStrategy,
     ScoringDimensionSpec,
+    dimension_metadata,
 )
 from engine.graph.driver import GraphDriver
 from engine.utils.security import cypher_number, sanitize_label
@@ -596,17 +597,15 @@ class ScoringAssembler:
 
         # Outcome vocabulary comes from the domain spec; only the structural
         # property name has an engine default.
-        metadata = dim.metadata if hasattr(dim, "metadata") and dim.metadata else {}
+        metadata = dimension_metadata(dim)
         feedback = self.domain_spec.feedbackloop
         outcome_rel = sanitize_label(metadata.get("outcome_relation", feedback.outcome_edge_type))
         success_prop = sanitize_label(metadata.get("success_property", "outcome_type"))
         success_value = metadata.get("success_value")
         if success_value is None:
-            msg = (
-                f"Dimension '{dim.name}': preference_attention requires metadata.success_value "
-                "(the outcome value the domain counts as success); the engine has no default"
-            )
-            raise ValueError(msg)
+            from engine.config.outcome_vocabulary import preference_attention_success_value_defect
+
+            raise ValueError(preference_attention_success_value_defect(dim.name))
         if not isinstance(success_value, str):
             msg = f"Dimension '{dim.name}': success_value must be a string"
             raise ValueError(msg)
@@ -689,7 +688,7 @@ class ScoringAssembler:
         default = float(dim.defaultwhennull)
 
         # Extract community properties from metadata or use sensible defaults
-        metadata = dim.metadata if hasattr(dim, "metadata") and dim.metadata else {}
+        metadata = dimension_metadata(dim)
         community_props = metadata.get("community_properties", [])
         if not community_props:
             # Fall back to the declared candidateprop (Stage 2 follow-up, item 8:

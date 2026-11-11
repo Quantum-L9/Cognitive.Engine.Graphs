@@ -113,7 +113,9 @@ def dimension_defects(dim: Any) -> list[str]:
     if computation in ("communitymatch", "preference_attention") and not _present(candidateprop):
         return [f"scoring {name!r} ({computation}) declares no candidateprop (the community property)"]
     if computation == "community_bridge":
-        metadata = getattr(dim, "metadata", None)
+        from engine.config.schema import dimension_metadata
+
+        metadata = dimension_metadata(dim)
         listed = metadata.get("community_properties") if isinstance(metadata, dict) else None
         if not listed and not _present(candidateprop):
             return [community_bridge_defect(name)]

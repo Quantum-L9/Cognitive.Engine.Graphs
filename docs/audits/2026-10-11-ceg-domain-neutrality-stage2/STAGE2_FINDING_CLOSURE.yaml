@@ -367,6 +367,14 @@ followup:
       evidence:
         - "engine/scoring/assembler.py: preference_attention compares the outcome nodes' metadata.outcome_community_property (default: the candidate's declared community property); flag preference_attention_declared_community_enabled (default on; off restores community_id)"
         - tests/unit/test_domain_neutrality_acceptance.py::test_preference_attention_reads_the_declared_outcome_community_property
+      note: >
+        2026-11-11 (ceg-preference-attention-unreachable): item 7 is now reachable
+        from packs. ScoringDimensionSpec.metadata (ScoringDimensionMetadata,
+        extra="forbid") keeps success_value and outcome_community_property from
+        pack YAML, where pydantic previously dropped them; a preference_attention
+        dimension without success_value is withheld at admission
+        (preference_attention_metadata_required_enabled). Proved end to end from
+        YAML on orbital-logistics in tests/unit/test_scoring_dimension_metadata.py.
     - item: 10
       finding: M9
       disposition: KEPT (owner decision)
