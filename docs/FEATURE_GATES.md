@@ -1649,4 +1649,3 @@ changes of this section: plasticos 1.4.0 declares `Facility.processed_polymers`
 as `list<map{code: string required}>`; the synthetic `orbital-logistics` 0.2.0
 fixture carries a `list<string>` property, a `list<string>` taxonomy field and a
 `list<map>` childsync.
-
