@@ -103,8 +103,10 @@ def test_an_undeclared_childsync_field_is_refused_by_the_generator() -> None:
     raw = fx.orbital_raw()
     fx.drop_depot_prop(raw, "stocked_grades")
     spec = fx.spec(raw)
+    generator = SyncGenerator(spec)
+    depots = fx.endpoint(spec, fx.DEPOTS)
     with pytest.raises(ValueError, match="childsync field 'stocked_grades' must be declared"):
-        SyncGenerator(spec).generate_sync_query(fx.endpoint(spec, fx.DEPOTS), [])
+        generator.generate_sync_query(depots, [])
 
 
 def test_flag_off_restores_the_row_star_contract(monkeypatch: pytest.MonkeyPatch) -> None:
