@@ -158,3 +158,45 @@ def test_payload_schemas_exist() -> None:
     assert (payloads / "common.schema.yaml").is_file()
     assert (payloads / "match-request.schema.yaml").is_file()
     assert (payloads / "canonical-projection.schema.yaml").is_file()
+
+
+# ── Stage 2 follow-up (item 9): the make gates are domain-neutral ─────────────
+
+NEUTRAL_FIXTURES = ROOT / "tests" / "fixtures" / "payloads" / "orbital-logistics"
+
+
+def test_make_gates_run_the_compiler_on_the_neutral_fixtures() -> None:
+    """Every Repo.mk compiler call passes explicit synthetic roots, so no gate needs domains/plasticos."""
+    repo_mk = (ROOT / "Repo.mk").read_text(encoding="utf-8")
+    calls = [line for line in repo_mk.splitlines() if "tools/payload_contract_compiler.py" in line]
+    assert len(calls) == 3
+    assert all(line.rstrip().endswith("tools/payload_contract_compiler.py $(PAYLOAD_COMPILER_ARGS)") for line in calls)
+    args = repo_mk.split("PAYLOAD_COMPILER_ARGS :=", 1)[1].split("\n\n", 1)[0]
+    assert "--domains-root tests/fixtures/domains" in args
+    assert "--fixtures-root tests/fixtures/payloads/orbital-logistics" in args
+    assert "--domain orbital-logistics" in args
+
+
+def test_neutral_fixtures_pass_without_any_product_pack(tmp_path: Path) -> None:
+    mod = _load_compiler()
+    domains_root = tmp_path / "domains"
+    shutil.copytree(SYNTHETIC_DOMAINS_ROOT / "orbital-logistics", domains_root / "orbital-logistics")
+
+    report = mod.compile_report(
+        write_path=None, domains_root=domains_root, fixtures_root=NEUTRAL_FIXTURES, domain_id="orbital-logistics"
+    )
+
+    assert report["result"] == "PASS", json.dumps(report, indent=2)[:3000]
+    assert len(report["positives"]) == 7
+    assert len(report["negatives"]) == 6
+    text = "\n".join(path.read_text(encoding="utf-8").lower() for path in sorted(NEUTRAL_FIXTURES.rglob("*.json")))
+    for term in ("plasticos", "polymer", "facility", "hdpe"):
+        assert term not in text, term
+
+
+def test_fixture_header_key_is_not_part_of_the_payload(tmp_path: Path) -> None:
+    """A fixture's `_l9_meta` header (C-18) is stripped before admission; the payload is unchanged."""
+    mod = _load_compiler()
+    fixture = tmp_path / "fixture.json"
+    fixture.write_text(json.dumps({"_l9_meta": {"l9_schema": 1}, "domain": "orbital-logistics"}))
+    assert mod._load_fixture(fixture) == {"domain": "orbital-logistics"}

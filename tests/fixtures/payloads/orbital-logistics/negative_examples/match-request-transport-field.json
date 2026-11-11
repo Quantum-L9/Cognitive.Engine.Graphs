@@ -1,0 +1,39 @@
+{
+  "_l9_meta": {
+    "l9_schema": 1,
+    "origin": "engine-specific",
+    "engine": "graph",
+    "layer": ["test"],
+    "tags": ["test", "fixtures", "domain-neutrality", "payload-contracts"],
+    "owner": "engine-team",
+    "status": "active"
+  },
+  "contract_version": "1.0.0-draft",
+  "domain": "orbital-logistics",
+  "query_id": "odoo-match-71-1",
+  "direction": "window_to_depot",
+  "query_entity_ref": "orbital.launch.window:42",
+  "query": {
+    "facts": {
+      "grade_code": "LOX",
+      "form_code": "REGRIND",
+      "quantity_lbs": 40000
+    },
+    "evidence_summary": [
+      {
+        "feature_id": "payload.hazmat_class",
+        "value_state": "observed",
+        "evidence_ref": "orbital.depot.observation:90"
+      }
+    ],
+    "governed_filters": {}
+  },
+  "top_n": 20,
+  "projection_version": "1.0.0",
+  "policy_ref": {
+    "id": "orbital.match-policy",
+    "version": "1.0.0"
+  },
+  "field_dictionary_version": "1.0.0",
+  "packet_uuid": "00000000-0000-0000-0000-000000000000"
+}

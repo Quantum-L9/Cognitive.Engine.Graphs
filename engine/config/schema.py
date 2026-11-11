@@ -1092,6 +1092,11 @@ class PluginsSpec(BaseModel):
     # Empty means none: the generic engine never runs business inference a
     # domain did not declare.
     inference_rules: list[str] = Field(default_factory=list)
+    # Per-rule parameters, keyed by rule name, for authorized rules whose
+    # business vocabulary is the domain's (e.g. infer_buyer_persona's personas
+    # and keywords). Validated at admission by
+    # engine.inference_rule_registry.rule_parameter_defects.
+    inference_rule_parameters: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class SignalWeightSpec(BaseModel):

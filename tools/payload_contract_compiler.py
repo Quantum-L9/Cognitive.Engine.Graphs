@@ -96,6 +96,19 @@ def _load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+# The repository's JSON header key (C-18, tools/l9_meta_injector.py). It is the
+# fixture file's metadata, not part of the payload under test.
+_HEADER_KEY = "_l9_meta"
+
+
+def _load_fixture(path: Path) -> Any:
+    """A payload fixture without its L9_META header key."""
+    data = _load_json(path)
+    if isinstance(data, dict):
+        data.pop(_HEADER_KEY, None)
+    return data
+
+
 def _resolve_under_root(path: Path) -> Path:
     """Reject report paths that escape the repository root."""
     resolved = path.expanduser().resolve()
@@ -211,7 +224,7 @@ def _positive_entry(path: Path, models: dict[str, type], aliases: dict[str, str]
         entry["error"] = "no model mapping"
         return entry
     try:
-        models[model_name].model_validate(_load_json(path), context=contract.context())
+        models[model_name].model_validate(_load_fixture(path), context=contract.context())
         entry["status"] = "PASS"
         entry["model"] = model_name
     except ValidationError as exc:
@@ -237,7 +250,7 @@ def _negative_entry(path: Path, models: dict[str, type], contract: Any) -> dict[
         return entry
     entry["model"] = model_name
     try:
-        model.model_validate(_load_json(path), context=contract.context())
+        model.model_validate(_load_fixture(path), context=contract.context())
         entry["status"] = "FAIL"
         entry["detail"] = "incorrectly_accepted"
     except ValidationError:
@@ -253,7 +266,7 @@ def fixture_domain(fixtures_root: Path) -> str:
     examples = sorted((fixtures_root / "examples").glob("*.json"))
     if not examples:
         raise ValueError(f"no positive fixtures under {fixtures_root / 'examples'}")
-    domains = {str(_load_json(path).get("domain")) for path in examples}
+    domains = {str(_load_fixture(path).get("domain")) for path in examples}
     if len(domains) != 1:
         raise ValueError(f"positive fixtures name more than one domain: {sorted(domains)}")
     return domains.pop()

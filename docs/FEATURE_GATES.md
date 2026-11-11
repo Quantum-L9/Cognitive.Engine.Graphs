@@ -133,7 +133,7 @@ independently of the code default.
 | PacketStore Packet-Identity Dedup | `PACKET_STORE_PACKET_IDENTITY_DEDUP_ENABLED` (`packet_store_packet_identity_dedup_enabled`) | `True` | unset | active (hardening, RU-078); `packet_store.content_hash` is the SDK `transport_hash`, so distinct packets with equal payloads are both stored, and a packet whose INSERT is skipped as a duplicate writes no hop/delegation/lineage rows; off restores the `payload_hash` key and unconditional child rows — see §7 |
 | PacketStore RLS Tenant Session | `PACKET_STORE_RLS_TENANT_SESSION_ENABLED` (`packet_store_rls_tenant_session_enabled`) | `True` | unset | active (hardening, RU-079); `persist` and `record_outcome` set the transaction-local `app.current_tenant` GUC to the packet's / call's tenant before writing, so an `l9_product` DSN satisfies the DDL's RLS policies; off issues no `set_config` — see §7 |
 | Inference Geography USPS Zones | `INFERENCE_GEO_USPS_ZONES_ENABLED` (`inference_geo_usps_zones_enabled`) | `True` | unset | active (correctness, RU-084); `infer_geography_from_postal_code` maps the ZIP first digit to its USPS zone (0-1 Northeast, 2-3 Southeast, 4-6 Midwest, 7 South, 8-9 West) and emits nothing when the entity declares a non-US `country`; off restores the five-digit threshold ladder. The rule also needs `graph_inference_feedback_enabled` and domain authorization — see §13 |
-| Inference Persona Token Match | `INFERENCE_PERSONA_TOKEN_MATCH_ENABLED` (`inference_persona_token_match_enabled`) | `True` | unset | active (correctness, RU-088); `infer_buyer_persona` matches a keyword only as a whole job-title token (split on `[^a-z0-9&]+`), so "Marketing Coordinator" is no longer executive; keyword sets, precedence and confidences unchanged; off restores substring matching — see §13 |
+| Inference Persona Token Match | `INFERENCE_PERSONA_TOKEN_MATCH_ENABLED` (`inference_persona_token_match_enabled`) | `True` | unset | active (correctness, RU-088); `infer_buyer_persona` matches a keyword only as a whole job-title token (split on `[^a-z0-9&]+`), so "Marketing Coordinator" no longer matches `coo`; the personas, keywords, precedence and confidences are the domain's declaration (`plugins.inference_rule_parameters.infer_buyer_persona`; Stage 2 follow-up — the engine carries no keyword list and an undeclared rule infers nothing, an authorized but undeclared one withholds the pack); off restores substring matching — see §13 |
 | Inference Input Parsing Strict | `INFERENCE_INPUT_PARSING_STRICT_ENABLED` (`inference_input_parsing_strict_enabled`) | `True` | unset | active (correctness, RU-089); `infer_company_size_tier` falls back to `employees`/`revenue` only when the primary field is absent and parses each value separately (an unparseable employee count falls back to revenue), and `infer_email_domain_from_website` emits the URL hostname without port, userinfo or `www.`; off restores the legacy parsing — see §13 |
 | Packet Audit on Cancel | `PACKET_AUDIT_ON_CANCEL_ENABLED` (`packet_audit_on_cancel_enabled`) | `True` | unset | active (correctness, RU-086); a handler the SDK cancels on timeout persists one failed request/response pair (`engine_data={"error": "handler_cancelled"}`) under `asyncio.shield` before the cancellation is re-raised; off records no pair for a cancelled handler — see §19 |
 | Capability Record Binding | `CAPABILITY_RECORD_BINDING_ENABLED` (`capability_record_binding_enabled`) | `True` | unset | active (hardening, RU-090); `CapabilityValidator.validate_action` authorizes only an object equal to the registered record (incl. `proof_hash`) and reads revocation, expiry, tenant and actions from that record; `expires_at` is part of `proof_hash`, so the admin `delegate_capability` response carries a different `proof_hash` value; off restores the legacy checks and hash input — see §12 |
@@ -1134,6 +1134,14 @@ changes nothing for a pack that declares what it uses; every served pack
 
 The outcome *edge* (`feedbackloop.outcome_edge_type`, default `RESULTED_IN`) is
 not part of this section: its split stays deferred with A09.
+
+**Persona vocabulary (no flag).** `infer_buyer_persona` reads its personas, keywords,
+precedence and confidences from `plugins.inference_rule_parameters.infer_buyer_persona`
+(`personas: [{persona, keywords, confidence}]`, optional `unmatched: {persona, confidence}`);
+the hardcoded keyword lists (which included `plant` / `facility`) are gone. Admission
+withholds a pack that authorizes the rule without a valid declaration, or declares
+parameters for a rule it does not authorize. No pack authorizes the rule, so no served
+behaviour changes and there is no rollback flag.
 
 ### Validation
 

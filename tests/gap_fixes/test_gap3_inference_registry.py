@@ -181,6 +181,35 @@ def test_geography_flag_off_restores_threshold_ladder(
 
 
 # -- RU-088 / RG-117: persona keywords match whole title tokens ---------------
+#
+# Stage 2 follow-up: the personas, keywords, precedence and confidences are the
+# domain's declaration (plugins.inference_rule_parameters.infer_buyer_persona),
+# passed to the rule in InferenceContext.rule_parameters. This is a test
+# domain's declaration; the engine carries none.
+
+PERSONA_PARAMETERS = {
+    "personas": [
+        {
+            "persona": "executive",
+            "keywords": ["ceo", "coo", "president", "owner", "founder", "vp", "svp", "evp"],
+            "confidence": 0.85,
+        },
+        {"persona": "procurement", "keywords": ["procurement", "purchasing", "buyer", "sourcing"], "confidence": 0.83},
+        {"persona": "operations", "keywords": ["operations", "ops", "production", "supply"], "confidence": 0.80},
+        {
+            "persona": "technical",
+            "keywords": ["engineer", "technical", "r&d", "research", "quality"],
+            "confidence": 0.78,
+        },
+    ],
+    "unmatched": {"persona": "unknown", "confidence": 0.55},
+}
+PERSONA_CTX = InferenceContext(
+    tenant_id="t1",
+    domain_id="orbital-logistics",
+    pass_number=1,
+    rule_parameters={"infer_buyer_persona": PERSONA_PARAMETERS},
+)
 
 
 @pytest.mark.parametrize(
@@ -193,7 +222,7 @@ def test_geography_flag_off_restores_threshold_ladder(
         ("Chief Operating Officer COO", "executive"),
         ("VP Sales", "executive"),
         ("SVP, Global Sourcing", "executive"),  # precedence: executive before procurement
-        ("Product Owner", "executive"),  # keyword sets unchanged
+        ("Product Owner", "executive"),
         ("Head of Purchasing", "procurement"),
         ("Plant Operations Lead", "operations"),
         ("R&D Manager", "technical"),  # '&' kept inside the token
@@ -201,7 +230,7 @@ def test_geography_flag_off_restores_threshold_ladder(
     ],
 )
 def test_buyer_persona_matches_whole_tokens(title: str, persona: str) -> None:
-    result = execute_rule("infer_buyer_persona", {"job_title": title}, CTX)
+    result = execute_rule("infer_buyer_persona", {"job_title": title}, PERSONA_CTX)
     assert result is not None
     assert result.value == persona
 
@@ -209,7 +238,7 @@ def test_buyer_persona_matches_whole_tokens(title: str, persona: str) -> None:
 def test_buyer_persona_confidences_unchanged() -> None:
     expected = {"VP Sales": 0.85, "Buyer": 0.83, "Ops Manager": 0.80, "Engineer": 0.78, "Analyst": 0.55}
     for title, confidence in expected.items():
-        result = execute_rule("infer_buyer_persona", {"job_title": title}, CTX)
+        result = execute_rule("infer_buyer_persona", {"job_title": title}, PERSONA_CTX)
         assert result is not None
         assert result.confidence == pytest.approx(confidence), title
 
@@ -224,7 +253,7 @@ def test_buyer_persona_flag_off_restores_substring_match(
     from engine.config.settings import settings
 
     monkeypatch.setattr(settings, "inference_persona_token_match_enabled", False)
-    result = execute_rule("infer_buyer_persona", {"job_title": title}, CTX)
+    result = execute_rule("infer_buyer_persona", {"job_title": title}, PERSONA_CTX)
     assert result is not None
     assert result.value == persona
 
@@ -289,3 +318,33 @@ def test_input_parsing_flag_off_restores_legacy(
     monkeypatch.setattr(settings, "inference_input_parsing_strict_enabled", False)
     result = execute_rule(rule, entity, CTX)
     assert (result.value if result is not None else None) == expected
+
+
+# -- Stage 2 follow-up: persona vocabulary is the domain's declaration --------
+
+
+def test_buyer_persona_without_a_declaration_infers_nothing() -> None:
+    assert execute_rule("infer_buyer_persona", {"job_title": "VP Sales"}, CTX) is None
+
+
+def test_buyer_persona_uses_only_the_declared_personas() -> None:
+    declared = {"personas": [{"persona": "docking_officer", "keywords": ["dockmaster"], "confidence": 0.9}]}
+    ctx = InferenceContext(
+        tenant_id="t1", domain_id="orbital-logistics", pass_number=1, rule_parameters={"infer_buyer_persona": declared}
+    )
+    hit = execute_rule("infer_buyer_persona", {"job_title": "Senior Dockmaster"}, ctx)
+    assert hit is not None
+    assert (hit.value, hit.confidence) == ("docking_officer", 0.9)
+    # No built-in keyword survives: 'plant' / 'facility' / 'ceo' mean nothing undeclared.
+    for title in ("Plant Manager", "Facility Lead", "CEO"):
+        assert execute_rule("infer_buyer_persona", {"job_title": title}, ctx) is None
+
+
+def test_engine_carries_no_persona_keywords() -> None:
+    import inspect
+
+    import engine.inference_rule_registry as registry
+
+    source = inspect.getsource(registry.infer_buyer_persona).lower()
+    for former in ('"plant"', '"facility"', '"procurement"', '"ceo"'):
+        assert former not in source
