@@ -297,23 +297,22 @@ _ISO_DURATION = re.compile(
 _MISSING = object()
 
 
+# JSON type names in the vocabulary declarations use; bool before int (bool is an int).
+_JSON_TYPES: tuple[tuple[type | tuple[type, ...], str], ...] = (
+    (bool, "bool"),
+    (int, "int"),
+    (float, "float"),
+    (str, "string"),
+    ((list, tuple), "list"),
+    (dict, "map"),
+)
+
+
 def actual_type(value: Any) -> str:
     """The JSON type of a row value, in the vocabulary declarations use."""
     if value is None:
         return "null"
-    if isinstance(value, bool):
-        return "bool"
-    if isinstance(value, int):
-        return "int"
-    if isinstance(value, float):
-        return "float"
-    if isinstance(value, str):
-        return "string"
-    if isinstance(value, list | tuple):
-        return "list"
-    if isinstance(value, dict):
-        return "map"
-    return type(value).__name__
+    return next((name for kind, name in _JSON_TYPES if isinstance(value, kind)), type(value).__name__)
 
 
 def _iso(value: str, parse: Any) -> bool:
@@ -324,70 +323,39 @@ def _iso(value: str, parse: Any) -> bool:
     return True
 
 
-# ── scalar checks: one per declared type, each returning the ``got`` of a defect ──
+def _is_str(value: Any) -> bool:
+    return isinstance(value, str)
 
 
-ScalarCheck = Callable[[Any, list[str] | None], str | None]
-
-
-def _type_check(accepts: Callable[[Any], bool]) -> ScalarCheck:
-    """A check that only tests the JSON type."""
-
-    def check(value: Any, _values: list[str] | None) -> str | None:
-        return None if accepts(value) else actual_type(value)
-
-    return check
-
-
-def _is_int(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
-
-
-def _is_number(value: Any) -> bool:
-    return isinstance(value, int | float) and not isinstance(value, bool)
-
-
-def _check_float(value: Any, _values: list[str] | None) -> str | None:
-    if not _is_number(value):
-        return actual_type(value)
-    return None if math.isfinite(value) else f"{actual_type(value)} (non-finite)"
-
-
-def _text_check(valid: Callable[[str], bool], what: str) -> ScalarCheck:
-    """A string whose text must also be ``valid`` (an ISO-8601 form)."""
-
-    def check(value: Any, _values: list[str] | None) -> str | None:
-        if not isinstance(value, str):
-            return actual_type(value)
-        return None if valid(value) else f"string (not an ISO-8601 {what})"
-
-    return check
-
-
-def _check_enum(value: Any, values: list[str] | None) -> str | None:
-    if not isinstance(value, str):
-        return actual_type(value)
-    return "string (not a declared value)" if values and value not in values else None
-
-
-_SCALAR_CHECKS: dict[PropertyType, ScalarCheck] = {
-    PropertyType.STRING: _type_check(lambda value: isinstance(value, str)),
-    PropertyType.INT: _type_check(_is_int),
-    PropertyType.FLOAT: _check_float,
-    PropertyType.BOOL: _type_check(lambda value: isinstance(value, bool)),
-    PropertyType.DATETIME: _text_check(lambda text: _iso(text, datetime.fromisoformat), "datetime"),
-    PropertyType.DATE: _text_check(lambda text: _iso(text, date.fromisoformat), "date"),
-    PropertyType.DURATION: _text_check(lambda text: _ISO_DURATION.fullmatch(text) is not None, "duration"),
-    PropertyType.ENUM: _check_enum,
+# Per scalar type: (accepts the JSON type, rule an accepted value must also meet, what the rule names).
+_SCALAR_RULES: dict[PropertyType, tuple[Callable[[Any], bool], Callable[[Any, list[str] | None], bool], str]] = {
+    PropertyType.STRING: (_is_str, lambda _v, _values: True, ""),
+    PropertyType.INT: (lambda v: isinstance(v, int) and not isinstance(v, bool), lambda _v, _values: True, ""),
+    PropertyType.FLOAT: (
+        lambda v: isinstance(v, int | float) and not isinstance(v, bool),
+        lambda v, _values: math.isfinite(v),
+        "non-finite",
+    ),
+    PropertyType.BOOL: (lambda v: isinstance(v, bool), lambda _v, _values: True, ""),
+    PropertyType.DATETIME: (_is_str, lambda v, _values: _iso(v, datetime.fromisoformat), "not an ISO-8601 datetime"),
+    PropertyType.DATE: (_is_str, lambda v, _values: _iso(v, date.fromisoformat), "not an ISO-8601 date"),
+    PropertyType.DURATION: (
+        _is_str,
+        lambda v, _values: _ISO_DURATION.fullmatch(v) is not None,
+        "not an ISO-8601 duration",
+    ),
+    PropertyType.ENUM: (_is_str, lambda v, values: not values or v in values, "not a declared value"),
 }
 
 
 def _scalar_mismatch(type_: PropertyType, values: list[str] | None, value: Any) -> str | None:
     """How ``value`` fails a scalar declaration (the ``got`` part of a defect), else None."""
-    check = _SCALAR_CHECKS.get(type_)
-    if check is None:  # shapes are dispatched before scalars
-        return actual_type(value)
-    return check(value, values)
+    got = actual_type(value)
+    rule = _SCALAR_RULES.get(type_)
+    if rule is None or not rule[0](value):  # shapes are dispatched before scalars
+        return got
+    _accepts, valid, what = rule
+    return None if valid(value, values) else f"{got} ({what})"
 
 
 @dataclass
@@ -588,12 +556,6 @@ class SyncRowContract:
         """Every defect of every row; empty when the whole batch conforms."""
         return self._walk(batch, refuse_undeclared=refuse_undeclared).defects
 
-    def _project_row(self, row: dict[str, Any], stored: frozenset[str]) -> dict[str, Any]:
-        return {
-            "node": {key: value for key, value in row.items() if key in stored},
-            "children": {child.field: child.project(row.get(child.field)) for child in self.children},
-        }
-
     def project(self, batch: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
         """Rows in write shape, plus how often each undeclared key was dropped.
 
@@ -604,4 +566,11 @@ class SyncRowContract:
         """
         dropped = self._walk(batch, refuse_undeclared=False).undeclared
         stored = self.stored
-        return [self._project_row(row, stored) for row in batch], dict(sorted(dropped.items()))
+        rows = [
+            {
+                "node": {key: value for key, value in row.items() if key in stored},
+                "children": {child.field: child.project(row.get(child.field)) for child in self.children},
+            }
+            for row in batch
+        ]
+        return rows, dict(sorted(dropped.items()))
