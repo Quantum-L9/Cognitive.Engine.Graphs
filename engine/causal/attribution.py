@@ -20,6 +20,7 @@ import math
 from typing import Any
 
 from engine.causal.identity import FALLBACK_ID_PROPERTY, node_id_property
+from engine.config.outcome_vocabulary import outcome_node_label
 from engine.config.schema import DomainSpec
 from engine.config.settings import settings
 from engine.graph.driver import GraphDriver
@@ -94,7 +95,7 @@ class AttributionCalculator:
             raise ValueError(msg)
 
         depth = int(max_depth or self._spec.causal.chain_depth_limit)
-        outcome_label = sanitize_label(self._spec.feedbackloop.outcome_node_label)
+        outcome_label = sanitize_label(outcome_node_label(self._spec, "causal attribution"))
 
         # Build edge pattern from causal spec
         edge_types = [sanitize_label(e.edge_type) for e in self._spec.causal.causal_edges]

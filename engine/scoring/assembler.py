@@ -576,7 +576,6 @@ class ScoringAssembler:
         metadata = dim.metadata if hasattr(dim, "metadata") and dim.metadata else {}
         feedback = self.domain_spec.feedbackloop
         outcome_rel = sanitize_label(metadata.get("outcome_relation", feedback.outcome_edge_type))
-        outcome_node = sanitize_label(metadata.get("outcome_node", feedback.outcome_node_label))
         success_prop = sanitize_label(metadata.get("success_property", "outcome_type"))
         success_value = metadata.get("success_value")
         if success_value is None:
@@ -588,6 +587,16 @@ class ScoringAssembler:
         if not isinstance(success_value, str):
             msg = f"Dimension '{dim.name}': success_value must be a string"
             raise ValueError(msg)
+        # The outcome node is metadata.outcome_node, else the domain's declared
+        # feedbackloop.outcome_node_label (no engine default; Stage 2 follow-up).
+        if "outcome_node" in metadata:
+            outcome_node = sanitize_label(metadata["outcome_node"])
+        else:
+            from engine.config.outcome_vocabulary import outcome_node_label
+
+            outcome_node = sanitize_label(
+                outcome_node_label(self.domain_spec, f"preference_attention dimension '{dim.name}'")
+            )
 
         cand_community_prop = sanitize_label(dim.candidateprop or "community_id")
         safe_dim = sanitize_label(dim.name)

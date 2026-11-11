@@ -106,6 +106,7 @@ def _spec_with_dimensions(
         gates=[],
         scoring=ScoringSpec(dimensions=dims),
         feedbackloop=FeedbackLoopSpec(
+            outcome_node_label="TransactionOutcome",
             enabled=True,
             signal_weights=SignalWeightSpec(
                 enabled=True,

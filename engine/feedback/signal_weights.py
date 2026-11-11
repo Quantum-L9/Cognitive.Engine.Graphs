@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import math
 
+from engine.config.outcome_vocabulary import outcome_node_label
 from engine.config.schema import DomainSpec
 from engine.config.settings import settings
 from engine.graph.driver import GraphDriver
@@ -68,7 +69,7 @@ class SignalWeightCalculator:
 
         Returns mapping of dimension name to computed weight.
         """
-        outcome_label = sanitize_label(self._spec.feedbackloop.outcome_node_label)
+        outcome_label = sanitize_label(outcome_node_label(self._spec, "signal weight recalculation"))
 
         # Step 1: Get total outcome counts
         totals_cypher = f"""
@@ -220,7 +221,7 @@ class SignalWeightCalculator:
 
     async def should_recalculate(self) -> bool:
         """Check if recalculation threshold met (outcome count since last recalc)."""
-        outcome_label = sanitize_label(self._spec.feedbackloop.outcome_node_label)
+        outcome_label = sanitize_label(outcome_node_label(self._spec, "signal weight recalculation check"))
 
         cypher = f"""
         OPTIONAL MATCH (dw:DimensionWeight {{tenant: $tenant}})

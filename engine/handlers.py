@@ -126,6 +126,25 @@ class ExecutionError(EngineError):
     """Neo4j or runtime execution failure."""
 
 
+class OutcomeVocabularyUndeclaredError(ValidationError):
+    """An outcome write or read on a domain that declares no ``feedbackloop.outcome_node_label``.
+
+    Its own class so a failure packet names the cause: the pack must declare its
+    outcome node label (Stage 2 follow-up, ``outcome_vocabulary_required_enabled``).
+    Not a ``ValueError``, so no outcome path swallows it as a malformed item.
+    """
+
+
+def _outcome_label(domain_spec: DomainSpec, tenant: str, action: str, operation: str) -> str:
+    """The domain's sanitized outcome node label, or OutcomeVocabularyUndeclaredError."""
+    from engine.config.outcome_vocabulary import OutcomeNodeLabelUndeclaredError, outcome_node_label
+
+    try:
+        return sanitize_label(outcome_node_label(domain_spec, operation))
+    except OutcomeNodeLabelUndeclaredError as exc:
+        raise OutcomeVocabularyUndeclaredError(str(exc), action=action, tenant=tenant) from exc
+
+
 def init_dependencies(
     graph_driver: GraphDriver,
     domain_loader: DomainPackLoader,
@@ -1469,7 +1488,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         spec = domain_loader.load_domain(domain_id)
         # Read recent outcomes from Neo4j. The outcome node label is the domain's
         # (feedbackloop.outcome_node_label), not a fixed engine vocabulary.
-        outcome_label = sanitize_label(spec.feedbackloop.outcome_node_label)
+        outcome_label = _outcome_label(spec, tenant, "admin", "admin score_feedback")
         from engine.config.settings import settings as _fb_schema_settings
 
         # RU-006: project the per-dimension scores the writers persist.
@@ -1955,7 +1974,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         spec = domain_loader.load_domain(domain_id)
 
         # Read recent outcomes with scores (outcome node label is the domain's)
-        outcome_label = sanitize_label(spec.feedbackloop.outcome_node_label)
+        outcome_label = _outcome_label(spec, tenant, "admin", "admin generate_calibration_pairs")
         outcome_cypher = f"""
         MATCH (o:{outcome_label})
         WHERE o.tenant = $tenant AND o.outcome IN ['success', 'failure']
@@ -2097,7 +2116,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             )
 
         # Read outcome history from Neo4j (outcome node label is the domain's)
-        outcome_label = sanitize_label(spec.feedbackloop.outcome_node_label)
+        outcome_label = _outcome_label(spec, tenant, "admin", "admin discover_weights")
         outcome_cypher = f"""
         MATCH (o:{outcome_label})
         WHERE o.tenant = $tenant AND o.dimension_scores IS NOT NULL
@@ -2558,8 +2577,9 @@ def _build_outcome_write(
     feedback_fields = _outcome_feedback_fields(fingerprint) if unified else None
 
     # The outcome node label is the domain's (feedbackloop.outcome_node_label);
-    # the engine's system graph schema documents the default, not a fixed name.
-    outcome_label = sanitize_label(domain_spec.feedbackloop.outcome_node_label)
+    # a pack that declares none is refused here, before any Cypher (Stage 2
+    # follow-up), on both the outcomes and the sync-outcome path.
+    outcome_label = _outcome_label(domain_spec, tenant, "outcomes", "an outcome write")
     feedback_props = (
         ",\n        dimension_scores: $dimension_scores,\n        was_selected: $was_selected" if unified else ""
     )
@@ -2685,7 +2705,7 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
                 counterfactual_spec=domain_spec.counterfactual,
                 graph_driver=graph_driver,
                 domain_id=domain_spec.domain.id,
-                outcome_label=domain_spec.feedbackloop.outcome_node_label,  # RU-075
+                outcome_label=_outcome_label(domain_spec, tenant, "outcomes", "counterfactual generation"),  # RU-075
             )
             await generator.generate_for_outcome(outcome_id)
         except Exception:

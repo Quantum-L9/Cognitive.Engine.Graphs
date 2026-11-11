@@ -343,9 +343,7 @@ async def test_outcome_node_label_comes_from_the_domain_spec() -> None:
     from engine.handlers import handle_outcomes
     from engine.state import _reset_singleton
 
-    raw = synthetic_loader().load_domain("orbital-logistics").model_dump(by_alias=True)
-    raw["feedbackloop"] = {"enabled": False, "outcome_node_label": "DockingResult"}
-    spec = DomainSpec.model_validate(raw)
+    spec = synthetic_loader().load_domain("orbital-logistics")  # declares outcome_node_label: DockingResult
     _driver, calls = _bind_handlers(spec)
     try:
         result = await handle_outcomes(
@@ -359,7 +357,8 @@ async def test_outcome_node_label_comes_from_the_domain_spec() -> None:
     writes = [cypher for cypher, _ in calls if "CREATE (o:" in cypher]
     assert writes, calls
     assert "CREATE (o:DockingResult {" in writes[0]
-    assert "TransactionOutcome" not in writes[0]
+    # The outcome edge (feedbackloop.outcome_edge_type) stays deferred with A09.
+    _assert_free_of_former_built_ins(writes[0], allowed=("RESULTED_IN",))
 
 
 def test_unregistered_inference_rule_name_withholds_the_pack(tmp_path: Path) -> None:

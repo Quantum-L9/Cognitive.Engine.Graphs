@@ -48,7 +48,7 @@ class CounterfactualGenerator:
         counterfactual_spec: CounterfactualSpec,
         graph_driver: GraphDriver,
         domain_id: str,
-        outcome_label: str = "TransactionOutcome",
+        outcome_label: str,
     ) -> None:
         self._spec = counterfactual_spec
         self._graph_driver = graph_driver

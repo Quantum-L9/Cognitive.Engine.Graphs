@@ -1121,7 +1121,10 @@ class FeedbackLoopSpec(BaseModel):
     propagation_boost_factor: float = 1.15
     propagation_similarity_threshold: float = 0.4
     outcome_edge_type: str = "RESULTED_IN"
-    outcome_node_label: str = "TransactionOutcome"
+    # The domain's outcome node label. No engine default: a pack that writes or
+    # reads outcomes declares it (engine.config.outcome_vocabulary; Stage 2
+    # follow-up, outcome_vocabulary_required_enabled).
+    outcome_node_label: str | None = None
     drift_threshold: float = 0.15
     drift_window_days: int = 30
 
