@@ -1,168 +1,75 @@
-# --- L9_META ---
-# l9_schema: 1
-# origin: l9-template
-# engine: graph
-# layer: [governance]
-# tags: [L9_TEMPLATE, security, deps]
-# owner: platform
-# status: active
-# --- /L9_META ---
+# Rendered by Quantum-L9/.github ops/render-dependabot.js; managed — local edits
+# are restored; opt out with .l9/no-sync. ADR: docs/adr/0019-dependabot-managed-rendered.md
 #
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Universal CI/CD Pack — Dependabot Configuration
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# VERSION: 1.0.0
-# PURPOSE: Automated dependency updates with logical grouping
-# CUSTOMIZE: Update reviewers, assignees, and dependency groups for your stack
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
+# Ecosystems follow this repository's root: github-actions always; uv when
+# uv.lock exists, else pip when a root requirements*.txt or a PEP 621
+# pyproject.toml exists; npm when package.json exists; pre-commit when
+# .pre-commit-config.yaml exists.
+# Tools Core selects (Quantum-L9/l9-ci-core core-owned-tools.json) and the
+# Core, SDK and .github action pins are ignored: they are not bumped here.
+# Safe-only: no semver-major bump is proposed in any ecosystem; a fix that
+# exists only in a new major arrives as a Dependabot alert, not a PR.
+# ADVISORY POSTURE: this opens PRs only. No auto-merge, no major groups.
 version: 2
-
 updates:
-  # ──────────────────────────────────────────────────────────────────────
-  # Python Dependencies
-  # ──────────────────────────────────────────────────────────────────────
-  - package-ecosystem: "pip"
+  - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "03:00"
-      timezone: "UTC"
-
-    open-pull-requests-limit: 5
-
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
     commit-message:
       prefix: "chore(deps)"
-      include: "scope"
-
-    labels:
-      - "dependencies"
-      - "python"
-      - "automerge-candidate"
-
-    # CUSTOMIZE: Replace with your GitHub username(s)
-    reviewers:
-      - "YOUR_GITHUB_USERNAME"
-
-    assignees:
-      - "YOUR_GITHUB_USERNAME"
-
-    # Core-owned tools: their versions come only from Quantum-L9/l9-ci-core
-    # .github/actions/install-consumer-ci/toolchain-lock.json. Version drift
-    # from Core is prohibited org-wide, so Dependabot never proposes them; a
-    # bump lands here only after the Core lock moves.
-    # tests/unit/test_core_toolchain_pins.py keeps every CEG declaration of
-    # these tools on one version.
+    cooldown:
+      default-days: 7
     ignore:
-      - dependency-name: "pytest"
-      - dependency-name: "ruff"
+      - dependency-name: "Quantum-L9/.github*"
+      - dependency-name: "Quantum-L9/l9-ci-core*"
+      - dependency-name: "Quantum-L9/l9-ci-sdk*"
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    groups:
+      actions-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "chore(deps)"
+    cooldown:
+      default-days: 7
+    ignore:
       - dependency-name: "mypy"
       - dependency-name: "pre-commit"
+      - dependency-name: "pytest"
+      - dependency-name: "ruff"
       - dependency-name: "semgrep"
-
-    # Dependency groups — customize for your stack
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
-      # Web frameworks
-      web-framework:
-        patterns:
-          - "fastapi*"
-          - "uvicorn*"
-          - "pydantic*"
-          - "starlette*"
-          - "django*"
-          - "flask*"
-          - "requests*"
-          - "httpx*"
-
-      # Database drivers and ORMs
-      database:
-        patterns:
-          - "psycopg*"
-          - "asyncpg*"
-          - "sqlalchemy*"
-          - "alembic*"
-          - "pymongo*"
-          - "redis*"
-
-      # Testing frameworks
-      testing:
-        patterns:
-          - "pytest*"
-          - "coverage*"
-          - "hypothesis*"
-          - "faker*"
-
-      # Development tools
-      dev-tools:
-        patterns:
-          - "ruff*"
-          - "mypy*"
-          - "black*"
-          - "isort*"
-          - "pre-commit*"
-
-      # Security and cryptography
-      security:
-        patterns:
-          - "cryptography*"
-          - "pyjwt*"
-          - "passlib*"
-          - "bcrypt*"
-
-      # Monitoring and logging
-      observability:
-        patterns:
-          - "structlog*"
-          - "sentry-sdk*"
-          - "prometheus*"
-          - "opentelemetry*"
-
-  # ──────────────────────────────────────────────────────────────────────
-  # GitHub Actions
-  # ──────────────────────────────────────────────────────────────────────
-  - package-ecosystem: "github-actions"
+      python-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+  - package-ecosystem: pre-commit
     directory: "/"
     schedule:
-      interval: "weekly"
-      day: "monday"
-
-    open-pull-requests-limit: 5
-
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
     commit-message:
-      prefix: "chore(ci)"
-
-    # Every github/codeql-action step (init, analyze, upload-sarif) must run
-    # the same version: a split bump fails with "Loaded a configuration file
-    # for version X, but running version Y".
+      prefix: "chore(deps)"
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: "https://github.com/astral-sh/ruff-pre-commit"
+      - dependency-name: "https://github.com/pre-commit/mirrors-mypy"
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
-      codeql-action:
-        patterns:
-          - "github/codeql-action*"
-
-    labels:
-      - "dependencies"
-      - "github-actions"
-      - "automerge-candidate"
-
-  # ──────────────────────────────────────────────────────────────────────
-  # Docker
-  # ──────────────────────────────────────────────────────────────────────
-  - package-ecosystem: "docker"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-
-    open-pull-requests-limit: 3
-
-    commit-message:
-      prefix: "chore(docker)"
-
-    labels:
-      - "dependencies"
-      - "docker"
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# END OF DEPENDABOT CONFIGURATION
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+      pre-commit-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

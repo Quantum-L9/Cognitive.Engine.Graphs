@@ -119,11 +119,37 @@ def test_dependabot_ignores_core_owned_tools() -> None:
     )
 
 
-def test_dependabot_groups_every_codeql_action_step() -> None:
+def test_dependabot_is_the_org_render() -> None:
+    # Quantum-L9/.github renders and restores this file (ADR-0019); a hand edit
+    # here is replaced on the next seed, so a policy change belongs there.
+    text = (ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
+    assert text.startswith("# Rendered by Quantum-L9/.github ops/render-dependabot.js"), text[:120]
+
+
+def test_dependabot_opens_only_safe_prs() -> None:
+    config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
+    for update in config["updates"]:
+        ecosystem = update["package-ecosystem"]
+        majors = [
+            entry
+            for entry in update.get("ignore", [])
+            if entry.get("dependency-name") == "*" and entry.get("update-types") == ["version-update:semver-major"]
+        ]
+        assert majors, f"{ecosystem}: semver-major bumps must be ignored (safe-only)"
+        groups = update.get("groups", {}).values()
+        assert any("*" in g.get("patterns", []) and g.get("update-types") == ["minor", "patch"] for g in groups), (
+            f"{ecosystem}: minor/patch bumps must land as one grouped PR"
+        )
+
+
+def test_dependabot_bumps_every_codeql_action_step_together() -> None:
+    # A split bump fails CodeQL ("Loaded a configuration file for version X, but
+    # running version Y"). The github-actions minor/patch group matches "*", so
+    # init, analyze and upload-sarif always move in one PR; majors are ignored.
     config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
     actions = next(u for u in config["updates"] if u["package-ecosystem"] == "github-actions")
     patterns = [p for group in actions.get("groups", {}).values() for p in group.get("patterns", [])]
-    assert "github/codeql-action*" in patterns, patterns
+    assert "*" in patterns or "github/codeql-action*" in patterns, patterns
 
 
 def test_every_codeql_action_step_runs_one_version() -> None:
