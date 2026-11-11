@@ -7,7 +7,7 @@ authors = [{ name = "L9", email = "eng@l9.dev" }]
 requires-python = ">=3.12,<3.13"
 # Runtime dependencies: what the images install (tools/deps/install_locked.sh runtime).
 dependencies = [
-    "fastapi>=0.135.1,<0.136.0",
+    "fastapi>=0.135.1,<0.163.0",
     "uvicorn[standard]>=0.42,<0.54",
     "neo4j>=5.25.0,<6.0.0",
     "pydantic>=2.10.0,<3.0.0",
@@ -59,7 +59,7 @@ ci = [
     "httpx>=0.27.0",
     "jsonschema==4.26.0",
     "bandit==1.9.4",
-    "pip-audit==2.9.0",
+    "pip-audit==2.10.1",
     "pip-licenses>=5.5.5",
 ]
 tools = [
