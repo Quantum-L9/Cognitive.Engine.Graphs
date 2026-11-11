@@ -106,6 +106,22 @@ class ObservedAssociationRejectedError(ValidationError):
     """
 
 
+class SyncRowRejectedError(ValidationError):
+    """A node sync batch does not conform to the types the tenant spec declares.
+
+    Raised before compliance logging or any Cypher, so nothing is written. The
+    message lists every defect as ``row <i> <field>: expected <declared>, got
+    <actual>``; ``defects`` carries the same list. Its own class so a producer
+    can tell "my rows disagree with CEG's copy of the spec" from other
+    validation failures by name.
+    """
+
+    def __init__(self, defects: list[str], *, action: str, tenant: str) -> None:
+        self.defects = list(defects)
+        message = f"Sync refused, nothing written: {len(self.defects)} defect(s): {'; '.join(self.defects)}"
+        super().__init__(message, action=action, tenant=tenant)
+
+
 class ExecutionError(EngineError):
     """Neo4j or runtime execution failure."""
 
@@ -1098,6 +1114,30 @@ async def _sync_outcomes_unified(
     return response
 
 
+def _check_sync_rows(domain_spec: DomainSpec, endpoint_spec: Any, batch: list[Any], *, tenant: str) -> None:
+    """Refuse a node sync batch whose rows disagree with the declared types (``SyncRowContract``).
+
+    Relationship endpoints have their own row contract (``normalize_relationship_rows``).
+    With ``sync_row_type_validation_enabled`` off nothing is checked here.
+    """
+    from engine.config.settings import settings as _row_settings
+    from engine.sync.row_contract import SyncRowContract
+
+    if endpoint_spec.targetedge or not _row_settings.sync_row_type_validation_enabled:
+        return
+    try:
+        contract = SyncRowContract.from_spec(domain_spec, endpoint_spec)
+    except ValueError as exc:
+        raise ValidationError(
+            f"Sync refused, nothing written: the endpoint's fields are not declared by the spec: {exc}",
+            action="sync",
+            tenant=tenant,
+        ) from exc
+    defects = contract.defects(batch, refuse_undeclared=_row_settings.sync_undeclared_property_refusal_enabled)
+    if defects:
+        raise SyncRowRejectedError(defects, action="sync", tenant=tenant)
+
+
 async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Batch UNWIND MERGE/MATCH SET for graph entities."""
     graph_driver, domain_loader = _require_deps()
@@ -1225,6 +1265,11 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             tenant=tenant,
         )
 
+    # Typed sync contract: a node row is checked against the types CEG's own
+    # copy of the tenant spec declares before compliance records the request
+    # or anything touches the graph. One defect refuses the whole batch.
+    _check_sync_rows(domain_spec, endpoint_spec, batch, tenant=tenant)
+
     # Run compliance checks on sync request
     compliance = _get_compliance_engine(domain_spec)
     from engine.config.settings import settings as _sync_settings
@@ -1267,11 +1312,25 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     generator = SyncGenerator(domain_spec)
     cypher = generator.generate_sync_query(endpoint_spec, batch)
+    from engine.config.settings import settings as _projection_settings
+
+    write_batch: list[Any] = batch
+    undeclared: dict[str, int] = {}
+    if _projection_settings.sync_declared_projection_enabled:
+        # The generator's Cypher reads `row.node` / `row.children`: only what
+        # the spec declares writable reaches SET; undeclared keys are dropped.
+        write_batch, undeclared = generator.project_batch(endpoint_spec, batch)
+        if undeclared:
+            logger.warning(
+                "sync %s: dropped undeclared properties (not written) %s",
+                entity_type,
+                ", ".join(f"{name}={count}" for name, count in undeclared.items()),
+            )
 
     try:
         write_rows = await graph_driver.execute_query(
             cypher=cypher,
-            parameters={"batch": batch, "tenant": tenant},
+            parameters={"batch": write_batch, "tenant": tenant},
             database=domain_spec.domain.id,
         )
     except Exception as exc:
@@ -1288,6 +1347,8 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         "entity_type": entity_type,
         "synced_count": len(batch),
     }
+    if undeclared:
+        result["undeclared_properties"] = undeclared
     from engine.config.schema import SyncStrategy
     from engine.config.settings import settings as _sync_settings
 

@@ -88,6 +88,9 @@ independently of the code default.
 | Spec-declared Candidate Id | `SPEC_DECLARED_CANDIDATE_ID` (`spec_declared_candidate_id`) | `True` | unset | active; `handle_match` identifies candidates by the domain's declared id property, not `entity_id`; since RU-002 the outcome edges, legacy `resolve`, `enrich` by ids and admin `evaluate` do too — see §20 |
 | Traversal Gate EXISTS Subquery | `TRAVERSAL_GATE_EXISTS_SUBQUERY` (`traversal_gate_exists_subquery`) | `True` | unset | active; traversal gates compile to an `EXISTS { … }` subquery Neo4j 5 accepts — see §20 |
 | Childsync FOREACH Projection | `CHILDSYNC_FOREACH_PROJECTION` (`childsync_foreach_projection`) | `True` | unset | active; childsync writes children in `FOREACH` without copying them onto the parent — see §20 |
+| Sync Declared Projection | `SYNC_DECLARED_PROJECTION_ENABLED` (`sync_declared_projection_enabled`) | `True` | unset | active (restores "the domain spec is the single source of truth"); node sync writes only the target node's declared, storable properties (`SET n += row.node`), each childsync child only what its item map and node declare (a `static` child on create only), a `list<scalar>` taxonomy field links one node per element; off restores `row{.*}` — see §30 |
+| Sync Row Type Validation | `SYNC_ROW_TYPE_VALIDATION_ENABLED` (`sync_row_type_validation_enabled`) | `True` | unset | active; every node-sync row is validated against the spec's declared types before compliance logging or Cypher; any defect refuses the batch (`SyncRowRejectedError`, nothing written) listing every `row <i> <field>: expected <declared>, got <actual>` — see §30 |
+| Sync Undeclared Property Refusal | `SYNC_UNDECLARED_PROPERTY_REFUSAL_ENABLED` (`sync_undeclared_property_refusal_enabled`) | `False` | unset | staged; off, undeclared row keys are dropped by the projection and counted in `undeclared_properties`; on, they are row defects that refuse the batch — see §30 |
 | Match Dimension Projection | `MATCH_DIMENSION_PROJECTION` (`match_dimension_projection`) | `True` | unset | active (correctness, RU-001); match RETURNs the active dimension scores as `dimension_scores` so Pareto, arbitration and confidence checks see real values; off restores `RETURN candidate, score` |
 | Gate WHERE Row Scope | `GATE_WHERE_ROW_SCOPE` (`gate_where_row_scope`) | `True` | unset | active (correctness, RU-011); match emits `WITH *` before the gate `WHERE` so gates remove candidate rows even after a trailing `OPTIONAL MATCH`; off restores `WHERE` directly after the traversal |
 | Match Collapse Traversal Rows | `MATCH_COLLAPSE_TRAVERSAL_ROWS` (`match_collapse_traversal_rows`) | `True` | unset | active (correctness, RU-036); match keeps each candidate's best-scoring traversal row before `ORDER BY … LIMIT $top_n`, so `top_n` counts distinct candidates; off restores one row per path |
@@ -1601,3 +1604,49 @@ the env var to `false` to restore the previous behaviour verbatim.
 | `strict_null_gates` (`STRICT_NULL_GATES`, existing W1-03 flag; meaning fixed by R1a-DEC-03) | `true` | RU-010 / CEG-COR-023 | `handle_match` calls `GateCompiler.validate_gates(resolved_query, match_direction=…, reject_unbound=True)` after defaults backfill and derived resolution, over the gates active for the direction (`matchdirections` empty or containing it). A gate whose named `queryparam` is missing/null and is undeclared (neither a queryschema field nor a derived parameter) or a `required` queryschema field raises `ValidationError` naming every such gate; a null optional or derived parameter is left to the gate's `nullbehavior` (C-14) and logged as a WARNING once per gate. Literal operands and gates without a named parameter are not checked. Required queryschema fields are therefore enforced for gates that read them (e.g. plasticos `polymer_type`) | `validate_gates` is never called on the match path; a null undeclared parameter reaches Neo4j as a missing parameter |
 | `match_request_contract_admission` (`MATCH_REQUEST_CONTRACT_ADMISSION`) | `true` | RU-012 / CEG-COR-063 (R1a-DEC-04 "admit both") | `handle_match` validates a payload that carries `contract_version` with `admit_payload(MatchRequest, payload, DomainContract.from_spec(<tenant's pack>))` — tenant-bound `domain`, declared `direction`, `extra=forbid`, transport fields refused, failures raised as `ValidationError` before any query — and continues with `{query: query.facts, match_direction: direction, top_n}`. Payloads without `contract_version` (legacy `MatchPayload`) are unchanged. The response stays the legacy shape | The `MatchRequest` example is rejected with `Missing required field 'match_direction'` |
 | `gate_role_exemption` (`GATE_ROLE_EXEMPTION`) | `true` | RU-015 / CEG-COR-080 (R1a-DEC-05 "withhold") | `engine.config.loader.admission_defects` adds `<gate>: roleexempt … is not consumed — match takes no request role` for a gate whose `roleexempt` is set and `<gate>: relaxedpenalty … is not consumed — relaxed matching is not exposed` for a gate that declares `relaxedpenalty` (explicitly, any value), so `withholding_reason` withholds the pack unless `UNVALIDATED_DOMAIN_PACKS_ENABLED`. No shipped pack declares either field. `schema.py`, the compiler's `role` / `compile_relaxed` support and the match payload are unchanged | The fields are accepted and silently ignored by every match |
+
+## 30. Typed sync contract — list and map shapes (2026-11-11)
+
+**Flags**: `SYNC_DECLARED_PROJECTION_ENABLED=True`, `SYNC_ROW_TYPE_VALIDATION_ENABLED=True`,
+`SYNC_UNDECLARED_PROPERTY_REFUSAL_ENABLED=False`
+
+The sync generator relied on shapes the spec could not declare: childsync
+assumed a list of maps under an untyped `field`, taxonomy edges assumed a
+scalar (a list silently created no edge while the sync reported success), and
+`SET n += row{.*}` stored whatever a row carried. `PropertySpec` now declares
+`list` (element type in `items`) and `map` (keys in `properties`):
+
+```yaml
+- {name: certifications, type: list, items: {type: string}}
+- name: processed_polymers
+  type: list
+  items:
+    type: map
+    properties:
+      - {name: code, type: string, required: true}
+```
+
+Storage rule: `list<primitive>` is storable; `map` and `list<map>` are wire-only
+and legal on a node only as the `field` of a childsync on a sync endpoint
+targeting that node. Admission (`admission_defects`, unconditional — the
+override is `UNVALIDATED_DOMAIN_PACKS_ENABLED`, §16) refuses a declared `map` /
+`list<map>` nothing consumes (Neo4j cannot store either), and a node sync
+endpoint whose childsync field is not declared `list<map>` on `targetnode`,
+whose `targetid` is not a required scalar of the item map (and a scalar of the
+child node), whose taxonomy field is not a scalar or `list<scalar>`, or whose
+`fieldsupdated` names an undeclared or wire-only property.
+
+| Flag | On | Off |
+|---|---|---|
+| `sync_declared_projection_enabled` | `SyncGenerator.project_batch` binds `$batch` as `{node: <declared storable keys present>, children: {<field>: [<item keys the child node declares>]}}`; the Cypher is `SET n += row.node`, `FOREACH (child_row IN coalesce(row.children.<field>, []) \| MERGE ... SET c += child_row ...)` (`ON CREATE SET` for a `managedby: static` child), and a `list<scalar>` taxonomy field `OPTIONAL MATCH (tax:L) WHERE tax.<id> IN coalesce(row.node.<field>, [])` → one edge per element | `SET n += row{.*, <child fields>: null}` / `SET n += row` and the §20 paths |
+| `sync_row_type_validation_enabled` | `handle_sync` builds a `SyncRowContract` (`engine/sync/row_contract.py`) for a node endpoint and refuses the whole batch on any defect, before compliance logging and before any Cypher, with `SyncRowRejectedError` (a `ValidationError`) listing every defect: `row 0 processed_polymers: expected list<map>, got string`, `row 1 processed_polymers[0]: expected map, got string`, `row 2 rate_per_ton: expected float, got string`, `row 3 processed_polymers[0].code: expected string (required), got missing`. No coercion; values are never echoed (only JSON types). `required` is enforced on the endpoint's `idproperty` and on map members; `nullable: false` refuses null | No ingress check; a mistyped row fails the whole statement inside Neo4j (`ExecutionError`) |
+| `sync_undeclared_property_refusal_enabled` | Undeclared keys (top level or inside a map) are row defects: `row 0 color: expected no such declared property, got string` | Undeclared keys are dropped by the projection (never written), counted in the response as `undeclared_properties: {<key path>: <rows>}` and logged by name |
+
+Rollback of the write and ingress behaviour is `SYNC_DECLARED_PROJECTION_ENABLED=false`
+and `SYNC_ROW_TYPE_VALIDATION_ENABLED=false`; a pack whose declarations admission
+refuses is served only with `UNVALIDATED_DOMAIN_PACKS_ENABLED=true`. Domain-spec
+changes of this section: plasticos 1.4.0 declares `Facility.processed_polymers`
+as `list<map{code: string required}>`; the synthetic `orbital-logistics` 0.2.0
+fixture carries a `list<string>` property, a `list<string>` taxonomy field and a
+`list<map>` childsync.
+
