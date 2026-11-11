@@ -154,8 +154,9 @@ def test_flag_off_admits_the_pack_and_the_compiler_refuses_at_match_time(
     """C-21 rollback: the pack is admitted as before; the compiler still has no default."""
     monkeypatch.setattr(settings, "preference_attention_metadata_required_enabled", False)
     spec = _pack_root(tmp_path, _attention(None)).load_domain(_DOMAIN)
+    assembler = ScoringAssembler(spec)
     with pytest.raises(ValueError, match="requires metadata.success_value"):
-        ScoringAssembler(spec).assemble_scoring_clause(_DIRECTION, {})
+        assembler.assemble_scoring_clause(_DIRECTION, {})
 
 
 # ── A misspelled or unread key fails validation instead of being dropped ─────
@@ -186,10 +187,12 @@ def test_flag_off_admits_the_pack_and_the_compiler_refuses_at_match_time(
     ids=["misspelled", "mistyped", "unread-by-lognormalized", "unread-by-community_bridge"],
 )
 def test_metadata_the_compilers_do_not_read_is_refused(dimension: dict[str, Any], message: str, tmp_path: Path) -> None:
+    raw = _raw(dimension)
+    loader = _pack_root(tmp_path, dimension)
     with pytest.raises(ValidationError, match=re.escape(message)):
-        DomainSpec.model_validate(_raw(dimension))
+        DomainSpec.model_validate(raw)
     with pytest.raises(DomainSpecError, match=re.escape(message)):
-        _pack_root(tmp_path, dimension).load_domain(_DOMAIN)
+        loader.load_domain(_DOMAIN)
 
 
 # ── community_bridge reads metadata.community_properties from the pack ───────

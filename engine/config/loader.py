@@ -26,16 +26,19 @@ import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 import yaml
 from pydantic import ConfigDict, Field, RootModel, model_validator, with_config
 from pydantic import ValidationError as PydanticValidationError
 from typing_extensions import TypedDict
 
-from engine.config.schema import DomainActivation, DomainSpec, GateSpec
+from engine.config.schema import DomainActivation, DomainSpec, GateSpec, ScoringDimensionSpec
 from engine.config.settings import settings
 from engine.utils.security import tenant_id_defect
+
+if TYPE_CHECKING:
+    from engine.scoring.assembler import ScoringAssembler
 
 logger = logging.getLogger(__name__)
 
@@ -755,44 +758,73 @@ def _scoring_defects(spec: DomainSpec, *, check_producers: bool, reported: set[s
     ``ParameterMissing``. One defect per offending dimension. A dimension in
     ``reported`` already carries a named admission defect and is not compiled.
     """
+    reported = reported or set()
+    defects: list[str] = _producer_defects(spec) if check_producers else []
+    bindable = _bindable_parameters(spec)
+    for direction in spec.queryschema.matchdirections:
+        defects.extend(_direction_scoring_defects(spec, direction, bindable=bindable, reported=reported, prior=defects))
+    return defects
+
+
+def _producer_defects(spec: DomainSpec) -> list[str]:
+    """``_no_producer_defect`` for every scoring dimension, in declaration order."""
+    candidate_properties = _candidate_properties(spec)
+    producers = (_no_producer_defect(dim, candidate_properties=candidate_properties) for dim in spec.scoring.dimensions)
+    return [producer for producer in producers if producer is not None]
+
+
+def _direction_scoring_defects(
+    spec: DomainSpec, direction: str, *, bindable: set[str], reported: set[str], prior: list[str]
+) -> list[str]:
+    """One direction's dimension defects, then the assembled clause when nothing in it was refused.
+
+    Dimensions compile in declaration order on one assembler, so a later
+    dimension sees the parameters earlier ones bound. The clause is assembled
+    only when no applicable dimension is ``reported`` and no defect so far
+    (``prior`` included) names this direction.
+    """
     from engine.scoring.assembler import ScoringAssembler
 
-    reported = reported or set()
+    assembler = ScoringAssembler(spec)
+    applicable = [dim for dim in spec.scoring.dimensions if not dim.matchdirections or direction in dim.matchdirections]
+    compiled = (
+        _dimension_defect(assembler, dim, direction, bindable) for dim in applicable if dim.name not in reported
+    )
+    found = [defect for defect in compiled if defect is not None]
+    if any(dim.name in reported for dim in applicable):
+        return found
+    prefix = f"scoring[{direction}]"
+    if any(defect.startswith(prefix) for defect in (*prior, *found)):
+        return found
+    clause = _clause_defect(spec, direction)
+    return found if clause is None else [*found, clause]
 
-    defects: list[str] = []
-    bindable = _bindable_parameters(spec)
-    if check_producers:
-        candidate_properties = _candidate_properties(spec)
-        for dim in spec.scoring.dimensions:
-            producer = _no_producer_defect(dim, candidate_properties=candidate_properties)
-            if producer is not None:
-                defects.append(producer)
-    for direction in spec.queryschema.matchdirections:
-        assembler = ScoringAssembler(spec)
-        skipped = False
-        for dim in spec.scoring.dimensions:
-            if dim.matchdirections and direction not in dim.matchdirections:
-                continue
-            if dim.name in reported:
-                skipped = True
-                continue
-            try:
-                expression = assembler._compile_dimension(dim)
-            except (ValueError, KeyError, TypeError) as exc:
-                defects.append(f"scoring[{direction}] {dim.name}: refused by the scoring compiler — {exc}")
-                continue
-            bound = bindable | set(assembler.last_query_params)
-            unbound = sorted({p for p in _PARAM_IDENTIFIER_REF.findall(expression) if p not in bound})
-            if unbound:
-                names = ", ".join(repr(p) for p in unbound)
-                defects.append(f"scoring[{direction}] {dim.name}: references parameter(s) {names}, which nothing binds")
-        if not skipped and not any(d.startswith(f"scoring[{direction}]") for d in defects):
-            # The clause as handle_match assembles it (aliases, weights, clamp).
-            try:
-                ScoringAssembler(spec).assemble_scoring_clause(direction, {})
-            except (ValueError, KeyError, TypeError) as exc:
-                defects.append(f"scoring[{direction}]: refused by the scoring assembler — {exc}")
-    return defects
+
+def _dimension_defect(
+    assembler: ScoringAssembler, dim: ScoringDimensionSpec, direction: str, bindable: set[str]
+) -> str | None:
+    """The compiler's refusal of ``dim``, or the parameters its expression references that nothing binds."""
+    try:
+        expression = assembler._compile_dimension(dim)
+    except (ValueError, KeyError, TypeError) as exc:
+        return f"scoring[{direction}] {dim.name}: refused by the scoring compiler — {exc}"
+    bound = bindable | set(assembler.last_query_params)
+    unbound = sorted({p for p in _PARAM_IDENTIFIER_REF.findall(expression) if p not in bound})
+    if not unbound:
+        return None
+    names = ", ".join(repr(p) for p in unbound)
+    return f"scoring[{direction}] {dim.name}: references parameter(s) {names}, which nothing binds"
+
+
+def _clause_defect(spec: DomainSpec, direction: str) -> str | None:
+    """The clause as ``handle_match`` assembles it (aliases, weights, clamp), or ``None`` when it assembles."""
+    from engine.scoring.assembler import ScoringAssembler
+
+    try:
+        ScoringAssembler(spec).assemble_scoring_clause(direction, {})
+    except (ValueError, KeyError, TypeError) as exc:
+        return f"scoring[{direction}]: refused by the scoring assembler — {exc}"
+    return None
 
 
 def withholding_reason(spec: DomainSpec, *, complete: bool = False) -> str | None:
