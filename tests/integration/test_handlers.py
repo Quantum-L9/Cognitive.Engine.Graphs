@@ -17,6 +17,8 @@ from engine.graph.driver import GraphDriver
 from engine.handlers import handle_admin, handle_match, handle_sync, init_dependencies
 from engine.state import get_state
 
+pytestmark = pytest.mark.unit
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 

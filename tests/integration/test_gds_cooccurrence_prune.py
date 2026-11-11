@@ -38,6 +38,8 @@ import pytest
 from engine.config.schema import DomainSpec, GDSJobScheduleSpec, GDSJobSpec, GDSProjectionSpec
 from engine.gds.scheduler import GDSScheduler
 
+pytestmark = pytest.mark.integration
+
 DB = "plasticos"  # created by the plasticos_database fixture; wiped by clean_db
 
 # Each pair (a, b) shares `k` private Resource nodes, so Step 1 writes

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 async def test_list_domains_returns_plasticos(engine_deps):

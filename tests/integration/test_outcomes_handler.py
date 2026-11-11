@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.mark.asyncio
 async def test_outcome_success_recorded(engine_deps, graph_driver, clean_db):
