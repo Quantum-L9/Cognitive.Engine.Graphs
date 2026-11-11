@@ -147,7 +147,7 @@ def test_trace_rule_fires_when_a_required_token_leaves_the_definition(tmp_path: 
     assert findings[0].rule_id == rule_id
     assert repr(token) in findings[0].evidence
     assert f"`{name}`" in findings[0].evidence
-    assert (findings[0].line_start, findings[0].line_end) == found[1:]
+    assert found[1:] == (findings[0].line_start, findings[0].line_end)
 
 
 @pytest.mark.parametrize("rule_id", sorted(TRACE_ANCHORS))
