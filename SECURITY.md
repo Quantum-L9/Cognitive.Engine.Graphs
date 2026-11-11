@@ -44,6 +44,6 @@ Include:
 - `CODEOWNERS` enforces mandatory review on governance files (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`)
 
 ## Dependency Management
-- Dependabot is configured for pip and GitHub Actions (`.github/dependabot.yml`)
+- Dependabot is configured for uv, pre-commit and GitHub Actions (`.github/dependabot.yml`, rendered by Quantum-L9/.github)
 - Run `make audit` to check for known CVEs in current dependencies
-- Lock file (`poetry.lock`) must be committed and kept current
+- `uv.lock` is the single lock and must be committed and kept current (`uv lock`; CI runs `uv lock --check`)

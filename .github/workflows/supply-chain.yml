@@ -79,7 +79,7 @@ jobs:
           publish_results: true
 
       - name: Upload Scorecard Results to Security Tab
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370  # v4
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
         with:
           sarif_file: scorecard.sarif
 
@@ -132,8 +132,34 @@ jobs:
           # deny-licenses. Keep the allow-list (stricter); deny-list is implied.
           # SPDX AND compounds in allow-licenses do not match package Dual
           # licenses and also break MIT matching (upload-artifact 7.0.1).
-          allow-licenses: ${{ vars.ALLOWED_LICENSES || 'MIT, Apache-2.0, BSD-3-Clause, BSD-2-Clause, ISC, MPL-2.0' }}
-          allow-dependencies-licenses: pkg:pypi/structlog, pkg:pypi/prometheus-client
+          # Policy lives here, not in vars.ALLOWED_LICENSES (operator decision
+          # 2026-11-11): permissive licences only. uv.lock is the first lock
+          # GitHub's dependency graph reads, which surfaced MPL-2.0 (certifi,
+          # hypothesis, pathspec), PSF-2.0 (defusedxml, distlib, pywin32) and
+          # MIT-0 (cffi) in the existing dependency set.
+          allow-licenses: >-
+            MIT, Apache-2.0, BSD-3-Clause, BSD-2-Clause, ISC, MPL-2.0, PSF-2.0,
+            Python-2.0, MIT-0, 0BSD, Zlib, CC0-1.0, HPND-Markus-Kuhn
+          # Exempted by name, each reviewed 2026-11-11:
+          # - AND-compounds of allowed licences, which this action does not
+          #   match: colorama, httpcore, nodeenv (BSD-2 AND BSD-3); sniffio,
+          #   types-pyyaml, pip-requirements-parser (Apache-2.0 AND MIT);
+          #   pip-audit (Apache-2.0 AND ISC); cyclonedx-python-lib (Apache-2.0
+          #   AND Python-2.0); tqdm (MPL-2.0 AND MIT); wcwidth (HPND AND MIT);
+          #   numpy (BSD-3 AND 0BSD AND MIT AND Zlib AND CC0-1.0); mypy (MIT AND
+          #   Python-2.0 AND BSD-2-Clause, Core-owned dev tool).
+          # - typing-extensions: PSF-2.0; the detected "GPL-1.0-or-later" comes
+          #   from the PSF licence history text, not a GPL grant.
+          # - yamllint: GPL-3.0, a CI-only linter (tools profile), never shipped
+          #   in an image.
+          # - structlog, prometheus-client: existing exemptions.
+          allow-dependencies-licenses: >-
+            pkg:pypi/structlog, pkg:pypi/prometheus-client, pkg:pypi/mypy,
+            pkg:pypi/colorama, pkg:pypi/httpcore, pkg:pypi/nodeenv,
+            pkg:pypi/sniffio, pkg:pypi/types-pyyaml, pkg:pypi/pip-requirements-parser,
+            pkg:pypi/pip-audit, pkg:pypi/cyclonedx-python-lib, pkg:pypi/tqdm,
+            pkg:pypi/wcwidth, pkg:pypi/numpy, pkg:pypi/typing-extensions,
+            pkg:pypi/yamllint
           comment-summary-in-pr: on-failure
 
 # ────────────────────────────────────────────────────────────────────────
@@ -190,7 +216,7 @@ jobs:
       - name: Install Dependencies
         run: |
           # pip-licenses reports on what is installed: the locked runtime set
-          # (requirements.txt + the Gate SDK) plus pip-licenses itself.
+          # (pyproject.toml [project] dependencies + the Gate SDK) plus pip-licenses.
           bash tools/deps/install_locked.sh runtime
 
       - name: Check License Compliance

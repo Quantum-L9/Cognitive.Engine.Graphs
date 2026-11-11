@@ -111,16 +111,12 @@ FILE_REGISTRY: list[FileMeta] = [
     ),
     # --- Governance ---
     FileMeta(
-        ".github/CODEOWNERS", "l9-template", ["governance"], ["L9_TEMPLATE", "governance", "ownership"], "platform"
-    ),
-    FileMeta(
         ".github/pr_review_config.yaml",
         "l9-template",
         ["governance"],
         ["L9_TEMPLATE", "governance", "pr-review"],
         "platform",
     ),
-    FileMeta(".github/dependabot.yml", "l9-template", ["governance"], ["L9_TEMPLATE", "security", "deps"], "platform"),
     FileMeta(
         ".github/scripts/setup-repo-vars.sh",
         "l9-template",
@@ -833,9 +829,7 @@ FILE_REGISTRY: list[FileMeta] = [
         ["chassis", "auth", "test"],
         "platform-team",
     ),
-    FileMeta(
-        "pyproject.toml", "engine-specific", ["build", "config"], ["build", "dependencies", "poetry"], "engine-team"
-    ),
+    FileMeta("pyproject.toml", "engine-specific", ["build", "config"], ["build", "dependencies", "uv"], "engine-team"),
     FileMeta(
         "graph-cognitive-engine-spec-v1.1.0.yaml", "engine-specific", ["config"], ["spec", "engine-spec"], "engine-team"
     ),
@@ -1486,6 +1480,15 @@ EXCLUDED_PATTERNS: dict[str, str] = {
         "Core repository execution contract (l9.repo-execution/v2): Core rejects any key besides "
         "schema, facade and required_phases, so the JSON header's _l9_meta key fails the contract"
     ),
+    ".github/CODEOWNERS": (
+        "org-managed seed (Quantum-L9/.github policies/CODEOWNERS, ADR-0019 managed seed paths): the "
+        "org seed restores it byte-for-byte, so a header here would be stripped on the next seed"
+    ),
+    ".github/dependabot.yml": (
+        "org-managed render (Quantum-L9/.github ops/render-dependabot.js, ADR-0019): the org seed "
+        "restores it byte-for-byte to the render, which carries its own provenance comment, so a "
+        "header here would be stripped on the next seed"
+    ),
 }
 
 # Headerless files that are still eligible: when one does carry a header, the
@@ -1524,6 +1527,7 @@ HEADERLESS_BASELINE: frozenset[str] = frozenset(
         ".github/ISSUE_TEMPLATE/gov-violation.yml",
         ".github/ISSUE_TEMPLATE/seed-ci-failure.yml",
         ".github/PULL_REQUEST_TEMPLATE/agent.md",
+        ".github/PULL_REQUEST_TEMPLATE/release.md",
         ".github/governance/execution-profiles.yaml",
         ".github/governance/promotion-policy.yaml",
         ".github/governance/provider-requiredness.yaml",
