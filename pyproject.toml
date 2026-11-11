@@ -8,7 +8,7 @@ requires-python = ">=3.12,<3.13"
 # Runtime dependencies: what the images install (tools/deps/install_locked.sh runtime).
 dependencies = [
     "fastapi>=0.135.1,<0.163.0",
-    "uvicorn[standard]>=0.42,<0.54",
+    "uvicorn[standard]>=0.42,<0.55",
     "neo4j>=5.25.0,<6.0.0",
     "pydantic>=2.10.0,<3.0.0",
     "pydantic-settings>=2.6.0,<3.0.0",
