@@ -15,52 +15,96 @@ baseline:
 authority: candidate_extracted_from_source
 schema: l9.ceg.feedback.convergence/v1
 owner: CEG feedback domain owner
-status: implemented_code_path_gated_not_deployment_proven
+status: replay_partial_and_tenant_proven_weight_governance_open
 source_refs:
 - path: engine/feedback/convergence.py
   symbol: ConvergenceLoop.on_outcome_recorded
   revision: 3379309971f9defa40c393b2292f2f1784aa90ac
+- path: engine/feedback/score_propagator.py
+  symbol: ScorePropagator.propagate_outcome, ScorePropagator._apply_claimed_boost
+  revision: 3379309971f9defa40c393b2292f2f1784aa90ac
+- path: engine/feedback/signal_weights.py
+  symbol: SignalWeightCalculator.should_recalculate, recalculate_weights, _store_weights
+  revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 - path: engine/handlers.py
-  symbol: _feedback_effective,handle_outcomes,handle_sync
+  symbol: _feedback_effective,handle_outcomes,handle_sync,_keyed_outcome_write_cypher,_keyed_outcome_replayed
   revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 - path: engine/config/settings.py
-  symbol: feedback_enabled
+  symbol: feedback_enabled, outcome_idempotency_enabled, feedback_partial_results_enabled
   revision: 3379309971f9defa40c393b2292f2f1784aa90ac
 activation:
   global_setting: feedback_enabled
   global_default: false
   domain_spec_setting: feedbackloop.enabled
   rule: both must be true; neither flag individually activates
+  closure_flags:
+    outcome_idempotency_enabled: true
+    feedback_partial_results_enabled: true
+    reference: docs/FEATURE_GATES.md §30
 observed:
   handler_invokes_convergence_when_both_enabled: true
   callback: ConvergenceLoop.on_outcome_recorded
-  runtime_delivery_tested_here: false
+  runtime_delivery_tested_here: true
   automatic_weight_admission_proven: false
   convergence_stages_from_code:
   - ScorePropagator.propagate_outcome
   - SignalWeightCalculator.should_recalculate + recalculate_weights
   - DriftDetector.check_and_alert
-  runtime_outcome_idempotency_proven: false
+  runtime_outcome_idempotency_proven: true
   weight_recalculation_can_execute_after_gate: true
+  weight_recalculation_requires_approval: false
+  tenant_equals_domain_id: verified; DomainPackLoader refuses a pack whose domain.id differs from the tenant lookup key (engine/config/loader.py, legacy and receipt modes), so the propagator's tenant=domain.id scope matches the outcome node's tenant
+sync_path_outcomes:
+  decision: excluded_by_design
+  rationale: sync entity_type=outcome is batch ingestion/backfill; it writes through the same outcome writer but never invokes the convergence loop, so replayed history does not move live weights. Live outcomes use the outcomes action.
+  evidence: tests/unit/test_feedback_convergence_closure.py::test_sync_outcomes_never_run_the_convergence_loop
 invariants:
 - No unconditional scoring-weight mutation
 - No implied Gate worker action route
 - No learned-weight authority without approved policy
 - Keep outcome replay/idempotency obligations explicit
 required_proof:
-- gated-off case
-- gated-on case
-- single outcome propagates once
-- failure/rollback/idempotency receipt
-- cross-tenant denial
+- item: gated-off case
+  status: verified_local
+  evidence: tests/integration/test_feedback_convergence_closure.py::test_gated_off_writes_the_outcome_and_moves_no_weight
+- item: gated-on case
+  status: verified_local
+  evidence: tests/integration/test_feedback_convergence_closure.py::test_gated_on_applies_the_boost_once
+- item: single outcome propagates once
+  status: verified_local
+  evidence: tests/integration/test_feedback_convergence_closure.py::test_replayed_outcome_applies_once_and_records_one_node, ::test_concurrent_first_writes_of_one_outcome_apply_once
+- item: failure/rollback/idempotency receipt
+  status: verified_local
+  evidence: tests/integration/test_feedback_convergence_closure.py::test_failed_propagation_reports_partial_and_a_retry_applies_once
+- item: cross-tenant denial
+  status: verified_local
+  evidence: tests/integration/test_feedback_convergence_closure.py::test_propagation_never_touches_another_tenants_weights, ::test_tenant_outside_allowlist_is_refused_before_any_write
+blocking_validation:
+- item: repeat same outcome must not double-apply score adjustments
+  status: verified_local
+- item: cross-tenant graph write denied
+  status: verified_local
+- item: failure during propagation must report partial outcome truth
+  status: verified_local
+- item: weight recalculation governance and replay admission
+  status: open
+  mechanism: once feedbackloop.signal_weights.min_outcomes_for_recalculation new outcomes accumulate, ConvergenceLoop calls SignalWeightCalculator.recalculate_weights, which writes DimensionWeight.weight with no approval; ScoringAssembler.load_learned_weights then applies it. The governed path (admin score_feedback -> apply_weight_proposal) is bypassed.
+  required_disposition: owner decision on whether the loop may write learned weights, or must emit a proposal for apply_weight_proposal
+  probe: tests/contracts/test_known_gaps.py::_probe_feedback_convergence
+partial_proof:
+  scope: replay identity, partial-outcome truth, tenant scoping; not weight governance
+  tests:
+  - tests/unit/test_feedback_convergence_closure.py
+  - tests/integration/test_feedback_convergence_closure.py
+  local_run:
+    neo4j_image: neo4j:5.18-enterprise (testcontainers)
+    command: CEG_REQUIRE_INTEGRATION=1 pytest tests/integration/test_feedback_convergence_closure.py tests/integration/test_score_propagator_integration.py tests/integration/test_outcomes_handler.py tests/integration/test_outcomes_causal_integrity.py tests/integration/test_dimension_weight_roundtrip.py
+    result: 20 passed
+    date: '2026-11-11'
+  CI_run_id: null
 operational_proof:
   observed_in_this_pack: false
   runtime_test_receipt: null
   CI_run_id: null
-  blocked_until: owner-native executable and integration evidence, not this file presence
+  blocked_until: weight-recalculation governance decided and proven; then a CI receipt naming the behaviour tests
 contract_status_is_not_runtime_status: true
-blocking_validation:
-- repeat same outcome must not double-apply score adjustments
-- cross-tenant graph write denied
-- failure during propagation must report partial outcome truth
-- weight recalculation governance and replay admission

@@ -1602,10 +1602,47 @@ the env var to `false` to restore the previous behaviour verbatim.
 | `match_request_contract_admission` (`MATCH_REQUEST_CONTRACT_ADMISSION`) | `true` | RU-012 / CEG-COR-063 (R1a-DEC-04 "admit both") | `handle_match` validates a payload that carries `contract_version` with `admit_payload(MatchRequest, payload, DomainContract.from_spec(<tenant's pack>))` — tenant-bound `domain`, declared `direction`, `extra=forbid`, transport fields refused, failures raised as `ValidationError` before any query — and continues with `{query: query.facts, match_direction: direction, top_n}`. Payloads without `contract_version` (legacy `MatchPayload`) are unchanged. The response stays the legacy shape | The `MatchRequest` example is rejected with `Missing required field 'match_direction'` |
 | `gate_role_exemption` (`GATE_ROLE_EXEMPTION`) | `true` | RU-015 / CEG-COR-080 (R1a-DEC-05 "withhold") | `engine.config.loader.admission_defects` adds `<gate>: roleexempt … is not consumed — match takes no request role` for a gate whose `roleexempt` is set and `<gate>: relaxedpenalty … is not consumed — relaxed matching is not exposed` for a gate that declares `relaxedpenalty` (explicitly, any value), so `withholding_reason` withholds the pack unless `UNVALIDATED_DOMAIN_PACKS_ENABLED`. No shipped pack declares either field. `schema.py`, the compiler's `role` / `compile_relaxed` support and the match payload are unchanged | The fields are accepted and silently ignored by every match |
 
-## 30. Feedback convergence closure
+## 30. Feedback convergence closure (FEEDBACK-IDEMP-01, FEEDBACK-PARTIAL-01)
 
-Applies only where the feedback loop runs: `feedback_enabled` (default `False`)
-and the domain's `feedbackloop.enabled` must both be true.
+Both apply only where the feedback loop runs: `feedback_enabled` (default
+`False`) and the domain's `feedbackloop.enabled` must both be true.
+
+### Outcome idempotency (`outcome_idempotency_enabled`, default `True`) — FEEDBACK-IDEMP-01
+
+`handle_outcomes` minted a fresh `outcome_id` per call and `ScorePropagator`
+never read it, so a retried outcome multiplied every `DimensionWeight`
+`boost_factor` a second time (up to the clamp).
+
+On:
+
+- A caller-supplied `outcome_id` (1-128 characters of letters, digits, `_`, `.`,
+  `:`, `-`, starting alphanumeric) is the replay key. Before the write,
+  `CREATE CONSTRAINT ceg_outcome_id_<label> IF NOT EXISTS … REQUIRE o.outcome_id IS UNIQUE`
+  runs on the domain's outcome label (a node uniqueness constraint: Community and
+  Enterprise); if it cannot be created the call fails closed and nothing is written.
+  The write is a `MERGE`: a replay changes nothing, returns `"replayed": true`, and
+  skips counterfactuals, the compliance outcome log, PacketStore linkage and causal
+  edges, which ran with the first write. A replay whose `match_id`, `candidate_id`,
+  `outcome` or tenant differ from the stored outcome is refused (`ValidationError`).
+  Without `outcome_id` the server mints one, as before; such a call cannot be
+  recognised as a replay.
+- Propagation claims the outcome node: in one transaction it write-locks the node,
+  reads `propagated_at`, stamps it, and only the transaction that found it unset
+  multiplies the DimensionWeights (each also write-locked), clamped to
+  `signal_weights` [`min_weight`, `max_weight`]. A replay reports
+  `propagation.reason = "already_applied"`. A failed propagation rolls its stamp
+  back, so a retry with the same `outcome_id` applies it. Requires
+  `propagation_single_application`; with that off, the legacy unclaimed query runs.
+
+Off: server-minted ids only, `CREATE`, and the unclaimed propagation query.
+
+Sync-path outcomes (`sync` with `entity_type: outcome`) are batch ingestion and
+backfill: they are written through the same outcome writer but never invoke the
+convergence loop, by design, so history replayed through `sync` does not move live
+weights. Report a live outcome through the `outcomes` action.
+
+Tests: `tests/unit/test_feedback_convergence_closure.py`,
+`tests/integration/test_feedback_convergence_closure.py`.
 
 ### Partial feedback results (`feedback_partial_results_enabled`, default `True`) — FEEDBACK-PARTIAL-01
 
@@ -1616,5 +1653,3 @@ isolated; the `feedback` metadata carries `stages` (`ok` or `failed:<ExceptionCl
 the message is logged, not returned, because it can carry driver detail) and
 `status` `complete` or `partial`. The outcome stays `recorded`. Off: the first stage
 failure propagates.
-
-Tests: `tests/unit/test_feedback_convergence_closure.py` (`TestPartialResults`).

@@ -418,6 +418,14 @@ class Settings(BaseSettings):
     # DimensionWeight and the result is clamped to signal_weights
     # [min_weight, max_weight]. Off: the legacy query.
     propagation_single_application: bool = True
+    # FEEDBACK-IDEMP-01: handle_outcomes minted a fresh outcome_id per call and
+    # ScorePropagator never read it, so a retried outcome multiplied every
+    # DimensionWeight boost_factor again. On: a caller-supplied outcome_id is
+    # the replay key (MERGE under a uniqueness constraint; a conflicting replay
+    # is refused) and propagation claims the outcome node under a write lock,
+    # applying once per outcome_id (requires propagation_single_application).
+    # Off: server-minted ids and the unclaimed propagation query.
+    outcome_idempotency_enabled: bool = True
     # FEEDBACK-PARTIAL-01: a ConvergenceLoop stage that raised escaped
     # handle_outcomes after the outcome node was written, so the caller got an
     # error with no record of what was applied. On: each stage is isolated and
