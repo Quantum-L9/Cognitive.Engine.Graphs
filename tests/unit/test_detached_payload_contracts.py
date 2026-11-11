@@ -251,9 +251,9 @@ def test_contract_from_spec_matches_declared_vocabulary() -> None:
     contract = synthetic_contract("orbital-logistics")
     assert contract == DomainContract(
         domain_id="orbital-logistics",
-        domain_version="0.1.0",
+        domain_version="0.2.0",
         match_directions=frozenset({"window_to_depot"}),
-        entity_types=frozenset({"OrbitalDepot", "LaunchWindow", "PropellantGrade"}),
+        entity_types=frozenset({"OrbitalDepot", "LaunchWindow", "PropellantGrade", "OrbitClass"}),
         source_systems=frozenset({"ceg", "operator", "external_source", "station_ledger"}),
         outcome_types=frozenset({"docked", "aborted"}),
     )

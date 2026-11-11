@@ -33,7 +33,14 @@ class ManagedByType(StrEnum):
 
 
 class PropertyType(StrEnum):
-    """Supported property data types."""
+    """Supported property data types.
+
+    ``list`` and ``map`` are shapes, not scalars: a ``list`` declares its element
+    type in ``items`` and a ``map`` declares its keys in ``properties``
+    (``PropertySpec``). Neo4j stores primitives and arrays of primitives only, so
+    ``list<primitive>`` is storable while ``map`` and ``list<map>`` are wire-only
+    shapes a sync endpoint consumes (``childsync``) and never stores.
+    """
 
     STRING = "string"
     INT = "int"
@@ -43,6 +50,12 @@ class PropertyType(StrEnum):
     DATE = "date"
     DURATION = "duration"
     ENUM = "enum"
+    LIST = "list"
+    MAP = "map"
+
+
+# Shapes that declare structure rather than a scalar value.
+SHAPE_TYPES = frozenset({PropertyType.LIST, PropertyType.MAP})
 
 
 class EdgeDirection(StrEnum):
@@ -176,8 +189,81 @@ class SyncStrategy(StrEnum):
     UNWINDMATCHSET = "UNWINDMATCHSET"
 
 
+def _shape_defect(owner: str, type_: PropertyType, items: object, properties: object) -> str | None:
+    """Why a declared type and its ``items`` / ``properties`` disagree, else None."""
+    if type_ is PropertyType.LIST:
+        if items is None:
+            return f"{owner}: type list requires items (the element type)"
+        if properties is not None:
+            return f"{owner}: type list declares its element shape in items, not properties"
+    elif type_ is PropertyType.MAP:
+        if not properties:
+            return f"{owner}: type map requires a non-empty properties list"
+        if items is not None:
+            return f"{owner}: type map declares its keys in properties, not items"
+    elif items is not None or properties is not None:
+        return f"{owner}: items/properties are declared only for type list or map, not {type_.value}"
+    return None
+
+
+def _duplicate_property_defect(owner: str, properties: list[PropertySpec] | None) -> str | None:
+    names = [prop.name for prop in properties or []]
+    duplicates = sorted({name for name in names if names.count(name) > 1})
+    if duplicates:
+        return f"{owner}: duplicate map property name(s) {duplicates}"
+    return None
+
+
+class ItemSpec(BaseModel):
+    """Element type of a ``list`` property: a primitive, an enum, or a ``map``.
+
+    A list of lists is refused: Neo4j cannot store one and no sync shape
+    consumes one. Unknown keys are refused (a new model, strict from the start).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: PropertyType
+    values: list[str] | None = None  # For enum items
+    properties: list[PropertySpec] | None = None  # For map items
+    unit: str | None = None
+    description: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def refuse_list_of_list(cls, data: object) -> object:
+        """Named before the generic unknown-key refusal would report ``items.items``."""
+        if isinstance(data, dict) and data.get("type") == PropertyType.LIST.value:
+            msg = "items: a list of lists is not a declarable shape"
+            raise ValueError(msg)
+        return data
+
+    @model_validator(mode="after")
+    def validate_item_shape(self) -> ItemSpec:
+        """A map item declares its properties; a scalar item declares none."""
+        defect = _shape_defect("items", self.type, None, self.properties) or _duplicate_property_defect(
+            "items", self.properties
+        )
+        if defect is not None:
+            raise ValueError(defect)
+        return self
+
+
 class PropertySpec(BaseModel):
-    """Property definition for nodes and edges."""
+    """Property definition for nodes and edges.
+
+    ``items`` is required iff ``type`` is ``list`` (the element type: any
+    primitive, enum, or ``map``); ``properties`` is required iff ``type`` is
+    ``map`` (its keys, each a ``PropertySpec``). YAML syntax::
+
+        - {name: certifications, type: list, items: {type: string}}
+        - name: processed_polymers
+          type: list
+          items:
+            type: map
+            properties:
+              - {name: code, type: string, required: true}
+    """
 
     name: str
     type: PropertyType
@@ -187,6 +273,44 @@ class PropertySpec(BaseModel):
     values: list[str] | None = None  # For enum types
     managedby: ManagedByType | None = None
     description: str | None = None
+    items: ItemSpec | None = None  # For list types
+    properties: list[PropertySpec] | None = None  # For map types
+
+    @model_validator(mode="after")
+    def validate_shape(self) -> PropertySpec:
+        """``items`` iff list, ``properties`` iff map (purely additive: scalars are unchanged)."""
+        owner = f"property {self.name!r}"
+        defect = _shape_defect(owner, self.type, self.items, self.properties) or _duplicate_property_defect(
+            owner, self.properties
+        )
+        if defect is not None:
+            raise ValueError(defect)
+        return self
+
+    @property
+    def wire_only(self) -> bool:
+        """``map`` and ``list<map>``: a sync wire shape Neo4j cannot store as a property."""
+        if self.type is PropertyType.MAP:
+            return True
+        return self.type is PropertyType.LIST and self.items is not None and self.items.type is PropertyType.MAP
+
+    @property
+    def declared_type(self) -> str:
+        """The declared type as defects render it: ``float``, ``list<string>``, ``list<map>``."""
+        return render_declared_type(self.type, self.values, self.items)
+
+
+def render_declared_type(type_: PropertyType, values: list[str] | None, items: ItemSpec | None) -> str:
+    """``list<map>``, ``list<enum[a|b]>``, ``enum[a|b]``, ``float`` — one spelling for every defect."""
+    if type_ is PropertyType.LIST and items is not None:
+        return f"list<{render_declared_type(items.type, items.values, None)}>"
+    if type_ is PropertyType.ENUM and values:
+        return f"enum[{'|'.join(values)}]"
+    return type_.value
+
+
+ItemSpec.model_rebuild()
+PropertySpec.model_rebuild()
 
 
 class NodeSpec(BaseModel):
@@ -304,6 +428,15 @@ class QueryFieldSpec(BaseModel):
     default: Any | None = None
     mapstotaxonomy: str | None = None  # Target taxonomy node label
 
+    @field_validator("type")
+    @classmethod
+    def refuse_shape_type(cls, value: PropertyType) -> PropertyType:
+        """``list`` / ``map`` are property shapes (``PropertySpec``), not match query parameters."""
+        if value in SHAPE_TYPES:
+            msg = f"query field type {value.value!r} is a property shape; query fields are scalars"
+            raise ValueError(msg)
+        return value
+
 
 class QuerySchemaSpec(BaseModel):
     """Query schema for /v1/match requests."""
@@ -320,6 +453,15 @@ class DerivedParameterSpec(BaseModel):
     type: PropertyType
     unit: str | None = None
     description: str | None = None
+
+    @field_validator("type")
+    @classmethod
+    def refuse_shape_type(cls, value: PropertyType) -> PropertyType:
+        """A derived parameter is a computed scalar; ``list`` / ``map`` are property shapes."""
+        if value in SHAPE_TYPES:
+            msg = f"derived parameter type {value.value!r} is a property shape; derived parameters are scalars"
+            raise ValueError(msg)
+        return value
 
 
 class TraversalStepSpec(BaseModel):
@@ -582,7 +724,12 @@ class SoftSignalSpec(BaseModel):
 
 
 class TaxonomyEdgeSpec(BaseModel):
-    """Taxonomy edge for sync auto-linking."""
+    """Taxonomy edge for sync auto-linking.
+
+    ``field`` is a property the endpoint's ``targetnode`` declares as a scalar
+    (one edge) or ``list<scalar>`` (one edge per element); admission refuses any
+    other declaration (``engine/sync/row_contract.py``).
+    """
 
     field: str
     edgetype: str
@@ -591,9 +738,18 @@ class TaxonomyEdgeSpec(BaseModel):
 
 
 class ChildSyncSpec(BaseModel):
-    """Nested child entity sync."""
+    """Nested child entity sync.
 
-    field: str  # JSON field containing child array
+    ``field`` is a property the endpoint's ``targetnode`` declares as
+    ``list<map>``; ``targetid`` is a required property of that map. The shape
+    is a declaration, checked at admission (``endpoint_shape_defects`` in
+    ``engine/sync/row_contract.py``): a pack whose childsync field is not
+    declared this way is withheld. Checking each row against it at sync
+    ingress is the sync row contract's job, not this model's. On the wire the
+    children are a JSON array of objects, never a JSON-encoded string.
+    """
+
+    field: str  # targetnode property declared list<map>; one child per element
     targetnode: str
     targetid: str
     edgetype: str

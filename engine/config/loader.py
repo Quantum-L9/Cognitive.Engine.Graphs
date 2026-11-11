@@ -543,6 +543,7 @@ def admission_defects(spec: DomainSpec, *, complete: bool = False) -> list[str]:
         for rule_name in spec.plugins.inference_rules:
             if rule_name not in registered:
                 defects.append(f"plugins.inference_rules: {rule_name!r} is not a registered inference rule")
+    defects.extend(_sync_shape_defects(spec))
     if complete or settings.scoring_admission_check_enabled or settings.admission_checks_full_match:
         defects.extend(_scoring_defects(spec, check_producers=complete or settings.scoring_admission_check_enabled))
     if complete or settings.admission_checks_full_match:
@@ -550,6 +551,28 @@ def admission_defects(spec: DomainSpec, *, complete: bool = False) -> list[str]:
     if complete:
         defects.extend(_complete_native_defects(spec))
     return list(dict.fromkeys(defects))
+
+
+# Prefixes of the typed sync contract's admission defects (row_contract.py).
+_SYNC_SHAPE_PREFIXES = ("sync ", "ontology node ", "ontology edge ")
+
+
+def _sync_shape_defects(spec: DomainSpec) -> list[str]:
+    """Typed sync contract at admission (``engine/sync/row_contract.py``).
+
+    A declared ``map`` / ``list<map>`` no childsync consumes (Neo4j cannot
+    store either), and a node sync endpoint whose ``childsync`` /
+    ``taxonomyedges`` / ``fieldsupdated`` fields its ``targetnode`` does not
+    declare in a writable shape. Unconditional, like the tenant-mapping
+    declarations (D-7): a pack whose sync contract the spec cannot state is
+    withheld; ``unvalidated_domain_packs_enabled`` remains the operator override.
+    """
+    from engine.sync.row_contract import endpoint_shape_defects, stored_shape_defects
+
+    defects = stored_shape_defects(spec)
+    for endpoint in spec.sync.endpoints if spec.sync else []:
+        defects.extend(endpoint_shape_defects(spec, endpoint))
+    return defects
 
 
 def _complete_native_defects(spec: DomainSpec) -> list[str]:
@@ -758,14 +781,15 @@ def withholding_reason(spec: DomainSpec, *, complete: bool = False) -> str | Non
     if complete or not settings.unvalidated_domain_packs_enabled:
         defects = admission_defects(spec, complete=complete)
         if defects:
-            if not complete and not _match_admission_checks_enabled():
+            sync_shape = any(defect.startswith(_SYNC_SHAPE_PREFIXES) for defect in defects)
+            if not complete and not _match_admission_checks_enabled() and not sync_shape:
                 return (
                     f"Domain '{spec.domain.id}' is withheld: {len(defects)} gate(s) do not compile to executable "
                     f"Cypher ({defects[0]}); set UNVALIDATED_DOMAIN_PACKS_ENABLED=true to serve it anyway"
                 )
             return (
-                f"Domain '{spec.domain.id}' is withheld: {len(defects)} admission defect(s) — its gates, traversal "
-                f"or scoring do not compile to executable Cypher ({'; '.join(defects)}); "
+                f"Domain '{spec.domain.id}' is withheld: {len(defects)} admission defect(s) — its gates, traversal, "
+                f"scoring or sync declarations do not compile to executable Cypher ({'; '.join(defects)}); "
                 "set UNVALIDATED_DOMAIN_PACKS_ENABLED=true to serve it anyway"
             )
     return None

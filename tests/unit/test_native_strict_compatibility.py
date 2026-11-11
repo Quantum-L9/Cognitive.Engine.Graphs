@@ -179,7 +179,7 @@ def test_actual_fixture_cli_matches_pinned_default_and_strict_verdicts(
 
 def test_runtime_per_direction_api_remains_unchanged() -> None:
     path = REPO / "domains/plasticos/spec.yaml"
-    assert owner.validate_native_file(path, "plasticos").domain.version == "1.3.0"
+    assert owner.validate_native_file(path, "plasticos").domain.version == "1.4.0"
     assert validate_spec(path)[1] == 0
     assert validate_spec(path, complete=True)[1] == 0
 
