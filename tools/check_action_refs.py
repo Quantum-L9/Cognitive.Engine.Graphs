@@ -47,6 +47,10 @@ USES_LINE = re.compile(r"^\s*(?:-\s+)?uses:\s*(?P<reference>\S+)")
 EXTERNAL_ACTION = re.compile(r"^(?P<action>[\w.-]+/[\w.-]+(?:/[\w./-]+)?)@(?P<ref>[^\s#]+)$")
 
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+# The one non-SHA reference: Quantum-L9/l9-ci-core's consumer toolchain installer
+# on its v2 channel. Core forbids consumers choosing a Core revision
+# (release-plane.yaml, docs/consumer-lint-test.md); a SHA pin would be that.
+CORE_INSTALLER = "Quantum-L9/l9-ci-core/.github/actions/install-consumer-ci@v2"
 
 
 def main() -> int:
@@ -73,6 +77,8 @@ def main() -> int:
                 violations.append(f"{path}:{lineno}: invalid non-local action reference: {line.strip()}")
                 continue
             action, ref = action_ref.group("action"), action_ref.group("ref")
+            if f"{action}@{ref}" == CORE_INSTALLER:
+                continue
             if not FULL_SHA.match(ref):
                 violations.append(
                     f"{path}:{lineno}: external action must be SHA-pinned: "

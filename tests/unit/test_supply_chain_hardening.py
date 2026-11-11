@@ -28,6 +28,10 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 pytestmark = pytest.mark.unit
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
+# The one non-SHA reference: Quantum-L9/l9-ci-core's consumer toolchain installer
+# on its v2 channel. Core's contract (release-plane.yaml, docs/consumer-lint-test.md)
+# forbids consumers choosing a Core revision; a SHA here would be exactly that.
+CORE_INSTALLER = "Quantum-L9/l9-ci-core/.github/actions/install-consumer-ci@v2"
 _IMAGE_DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
 
 
@@ -39,7 +43,7 @@ def test_every_external_workflow_action_is_immutable() -> None:
             if not match:
                 continue
             reference = match.group(1)
-            if reference.startswith("./"):
+            if reference.startswith("./") or reference == CORE_INSTALLER:
                 continue
             _, _, revision = reference.rpartition("@")
             if not _SHA.fullmatch(revision):

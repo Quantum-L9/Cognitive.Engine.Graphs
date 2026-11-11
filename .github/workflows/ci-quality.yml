@@ -92,25 +92,42 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
 
-      - name: Run Semgrep
-        uses: returntocorp/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v1
+      # Semgrep is Core-owned: its version is Quantum-L9/l9-ci-core
+      # toolchain-lock.json's, installed hash-locked by Core's installer (on by
+      # default). This repository names no Semgrep version, image or action.
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
-          config: ${{ vars.SEMGREP_RULES_PATH || '.semgrep/' }}
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Core toolchain (Semgrep included)
+        id: core
+        uses: Quantum-L9/l9-ci-core/.github/actions/install-consumer-ci@v2
+
+      - name: Run Semgrep
         env:
-          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN || '' }}
+          SEMGREP: ${{ steps.core.outputs.semgrep-executable }}
+          RULES: ${{ vars.SEMGREP_RULES_PATH || '.semgrep/' }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SEMGREP}" ]]; then
+            echo "::error::install-consumer-ci@v2 did not install Semgrep (v2 predates Quantum-L9/l9-ci-core#248)"
+            exit 1
+          fi
+          "${SEMGREP}" scan --config "${RULES}" --error --metrics=off --disable-version-check
 
       # The rule fixtures (.semgrep/fixtures/semgrep-rules.py: deliberate true
       # positives and true negatives) must keep matching, or a rule edit could
-      # silently stop catching what it exists for. Same image tag as the action
-      # above, pulled in the same job, so the fixtures are judged by the engine
-      # that just ran the policy scan. The fixture path is given as a file:
-      # semgrep --test with a directory target crashes, and a fixture under
-      # tests/ is hidden by the rules' own **/tests/** exclude on this engine.
+      # silently stop catching what it exists for. Same engine as the policy
+      # scan above. The fixture path is given as a file: semgrep --test with a
+      # directory target crashes, and a fixture under tests/ is hidden by the
+      # rules' own **/tests/** exclude.
       - name: Semgrep rule fixtures (semgrep --test)
+        env:
+          SEMGREP: ${{ steps.core.outputs.semgrep-executable }}
         run: |
-          docker run --rm -v "$GITHUB_WORKSPACE:/src" -w /src returntocorp/semgrep-agent:v1 \
-            semgrep --test --metrics=off \
-              --config .semgrep/semgrep-rules.yaml .semgrep/fixtures/semgrep-rules.py
+          "${SEMGREP}" --test --metrics=off --disable-version-check \
+            --config .semgrep/semgrep-rules.yaml .semgrep/fixtures/semgrep-rules.py
 
   # ===========================================================================
   # SECRETS-SCAN — GitGuardian Secrets Detection
