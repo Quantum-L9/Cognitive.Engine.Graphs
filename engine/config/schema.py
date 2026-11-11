@@ -741,10 +741,12 @@ class ChildSyncSpec(BaseModel):
     """Nested child entity sync.
 
     ``field`` is a property the endpoint's ``targetnode`` declares as
-    ``list<map>``; ``targetid`` is a required property of that map. A row
-    carries the children as a JSON array of objects — never a JSON-encoded
-    string. Enforced at admission and at sync ingress
-    (``engine/sync/row_contract.py``).
+    ``list<map>``; ``targetid`` is a required property of that map. The shape
+    is a declaration, checked at admission (``endpoint_shape_defects`` in
+    ``engine/sync/row_contract.py``): a pack whose childsync field is not
+    declared this way is withheld. Checking each row against it at sync
+    ingress is the sync row contract's job, not this model's. On the wire the
+    children are a JSON array of objects, never a JSON-encoded string.
     """
 
     field: str  # targetnode property declared list<map>; one child per element
