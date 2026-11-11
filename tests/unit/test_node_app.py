@@ -705,3 +705,110 @@ def test_gate_key_binding_flag_off_restores_claim_check(monkeypatch: pytest.Monk
     monkeypatch.delenv("L9_GATE_SIGNING_KEY_IDS", raising=False)
     monkeypatch.setattr(settings, "gate_signing_key_binding_enabled", False)
     assert _gate_key_binding() == (None, False)
+
+
+# ── Production ingress allowlist (W2, rbac-policy.yaml AUTH-GATE-03) ────────
+#
+# The SDK execute route validates the packet action against allowed_actions
+# before dispatch. These tests build the node app with the exact
+# L9_ALLOWED_ACTIONS that docker-compose.prod.yml hands the SDK.
+
+
+def _prod_allowed_actions() -> tuple[str, ...]:
+    from pathlib import Path
+
+    import yaml
+
+    compose = yaml.safe_load((Path(__file__).resolve().parents[2] / "docker-compose.prod.yml").read_text())
+    values = [
+        svc["environment"]["L9_ALLOWED_ACTIONS"]
+        for svc in compose["services"].values()
+        if isinstance(svc.get("environment"), dict) and "L9_ALLOWED_ACTIONS" in svc["environment"]
+    ]
+    assert len(values) == 1, values
+    return tuple(action.strip() for action in values[0].split(",") if action.strip())
+
+
+def test_prod_allowlist_refuses_enrich_before_dispatch() -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def spy(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
+        calls.append(payload)
+        return {}
+
+    register_handler("enrich", _with_packet_audit("enrich", spy))
+    assert "enrich" not in _prod_allowed_actions()
+
+    with TestClient(_app(_config(allowed_actions=_prod_allowed_actions()))) as client:
+        response = client.post("/v1/execute", json=_gate_packet(action="enrich", entity_ids=["e-1"]))
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["header"]["packet_type"] == "failure"
+    assert body["payload"]["error"] == "TransportAuthorizationError"  # SDK allowlist, before dispatch
+    assert calls == []
+
+
+@pytest.mark.parametrize("granted", [False, True])
+def test_prod_allowlist_admits_admin_but_admin_write_still_guards_it(
+    monkeypatch: pytest.MonkeyPatch, granted: bool
+) -> None:
+    """admin stays reachable at production ingress (operator decision 2026-11-11, Constellation.Gate#37);
+    the handler-level admin:write check is what refuses a tenant without the grant."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from engine.auth.capabilities import Capability, get_capability_validator, reset_capability_validator
+    from engine.config.schema import CapabilitySpec
+    from engine.config.settings import settings
+    from engine.handlers import init_dependencies
+    from engine.state import get_state
+    from tests.fixtures.domain_contracts import synthetic_loader
+
+    assert "admin" in _prod_allowed_actions()
+    monkeypatch.setattr(settings, "l9_env", "prod")
+    reset_capability_validator()
+    spec = synthetic_loader().load_domain("orbital-logistics")
+    spec = spec.model_copy(
+        update={
+            "capabilities": [
+                CapabilitySpec(
+                    name="ops",
+                    actions=["admin:write"],
+                    allowed_subjects=["orbital-logistics" if granted else "ops-only"],
+                )
+            ]
+        }
+    )
+    loader = MagicMock()
+    loader.load_domain.return_value = spec
+    loader.list_domains.return_value = ["orbital-logistics"]
+    driver = MagicMock()
+    driver.execute_query = AsyncMock(return_value=[])
+    init_dependencies(driver, loader)
+    get_state()._tenant_allowlist = {"orbital-logistics"}
+    target = Capability(tenant_id="orbital-logistics", domain_id="*", allowed_actions=frozenset({"sync:write"}))
+    get_capability_validator().register(target)
+    register_engine_handlers()
+    try:
+        with TestClient(_app(_config(allowed_actions=_prod_allowed_actions()))) as client:
+            response = client.post(
+                "/v1/execute",
+                json=_gate_packet(
+                    action="admin",
+                    tenant="orbital-logistics",
+                    subaction="revoke_capability",
+                    capability_id=target.capability_id,
+                ),
+            )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        record = get_capability_validator()._registry[target.capability_id]
+        if granted:  # positive control: the request itself is valid and admitted
+            assert body["header"]["packet_type"] != "failure", body.get("payload")
+            assert record.revoked
+        else:
+            assert body["header"]["packet_type"] == "failure"
+            assert body["payload"]["error"] == "ValidationError"  # engine admin:write check, past transport
+            assert record.is_active()
+    finally:
+        reset_capability_validator()

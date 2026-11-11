@@ -63,7 +63,7 @@ OPEN_GAPS: dict[str, str] = {
     "feedback/convergence-loop.yaml": "W1 (feedback convergence closure)",
     "observability/otel-traces.yaml": "Quantum-L9/Cognitive.Engine.Graphs#441, Quantum-L9/Gate_SDK#75",
     "observability/slo-definitions.yaml": "Quantum-L9/Cognitive.Engine.Graphs#441, Quantum-L9/Gate_SDK#75",
-    "auth/rbac-policy.yaml": "W2 (CEG-side RBAC), Quantum-L9/Constellation.Gate#37",
+    "auth/rbac-policy.yaml": "Quantum-L9/Constellation.Gate#37 (Gate caller-policy evidence; CEG side verified by CAP-TENANT-01)",
 }
 
 # path -> behaviour test node ids ("tests/...py::Class::test" or "tests/...py::test")
@@ -159,32 +159,6 @@ async def _probe_feedback_convergence(monkeypatch: pytest.MonkeyPatch) -> None:
     assert metadata.get("status") == "partial"
 
 
-async def _probe_rbac_revoke_is_tenant_bound(monkeypatch: pytest.MonkeyPatch) -> None:
-    """rbac-policy.yaml required_proof: revoke restricted to an authorized operator."""
-    from engine.auth.capabilities import Capability, get_capability_validator, reset_capability_validator
-    from engine.config.schema import CapabilitySpec
-    from engine.handlers import ValidationError, handle_admin
-
-    reset_capability_validator()
-    try:
-        _wire_engine(
-            [CapabilitySpec(name="admin_ops", actions=["admin:write"], allowed_subjects=["orbital-logistics"])]
-        )
-        foreign = Capability(tenant_id="consumer-a", domain_id="*", allowed_actions=frozenset({"sync:write"}))
-        validator = get_capability_validator()
-        validator.register(foreign)
-        try:
-            await handle_admin(
-                "orbital-logistics", {"subaction": "revoke_capability", "capability_id": foreign.capability_id}
-            )
-        except ValidationError:
-            assert validator._registry[foreign.capability_id].is_active()
-            return
-        raise AssertionError("tenant revoked another tenant's capability")
-    finally:
-        reset_capability_validator()
-
-
 async def _probe_otel_trace_continuity(monkeypatch: pytest.MonkeyPatch) -> None:
     """otel-traces.yaml: no second root on either ingress path, and spans exist."""
     from constellation_node_sdk.runtime.execution import _invoke_handler  # dispatch the SDK uses
@@ -221,7 +195,9 @@ PROBES: dict[str, Callable[[pytest.MonkeyPatch], Awaitable[None]]] = {
     "feedback/convergence-loop.yaml": _probe_feedback_convergence,
     "observability/otel-traces.yaml": _probe_otel_trace_continuity,
     "observability/slo-definitions.yaml": _contract_flag_probe("observability/slo-definitions.yaml"),
-    "auth/rbac-policy.yaml": _probe_rbac_revoke_is_tenant_bound,
+    # CEG-side revoke/audit binding is proven (tests/unit/test_capability_tenant_binding.py);
+    # what remains is Gate caller-policy evidence, outside this repository.
+    "auth/rbac-policy.yaml": _contract_flag_probe("auth/rbac-policy.yaml"),
 }
 
 

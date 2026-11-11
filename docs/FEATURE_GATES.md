@@ -1666,3 +1666,33 @@ the message is logged, not returned, because it can carry driver detail) and
 failure propagates.
 
 Tests: `tests/unit/test_feedback_convergence_closure.py` (`TestPartialResults`).
+
+## 31. Capability tenant binding (CAP-TENANT-01, W2)
+
+### Capability tenant binding (`capability_tenant_binding_enabled`, default `True`)
+
+Admin `revoke_capability` revoked any registered capability id, along with its
+derived children, and `capability_audit` counted the whole registry. So any tenant
+holding `admin:write` could revoke another tenant's capability. `admin` stays
+reachable at production ingress by operator decision (2026-11-11,
+Quantum-L9/Constellation.Gate#37), which made this a cross-tenant hole.
+
+On:
+
+- `revoke_capability` requires the caller to own the capability:
+  `CapabilityValidator.is_owned_by` holds when the capability's own tenant, or the
+  tenant of any ancestor in its registered derivation chain, is the caller. A
+  delegator therefore keeps the right to revoke what it granted.
+- A `"*"` (tenant-less) capability is owned by no tenant.
+- A chain broken by an unregistered parent confers nothing beyond the links that
+  remain.
+- An unowned id is refused with the same `ValidationError` as an unknown one, before
+  any mutation, so revoke is not an oracle for other tenants' ids.
+- `capability_audit`, and the `audit` block of the revoke response, count only the
+  caller's capabilities. A derivation counts when its parent or child is owned.
+
+Off: the registry-wide legacy behaviour.
+
+Tests: `tests/unit/test_capability_tenant_binding.py`. Production ingress behaviour
+for `enrich` (refused by the SDK allowlist before dispatch) and `admin` (admitted,
+then guarded by `admin:write`) is pinned in `tests/unit/test_node_app.py`.
