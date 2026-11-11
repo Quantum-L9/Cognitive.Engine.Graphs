@@ -39,6 +39,9 @@ permissions:
   id-token: write
   security-events: write
   attestations: write
+  # upload-sarif reads the workflow run; in a private repository that needs
+  # actions: read, otherwise "Resource not accessible by integration" (#392).
+  actions: read
 
 env:
   REGISTRY: ${{ vars.REGISTRY || 'ghcr.io' }}
