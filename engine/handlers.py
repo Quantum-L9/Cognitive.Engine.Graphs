@@ -2473,6 +2473,7 @@ def _build_outcome_write(
     value: Any,
     fingerprint: Any,
     create_resulted_in: bool,
+    keyed: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """The one outcome-record writer (handle_outcomes; sync ``outcome`` under RU-006).
 
@@ -2526,6 +2527,9 @@ def _build_outcome_write(
     """
     )
 
+    if keyed:
+        cypher = _keyed_outcome_write_cypher(outcome_label, unified)
+
     # RU-005 / CEG-COR-056: one decodable encoding (JSON) for the map-valued
     # fingerprint field; off restores the Python repr writer.
     stored_dimension_weights = (
@@ -2555,9 +2559,106 @@ def _build_outcome_write(
         "candidate_count": candidate_count,
         "create_resulted_in": create_resulted_in,
     }
+    if keyed:
+        parameters["request_token"] = uuid.uuid4().hex
     if feedback_fields is not None:
         parameters["dimension_scores"], parameters["was_selected"] = feedback_fields
     return cypher, parameters
+
+
+_OUTCOME_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}$")
+_OUTCOME_STORED_FIELDS = ("match_id", "candidate_id", "outcome", "tenant")
+
+
+def _validated_outcome_id(value: Any, tenant: str) -> str:
+    """A caller-supplied outcome_id: the replay key (FEEDBACK-IDEMP-01)."""
+    if not isinstance(value, str) or not _OUTCOME_ID_PATTERN.match(value):
+        raise ValidationError(
+            "outcome_id must be 1-128 characters of letters, digits, '_', '.', ':' or '-', starting alphanumeric",
+            action="outcomes",
+            tenant=tenant,
+        )
+    return value
+
+
+def _outcome_id_constraint_query(outcome_label: str) -> str:
+    """Uniqueness of ``outcome_id`` on the domain's outcome label (idempotent).
+
+    MERGE alone cannot stop two concurrent first writes of one key both
+    creating a node; the constraint makes the database refuse the second.
+    A schema statement, so it runs in its own transaction, never with the write.
+    """
+    label = sanitize_label(outcome_label)
+    return f"CREATE CONSTRAINT ceg_outcome_id_{label} IF NOT EXISTS FOR (o:{label}) REQUIRE o.outcome_id IS UNIQUE"
+
+
+def _keyed_outcome_write_cypher(outcome_label: str, unified: bool) -> str:
+    """MERGE form of the outcome write for a caller-supplied outcome_id.
+
+    The node is created once; a replay matches it and changes nothing.
+    ``created`` is true only for the transaction whose per-request token was
+    written ON CREATE (the token is removed before commit). RESULTED_IN is only
+    created with the node. The stored identity fields are returned so the
+    handler can refuse a replay whose content differs.
+    """
+    label = sanitize_label(outcome_label)
+    fields = [
+        "match_id",
+        "candidate_id",
+        "outcome",
+        "value",
+        "tenant",
+        "domain_id",
+        "active_dimensions",
+        "dimension_weights",
+        "gates_passed",
+        "match_direction",
+        "candidate_count",
+    ]
+    if unified:
+        fields += ["dimension_scores", "was_selected"]
+    assignments = ",\n        ".join(f"o.{name} = ${name}" for name in fields)
+    stored = ", ".join(f"o.{name} AS stored_{name}" for name in _OUTCOME_STORED_FIELDS)
+    return f"""
+    MERGE (o:{label} {{outcome_id: $outcome_id}})
+    ON CREATE SET
+        {assignments},
+        o.created_at = datetime(),
+        o._created_by_request = $request_token
+    WITH o, coalesce(o._created_by_request = $request_token, false) AS created
+    REMOVE o._created_by_request
+    WITH o, created
+    OPTIONAL MATCH (c {{entity_id: $candidate_id}})
+    FOREACH (_ IN CASE WHEN created AND c IS NOT NULL AND $create_resulted_in THEN [1] ELSE [] END |
+        CREATE (c)-[:RESULTED_IN]->(o)
+    )
+    RETURN DISTINCT o.outcome_id AS outcome_id, created, {stored}
+    """
+
+
+def _keyed_outcome_replayed(
+    rows: list[dict[str, Any]],
+    expected: dict[str, Any],
+    tenant: str,
+) -> bool:
+    """Whether a keyed outcome write matched an existing node (a replay).
+
+    A replay whose identity fields differ from the stored outcome is refused:
+    one outcome_id names one observation.
+    """
+    if not rows:
+        raise ExecutionError("Outcome write returned no row", action="outcomes", tenant=tenant)
+    row = rows[0]
+    if row.get("created"):
+        return False
+    conflicts = sorted(name for name in _OUTCOME_STORED_FIELDS if row.get(f"stored_{name}") != expected.get(name))
+    if conflicts:
+        raise ValidationError(
+            f"outcome_id {expected['outcome_id']!r} is already recorded with different {', '.join(conflicts)}",
+            action="outcomes",
+            tenant=tenant,
+        )
+    return True
 
 
 async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -2578,7 +2679,12 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
 
     domain_spec = domain_loader.load_domain(tenant)
     _enforce_capability(tenant, "outcomes", domain_spec)
-    outcome_id = f"out_{uuid.uuid4().hex[:12]}"
+    from engine.config.settings import settings as _idempotency_settings
+
+    # FEEDBACK-IDEMP-01: a caller-supplied outcome_id is the replay key.
+    replay_key = payload.get("outcome_id")
+    keyed = bool(_idempotency_settings.outcome_idempotency_enabled) and replay_key is not None
+    outcome_id = _validated_outcome_id(replay_key, tenant) if keyed else f"out_{uuid.uuid4().hex[:12]}"
 
     # R3: Causal validation for RESULTED_IN edge. CEG-FIX-001: a rejection
     # suppresses the edge in both write paths below; the outcome node is the
@@ -2598,11 +2704,25 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
             value=payload.get("value"),
             fingerprint=fingerprint,
             create_resulted_in=create_resulted_in,
+            keyed=keyed,
         )
     except ValueError as exc:
         raise ValidationError(str(exc), action="outcomes", tenant=tenant) from exc
+    if keyed:
+        try:
+            await graph_driver.execute_query(
+                cypher=_outcome_id_constraint_query(domain_spec.feedbackloop.outcome_node_label),
+                database=domain_spec.domain.id,
+            )
+        except Exception as exc:
+            raise ExecutionError(
+                "Outcome write could not enforce outcome_id uniqueness; nothing written",
+                action="outcomes",
+                tenant=tenant,
+                detail=str(exc),
+            ) from exc
     try:
-        await graph_driver.execute_query(
+        write_rows = await graph_driver.execute_query(
             cypher=cypher,
             parameters=parameters,
             database=domain_spec.domain.id,
@@ -2614,9 +2734,14 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
             tenant=tenant,
             detail=str(exc),
         ) from exc
+    replayed = keyed and _keyed_outcome_replayed(write_rows, parameters, tenant)
+
+    # A replay recorded nothing new: the side effects below ran with the first
+    # write. Only the feedback loop runs again; its propagation claim makes the
+    # boost apply once per outcome_id and lets a retry finish a failed one.
 
     # R6: Counterfactual generation for negative outcomes
-    if domain_spec.counterfactual.enabled and outcome == "failure":
+    if domain_spec.counterfactual.enabled and outcome == "failure" and not replayed:
         try:
             from engine.causal.counterfactual import CounterfactualGenerator
 
@@ -2631,11 +2756,14 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
             logger.warning("Counterfactual generation failed for %s", outcome_id, exc_info=True)
 
     compliance = _get_compliance_engine(domain_spec)
-    if compliance.enabled:
+    if compliance.enabled and not replayed:
         compliance.log_outcome(tenant=tenant, outcome_id=outcome_id, outcome=outcome)
 
     response: dict[str, Any] = {"status": "recorded", "outcome_id": outcome_id}
-    if not create_resulted_in:
+    if replayed:
+        response["replayed"] = True
+        logger.info("Outcome replay tenant=%s outcome_id=%s", tenant, outcome_id)
+    elif not create_resulted_in:
         response["rejected_count"] = 1
 
     # Feedback loop: propagate outcome to signal weights and score adjustments
@@ -2660,7 +2788,7 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
     # Non-fatal: PacketStore.record_outcome() never raises; always returns bool.
     from engine.config.settings import settings as _outcome_settings
 
-    if _outcome_settings.outcome_persistence_enabled:
+    if _outcome_settings.outcome_persistence_enabled and not replayed:
         _match_packet_id = payload.get("match_packet_id")
         if _match_packet_id:
             from engine.packet.packet_store import get_packet_store as _get_store
@@ -2686,7 +2814,7 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
             )
 
     # Causal edge creation: auto-create causal chain from outcome
-    if domain_spec.causal.enabled:
+    if domain_spec.causal.enabled and not replayed:
         from engine.causal.causal_compiler import CausalCompiler
 
         compiler = CausalCompiler(domain_spec)
