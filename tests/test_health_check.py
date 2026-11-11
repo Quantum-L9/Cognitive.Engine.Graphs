@@ -1,5 +1,9 @@
 """Tests for health check response path verification (GMP-07)."""
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 def test_health_response_structure():
     """Verify handle_health returns status at correct nesting level."""

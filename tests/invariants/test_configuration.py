@@ -12,6 +12,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+pytestmark = pytest.mark.unit
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 
 

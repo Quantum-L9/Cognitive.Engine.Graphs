@@ -19,6 +19,8 @@ from engine.inference_rule_registry import (
     list_registered_rules,
 )
 
+pytestmark = pytest.mark.unit
+
 CTX = InferenceContext(tenant_id="t1", domain_id="orbital-logistics", pass_number=1)
 
 _REMOVED_VERTICAL_RULES = (

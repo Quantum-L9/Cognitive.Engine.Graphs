@@ -9,6 +9,8 @@ import re
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 EXPECTED_TEMPLATES = {
     "api-endpoint.template.yaml": "yaml",
     "tool-schema.template.json": "json",

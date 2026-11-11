@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 
 class TestBootModule:
     """Smoke tests for engine.boot module."""
