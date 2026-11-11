@@ -56,13 +56,22 @@ class ScorePropagator:
         outcome_type = outcome_data.get("outcome", "")
         candidate_id = outcome_data.get("candidate_id", "")
 
-        if outcome_type == "success":
-            affected = await self._apply_positive_boost(candidate_id, boost_factor)
-        elif outcome_type == "failure":
-            penalty_factor = 1.0 / boost_factor
-            affected = await self._apply_positive_boost(candidate_id, penalty_factor)
-        else:
+        if outcome_type not in ("success", "failure"):
             return {"propagated": False, "reason": "partial_outcome_no_action"}
+        factor = boost_factor if outcome_type == "success" else 1.0 / boost_factor
+
+        from engine.config.settings import settings
+
+        outcome_id = outcome_data.get("outcome_id")
+        if settings.outcome_idempotency_enabled and settings.propagation_single_application and outcome_id:
+            claim = await self._apply_claimed_boost(str(outcome_id), candidate_id, factor)
+            if claim is None:
+                return {"propagated": False, "reason": "outcome_not_found", "outcome_id": outcome_id}
+            applied, affected = claim
+            if not applied:
+                return {"propagated": False, "reason": "already_applied", "outcome_id": outcome_id}
+        else:
+            affected = await self._apply_positive_boost(candidate_id, factor)
 
         return {
             "propagated": True,
@@ -140,3 +149,73 @@ class ScorePropagator:
             affected,
         )
         return affected
+
+    async def _apply_claimed_boost(
+        self,
+        outcome_id: str,
+        candidate_id: str,
+        factor: float,
+    ) -> tuple[bool, int] | None:
+        """Apply the boost at most once per outcome_id (FEEDBACK-IDEMP-01).
+
+        One statement, one transaction: the outcome node is write-locked by a
+        temporary property before ``propagated_at`` is read (Neo4j runs read
+        committed, and a plain read-then-SET loses concurrent updates), then
+        stamped. Only the transaction that found it unstamped multiplies the
+        DimensionWeights, each locked by its own SET, with the single-application
+        clamp. A failed transaction rolls the stamp back, so a retry can apply.
+
+        Returns ``(applied, affected)``, or None when no outcome node carries
+        ``outcome_id`` for this tenant.
+        """
+        outcome_label = sanitize_label(outcome_node_label(self._spec, "keyed score propagation"))
+        sw_spec = self._spec.feedbackloop.signal_weights
+        cypher = f"""
+        MATCH (claim:{outcome_label} {{outcome_id: $outcome_id, tenant: $tenant}})
+        SET claim._propagation_lock = true
+        REMOVE claim._propagation_lock
+        WITH claim, claim.propagated_at IS NULL AS first_application
+        SET claim.propagated_at = coalesce(claim.propagated_at, datetime())
+        WITH first_application
+        OPTIONAL MATCH (o:{outcome_label} {{candidate_id: $candidate_id, tenant: $tenant}})
+        WHERE first_application
+        WITH first_application, count(o) AS outcomes
+        OPTIONAL MATCH (dw:DimensionWeight {{tenant: $tenant}})
+        WHERE first_application AND outcomes > 0
+        FOREACH (_ IN CASE WHEN dw IS NULL THEN [] ELSE [1] END |
+            SET dw._propagation_lock = true
+            REMOVE dw._propagation_lock
+            SET dw.boost_factor = CASE
+                    WHEN coalesce(dw.boost_factor, 1.0) * $factor > $max_weight THEN $max_weight
+                    WHEN coalesce(dw.boost_factor, 1.0) * $factor < $min_weight THEN $min_weight
+                    ELSE coalesce(dw.boost_factor, 1.0) * $factor
+                END,
+                dw.last_propagation_at = datetime()
+        )
+        RETURN first_application AS applied, count(dw) AS affected
+        """
+        result = await self._driver.execute_query(
+            cypher,
+            parameters={
+                "outcome_id": outcome_id,
+                "candidate_id": candidate_id,
+                "tenant": self._db,
+                "factor": factor,
+                "min_weight": sw_spec.min_weight,
+                "max_weight": sw_spec.max_weight,
+            },
+            database=self._db,
+        )
+        if not result:
+            logger.warning("No outcome node for outcome_id=%s; propagation skipped", outcome_id)
+            return None
+        applied = bool(result[0]["applied"])
+        affected = int(result[0]["affected"]) if applied else 0
+        logger.info(
+            "Propagation claim outcome_id=%s applied=%s factor=%.3f affected=%d",
+            outcome_id,
+            applied,
+            factor,
+            affected,
+        )
+        return applied, affected

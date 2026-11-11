@@ -52,6 +52,11 @@
       "minLength": 1,
       "description": "Optional packet-store linkage when outcome_persistence_enabled; not a tenant id."
     },
+    "outcome_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:\\-]{0,127}$",
+      "description": "Optional replay key (outcome_idempotency_enabled, FEEDBACK-IDEMP-01): a replay with the same id records nothing new and propagates at most once; a replay with different match_id, candidate_id or outcome is refused. Omitted: the server mints an id, and a retry cannot be recognised."
+    },
     "fingerprint": {
       "type": "object",
       "properties": {

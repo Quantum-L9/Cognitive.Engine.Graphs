@@ -60,7 +60,7 @@ ALL_ARCH = frozenset(
 OPEN_GAPS: dict[str, str] = {
     "eval/eval-pipeline.yaml": "Quantum-L9/Cognitive.Engine.Graphs#440",
     "eval/benchmarks.yaml": "Quantum-L9/Cognitive.Engine.Graphs#440",
-    "feedback/convergence-loop.yaml": "W1 (feedback convergence closure)",
+    "feedback/convergence-loop.yaml": "weight-recalculation governance (owner decision pending)",
     "observability/otel-traces.yaml": "Quantum-L9/Cognitive.Engine.Graphs#441, Quantum-L9/Gate_SDK#75",
     "observability/slo-definitions.yaml": "Quantum-L9/Cognitive.Engine.Graphs#441, Quantum-L9/Gate_SDK#75",
     "auth/rbac-policy.yaml": "Quantum-L9/Constellation.Gate#37 (Gate caller-policy evidence; CEG side verified by CAP-TENANT-01)",
@@ -127,36 +127,28 @@ def _wire_engine(capabilities: list[Any], *, feedback_enabled: bool = False) -> 
 
 
 async def _probe_feedback_convergence(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Replay identity and partial-outcome truth (convergence-loop.yaml blocking_validation)."""
+    """Remaining blocking item: no learned-weight authority without an approved policy.
+
+    Replay identity, partial-outcome truth and tenant scoping are proven
+    (convergence-loop.yaml ``partial_proof``). Still open: once
+    ``min_outcomes_for_recalculation`` new outcomes accumulate, the loop writes
+    recalculated DimensionWeight weights with no approval, bypassing the governed
+    admin ``score_feedback`` -> ``apply_weight_proposal`` path.
+    """
     from engine.feedback.convergence import ConvergenceLoop
-    from engine.handlers import handle_outcomes
-
-    _wire_engine([])
-    # 1. The caller's outcome_id is the replay key: without it a retried
-    #    outcome cannot be recognised and propagation applies twice.
-    result = await handle_outcomes(
-        "orbital-logistics",
-        {"match_id": "m-probe", "candidate_id": "c-probe", "outcome": "success", "outcome_id": "probe-replay-1"},
-    )
-    assert result["outcome_id"] == "probe-replay-1", "caller-supplied outcome_id is not honoured"
-
-    # 2. A stage failure after the outcome is written reports partial truth
-    #    instead of raising with no record of what was applied.
     from tests.fixtures.domain_contracts import synthetic_loader
 
     spec = synthetic_loader().load_domain("orbital-logistics")
     spec = spec.model_copy(update={"feedbackloop": spec.feedbackloop.model_copy(update={"enabled": True})})
     loop = ConvergenceLoop(MagicMock(), spec)
-    loop._score_propagator.propagate_outcome = AsyncMock(side_effect=RuntimeError("probe"))  # type: ignore[method-assign]
-    loop._weight_calculator.should_recalculate = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop._score_propagator.propagate_outcome = AsyncMock(return_value={"propagated": True})  # type: ignore[method-assign]
+    loop._weight_calculator.should_recalculate = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    loop._weight_calculator.recalculate_weights = AsyncMock(return_value={"fit": 2.0})  # type: ignore[method-assign]
     loop._drift_detector.check_and_alert = AsyncMock(return_value={"drift_detected": False})  # type: ignore[method-assign]
-    try:
-        metadata = await loop.on_outcome_recorded(
-            {"outcome_id": "probe-replay-1", "candidate_id": "c-probe", "outcome": "success"}
-        )
-    except Exception as exc:
-        raise AssertionError(f"stage failure propagated instead of a partial report: {exc!r}") from exc
-    assert metadata.get("status") == "partial"
+    await loop.on_outcome_recorded({"outcome_id": "probe-1", "candidate_id": "c-probe", "outcome": "success"})
+    assert loop._weight_calculator.recalculate_weights.await_count == 0, (
+        "the convergence loop applied recalculated weights with no approved proposal"
+    )
 
 
 async def _probe_otel_trace_continuity(monkeypatch: pytest.MonkeyPatch) -> None:
