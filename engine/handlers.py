@@ -1639,7 +1639,14 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     if subaction == "revoke_capability":
         capability_id = _require_key(payload, "capability_id", "admin", tenant)
         validator = get_capability_validator()
-        revoked = validator.revoke_capability(capability_id)
+        from engine.config.settings import settings as _cap_settings
+
+        # CAP-TENANT-01: a tenant revokes only what it owns or delegated. An
+        # unowned id is refused exactly like an unknown one, before any
+        # mutation, so revoke is not an oracle for other tenants' ids.
+        tenant_bound = bool(_cap_settings.capability_tenant_binding_enabled)
+        owned = not tenant_bound or validator.is_owned_by(capability_id, tenant)
+        revoked = owned and validator.revoke_capability(capability_id)
         if not revoked:
             raise ValidationError(
                 f"Capability '{capability_id}' not found in registry",
@@ -1652,14 +1659,17 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {
             "status": "revoked",
             "capability_id": capability_id,
-            "audit": validator.audit_summary(),
+            "audit": validator.audit_summary(tenant if tenant_bound else None),
         }
 
     if subaction == "capability_audit":
         validator = get_capability_validator()
+        from engine.config.settings import settings as _cap_settings
+
+        scope = tenant if _cap_settings.capability_tenant_binding_enabled else None
         return {
             "status": "audit",
-            "summary": validator.audit_summary(),
+            "summary": validator.audit_summary(scope),
         }
 
     # --- W6-01: KGE Activation Pathway ---

@@ -622,6 +622,14 @@ class Settings(BaseSettings):
     # admin delegate_capability response therefore shows a new proof_hash).
     # Off: the legacy checks and hash input.
     capability_record_binding_enabled: bool = True
+    # CAP-TENANT-01 (W2): admin revoke_capability revoked any registered id and
+    # capability_audit counted the whole registry, so any tenant holding
+    # admin:write could revoke another tenant's capability and its children.
+    # On: revoke requires the caller to own the capability (its tenant or an
+    # ancestor's in the derivation chain) and refuses an unowned id with the
+    # same error as an unknown one; audits count only the caller's capabilities.
+    # Off: the registry-wide legacy behaviour.
+    capability_tenant_binding_enabled: bool = True
     # Correctness remediation lane F (plan 0d84ec8, RU-093..RU-103)
     # RU-094 / CEG-COR-035: a HALF_OPEN probe cancelled before it produced a
     # result (the SDK runtime's wait_for timeout) returns its probe slot. Off:

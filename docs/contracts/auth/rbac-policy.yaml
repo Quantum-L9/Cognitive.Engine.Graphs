@@ -71,6 +71,40 @@ required_proof:
 - Gate main vs PR #31 acceptance evidence separately bound
 - delegate_capability rejects forged source_tenant and unauthorized root synthesis
 - revoke/capability_audit restricted to authorized operator
+required_proof_status:
+- item: read-only caller denied resolve before graph query
+  status: verified_local
+  evidence: tests/unit/test_wave3_capabilities.py::TestResolveCapabilityEnforcement::test_read_only_tenant_cannot_create_resolution_edge
+- item: write-authorized caller can resolve in correct tenant
+  status: verified_local
+  evidence: tests/unit/test_rbac_required_proofs.py::TestWriteAuthorizedResolveInCorrectTenant (l9_env=prod; a sync:write grant naming the caller resolves in the caller's own database with the caller's tenant on the edge; a grant naming another tenant is refused before any query)
+- item: wrong-tenant refusal
+  status: verified_local
+  evidence: tests/unit/test_wave3_capabilities.py::TestTenantAuthEnforcement
+- item: Gate worker and consumer caller policies pass
+  status: external
+  evidence: Quantum-L9/Constellation.Gate#37
+- item: existing match permission not expanded
+  status: verified_local
+  evidence: tests/unit/test_rbac_required_proofs.py::TestMatchPermissionNotExpanded (match requires exactly match:read; no write action maps to a read permission; in prod a match:read grant authorizes match and refuses sync, outcomes, resolve, enrich and admin)
+- item: unconfigured CapabilitySet cannot authorize untrusted writes in production
+  status: verified_local
+  evidence: tests/unit/test_wave3_capabilities.py::TestActionPermissions::test_enforce_capability_no_caps_in_spec
+- item: missing permission entry cannot authorize untrusted writes
+  status: verified_local
+  evidence: tests/unit/test_wave3_capabilities.py::TestActionPermissions::test_check_action_permission_unknown_action
+- item: SDK direct ingress for admin/enrich denied in production
+  status: verified_local_with_operator_exception
+  evidence: tests/unit/test_node_app.py::test_prod_allowlist_refuses_enrich_before_dispatch (enrich refused by the SDK allowlist from docker-compose.prod.yml before dispatch); tests/unit/test_node_app.py::test_prod_allowlist_admits_admin_but_admin_write_still_guards_it (admin admitted at ingress by operator decision 2026-11-11, refused by the handler admin:write check without a grant)
+- item: Gate main vs PR #31 acceptance evidence separately bound
+  status: external
+  evidence: Quantum-L9/Constellation.Gate#37
+- item: delegate_capability rejects forged source_tenant and unauthorized root synthesis
+  status: verified_local
+  evidence: tests/unit/test_wave3_capabilities.py::TestDelegatedCapabilityAuthorization
+- item: revoke/capability_audit restricted to authorized operator
+  status: verified_local
+  evidence: tests/unit/test_capability_tenant_binding.py (CAP-TENANT-01, capability_tenant_binding_enabled); an unowned id is refused exactly like an unknown one
 release_ready: false
 operational_proof:
   observed_in_this_pack: false

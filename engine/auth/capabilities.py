@@ -327,17 +327,44 @@ class CapabilityValidator:
         chain.reverse()
         return chain
 
-    def audit_summary(self) -> dict[str, Any]:
-        """Summary of all registered capabilities for audit."""
-        active = sum(1 for c in self._registry.values() if c.is_active())
-        revoked = sum(1 for c in self._registry.values() if c.revoked)
-        expired = sum(1 for c in self._registry.values() if not c.revoked and c.is_expired())
+    def is_owned_by(self, capability_id: str, tenant: str) -> bool:
+        """Whether ``tenant`` owns the registered capability or delegated it.
+
+        CAP-TENANT-01: ownership is the capability's own tenant or the tenant of
+        any ancestor in its registered derivation chain, so a delegator keeps the
+        right to revoke what it granted. It is read only from registered records:
+        a chain broken by an unregistered parent confers nothing beyond the links
+        that remain, an unknown id is owned by no one, and a ``"*"`` capability
+        (tenant-less) is owned by no tenant.
+        """
+        capability = self._registry.get(capability_id)
+        if capability is None or not tenant or tenant == "*":
+            return False
+        return any(link.tenant_id == tenant for link in self.check_derivation_chain(capability))
+
+    def audit_summary(self, tenant: str | None = None) -> dict[str, Any]:
+        """Summary of registered capabilities for audit.
+
+        With ``tenant`` (CAP-TENANT-01) only capabilities that tenant owns are
+        counted, and a derivation counts when its parent or child is owned.
+        """
+        if tenant is None:
+            capabilities = list(self._registry.values())
+            derivations = len(self._derivations)
+        else:
+            capabilities = [c for c in self._registry.values() if self.is_owned_by(c.capability_id, tenant)]
+            derivations = sum(
+                1
+                for d in self._derivations.values()
+                if self.is_owned_by(d.parent_capability.capability_id, tenant)
+                or self.is_owned_by(d.child_capability.capability_id, tenant)
+            )
         return {
-            "total_registered": len(self._registry),
-            "active": active,
-            "revoked": revoked,
-            "expired": expired,
-            "derivations": len(self._derivations),
+            "total_registered": len(capabilities),
+            "active": sum(1 for c in capabilities if c.is_active()),
+            "revoked": sum(1 for c in capabilities if c.revoked),
+            "expired": sum(1 for c in capabilities if not c.revoked and c.is_expired()),
+            "derivations": derivations,
         }
 
 

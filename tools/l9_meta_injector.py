@@ -354,6 +354,20 @@ FILE_REGISTRY: list[FileMeta] = [
         "tests/unit/test_handlers_extended.py", "engine-specific", ["test"], ["test", "unit", "handlers"], "engine-team"
     ),
     FileMeta(
+        "tests/unit/test_rbac_required_proofs.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "capability", "auth"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/unit/test_capability_tenant_binding.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "capability", "auth"],
+        "engine-team",
+    ),
+    FileMeta(
         "tests/unit/test_feedback_convergence_closure.py",
         "engine-specific",
         ["test"],
@@ -811,6 +825,13 @@ FILE_REGISTRY: list[FileMeta] = [
     ),
     FileMeta(
         "reports/GMP-Report-130-Contract-Enforcement-System.md",
+        "engine-specific",
+        ["reports"],
+        ["gmp-report"],
+        "engine-team",
+    ),
+    FileMeta(
+        "reports/gmp/GMP-Report-135-W2-CEG-side-RBAC-tenant-bound-capability-revoke-and-audit.md",
         "engine-specific",
         ["reports"],
         ["gmp-report"],
