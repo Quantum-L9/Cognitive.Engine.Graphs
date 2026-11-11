@@ -23,6 +23,8 @@ from engine.scoring.belief_propagation import (
     propagate_chain,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class TestBayesianUpdate:
     """Test Bayesian belief update primitive."""
