@@ -7,7 +7,11 @@ Sources:
   docker-compose.yml
 """
 
+import pytest
+
 from tests.contracts._constants import FORBIDDEN_PROD_SECRETS, REQUIRED_ENV_VARS
+
+pytestmark = pytest.mark.unit
 
 # ── 1. Schema structure ─────────────────────────────────────────────────────
 

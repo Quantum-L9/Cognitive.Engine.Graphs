@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 if TYPE_CHECKING:
     from engine.config.schema import DomainSpec
 
