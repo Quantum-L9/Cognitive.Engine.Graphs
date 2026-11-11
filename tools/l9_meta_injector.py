@@ -354,6 +354,13 @@ FILE_REGISTRY: list[FileMeta] = [
         "tests/unit/test_handlers_extended.py", "engine-specific", ["test"], ["test", "unit", "handlers"], "engine-team"
     ),
     FileMeta(
+        "tests/unit/test_test_classification_guard.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "ci"],
+        "engine-team",
+    ),
+    FileMeta(
         "tests/unit/test_feedback_convergence_closure.py",
         "engine-specific",
         ["test"],
