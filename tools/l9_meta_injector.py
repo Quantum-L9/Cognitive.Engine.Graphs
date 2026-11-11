@@ -406,6 +406,13 @@ FILE_REGISTRY: list[FileMeta] = [
     ),
     FileMeta("tests/unit/test_settings.py", "engine-specific", ["test"], ["test", "unit", "config"], "engine-team"),
     FileMeta("tests/unit/test_sync.py", "engine-specific", ["test"], ["test", "unit", "sync"], "engine-team"),
+    FileMeta(
+        "tests/unit/test_test_classification_guard.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "ci"],
+        "engine-team",
+    ),
     FileMeta("tests/unit/test_traversal.py", "engine-specific", ["test"], ["test", "unit", "traversal"], "engine-team"),
     FileMeta("tests/unit/test_units.py", "engine-specific", ["test"], ["test", "unit", "units"], "engine-team"),
     # =========================================================================

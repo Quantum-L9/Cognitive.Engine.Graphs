@@ -104,6 +104,38 @@ def pytest_make_collect_report(
     return report
 
 
+# ── Test classification guard ─────────────────────────────────────────────────
+# `make test` (the required `Analyze (central Core)` check) runs `pytest -m unit`,
+# so a test with no classifying marker is silently deselected there. 107 such
+# files accumulated before #449-#452 classified them. Every collected test must
+# carry one of these markers, so what the required check runs stays deliberate.
+
+CLASSIFYING_MARKERS: frozenset[str] = frozenset({"unit", "integration", "performance"})
+
+
+def unclassified_nodeids(items: list[Any]) -> list[str]:
+    """Node ids of collected tests that carry none of CLASSIFYING_MARKERS."""
+    return [item.nodeid for item in items if not any(item.get_closest_marker(name) for name in CLASSIFYING_MARKERS)]
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Refuse the run when a test is unclassified.
+
+    ``tryfirst`` so it sees the full collection before ``-m`` deselects the very
+    tests it exists to catch.
+    """
+    missing = unclassified_nodeids(items)
+    if missing:
+        markers = ", ".join(sorted(CLASSIFYING_MARKERS))
+        listed = "\n  ".join(missing[:50])
+        msg = (
+            f"{len(missing)} collected test(s) carry no classifying marker ({markers}); "
+            f"`pytest -m unit` would silently skip them. Add pytestmark to the module:\n  {listed}"
+        )
+        raise pytest.UsageError(msg)
+
+
 # ── Neo4j Testcontainer ────────────────────────────────────────────────────────
 
 
