@@ -1116,6 +1116,30 @@ as `list<map{code: string required}>`; the synthetic `orbital-logistics` 0.2.0
 fixture carries a `list<string>` property, a `list<string>` taxonomy field and a
 `list<map>` childsync.
 
+## 32. Stage 2 follow-up — declared domain vocabulary (owner decisions 2026-11-11)
+
+The engine borrows no pack's vocabulary as a default. Each behaviour below ships
+`True` because it restores "the domain spec is the single source of truth" and
+changes nothing for a pack that declares what it uses; every served pack
+(freight-matching, mortgage-brokerage, plasticos) declares it. Set the env var to
+`false` to restore the previous behaviour verbatim (C-21 rollback).
+
+| Flag (env var) | Default | Behaviour on | Off (rollback) |
+|---|---|---|---|
+| `outcome_vocabulary_required_enabled` (`OUTCOME_VOCABULARY_REQUIRED_ENABLED`) | `true` | `FeedbackLoopSpec.outcome_node_label` defaults to `None`. `handle_outcomes`, sync `entity_type=outcome`, admin `score_feedback` / `generate_calibration_pairs` / `discover_weights`, the feedback loop (signal weights, propagation, pattern matching, drift), causal attribution and a `preference_attention` dimension without `metadata.outcome_node` read the domain's declared label; on a pack that declares none they raise before any Cypher — `OutcomeVocabularyUndeclaredError` (a `ValidationError`) from handlers, `OutcomeNodeLabelUndeclaredError` (a `ValueError`) from the engine modules — naming the domain and the operation. freight-matching and mortgage-brokerage declare `outcome_node_label: TransactionOutcome` (the label their graphs already hold), plasticos already declared it, so no graph migrates | An undeclared label resolves to the former default `TransactionOutcome` |
+
+The outcome *edge* (`feedbackloop.outcome_edge_type`, default `RESULTED_IN`) is
+not part of this section: its split stays deferred with A09.
+
+### Validation
+
+`tests/unit/test_outcome_vocabulary_required.py` (synthetic packs: orbital-logistics
+declares `DockingResult`, cheese-aging declares nothing).
+
+### Rollback
+
+Set `OUTCOME_VOCABULARY_REQUIRED_ENABLED=false` and restart.
+
 ## 29. Gate-routed score and Gate key binding (SCORING-GATE-01)
 
 ### Gate signing key binding (`gate_signing_key_binding_enabled`, default `True`) — GATE-KEY-01
@@ -1650,27 +1674,3 @@ the env var to `false` to restore the previous behaviour verbatim.
 | `strict_null_gates` (`STRICT_NULL_GATES`, existing W1-03 flag; meaning fixed by R1a-DEC-03) | `true` | RU-010 / CEG-COR-023 | `handle_match` calls `GateCompiler.validate_gates(resolved_query, match_direction=…, reject_unbound=True)` after defaults backfill and derived resolution, over the gates active for the direction (`matchdirections` empty or containing it). A gate whose named `queryparam` is missing/null and is undeclared (neither a queryschema field nor a derived parameter) or a `required` queryschema field raises `ValidationError` naming every such gate; a null optional or derived parameter is left to the gate's `nullbehavior` (C-14) and logged as a WARNING once per gate. Literal operands and gates without a named parameter are not checked. Required queryschema fields are therefore enforced for gates that read them (e.g. plasticos `polymer_type`) | `validate_gates` is never called on the match path; a null undeclared parameter reaches Neo4j as a missing parameter |
 | `match_request_contract_admission` (`MATCH_REQUEST_CONTRACT_ADMISSION`) | `true` | RU-012 / CEG-COR-063 (R1a-DEC-04 "admit both") | `handle_match` validates a payload that carries `contract_version` with `admit_payload(MatchRequest, payload, DomainContract.from_spec(<tenant's pack>))` — tenant-bound `domain`, declared `direction`, `extra=forbid`, transport fields refused, failures raised as `ValidationError` before any query — and continues with `{query: query.facts, match_direction: direction, top_n}`. Payloads without `contract_version` (legacy `MatchPayload`) are unchanged. The response stays the legacy shape | The `MatchRequest` example is rejected with `Missing required field 'match_direction'` |
 | `gate_role_exemption` (`GATE_ROLE_EXEMPTION`) | `true` | RU-015 / CEG-COR-080 (R1a-DEC-05 "withhold") | `engine.config.loader.admission_defects` adds `<gate>: roleexempt … is not consumed — match takes no request role` for a gate whose `roleexempt` is set and `<gate>: relaxedpenalty … is not consumed — relaxed matching is not exposed` for a gate that declares `relaxedpenalty` (explicitly, any value), so `withholding_reason` withholds the pack unless `UNVALIDATED_DOMAIN_PACKS_ENABLED`. No shipped pack declares either field. `schema.py`, the compiler's `role` / `compile_relaxed` support and the match payload are unchanged | The fields are accepted and silently ignored by every match |
-
-## 32. Stage 2 follow-up — declared domain vocabulary (owner decisions 2026-11-11)
-
-The engine borrows no pack's vocabulary as a default. Each behaviour below ships
-`True` because it restores "the domain spec is the single source of truth" and
-changes nothing for a pack that declares what it uses; every served pack
-(freight-matching, mortgage-brokerage, plasticos) declares it. Set the env var to
-`false` to restore the previous behaviour verbatim (C-21 rollback).
-
-| Flag (env var) | Default | Behaviour on | Off (rollback) |
-|---|---|---|---|
-| `outcome_vocabulary_required_enabled` (`OUTCOME_VOCABULARY_REQUIRED_ENABLED`) | `true` | `FeedbackLoopSpec.outcome_node_label` defaults to `None`. `handle_outcomes`, sync `entity_type=outcome`, admin `score_feedback` / `generate_calibration_pairs` / `discover_weights`, the feedback loop (signal weights, propagation, pattern matching, drift), causal attribution and a `preference_attention` dimension without `metadata.outcome_node` read the domain's declared label; on a pack that declares none they raise before any Cypher — `OutcomeVocabularyUndeclaredError` (a `ValidationError`) from handlers, `OutcomeNodeLabelUndeclaredError` (a `ValueError`) from the engine modules — naming the domain and the operation. freight-matching and mortgage-brokerage declare `outcome_node_label: TransactionOutcome` (the label their graphs already hold), plasticos already declared it, so no graph migrates | An undeclared label resolves to the former default `TransactionOutcome` |
-
-The outcome *edge* (`feedbackloop.outcome_edge_type`, default `RESULTED_IN`) is
-not part of this section: its split stays deferred with A09.
-
-### Validation
-
-`tests/unit/test_outcome_vocabulary_required.py` (synthetic packs: orbital-logistics
-declares `DockingResult`, cheese-aging declares nothing).
-
-### Rollback
-
-Set `OUTCOME_VOCABULARY_REQUIRED_ENABLED=false` and restart.
