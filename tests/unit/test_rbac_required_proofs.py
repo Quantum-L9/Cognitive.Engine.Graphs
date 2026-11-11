@@ -82,8 +82,9 @@ class TestWriteAuthorizedResolveInCorrectTenant:
         from engine.handlers import ValidationError, handle_resolve
 
         driver, spec = _wire([CapabilitySpec(name="writers", actions=["sync:write"], allowed_subjects=[_OTHER])])
+        payload = _resolve_payload(spec)
         with pytest.raises(ValidationError, match="lacks capability 'sync:write'"):
-            await handle_resolve(_TENANT, _resolve_payload(spec))
+            await handle_resolve(_TENANT, payload)
         driver.execute_query.assert_not_awaited()
 
 
