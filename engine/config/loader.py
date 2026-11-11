@@ -538,22 +538,7 @@ def admission_defects(spec: DomainSpec, *, complete: bool = False) -> list[str]:
         for param in _PARAM_REF.findall(cypher):
             if not _IDENTIFIER.fullmatch(param):
                 defects.append(f"{gate.name}: parameter {param!r} is not an identifier — {cypher}")
-    # plugins.inference_rules authorizes registered rules by name; a name the
-    # registry does not know would surface only when emit_inference_feedback
-    # runs it (KeyError), so it is an admission defect, not a runtime surprise.
-    if spec.plugins and spec.plugins.inference_rules:
-        from engine.inference_rule_registry import list_registered_rules
-
-        registered = set(list_registered_rules())
-        for rule_name in spec.plugins.inference_rules:
-            if rule_name not in registered:
-                defects.append(f"plugins.inference_rules: {rule_name!r} is not a registered inference rule")
-    # Rule parameters (the domain's vocabulary for rules such as
-    # infer_buyer_persona) are checked against the authorized rules.
-    if spec.plugins and (spec.plugins.inference_rules or spec.plugins.inference_rule_parameters):
-        from engine.inference_rule_registry import rule_parameter_defects
-
-        defects.extend(rule_parameter_defects(spec))
+    defects.extend(_plugin_defects(spec))
     defects.extend(_sync_shape_defects(spec))
     if complete or settings.scoring_admission_check_enabled or settings.admission_checks_full_match:
         defects.extend(_scoring_defects(spec, check_producers=complete or settings.scoring_admission_check_enabled))
@@ -562,6 +547,28 @@ def admission_defects(spec: DomainSpec, *, complete: bool = False) -> list[str]:
     if complete:
         defects.extend(_complete_native_defects(spec))
     return list(dict.fromkeys(defects))
+
+
+def _plugin_defects(spec: DomainSpec) -> list[str]:
+    """Inference-rule authorization and parameters (``plugins``) as admission defects."""
+    plugins = spec.plugins
+    if not plugins or not (plugins.inference_rules or plugins.inference_rule_parameters):
+        return []
+    from engine.inference_rule_registry import list_registered_rules, rule_parameter_defects
+
+    # plugins.inference_rules authorizes registered rules by name; a name the
+    # registry does not know would surface only when emit_inference_feedback
+    # runs it (KeyError), so it is an admission defect, not a runtime surprise.
+    registered = set(list_registered_rules())
+    defects = [
+        f"plugins.inference_rules: {rule_name!r} is not a registered inference rule"
+        for rule_name in plugins.inference_rules
+        if rule_name not in registered
+    ]
+    # Rule parameters (the domain's vocabulary for rules such as
+    # infer_buyer_persona) are checked against the authorized rules.
+    defects.extend(rule_parameter_defects(spec))
+    return defects
 
 
 # Prefixes of the typed sync contract's admission defects (row_contract.py).

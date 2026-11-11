@@ -414,6 +414,34 @@ def infer_icp_fit_score(entity: dict, ctx: InferenceContext) -> InferenceResult 
 _TITLE_TOKEN_SPLIT = re.compile(r"[^a-z0-9&]+")
 
 
+_PERSONA_PARAMETERS_PREFIX = "plugins.inference_rule_parameters.infer_buyer_persona"
+
+
+def _is_confidence(value: Any) -> bool:
+    """A number in (0, 1]; a bool is not a confidence."""
+    return not isinstance(value, bool) and isinstance(value, int | float) and 0.0 < value <= 1.0
+
+
+def _is_keyword_list(value: Any) -> bool:
+    """A non-empty list of non-blank strings."""
+    return isinstance(value, list) and bool(value) and all(isinstance(k, str) and k.strip() for k in value)
+
+
+def _persona_entry_defects(location: str, entry: Any, *, needs_keywords: bool) -> list[str]:
+    """One ``personas[i]`` (``needs_keywords``) or ``unmatched`` entry."""
+    if not isinstance(entry, dict):
+        return [f"{location}: must be a mapping"]
+    defects: list[str] = []
+    persona = entry.get("persona")
+    if not isinstance(persona, str) or not persona.strip():
+        defects.append(f"{location}.persona: must be a non-empty string")
+    if not _is_confidence(entry.get("confidence")):
+        defects.append(f"{location}.confidence: must be a number in (0, 1]")
+    if needs_keywords and not _is_keyword_list(entry.get("keywords")):
+        defects.append(f"{location}.keywords: must be a non-empty list of strings")
+    return defects
+
+
 def _persona_parameter_defects(params: Any) -> list[str]:
     """``plugins.inference_rule_parameters.infer_buyer_persona``: personas in precedence order.
 
@@ -423,7 +451,7 @@ def _persona_parameter_defects(params: Any) -> list[str]:
           - {persona: <str>, keywords: [<str>, ...], confidence: <0..1>}
         unmatched: {persona: <str>, confidence: <0..1>}   # optional
     """
-    prefix = "plugins.inference_rule_parameters.infer_buyer_persona"
+    prefix = _PERSONA_PARAMETERS_PREFIX
     if not isinstance(params, dict):
         return [f"{prefix}: must be a mapping"]
     defects: list[str] = []
@@ -434,27 +462,10 @@ def _persona_parameter_defects(params: Any) -> list[str]:
     if not isinstance(personas, list) or not personas:
         defects.append(f"{prefix}.personas: must be a non-empty list")
         personas = []
-    entries: list[tuple[str, int | None, Any]] = [("personas", i, entry) for i, entry in enumerate(personas)]
+    for index, entry in enumerate(personas):
+        defects.extend(_persona_entry_defects(f"{prefix}.personas[{index}]", entry, needs_keywords=True))
     if "unmatched" in params:
-        entries.append(("unmatched", None, params["unmatched"]))
-    for name, index, entry in entries:
-        location = f"{prefix}.{name}" + (f"[{index}]" if index is not None else "")
-        if not isinstance(entry, dict):
-            defects.append(f"{location}: must be a mapping")
-            continue
-        if not isinstance(entry.get("persona"), str) or not entry["persona"].strip():
-            defects.append(f"{location}.persona: must be a non-empty string")
-        confidence = entry.get("confidence")
-        if isinstance(confidence, bool) or not isinstance(confidence, int | float) or not 0.0 < confidence <= 1.0:
-            defects.append(f"{location}.confidence: must be a number in (0, 1]")
-        if name == "personas":
-            keywords = entry.get("keywords")
-            if (
-                not isinstance(keywords, list)
-                or not keywords
-                or not all(isinstance(k, str) and k.strip() for k in keywords)
-            ):
-                defects.append(f"{location}.keywords: must be a non-empty list of strings")
+        defects.extend(_persona_entry_defects(f"{prefix}.unmatched", params["unmatched"], needs_keywords=False))
     return defects
 
 
