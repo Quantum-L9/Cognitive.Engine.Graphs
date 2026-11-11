@@ -81,5 +81,6 @@ class TestPartialResults:
 
     async def test_flag_off_propagates_the_first_failure(self, monkeypatch) -> None:
         monkeypatch.setattr(settings, "feedback_partial_results_enabled", False)
-        with pytest.raises(RuntimeError):
-            await self._loop(propagation=RuntimeError("boom")).on_outcome_recorded(self._OUTCOME)
+        loop = self._loop(propagation=RuntimeError("boom"))
+        with pytest.raises(RuntimeError, match="boom"):
+            await loop.on_outcome_recorded(self._OUTCOME)
