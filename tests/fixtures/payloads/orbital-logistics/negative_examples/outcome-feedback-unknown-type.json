@@ -1,4 +1,20 @@
 {
+  "_l9_meta": {
+    "l9_schema": 1,
+    "origin": "engine-specific",
+    "engine": "graph",
+    "layer": [
+      "test"
+    ],
+    "tags": [
+      "test",
+      "fixtures",
+      "domain-neutrality",
+      "payload-contracts"
+    ],
+    "owner": "engine-team",
+    "status": "active"
+  },
   "contract_version": "1.0.0-draft",
   "domain": "orbital-logistics",
   "outcomes": [

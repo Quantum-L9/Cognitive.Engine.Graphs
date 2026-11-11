@@ -229,6 +229,44 @@ FILE_REGISTRY: list[FileMeta] = [
         ["test", "fixtures", "domain-neutrality", "synthetic"],
         "engine-team",
     ),
+    # Neutral payload fixtures the make gates' payload-contract compiler admits
+    # against orbital-logistics (Stage 2 follow-up, item 9). The compiler drops
+    # the `_l9_meta` header key before admission.
+    *(
+        FileMeta(
+            f"tests/fixtures/payloads/orbital-logistics/{kind}/{name}.json",
+            "engine-specific",
+            ["test"],
+            ["test", "fixtures", "domain-neutrality", "payload-contracts"],
+            "engine-team",
+        )
+        for kind, names in (
+            (
+                "examples",
+                (
+                    "canonical-projection",
+                    "improvement-proposal",
+                    "match-request",
+                    "match-response",
+                    "outcome-feedback",
+                    "sync-projection-tombstone",
+                    "sync-projection",
+                ),
+            ),
+            (
+                "negative_examples",
+                (
+                    "canonical-projection-transport-field",
+                    "improvement-proposal-direct-mutation",
+                    "match-request-transport-field",
+                    "match-response-ineligible-ranked",
+                    "outcome-feedback-unknown-type",
+                    "sync-projection-unknown-operation",
+                ),
+            ),
+        )
+        for name in names
+    ),
     # --- Tests: Compliance ---
     FileMeta(
         "tests/compliance/test_audit.py", "engine-specific", ["test"], ["test", "compliance", "audit"], "engine-team"
