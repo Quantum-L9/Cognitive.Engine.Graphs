@@ -756,8 +756,9 @@ class TestContract22ScoringWeightCeiling:
     def test_spec_exceeding_ceiling_is_refused(self):
         from engine.config.schema import DomainSpec
 
+        raw = self._spec([0.6, 0.6])
         with pytest.raises(ValueError, match="exceeding 1.0"):
-            DomainSpec.model_validate(self._spec([0.6, 0.6]))
+            DomainSpec.model_validate(raw)
 
 
 class TestContract23AdminSubactionRegistration:
