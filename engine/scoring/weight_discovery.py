@@ -21,8 +21,8 @@ Usage::
     from engine.scoring.weight_discovery import adaptive_weight_discovery
 
     weight_vectors = await adaptive_weight_discovery(
-        dimension_names=["structural", "geo_decay", "price_alignment"],
-        outcome_history=outcome_store.get_recent("plasticos", days=90),
+        dimension_names=[dim.name for dim in spec.scoring.dimensions],
+        outcome_history=outcome_store.get_recent(spec.domain.id, days=90),
         n_samples=50,
     )
 """

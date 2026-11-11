@@ -21,7 +21,9 @@ rather than a built-in recipe. They are verification inputs, not products.
 
 from __future__ import annotations
 
+import ast
 import importlib
+import re
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -53,12 +55,32 @@ _FORMER_BUILT_INS = (
     "closed_won",
     "plasticos",
     "supply_opportunity_to_buyer_facility",
+    # Stage 2 removal (owner decisions on items 5 and 8): the outcome node,
+    # exclusion edge and community properties were borrowed defaults.
+    "TransactionOutcome",
+    "RESULTED_IN",
+    "EXCLUDED_FROM",
+    "community_id",
+    "communityId",
 )
 
+# Former geo defaults. As substrings they occur in generic Cypher and words
+# ("relationship", "translate", "long", "latest"), so they are matched as whole
+# identifiers only: `candidate.lat`, `$lon` and `{lat_property}` default names.
+_FORMER_BUILT_IN_IDENTIFIERS = ("lat", "lon")
 
-def _assert_free_of_former_built_ins(text: str) -> None:
+
+def _assert_free_of_former_built_ins(text: str, *, allowed: tuple[str, ...] = ()) -> None:
     for token in _FORMER_BUILT_INS:
+        if token in allowed:
+            continue
         assert token not in text, f"generic path emitted former built-in vocabulary {token!r}: {text[:300]}"
+    for token in _FORMER_BUILT_IN_IDENTIFIERS:
+        if token in allowed:
+            continue
+        assert not re.search(rf"(?<![A-Za-z0-9_]){token}(?![A-Za-z0-9_])", text), (
+            f"generic path emitted former built-in identifier {token!r}: {text[:300]}"
+        )
 
 
 @pytest.fixture(params=sorted(SYNTHETIC_VOCABULARY), ids=str)
@@ -111,6 +133,26 @@ async def test_core_startup_with_empty_domain_directory(tmp_path: Path, monkeypa
         finally:
             await lifecycle.shutdown()
             _reset_singleton()
+
+
+def test_semantic_registry_allowlist_stays_retired() -> None:
+    """A11: the CANONICAL_ENTITY_TYPES allowlist was removed; no engine code may define or read it again.
+
+    Prose (the semantic registry's own removal note) may name it; code may not.
+    """
+    from engine.config import semantic_registry
+
+    assert not hasattr(semantic_registry, "CANONICAL_ENTITY_TYPES")
+    engine_root = Path(__file__).resolve().parents[2] / "engine"
+    offenders: list[str] = []
+    for path in sorted(engine_root.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            name = getattr(node, "id", None) or getattr(node, "attr", None) or getattr(node, "name", None)
+            if name == "CANONICAL_ENTITY_TYPES" or (
+                isinstance(node, ast.alias) and "CANONICAL_ENTITY_TYPES" in (node.name, node.asname)
+            ):
+                offenders.append(f"{path.relative_to(engine_root.parent)}:{getattr(node, 'lineno', '?')}")
+    assert offenders == [], offenders
 
 
 # ── Domain admission ────────────────────────────────────────────────────────

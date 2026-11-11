@@ -87,14 +87,11 @@ were industry-specific and had no caller).
 | remote_score_enabled | False | Gate-routed `score` (`handle_score_remote`); off refuses before any spec load or read. On still needs explicit tenant `score:read`, an admissible spec and typed identity (SCORING-GATE-01, FEATURE_GATES §29) |
 | gate_signing_key_binding_enabled | True | SDK `/v1/execute` accepts a Gate claim only under a key id in `L9_GATE_SIGNING_KEY_IDS` (required in staging/prod, where hmac-sha256 is refused) (GATE-KEY-01); off restores the claim-only check |
 
-## Scoring Weights (Contract 22: sum ≤ 1.0)
-| Weight | Default | Enforced by |
-|--------|---------|-------------|
-| w_structural | 0.30 | boot.py _assert_default_weight_sum() |
-| w_geo | 0.25 | boot.py _assert_default_weight_sum() |
-| w_reinforcement | 0.20 | boot.py _assert_default_weight_sum() |
-| w_freshness | 0.10 | boot.py _assert_default_weight_sum() |
-| **Sum** | **0.85** | Must be ≤ 1.0 |
+## Scoring Weights (Contract 22: sum ≤ 1.0 per direction)
+Scoring dimensions and their default weights are the domain's (`scoring.dimensions[*].defaultweight`);
+`DomainSpec` validation refuses a spec whose weights for any match direction exceed 1.0. The engine
+declares no weights of its own: the fixed `w_structural` / `w_geo` / `w_reinforcement` / `w_freshness`
+settings and the boot assertion over them were retired (Stage 2).
 
 ## Stage 2 — Domain-neutral Cypher (CEG Stage 4 proof)
 | Flag | Default | Purpose |

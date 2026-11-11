@@ -112,22 +112,16 @@ def test_neo4j_circuit_threshold_default_is_5(env_contract):
         assert entry.get("default") == 5, "NEO4J_CIRCUIT_THRESHOLD default must be 5"
 
 
-# ── 6. Scoring weight coverage ──────────────────────────────────────────────
+# ── 6. Scoring weights are the domain's ─────────────────────────────────────
 
-SCORING_WEIGHT_VARS = ["W_STRUCTURAL", "W_GEO", "W_REINFORCEMENT", "W_FRESHNESS"]
+# The fixed four-dimension weights (structural, geo, reinforcement, freshness)
+# never reached a scoring path and were retired; scoring dimensions and their
+# default weights are declared per domain (CONTRACT-22). They must not come back
+# as engine-wide environment variables.
+RETIRED_SCORING_WEIGHT_VARS = ["W_STRUCTURAL", "W_GEO", "W_REINFORCEMENT", "W_FRESHNESS"]
 
 
-def test_scoring_weight_vars_declared(env_contract):
+def test_retired_scoring_weight_vars_not_declared(env_contract):
     declared = {v["name"] for v in env_contract["variables"]}
-    for var in SCORING_WEIGHT_VARS:
-        assert var in declared, f"Scoring weight var '{var}' not in env-contract.yaml"
-
-
-def test_scoring_weights_have_range_validation(env_contract):
-    by_name = {v["name"]: v for v in env_contract["variables"]}
-    for var in SCORING_WEIGHT_VARS:
-        if var in by_name:
-            validation = by_name[var].get("validation", "")
-            val_str = str(validation)
-            assert "0.0" in val_str, f"'{var}' must have range validation minimum 0.0"
-            assert "1.0" in val_str, f"'{var}' must have range validation maximum 1.0"
+    for var in RETIRED_SCORING_WEIGHT_VARS:
+        assert var not in declared, f"Retired scoring weight var '{var}' is still in env-contract.yaml"

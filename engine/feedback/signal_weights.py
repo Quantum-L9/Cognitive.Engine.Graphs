@@ -63,7 +63,7 @@ class SignalWeightCalculator:
 
     async def recalculate_weights(self) -> dict[str, float]:
         """
-        Query all TransactionOutcome nodes, compute win rates per dimension config,
+        Query the domain's outcome nodes (feedbackloop.outcome_node_label), compute win rates per dimension config,
         update DimensionWeight nodes in Neo4j.
 
         Returns mapping of dimension name to computed weight.

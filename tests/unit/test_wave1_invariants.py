@@ -493,22 +493,13 @@ class TestW102ScoreRange:
 
         _validate_match_weights({"w1": 0.3, "w2": 0.3}, "test-tenant")
 
-    def test_boot_weight_sum_assertion_passes_default(self) -> None:
-        """Default weights (0.30+0.25+0.20+0.10=0.85) pass the assertion."""
-        from engine.boot import _assert_default_weight_sum
+    def test_no_engine_wide_default_weight_set(self) -> None:
+        """The fixed four-dimension weights are retired; the ceiling is per spec (TestW101DomainCrossRef)."""
+        from engine import boot
 
-        s = _make_settings()
-        with patch("engine.boot.settings", s):
-            _assert_default_weight_sum()  # Should not raise
-
-    def test_boot_weight_sum_assertion_fails_overflow(self) -> None:
-        """Weights summing to > 1.0 fail the startup assertion."""
-        from engine.boot import _assert_default_weight_sum
-
-        s = _make_settings(w_structural=0.5, w_geo=0.3, w_reinforcement=0.2, w_freshness=0.2)
-        with patch("engine.boot.settings", s):
-            with pytest.raises(ValueError, match="Default scoring weights sum to"):
-                _assert_default_weight_sum()
+        for retired in ("w_structural", "w_geo", "w_reinforcement", "w_freshness"):
+            assert retired not in Settings.model_fields
+        assert not hasattr(boot, "_assert_default_weight_sum")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

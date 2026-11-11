@@ -39,8 +39,8 @@ class ConvergenceLoop:
     4. Score propagation: boost/penalize active candidate scores
     5. Drift detection: chi-squared divergence check
 
-    This is called from handle_outcomes after the TransactionOutcome
-    node is written to Neo4j.
+    This is called from handle_outcomes after the domain's outcome node
+    (feedbackloop.outcome_node_label) is written to Neo4j.
     """
 
     def __init__(
@@ -61,7 +61,7 @@ class ConvergenceLoop:
         outcome_data: dict[str, Any],
     ) -> dict[str, Any]:
         """
-        Called after handle_outcomes writes the TransactionOutcome node.
+        Called after handle_outcomes writes the domain's outcome node.
         Executes the convergence cycle.
         Returns feedback metadata for the response envelope.
         """

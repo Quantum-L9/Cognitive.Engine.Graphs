@@ -764,7 +764,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             resolved_query[field.name] = field.default
 
     # Scoring dimensions may reference query parameters (queryprop) that are
-    # not declared in queryschema (e.g. $community_id for communitymatch).
+    # not declared in queryschema (e.g. a communitymatch dimension's queryprop).
     # Backfill them with null so the generated Cypher never fails with
     # Neo.ClientError.Statement.ParameterMissing — the scoring expressions
     # already define null-handling defaults.
@@ -2622,7 +2622,7 @@ def _build_outcome_write(
 
 
 async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Write TransactionOutcome nodes with match fingerprint and RESULTED_IN edges."""
+    """Write the domain's outcome node (feedbackloop.outcome_node_label) with match fingerprint and RESULTED_IN edge."""
     graph_driver, domain_loader = _require_deps()
     _validate_tenant_access(tenant, "outcomes")
 

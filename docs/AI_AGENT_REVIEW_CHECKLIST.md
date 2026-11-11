@@ -94,9 +94,9 @@ status: active
 - **Template**: "Behavioral change not gated. Add feature flag. Contract C-021. See FEATURE_FLAGS.md"
 
 **CON-002: Scoring Weight Sum (C-022)**
-- [ ] If new scoring weight added → existing weights reduced proportionally
-- [ ] Sum of all default weights ≤ 1.0
-- [ ] Startup assertion `_assert_default_weight_sum()` will verify
+- [ ] If a scoring dimension is added to a pack → that pack's other default weights reduced proportionally
+- [ ] Per match direction, the pack's default weights sum ≤ 1.0
+- [ ] `DomainSpec` validation will refuse the spec at load otherwise
 - **Severity**: MEDIUM
 
 **CON-003: L9_META Headers (C-018)**

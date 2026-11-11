@@ -69,7 +69,7 @@ class AttributionCalculator:
     """
     Multi-touch attribution for outcome causation.
 
-    Given an outcome (TransactionOutcome), traces backward through
+    Given an outcome (the domain's outcome node), traces backward through
     causal edges to identify and weight contributing factors.
     Supports: first_touch, last_touch, linear, position_based attribution models.
     """
