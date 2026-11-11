@@ -3,15 +3,8 @@
     "l9_schema": 1,
     "origin": "engine-specific",
     "engine": "graph",
-    "layer": [
-      "test"
-    ],
-    "tags": [
-      "test",
-      "fixtures",
-      "domain-neutrality",
-      "payload-contracts"
-    ],
+    "layer": ["test"],
+    "tags": ["test", "fixtures", "domain-neutrality", "payload-contracts"],
     "owner": "engine-team",
     "status": "active"
   },
@@ -28,12 +21,8 @@
         "name": "Example Recycler",
         "state": "NC"
       },
-      "relationship_refs": [
-        "orbital.depot.docking.rule:22"
-      ],
-      "evidence_refs": [
-        "orbital.port.observation:44"
-      ],
+      "relationship_refs": ["orbital.depot.docking.rule:22"],
+      "evidence_refs": ["orbital.port.observation:44"],
       "source_record": {
         "system": "station_ledger",
         "record_ref": "res.partner:102",

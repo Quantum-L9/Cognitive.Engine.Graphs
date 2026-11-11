@@ -3,15 +3,8 @@
     "l9_schema": 1,
     "origin": "engine-specific",
     "engine": "graph",
-    "layer": [
-      "test"
-    ],
-    "tags": [
-      "test",
-      "fixtures",
-      "domain-neutrality",
-      "payload-contracts"
-    ],
+    "layer": ["test"],
+    "tags": ["test", "fixtures", "domain-neutrality", "payload-contracts"],
     "owner": "engine-team",
     "status": "active"
   },
@@ -32,12 +25,8 @@
     "form_code": "REGRIND",
     "color_code": "BLACK"
   },
-  "relationship_refs": [
-    "orbital.depot.observation:90"
-  ],
-  "evidence_refs": [
-    "orbital.depot.observation:90"
-  ],
+  "relationship_refs": ["orbital.depot.observation:90"],
+  "evidence_refs": ["orbital.depot.observation:90"],
   "generated_at": "2026-08-01T13:30:00Z",
   "tombstone": false
 }

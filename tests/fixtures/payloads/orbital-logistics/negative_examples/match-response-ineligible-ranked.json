@@ -3,15 +3,8 @@
     "l9_schema": 1,
     "origin": "engine-specific",
     "engine": "graph",
-    "layer": [
-      "test"
-    ],
-    "tags": [
-      "test",
-      "fixtures",
-      "domain-neutrality",
-      "payload-contracts"
-    ],
+    "layer": ["test"],
+    "tags": ["test", "fixtures", "domain-neutrality", "payload-contracts"],
     "owner": "engine-team",
     "status": "active"
   },
@@ -31,14 +24,10 @@
         {
           "feature_id": "orbit_fit",
           "contribution": 0.4,
-          "evidence_refs": [
-            "orbital.depot.docking.rule:22"
-          ]
+          "evidence_refs": ["orbital.depot.docking.rule:22"]
         }
       ],
-      "missing_evidence": [
-        "depot.ports.available"
-      ],
+      "missing_evidence": ["depot.ports.available"],
       "explanation": "Orbit and payload accepted; port evidence is incomplete."
     }
   ],

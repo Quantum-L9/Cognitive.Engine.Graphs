@@ -3,15 +3,8 @@
     "l9_schema": 1,
     "origin": "engine-specific",
     "engine": "graph",
-    "layer": [
-      "test"
-    ],
-    "tags": [
-      "test",
-      "fixtures",
-      "domain-neutrality",
-      "payload-contracts"
-    ],
+    "layer": ["test"],
+    "tags": ["test", "fixtures", "domain-neutrality", "payload-contracts"],
     "owner": "engine-team",
     "status": "active"
   },

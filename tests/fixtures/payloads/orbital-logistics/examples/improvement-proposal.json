@@ -3,15 +3,8 @@
     "l9_schema": 1,
     "origin": "engine-specific",
     "engine": "graph",
-    "layer": [
-      "test"
-    ],
-    "tags": [
-      "test",
-      "fixtures",
-      "domain-neutrality",
-      "payload-contracts"
-    ],
+    "layer": ["test"],
+    "tags": ["test", "fixtures", "domain-neutrality", "payload-contracts"],
     "owner": "engine-team",
     "status": "active"
   },
@@ -28,9 +21,7 @@
       "rationale": "Three recent verified observations agree."
     }
   ],
-  "evidence_refs": [
-    "orbital.depot.observation:90"
-  ],
+  "evidence_refs": ["orbital.depot.observation:90"],
   "status": "pending_review",
   "direct_mutation": false,
   "review_required": true,
