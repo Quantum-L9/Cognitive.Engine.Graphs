@@ -23,6 +23,7 @@ from typing import Any
 
 import structlog
 
+from engine.config.outcome_vocabulary import outcome_node_label
 from engine.config.schema import DomainSpec
 from engine.graph.driver import GraphDriver
 from engine.utils.security import sanitize_label
@@ -101,7 +102,7 @@ class DriftDetector:
 
         Returns metadata with divergence score and per-dimension breakdown.
         """
-        outcome_label = sanitize_label(self._spec.feedbackloop.outcome_node_label)
+        outcome_label = sanitize_label(outcome_node_label(self._spec, "drift detection"))
 
         from engine.config.settings import settings
 

@@ -74,6 +74,7 @@ def _minimal_spec(
         gates=[],
         scoring={"dimensions": []},
         feedbackloop=FeedbackLoopSpec(
+            outcome_node_label="TransactionOutcome",
             enabled=feedback_enabled,
             signal_weights=SignalWeightSpec(enabled=signal_weights_enabled),
             propagation_boost_factor=1.15,

@@ -316,3 +316,32 @@ followup:
     - item: 19
       finding: A15 test literals
       disposition: OWNER_DEFERRED
+  closures_outcome_vocabulary:
+    - item: 5
+      finding: M2 (A09 node-label half)
+      owner_decision: "Require it, packs declare"
+      disposition: CLOSED
+      evidence:
+        - "engine/config/schema.py: FeedbackLoopSpec.outcome_node_label defaults to None"
+        - "engine/config/outcome_vocabulary.py: outcome_node_label() resolves the declared label or raises OutcomeNodeLabelUndeclaredError; engine/handlers.py raises OutcomeVocabularyUndeclaredError (ValidationError) for handle_outcomes, sync outcome items, admin score_feedback / generate_calibration_pairs / discover_weights"
+        - "engine/feedback/*, engine/causal/attribution.py, engine/causal/identity.py, engine/scoring/assembler.py (preference_attention): declared label only"
+        - "flag outcome_vocabulary_required_enabled (default on; off restores the former default) — docs/FEATURE_GATES.md §32"
+        - "domains/freight-matching, domains/mortgage-brokerage: declare outcome_node_label TransactionOutcome (no graph migration); plasticos already declared it"
+        - tests/unit/test_outcome_vocabulary_required.py (orbital-logistics declares DockingResult; cheese-aging declares nothing and is refused)
+      deferred:
+        - "outcome_edge_type / RESULTED_IN half stays deferred with A09 (not touched)"
+      left_for_owner:
+        - "the eight unserved packs declare no outcome_node_label; an outcome write on them fails once served"
+        - "ScoringDimensionSpec declares no `metadata` field, so preference_attention / community_bridge metadata cannot be declared in YAML (pydantic drops it); preference_attention can therefore never compile from a pack (it always lacks success_value). Not changed: schema.py changes are ask-first"
+    - item: 6
+      finding: M3
+      disposition: CLOSED
+      evidence:
+        - "engine/causal/counterfactual.py: outcome_label has no default; handle_outcomes passes the resolved declared label. The flag-off literal in _label() is the counterfactual_dedupe_and_spec_label C-21 rollback and stays (item 10)"
+        - tests/unit/test_counterfactual.py::TestCounterfactualDedupeAndLabel::test_outcome_label_has_no_default
+    - item: 16
+      findings: [D3, D4]
+      disposition: CLOSED
+      evidence:
+        - "docs/contracts/data/graph-schema.yaml, docs/contracts/agents/tool-schemas/_index.yaml, docs/contracts/FEEDBACK_LOOPS.md: the outcome node / edge / community key are the domain's feedbackloop.* (or declared community property) declaration, example PlasticOS"
+        - tests/contracts/test_data_models.py (outcome node and edge are declared placeholders with PlasticOS examples)

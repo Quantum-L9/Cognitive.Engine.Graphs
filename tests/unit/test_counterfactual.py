@@ -93,7 +93,7 @@ class TestCounterfactualGenerator:
             [],
         ]
 
-        gen = CounterfactualGenerator(spec, driver, "test_domain")
+        gen = CounterfactualGenerator(spec, driver, "test_domain", outcome_label="DockingResult")
         scenarios = await gen.generate_for_outcome("out_fail_001")
 
         assert len(scenarios) >= 1
@@ -139,7 +139,7 @@ class TestCounterfactualGenerator:
             [],
         ]
 
-        gen = CounterfactualGenerator(spec, driver, "test_domain")
+        gen = CounterfactualGenerator(spec, driver, "test_domain", outcome_label="DockingResult")
         scenarios = await gen.generate_for_outcome("out_fail_002")
 
         # pricealignment is in 7/10 = 0.7 >= 0.5, should appear
@@ -179,7 +179,7 @@ class TestCounterfactualGenerator:
             [],
         ]
 
-        gen = CounterfactualGenerator(spec, driver, "test_domain")
+        gen = CounterfactualGenerator(spec, driver, "test_domain", outcome_label="DockingResult")
         scenarios = await gen.generate_for_outcome("out_fail_003")
 
         assert len(scenarios) <= 2
@@ -194,7 +194,7 @@ class TestCounterfactualGenerator:
             [],  # No outcome found
         ]
 
-        gen = CounterfactualGenerator(spec, driver, "test_domain")
+        gen = CounterfactualGenerator(spec, driver, "test_domain", outcome_label="DockingResult")
         scenarios = await gen.generate_for_outcome("nonexistent")
 
         assert scenarios == []
@@ -219,7 +219,7 @@ class TestCounterfactualGenerator:
             [],  # No positives
         ]
 
-        gen = CounterfactualGenerator(spec, driver, "test_domain")
+        gen = CounterfactualGenerator(spec, driver, "test_domain", outcome_label="DockingResult")
         scenarios = await gen.generate_for_outcome("out_fail_004")
 
         assert scenarios == []
@@ -252,7 +252,7 @@ class TestCounterfactualGenerator:
             [],
         ]
 
-        gen = CounterfactualGenerator(spec, driver, "test_domain")
+        gen = CounterfactualGenerator(spec, driver, "test_domain", outcome_label="DockingResult")
         scenarios = await gen.generate_for_outcome("out_fail_005")
 
         for scenario in scenarios:
@@ -306,7 +306,9 @@ class TestStoredDimensionWeights:
             encode_outcome_map({"geo": 0.1, "price": 0.3}),
             encode_outcome_map({"geo": 0.5, "price": 0.3}),
         )
-        scenarios = await CounterfactualGenerator(_make_spec(), driver, "d").generate_for_outcome("out_1")
+        scenarios = await CounterfactualGenerator(
+            _make_spec(), driver, "d", outcome_label="DockingResult"
+        ).generate_for_outcome("out_1")
         assert [s["key_difference"] for s in scenarios] == ["geo_weight_increase"]
 
     async def test_legacy_repr_string_is_tolerated_without_weight_scenarios(self) -> None:
@@ -315,13 +317,17 @@ class TestStoredDimensionWeights:
             str({"geo": 0.1, "price": 0.3}),
             str({"geo": 0.5, "price": 0.3}),
         )
-        scenarios = await CounterfactualGenerator(_make_spec(), driver, "d").generate_for_outcome("out_1")
+        scenarios = await CounterfactualGenerator(
+            _make_spec(), driver, "d", outcome_label="DockingResult"
+        ).generate_for_outcome("out_1")
         assert scenarios == []
 
     async def test_dict_valued_weights_still_accepted(self) -> None:
         driver = _mock_driver()
         driver.execute_query.side_effect = _fingerprint_rows({"geo": 0.1}, {"geo": 0.5})
-        scenarios = await CounterfactualGenerator(_make_spec(), driver, "d").generate_for_outcome("out_1")
+        scenarios = await CounterfactualGenerator(
+            _make_spec(), driver, "d", outcome_label="DockingResult"
+        ).generate_for_outcome("out_1")
         assert [s["key_difference"] for s in scenarios] == ["geo_weight_increase"]
 
     def test_codec_round_trip_and_tolerance(self) -> None:
@@ -384,7 +390,7 @@ class TestCounterfactualDedupeAndLabel:
         ]
 
     def test_two_positives_with_higher_weight_yield_one_scenario(self) -> None:
-        generator = CounterfactualGenerator(_make_spec(), _mock_driver(), "test_db")
+        generator = CounterfactualGenerator(_make_spec(), _mock_driver(), "test_db", outcome_label="DockingResult")
         scenarios = generator._diff_fingerprints(self._actual(), self._positives(), "out_1")
         keys = [(s["intervention_type"], s["key_difference"]) for s in scenarios]
         assert keys == [("change_weight", "price_weight_increase")]
@@ -393,7 +399,7 @@ class TestCounterfactualDedupeAndLabel:
         from engine.config.settings import settings
 
         monkeypatch.setattr(settings, "counterfactual_dedupe_and_spec_label", False)
-        generator = CounterfactualGenerator(_make_spec(), _mock_driver(), "test_db")
+        generator = CounterfactualGenerator(_make_spec(), _mock_driver(), "test_db", outcome_label="DockingResult")
         scenarios = generator._diff_fingerprints(self._actual(), self._positives(), "out_1")
         assert len(scenarios) == 2
 
@@ -410,9 +416,14 @@ class TestCounterfactualDedupeAndLabel:
         assert all("(o:Outcome" in c for c in cyphers)
         assert not any("TransactionOutcome" in c for c in cyphers)
 
-    def test_default_label_is_transaction_outcome(self) -> None:
-        generator = CounterfactualGenerator(_make_spec(), _mock_driver(), "test_db")
-        assert generator._outcome_label == "TransactionOutcome"
+    def test_outcome_label_has_no_default(self) -> None:
+        """Stage 2 follow-up (item 6): the caller passes the domain's label; there is no borrowed default."""
+        import inspect
+
+        parameter = inspect.signature(CounterfactualGenerator).parameters["outcome_label"]
+        assert parameter.default is inspect.Parameter.empty
+        with pytest.raises(TypeError):
+            CounterfactualGenerator(_make_spec(), _mock_driver(), "test_db")  # type: ignore[call-arg]
 
     def test_unsafe_label_is_refused(self) -> None:
         with pytest.raises(ValueError):

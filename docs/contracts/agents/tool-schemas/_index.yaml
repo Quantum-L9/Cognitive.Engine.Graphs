@@ -37,7 +37,7 @@ tools:
     schema_file: outcomes.schema.json
     capability: "sync:write"
     handler: engine/handlers.py:handle_outcomes
-    description: Records match outcome feedback (TransactionOutcome node + RESULTED_IN edge).
+    description: Records match outcome feedback (the domain's feedbackloop.outcome_node_label node + outcome edge; example PlasticOS TransactionOutcome / RESULTED_IN).
 
   - name: resolve
     schema_file: resolve.schema.json

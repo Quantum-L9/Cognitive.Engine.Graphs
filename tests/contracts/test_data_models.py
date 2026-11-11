@@ -106,29 +106,38 @@ def test_graph_schema_has_system_nodes(graph_schema):
     )
 
 
-def test_transaction_outcome_node_defined(graph_schema):
-    labels = [n.get("label") for n in graph_schema.get("system_nodes", [])]
-    assert "TransactionOutcome" in labels
+_OUTCOME_NODE = "< the domain's feedbackloop.outcome_node_label >"
+_OUTCOME_EDGE = "< the domain's feedbackloop.outcome_edge_type >"
 
 
-def test_transaction_outcome_has_required_properties(graph_schema):
+def test_outcome_node_is_the_domains_declared_label(graph_schema):
+    """Stage 2 follow-up: the outcome node's label is the domain's declaration, not engine vocabulary."""
+    nodes = {n.get("label"): n for n in graph_schema.get("system_nodes", [])}
+    assert _OUTCOME_NODE in nodes
+    assert "TransactionOutcome" not in nodes, "the outcome label is the domain's, not a system node label"
+    assert nodes[_OUTCOME_NODE].get("example") == "TransactionOutcome"
+
+
+def test_outcome_node_has_required_properties(graph_schema):
     node = next(
-        (n for n in graph_schema.get("system_nodes", []) if n.get("label") == "TransactionOutcome"),
+        (n for n in graph_schema.get("system_nodes", []) if n.get("label") == _OUTCOME_NODE),
         None,
     )
-    assert node is not None, "TransactionOutcome node not found"
+    assert node is not None, "outcome node not found"
     prop_names = {p["name"] for p in node.get("properties", [])}
     for field in ("outcome_id", "match_id", "candidate_id", "outcome", "created_at"):
-        assert field in prop_names, f"TransactionOutcome missing property '{field}'"
+        assert field in prop_names, f"outcome node missing property '{field}'"
 
 
 def test_graph_schema_has_system_edges(graph_schema):
     assert "system_edges" in graph_schema
 
 
-def test_resulted_in_edge_defined(graph_schema):
-    edge_types = [e.get("type") for e in graph_schema.get("system_edges", [])]
-    assert "RESULTED_IN" in edge_types
+def test_outcome_edge_is_the_domains_declared_type(graph_schema):
+    edges = {e.get("type"): e for e in graph_schema.get("system_edges", [])}
+    assert _OUTCOME_EDGE in edges
+    assert edges[_OUTCOME_EDGE].get("example") == "RESULTED_IN"
+    assert edges[_OUTCOME_EDGE].get("to") == _OUTCOME_NODE
 
 
 def test_resolved_from_edge_defined(graph_schema):

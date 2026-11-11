@@ -127,6 +127,7 @@ independently of the code default.
 | safe_eval Rejects Keywords | `SAFE_EVAL_REJECT_KEYWORDS` (`safe_eval_reject_keywords`) | `True` | unset | active; keyword arguments in derived-parameter / unit expressions raise instead of being dropped — see lane D |
 | Causal Serializer Variable Depth | `CAUSAL_SERIALIZER_VARIABLE_DEPTH` (`causal_serializer_variable_depth`) | `True` | unset | active; causal match explanations follow chains up to the requested depth — see lane D |
 | Counterfactual Dedupe and Spec Label | `COUNTERFACTUAL_DEDUPE_AND_SPEC_LABEL` (`counterfactual_dedupe_and_spec_label`) | `True` | unset | active; no duplicate counterfactual scenarios, fingerprints read from the domain's outcome label — see lane D |
+| Outcome Vocabulary Required | `OUTCOME_VOCABULARY_REQUIRED_ENABLED` (`outcome_vocabulary_required_enabled`) | `True` | unset | active (hardening, Stage 2 follow-up); `feedbackloop.outcome_node_label` has no engine default, and an outcome write or read on a pack that declares none raises `OutcomeVocabularyUndeclaredError`; every served pack declares its label — see §32 |
 | PacketStore Packet-Identity Dedup | `PACKET_STORE_PACKET_IDENTITY_DEDUP_ENABLED` (`packet_store_packet_identity_dedup_enabled`) | `True` | unset | active (hardening, RU-078); `packet_store.content_hash` is the SDK `transport_hash`, so distinct packets with equal payloads are both stored, and a packet whose INSERT is skipped as a duplicate writes no hop/delegation/lineage rows; off restores the `payload_hash` key and unconditional child rows — see §7 |
 | PacketStore RLS Tenant Session | `PACKET_STORE_RLS_TENANT_SESSION_ENABLED` (`packet_store_rls_tenant_session_enabled`) | `True` | unset | active (hardening, RU-079); `persist` and `record_outcome` set the transaction-local `app.current_tenant` GUC to the packet's / call's tenant before writing, so an `l9_product` DSN satisfies the DDL's RLS policies; off issues no `set_config` — see §7 |
 | Inference Geography USPS Zones | `INFERENCE_GEO_USPS_ZONES_ENABLED` (`inference_geo_usps_zones_enabled`) | `True` | unset | active (correctness, RU-084); `infer_geography_from_postal_code` maps the ZIP first digit to its USPS zone (0-1 Northeast, 2-3 Southeast, 4-6 Midwest, 7 South, 8-9 West) and emits nothing when the entity declares a non-US `country`; off restores the five-digit threshold ladder. The rule also needs `graph_inference_feedback_enabled` and domain authorization — see §13 |
@@ -1649,3 +1650,27 @@ the env var to `false` to restore the previous behaviour verbatim.
 | `strict_null_gates` (`STRICT_NULL_GATES`, existing W1-03 flag; meaning fixed by R1a-DEC-03) | `true` | RU-010 / CEG-COR-023 | `handle_match` calls `GateCompiler.validate_gates(resolved_query, match_direction=…, reject_unbound=True)` after defaults backfill and derived resolution, over the gates active for the direction (`matchdirections` empty or containing it). A gate whose named `queryparam` is missing/null and is undeclared (neither a queryschema field nor a derived parameter) or a `required` queryschema field raises `ValidationError` naming every such gate; a null optional or derived parameter is left to the gate's `nullbehavior` (C-14) and logged as a WARNING once per gate. Literal operands and gates without a named parameter are not checked. Required queryschema fields are therefore enforced for gates that read them (e.g. plasticos `polymer_type`) | `validate_gates` is never called on the match path; a null undeclared parameter reaches Neo4j as a missing parameter |
 | `match_request_contract_admission` (`MATCH_REQUEST_CONTRACT_ADMISSION`) | `true` | RU-012 / CEG-COR-063 (R1a-DEC-04 "admit both") | `handle_match` validates a payload that carries `contract_version` with `admit_payload(MatchRequest, payload, DomainContract.from_spec(<tenant's pack>))` — tenant-bound `domain`, declared `direction`, `extra=forbid`, transport fields refused, failures raised as `ValidationError` before any query — and continues with `{query: query.facts, match_direction: direction, top_n}`. Payloads without `contract_version` (legacy `MatchPayload`) are unchanged. The response stays the legacy shape | The `MatchRequest` example is rejected with `Missing required field 'match_direction'` |
 | `gate_role_exemption` (`GATE_ROLE_EXEMPTION`) | `true` | RU-015 / CEG-COR-080 (R1a-DEC-05 "withhold") | `engine.config.loader.admission_defects` adds `<gate>: roleexempt … is not consumed — match takes no request role` for a gate whose `roleexempt` is set and `<gate>: relaxedpenalty … is not consumed — relaxed matching is not exposed` for a gate that declares `relaxedpenalty` (explicitly, any value), so `withholding_reason` withholds the pack unless `UNVALIDATED_DOMAIN_PACKS_ENABLED`. No shipped pack declares either field. `schema.py`, the compiler's `role` / `compile_relaxed` support and the match payload are unchanged | The fields are accepted and silently ignored by every match |
+
+## 32. Stage 2 follow-up — declared domain vocabulary (owner decisions 2026-11-11)
+
+The engine borrows no pack's vocabulary as a default. Each behaviour below ships
+`True` because it restores "the domain spec is the single source of truth" and
+changes nothing for a pack that declares what it uses; every served pack
+(freight-matching, mortgage-brokerage, plasticos) declares it. Set the env var to
+`false` to restore the previous behaviour verbatim (C-21 rollback).
+
+| Flag (env var) | Default | Behaviour on | Off (rollback) |
+|---|---|---|---|
+| `outcome_vocabulary_required_enabled` (`OUTCOME_VOCABULARY_REQUIRED_ENABLED`) | `true` | `FeedbackLoopSpec.outcome_node_label` defaults to `None`. `handle_outcomes`, sync `entity_type=outcome`, admin `score_feedback` / `generate_calibration_pairs` / `discover_weights`, the feedback loop (signal weights, propagation, pattern matching, drift), causal attribution and a `preference_attention` dimension without `metadata.outcome_node` read the domain's declared label; on a pack that declares none they raise before any Cypher — `OutcomeVocabularyUndeclaredError` (a `ValidationError`) from handlers, `OutcomeNodeLabelUndeclaredError` (a `ValueError`) from the engine modules — naming the domain and the operation. freight-matching and mortgage-brokerage declare `outcome_node_label: TransactionOutcome` (the label their graphs already hold), plasticos already declared it, so no graph migrates | An undeclared label resolves to the former default `TransactionOutcome` |
+
+The outcome *edge* (`feedbackloop.outcome_edge_type`, default `RESULTED_IN`) is
+not part of this section: its split stays deferred with A09.
+
+### Validation
+
+`tests/unit/test_outcome_vocabulary_required.py` (synthetic packs: orbital-logistics
+declares `DockingResult`, cheese-aging declares nothing).
+
+### Rollback
+
+Set `OUTCOME_VOCABULARY_REQUIRED_ENABLED=false` and restart.

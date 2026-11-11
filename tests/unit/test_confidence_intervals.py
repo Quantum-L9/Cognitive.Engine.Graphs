@@ -91,6 +91,7 @@ def _spec_with_confidence(
             ]
         ),
         feedbackloop=FeedbackLoopSpec(
+            outcome_node_label="TransactionOutcome",
             enabled=True,
             signal_weights=SignalWeightSpec(
                 enabled=True,
