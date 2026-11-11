@@ -77,8 +77,8 @@ class AuditEntry(BaseModel):
     actor: str  # who performed the action
     tenant: str  # org isolation key
     trace_id: str | None = None  # W3C trace context
-    resource: str | None = None  # e.g., "Facility:42", "PacketEnvelope:abc"
-    resource_type: str | None = None  # e.g., "Facility", "MaterialProfile"
+    resource: str | None = None  # e.g., "<NodeLabel>:42", "PacketEnvelope:abc"
+    resource_type: str | None = None  # e.g., the domain's node label, "PacketEnvelope"
     detail: str | None = None  # human-readable description
     payload_hash: str | None = None  # SHA-256 of related payload
     compliance_tags: list[str] = Field(default_factory=list)  # GDPR, SOC2, ECOA
@@ -125,8 +125,8 @@ class AuditLogger:
 
     Usage:
         audit = AuditLogger(retention_policies=DEFAULT_RETENTION)
-        audit.log_access(actor="mike", tenant="acme", resource="Facility:42")
-        audit.log_mutation(actor="sync", tenant="acme", resource="MaterialProfile:7",
+        audit.log_access(actor="mike", tenant="acme", resource="Warehouse:42")
+        audit.log_mutation(actor="sync", tenant="acme", resource="Shipment:7",
                            detail="Batch sync 150 entities", compliance_tags=["GDPR"])
         audit.log_query(actor="api", tenant="acme", detail="match_strict 14 gates")
     """

@@ -300,7 +300,7 @@ class SelfRangeGate(BaseGate):
 
     def compile(self) -> str:
         """
-        Example: $query.mfi >= candidate.mfi_min AND $query.mfi <= candidate.mfi_max
+        Example: $query.depth >= candidate.depth_min AND $query.depth <= candidate.depth_max
         """
         if not self.spec.candidateprop_min or not self.spec.candidateprop_max:
             raise ValueError(f"Gate '{self.spec.name}': candidateprop_min and candidateprop_max required")

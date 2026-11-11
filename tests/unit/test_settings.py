@@ -45,13 +45,10 @@ class TestSettingsDefaults:
         assert s.neo4j_username == "neo4j"
         assert s.neo4j_pool_size in (50, 20)  # default or .env value
 
-    def test_default_scoring_weights(self) -> None:
-        """Default scoring weights are set."""
-        s = Settings()
-        assert s.w_structural == 0.30
-        assert s.w_geo == 0.25
-        assert s.w_reinforcement == 0.20
-        assert s.w_freshness == 0.10
+    def test_no_engine_wide_scoring_weights(self) -> None:
+        """Scoring weights are the domain's (scoring.dimensions[*].defaultweight); the fixed four-dimension set is retired."""
+        for retired in ("w_structural", "w_geo", "w_reinforcement", "w_freshness"):
+            assert retired not in Settings.model_fields
 
     def test_default_temporal_decay(self) -> None:
         """Default causal-attribution half-life is set; industry-specific decays are gone (Stage 2 R10)."""

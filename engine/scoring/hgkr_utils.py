@@ -16,7 +16,7 @@ Implements second-order enhancements extracted from Liu et al. (2023)
 (Scientific Reports 13:6987, DOI: 10.1038/s41598-023-33984-5).
 
 Contains:
-- S2-08: Auto-generation of calibration pairs from TransactionOutcome history
+- S2-08: Auto-generation of calibration pairs from outcome history
 - S2-09: Score drift detection between GDS refresh cycles
 - S2-10: EdgeCategory-driven GDS default configuration generator
 - S2-13: Adaptive K-parameter computation from graph density
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 
 # ══════════════════════════════════════════════════════════════════════
-# S2-08: Auto-generate calibration pairs from TransactionOutcome history
+# S2-08: Auto-generate calibration pairs from outcome history
 # ══════════════════════════════════════════════════════════════════════
 
 
@@ -65,10 +65,10 @@ def generate_calibration_pairs(
     positive_margin: float = 0.1,
     negative_ceiling: float = 0.5,
 ) -> list[CalibrationPair]:
-    """Auto-generate CalibrationPairs from historical TransactionOutcome data.
+    """Auto-generate CalibrationPairs from historical outcome records.
 
     HGKR evaluation methodology: use ground truth labels (positive/negative)
-    to validate the model. CEG has ground truth (TransactionOutcome) but
+    to validate the model. CEG has ground truth (the domain's outcome nodes) but
     no automated calibration generation — until now.
 
     For success outcomes: expected_score_min = actual_score - margin

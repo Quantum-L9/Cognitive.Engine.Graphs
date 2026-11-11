@@ -70,13 +70,26 @@ OPERATORS: dict[str, Callable] = {
 
 ## Rule 4: Query Dict Keys
 
-When building Cypher from query parameters, keys must be validated:
+There is no engine-wide allowlist of query keys: the keys a match may carry are the ones the
+domain declares. A `$parameter` in compiled Cypher is one of
+
+- a `queryschema.fields` name (backfilled with its declared default),
+- a `derivedparameters` name (resolved by `ParameterResolver`),
+- a scoring dimension's `queryprop` (backfilled with null), or
+- a value a compiler binds itself under a generated, sanitized name.
+
+Query **values** only ever travel as `$params`. Parameter **names** that reach Cypher text are
+validated like labels (C-009: `sanitize_label`, identifier pattern); a gate whose parameter is
+not an identifier is refused by the compiler and withholds the pack at admission
+(`engine/config/loader.py::admission_defects`). With `domain_undeclared_param_rejected` a gate
+referencing an undeclared parameter is refused at spec load.
 
 ```python
-ALLOWED_QUERY_KEYS = {"lat", "lon", "mfi", "capacity", "material_type", ...}
-for key in query:
-    if key not in ALLOWED_QUERY_KEYS:
-        raise ValueError(f"Unknown query key: {key!r}")
+# WRONG — a static key list names one domain's vocabulary and drifts from the spec
+ALLOWED_QUERY_KEYS = {"capacity", "material_type", ...}
+
+# RIGHT — the declared contract is the allowlist
+declared = {f.name for f in spec.queryschema.fields} | {p.name for p in spec.derivedparameters}
 ```
 
 

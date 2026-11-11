@@ -66,7 +66,8 @@ class ConfigurationMatcher:
     using Jaccard similarity on dimension/gate profiles.
 
     When a new match request comes in, compares its gate+scoring configuration
-    against historical TransactionOutcome configurations that resulted in
+    against historical outcome-node configurations (the domain's
+    feedbackloop.outcome_node_label) that resulted in
     positive outcomes. Returns similarity scores and pattern metadata.
     """
 

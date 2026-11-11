@@ -257,7 +257,7 @@ class PropertySpec(BaseModel):
     ``map`` (its keys, each a ``PropertySpec``). YAML syntax::
 
         - {name: certifications, type: list, items: {type: string}}
-        - name: processed_polymers
+        - name: stocked_grades
           type: list
           items:
             type: map

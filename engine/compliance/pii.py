@@ -205,7 +205,7 @@ class PIIHandler:
         pii = PIIHandler()
 
         # Detect PII in a payload
-        detections = pii.detect_pii({"email": "a@b.com", "facility_id": 42})
+        detections = pii.detect_pii({"email": "a@b.com", "account_id": 42})
         # → [PIIDetection(field_path="email", category=EMAIL, ...)]
 
         # Get pii_fields tuple for PacketEnvelope

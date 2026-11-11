@@ -15,76 +15,70 @@ status: active
 
 ## Rule
 
-Default scoring weights sum to **at most 1.0**, and the sum is asserted at startup. A
-misconfigured deployment fails to boot rather than silently emitting scores outside
-`[0, 1]`.
+A domain's scoring dimensions and their default weights are the domain's declaration
+(`scoring.dimensions[*].defaultweight` in its `spec.yaml`). For every match direction the
+default weights of the dimensions that score in it sum to **at most 1.0**. The check runs
+when the spec loads, so a pack that breaches the ceiling is refused rather than emitting
+scores outside `[0, 1]`.
 
-## Defaults
+The engine declares no scoring dimensions and no default weights of its own. The former
+engine-wide settings `w_structural`, `w_geo`, `w_reinforcement` and `w_freshness` (and the
+boot-time assertion over their sum) named one pack's dimensions, reached no scoring path,
+and were retired (CEG domain-neutrality Stage 2).
 
-`engine/config/settings.py`:
+## Where it is checked
 
-| Setting | Default |
-|---|---|
-| `w_structural` | 0.30 |
-| `w_geo` | 0.25 |
-| `w_reinforcement` | 0.20 |
-| `w_freshness` | 0.10 |
-| **Sum** | **0.85** |
+`engine/config/schema.py` — `DomainSpec` cross-reference validation, with
+`domain_strict_validation` on (the default):
 
-The 0.15 headroom is deliberate — it is the budget for an additional dimension (KGE,
-causal, persona) without breaching the ceiling.
+- dimensions are bucketed by `matchdirections` (an unscoped dimension scores in every
+  direction);
+- with `weight_ceiling_includes_unscoped` (default on, RU-044) each declared direction
+  carries the unscoped weight on top of its own;
+- a bucket over `1.0` (with a `1e-9` float tolerance) raises
+  `ValueError("Scoring dimension default weights sum to … for direction …, exceeding 1.0")`.
 
-## Startup assertion
-
-`engine/boot.py`:
-
-```python
-_WEIGHT_CEILING = 1.0
-
-
-def _assert_default_weight_sum() -> None:
-    weight_sum = settings.w_structural + settings.w_geo + settings.w_reinforcement + settings.w_freshness
-    if weight_sum > _WEIGHT_CEILING + _WEIGHT_SUM_TOLERANCE:
-        raise ValueError(f"... exceeding {_WEIGHT_CEILING}")
-    logger.info("W1-02: Default weight sum validated: %.4f <= %.1f", weight_sum, _WEIGHT_CEILING)
-```
-
-A float tolerance is applied so that weights summing to exactly 1.0 do not trip on
-binary-representation error.
+`engine/config/loader.py` — the offline authoring validator (`validate_authoring_file`)
+reports the same breach as the `W1-01-weight-sum` FAIL.
 
 ## Adding a dimension
 
-Take the weight from the headroom or rebalance the existing four. Do not add on top.
+Take the weight from the direction's headroom or rebalance that domain's other dimensions.
+Do not add on top.
 
 ## Correct
 
-```bash
-# 0.30 + 0.25 + 0.20 + 0.10 = 0.85, plus a 0.15 KGE dimension = 1.00
-W_STRUCTURAL=0.30
-W_GEO=0.25
-W_REINFORCEMENT=0.20
-W_FRESHNESS=0.10
+```yaml
+scoring:
+  dimensions:
+  - {name: humidity_fit, computation: candidateproperty, candidateprop: humidity_pct,
+     weightkey: w_humidity, defaultweight: 0.6}
+  - {name: turnover_fit, computation: inverselinear, candidateprop: turnover_days,
+     weightkey: w_turnover, defaultweight: 0.4}   # 0.6 + 0.4 = 1.0
 ```
 
 ## Wrong
 
-```bash
-# WRONG — 1.30 total; boot raises ValueError
-W_STRUCTURAL=0.50
-W_GEO=0.50
-W_REINFORCEMENT=0.20
-W_FRESHNESS=0.10
+```yaml
+# WRONG — 1.2 for the direction; the spec is refused at load
+scoring:
+  dimensions:
+  - {name: humidity_fit, computation: candidateproperty, candidateprop: humidity_pct,
+     weightkey: w_humidity, defaultweight: 0.6}
+  - {name: turnover_fit, computation: inverselinear, candidateprop: turnover_days,
+     weightkey: w_turnover, defaultweight: 0.6}
 ```
 
 ## Per-request weights
 
-Weights supplied in a `match` payload are validated separately by the scoring assembler
-when `score_clamp_enabled` is set. The startup assertion covers **defaults only** — it
-cannot see request-time overrides.
+Weights supplied in a `match` payload are validated separately (`_validate_match_weights`,
+and with `match_effective_weight_validation` the merged per-dimension weights scoring will
+apply) when `score_clamp_enabled` is set. The spec-load check covers declared defaults
+only — it cannot see request-time overrides.
 
 ## Verified by
 
 - `tests/contracts/test_contracts.py::TestContract22ScoringWeightCeiling`
-  - `_assert_default_weight_sum` exists and `_WEIGHT_CEILING == 1.0`
-  - shipped defaults are within the ceiling
-  - the assertion raises when the sum is exceeded
+  - no engine-wide weight set or boot assertion exists
+  - a spec within the ceiling is accepted; one exceeding it is refused
+- `tests/unit/test_wave1_invariants.py::TestW101DomainCrossRef` (per-direction buckets, RU-044)

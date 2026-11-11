@@ -17,8 +17,8 @@ paths:
 ## Scoring (Contract 13, 22)
 - 13 computation types: geodecay, lognormalized, communitymatch, inverselinear, candidateproperty, weightedrate, pricealignment, temporalproximity, customcypher, traversalalias, kge, variantdiscovery, ensembleconfidence
 - Every dimension expression clamped to [0, 1] via `_clamp_expression()` (W1-02)
-- Default weights sum ≤ 1.0: w_structural(0.30) + w_geo(0.25) + w_reinforcement(0.20) + w_freshness(0.10) = 0.85
-- When adding a new weight dimension, REDUCE existing defaults to maintain ceiling
+- A domain's default dimension weights sum ≤ 1.0 per match direction, checked when the spec loads (the engine has no weights of its own)
+- When adding a dimension to a pack, REDUCE that pack's other defaults to maintain the ceiling
 - Monoculture detection: flag candidates where one dimension > 70% of total score
 - Calibration: `engine/scoring/calibration.py` verifies scores against expected ranges
 

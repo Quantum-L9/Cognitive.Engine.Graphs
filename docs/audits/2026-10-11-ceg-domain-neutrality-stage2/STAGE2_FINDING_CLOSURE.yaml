@@ -243,3 +243,76 @@ collision_probe:
 stage_dependencies:
   stage_3: CI guard that fails on reintroduced product vocabulary in generic executable paths (not implemented here by contract)
   stage_4: container-backed graph integration campaign; migrates tests/conftest.py and the Neo4j-backed suites off the PlasticOS database (A16)
+
+# ── Stage 2 removal follow-up (2026-11-11) ──────────────────────────────────
+# Appended, not rewritten: the entries above are the record as it was made.
+# Source: re-audit of origin/main @ 9251333 (findings M1-M12, D1-D6, removal
+# items 1-19) and the owner decisions taken on it. Each closure names the
+# executable proof; corrections name the entry above that they correct.
+followup:
+  audit_base: 9251333
+  corrections:
+    - corrects: A08
+      claim: "Makefile: ... seed target label neutral"
+      finding: >
+        False when made. Repo.mk:124 still read "Seed PlasticOS domain data into Neo4j"
+        on 9251333. The label is neutral as of this follow-up (item 2); the seed
+        target itself (it runs engine.scripts.seed, which does not exist) stays
+        owner-deferred.
+    - corrects: A10
+      claim: "kept: ... w_* weights (boot + handlers)"
+      finding: >
+        False when made. w_structural / w_geo / w_reinforcement / w_freshness were read
+        only by engine/boot.py::_assert_default_weight_sum; no scoring path or handler
+        read them. Retired in this follow-up (item 3 / M4 / D6).
+    - corrects: A11
+      claim: "disposition CLOSED"
+      finding: >
+        Closed but untested: nothing failed if CANONICAL_ENTITY_TYPES came back.
+        Guarded in this follow-up (item 13).
+  closures:
+    - item: 1
+      finding: M11
+      disposition: CLOSED
+      evidence:
+        - "engine/scoring/weight_discovery.py, engine/gates/types/all_gates.py, engine/compliance/audit.py, engine/compliance/pii.py, engine/packet/packet_store.sql, engine/packet/packet_store.py, engine/scoring/hgkr_utils.py, engine/feedback/{convergence,signal_weights,pattern_matcher}.py, engine/causal/{attribution,counterfactual}.py, engine/handlers.py, engine/config/schema.py: PlasticOS examples in comments/docstrings neutralized"
+      left_for_owner:
+        - ".env.template:138 comment (protected .env* file, not approved)"
+    - item: 2
+      finding: A08 (seed label)
+      disposition: CLOSED
+      evidence:
+        - "Repo.mk:124: seed target help text is 'Seed domain pack data into Neo4j'; the target is unchanged (owner-deferred)"
+    - item: 3
+      finding: M4 / D6
+      disposition: CLOSED
+      evidence:
+        - "engine/config/settings.py, chassis/auth/settings.py: w_structural / w_geo / w_reinforcement / w_freshness deleted"
+        - "engine/boot.py: _assert_default_weight_sum deleted; the per-spec, per-direction ceiling (DomainSpec validation, loader W1-01-weight-sum) is the C-22 check"
+        - "docs/contracts/SCORING_WEIGHT_CEILING.md, contracts/contract_22.yaml, docs/contracts/config/env-contract.yaml, .claude/rules/feature-flags.md, docs/TROUBLESHOOTING.md: fixed four-dimension set removed"
+        - "tests/contracts/test_contracts.py::TestContract22ScoringWeightCeiling, tests/contracts/test_env_contract.py::test_retired_scoring_weight_vars_not_declared, tests/unit/test_settings.py::test_no_engine_wide_scoring_weights, tests/unit/test_wave1_invariants.py::TestW102ScoreRange::test_no_engine_wide_default_weight_set"
+      left_for_owner:
+        - "docker-compose.yml:90-93 and .env.template:30-33 still set W_STRUCTURAL / W_GEO / W_REINFORCEMENT / W_FRESHNESS (protected files, not approved); Settings ignores them (extra=ignore)"
+    - item: 4
+      finding: A08 (compose variables)
+      disposition: LEFT_FOR_OWNER
+      reason: "docker-compose.yml:94-95 GEO_DECAY_KM / COMMUNITY_CROSS_BIAS are dead (Settings ignores them) but the file is protected and the change is not approved"
+    - item: 13
+      finding: A11
+      disposition: CLOSED
+      evidence:
+        - tests/unit/test_domain_neutrality_acceptance.py::test_semantic_registry_allowlist_stays_retired (AST scan of engine/; fails on a definition, read or import)
+    - item: banned_terms
+      disposition: CLOSED
+      evidence:
+        - "tests/unit/test_domain_neutrality_acceptance.py: _FORMER_BUILT_INS gains TransactionOutcome, RESULTED_IN, EXCLUDED_FROM, community_id, communityId; lat / lon are matched as whole identifiers (_FORMER_BUILT_IN_IDENTIFIERS) because as substrings they occur in generic Cypher"
+    - items: [14, 15, 17]
+      findings: [D1, D2, D5]
+      disposition: CLOSED
+      evidence:
+        - "docs/contracts/ENV_VARS.md: L9_API_KEY_PREFIX=pk_plasticos_ and L9_DEFAULT_TENANT=plasticos removed (no code reads either)"
+        - "docs/contracts/CYPHER_SAFETY.md Rule 4: the declared queryschema / derived parameters / scoring queryprop are the allowlist; no static key list"
+        - "docs/contracts/TEST_PATTERNS.md: generic tests load a synthetic pack (tests/fixtures/domains)"
+    - item: 19
+      finding: A15 test literals
+      disposition: OWNER_DEFERRED

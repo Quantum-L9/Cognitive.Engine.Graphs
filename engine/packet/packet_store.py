@@ -21,7 +21,7 @@ Uses constellation_node_sdk.TransportPacket as the canonical wire format.
 New in this version:
   PacketStore.record_outcome(...)
     -- Writes outcome_jsonb to an existing packet_store row, linking a
-       TransactionOutcome node (Neo4j) back to the TransportPacket that
+       the domain's outcome node (Neo4j) back to the TransportPacket that
        triggered the match. Called from handle_outcomes() when both
        PACKET_STORE_ENABLED=true and settings.outcome_persistence_enabled=True.
     -- Non-fatal: degrades gracefully on any DB error (log warning, return False).
@@ -390,7 +390,7 @@ class PacketStore:
     ) -> bool:
         """Write outcome_jsonb to the packet_store row for a match packet.
 
-        Links the TransactionOutcome node written to Neo4j back to the
+        Links the domain's outcome node written to Neo4j back to the
         TransportPacket row that triggered the match, completing the
         feedback loop substrate. This is the write half of the loop;
         SignalWeightCalculator is the read half.
@@ -399,7 +399,7 @@ class PacketStore:
             match_packet_id: packet_id (UUID str) of the original match TransportPacket.
                              Provided by caller via payload.match_packet_id.
             tenant:          actor_tenant for RLS scoping. Always in the WHERE clause.
-            outcome_id:      TransactionOutcome.outcome_id (Neo4j node id).
+            outcome_id:      outcome node's outcome_id (Neo4j node id).
             outcome:         "success" | "failure" | "partial".
             match_id:        payload.match_id from the outcomes request.
             candidate_id:    payload.candidate_id from the outcomes request.
