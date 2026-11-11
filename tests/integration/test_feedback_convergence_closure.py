@@ -1,4 +1,15 @@
-"""Integration — feedback convergence closure against Neo4j (FEEDBACK-IDEMP-01, FEEDBACK-PARTIAL-01).
+"""
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [test, integration, feedback]
+owner: engine-team
+status: active
+--- /L9_META ---
+
+Integration — feedback convergence closure against Neo4j (FEEDBACK-IDEMP-01, FEEDBACK-PARTIAL-01).
 
 Proves docs/contracts/feedback/convergence-loop.yaml required_proof and
 blocking_validation through the real ``handle_outcomes`` path on the per-domain

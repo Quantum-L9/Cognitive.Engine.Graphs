@@ -1,4 +1,15 @@
-"""Unit — feedback convergence closure (FEEDBACK-IDEMP-01, FEEDBACK-PARTIAL-01).
+"""
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [test, unit, feedback]
+owner: engine-team
+status: active
+--- /L9_META ---
+
+Unit — feedback convergence closure (FEEDBACK-IDEMP-01, FEEDBACK-PARTIAL-01).
 
 Contract: docs/contracts/feedback/convergence-loop.yaml (blocking_validation).
 The graph semantics (MERGE, write lock, single application) are proven against
