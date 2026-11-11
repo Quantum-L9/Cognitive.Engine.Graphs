@@ -18,6 +18,8 @@ except ImportError:
 
 from tests.contracts._constants import KNOWN_ACTIONS
 
+pytestmark = pytest.mark.unit
+
 
 def test_packet_schema_exists(packet_envelope_schema):
     assert packet_envelope_schema.get("type") == "object"

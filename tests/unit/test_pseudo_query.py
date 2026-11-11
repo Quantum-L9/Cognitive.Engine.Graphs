@@ -22,6 +22,8 @@ from engine.traversal.pseudo_query import (
     QuestionTriplet,
 )
 
+pytestmark = pytest.mark.unit
+
 
 class MockLLM:
     """Mock LLM that returns numbered questions."""

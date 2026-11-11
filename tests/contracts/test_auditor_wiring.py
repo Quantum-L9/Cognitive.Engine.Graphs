@@ -25,6 +25,8 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from tools.auditors.base import get_all_auditors  # noqa: E402
 
+pytestmark = pytest.mark.unit
+
 AUDITORS_DIR = REPO_ROOT / "tools" / "auditors"
 
 

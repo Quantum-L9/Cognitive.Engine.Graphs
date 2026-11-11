@@ -38,6 +38,8 @@ from engine.scoring.evidence_priority import (
     score_cohort,
 )
 
+pytestmark = pytest.mark.unit
+
 ROOT = Path(__file__).resolve().parents[2]
 
 POSITIVE = "SYNTHETIC_POSITIVE_REL"

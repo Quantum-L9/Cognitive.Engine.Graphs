@@ -36,6 +36,8 @@ from engine.config.schema import DomainSpec, GDSJobScheduleSpec, GDSJobSpec, GDS
 from engine.gds.scheduler import GDSScheduler
 from tests.unit.test_gds_scheduler import _minimal_spec
 
+pytestmark = pytest.mark.integration
+
 DB = "plasticos"  # created by the plasticos_database fixture; wiped by clean_db
 
 SEED_CYPHER = """

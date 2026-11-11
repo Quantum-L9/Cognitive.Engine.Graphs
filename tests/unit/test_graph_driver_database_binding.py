@@ -28,6 +28,8 @@ import pytest
 from engine.config.settings import Settings
 from engine.graph.driver import GraphDriver
 
+pytestmark = pytest.mark.unit
+
 
 def _settings(*, strict: bool | None = None) -> Settings:
     overrides = {} if strict is None else {"strict_tenant_database": strict}
