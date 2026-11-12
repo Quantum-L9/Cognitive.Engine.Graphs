@@ -1807,7 +1807,7 @@ stored), `new_weight`, `applied`, `confidence`, `ci_width`, `lift`,
 `sample_size`, `outcome_count`, `win_count`, `method`
 (`outcome_lift/<ci>/v1`) and `recorded_at`. Nothing in the engine updates or
 deletes one (`tests/unit/test_feedback_weight_governance.py::test_change_records_are_append_only`).
-The whole recalculation is one statement, so its records (and any weights it
+The whole recalculation is one transaction, so its records (and any weights it
 applies) commit together or not at all; a failed recalculation reports
 `weights_recalculated: false`, `weights_applied: false` and changes nothing.
 `should_recalculate` measures new outcomes from the newer of the last applied
@@ -1824,10 +1824,13 @@ The only switch that writes `DimensionWeight.weight`. Off: a recalculation is re
 `ScoringAssembler.load_learned_weights` keeps returning the weights already
 stored. The outcome response reports `weights_recalculated: true`,
 `weights_applied: false`. On: approved automatic recalculation (issue #462,
-option b). Each DimensionWeight is write-locked, its prior weight read, the new
-weight written and the record created with `applied: true`, all in the
-recalculation's one statement. The lock serialises concurrent writes to an
-existing DimensionWeight; two concurrent first writes of a missing one can each
+option b). One write transaction runs two statements: the first write-locks
+every DimensionWeight it will change, the second reads each prior weight, writes
+the new one and creates the record with `applied: true`. The lock must be its own
+statement: inside one statement the planner may cache `dw.weight` before the
+`MERGE`, and a single-statement version recorded a stale prior under concurrency
+(CI run 43130108743; reproduced locally in 16 of 20 concurrent runs). The lock
+serialises concurrent writes to an existing DimensionWeight; two concurrent first writes of a missing one can each
 create a node, because no `(dimension, tenant)` uniqueness constraint exists
 (unchanged by CEG-462). Turning auto-apply on applies nothing retroactively:
 recorded candidates stay unapplied, and the first applied write waits for

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import math
+from typing import Any
 from uuid import uuid4
 
 from engine.config.outcome_vocabulary import outcome_node_label
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 _Z_95 = 1.96
 
-# CEG-462: one statement (one transaction) per recalculation, so its records,
+# CEG-462: one transaction per recalculation, so its records,
 # and any weights it applies, commit together or not at all. DimensionWeightChange
 # is append-only: nothing in the engine updates or deletes it. datetime() uses the
 # statement clock, so every record of one recalculation has the same recorded_at.
@@ -56,16 +57,26 @@ _CANDIDATE_CHANGE_CYPHER = (
         """
 )
 
-# An applied recalculation. Each DimensionWeight is write-locked before its prior
-# weight is read, so a concurrent applied write to an EXISTING node is serialised.
-# Two concurrent first writes of a missing node can still each MERGE one: there is
+# An applied recalculation runs as two statements in ONE write transaction.
+# Statement 1 write-locks every DimensionWeight it will change (MERGE creates a
+# missing one). Statement 2 then reads each prior weight and writes. The split is
+# what makes the prior read happen after the lock: inside a single statement the
+# planner may cache dw.weight before the MERGE (CacheProperties), and on e56f973
+# that read a stale prior under concurrency (CI run 43130108743). Two concurrent
+# first writes of a MISSING DimensionWeight can still each MERGE a node: there is
 # no (dimension, tenant) uniqueness constraint (pre-existing, outside CEG-462).
-_APPLIED_CHANGE_CYPHER = (
-    """
+_APPLIED_LOCK_CYPHER = """
         UNWIND $rows AS row
         MERGE (dw:DimensionWeight {dimension: row.dimension, tenant: $tenant})
         SET dw._weight_lock = true
         REMOVE dw._weight_lock
+        RETURN count(dw) AS locked
+        """
+
+_APPLIED_CHANGE_CYPHER = (
+    """
+        UNWIND $rows AS row
+        MATCH (dw:DimensionWeight {dimension: row.dimension, tenant: $tenant})
         WITH row, dw, dw.weight AS prior_weight
         SET dw.weight = row.weight,
             dw.confidence = row.confidence,
@@ -101,6 +112,12 @@ def learned_weights_applied() -> bool:
     kept, never whether a weight moves.
     """
     return settings.learned_weight_auto_apply_enabled
+
+
+async def _apply_recalculation(tx: Any, parameters: dict[str, Any]) -> None:
+    """Managed write transaction: lock every target DimensionWeight, then read priors and write."""
+    await (await tx.run(_APPLIED_LOCK_CYPHER, parameters)).consume()
+    await (await tx.run(_APPLIED_CHANGE_CYPHER, parameters)).consume()
 
 
 def _recalculation_method() -> str:
@@ -284,7 +301,7 @@ class SignalWeightCalculator:
 
         CEG-462: only ``learned_weight_auto_apply_enabled`` writes
         ``DimensionWeight.weight``. With ``learned_weight_change_record_enabled``
-        the whole recalculation is one statement that appends one
+        the whole recalculation is one transaction that appends one
         ``DimensionWeightChange`` per dimension (and applies the weights when
         auto-apply is on), so it commits completely or not at all. With the record
         off, auto-apply runs the legacy overwrite with no history, and without
@@ -317,18 +334,18 @@ class SignalWeightCalculator:
             }
             for dim_name, detail in weight_details.items()
         ]
-        await self._driver.execute_query(
-            _APPLIED_CHANGE_CYPHER if apply else _CANDIDATE_CHANGE_CYPHER,
-            parameters={
-                "rows": rows,
-                "tenant": self._db,
-                "outcome_count": outcome_count,
-                "win_count": win_count,
-                "recalculation_id": recalculation_id,
-                "method": _recalculation_method(),
-            },
-            database=self._db,
-        )
+        parameters: dict[str, Any] = {
+            "rows": rows,
+            "tenant": self._db,
+            "outcome_count": outcome_count,
+            "win_count": win_count,
+            "recalculation_id": recalculation_id,
+            "method": _recalculation_method(),
+        }
+        if apply:
+            await self._driver.execute_write(_apply_recalculation, parameters, database=self._db)
+        else:
+            await self._driver.execute_query(_CANDIDATE_CHANGE_CYPHER, parameters=parameters, database=self._db)
         logger.info(
             "Recorded %d dimension weight changes for domain=%s recalculation_id=%s applied=%s",
             len(rows),

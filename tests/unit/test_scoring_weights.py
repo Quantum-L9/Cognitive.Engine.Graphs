@@ -378,11 +378,30 @@ class _PropertyLevelDimensionWeightStore:
         self.nodes: list[dict] = []
         self.reader_cypher: list[str] = []
         self.execute_query = AsyncMock(side_effect=self._execute)
+        self.execute_write = AsyncMock(side_effect=self._write)
+
+    async def _write(self, transaction_function, *args, database: str | None = None):
+        """CEG-462: applied weights are written by a managed transaction function."""
+        store = self
+
+        class _Result:
+            async def consume(self) -> None:
+                return None
+
+        class _Tx:
+            async def run(self, cypher: str, parameters: dict | None = None) -> _Result:
+                await store._execute(cypher, parameters)
+                return _Result()
+
+        return await transaction_function(_Tx(), *args)
 
     async def _execute(self, cypher: str, parameters: dict | None = None, database: str | None = None, **_kw):
         parameters = parameters or {}
-        if "MERGE (dw:DimensionWeight" in cypher:
-            # CEG-462: the governed writer sends one UNWIND $rows statement.
+        if "CREATE (c:DimensionWeightChange" in cypher:
+            # The change-record statement; the weights were stored by the lock statement's MERGE above.
+            return [{"written": len(parameters.get("rows") or [])}]
+        if "MERGE (dw:DimensionWeight" in cypher and "weight" in str(parameters.get("rows") or parameters):
+            # CEG-462: the governed writer sends UNWIND $rows statements (lock, then write).
             for row in parameters.get("rows") or [parameters]:
                 key = {"dimension": row["dimension"], "tenant": parameters["tenant"]}
                 node = next((n for n in self.nodes if all(n.get(k) == v for k, v in key.items())), None)

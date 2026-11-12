@@ -18,7 +18,7 @@ CEG-462: feedback weight governance and the retired boost_factor stage.
   deletes one.
 - ``learned_weight_auto_apply_enabled`` (default off): a recalculation is an
   unapplied candidate and ``DimensionWeight.weight`` (what scoring reads) is
-  not written; on, each applied write is recorded in the same statement.
+  not written; on, each applied write is recorded in the same transaction.
 """
 
 from __future__ import annotations
@@ -62,6 +62,26 @@ class _Driver:
         self._total = total
         self._wins = wins
         self.execute_query = AsyncMock(side_effect=self._execute)
+        self.execute_write = AsyncMock(side_effect=self._write)
+        self.transactions: list[list[str]] = []
+
+    async def _write(self, transaction_function: Any, *args: Any, database: str | None = None) -> Any:
+        """A managed write transaction: every statement the function runs is recorded as one transaction."""
+        statements: list[str] = []
+        self.transactions.append(statements)
+        driver = self
+
+        class _Result:
+            async def consume(self) -> None:
+                return None
+
+        class _Tx:
+            async def run(self, cypher: str, parameters: dict[str, Any] | None = None) -> _Result:
+                statements.append(cypher)
+                await driver._execute(cypher, parameters)
+                return _Result()
+
+        return await transaction_function(_Tx(), *args)
 
     async def _execute(self, cypher: str, parameters: dict[str, Any] | None = None, **_: Any) -> list[dict[str, Any]]:
         parameters = parameters or {}
@@ -148,7 +168,7 @@ class TestUnappliedCandidateByDefault:
 
         assert metadata["weights_recalculated"] is True
         assert metadata["weights_applied"] is False
-        ((cypher, params),) = driver.writes()  # the whole recalculation is one statement
+        ((cypher, params),) = driver.writes()  # an unapplied recalculation is one statement
         assert not _sets_weight(cypher)
         assert "MERGE" not in cypher, "a candidate must not create a DimensionWeight node"
         assert "CREATE (c:DimensionWeightChange" in cypher
@@ -194,18 +214,10 @@ class TestUnappliedCandidateByDefault:
         assert metadata["weights_applied"] is False
 
     async def test_failed_recalculation_reports_nothing_applied(self, monkeypatch) -> None:
-        """One statement per recalculation: a failure commits nothing, and the response says so."""
+        """One transaction per recalculation: a failure commits nothing, and the response says so."""
         monkeypatch.setattr(settings, "learned_weight_auto_apply_enabled", True)
         driver = _Driver()
-        real = driver._execute
-
-        async def _fail_on_write(cypher: str, parameters: dict[str, Any] | None = None, **kw: Any) -> Any:
-            if "DimensionWeightChange {" in cypher:
-                msg = "write failed"
-                raise RuntimeError(msg)
-            return await real(cypher, parameters, **kw)
-
-        driver.execute_query = AsyncMock(side_effect=_fail_on_write)
+        driver.execute_write = AsyncMock(side_effect=RuntimeError("write failed"))
         metadata = await ConvergenceLoop(driver, _spec()).on_outcome_recorded(_OUTCOME)  # type: ignore[arg-type]
         assert metadata["stages"]["weights"] == "failed:RuntimeError"
         assert metadata["weights_recalculated"] is False
@@ -220,19 +232,18 @@ class TestApprovedAutomaticRecalculation:
         metadata = await ConvergenceLoop(driver, _spec()).on_outcome_recorded(_OUTCOME)  # type: ignore[arg-type]
 
         assert metadata["weights_applied"] is True
-        ((cypher, params),) = driver.writes()
-        assert _sets_weight(cypher)
-        assert "CREATE (c:DimensionWeightChange" in cypher
-        assert "applied: true" in cypher
-        # prior weight read under the write lock, before the new weight is set
-        lock, prior, write = (
-            cypher.index("SET dw._weight_lock"),
-            cypher.index("dw.weight AS prior_weight"),
-            cypher.index("SET dw.weight"),
-        )
-        assert lock < prior < write
+        # One managed transaction: statement 1 locks every target, statement 2 reads priors and writes.
+        ((lock, change),) = driver.transactions
+        assert "SET dw._weight_lock = true" in lock
+        assert "prior_weight" not in lock
+        assert not _sets_weight(lock)
+        assert "_weight_lock" not in change
+        assert change.index("dw.weight AS prior_weight") < change.index("SET dw.weight")
+        assert "CREATE (c:DimensionWeightChange" in change
+        assert "applied: true" in change
+        (_, params) = driver.writes()[-1]
         # the legacy per-dimension property travels as a parameter map, not Cypher text
-        assert "_weight = " not in cypher.replace("dw._weight_lock", "")
+        assert "_weight = " not in change
         assert params["rows"][0]["dimension_property"] == {"depot_reliability_weight": params["rows"][0]["weight"]}
 
 

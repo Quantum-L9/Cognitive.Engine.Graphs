@@ -22,11 +22,10 @@ seeded outcomes trigger a recalculation:
   not recalculate again
 - auto-apply: the weight moves and each write has one applied record carrying
   the prior weight
-- two concurrent applied recalculations of an existing DimensionWeight leave a
-  consistent prior-weight chain (a consistency check: it does not force the
-  interleaving that would prove the write lock; two concurrent first writes of a
-  missing DimensionWeight can still each create one, since no (dimension, tenant)
-  uniqueness constraint exists)
+- concurrent applied recalculations of an existing DimensionWeight never record
+  a stale prior, over repeated rounds (lost-update regression from e56f973); two
+  concurrent first writes of a MISSING DimensionWeight can still each create one,
+  since no (dimension, tenant) uniqueness constraint exists
 """
 
 from __future__ import annotations
@@ -183,21 +182,40 @@ async def test_auto_apply_writes_the_weight_and_records_its_prior(governance_gra
     assert record["new"] == pytest.approx(new_weight)
 
 
-async def test_concurrent_applied_recalculations_of_an_existing_weight_chain_their_priors(
-    governance_graph, domain_spec, monkeypatch
-):
+_CONCURRENT_ROUNDS = 10
+
+
+async def test_concurrent_applied_recalculations_never_record_a_stale_prior(governance_graph, domain_spec, monkeypatch):
+    """Lost-update regression (CI run 43130108743, commit e56f973).
+
+    A single-statement lock let the planner cache dw.weight before the MERGE, so
+    two concurrent applied writes both recorded the seeded 0.5 as their prior; a
+    local reproduction lost the update in 16 of 20 natural concurrent runs. The
+    lock now runs as its own statement before the read, in one transaction.
+    Repeated rounds make a regression all but certain to fail here.
+    """
     from engine.feedback.signal_weights import SignalWeightCalculator
 
     monkeypatch.setattr(settings, "learned_weight_auto_apply_enabled", True)
     spec = _spec(domain_spec)
 
-    await asyncio.gather(
-        SignalWeightCalculator(governance_graph, spec).recalculate_weights(),
-        SignalWeightCalculator(governance_graph, spec).recalculate_weights(),
-    )
-
-    records = await _records(governance_graph, _SEEDED_DIM)
-    assert len(records) == 2
-    new_weight = records[0]["new"]
-    # The second writer saw the first one's weight, never the same stale prior.
-    assert sorted(r["prior"] for r in records) == sorted([_SEEDED_WEIGHT, new_weight])
+    for round_no in range(_CONCURRENT_ROUNDS):
+        await governance_graph.execute_query(
+            "MATCH (n) WHERE (n:DimensionWeight OR n:DimensionWeightChange) AND n.tenant = $tenant DETACH DELETE n",
+            parameters={"tenant": _TENANT},
+            database=_TENANT,
+        )
+        await governance_graph.execute_query(
+            "CREATE (:DimensionWeight {dimension: $dim, tenant: $tenant, weight: $weight})",
+            parameters={"tenant": _TENANT, "dim": _SEEDED_DIM, "weight": _SEEDED_WEIGHT},
+            database=_TENANT,
+        )
+        await asyncio.gather(
+            SignalWeightCalculator(governance_graph, spec).recalculate_weights(),
+            SignalWeightCalculator(governance_graph, spec).recalculate_weights(),
+        )
+        records = await _records(governance_graph, _SEEDED_DIM)
+        assert len(records) == 2, round_no
+        new_weight = records[0]["new"]
+        # The second writer saw the first one's committed weight, never the same stale prior.
+        assert sorted(r["prior"] for r in records) == sorted([_SEEDED_WEIGHT, new_weight]), round_no

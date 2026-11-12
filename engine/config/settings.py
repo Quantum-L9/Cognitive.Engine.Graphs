@@ -467,7 +467,7 @@ class Settings(BaseSettings):
     # recalculation appends one DimensionWeightChange record per dimension
     # (prior weight, computed weight, evidence counts, confidence, method,
     # whether it was applied); the recalculation, records and any applied
-    # weights, is one statement; records are never updated or deleted. Off: no
+    # weights, is one transaction; records are never updated or deleted. Off: no
     # history. This flag never decides whether a weight moves.
     learned_weight_change_record_enabled: bool = True
     # CEG-462 (weight governance): whether a recalculated weight is applied to
