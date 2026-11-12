@@ -22,7 +22,11 @@ seeded outcomes trigger a recalculation:
   not recalculate again
 - auto-apply: the weight moves and each write has one applied record carrying
   the prior weight
-- concurrent applied recalculations record a consistent prior-weight chain
+- two concurrent applied recalculations of an existing DimensionWeight leave a
+  consistent prior-weight chain (a consistency check: it does not force the
+  interleaving that would prove the write lock; two concurrent first writes of a
+  missing DimensionWeight can still each create one, since no (dimension, tenant)
+  uniqueness constraint exists)
 """
 
 from __future__ import annotations
@@ -168,11 +172,18 @@ async def test_auto_apply_writes_the_weight_and_records_its_prior(governance_gra
     assert len(loaded) == len(spec.scoring.dimensions)
     (record,) = await _records(governance_graph, _SEEDED_DIM)
     assert record["applied"] is True
+    # The legacy per-dimension copy is still written (now from a parameter map).
+    (row,) = await governance_graph.execute_query(
+        "MATCH (dw:DimensionWeight {tenant: $tenant, dimension: $dim}) RETURN dw.geo_proximity_weight AS copy",
+        parameters={"tenant": _TENANT, "dim": _SEEDED_DIM},
+        database=_TENANT,
+    )
+    assert row["copy"] == pytest.approx(new_weight)
     assert record["prior"] == pytest.approx(_SEEDED_WEIGHT)
     assert record["new"] == pytest.approx(new_weight)
 
 
-async def test_concurrent_applied_recalculations_record_a_consistent_prior_chain(
+async def test_concurrent_applied_recalculations_of_an_existing_weight_chain_their_priors(
     governance_graph, domain_spec, monkeypatch
 ):
     from engine.feedback.signal_weights import SignalWeightCalculator

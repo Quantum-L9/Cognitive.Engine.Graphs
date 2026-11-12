@@ -382,14 +382,16 @@ class _PropertyLevelDimensionWeightStore:
     async def _execute(self, cypher: str, parameters: dict | None = None, database: str | None = None, **_kw):
         parameters = parameters or {}
         if "MERGE (dw:DimensionWeight" in cypher:
-            key = {"dimension": parameters["dimension"], "tenant": parameters["tenant"]}
-            node = next((n for n in self.nodes if all(n.get(k) == v for k, v in key.items())), None)
-            if node is None:
-                node = dict(key)
-                self.nodes.append(node)
-            node.update(weight=parameters["weight"], confidence=parameters["confidence"])
-            node["ci_width"] = parameters["ci_width"]
-            return [{"dimension": parameters["dimension"]}]
+            # CEG-462: the governed writer sends one UNWIND $rows statement.
+            for row in parameters.get("rows") or [parameters]:
+                key = {"dimension": row["dimension"], "tenant": parameters["tenant"]}
+                node = next((n for n in self.nodes if all(n.get(k) == v for k, v in key.items())), None)
+                if node is None:
+                    node = dict(key)
+                    self.nodes.append(node)
+                node.update(weight=row["weight"], confidence=row["confidence"])
+                node["ci_width"] = row["ci_width"]
+            return [{"written": len(parameters.get("rows") or [parameters])}]
         self.reader_cypher.append(cypher)
         rows = list(self.nodes)
         map_pattern = _re.search(r"\(dw:DimensionWeight\s*\{([^}]*)\}\)", cypher)

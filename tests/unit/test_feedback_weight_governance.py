@@ -148,20 +148,17 @@ class TestUnappliedCandidateByDefault:
 
         assert metadata["weights_recalculated"] is True
         assert metadata["weights_applied"] is False
-        writes = driver.writes()
-        assert len(writes) == 2  # one record per scoring dimension
-        for cypher, params in writes:
-            assert not _sets_weight(cypher)
-            assert "MERGE" not in cypher, "a candidate must not create a DimensionWeight node"
-            assert "CREATE (c:DimensionWeightChange" in cypher
-            assert "applied: false" in cypher
-            assert "head(collect(dw.weight)) AS prior_weight" in cypher
-            assert params["outcome_count"] == 20
-            assert params["win_count"] == 10
-            assert params["sample_size"] == 10
-            assert params["method"] == "outcome_lift/agresti_coull/v1"
-        assert {p["dimension"] for _, p in writes} == {"depot_reliability", "port_capacity"}
-        assert len({p["recalculation_id"] for _, p in writes}) == 1
+        ((cypher, params),) = driver.writes()  # the whole recalculation is one statement
+        assert not _sets_weight(cypher)
+        assert "MERGE" not in cypher, "a candidate must not create a DimensionWeight node"
+        assert "CREATE (c:DimensionWeightChange" in cypher
+        assert "applied: false" in cypher
+        assert "head(collect(dw.weight)) AS prior_weight" in cypher
+        assert params["outcome_count"] == 20
+        assert params["win_count"] == 10
+        assert params["method"] == "outcome_lift/agresti_coull/v1"
+        assert [r["dimension"] for r in params["rows"]] == ["depot_reliability", "port_capacity"]
+        assert all(r["sample_size"] == 10 for r in params["rows"])
 
     async def test_each_recalculation_gets_its_own_id(self) -> None:
         driver = _Driver()
@@ -169,7 +166,7 @@ class TestUnappliedCandidateByDefault:
         await calc.recalculate_weights()
         await calc.recalculate_weights()
         ids = [p["recalculation_id"] for _, p in driver.writes()]
-        assert len(ids) == 4
+        assert len(ids) == 2
         assert len(set(ids)) == 2
 
     async def test_no_outcomes_writes_nothing(self) -> None:
@@ -179,16 +176,38 @@ class TestUnappliedCandidateByDefault:
         assert driver.writes() == []
 
     async def test_recalculation_marker_includes_unapplied_records(self) -> None:
-        """Without it every outcome past the threshold would recalculate and record again."""
+        """Without it every outcome past the threshold would recalculate and record again.
+
+        The marker's effect is proven against Neo4j by
+        tests/integration/test_feedback_weight_governance.py::test_unapplied_recalculation_is_not_repeated_by_the_next_outcome.
+        """
         driver = _Driver()
         await SignalWeightCalculator(driver, _spec()).should_recalculate()  # type: ignore[arg-type]
         cypher = driver.calls[0][0]
         assert "max(c.recorded_at) AS last_recorded" in cypher
         assert "max(dw.updated_at) AS last_applied" in cypher
 
-    async def test_replayed_outcome_after_recalculation_does_not_recalculate(self) -> None:
+    async def test_below_threshold_reports_nothing_recalculated_or_applied(self) -> None:
         loop = ConvergenceLoop(_Driver(new_outcomes=0), _spec())  # type: ignore[arg-type]
         metadata = await loop.on_outcome_recorded(_OUTCOME)
+        assert metadata["weights_recalculated"] is False
+        assert metadata["weights_applied"] is False
+
+    async def test_failed_recalculation_reports_nothing_applied(self, monkeypatch) -> None:
+        """One statement per recalculation: a failure commits nothing, and the response says so."""
+        monkeypatch.setattr(settings, "learned_weight_auto_apply_enabled", True)
+        driver = _Driver()
+        real = driver._execute
+
+        async def _fail_on_write(cypher: str, parameters: dict[str, Any] | None = None, **kw: Any) -> Any:
+            if "DimensionWeightChange {" in cypher:
+                msg = "write failed"
+                raise RuntimeError(msg)
+            return await real(cypher, parameters, **kw)
+
+        driver.execute_query = AsyncMock(side_effect=_fail_on_write)
+        metadata = await ConvergenceLoop(driver, _spec()).on_outcome_recorded(_OUTCOME)  # type: ignore[arg-type]
+        assert metadata["stages"]["weights"] == "failed:RuntimeError"
         assert metadata["weights_recalculated"] is False
         assert metadata["weights_applied"] is False
 
@@ -201,24 +220,42 @@ class TestApprovedAutomaticRecalculation:
         metadata = await ConvergenceLoop(driver, _spec()).on_outcome_recorded(_OUTCOME)  # type: ignore[arg-type]
 
         assert metadata["weights_applied"] is True
-        writes = driver.writes()
-        assert len(writes) == 2
-        for cypher, _ in writes:
-            assert _sets_weight(cypher)
-            assert "CREATE (:DimensionWeightChange" in cypher
-            assert "applied: true" in cypher
-            # prior weight read under the write lock, before the new weight is set
-            lock, prior, write = (
-                cypher.index("SET dw._weight_lock"),
-                cypher.index("dw.weight AS prior_weight"),
-                cypher.index("SET dw.weight"),
-            )
-            assert lock < prior < write
+        ((cypher, params),) = driver.writes()
+        assert _sets_weight(cypher)
+        assert "CREATE (c:DimensionWeightChange" in cypher
+        assert "applied: true" in cypher
+        # prior weight read under the write lock, before the new weight is set
+        lock, prior, write = (
+            cypher.index("SET dw._weight_lock"),
+            cypher.index("dw.weight AS prior_weight"),
+            cypher.index("SET dw.weight"),
+        )
+        assert lock < prior < write
+        # the legacy per-dimension property travels as a parameter map, not Cypher text
+        assert "_weight = " not in cypher.replace("dw._weight_lock", "")
+        assert params["rows"][0]["dimension_property"] == {"depot_reliability_weight": params["rows"][0]["weight"]}
 
 
-class TestLegacyOverwrite:
-    async def test_record_flag_off_overwrites_with_no_history(self, monkeypatch) -> None:
+class TestRecordFlagNeverAppliesWeights:
+    """learned_weight_change_record_enabled decides history, never whether a weight moves (review finding)."""
+
+    async def test_record_off_without_auto_apply_writes_and_recalculates_nothing(self, monkeypatch) -> None:
         monkeypatch.setattr(settings, "learned_weight_change_record_enabled", False)
+        assert learned_weights_applied() is False
+        driver = _Driver()
+        calc = SignalWeightCalculator(driver, _spec())  # type: ignore[arg-type]
+        assert await calc.should_recalculate() is False
+        await calc.recalculate_weights()
+        assert driver.writes() == []
+
+        metadata = await ConvergenceLoop(driver, _spec()).on_outcome_recorded(_OUTCOME)  # type: ignore[arg-type]
+        assert metadata["weights_recalculated"] is False
+        assert metadata["weights_applied"] is False
+        assert driver.writes() == []
+
+    async def test_record_off_with_auto_apply_is_the_legacy_overwrite(self, monkeypatch) -> None:
+        monkeypatch.setattr(settings, "learned_weight_change_record_enabled", False)
+        monkeypatch.setattr(settings, "learned_weight_auto_apply_enabled", True)
         assert learned_weights_applied() is True
         driver = _Driver()
         calc = SignalWeightCalculator(driver, _spec())  # type: ignore[arg-type]
@@ -230,6 +267,17 @@ class TestLegacyOverwrite:
         driver.calls.clear()
         await calc.should_recalculate()
         assert "DimensionWeightChange" not in driver.calls[0][0]
+
+
+@pytest.mark.parametrize(("auto_apply", "applied"), [(False, 0), (True, 2)])
+async def test_scheduler_reports_only_applied_weights_as_updated(monkeypatch, auto_apply: bool, applied: int) -> None:
+    from engine.gds.scheduler import GDSScheduler
+
+    monkeypatch.setattr(settings, "learned_weight_auto_apply_enabled", auto_apply)
+    monkeypatch.setattr(SignalWeightCalculator, "recalculate_weights", AsyncMock(return_value={"a": 1.2, "b": 0.8}))
+    stub = type("_Stub", (), {"graph_driver": _Driver(), "domain_spec": _spec()})()
+    result = await GDSScheduler._run_feedback_recalculation(stub, None)  # type: ignore[arg-type]
+    assert result == {"algorithm": "feedback_recalculation", "weights_computed": 2, "weights_updated": applied}
 
 
 def test_change_records_are_append_only() -> None:

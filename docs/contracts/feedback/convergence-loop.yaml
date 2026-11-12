@@ -66,7 +66,7 @@ observed:
   - DriftDetector.check_and_alert
   runtime_outcome_idempotency_proven: true
   weight_recalculation_can_execute_after_gate: true
-  weight_recalculation_requires_approval: true  # since CEG-462: DimensionWeight.weight is written only with learned_weight_auto_apply_enabled (operator flag, default off)
+  weight_recalculation_requires_approval: true  # since CEG-462: DimensionWeight.weight is written only with learned_weight_auto_apply_enabled (operator flag, default off), whatever learned_weight_change_record_enabled says
   tenant_equals_domain_id: verified; DomainPackLoader refuses a pack whose domain.id differs from the tenant lookup key (engine/config/loader.py, legacy and receipt modes), so the propagator's tenant=domain.id scope matches the outcome node's tenant
 sync_path_outcomes:
   decision: excluded_by_design
@@ -130,7 +130,9 @@ weight_governance:
       candidate_only: keep the default; recalculations stay unapplied records (no weight moves); applying one is a separate, not yet built step (apply_weight_proposal persists nothing)
     record_when_decided: set status to decided with the decision, date and decider; the known-gap probe then passes and the path moves to CLOSED_GAPS with a CI receipt
   mechanism:
-    change_record: one DimensionWeightChange per dimension per recalculation (tenant, dimension, recalculation_id, prior_weight, new_weight, applied, confidence, ci_width, lift, sample_size, outcome_count, win_count, method, recorded_at); created in the same statement as an applied write; nothing in the engine updates or deletes it
+    change_record: one DimensionWeightChange per dimension per recalculation (tenant, dimension, recalculation_id, prior_weight, new_weight, applied, confidence, ci_width, lift, sample_size, outcome_count, win_count, method, recorded_at); the whole recalculation (records and any applied weights) is one statement, so it commits completely or not at all; nothing in the engine updates or deletes a record
+    apply_switch: learned_weight_auto_apply_enabled alone writes DimensionWeight.weight; learned_weight_change_record_enabled only decides whether history is kept (record off + auto-apply off recalculates and writes nothing)
+    known_limit: the write lock serialises concurrent applied writes to an existing DimensionWeight; two concurrent first writes of a missing one can each MERGE a node because no (dimension, tenant) uniqueness constraint exists (pre-existing); the integration concurrency test is a consistency check and does not force that interleaving
     default: candidate only; DimensionWeight.weight is neither written nor created, so ScoringAssembler.load_learned_weights is unchanged
     no_evidence: a recalculation with zero outcomes writes nothing
     recalculation_marker: should_recalculate counts outcomes newer than the latest applied weight or change record, so a replayed outcome does not recalculate again

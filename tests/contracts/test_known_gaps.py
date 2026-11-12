@@ -138,8 +138,6 @@ async def _probe_feedback_convergence(monkeypatch: pytest.MonkeyPatch) -> None:
     Still open: the operator's decision on ``learned_weight_auto_apply_enabled``
     and a CI receipt; the probe passes only once the contract records both.
     """
-    import re
-
     from engine.config.settings import settings
     from engine.feedback.convergence import ConvergenceLoop
     from tests.fixtures.domain_contracts import synthetic_loader

@@ -1779,9 +1779,11 @@ failure propagates.
 
 ## 34. Feedback weight governance and the retired boost_factor (CEG-462)
 
-All three apply only where the feedback loop runs: `feedback_enabled` (default
-`False`) and the domain's `feedbackloop.enabled` must both be true, and weight
-recalculation also needs `feedbackloop.signal_weights.enabled`.
+The outcome path applies only where the feedback loop runs: `feedback_enabled`
+(default `False`) and the domain's `feedbackloop.enabled` must both be true, and
+weight recalculation also needs `feedbackloop.signal_weights.enabled`. A GDS job
+with algorithm `feedback_recalculation` calls the same writer (no shipped pack
+declares one) and reports `weights_computed` and `weights_updated` (applied only).
 
 ### Boost propagation (`feedback_boost_propagation_enabled`, default `False`)
 
@@ -1805,20 +1807,31 @@ stored), `new_weight`, `applied`, `confidence`, `ci_width`, `lift`,
 `sample_size`, `outcome_count`, `win_count`, `method`
 (`outcome_lift/<ci>/v1`) and `recorded_at`. Nothing in the engine updates or
 deletes one (`tests/unit/test_feedback_weight_governance.py::test_change_records_are_append_only`).
+The whole recalculation is one statement, so its records (and any weights it
+applies) commit together or not at all; a failed recalculation reports
+`weights_recalculated: false`, `weights_applied: false` and changes nothing.
 `should_recalculate` measures new outcomes from the newer of the last applied
 weight and the last record, so an unapplied recalculation is not repeated on
-every later outcome. A recalculation with no outcomes writes nothing. Off: the
-legacy overwrite, no record.
+every later outcome. A recalculation with no outcomes writes nothing. Off: no
+history; a weight is then written only by the legacy overwrite under
+`learned_weight_auto_apply_enabled`, and with auto-apply also off nothing is
+recalculated or written. This flag never decides whether a weight moves.
 
 ### Automatic application (`learned_weight_auto_apply_enabled`, default `False`)
 
-Requires the change record. Off: a recalculation is recorded with
+The only switch that writes `DimensionWeight.weight`. Off: a recalculation is recorded with
 `applied: false` and `DimensionWeight` is neither written nor created, so
 `ScoringAssembler.load_learned_weights` keeps returning the weights already
 stored. The outcome response reports `weights_recalculated: true`,
 `weights_applied: false`. On: approved automatic recalculation (issue #462,
-option b). The DimensionWeight is write-locked, its prior weight read, the new
-weight written and the record created with `applied: true` in one statement.
+option b). Each DimensionWeight is write-locked, its prior weight read, the new
+weight written and the record created with `applied: true`, all in the
+recalculation's one statement. The lock serialises concurrent writes to an
+existing DimensionWeight; two concurrent first writes of a missing one can each
+create a node, because no `(dimension, tenant)` uniqueness constraint exists
+(unchanged by CEG-462). Turning auto-apply on applies nothing retroactively:
+recorded candidates stay unapplied, and the first applied write waits for
+`min_outcomes_for_recalculation` new outcomes after the last record.
 Bounds are unchanged: `min_outcomes_for_recalculation`, the
 `[min_weight, max_weight]` clamp, confidence dampening and the C-22
 renormalisation in the reader.
