@@ -466,15 +466,17 @@ class Settings(BaseSettings):
     # overwrote DimensionWeight.weight with no history. On (default): every
     # recalculation appends one DimensionWeightChange record per dimension
     # (prior weight, computed weight, evidence counts, confidence, method,
-    # whether it was applied), created in the same statement as any weight
-    # write, never updated or deleted. Off: the legacy overwrite, no record.
+    # whether it was applied); the recalculation, records and any applied
+    # weights, is one statement; records are never updated or deleted. Off: no
+    # history. This flag never decides whether a weight moves.
     learned_weight_change_record_enabled: bool = True
     # CEG-462 (weight governance): whether a recalculated weight is applied to
     # DimensionWeight.weight, which ScoringAssembler.load_learned_weights reads.
-    # Requires learned_weight_change_record_enabled. Off (default): the
-    # recalculation is recorded as an unapplied candidate and ranking keeps the
-    # current weights. On: approved automatic recalculation, each write
-    # recorded. The operator owns this decision (issue #462, Decision 1).
+    # The only switch that writes a weight. Off (default): the recalculation is
+    # recorded as an unapplied candidate (or, with the record also off, not run)
+    # and ranking keeps the current weights. On: approved automatic
+    # recalculation, each write recorded (with the record off: the legacy
+    # overwrite). The operator owns this decision (issue #462, Decision 1).
     learned_weight_auto_apply_enabled: bool = False
     # RU-029 / CEG-COR-118: DriftDetector treated only a both-empty window pair
     # as insufficient data, so an empty baseline (the first drift_window_days)
