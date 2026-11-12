@@ -9,16 +9,8 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
-CEG-462: feedback weight governance and the retired boost_factor stage.
-
-- ``feedback_boost_propagation_enabled`` (default off): the convergence loop
-  writes no ``boost_factor`` (a hand-set multiplier nothing reads) and says so.
-- ``learned_weight_change_record_enabled`` (default on): every recalculation
-  appends one ``DimensionWeightChange`` per dimension; nothing updates or
-  deletes one.
-- ``learned_weight_auto_apply_enabled`` (default off): a recalculation is an
-  unapplied candidate and ``DimensionWeight.weight`` (what scoring reads) is
-  not written; on, each applied write is recorded in the same transaction.
+CEG-462: feedback weight governance and the retired boost_factor stage
+(docs/FEATURE_GATES.md §34).
 """
 
 from __future__ import annotations

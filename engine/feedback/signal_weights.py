@@ -57,14 +57,9 @@ _CANDIDATE_CHANGE_CYPHER = (
         """
 )
 
-# An applied recalculation runs as two statements in ONE write transaction.
-# Statement 1 write-locks every DimensionWeight it will change (MERGE creates a
-# missing one). Statement 2 then reads each prior weight and writes. The split is
-# what makes the prior read happen after the lock: inside a single statement the
-# planner may cache dw.weight before the MERGE (CacheProperties), and on e56f973
-# that read a stale prior under concurrency (CI run 43130108743). Two concurrent
-# first writes of a MISSING DimensionWeight can still each MERGE a node: there is
-# no (dimension, tenant) uniqueness constraint (pre-existing, outside CEG-462).
+# An applied recalculation: one write transaction, two statements. The lock must
+# be its own statement; inside one, the planner may cache dw.weight before the
+# MERGE and record a stale prior (CI run 43130108743). FEATURE_GATES §34.
 _APPLIED_LOCK_CYPHER = """
         UNWIND $rows AS row
         MERGE (dw:DimensionWeight {dimension: row.dimension, tenant: $tenant})
@@ -299,13 +294,9 @@ class SignalWeightCalculator:
     ) -> None:
         """Store computed weights as DimensionWeight nodes in Neo4j with confidence metadata.
 
-        CEG-462: only ``learned_weight_auto_apply_enabled`` writes
-        ``DimensionWeight.weight``. With ``learned_weight_change_record_enabled``
-        the whole recalculation is one transaction that appends one
-        ``DimensionWeightChange`` per dimension (and applies the weights when
-        auto-apply is on), so it commits completely or not at all. With the record
-        off, auto-apply runs the legacy overwrite with no history, and without
-        auto-apply nothing is written.
+        CEG-462 (FEATURE_GATES §34): with the change record, one transaction per
+        recalculation; the weights move only under auto-apply. Without the record,
+        auto-apply is the legacy overwrite and otherwise nothing is written.
         """
         apply = learned_weights_applied()
         if not settings.learned_weight_change_record_enabled:

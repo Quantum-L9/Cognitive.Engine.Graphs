@@ -9,23 +9,11 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
-Integration — feedback weight governance against Neo4j (CEG-462).
+Integration — feedback weight governance against Neo4j (CEG-462, FEATURE_GATES §34).
 
 Runs the real ConvergenceLoop on the per-domain ``plasticos`` database
 (enterprise testcontainer), with ``min_outcomes_for_recalculation`` lowered so
-seeded outcomes trigger a recalculation:
-
-- default: the recalculation is recorded as unapplied candidates; the stored
-  weight, the weights scoring reads, and every boost_factor are unchanged, and
-  no DimensionWeight is created
-- the unapplied recalculation counts as the last one, so the next outcome does
-  not recalculate again
-- auto-apply: the weight moves and each write has one applied record carrying
-  the prior weight
-- concurrent applied recalculations of an existing DimensionWeight never record
-  a stale prior, over repeated rounds (lost-update regression from e56f973); two
-  concurrent first writes of a MISSING DimensionWeight can still each create one,
-  since no (dimension, tenant) uniqueness constraint exists
+seeded outcomes trigger a recalculation.
 """
 
 from __future__ import annotations

@@ -454,29 +454,17 @@ class Settings(BaseSettings):
     # the feedback metadata reports status complete|partial with per-stage
     # results. Off: the first stage failure propagates.
     feedback_partial_results_enabled: bool = True
-    # CEG-462 (boost_factor): ScorePropagator multiplied every tenant
-    # DimensionWeight.boost_factor by the hand-set
-    # feedbackloop.propagation_boost_factor (1.15) on any success, and nothing
-    # reads boost_factor, so the stage wrote an unevidenced number that never
-    # reached ranking. Off (default): the convergence loop skips propagation and
-    # reports it as not applied. On: the legacy propagation stage, kept for
-    # rollback only. Ranking is identical either way.
+    # CEG-462 (FEATURE_GATES §34): the propagation stage multiplied every tenant
+    # DimensionWeight.boost_factor by a hand-set 1.15 that nothing reads. Off
+    # (default): skipped and reported as not applied. On: legacy, rollback only.
     feedback_boost_propagation_enabled: bool = False
-    # CEG-462 (weight governance): SignalWeightCalculator._store_weights
-    # overwrote DimensionWeight.weight with no history. On (default): every
-    # recalculation appends one DimensionWeightChange record per dimension
-    # (prior weight, computed weight, evidence counts, confidence, method,
-    # whether it was applied); the recalculation, records and any applied
-    # weights, is one transaction; records are never updated or deleted. Off: no
-    # history. This flag never decides whether a weight moves.
+    # CEG-462 (§34): on, each recalculation appends one append-only
+    # DimensionWeightChange per dimension, in one transaction. Off: no history.
+    # This flag never decides whether a weight moves.
     learned_weight_change_record_enabled: bool = True
-    # CEG-462 (weight governance): whether a recalculated weight is applied to
-    # DimensionWeight.weight, which ScoringAssembler.load_learned_weights reads.
-    # The only switch that writes a weight. Off (default): the recalculation is
-    # recorded as an unapplied candidate (or, with the record also off, not run)
-    # and ranking keeps the current weights. On: approved automatic
-    # recalculation, each write recorded (with the record off: the legacy
-    # overwrite). The operator owns this decision (issue #462, Decision 1).
+    # CEG-462 (§34): the only switch that writes DimensionWeight.weight (read by
+    # scoring). Off (default): an unapplied candidate. On: approved automatic
+    # recalculation. The operator owns this decision (issue #462, Decision 1).
     learned_weight_auto_apply_enabled: bool = False
     # RU-029 / CEG-COR-118: DriftDetector treated only a both-empty window pair
     # as insufficient data, so an empty baseline (the first drift_window_days)

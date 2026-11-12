@@ -1824,15 +1824,11 @@ The only switch that writes `DimensionWeight.weight`. Off: a recalculation is re
 `ScoringAssembler.load_learned_weights` keeps returning the weights already
 stored. The outcome response reports `weights_recalculated: true`,
 `weights_applied: false`. On: approved automatic recalculation (issue #462,
-option b). One write transaction runs two statements: the first write-locks
-every DimensionWeight it will change, the second reads each prior weight, writes
-the new one and creates the record with `applied: true`. The lock must be its own
-statement: inside one statement the planner may cache `dw.weight` before the
-`MERGE`, and a single-statement version recorded a stale prior under concurrency
-(CI run 43130108743; reproduced locally in 16 of 20 concurrent runs). The lock
-serialises concurrent writes to an existing DimensionWeight; two concurrent first writes of a missing one can each
-create a node, because no `(dimension, tenant)` uniqueness constraint exists
-(unchanged by CEG-462). Turning auto-apply on applies nothing retroactively:
+option b). One write transaction locks every target DimensionWeight in its own
+statement, then reads each prior, writes, and records `applied: true` (a
+single-statement lock let the planner read a cached prior: CI run 43130108743).
+Two concurrent first writes of a missing DimensionWeight can each create a node:
+no `(dimension, tenant)` uniqueness constraint exists (unchanged by CEG-462). Turning auto-apply on applies nothing retroactively:
 recorded candidates stay unapplied, and the first applied write waits for
 `min_outcomes_for_recalculation` new outcomes after the last record.
 Bounds are unchanged: `min_outcomes_for_recalculation`, the

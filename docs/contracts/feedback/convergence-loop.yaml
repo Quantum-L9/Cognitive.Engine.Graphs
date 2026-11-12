@@ -129,18 +129,10 @@ weight_governance:
       approved_automatic_recalculation: set learned_weight_auto_apply_enabled=true (issue option b); each write appends an applied DimensionWeightChange
       candidate_only: keep the default; recalculations stay unapplied records (no weight moves); applying one is a separate, not yet built step (apply_weight_proposal persists nothing)
     record_when_decided: set status to decided with the decision, date and decider; the known-gap probe then passes and the path moves to CLOSED_GAPS with a CI receipt
-  mechanism:
-    change_record: one DimensionWeightChange per dimension per recalculation (tenant, dimension, recalculation_id, prior_weight, new_weight, applied, confidence, ci_width, lift, sample_size, outcome_count, win_count, method, recorded_at); the whole recalculation (records and any applied weights) is one transaction, so it commits completely or not at all; nothing in the engine updates or deletes a record
-    apply_switch: learned_weight_auto_apply_enabled alone writes DimensionWeight.weight; learned_weight_change_record_enabled only decides whether history is kept (record off + auto-apply off recalculates and writes nothing)
-    lost_update_guard: an applied recalculation is one write transaction of two statements (lock every target DimensionWeight, then read priors and write); a single-statement version let the planner cache dw.weight before the MERGE and recorded a stale prior under concurrency (CI run 43130108743 on e56f973; reproduced locally in 16/20 concurrent runs, 0/20 after the split); regression test repeats concurrent rounds and fails on the old statement
-    known_limit: two concurrent first writes of a MISSING DimensionWeight can each MERGE a node because no (dimension, tenant) uniqueness constraint exists (pre-existing, outside CEG-462)
-    default: candidate only; DimensionWeight.weight is neither written nor created, so ScoringAssembler.load_learned_weights is unchanged
-    no_evidence: a recalculation with zero outcomes writes nothing
-    recalculation_marker: should_recalculate counts outcomes newer than the latest applied weight or change record, so a replayed outcome does not recalculate again
-  boost_factor:
-    disposition: retired behind feedback_boost_propagation_enabled (default false); legacy stage kept for rollback only
-    reason: hand-set multiplier (feedbackloop.propagation_boost_factor 1.15) applied to every tenant DimensionWeight regardless of dimension; no engine code reads boost_factor, so ranking is identical in both states
-    schema_field: feedbackloop.propagation_boost_factor kept (engine/config/schema.py unchanged); inert while the flag is off
+  mechanism: docs/FEATURE_GATES.md §34 (append-only DimensionWeightChange per dimension; one transaction per recalculation; only learned_weight_auto_apply_enabled writes a weight)
+  lost_update_guard: CI run 43130108743 on e56f973 recorded a stale prior (planner cached dw.weight before the lock; 16/20 local concurrent runs); fixed by locking in its own statement (0/20); the regression test fails on the old statement
+  known_limit: two concurrent first writes of a MISSING DimensionWeight can each MERGE a node (no (dimension, tenant) uniqueness constraint; pre-existing)
+  boost_factor: retired behind feedback_boost_propagation_enabled (default false); nothing reads boost_factor, so ranking is identical; propagation_boost_factor stays in the schema, inert
   method_findings_for_the_owner:
   - the per-dimension lift counts outcomes where <dim>_score IS NOT NULL (presence), not outcomes where the dimension scored high, as the recalculate_weights docstring describes; a lift therefore measures which dimensions were recorded, not whether they predict wins
   - outcomes exist only for candidates that were matched and shown, so the win rates carry exposure/selection bias; there is no held-out comparison against the unchanged baseline
