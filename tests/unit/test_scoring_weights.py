@@ -416,13 +416,25 @@ def _plasticos_like_spec(domain_id: str = "plasticos") -> MagicMock:
 
 
 async def _write_weights(store: _PropertyLevelDimensionWeightStore, spec, details: dict[str, float]) -> None:
+    """Apply learned weights the way an approved recalculation does.
+
+    These tests prove the reader/writer key contract for an APPLIED weight, so
+    the write runs with learned_weight_auto_apply_enabled (CEG-462: off by
+    default, a recalculation is then only a recorded candidate). The detail map
+    carries every key recalculate_weights produces.
+    """
+    from unittest.mock import patch
+
+    from engine.config.settings import settings
     from engine.feedback.signal_weights import SignalWeightCalculator
 
     calc = SignalWeightCalculator.__new__(SignalWeightCalculator)
     calc._driver = store
     calc._spec = spec
     calc._db = spec.domain.id
-    await calc._store_weights({name: {"weight": w, "confidence": 0.9, "ci_width": 0.1} for name, w in details.items()})
+    detail = {"confidence": 0.9, "ci_width": 0.1, "lift": 1.0, "sample_size": 10}
+    with patch.object(settings, "learned_weight_auto_apply_enabled", True):
+        await calc._store_weights({name: {"weight": w, **detail} for name, w in details.items()})
 
 
 @pytest.mark.unit

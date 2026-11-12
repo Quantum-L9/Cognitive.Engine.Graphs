@@ -454,6 +454,28 @@ class Settings(BaseSettings):
     # the feedback metadata reports status complete|partial with per-stage
     # results. Off: the first stage failure propagates.
     feedback_partial_results_enabled: bool = True
+    # CEG-462 (boost_factor): ScorePropagator multiplied every tenant
+    # DimensionWeight.boost_factor by the hand-set
+    # feedbackloop.propagation_boost_factor (1.15) on any success, and nothing
+    # reads boost_factor, so the stage wrote an unevidenced number that never
+    # reached ranking. Off (default): the convergence loop skips propagation and
+    # reports it as not applied. On: the legacy propagation stage, kept for
+    # rollback only. Ranking is identical either way.
+    feedback_boost_propagation_enabled: bool = False
+    # CEG-462 (weight governance): SignalWeightCalculator._store_weights
+    # overwrote DimensionWeight.weight with no history. On (default): every
+    # recalculation appends one DimensionWeightChange record per dimension
+    # (prior weight, computed weight, evidence counts, confidence, method,
+    # whether it was applied), created in the same statement as any weight
+    # write, never updated or deleted. Off: the legacy overwrite, no record.
+    learned_weight_change_record_enabled: bool = True
+    # CEG-462 (weight governance): whether a recalculated weight is applied to
+    # DimensionWeight.weight, which ScoringAssembler.load_learned_weights reads.
+    # Requires learned_weight_change_record_enabled. Off (default): the
+    # recalculation is recorded as an unapplied candidate and ranking keeps the
+    # current weights. On: approved automatic recalculation, each write
+    # recorded. The operator owns this decision (issue #462, Decision 1).
+    learned_weight_auto_apply_enabled: bool = False
     # RU-029 / CEG-COR-118: DriftDetector treated only a both-empty window pair
     # as insufficient data, so an empty baseline (the first drift_window_days)
     # scored divergence 1.0 and raised alert=True. On: either window empty is

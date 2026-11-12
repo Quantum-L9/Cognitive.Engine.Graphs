@@ -15,7 +15,7 @@ baseline:
 authority: candidate_extracted_from_source
 schema: l9.ceg.feedback.convergence/v1
 owner: CEG feedback domain owner
-status: replay_partial_and_tenant_proven_weight_governance_open
+status: replay_partial_tenant_and_governance_mechanism_proven_owner_admission_open
 source_refs:
 - path: engine/feedback/convergence.py
   symbol: ConvergenceLoop.on_outcome_recorded
@@ -32,6 +32,15 @@ source_refs:
 - path: engine/config/settings.py
   symbol: feedback_enabled, outcome_idempotency_enabled, feedback_partial_results_enabled
   revision: 3379309971f9defa40c393b2292f2f1784aa90ac
+- path: engine/feedback/signal_weights.py
+  symbol: learned_weights_applied, SignalWeightCalculator._store_weights, _applied_change_cypher, should_recalculate
+  revision: CEG-462 change on branch claude/ceg-462-weight-governance-m7h203, base 2c2f27a75fee498ea22e1cf672d40e0ee56b61a8
+- path: engine/feedback/convergence.py
+  symbol: ConvergenceLoop.on_outcome_recorded (propagation behind feedback_boost_propagation_enabled)
+  revision: CEG-462 change on branch claude/ceg-462-weight-governance-m7h203, base 2c2f27a75fee498ea22e1cf672d40e0ee56b61a8
+- path: engine/config/settings.py
+  symbol: feedback_boost_propagation_enabled, learned_weight_change_record_enabled, learned_weight_auto_apply_enabled
+  revision: CEG-462 change on branch claude/ceg-462-weight-governance-m7h203, base 2c2f27a75fee498ea22e1cf672d40e0ee56b61a8
 activation:
   global_setting: feedback_enabled
   global_default: false
@@ -41,18 +50,23 @@ activation:
     outcome_idempotency_enabled: true
     feedback_partial_results_enabled: true
     reference: docs/FEATURE_GATES.md §30
+  governance_flags:
+    feedback_boost_propagation_enabled: false
+    learned_weight_change_record_enabled: true
+    learned_weight_auto_apply_enabled: false
+    reference: docs/FEATURE_GATES.md §34
 observed:
   handler_invokes_convergence_when_both_enabled: true
   callback: ConvergenceLoop.on_outcome_recorded
   runtime_delivery_tested_here: true
   automatic_weight_admission_proven: false
   convergence_stages_from_code:
-  - ScorePropagator.propagate_outcome
+  - ScorePropagator.propagate_outcome (only with feedback_boost_propagation_enabled; off by default since CEG-462)
   - SignalWeightCalculator.should_recalculate + recalculate_weights
   - DriftDetector.check_and_alert
   runtime_outcome_idempotency_proven: true
   weight_recalculation_can_execute_after_gate: true
-  weight_recalculation_requires_approval: false
+  weight_recalculation_requires_approval: true  # since CEG-462: DimensionWeight.weight is written only with learned_weight_auto_apply_enabled (operator flag, default off)
   tenant_equals_domain_id: verified; DomainPackLoader refuses a pack whose domain.id differs from the tenant lookup key (engine/config/loader.py, legacy and receipt modes), so the propagator's tenant=domain.id scope matches the outcome node's tenant
 sync_path_outcomes:
   decision: excluded_by_design
@@ -88,8 +102,10 @@ blocking_validation:
   status: verified_local
 - item: weight recalculation governance and replay admission
   status: open
+  mechanism_status: verified_local (CEG-462); remaining is owner admission of the policy and a CI receipt
   mechanism: once feedbackloop.signal_weights.min_outcomes_for_recalculation new outcomes accumulate, ConvergenceLoop calls SignalWeightCalculator.recalculate_weights, which writes DimensionWeight.weight with no approval; ScoringAssembler.load_learned_weights then applies it. The governed path (admin score_feedback -> apply_weight_proposal) is bypassed.
   required_disposition: owner decision on whether the loop may write learned weights, or must emit a proposal for apply_weight_proposal
+  superseded_mechanism: before CEG-462 the loop overwrote DimensionWeight.weight with no approval and no history; see weight_governance
   probe: tests/contracts/test_known_gaps.py::_probe_feedback_convergence
 partial_proof:
   scope: replay identity, partial-outcome truth, tenant scoping; not weight governance
@@ -104,9 +120,40 @@ partial_proof:
   CI_run_id: 43077639971
   CI_head: 83c9d377dccdcf519d071733c43df7bab63e26a9
   CI_job: Integration Tests (Neo4j Enterprise + PostgreSQL) - tests/integration/test_feedback_convergence_closure.py 7 passed, 156 passed in job
+weight_governance:
+  issue: Quantum-L9/Cognitive.Engine.Graphs#462
+  owner_decision:
+    status: pending
+    decision_owner: operator (issue #462 Decision 1, deferred 2026-11-11)
+    options:
+      approved_automatic_recalculation: set learned_weight_auto_apply_enabled=true (issue option b); each write appends an applied DimensionWeightChange
+      candidate_only: keep the default; recalculations stay unapplied records (no weight moves); applying one is a separate, not yet built step (apply_weight_proposal persists nothing)
+    record_when_decided: set status to decided with the decision, date and decider; the known-gap probe then passes and the path moves to CLOSED_GAPS with a CI receipt
+  mechanism:
+    change_record: one DimensionWeightChange per dimension per recalculation (tenant, dimension, recalculation_id, prior_weight, new_weight, applied, confidence, ci_width, lift, sample_size, outcome_count, win_count, method, recorded_at); created in the same statement as an applied write; nothing in the engine updates or deletes it
+    default: candidate only; DimensionWeight.weight is neither written nor created, so ScoringAssembler.load_learned_weights is unchanged
+    no_evidence: a recalculation with zero outcomes writes nothing
+    recalculation_marker: should_recalculate counts outcomes newer than the latest applied weight or change record, so a replayed outcome does not recalculate again
+  boost_factor:
+    disposition: retired behind feedback_boost_propagation_enabled (default false); legacy stage kept for rollback only
+    reason: hand-set multiplier (feedbackloop.propagation_boost_factor 1.15) applied to every tenant DimensionWeight regardless of dimension; no engine code reads boost_factor, so ranking is identical in both states
+    schema_field: feedbackloop.propagation_boost_factor kept (engine/config/schema.py unchanged); inert while the flag is off
+  method_findings_for_the_owner:
+  - the per-dimension lift counts outcomes where <dim>_score IS NOT NULL (presence), not outcomes where the dimension scored high, as the recalculate_weights docstring describes; a lift therefore measures which dimensions were recorded, not whether they predict wins
+  - outcomes exist only for candidates that were matched and shown, so the win rates carry exposure/selection bias; there is no held-out comparison against the unchanged baseline
+  - outcomes are deduplicated by outcome_id (FEEDBACK-IDEMP-01), but outcomes sharing one upstream event under different ids are counted as independent
+  proof:
+    unit: tests/unit/test_feedback_weight_governance.py
+    integration: tests/integration/test_feedback_weight_governance.py
+    local_run:
+      neo4j_image: neo4j:5.18-enterprise (testcontainers)
+      command: CEG_REQUIRE_INTEGRATION=1 pytest tests/integration/test_feedback_weight_governance.py tests/integration/test_feedback_convergence_closure.py tests/integration/test_score_propagator_integration.py tests/integration/test_dimension_weight_roundtrip.py tests/integration/test_outcomes_handler.py tests/integration/test_outcomes_causal_integrity.py
+      result: 24 passed
+      date: '2026-11-12'
+    CI_run_id: null
 operational_proof:
   observed_in_this_pack: false
   runtime_test_receipt: null
   CI_run_id: null
-  blocked_until: weight-recalculation governance decided and proven; then a CI receipt naming the behaviour tests
+  blocked_until: owner decision recorded in weight_governance.owner_decision (mechanism proven locally, CEG-462); then a CI receipt naming the behaviour tests
 contract_status_is_not_runtime_status: true

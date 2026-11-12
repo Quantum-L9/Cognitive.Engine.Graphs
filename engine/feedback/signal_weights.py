@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import logging
 import math
+from typing import Any
+from uuid import uuid4
 
 from engine.config.outcome_vocabulary import outcome_node_label
 from engine.config.schema import DomainSpec
@@ -28,6 +30,49 @@ from engine.utils.security import sanitize_label
 logger = logging.getLogger(__name__)
 
 _Z_95 = 1.96
+
+# CEG-462: a recalculation that is not applied is recorded as a candidate. The
+# prior weight is read, never written; no DimensionWeight node is created.
+# DimensionWeightChange is append-only: nothing in the engine updates or deletes it.
+_CANDIDATE_CHANGE_CYPHER = """
+        OPTIONAL MATCH (dw:DimensionWeight {dimension: $dimension, tenant: $tenant})
+        WITH head(collect(dw.weight)) AS prior_weight
+        CREATE (c:DimensionWeightChange {
+            tenant: $tenant, dimension: $dimension, recalculation_id: $recalculation_id,
+            prior_weight: prior_weight, new_weight: $weight, applied: false,
+            confidence: $confidence, ci_width: $ci_width, lift: $lift, sample_size: $sample_size,
+            outcome_count: $outcome_count, win_count: $win_count, method: $method,
+            recorded_at: datetime()
+        })
+        RETURN c.dimension AS dimension
+        """
+
+# Latest recalculation: the newer of the last applied weight and the last change record.
+_LAST_RECALC_WITH_RECORDS = """OPTIONAL MATCH (dw:DimensionWeight {tenant: $tenant})
+        WITH max(dw.updated_at) AS last_applied
+        OPTIONAL MATCH (c:DimensionWeightChange {tenant: $tenant})
+        WITH last_applied, max(c.recorded_at) AS last_recorded
+        WITH CASE
+            WHEN last_recorded IS NULL THEN last_applied
+            WHEN last_applied IS NOT NULL AND last_applied > last_recorded THEN last_applied
+            ELSE last_recorded
+        END AS last_recalc"""
+
+
+def learned_weights_applied() -> bool:
+    """Whether a recalculation writes ``DimensionWeight.weight`` (CEG-462).
+
+    True on the legacy path (no change record) and under approved automatic
+    recalculation; False when the recalculation is recorded as an unapplied
+    candidate, which leaves the weights ScoringAssembler reads unchanged.
+    """
+    return not settings.learned_weight_change_record_enabled or settings.learned_weight_auto_apply_enabled
+
+
+def _recalculation_method() -> str:
+    """Name of the calculation that produced a recorded weight, so a record can be reproduced."""
+    ci = "agresti_coull" if settings.signal_weight_proportion_ci else "legacy_lift_ci"
+    return f"outcome_lift/{ci}/v1"
 
 
 def _lift_ci_width(wins: int, n: int, base_win_rate: float) -> float:
@@ -106,7 +151,7 @@ class SignalWeightCalculator:
             weight_details[dim.name] = detail
 
         # Step 3: Store weights in Neo4j (with confidence metadata)
-        await self._store_weights(weight_details)
+        await self._store_weights(weight_details, outcome_count=total_outcomes, win_count=total_wins)
 
         logger.info(
             "Recalculated %d dimension weights for domain=%s",
@@ -194,8 +239,81 @@ class SignalWeightCalculator:
             "sample_size": dim_total,
         }
 
-    async def _store_weights(self, weight_details: dict[str, dict[str, float]]) -> None:
-        """Store computed weights as DimensionWeight nodes in Neo4j with confidence metadata."""
+    async def _store_weights(
+        self,
+        weight_details: dict[str, dict[str, float]],
+        *,
+        outcome_count: int = 0,
+        win_count: int = 0,
+    ) -> None:
+        """Store computed weights as DimensionWeight nodes in Neo4j with confidence metadata.
+
+        CEG-462: with ``learned_weight_change_record_enabled`` each dimension of a
+        recalculation appends one ``DimensionWeightChange`` node. The weight is
+        written only when ``learned_weights_applied()``; otherwise the record is an
+        unapplied candidate and DimensionWeight is not touched. Off: the legacy
+        overwrite with no history.
+        """
+        if not settings.learned_weight_change_record_enabled:
+            await self._overwrite_weights(weight_details)
+            return
+        apply = settings.learned_weight_auto_apply_enabled
+        recalculation_id = str(uuid4())
+        method = _recalculation_method()
+        for dim_name, detail in weight_details.items():
+            parameters: dict[str, Any] = {
+                "dimension": dim_name,
+                "tenant": self._db,
+                "weight": detail["weight"],
+                "confidence": detail["confidence"],
+                "ci_width": detail["ci_width"],
+                "lift": detail["lift"],
+                "sample_size": detail["sample_size"],
+                "outcome_count": outcome_count,
+                "win_count": win_count,
+                "recalculation_id": recalculation_id,
+                "method": method,
+            }
+            cypher = self._applied_change_cypher(dim_name) if apply else _CANDIDATE_CHANGE_CYPHER
+            await self._driver.execute_query(cypher, parameters=parameters, database=self._db)
+        logger.info(
+            "Recorded %d dimension weight changes for domain=%s recalculation_id=%s applied=%s",
+            len(weight_details),
+            self._db,
+            recalculation_id,
+            apply,
+        )
+
+    @staticmethod
+    def _applied_change_cypher(dim_name: str) -> str:
+        """Write the weight and its change record in one statement.
+
+        The DimensionWeight is write-locked before its prior weight is read, so
+        two concurrent recalculations cannot both record the same prior value.
+        """
+        safe_name = sanitize_label(dim_name)
+        return f"""
+        MERGE (dw:DimensionWeight {{dimension: $dimension, tenant: $tenant}})
+        SET dw._weight_lock = true
+        REMOVE dw._weight_lock
+        WITH dw, dw.weight AS prior_weight
+        SET dw.weight = $weight,
+            dw.confidence = $confidence,
+            dw.ci_width = $ci_width,
+            dw.updated_at = datetime(),
+            dw.{safe_name}_weight = $weight
+        CREATE (:DimensionWeightChange {{
+            tenant: $tenant, dimension: $dimension, recalculation_id: $recalculation_id,
+            prior_weight: prior_weight, new_weight: $weight, applied: true,
+            confidence: $confidence, ci_width: $ci_width, lift: $lift, sample_size: $sample_size,
+            outcome_count: $outcome_count, win_count: $win_count, method: $method,
+            recorded_at: dw.updated_at
+        }})
+        RETURN dw.dimension AS dimension
+        """
+
+    async def _overwrite_weights(self, weight_details: dict[str, dict[str, float]]) -> None:
+        """Legacy write (learned_weight_change_record_enabled off): overwrite, no history."""
         for dim_name, detail in weight_details.items():
             safe_name = sanitize_label(dim_name)
             cypher = f"""
@@ -223,9 +341,16 @@ class SignalWeightCalculator:
         """Check if recalculation threshold met (outcome count since last recalc)."""
         outcome_label = sanitize_label(outcome_node_label(self._spec, "signal weight recalculation check"))
 
+        # CEG-462: an unapplied recalculation does not move dw.updated_at, so the
+        # latest change record also marks a recalculation; without it every
+        # outcome past the threshold would recalculate (and record) again.
+        last_recalc = (
+            _LAST_RECALC_WITH_RECORDS
+            if settings.learned_weight_change_record_enabled
+            else "OPTIONAL MATCH (dw:DimensionWeight {tenant: $tenant})\n        WITH max(dw.updated_at) AS last_recalc"
+        )
         cypher = f"""
-        OPTIONAL MATCH (dw:DimensionWeight {{tenant: $tenant}})
-        WITH max(dw.updated_at) AS last_recalc
+        {last_recalc}
         MATCH (o:{outcome_label})
         WHERE o.tenant = $tenant
           AND (last_recalc IS NULL OR o.created_at > last_recalc)

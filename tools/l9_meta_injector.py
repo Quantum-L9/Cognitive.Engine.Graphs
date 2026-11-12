@@ -381,6 +381,20 @@ FILE_REGISTRY: list[FileMeta] = [
         ["test", "integration", "feedback"],
         "engine-team",
     ),
+    FileMeta(
+        "tests/unit/test_feedback_weight_governance.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "feedback", "signal-weights"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/integration/test_feedback_weight_governance.py",
+        "engine-specific",
+        ["test"],
+        ["test", "integration", "feedback"],
+        "engine-team",
+    ),
     FileMeta("tests/unit/test_kge_beam_search.py", "engine-specific", ["test"], ["test", "unit", "kge"], "engine-team"),
     FileMeta(
         "tests/unit/test_kge_compound_e3d.py", "engine-specific", ["test"], ["test", "unit", "kge"], "engine-team"

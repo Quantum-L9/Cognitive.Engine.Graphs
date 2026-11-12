@@ -24,10 +24,14 @@ from engine.config.schema import DomainSpec
 from engine.feedback.drift_detector import DriftDetector
 from engine.feedback.pattern_matcher import ConfigurationMatcher
 from engine.feedback.score_propagator import ScorePropagator
-from engine.feedback.signal_weights import SignalWeightCalculator
+from engine.feedback.signal_weights import SignalWeightCalculator, learned_weights_applied
 from engine.graph.driver import GraphDriver
 
 logger = logging.getLogger(__name__)
+
+# CEG-462: reported when feedback_boost_propagation_enabled is off. Nothing reads
+# DimensionWeight.boost_factor, so the stage could not affect ranking.
+_PROPAGATION_RETIRED: dict[str, Any] = {"propagated": False, "reason": "boost_propagation_disabled"}
 
 
 class ConvergenceLoop:
@@ -97,15 +101,18 @@ class ConvergenceLoop:
             stages[name] = "ok"
             return value
 
-        propagation = await _stage(
-            "propagation",
-            lambda: self._score_propagator.propagate_outcome(
-                outcome_data,
-                boost_factor=self._feedback_spec.propagation_boost_factor,
-            ),
-        )
-        if propagation is not None:
-            metadata["propagation"] = propagation
+        if settings.feedback_boost_propagation_enabled:
+            propagation = await _stage(
+                "propagation",
+                lambda: self._score_propagator.propagate_outcome(
+                    outcome_data,
+                    boost_factor=self._feedback_spec.propagation_boost_factor,
+                ),
+            )
+            if propagation is not None:
+                metadata["propagation"] = propagation
+        else:
+            metadata["propagation"] = dict(_PROPAGATION_RETIRED)
 
         async def _recalculate() -> dict[str, Any] | None:
             if await self._weight_calculator.should_recalculate():
@@ -115,6 +122,7 @@ class ConvergenceLoop:
 
         new_weights = await _stage("weights", _recalculate)
         metadata["weights_recalculated"] = stages["weights"] == "ok" and new_weights is not None
+        metadata["weights_applied"] = metadata["weights_recalculated"] and learned_weights_applied()
         if new_weights is not None:
             metadata["new_weights"] = new_weights
 
@@ -140,22 +148,28 @@ class ConvergenceLoop:
 
     async def _run_stages_unisolated(self, outcome_data: dict[str, Any]) -> dict[str, Any]:
         """Legacy path (feedback_partial_results_enabled off): the first stage failure propagates."""
+        from engine.config.settings import settings
+
         metadata: dict[str, Any] = {"feedback_loop": "enabled"}
 
-        # Step 1: Propagate score adjustments
-        propagation = await self._score_propagator.propagate_outcome(
-            outcome_data,
-            boost_factor=self._feedback_spec.propagation_boost_factor,
-        )
-        metadata["propagation"] = propagation
+        # Step 1: Propagate score adjustments (retired unless re-enabled, CEG-462)
+        if settings.feedback_boost_propagation_enabled:
+            metadata["propagation"] = await self._score_propagator.propagate_outcome(
+                outcome_data,
+                boost_factor=self._feedback_spec.propagation_boost_factor,
+            )
+        else:
+            metadata["propagation"] = dict(_PROPAGATION_RETIRED)
 
         # Step 2: Check if weight recalculation needed
         if await self._weight_calculator.should_recalculate():
             weights = await self._weight_calculator.recalculate_weights()
             metadata["weights_recalculated"] = True
+            metadata["weights_applied"] = learned_weights_applied()
             metadata["new_weights"] = weights
         else:
             metadata["weights_recalculated"] = False
+            metadata["weights_applied"] = False
 
         # Step 3: Drift detection (chi-squared divergence)
         drift_data = await self._drift_detector.check_and_alert(
