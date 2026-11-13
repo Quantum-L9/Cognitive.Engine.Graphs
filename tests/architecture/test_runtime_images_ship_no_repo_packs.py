@@ -15,7 +15,9 @@ Runtime images contain no repository domain packs (#400 A1-A3, A6).
 Operator decision 2026-11-03: the packs kept in this repository are design and
 test material. They must not be a runtime dependency. Decision D1 (2026-11-13):
 a tenant spec reaches production through an operator-owned pack root mounted
-read-only, the directory tools/publish_domain_pack.py publishes into.
+read-only. Which layout the loader reads there (folder-shaped spec.yaml, or the
+publisher's current.json + revisions) is DOMAIN_PACK_RECEIPTS_ENABLED, a
+separate operator authorization these guards do not decide.
 
 Static guards over Dockerfile, Dockerfile.prod, chassis/Dockerfile.chassis and
 docker-compose.prod.yml: no image copies a pack directory out of the build

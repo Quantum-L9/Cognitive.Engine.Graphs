@@ -80,11 +80,25 @@ CEG_DOMAINS_DIR=/opt/ceg/domain-packs
 **Domain packs are not in the image (#400).** Neither `Dockerfile` nor
 `Dockerfile.prod` copies a pack directory. `docker-compose.prod.yml` mounts
 `CEG_DOMAINS_DIR` read-only at `/app/domains` and sets `DOMAINS_ROOT` to that
-path, so the engine serves only what the operator placed there. That directory
-is the root `tools/publish_domain_pack.py` publishes reviewed packs into
-(`docs/contracts/DOMAIN_SPEC_VERSIONING.md`). With an empty directory the engine
-starts and serves no domain. The packs kept in this repository are design and
-test material and are never a production source.
+path, so the engine serves only what the operator placed there. With an empty
+directory the engine starts and serves no domain. The packs kept in this
+repository are design and test material and are never a production source.
+
+Which layout the engine reads from that directory depends on
+`DOMAIN_PACK_RECEIPTS_ENABLED`, which production compose does **not** set
+(default `False`):
+
+| `DOMAIN_PACK_RECEIPTS_ENABLED` | Layout served | How it gets there |
+|---|---|---|
+| unset / `false` (today) | `<root>/<tenant>/spec.yaml` | placed by the operator |
+| `true` | `<root>/<tenant>/current.json` + `revisions/<sha256>/` | `tools/publish_domain_pack.py` |
+
+A root written by `tools/publish_domain_pack.py` is therefore **not served**
+until receipt mode is turned on: the loader finds no `spec.yaml`, lists no
+domain, and the service still reports healthy. Turning the flag on in
+production is a separate operator authorization
+(`docs/runbooks/domain-pack-publish.md`, "Runtime feature discipline"); with it
+on, the folder-shaped `spec.yaml` layout is no longer read.
 
 Optional, with safe defaults: `NEO4J_USERNAME` (`neo4j`), `L9_SIGNING_KEY_ID`
 (`graph-engine-v1`), `POSTGRES_USER` (`l9_owner`), `POSTGRES_DB` (`l9_graph`),
