@@ -122,7 +122,7 @@ l9-engine/
 │   │   └── audit.py               # Audit logging
 │   └── db/                        # Database layer
 │       └── neo4j.py               # Async Neo4j driver pool
-├── domains/                       # Domain specification packs
+├── tests/fixtures/design_packs/   # Design and test domain packs (never loaded in production)
 │   ├── plasticos/
 │   ├── mortgage-brokerage/
 │   └── healthcare-matching/
@@ -238,9 +238,9 @@ See [iac/README.md](iac/README.md) for full infrastructure docs.
 
 ## Adding a New Domain
 
-1. Create `domains/<name>/spec.yaml` following the domain spec schema
-2. Add seed data in `domains/<name>/seeds/`
-3. Add migrations in `domains/<name>/migrations/`
+1. Create `tests/fixtures/design_packs/<name>/spec.yaml` following the domain spec schema
+2. Add seed data in `tests/fixtures/design_packs/<name>/seeds/`
+3. Add migrations in `tests/fixtures/design_packs/<name>/migrations/`
 4. Deploy — no code changes required
 
 See existing domains for examples.

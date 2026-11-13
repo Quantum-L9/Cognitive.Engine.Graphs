@@ -8,7 +8,7 @@ owner: domain-team
 status: active
 /L9_META -->
 
-# domains/TESTING_GUIDE.md
+# tests/fixtures/design_packs/TESTING_GUIDE.md
 """
 L9 Domains - Testing Guide
 
@@ -28,7 +28,7 @@ For each domain:
 
 ## 1. PLASTICOS (Recycled Plastic Matching)
 
-**Query File**: `domains/plasticos/test-query.json`
+**Query File**: `tests/fixtures/design_packs/plasticos/test-query.json`
 
 ```json
 {
@@ -64,7 +64,7 @@ For each domain:
 curl -X POST http://localhost:8000/v1/match \
   -H "Content-Type: application/json" \
   -H "X-Domain-Key: plasticos" \
-  -d @domains/plasticos/test-query.json
+  -d @tests/fixtures/design_packs/plasticos/test-query.json
 ```
 
 ---
@@ -75,7 +75,7 @@ The pack is served by default (owner decision 2026-10-29) but enforces no state
 licensing or lender blacklist yet (DEC-15). If it has been declared dormant,
 start the engine with `DORMANT_DOMAIN_PACKS_ENABLED=true` to run the requests below.
 
-**Query File**: `domains/mortgage-brokerage/test-query.json`
+**Query File**: `tests/fixtures/design_packs/mortgage-brokerage/test-query.json`
 
 ```json
 {
@@ -114,14 +114,14 @@ start the engine with `DORMANT_DOMAIN_PACKS_ENABLED=true` to run the requests be
 ```bash
 curl -X POST http://localhost:8000/v1/match \
   -H "X-Domain-Key: mortgage-brokerage" \
-  -d @domains/mortgage-brokerage/test-query.json
+  -d @tests/fixtures/design_packs/mortgage-brokerage/test-query.json
 ```
 
 ---
 
 ## 3. HEALTHCARE-REFERRAL (Provider Matching)
 
-**Query File**: `domains/healthcare-referral/test-query.json`
+**Query File**: `tests/fixtures/design_packs/healthcare-referral/test-query.json`
 
 ```json
 {
@@ -154,14 +154,14 @@ curl -X POST http://localhost:8000/v1/match \
 ```bash
 curl -X POST http://localhost:8000/v1/match \
   -H "X-Domain-Key: healthcare-referral" \
-  -d @domains/healthcare-referral/test-query.json
+  -d @tests/fixtures/design_packs/healthcare-referral/test-query.json
 ```
 
 ---
 
 ## 4. FREIGHT-MATCHING (Load-Carrier Matching)
 
-**Query File**: `domains/freight-matching/test-query.json`
+**Query File**: `tests/fixtures/design_packs/freight-matching/test-query.json`
 
 ```json
 {
@@ -196,14 +196,14 @@ curl -X POST http://localhost:8000/v1/match \
 ```bash
 curl -X POST http://localhost:8000/v1/match \
   -H "X-Domain-Key: freight-matching" \
-  -d @domains/freight-matching/test-query.json
+  -d @tests/fixtures/design_packs/freight-matching/test-query.json
 ```
 
 ---
 
 ## 5. ROOFING-COMPANY (Contractor-Project Matching)
 
-**Query File**: `domains/roofing-company/test-query.json`
+**Query File**: `tests/fixtures/design_packs/roofing-company/test-query.json`
 
 ```json
 {
@@ -237,14 +237,14 @@ curl -X POST http://localhost:8000/v1/match \
 ```bash
 curl -X POST http://localhost:8000/v1/match \
   -H "X-Domain-Key: roofing-company" \
-  -d @domains/roofing-company/test-query.json
+  -d @tests/fixtures/design_packs/roofing-company/test-query.json
 ```
 
 ---
 
 ## 6. EXECUTIVE-ASSISTANT (Task-Expert Matching)
 
-**Query File**: `domains/executive-assistant/test-query.json`
+**Query File**: `tests/fixtures/design_packs/executive-assistant/test-query.json`
 
 ```json
 {
@@ -275,14 +275,14 @@ curl -X POST http://localhost:8000/v1/match \
 ```bash
 curl -X POST http://localhost:8000/v1/match \
   -H "X-Domain-Key: executive-assistant" \
-  -d @domains/executive-assistant/test-query.json
+  -d @tests/fixtures/design_packs/executive-assistant/test-query.json
 ```
 
 ---
 
 ## 7. RESEARCH-AGENT (Paper-Dataset Matching)
 
-**Query File**: `domains/research-agent/test-query.json`
+**Query File**: `tests/fixtures/design_packs/research-agent/test-query.json`
 
 ```json
 {
@@ -313,14 +313,14 @@ curl -X POST http://localhost:8000/v1/match \
 ```bash
 curl -X POST http://localhost:8000/v1/match \
   -H "X-Domain-Key: research-agent" \
-  -d @domains/research-agent/test-query.json
+  -d @tests/fixtures/design_packs/research-agent/test-query.json
 ```
 
 ---
 
 ## 8. AIOS-GOD-AGENT (Tool Orchestration)
 
-**Query File**: `domains/aios-god-agent/test-query.json`
+**Query File**: `tests/fixtures/design_packs/aios-god-agent/test-query.json`
 
 ```json
 {
@@ -350,14 +350,14 @@ curl -X POST http://localhost:8000/v1/match \
 ```bash
 curl -X POST http://localhost:8000/v1/match \
   -H "X-Domain-Key: aios-god-agent" \
-  -d @domains/aios-god-agent/test-query.json
+  -d @tests/fixtures/design_packs/aios-god-agent/test-query.json
 ```
 
 ---
 
 ## 9. REPO-AS-AGENT (Code-Contributor Matching)
 
-**Query File**: `domains/repo-as-agent/test-query.json`
+**Query File**: `tests/fixtures/design_packs/repo-as-agent/test-query.json`
 
 ```json
 {
@@ -388,14 +388,14 @@ curl -X POST http://localhost:8000/v1/match \
 ```bash
 curl -X POST http://localhost:8000/v1/match \
   -H "X-Domain-Key: repo-as-agent" \
-  -d @domains/repo-as-agent/test-query.json
+  -d @tests/fixtures/design_packs/repo-as-agent/test-query.json
 ```
 
 ---
 
 ## 10. LEGAL-DISCOVERY (Case-Document Matching)
 
-**Query File**: `domains/legal-discovery/test-query.json`
+**Query File**: `tests/fixtures/design_packs/legal-discovery/test-query.json`
 
 ```json
 {
@@ -428,7 +428,7 @@ curl -X POST http://localhost:8000/v1/match \
 ```bash
 curl -X POST http://localhost:8000/v1/match \
   -H "X-Domain-Key: legal-discovery" \
-  -d @domains/legal-discovery/test-query.json
+  -d @tests/fixtures/design_packs/legal-discovery/test-query.json
 ```
 
 ---
@@ -510,7 +510,7 @@ curl -X POST http://localhost:8000/v1/match \
 ## Troubleshooting
 
 ### Domain fails to load
-- Check YAML syntax: `yamllint domains/{domain-id}/spec.yaml`
+- Check YAML syntax: `yamllint tests/fixtures/design_packs/{domain-id}/spec.yaml`
 - Verify all cross-references (gates → ontology, GDS → edges)
 - Check logs: `docker logs {container-id}`
 
