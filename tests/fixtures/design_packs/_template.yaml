@@ -12,7 +12,7 @@
 # =============================================================================
 # Version: 1.0.0
 # Schema: engine/config/schema.py (DomainSpec)
-# Usage: Copy this file to domains/{domain-id}/spec.yaml (the directory name
+# Usage: Copy this file to tests/fixtures/design_packs/{domain-id}/spec.yaml (the directory name
 #        is the domain id; this file itself is never served)
 #
 # This template shows the available fields with their types and defaults, and

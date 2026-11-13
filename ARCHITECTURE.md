@@ -45,7 +45,8 @@ engine/
   kge/                 CompoundE3D embeddings — DORMANT (kge_enabled=False)
 
 chassis/               FastAPI app, routers, middleware, request validation
-domains/               {domain_id}_domain_spec.yaml — one per vertical
+tests/fixtures/design_packs/
+                       {domain_id}_domain_spec.yaml — one per vertical (design and test packs)
 contracts/             24 enforced behavioral contracts
 tests/
   unit/                Pure functions, no Neo4j
@@ -68,7 +69,7 @@ tools/
 HTTP POST /v1/{tenant}/{action}
   └── chassis/routers.py        validates PacketEnvelope
       └── engine/handlers.py    dispatches to action handler
-          └── DomainSpec         loaded from domains/{domain_id}_domain_spec.yaml
+          └── DomainSpec         loaded from tests/fixtures/design_packs/{domain_id}_domain_spec.yaml
               ├── gates/          compile WHERE clauses
               ├── traversal/      compile MATCH clauses
               ├── scoring/        compile WITH + RETURN (weighted scoring)
@@ -95,7 +96,7 @@ Outcome recorded → fingerprint stored → ConvergenceLoop triggers:
 All matching behavior is declared in YAML. No hardcoded business logic in engine code.
 
 ```yaml
-# domains/example_domain_spec.yaml skeleton
+# tests/fixtures/design_packs/example_domain_spec.yaml skeleton
 version: "1.0"
 domain_id: example
 targetnode: Contact
@@ -148,7 +149,7 @@ All behavioral changes are gated. Flags live in `engine/config/settings.py`.
 | New scoring dimension | `engine/scoring/` + add to assembler |
 | New action handler | `engine/handlers.py` + update `register_all()` |
 | New HTTP route | `chassis/routers.py` only |
-| New domain vertical | `domains/{id}_domain_spec.yaml` |
+| New domain vertical | `tests/fixtures/design_packs/{id}_domain_spec.yaml` |
 | New contract | `contracts/` + `tools/contract_scanner.py` |
 
 > Cross-reference: `.claude/rules/routing.md` for exhaustive routing rules.

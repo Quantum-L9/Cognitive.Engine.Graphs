@@ -149,7 +149,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "tests/**" = ["S101", "S105", "S106", "S108", "ARG001", "ARG002", "PLR2004", "PT011", "B017", "F841", "SIM117", "RUF043"]
-"domains/**" = ["PTH123"]
+"tests/fixtures/design_packs/**" = ["PTH123"]
 "engine/packet/test_*.py" = ["B017"]
 "engine/packet/packet_store.py" = ["TRY300"]
 "scripts/**" = ["S603", "S607", "E402"]
@@ -188,7 +188,7 @@ exclude = [
     "^current work/",
     "^harvest_staging/",
     "^docs/",
-    "^domains/",
+    "^tests/fixtures/design_packs/",
 ]
 
 [tool.pydantic-mypy]

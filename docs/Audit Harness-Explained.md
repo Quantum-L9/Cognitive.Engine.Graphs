@@ -94,7 +94,7 @@ make audit
   └─→ tools/spec_extract.py          (spec feature coverage)
         ├─ Reads: graph-cognitive-engine-spec-v1.1.0.yaml
         ├─ Extracts: gates, scoring, ontology, v1.1 additions, actions, GDS
-        ├─ Scans: engine/**/*.py + domains/**/*.yaml
+        ├─ Scans: engine/**/*.py + tests/fixtures/design_packs/**/*.yaml
         └─ Writes: artifacts/coverage_report.md
                    artifacts/coverage_matrix.json
                    artifacts/spec_checklist.json

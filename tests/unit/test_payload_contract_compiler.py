@@ -166,7 +166,7 @@ NEUTRAL_FIXTURES = ROOT / "tests" / "fixtures" / "payloads" / "orbital-logistics
 
 
 def test_make_gates_run_the_compiler_on_the_neutral_fixtures() -> None:
-    """Every Repo.mk compiler call passes explicit synthetic roots, so no gate needs domains/plasticos."""
+    """Every Repo.mk compiler call passes explicit synthetic roots, so no gate needs tests/fixtures/design_packs/plasticos."""
     repo_mk = (ROOT / "Repo.mk").read_text(encoding="utf-8")
     calls = [line for line in repo_mk.splitlines() if "tools/payload_contract_compiler.py" in line]
     assert len(calls) == 3

@@ -1693,7 +1693,7 @@ wedged by the pre-fix behaviour needs a restart either way.
 
 Every flag below tightens `engine/config/schema.py` validation, so a spec that
 violates the rule stops loading (`DomainSpec.model_validate` raises). All default
-`true`; every shipped pack and `domains/_template.yaml` validate with all of them on.
+`true`; every shipped pack and `tests/fixtures/design_packs/_template.yaml` validate with all of them on.
 
 | Flag (env var) | Default | Unit | On | Off |
 |---|---|---|---|---|

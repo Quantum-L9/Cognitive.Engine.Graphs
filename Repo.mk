@@ -39,8 +39,8 @@
 VENV ?= .venv
 REPO_PY := $(if $(wildcard $(VENV)/bin/python),$(VENV)/bin/python,python3)
 # Payload contract compiler gate: a synthetic verification pack and its neutral
-# fixtures, so no make gate depends on a product pack under domains/ (Stage 2
-# follow-up, item 9). The PlasticOS example fixtures are validated by
+# fixtures, so no make gate depends on a product pack under
+# tests/fixtures/design_packs/ (Stage 2 follow-up, item 9). The PlasticOS example fixtures are validated by
 # tests/unit/test_payload_contract_compiler.py.
 PAYLOAD_COMPILER_ARGS := --stdout-only --domains-root tests/fixtures/domains \
 	--fixtures-root tests/fixtures/payloads/orbital-logistics --domain orbital-logistics

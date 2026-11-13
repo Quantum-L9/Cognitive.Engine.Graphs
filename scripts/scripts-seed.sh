@@ -20,12 +20,12 @@ set -a; source "$ROOT_DIR/.env" 2>/dev/null || true; set +a
 
 DOMAIN="${1:?Usage: seed.sh <domain> [api_url]}"
 API_URL="${2:-http://localhost:${API_PORT:-8000}}"
-SEED_DIR="$ROOT_DIR/domains/${DOMAIN}/seeds"
+SEED_DIR="$ROOT_DIR/tests/fixtures/design_packs/${DOMAIN}/seeds"
 
 if [[ ! -d "$SEED_DIR" ]]; then
   echo "⚠️  No seeds directory: ${SEED_DIR}"
-  echo "   Create JSON seed files in domains/${DOMAIN}/seeds/"
-  echo "   Example: domains/${DOMAIN}/seeds/suppliers.json"
+  echo "   Create JSON seed files in tests/fixtures/design_packs/${DOMAIN}/seeds/"
+  echo "   Example: tests/fixtures/design_packs/${DOMAIN}/seeds/suppliers.json"
   exit 1
 fi
 

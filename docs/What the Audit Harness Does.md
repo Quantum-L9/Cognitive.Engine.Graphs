@@ -250,7 +250,7 @@ def extract_ontology_features(spec: dict) -> list[SpecFeature]:
                     name=str(name),
                     spec_reference=f"ontology.{section_key}.{name}",
                     search_tokens=[f'"{name}"', f"'{name}'", str(name)],
-                    search_files=["engine/**/*.py", "domains/**/*.yaml"],
+                    search_files=["engine/**/*.py", "tests/fixtures/design_packs/**/*.yaml"],
                 ))
         elif isinstance(items, dict):
             for name in items:
@@ -259,7 +259,7 @@ def extract_ontology_features(spec: dict) -> list[SpecFeature]:
                     name=str(name),
                     spec_reference=f"ontology.{section_key}.{name}",
                     search_tokens=[f'"{name}"', f"'{name}'", str(name)],
-                    search_files=["engine/**/*.py", "domains/**/*.yaml"],
+                    search_files=["engine/**/*.py", "tests/fixtures/design_packs/**/*.yaml"],
                 ))
 
     return features
@@ -278,7 +278,7 @@ def extract_v11_additions(spec: dict) -> list[SpecFeature]:
             name=node,
             spec_reference=f"v1.1 addition: {node} node",
             search_tokens=[node, f'"{node}"', f"'{node}'"],
-            search_files=["engine/**/*.py", "domains/**/*.yaml"],
+            search_files=["engine/**/*.py", "tests/fixtures/design_packs/**/*.yaml"],
         ))
     for edge in v11_edges:
         features.append(SpecFeature(
@@ -286,7 +286,7 @@ def extract_v11_additions(spec: dict) -> list[SpecFeature]:
             name=edge,
             spec_reference=f"v1.1 addition: {edge} edge",
             search_tokens=[edge, f'"{edge}"', f"'{edge}'"],
-            search_files=["engine/**/*.py", "domains/**/*.yaml"],
+            search_files=["engine/**/*.py", "tests/fixtures/design_packs/**/*.yaml"],
         ))
     for ep in v11_endpoints:
         features.append(SpecFeature(
@@ -621,7 +621,7 @@ make audit
   └─→ tools/spec_extract.py          (spec feature coverage)
         ├─ Reads: graph-cognitive-engine-spec-v1.1.0.yaml
         ├─ Extracts: gates, scoring, ontology, v1.1 additions, actions, GDS
-        ├─ Scans: engine/**/*.py + domains/**/*.yaml
+        ├─ Scans: engine/**/*.py + tests/fixtures/design_packs/**/*.yaml
         └─ Writes: artifacts/coverage_report.md
                    artifacts/coverage_matrix.json
                    artifacts/spec_checklist.json

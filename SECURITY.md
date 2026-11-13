@@ -2,7 +2,7 @@
 
 ## Scope
 
-This policy covers the CEG engine (`engine/`), chassis (`chassis/`), domain specs (`domains/`), and all CI/CD infrastructure in this repository.
+This policy covers the CEG engine (`engine/`), chassis (`chassis/`), domain specs (`tests/fixtures/design_packs/`), and all CI/CD infrastructure in this repository.
 
 ## Supported Versions
 
@@ -40,7 +40,7 @@ Include:
 - Use `.env.template` for documenting required vars; populate via environment or secrets manager (AWS Secrets Manager / Hetzner env injection)
 
 ### Agent & AI Code Review
-- All AI-generated code that touches `engine/`, `contracts/`, or `domains/` requires human review before merge
+- All AI-generated code that touches `engine/`, `contracts/`, or `tests/fixtures/design_packs/` requires human review before merge
 - `CODEOWNERS` enforces mandatory review on governance files (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`)
 
 ## Dependency Management

@@ -8,36 +8,45 @@ owner: domain-team
 status: active
 /L9_META -->
 
+> **Design and test material only (issue #400 A5/A7, decision D5):** this directory is the former
+> top-level `domains/`. Nothing here is loaded in production: the runtime images ship no pack
+> from this repository, and a deployment serves only the packs an operator publishes into the
+> mounted read-only pack root with `tools/publish_domain_pack.py`
+> (`docs/runbooks/domain-pack-publish.md`). Tests and tools read this directory through
+> `DESIGN_PACKS_ROOT` in `tests/fixtures/domain_contracts.py`. The neutral synthetic packs
+> stay in `tests/fixtures/domains/`; do not add product packs there.
+>
 > **Domain neutrality (ADR-112, Stage 2):** CEG is a domain-agnostic graph engine. No pack in this
 > directory is privileged; `DomainPackLoader` admits every pack through one generic, fail-closed
 > policy (validates, gates compile, not declared `activation: dormant`). The packs here are
 > **examples and verification inputs**, not a required part of the core.
 >
 > **PlasticOS example (ADR-103 / TASK-015):** the executable PlasticOS example source is
-> `domains/plasticos/spec.yaml` only. Alternate PlasticOS YAML lives under `docs/archive/plasticos/`
+> `tests/fixtures/design_packs/plasticos/spec.yaml` only. Alternate PlasticOS YAML lives under `docs/archive/plasticos/`
 > and is non-authoritative.
 
 
-# domains/README.md
+# tests/fixtures/design_packs/README.md
 """
 L9 Graph Cognitive Engine - Domain Pack Repository
 
-This directory contains production-ready domain packs for vertical matching systems.
-Each domain pack is a complete, self-contained specification that the engine loads at runtime.
+This directory contains design and test domain packs for vertical matching systems.
+Each domain pack is a complete, self-contained specification in the shape the engine loads;
+none of them is loaded in production.
 
 ## Domain Pack Structure
 
 `DomainPackLoader` resolves **only** the subdirectory executable path:
 
 ```
-domains/
+tests/fixtures/design_packs/
 ├── {domain-id}/
 │   ├── spec.yaml          # Complete domain specification (REQUIRED)
 │   └── queries/           # Optional custom Cypher overrides
 │       └── {gate-name}.cypher
 ```
 
-Flat `*_domain_spec.yaml` files under `domains/` are not loaded at runtime.
+Flat `*_domain_spec.yaml` files under a pack root are not loaded at runtime.
 PlasticOS historical flat/docs specs are archived under `docs/archive/plasticos/`.
 
 ## Available Domains
@@ -63,7 +72,7 @@ PlasticOS historical flat/docs specs are archived under `docs/archive/plasticos/
 
 ### Step 1: Create Directory
 ```bash
-mkdir -p domains/my-domain/queries
+mkdir -p tests/fixtures/design_packs/my-domain/queries
 ```
 
 ### Step 2: Write spec.yaml
