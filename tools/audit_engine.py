@@ -10,6 +10,7 @@ status: active
 --- /L9_META ---
 """
 
+import ast
 import re
 import sys
 from dataclasses import dataclass
@@ -192,6 +193,110 @@ def ensure_template_manifest(root: Path) -> list[Finding]:
     return findings
 
 
+# Keys that narrow a rule's required_all / required_any check from the whole
+# file to the source of one module-level definition in it. A flow anchor such
+# as "handle_match constructs GateCompiler" is a statement about one function,
+# not about a file that happens to mention GateCompiler somewhere else.
+WITHIN_KEYS: dict[str, tuple[type[ast.AST], ...]] = {
+    "within_function": (ast.FunctionDef, ast.AsyncFunctionDef),
+    "within_class": (ast.ClassDef,),
+}
+
+
+def rule_within(rule: dict[str, Any]) -> tuple[str, str] | None:
+    """The ``(key, name)`` definition a rule's required tokens are scoped to, if any.
+
+    Raises ValueError for a rule that sets more than one scope key, or sets one
+    without required_all / required_any (it would narrow nothing).
+    """
+    keys = [k for k in WITHIN_KEYS if rule.get(k)]
+    if not keys:
+        return None
+    if len(keys) > 1:
+        msg = f"rule {rule['id']}: set at most one of {sorted(WITHIN_KEYS)}, got {keys}"
+        raise ValueError(msg)
+    if not (rule.get("required_all") or rule.get("required_any")):
+        msg = f"rule {rule['id']}: {keys[0]} needs required_all or required_any"
+        raise ValueError(msg)
+    return keys[0], str(rule[keys[0]])
+
+
+def definition_source(text: str, key: str, name: str) -> tuple[str, int, int] | None:
+    """Source, first and last line of the module-level definition *name* of kind *key*.
+
+    Only module-level definitions count: a nested helper of the same name is
+    not the lifecycle entrypoint the rule names. Raises SyntaxError when *text*
+    does not parse.
+    """
+    tree = ast.parse(text)
+    for node in tree.body:
+        if isinstance(node, WITHIN_KEYS[key]) and getattr(node, "name", None) == name:
+            segment = ast.get_source_segment(text, node) or ""
+            return segment, node.lineno, node.end_lineno or node.lineno
+    return None
+
+
+def required_token_findings(rule: dict[str, Any], f: Path, text: str) -> list[Finding]:
+    """required_all / required_any findings for one file, scoped by the rule's within_* key."""
+    required_all = rule.get("required_all", [])
+    required_any = rule.get("required_any", [])
+    if not (required_all or required_any):
+        return []
+
+    def finding(evidence: str, fix: str, start: int | None = None, end: int | None = None) -> Finding:
+        return Finding(
+            severity=rule["severity"],
+            rule_id=rule["id"],
+            file=str(f),
+            line_start=start,
+            line_end=end,
+            issue=rule["description"],
+            evidence=evidence,
+            fix=fix,
+        )
+
+    scope_text, where, start, end = text, "", None, None
+    within = rule_within(rule)
+    if within is not None:
+        key, name = within
+        kind = key.removeprefix("within_")
+        try:
+            found = definition_source(text, key, name)
+        except SyntaxError as exc:
+            return [finding(f"Module could not be parsed to locate {kind} {name}: {exc.msg}", "Fix the syntax error.")]
+        if found is None:
+            return [
+                finding(
+                    f"Module-level {kind} `{name}` is not defined in this file.",
+                    f"Restore `{name}` here or re-point the rule at the module that now owns the flow.",
+                )
+            ]
+        scope_text, start, end = found
+        where = f" in {kind} `{name}`"
+
+    findings: list[Finding] = []
+    missing = [x for x in required_all if x not in scope_text]
+    if missing:
+        findings.append(
+            finding(
+                f"Missing required tokens{where}: {missing}",
+                "Implement required flow anchors or algorithms as per engine contract.",
+                start,
+                end,
+            )
+        )
+    if required_any and not any(x in scope_text for x in required_any):
+        findings.append(
+            finding(
+                f"None of required-any tokens found{where}: {required_any}",
+                "Ensure lifecycle entrypoints reference expected components.",
+                start,
+                end,
+            )
+        )
+    return findings
+
+
 def audit_rules(root: Path, rules: dict[str, Any]) -> list[Finding]:
     findings: list[Finding] = []
 
@@ -226,44 +331,30 @@ def audit_rules(root: Path, rules: dict[str, Any]) -> list[Finding]:
             patterns_regex = rule.get("patterns_regex", [])
             allow_if_contains = rule.get("allow_if_contains", [])
 
-            required_all = rule.get("required_all", [])
-            required_any = rule.get("required_any", [])
-
             if rule.get("check") == "cypher_lint":
                 findings += cypher_lint_findings(root, files, rule)
+
+            # A required-token rule whose scope matches nothing would pass
+            # vacuously: renaming or moving the anchored module must fail the
+            # rule, not silently retire it.
+            if not files and (rule.get("required_all") or rule.get("required_any")):
+                findings.append(
+                    Finding(
+                        severity=severity,
+                        rule_id=rule_id,
+                        file=", ".join(include_globs),
+                        line_start=None,
+                        line_end=None,
+                        issue=desc,
+                        evidence=f"Rule scope matched no files: include_globs={include_globs}",
+                        fix="Restore the anchored module or re-point the rule's include_globs at its new home.",
+                    )
+                )
 
             for f in files:
                 text = read_text(f)
 
-                if required_all:
-                    missing = [x for x in required_all if x not in text]
-                    if missing:
-                        findings.append(
-                            Finding(
-                                severity=severity,
-                                rule_id=rule_id,
-                                file=str(f),
-                                line_start=None,
-                                line_end=None,
-                                issue=desc,
-                                evidence=f"Missing required tokens: {missing}",
-                                fix="Implement required flow anchors or algorithms as per engine contract.",
-                            )
-                        )
-
-                if required_any and not any(x in text for x in required_any):
-                    findings.append(
-                        Finding(
-                            severity=severity,
-                            rule_id=rule_id,
-                            file=str(f),
-                            line_start=None,
-                            line_end=None,
-                            issue=desc,
-                            evidence=f"None of required-any tokens found: {required_any}",
-                            fix="Ensure lifecycle entrypoints reference expected components.",
-                        )
-                    )
+                findings += required_token_findings(rule, f, text)
 
                 for needle in patterns:
                     for ln in find_all_lines(text, needle):
@@ -361,7 +452,11 @@ def main() -> int:
         return 2
 
     rules = load_yaml(rules_path)
-    findings += audit_rules(root, rules)
+    try:
+        findings += audit_rules(root, rules)
+    except ValueError as exc:  # a malformed rule is an infrastructure error, not a clean audit
+        print(f"ERROR: tools/audit_rules.yaml: {exc}", file=sys.stderr)
+        return 2
 
     grouped = group_findings(findings)
     write_report(root, meta, grouped)
