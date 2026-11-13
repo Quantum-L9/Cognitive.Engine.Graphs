@@ -42,6 +42,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from engine.config.domain_spec_schema_version import DOMAIN_SPEC_SCHEMA_VERSION
 from engine.config.schema import DomainSpec
 from tools.l9_meta_injector import ENGINE_ID, FILE_REGISTRY, format_json_meta
+from tools.path_policy import PathPolicyError, resolve_root, resolve_under_root
 
 ARTIFACT_RELPATH = "docs/contracts/data/models/domain-spec.schema.json"
 ARTIFACT_PATH = REPO_ROOT / ARTIFACT_RELPATH
@@ -137,23 +138,37 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Export the DomainSpec contract as a versioned JSON Schema artifact.")
     parser.add_argument("--check", action="store_true", help="compare the artifact with a fresh export; write nothing")
     parser.add_argument("--artifact", type=Path, default=ARTIFACT_PATH, help="artifact path (default: %(default)s)")
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=REPO_ROOT,
+        help="directory the artifact path must stay under (default: the repository root)",
+    )
     args = parser.parse_args(argv)
 
+    # The artifact path comes from the command line: confine it to --root so a
+    # caller-supplied value can neither read nor overwrite a file outside it.
+    try:
+        artifact = resolve_under_root(args.artifact, resolve_root(args.root), option="--artifact")
+    except PathPolicyError as exc:
+        print(f"REFUSED: {exc}", file=sys.stderr)
+        return 2
+
     if args.check:
-        drift = check(args.artifact)
+        drift = check(artifact)
         if drift:
-            print(f"DRIFT: {args.artifact} does not match engine.config.schema.DomainSpec", file=sys.stderr)
+            print(f"DRIFT: {artifact} does not match engine.config.schema.DomainSpec", file=sys.stderr)
             print("\n".join(drift[:_DIFF_LINES]), file=sys.stderr)
             if len(drift) > _DIFF_LINES:
                 print(f"... {len(drift) - _DIFF_LINES} more diff lines", file=sys.stderr)
             print("Regenerate: python tools/export_domain_spec_schema.py", file=sys.stderr)
             return 1
-        text = args.artifact.read_text(encoding="utf-8")
+        text = artifact.read_text(encoding="utf-8")
     else:
         text = render()
-        args.artifact.write_text(text, encoding="utf-8")
+        artifact.write_text(text, encoding="utf-8")
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    print(f"{'OK' if args.check else 'WROTE'} {args.artifact} version={DOMAIN_SPEC_SCHEMA_VERSION} sha256={digest}")
+    print(f"{'OK' if args.check else 'WROTE'} {artifact} version={DOMAIN_SPEC_SCHEMA_VERSION} sha256={digest}")
     return 0
 
 

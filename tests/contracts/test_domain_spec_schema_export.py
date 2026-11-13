@@ -62,8 +62,10 @@ def test_committed_artifact_equals_fresh_export() -> None:
 
 
 def test_export_is_deterministic() -> None:
-    assert exporter.render() == exporter.render()
-    assert exporter.render().endswith("}\n")
+    first = exporter.render()
+    second = exporter.render()
+    assert first == second
+    assert first.endswith("}\n")
 
 
 def test_id_carries_declared_version() -> None:
@@ -94,7 +96,7 @@ def test_check_fails_on_edited_artifact(mutate: Any, tmp_path: Path, capsys: pyt
     assert mutated != _committed_text()
     edited.write_text(mutated, encoding="utf-8")
 
-    assert exporter.main(["--check", "--artifact", str(edited)]) == 1
+    assert exporter.main(["--check", "--root", str(tmp_path), "--artifact", str(edited)]) == 1
     err = capsys.readouterr().err
     assert "DRIFT" in err
     assert str(edited) in err
@@ -102,8 +104,23 @@ def test_check_fails_on_edited_artifact(mutate: Any, tmp_path: Path, capsys: pyt
 
 
 def test_check_fails_on_missing_artifact(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert exporter.main(["--check", "--artifact", str(tmp_path / "absent.json")]) == 1
+    assert exporter.main(["--check", "--root", str(tmp_path), "--artifact", str(tmp_path / "absent.json")]) == 1
     assert "missing" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("flag", [["--check"], []], ids=["check", "write"])
+def test_artifact_outside_root_is_refused(flag: list[str], tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside.json"
+
+    assert exporter.main([*flag, "--root", str(root), "--artifact", str(outside)]) == 2
+    assert "--artifact must stay under --root" in capsys.readouterr().err
+    assert not outside.exists(), "a refused path must not be written"
+
+    # The default root is the repository: a path outside it is refused too.
+    assert exporter.main([*flag, "--artifact", str(outside)]) == 2
+    assert not outside.exists()
 
 
 def test_fixture_packs_were_discovered() -> None:
