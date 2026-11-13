@@ -427,6 +427,35 @@ FILE_REGISTRY: list[FileMeta] = [
     ),
     FileMeta("engine/config/settings.py", "engine-specific", ["config"], ["config", "settings"], "engine-team"),
     FileMeta("engine/config/units.py", "engine-specific", ["config"], ["config", "units"], "engine-team"),
+    # --- DomainSpec schema contract (#400 WS-B): version, exporter, generated artifact, drift test ---
+    FileMeta(
+        "engine/config/domain_spec_schema_version.py",
+        "engine-specific",
+        ["config"],
+        ["config", "domain-spec", "schema-version"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tools/export_domain_spec_schema.py",
+        "engine-specific",
+        ["tools"],
+        ["tools", "domain-spec", "json-schema", "contracts"],
+        "engine-team",
+    ),
+    FileMeta(
+        "docs/contracts/data/models/domain-spec.schema.json",
+        "engine-specific",
+        ["docs", "contracts"],
+        ["contracts", "domain-spec", "json-schema", "generated"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/contracts/test_domain_spec_schema_export.py",
+        "engine-specific",
+        ["tests"],
+        ["tests", "contracts", "domain-spec", "json-schema"],
+        "engine-team",
+    ),
     FileMeta("engine/gates/__init__.py", "engine-specific", ["config"], ["gates"], "engine-team"),
     FileMeta("engine/gates/compiler.py", "engine-specific", ["config"], ["gates", "compiler", "cypher"], "engine-team"),
     FileMeta(
