@@ -29,6 +29,7 @@ from typing import Any
 
 import pytest
 
+from engine.config.settings import settings
 from engine.health import nightly_health_scan
 from engine.health.health_schemas import HealthScanProfile
 from engine.health.nightly_health_scan import run_nightly_health_scan
@@ -41,8 +42,12 @@ DOMAIN = "plasticos"
 
 @pytest.fixture(autouse=True)
 def _design_pack_root(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The scan builds its own DomainPackLoader; name the repository design packs as its root."""
-    monkeypatch.setenv("DOMAIN_SPECS_PATH", str(DESIGN_PACKS_ROOT))
+    """The scan builds its own DomainPackLoader; name the repository design packs as its root.
+
+    The loader's root is Settings.domains_root (DOMAINS_ROOT); DOMAIN_SPECS_PATH
+    is no longer read (issue #400 A5).
+    """
+    monkeypatch.setattr(settings, "domains_root", DESIGN_PACKS_ROOT)
 
 
 def _entity(entity_id: str) -> dict[str, Any]:

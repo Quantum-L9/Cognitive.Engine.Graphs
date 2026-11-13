@@ -80,11 +80,16 @@ class TestDomainPackLoaderInit:
         loader = DomainPackLoader(config_path=str(tmp_path))
         assert loader._base_path == tmp_path.resolve()
 
-    def test_init_from_env_var(self, tmp_path: Path) -> None:
-        """DomainPackLoader reads DOMAIN_SPECS_PATH env var."""
-        with patch.dict(os.environ, {"DOMAIN_SPECS_PATH": str(tmp_path)}):
-            loader = DomainPackLoader()
-            assert loader._base_path == tmp_path.resolve()
+    def test_init_from_env_var(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """DomainPackLoader reads DOMAINS_ROOT (through Settings), never DOMAIN_SPECS_PATH (#400 A5)."""
+        import engine.config.loader as loader_mod
+        from engine.config.settings import Settings
+
+        monkeypatch.setenv("DOMAINS_ROOT", str(tmp_path))
+        monkeypatch.setenv("DOMAIN_SPECS_PATH", str(tmp_path / "ignored"))
+        monkeypatch.setattr(loader_mod, "settings", Settings(_env_file=None))
+        loader = DomainPackLoader()
+        assert loader._base_path == tmp_path.resolve()
 
     def test_init_default_path(self) -> None:
         """DomainPackLoader defaults to 'domains' when no path given."""

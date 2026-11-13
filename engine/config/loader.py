@@ -844,11 +844,55 @@ def _domain_cache_max_size() -> int:
     return int(settings.domain_cache_maxsize)
 
 
+def _pack_root_explicitly_configured(raw: str, *, explicit_argument: bool) -> bool:
+    """Whether ``raw`` is an operator's choice rather than the Settings default.
+
+    Explicit means DOMAINS_ROOT reached Settings (environment, .env or
+    constructor: ``domains_root`` is in ``model_fields_set``), or the caller
+    passed a root that differs from the Settings default. Boot passes
+    ``str(settings.domains_root)``, so an unset DOMAINS_ROOT is never explicit.
+    """
+    if "domains_root" in settings.model_fields_set:
+        return True
+    default = type(settings).model_fields["domains_root"].default
+    return explicit_argument and Path(raw) != Path(default)
+
+
+def _require_production_pack_root(raw: str, *, explicit_argument: bool) -> None:
+    """Issue #400 A4: production never serves packs from an implicit or absent root.
+
+    Under ``L9_ENV=prod`` with ``domains_root_required_in_prod`` on, refuse a
+    root that is not explicitly configured, relative, missing, not a directory
+    or unreadable. The refusal names DOMAINS_ROOT and is raised from the loader
+    boot constructs, so startup fails instead of listing zero domains.
+    """
+    if not (settings.domains_root_required_in_prod and settings.is_production):
+        return
+    path = Path(raw)
+    reason: str | None = None
+    if not _pack_root_explicitly_configured(raw, explicit_argument=explicit_argument):
+        reason = "is not set; production has no default pack root"
+    elif not path.is_absolute():
+        reason = "must be an absolute path in production"
+    elif not path.exists():
+        reason = "does not exist"
+    elif not path.is_dir():
+        reason = "is not a directory"
+    elif not os.access(path, os.R_OK | os.X_OK):
+        reason = "is not readable"
+    if reason is not None:
+        msg = f"DOMAINS_ROOT {reason}: {raw!r} (domains_root_required_in_prod)"
+        raise DomainSpecError(msg)
+
+
 class DomainPackLoader:
     """Load and cache folder-shaped domain specs with bounded hot reload."""
 
     def __init__(self, config_path: str | None = None) -> None:
-        raw = config_path or os.getenv("DOMAIN_SPECS_PATH") or "domains"
+        # Issue #400 A5: the root is the caller's argument or Settings.domains_root
+        # (env DOMAINS_ROOT). No second variable and no literal fallback.
+        raw = config_path or str(settings.domains_root)
+        _require_production_pack_root(raw, explicit_argument=bool(config_path))
         if settings.domain_pack_receipts_enabled and settings.is_production:
             path = Path(raw)
             if not path.is_absolute() or not path.is_dir() or any(p.is_symlink() for p in [path, *path.parents]):
