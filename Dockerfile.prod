@@ -26,7 +26,6 @@ COPY tools/deps/install_locked.sh tools/deps/uv-bootstrap.txt tools/deps/
 RUN UV_PROJECT_ENVIRONMENT=/opt/venv bash tools/deps/install_locked.sh runtime
 
 COPY engine/ ./engine/
-COPY domains/ ./domains/
 COPY chassis/ ./chassis/
 
 # --- Production ---
@@ -42,7 +41,8 @@ WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 COPY --from=builder /build/engine ./engine
-COPY --from=builder /build/domains ./domains
+# No domain packs in the production image (#400 A1). The operator mounts the
+# published pack root read-only at /app/domains (docker-compose.prod.yml).
 COPY --from=builder /build/chassis ./chassis
 
 ENV L9_PROJECT=$L9_PROJECT \
