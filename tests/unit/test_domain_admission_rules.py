@@ -453,7 +453,14 @@ CASES: list[Case] = [
         lambda raw: _dimension(raw, "depot_reliability").update(null_strategy="inherit_prior"),
     ),
     Case("ADM-DEFECT-SCORING-PRODUCER", "structural-similarity", _structural_similarity),
-    Case("ADM-DEFECT-SCORING-COMPILES", "compiler-refusal", _attention_without_success_value),
+    Case("ADM-DEFECT-SCORING-METADATA", "attention-without-success-value", _attention_without_success_value),
+    # With the metadata rule off the same dimension reaches the scoring compiler, which refuses it.
+    Case(
+        "ADM-DEFECT-SCORING-COMPILES",
+        "compiler-refusal",
+        _attention_without_success_value,
+        settings={"preference_attention_metadata_required_enabled": False},
+    ),
     Case(
         "ADM-DEFECT-SCORING-COMPILES",
         "unbound-parameter",
@@ -543,6 +550,12 @@ def _load(root: Path, tenant: str) -> Exception | DomainSpec:
         return exc
 
 
+def _apply_settings(monkeypatch: pytest.MonkeyPatch, values: dict[str, Any]) -> None:
+    """Set the engine settings a case runs under."""
+    for name, value in values.items():
+        monkeypatch.setattr(owner.settings, name, value)
+
+
 def _verdicts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -554,8 +567,7 @@ def _verdicts(
     receipt_patch: dict[str, Any] | None = None,
 ) -> Verdicts:
     patch = receipt_patch or {}
-    for name, value in (settings or {}).items():
-        monkeypatch.setattr(owner.settings, name, value)
+    _apply_settings(monkeypatch, settings or {})
     spec_path = _place(tmp_path / "packs" / tenant, data, symlink=symlink)
     receipt_path: Path | None = None
     if patch:
@@ -583,6 +595,7 @@ def _default_admission(monkeypatch: pytest.MonkeyPatch) -> None:
         "domain_production_stage_required",
     ):
         monkeypatch.setattr(owner.settings, name, False)
+    monkeypatch.setattr(owner.settings, "preference_attention_metadata_required_enabled", True)
     monkeypatch.setattr(owner.settings, "l9_env", "dev")
 
 
@@ -659,8 +672,11 @@ _WITHHOLDING = [case for case in CASES if RULES[case.rule]["stage"] == "withhold
 
 
 @pytest.mark.parametrize("case", _WITHHOLDING, ids=[case.id for case in _WITHHOLDING])
-def test_validator_message_is_the_loader_withholding_reason(case: Case, tmp_path: Path) -> None:
+def test_validator_message_is_the_loader_withholding_reason(
+    case: Case, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A withheld pack parses; the validator reports `withholding_reason` verbatim."""
+    _apply_settings(monkeypatch, case.settings)
     spec = DomainSpec.model_validate(yaml.safe_load(case.data()))
     spec_path = _place(tmp_path / TENANT, case.data(), symlink=False)
 
@@ -681,6 +697,7 @@ _OVERRIDABLE = [case for case in CASES if RULES[case.rule]["runtime"]["operator_
 def test_operator_override_serves_at_runtime_and_never_relaxes_complete(
     case: Case, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _apply_settings(monkeypatch, case.settings)
     override = RULES[case.rule]["runtime"]["operator_override"]
     setting = override.lower()
     assert setting in type(owner.settings).model_fields
