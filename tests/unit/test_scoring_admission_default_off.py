@@ -16,14 +16,13 @@ The check itself stays covered with it pinned on (test_domain_pack_loader.TestSc
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 import engine.config.loader as loader_module
 from engine.config.settings import Settings
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
-DOMAINS = Path(__file__).resolve().parents[2] / "domains"
+DOMAINS = DESIGN_PACKS_ROOT
 
 
 @pytest.mark.unit

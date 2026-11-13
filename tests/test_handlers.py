@@ -13,7 +13,6 @@ Tests for engine/handlers.py - all 6 action handlers."""
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -29,6 +28,7 @@ from engine.handlers import (
     handle_sync,
     init_dependencies,
 )
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 pytestmark = pytest.mark.unit
 
@@ -547,7 +547,7 @@ def _mortgage_spec_with(*, dimension_prop: str | None = None, gate_update: dict 
     from engine.config.schema import DomainSpec
 
     spec = DomainSpec.model_validate(
-        yaml.safe_load(Path("domains/mortgage-brokerage/spec.yaml").read_text(encoding="utf-8"))
+        yaml.safe_load((DESIGN_PACKS_ROOT / "mortgage-brokerage/spec.yaml").read_text(encoding="utf-8"))
     )
     if dimension_prop is not None:
         dims = list(spec.scoring.dimensions)

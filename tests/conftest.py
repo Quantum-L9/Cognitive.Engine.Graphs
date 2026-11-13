@@ -16,8 +16,9 @@ RULE 7 (L9 Contract): DomainPackLoader is instantiated with
     DomainPackLoader(config_path=str(DOMAINS_DIR))
     matching DomainPackLoader.__init__(self, config_path: str | None = None).
 
-DOMAINS_DIR uses Path(__file__).parent.parent to resolve
-from tests/ → repo root → domains/.
+DOMAINS_DIR is the repository's design and test packs, the top-level domains/
+directory until issue #400 moves them (DESIGN_PACKS_ROOT in tests/fixtures/domain_contracts.py).
+It is spelled out here so conftest imports no engine module at collection.
 """
 
 from __future__ import annotations

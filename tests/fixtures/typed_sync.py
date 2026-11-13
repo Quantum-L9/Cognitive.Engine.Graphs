@@ -22,7 +22,7 @@ from typing import Any
 import yaml
 
 from engine.config.schema import DomainSpec, SyncEndpointSpec
-from tests.fixtures.domain_contracts import SYNTHETIC_DOMAINS_ROOT
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT, SYNTHETIC_DOMAINS_ROOT
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPOTS = "/v1/sync/orbital-depots"
@@ -33,7 +33,7 @@ def orbital_raw() -> dict[str, Any]:
 
 
 def plasticos() -> DomainSpec:
-    return DomainSpec.model_validate(yaml.safe_load((REPO_ROOT / "domains/plasticos/spec.yaml").read_text()))
+    return DomainSpec.model_validate(yaml.safe_load((DESIGN_PACKS_ROOT / "plasticos/spec.yaml").read_text()))
 
 
 def spec(raw: dict[str, Any] | None = None) -> DomainSpec:

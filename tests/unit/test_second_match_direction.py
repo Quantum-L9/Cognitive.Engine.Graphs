@@ -9,6 +9,7 @@ import yaml
 
 from engine.config.loader import DomainPackLoader
 from engine.traversal.assembler import TraversalAssembler
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 pytestmark = pytest.mark.unit
 
@@ -18,7 +19,7 @@ DIR2 = "buyer_demand_to_supply_opportunity"
 
 
 def _spec_data() -> dict:
-    return yaml.safe_load((ROOT / "domains/plasticos/spec.yaml").read_text())
+    return yaml.safe_load((DESIGN_PACKS_ROOT / "plasticos/spec.yaml").read_text())
 
 
 def test_bidirectional_directions_declared() -> None:
@@ -44,7 +45,7 @@ def test_active_supply_gates_do_not_use_facility_capacity_property() -> None:
 
 
 def test_loader_and_traversal_for_second_direction() -> None:
-    spec = DomainPackLoader(config_path=str(ROOT / "domains")).load_domain("plasticos")
+    spec = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT)).load_domain("plasticos")
     assert DIR2 in spec.queryschema.matchdirections
     clauses = TraversalAssembler(spec).assemble_traversal(DIR2)
     # CEG-COR-013: the FULFILLS_POLYMER constraint is an EXISTS traversal gate on

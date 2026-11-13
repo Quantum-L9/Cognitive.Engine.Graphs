@@ -18,7 +18,6 @@ nothing and no RESOLVED_FROM edge was created.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -27,8 +26,9 @@ import pytest
 from engine.config.loader import DomainPackLoader
 from engine.config.settings import settings
 from engine.handlers import ExecutionError, ValidationError, handle_resolve, init_dependencies
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
-DOMAINS = Path(__file__).resolve().parents[2] / "domains"
+DOMAINS = DESIGN_PACKS_ROOT
 PAYLOAD = {"entity_type": "Facility", "source_id": "a", "target_id": "b"}
 
 
