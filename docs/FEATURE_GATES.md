@@ -1212,10 +1212,15 @@ Off, and in every non-production environment: the former behaviour (a missing
 root lists zero domains). Receipt mode (`DOMAIN_PACK_RECEIPTS_ENABLED`) keeps its
 own absolute/present/no-symlink check on top of this one.
 
-Independently of the flag (issue #400 A5): the loader's root is its argument or
-`Settings.domains_root` only — `DOMAIN_SPECS_PATH` is no longer read; the chassis
-`YAMLDomainLoader` takes a required root; vertical discovery reads YAML only from
-a root its caller names. `Settings.domains_root`'s `./domains` default is the one
+Independently of the flag (issue #400 A5): the loader's root is its argument,
+then the legacy `DOMAIN_SPECS_PATH` alias (the precedence it had before #400,
+kept for compatibility), then `Settings.domains_root`. A root supplied by the
+alias counts as explicitly configured and must pass the same production checks;
+a refusal names the variable that supplied it. Boot passes
+`str(settings.domains_root)`, so the alias only reaches callers that construct
+the loader with no argument. The chassis `YAMLDomainLoader` takes its root from
+the argument or that alias and refuses to construct with neither; vertical
+discovery reads YAML only from a root its caller names. `Settings.domains_root`'s `./domains` default is the one
 pack-root literal under `engine/` and `chassis/`, enforced by
 `tests/architecture/test_runtime_reads_no_repo_packs.py`.
 

@@ -121,8 +121,8 @@ class TestCountersPartitionTheAssessedSet:
 def _design_pack_settings_root(monkeypatch: pytest.MonkeyPatch) -> None:
     """Bind the design packs as Settings.domains_root (DOMAINS_ROOT), the loader's only root.
 
-    DomainPackLoader no longer reads DOMAIN_SPECS_PATH (issue #400 A5), so the
-    environment fixture above is inert; this one names the root the scan uses.
+    The scan's loader is built with an explicit root, which wins over the
+    DOMAIN_SPECS_PATH alias the fixture above sets; this one names that root.
     """
     from engine.config.settings import settings
 

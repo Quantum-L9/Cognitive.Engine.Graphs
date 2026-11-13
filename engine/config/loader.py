@@ -858,7 +858,14 @@ def _pack_root_explicitly_configured(raw: str, *, explicit_argument: bool) -> bo
     return explicit_argument and Path(raw) != Path(default)
 
 
-def _require_production_pack_root(raw: str, *, explicit_argument: bool) -> None:
+# Legacy alias for the pack root. Before issue #400 the loader read
+# DOMAIN_SPECS_PATH when no root was passed; it keeps that precedence so a
+# caller or deployment that sets only it keeps its root. DOMAINS_ROOT
+# (Settings.domains_root) is the documented variable.
+LEGACY_PACK_ROOT_ENV = "DOMAIN_SPECS_PATH"
+
+
+def _require_production_pack_root(raw: str, *, explicit_argument: bool, variable: str = "DOMAINS_ROOT") -> None:
     """Issue #400 A4: production never serves packs from an implicit or absent root.
 
     Under ``L9_ENV=prod`` with ``domains_root_required_in_prod`` on, refuse a
@@ -881,7 +888,7 @@ def _require_production_pack_root(raw: str, *, explicit_argument: bool) -> None:
     elif not os.access(path, os.R_OK | os.X_OK):
         reason = "is not readable"
     if reason is not None:
-        msg = f"DOMAINS_ROOT {reason}: {raw!r} (domains_root_required_in_prod)"
+        msg = f"{variable} {reason}: {raw!r} (domains_root_required_in_prod)"
         raise DomainSpecError(msg)
 
 
@@ -889,10 +896,16 @@ class DomainPackLoader:
     """Load and cache folder-shaped domain specs with bounded hot reload."""
 
     def __init__(self, config_path: str | None = None) -> None:
-        # Issue #400 A5: the root is the caller's argument or Settings.domains_root
-        # (env DOMAINS_ROOT). No second variable and no literal fallback.
-        raw = config_path or str(settings.domains_root)
-        _require_production_pack_root(raw, explicit_argument=bool(config_path))
+        # Issue #400 A5: the root is the caller's argument, then the legacy
+        # DOMAIN_SPECS_PATH alias (same precedence as before #400), then
+        # Settings.domains_root (env DOMAINS_ROOT). No literal fallback.
+        legacy = None if config_path else (os.getenv(LEGACY_PACK_ROOT_ENV) or None)
+        raw = config_path or legacy or str(settings.domains_root)
+        _require_production_pack_root(
+            raw,
+            explicit_argument=bool(config_path or legacy),
+            variable=LEGACY_PACK_ROOT_ENV if legacy else "DOMAINS_ROOT",
+        )
         if settings.domain_pack_receipts_enabled and settings.is_production:
             path = Path(raw)
             if not path.is_absolute() or not path.is_dir() or any(p.is_symlink() for p in [path, *path.parents]):

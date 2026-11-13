@@ -81,15 +81,19 @@ class TestDomainPackLoaderInit:
         assert loader._base_path == tmp_path.resolve()
 
     def test_init_from_env_var(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """DomainPackLoader reads DOMAINS_ROOT (through Settings), never DOMAIN_SPECS_PATH (#400 A5)."""
+        """DomainPackLoader reads DOMAINS_ROOT through Settings; the legacy DOMAIN_SPECS_PATH alias wins when set."""
         import engine.config.loader as loader_mod
         from engine.config.settings import Settings
 
         monkeypatch.setenv("DOMAINS_ROOT", str(tmp_path))
-        monkeypatch.setenv("DOMAIN_SPECS_PATH", str(tmp_path / "ignored"))
+        monkeypatch.delenv("DOMAIN_SPECS_PATH", raising=False)
         monkeypatch.setattr(loader_mod, "settings", Settings(_env_file=None))
-        loader = DomainPackLoader()
-        assert loader._base_path == tmp_path.resolve()
+        assert DomainPackLoader()._base_path == tmp_path.resolve()
+
+        legacy = tmp_path / "legacy"
+        legacy.mkdir()
+        monkeypatch.setenv("DOMAIN_SPECS_PATH", str(legacy))
+        assert DomainPackLoader()._base_path == legacy.resolve()
 
     def test_init_default_path(self) -> None:
         """DomainPackLoader defaults to 'domains' when no path given."""

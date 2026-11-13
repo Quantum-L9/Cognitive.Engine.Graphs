@@ -201,26 +201,70 @@ def test_prod_file_root_lists_nothing_with_flag_off(
         assert DomainPackLoader(config_path=str(built.domains_root)).list_domains() == []
 
 
-# ── A5: no second variable, no literal fallback ──────────
+# ── A5: no literal fallback; DOMAIN_SPECS_PATH stays a legacy alias ──────────
 
 
-def test_loader_ignores_domain_specs_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """DOMAIN_SPECS_PATH is no longer a pack root; Settings.domains_root is."""
+def test_legacy_alias_is_honoured_when_no_root_is_passed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """DOMAIN_SPECS_PATH keeps the precedence it had before #400: after the argument, before Settings."""
     root = _pack_root(tmp_path)
     empty = tmp_path / "empty"
     empty.mkdir()
     _settings(monkeypatch, env="dev", domains_root=str(empty))
     monkeypatch.setenv("DOMAIN_SPECS_PATH", str(root))
-    assert DomainPackLoader().list_domains() == []
+    assert DomainPackLoader().list_domains() == SYNTHETIC_IDS
 
 
-def test_chassis_loader_requires_explicit_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_argument_beats_the_legacy_alias(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     root = _pack_root(tmp_path)
-    monkeypatch.setenv("DOMAIN_SPECS_PATH", str(tmp_path / "elsewhere"))
-    with pytest.raises(TypeError):
-        YAMLDomainLoader()  # type: ignore[call-arg]
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    _settings(monkeypatch, env="dev")
+    monkeypatch.setenv("DOMAIN_SPECS_PATH", str(empty))
+    assert DomainPackLoader(config_path=str(root)).list_domains() == SYNTHETIC_IDS
+    monkeypatch.setenv("DOMAIN_SPECS_PATH", str(root))
+    assert DomainPackLoader(config_path=str(empty)).list_domains() == []
+
+
+def test_empty_legacy_alias_falls_through_to_settings(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    root = _pack_root(tmp_path)
+    _settings(monkeypatch, env="dev", domains_root=str(root))
+    monkeypatch.setenv("DOMAIN_SPECS_PATH", "")
+    assert DomainPackLoader().list_domains() == SYNTHETIC_IDS
+
+
+def test_prod_accepts_a_valid_legacy_alias_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A root supplied by the alias is explicitly configured, so A4 admits it when it is valid."""
+    root = _pack_root(tmp_path)
+    _settings(monkeypatch, env="prod", domains_root_required_in_prod=True)
+    monkeypatch.setenv("DOMAIN_SPECS_PATH", str(root))
+    assert DomainPackLoader().list_domains() == SYNTHETIC_IDS
+
+
+@pytest.mark.parametrize("bad", ["missing", "relative"])
+def test_prod_refuses_a_bad_legacy_alias_root_naming_the_alias(
+    bad: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _settings(monkeypatch, env="prod", domains_root_required_in_prod=True)
+    monkeypatch.setenv("DOMAIN_SPECS_PATH", str(tmp_path / "absent") if bad == "missing" else "packs")
+    with pytest.raises(DomainSpecError, match="DOMAIN_SPECS_PATH"):
+        DomainPackLoader()
+
+
+def test_chassis_loader_needs_a_root_from_the_argument_or_the_alias(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = _pack_root(tmp_path)
+    monkeypatch.delenv("DOMAIN_SPECS_PATH", raising=False)
+    with pytest.raises(ValueError, match="pack root"):
+        YAMLDomainLoader()
     assert YAMLDomainLoader(root).list_domains() == SYNTHETIC_IDS
     assert YAMLDomainLoader(str(root)).list_domains() == SYNTHETIC_IDS
+    # The alias this loader read before #400 still supplies the root; the argument wins over it.
+    monkeypatch.setenv("DOMAIN_SPECS_PATH", str(root))
+    assert YAMLDomainLoader().list_domains() == SYNTHETIC_IDS
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert YAMLDomainLoader(empty).list_domains() == []
 
 
 def test_vertical_discovery_reads_no_default_directory(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
