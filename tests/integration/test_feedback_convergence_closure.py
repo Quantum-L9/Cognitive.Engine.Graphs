@@ -88,6 +88,9 @@ async def feedback_graph(engine_deps, graph_driver, domain_spec, clean_db, monke
     monkeypatch.setattr(settings, "outcome_idempotency_enabled", True)
     monkeypatch.setattr(settings, "feedback_partial_results_enabled", True)
     monkeypatch.setattr(settings, "propagation_single_application", True)
+    # These tests prove the propagation claim (replay, concurrency, retry), so
+    # they run the legacy stage that CEG-462 turned off by default.
+    monkeypatch.setattr(settings, "feedback_boost_propagation_enabled", True)
     await _seed(graph_driver)
     return graph_driver
 

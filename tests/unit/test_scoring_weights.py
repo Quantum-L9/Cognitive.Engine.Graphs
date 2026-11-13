@@ -378,18 +378,39 @@ class _PropertyLevelDimensionWeightStore:
         self.nodes: list[dict] = []
         self.reader_cypher: list[str] = []
         self.execute_query = AsyncMock(side_effect=self._execute)
+        self.execute_write = AsyncMock(side_effect=self._write)
+
+    async def _write(self, transaction_function, *args, database: str | None = None):
+        """CEG-462: applied weights are written by a managed transaction function."""
+        store = self
+
+        class _Result:
+            async def consume(self) -> None:
+                return None
+
+        class _Tx:
+            async def run(self, cypher: str, parameters: dict | None = None) -> _Result:
+                await store._execute(cypher, parameters)
+                return _Result()
+
+        return await transaction_function(_Tx(), *args)
 
     async def _execute(self, cypher: str, parameters: dict | None = None, database: str | None = None, **_kw):
         parameters = parameters or {}
-        if "MERGE (dw:DimensionWeight" in cypher:
-            key = {"dimension": parameters["dimension"], "tenant": parameters["tenant"]}
-            node = next((n for n in self.nodes if all(n.get(k) == v for k, v in key.items())), None)
-            if node is None:
-                node = dict(key)
-                self.nodes.append(node)
-            node.update(weight=parameters["weight"], confidence=parameters["confidence"])
-            node["ci_width"] = parameters["ci_width"]
-            return [{"dimension": parameters["dimension"]}]
+        if "CREATE (c:DimensionWeightChange" in cypher:
+            # The change-record statement; the weights were stored by the lock statement's MERGE above.
+            return [{"written": len(parameters.get("rows") or [])}]
+        if "MERGE (dw:DimensionWeight" in cypher and "weight" in str(parameters.get("rows") or parameters):
+            # CEG-462: the governed writer sends UNWIND $rows statements (lock, then write).
+            for row in parameters.get("rows") or [parameters]:
+                key = {"dimension": row["dimension"], "tenant": parameters["tenant"]}
+                node = next((n for n in self.nodes if all(n.get(k) == v for k, v in key.items())), None)
+                if node is None:
+                    node = dict(key)
+                    self.nodes.append(node)
+                node.update(weight=row["weight"], confidence=row["confidence"])
+                node["ci_width"] = row["ci_width"]
+            return [{"written": len(parameters.get("rows") or [parameters])}]
         self.reader_cypher.append(cypher)
         rows = list(self.nodes)
         map_pattern = _re.search(r"\(dw:DimensionWeight\s*\{([^}]*)\}\)", cypher)
@@ -416,13 +437,25 @@ def _plasticos_like_spec(domain_id: str = "plasticos") -> MagicMock:
 
 
 async def _write_weights(store: _PropertyLevelDimensionWeightStore, spec, details: dict[str, float]) -> None:
+    """Apply learned weights the way an approved recalculation does.
+
+    These tests prove the reader/writer key contract for an APPLIED weight, so
+    the write runs with learned_weight_auto_apply_enabled (CEG-462: off by
+    default, a recalculation is then only a recorded candidate). The detail map
+    carries every key recalculate_weights produces.
+    """
+    from unittest.mock import patch
+
+    from engine.config.settings import settings
     from engine.feedback.signal_weights import SignalWeightCalculator
 
     calc = SignalWeightCalculator.__new__(SignalWeightCalculator)
     calc._driver = store
     calc._spec = spec
     calc._db = spec.domain.id
-    await calc._store_weights({name: {"weight": w, "confidence": 0.9, "ci_width": 0.1} for name, w in details.items()})
+    detail = {"confidence": 0.9, "ci_width": 0.1, "lift": 1.0, "sample_size": 10}
+    with patch.object(settings, "learned_weight_auto_apply_enabled", True):
+        await calc._store_weights({name: {"weight": w, **detail} for name, w in details.items()})
 
 
 @pytest.mark.unit

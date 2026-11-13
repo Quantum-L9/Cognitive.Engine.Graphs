@@ -27,17 +27,23 @@ def learning_spec(domain_spec):
 
 async def _clear(graph_driver) -> None:
     await graph_driver.execute_query(
-        "MATCH (dw:DimensionWeight {tenant: $tenant}) DETACH DELETE dw",
+        "MATCH (n) WHERE (n:DimensionWeight OR n:DimensionWeightChange) AND n.tenant = $tenant DETACH DELETE n",
         parameters={"tenant": "orbital-logistics"},
         database="orbital-logistics",
     )
 
 
 async def _store(graph_driver, domain_spec, weights: dict[str, float]) -> None:
+    """Apply weights as an approved recalculation does (CEG-462: auto-apply is off by default)."""
+    from unittest.mock import patch
+
+    from engine.config.settings import settings
     from engine.feedback.signal_weights import SignalWeightCalculator
 
     calc = SignalWeightCalculator(graph_driver, domain_spec)
-    await calc._store_weights({name: {"weight": w, "confidence": 0.9, "ci_width": 0.1} for name, w in weights.items()})
+    detail = {"confidence": 0.9, "ci_width": 0.1, "lift": 1.0, "sample_size": 10}
+    with patch.object(settings, "learned_weight_auto_apply_enabled", True):
+        await calc._store_weights({name: {"weight": w, **detail} for name, w in weights.items()})
 
 
 @pytest.mark.integration
