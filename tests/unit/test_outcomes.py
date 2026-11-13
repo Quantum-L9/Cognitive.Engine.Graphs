@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -8,6 +7,7 @@ import pytest
 from engine.config.schema import DomainSpec
 from engine.config.settings import settings
 from engine.handlers import ValidationError, handle_admin, handle_outcomes, handle_sync, init_dependencies
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 # ── RU-006 / CEG-COR-015 (RG-008): one outcome record schema ────────────────
 #
@@ -17,7 +17,7 @@ from engine.handlers import ValidationError, handle_admin, handle_outcomes, hand
 # and RESULTED_IN. With ``outcome_schema_unified`` both go through one writer.
 
 
-_DOMAINS = Path(__file__).resolve().parents[2] / "domains"
+_DOMAINS = DESIGN_PACKS_ROOT
 
 
 class _OutcomeGraph:

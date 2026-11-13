@@ -27,6 +27,7 @@ from engine.config.loader import (
     DomainPackLoader,
     DomainSpecError,
 )
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 
 def _minimal_spec_yaml(domain_id: str) -> str:
@@ -331,7 +332,7 @@ class TestInvalidate:
 # withhold the pack at admission instead of failing every match.
 # ============================================================================
 
-_REPO_DOMAINS = Path(__file__).resolve().parents[2] / "domains"
+_REPO_DOMAINS = DESIGN_PACKS_ROOT
 
 
 def _spec_with_dimensions(  # type: ignore[no-untyped-def]

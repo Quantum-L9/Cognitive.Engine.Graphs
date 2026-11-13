@@ -255,7 +255,7 @@ def _calls(log_path: Path) -> list[tuple[str, dict]]:
 
 
 def _seed(proj: Path, entities: dict[str, str]) -> None:
-    seeds = proj / "domains" / "acme" / "seeds"
+    seeds = proj / "tests" / "fixtures" / "design_packs" / "acme" / "seeds"
     seeds.mkdir(parents=True)
     for name, body in entities.items():
         (seeds / f"{name}.json").write_text(body, encoding="utf-8")

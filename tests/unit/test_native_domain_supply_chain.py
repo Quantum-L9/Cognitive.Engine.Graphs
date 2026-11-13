@@ -22,6 +22,7 @@ import yaml
 
 from engine.config import loader as owner
 from engine.config.settings import Settings
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 from tests.unit.test_domain_pack_loader import _minimal_spec_yaml
 from tools.validate_domain import validate_spec
 
@@ -89,8 +90,8 @@ def test_cli_loader_same_withholding_reason(tmp_path: Path) -> None:
 
 def test_cli_uses_per_direction_weight_semantics(tmp_path: Path) -> None:
     # PlasticOS is a multi-direction fixture; summing all directions is incorrect.
-    path = REPO / "domains" / "plasticos" / "spec.yaml"
-    assert owner.DomainPackLoader(str(REPO / "domains")).load_domain("plasticos").domain.version == "1.4.0"
+    path = DESIGN_PACKS_ROOT / "plasticos" / "spec.yaml"
+    assert owner.DomainPackLoader(str(DESIGN_PACKS_ROOT)).load_domain("plasticos").domain.version == "1.4.0"
     assert validate_spec(path)[1] == 0
 
 
@@ -213,8 +214,8 @@ def test_runtime_stage_flag_parity(
 
 
 def test_native_fixture_aliases_and_all_loader_cli_verdicts_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
-    loader = owner.DomainPackLoader(str(REPO / "domains"))
-    for path in sorted((REPO / "domains").glob("*/spec.yaml")):
+    loader = owner.DomainPackLoader(str(DESIGN_PACKS_ROOT))
+    for path in sorted(DESIGN_PACKS_ROOT.glob("*/spec.yaml")):
         before = hashlib.sha256(path.read_bytes()).hexdigest()
         results, code = validate_spec(path)
         try:

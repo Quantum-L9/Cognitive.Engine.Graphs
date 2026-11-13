@@ -47,6 +47,7 @@ from engine.health.health_schemas import (
     TIER_FEATURES,
     resolve_effective_capabilities,
 )
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 pytestmark = pytest.mark.unit
 
@@ -640,7 +641,7 @@ def real_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
     """The real analysis pipeline over the checked-in plasticos pack; only the loader and dispatch are fakes."""
     from engine.config.loader import DomainPackLoader
 
-    spec = DomainPackLoader().load_domain(TENANT)
+    spec = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT)).load_domain(TENANT)
     loader = MagicMock()
     loader.load_domain.return_value = spec
     monkeypatch.setattr(health_api, "_get_domain_loader", lambda: loader)

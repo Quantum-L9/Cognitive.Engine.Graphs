@@ -24,6 +24,12 @@ Two kinds of thing live here, deliberately apart:
   types, relationship names, directions, outcome signals and source systems.
   They prove the engine executes a domain's declared contract rather than a
   built-in recipe. Verification inputs only; never canonical domain products.
+
+``DESIGN_PACKS_ROOT`` is the repository's design and test packs (the former
+top-level ``domains/`` directory, issue #400 A5/D5). They are product-shaped
+examples read by tests and tools, never loaded in production, and they stay
+out of ``SYNTHETIC_DOMAINS_ROOT`` so that root remains domain-neutral
+(ADR-112).
 """
 
 from __future__ import annotations
@@ -37,6 +43,7 @@ from engine.models.payloads import DomainContract
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SYNTHETIC_DOMAINS_ROOT = REPO_ROOT / "tests" / "fixtures" / "domains"
+DESIGN_PACKS_ROOT = REPO_ROOT / "tests" / "fixtures" / "design_packs"
 PAYLOAD_EXAMPLES = REPO_ROOT / "contracts" / "payloads" / "examples"
 
 PLASTICOS_EXAMPLE_CONTRACT = DomainContract(

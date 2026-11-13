@@ -19,7 +19,6 @@ contract binds tenant and domain id (as HEALTH-05 does for health).
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -28,8 +27,9 @@ import pytest
 from engine.config.loader import DomainPackLoader
 from engine.config.settings import settings
 from engine.handlers import ValidationError, handle_admin, init_dependencies
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
-DOMAINS = Path(__file__).resolve().parents[2] / "domains"
+DOMAINS = DESIGN_PACKS_ROOT
 TENANT = "freight-matching"
 OTHER = "plasticos"
 
