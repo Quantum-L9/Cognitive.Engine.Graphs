@@ -833,6 +833,13 @@ class Settings(BaseSettings):
     # defaulting to the candidate's declared community property. Off: the
     # hardcoded `community_id` (C-21 rollback).
     preference_attention_declared_community_enabled: bool = True
+    # ScoringDimensionSpec.metadata (ceg-preference-attention-unreachable): a
+    # preference_attention dimension without metadata.success_value is refused
+    # by the scoring compiler on every match. On: the loader withholds the pack
+    # at admission ("undeclared scoring metadata: ..."). Ships on (hardening,
+    # C-21): no served pack declares the dimension. Off: the pack is admitted
+    # and the compiler's refusal surfaces at match time, as before.
+    preference_attention_metadata_required_enabled: bool = True
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

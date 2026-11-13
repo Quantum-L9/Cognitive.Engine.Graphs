@@ -571,8 +571,9 @@ def test_served_packs_declare_every_structural_property_they_use() -> None:
 
 
 def _attention_dim(**metadata: str) -> MagicMock:
-    # ScoringDimensionSpec declares no `metadata` field; the dimension is
-    # duck-typed exactly as the assembler reads it (cf. test_hgkr_pass2).
+    # A code-built dimension with a metadata mapping, duck-typed exactly as the
+    # assembler reads it (cf. test_hgkr_pass2); packs declare the typed
+    # ScoringDimensionSpec.metadata (test_scoring_dimension_metadata.py).
     dim = MagicMock()
     dim.name = "tasting_history"
     dim.candidateprop = "culture_cluster"

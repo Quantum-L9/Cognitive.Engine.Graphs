@@ -72,12 +72,29 @@ gate.nullbehavior  # NullBehavior — "pass" (default) or "fail"
 
 ### ScoringDimension
 
+Correction (ceg-preference-attention-unreachable): the names this section used
+to list (`dim.type`, `dim.weight`, `dim.field`, `dim.query_param`,
+`dim.params`) do not exist. The authority is `ScoringDimensionSpec` in
+`engine/config/schema.py`; its keys are flatcase where the schema says so, and
+the YAML key equals the attribute name. Only this section is corrected here.
+
 ```python
-dim.type  # ScoringType enum value
-dim.weight  # float
-dim.field  # str — property name on candidate node
-dim.query_param  # str — key in query dict
-dim.params  # dict[str, Any] — scoring-type-specific parameters
+dim.name  # str
+dim.computation  # ComputationType enum value
+dim.source  # ScoringSource enum value
+dim.candidateprop  # str | None — property name on the candidate node
+dim.queryprop  # str | None — query parameter name
+dim.weightkey  # str — key of the request weight override
+dim.defaultweight  # float
+dim.defaultwhennull  # float
+dim.matchdirections  # list[str] | None — directions this dimension applies to (None = all)
+dim.metadata  # ScoringDimensionMetadata | None — computation-specific keys:
+#   preference_attention: success_value, success_property, outcome_relation,
+#                         outcome_node, outcome_community_property
+#   community_bridge:     community_properties
+# Other computation keys are top-level fields: alias, expression, minvalue,
+# maxvalue, decayconstant, candidateprop_lon, queryprop_lon, bias, aggregation,
+# null_strategy, cold_start_fallback, soft_match, entity_types. There is no `params` dict.
 ```
 
 

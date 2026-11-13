@@ -26,16 +26,19 @@ import threading
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 
 import yaml
 from pydantic import ConfigDict, Field, RootModel, model_validator, with_config
 from pydantic import ValidationError as PydanticValidationError
 from typing_extensions import TypedDict
 
-from engine.config.schema import DomainActivation, DomainSpec, GateSpec
+from engine.config.schema import DomainActivation, DomainSpec, GateSpec, ScoringDimensionSpec
 from engine.config.settings import settings
 from engine.utils.security import tenant_id_defect
+
+if TYPE_CHECKING:
+    from engine.scoring.assembler import ScoringAssembler
 
 logger = logging.getLogger(__name__)
 
@@ -515,6 +518,7 @@ def admission_defects(spec: DomainSpec, *, complete: bool = False) -> list[str]:
     ``settings.unvalidated_domain_packs_enabled`` is the operator's explicit,
     documented override (docs/FEATURE_GATES.md §16).
     """
+    from engine.config.outcome_vocabulary import scoring_metadata_defects, undeclared_success_value_dimensions
     from engine.config.structural_vocabulary import UndeclaredStructuralPropertyError, structural_property_defects
     from engine.gates.compiler import GateCompiler
 
@@ -522,6 +526,10 @@ def admission_defects(spec: DomainSpec, *, complete: bool = False) -> list[str]:
     # Stage 2 follow-up (item 8): structural properties a gate, scoring
     # dimension or GDS job uses are declarations (declared_structural_properties_required_enabled).
     defects: list[str] = structural_property_defects(spec)
+    # A preference_attention dimension declares its success value
+    # (preference_attention_metadata_required_enabled); reported once, here.
+    undeclared_success = undeclared_success_value_dimensions(spec)
+    defects.extend(scoring_metadata_defects(undeclared_success))
     for gate in spec.gates:
         if gate.strictwhen:
             defects.append(f"{gate.name}: strictwhen {gate.strictwhen!r} is not consumed by any compiler")
@@ -541,7 +549,13 @@ def admission_defects(spec: DomainSpec, *, complete: bool = False) -> list[str]:
     defects.extend(_plugin_defects(spec))
     defects.extend(_sync_shape_defects(spec))
     if complete or settings.scoring_admission_check_enabled or settings.admission_checks_full_match:
-        defects.extend(_scoring_defects(spec, check_producers=complete or settings.scoring_admission_check_enabled))
+        defects.extend(
+            _scoring_defects(
+                spec,
+                check_producers=complete or settings.scoring_admission_check_enabled,
+                reported=set(undeclared_success),
+            )
+        )
     if complete or settings.admission_checks_full_match:
         defects.extend(_match_defects(spec))
     if complete:
@@ -734,47 +748,83 @@ def _no_producer_defect(dim: object, *, candidate_properties: set[str]) -> str |
     return None
 
 
-def _scoring_defects(spec: DomainSpec, *, check_producers: bool) -> list[str]:
+def _scoring_defects(spec: DomainSpec, *, check_producers: bool, reported: set[str] | None = None) -> list[str]:
     """Scoring dimensions that cannot execute in a declared match direction.
 
     For each direction, every applicable dimension is compiled exactly as
     ``ScoringAssembler.assemble_scoring_clause`` compiles it: a ``ValueError``
     is a defect quoting the compiler, and every ``$parameter`` the expression
     references must be one ``handle_match`` binds, or the match fails with
-    ``ParameterMissing``. One defect per offending dimension.
+    ``ParameterMissing``. One defect per offending dimension. A dimension in
+    ``reported`` already carries a named admission defect and is not compiled.
+    """
+    reported = reported or set()
+    defects: list[str] = _producer_defects(spec) if check_producers else []
+    bindable = _bindable_parameters(spec)
+    for direction in spec.queryschema.matchdirections:
+        defects.extend(_direction_scoring_defects(spec, direction, bindable=bindable, reported=reported, prior=defects))
+    return defects
+
+
+def _producer_defects(spec: DomainSpec) -> list[str]:
+    """``_no_producer_defect`` for every scoring dimension, in declaration order."""
+    candidate_properties = _candidate_properties(spec)
+    producers = (_no_producer_defect(dim, candidate_properties=candidate_properties) for dim in spec.scoring.dimensions)
+    return [producer for producer in producers if producer is not None]
+
+
+def _direction_scoring_defects(
+    spec: DomainSpec, direction: str, *, bindable: set[str], reported: set[str], prior: list[str]
+) -> list[str]:
+    """One direction's dimension defects, then the assembled clause when nothing in it was refused.
+
+    Dimensions compile in declaration order on one assembler, so a later
+    dimension sees the parameters earlier ones bound. The clause is assembled
+    only when no applicable dimension is ``reported`` and no defect so far
+    (``prior`` included) names this direction.
     """
     from engine.scoring.assembler import ScoringAssembler
 
-    defects: list[str] = []
-    bindable = _bindable_parameters(spec)
-    if check_producers:
-        candidate_properties = _candidate_properties(spec)
-        for dim in spec.scoring.dimensions:
-            producer = _no_producer_defect(dim, candidate_properties=candidate_properties)
-            if producer is not None:
-                defects.append(producer)
-    for direction in spec.queryschema.matchdirections:
-        assembler = ScoringAssembler(spec)
-        for dim in spec.scoring.dimensions:
-            if dim.matchdirections and direction not in dim.matchdirections:
-                continue
-            try:
-                expression = assembler._compile_dimension(dim)
-            except (ValueError, KeyError, TypeError) as exc:
-                defects.append(f"scoring[{direction}] {dim.name}: refused by the scoring compiler — {exc}")
-                continue
-            bound = bindable | set(assembler.last_query_params)
-            unbound = sorted({p for p in _PARAM_IDENTIFIER_REF.findall(expression) if p not in bound})
-            if unbound:
-                names = ", ".join(repr(p) for p in unbound)
-                defects.append(f"scoring[{direction}] {dim.name}: references parameter(s) {names}, which nothing binds")
-        if not any(d.startswith(f"scoring[{direction}]") for d in defects):
-            # The clause as handle_match assembles it (aliases, weights, clamp).
-            try:
-                ScoringAssembler(spec).assemble_scoring_clause(direction, {})
-            except (ValueError, KeyError, TypeError) as exc:
-                defects.append(f"scoring[{direction}]: refused by the scoring assembler — {exc}")
-    return defects
+    assembler = ScoringAssembler(spec)
+    applicable = [dim for dim in spec.scoring.dimensions if not dim.matchdirections or direction in dim.matchdirections]
+    compiled = (
+        _dimension_defect(assembler, dim, direction, bindable) for dim in applicable if dim.name not in reported
+    )
+    found = [defect for defect in compiled if defect is not None]
+    if any(dim.name in reported for dim in applicable):
+        return found
+    prefix = f"scoring[{direction}]"
+    if any(defect.startswith(prefix) for defect in (*prior, *found)):
+        return found
+    clause = _clause_defect(spec, direction)
+    return found if clause is None else [*found, clause]
+
+
+def _dimension_defect(
+    assembler: ScoringAssembler, dim: ScoringDimensionSpec, direction: str, bindable: set[str]
+) -> str | None:
+    """The compiler's refusal of ``dim``, or the parameters its expression references that nothing binds."""
+    try:
+        expression = assembler._compile_dimension(dim)
+    except (ValueError, KeyError, TypeError) as exc:
+        return f"scoring[{direction}] {dim.name}: refused by the scoring compiler — {exc}"
+    bound = bindable | set(assembler.last_query_params)
+    unbound = sorted({p for p in _PARAM_IDENTIFIER_REF.findall(expression) if p not in bound})
+    if not unbound:
+        return None
+    names = ", ".join(repr(p) for p in unbound)
+    return f"scoring[{direction}] {dim.name}: references parameter(s) {names}, which nothing binds"
+
+
+def _clause_defect(spec: DomainSpec, direction: str) -> str | None:
+    """The clause as ``handle_match`` assembles it (aliases, weights, clamp), or ``None`` when it assembles."""
+    from engine.scoring.assembler import ScoringAssembler
+
+    try:
+        ScoringAssembler(spec).assemble_scoring_clause(direction, {})
+    except (ValueError, KeyError, TypeError) as exc:
+        return f"scoring[{direction}]: refused by the scoring assembler — {exc}"
+    return None
 
 
 def withholding_reason(spec: DomainSpec, *, complete: bool = False) -> str | None:
@@ -799,11 +849,15 @@ def withholding_reason(spec: DomainSpec, *, complete: bool = False) -> str | Non
     if complete or not settings.unvalidated_domain_packs_enabled:
         defects = admission_defects(spec, complete=complete)
         if defects:
-            # Sync-shape and undeclared-structural-property defects are not gate
-            # compilation defects, so the reason names every defect.
+            # Sync-shape, undeclared-structural-property and scoring-metadata
+            # defects are not gate compilation defects, so the reason names every defect.
+            from engine.config.outcome_vocabulary import SCORING_METADATA_DEFECT_PREFIX
             from engine.config.structural_vocabulary import STRUCTURAL_DEFECT_PREFIX
 
-            sync_shape = any(defect.startswith((*_SYNC_SHAPE_PREFIXES, STRUCTURAL_DEFECT_PREFIX)) for defect in defects)
+            sync_shape = any(
+                defect.startswith((*_SYNC_SHAPE_PREFIXES, STRUCTURAL_DEFECT_PREFIX, SCORING_METADATA_DEFECT_PREFIX))
+                for defect in defects
+            )
             if not complete and not _match_admission_checks_enabled() and not sync_shape:
                 return (
                     f"Domain '{spec.domain.id}' is withheld: {len(defects)} gate(s) do not compile to executable "

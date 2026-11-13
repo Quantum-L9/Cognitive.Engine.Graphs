@@ -155,8 +155,9 @@ async def test_feedback_modules_refuse_an_undeclared_pack() -> None:
 
 
 def _attention_dimension() -> MagicMock:
-    # ScoringDimensionSpec declares no `metadata` field, so the dimension is
-    # duck-typed here exactly as the assembler reads it (cf. test_hgkr_pass2).
+    # A code-built dimension with a metadata mapping, duck-typed exactly as the
+    # assembler reads it (cf. test_hgkr_pass2); packs declare the typed
+    # ScoringDimensionSpec.metadata (test_scoring_dimension_metadata.py).
     dim = MagicMock()
     dim.name = "tasting_history"
     dim.candidateprop = "humidity_pct"
