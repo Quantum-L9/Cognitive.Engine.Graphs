@@ -35,11 +35,11 @@ class TestNullSemanticsPassBehavior:
         db = seeded_graph["database"]
         tenant = seeded_graph["tenant"]
 
-        # Insert a facility with NULL density bounds
+        # Insert a depot with NULL density bounds
         await graph_driver.execute_query(
             """
-            MERGE (f:Facility {facility_id: 9901})
-            SET f.name = 'NullDensity Facility',
+            MERGE (f:OrbitalDepot {depot_id: 9901})
+            SET f.name = 'NullDensity Depot',
                 f.min_density = null,
                 f.max_density = null,
                 f.tenant = $tenant,
@@ -59,20 +59,20 @@ class TestNullSemanticsPassBehavior:
 
         results = await graph_driver.execute_query(
             f"""
-            MATCH (f:Facility {{tenant: $tenant}})
+            MATCH (f:OrbitalDepot {{tenant: $tenant}})
             WHERE {null_clause}
-            RETURN f.facility_id AS fid, f.name AS name
-            ORDER BY f.facility_id
+            RETURN f.depot_id AS fid, f.name AS name
+            ORDER BY f.depot_id
             """,
             parameters={"tenant": tenant, "density": 0.95},
             database=db,
         )
 
-        facility_ids = [r["fid"] for r in results]
-        assert 9901 in facility_ids, "NULL density facility should PASS range gate"
+        depot_ids = [r["fid"] for r in results]
+        assert 9901 in depot_ids, "NULL density depot should PASS range gate"
 
         # Cleanup
-        await graph_driver.execute_query("MATCH (f:Facility {facility_id: 9901}) DETACH DELETE f", database=db)
+        await graph_driver.execute_query("MATCH (f:OrbitalDepot {depot_id: 9901}) DETACH DELETE f", database=db)
 
     @pytest.mark.asyncio
     async def test_null_query_param_passes_threshold_gate(self, graph_driver, seeded_graph):
@@ -86,28 +86,28 @@ class TestNullSemanticsPassBehavior:
         null_clause = NullHandler.wrap_gate_with_null_logic(
             gate_type=GateType.THRESHOLD,
             null_behavior=NullBehavior.PASS,
-            gate_cypher="f.contamination_tolerance >= $max_contamination",
-            query_param="$max_contamination",
+            gate_cypher="f.reliability >= $min_reliability",
+            query_param="$min_reliability",
         )
 
         results = await graph_driver.execute_query(
             f"""
-            MATCH (f:Facility {{tenant: $tenant}})
+            MATCH (f:OrbitalDepot {{tenant: $tenant}})
             WHERE {null_clause}
-            RETURN f.facility_id AS fid
+            RETURN f.depot_id AS fid
             """,
-            parameters={"tenant": tenant, "max_contamination": None},
+            parameters={"tenant": tenant, "min_reliability": None},
             database=db,
         )
 
-        assert len(results) == len(seeded_graph["facility_ids"]), (
-            "All facilities should pass threshold gate when query param is NULL"
+        assert len(results) == len(seeded_graph["depot_ids"]), (
+            "All depots should pass threshold gate when query param is NULL"
         )
 
     @pytest.mark.asyncio
     async def test_null_boolean_property_fails_boolean_gate(self, graph_driver, seeded_graph):
         """
-        Boolean gate with FAIL (default for boolean): NULL pvc_tolerant
+        Boolean gate with FAIL (default for boolean): NULL accepts_hazmat
         should exclude the candidate.
         """
         db = seeded_graph["database"]
@@ -115,9 +115,9 @@ class TestNullSemanticsPassBehavior:
 
         await graph_driver.execute_query(
             """
-            MERGE (f:Facility {facility_id: 9902})
-            SET f.name = 'NullBool Facility',
-                f.pvc_tolerant = null,
+            MERGE (f:OrbitalDepot {depot_id: 9902})
+            SET f.name = 'NullBool Depot',
+                f.accepts_hazmat = null,
                 f.tenant = $tenant
             """,
             parameters={"tenant": tenant},
@@ -127,24 +127,24 @@ class TestNullSemanticsPassBehavior:
         null_clause = NullHandler.wrap_gate_with_null_logic(
             gate_type=GateType.BOOLEAN,
             null_behavior=NullBehavior.FAIL,
-            gate_cypher="f.pvc_tolerant = $pvc_tolerant",
-            candidate_prop="f.pvc_tolerant",
+            gate_cypher="f.accepts_hazmat = $accepts_hazmat",
+            candidate_prop="f.accepts_hazmat",
         )
 
         results = await graph_driver.execute_query(
             f"""
-            MATCH (f:Facility {{tenant: $tenant}})
+            MATCH (f:OrbitalDepot {{tenant: $tenant}})
             WHERE {null_clause}
-            RETURN f.facility_id AS fid
+            RETURN f.depot_id AS fid
             """,
-            parameters={"tenant": tenant, "pvc_tolerant": True},
+            parameters={"tenant": tenant, "accepts_hazmat": True},
             database=db,
         )
 
-        facility_ids = [r["fid"] for r in results]
-        assert 9902 not in facility_ids, "NULL boolean should FAIL boolean gate"
+        depot_ids = [r["fid"] for r in results]
+        assert 9902 not in depot_ids, "NULL boolean should FAIL boolean gate"
 
-        await graph_driver.execute_query("MATCH (f:Facility {facility_id: 9902}) DETACH DELETE f", database=db)
+        await graph_driver.execute_query("MATCH (f:OrbitalDepot {depot_id: 9902}) DETACH DELETE f", database=db)
 
 
 @pytest.mark.integration
@@ -165,8 +165,8 @@ class TestNullSemanticsUnit:
         clause = NullHandler.wrap_gate_with_null_logic(
             gate_type=GateType.BOOLEAN,
             null_behavior=NullBehavior.FAIL,
-            gate_cypher="candidate.pvc_tolerant = $pvc",
-            candidate_prop="candidate.pvc_tolerant",
+            gate_cypher="candidate.accepts_hazmat = $hazmat",
+            candidate_prop="candidate.accepts_hazmat",
         )
         assert "IS NOT NULL" in clause
         assert "AND" in clause
@@ -181,8 +181,8 @@ class TestNullSemanticsUnit:
         assert NullHandler.DEFAULT_BEHAVIORS[GateType.EXCLUSION] == NullBehavior.PASS
 
 
-def _facility_gate_fragment(gate: dict) -> str:
-    """Compile one gate with the real GateCompiler against a minimal Facility pack."""
+def _depot_gate_fragment(gate: dict) -> str:
+    """Compile one gate with the real GateCompiler against a minimal OrbitalDepot pack."""
     from engine.config.schema import DomainSpec
     from engine.gates.compiler import GateCompiler
 
@@ -192,23 +192,23 @@ def _facility_gate_fragment(gate: dict) -> str:
             "ontology": {
                 "nodes": [
                     {
-                        "label": "Facility",
+                        "label": "OrbitalDepot",
                         "managedby": "sync",
                         "candidate": True,
-                        "properties": [{"name": "facility_id", "type": "int", "required": True}],
+                        "properties": [{"name": "depot_id", "type": "int", "required": True}],
                     },
                     {
-                        "label": "Ask",
+                        "label": "LaunchWindow",
                         "managedby": "api",
                         "queryentity": True,
-                        "properties": [{"name": "ask_id", "type": "string", "required": True}],
+                        "properties": [{"name": "window_id", "type": "string", "required": True}],
                     },
                 ],
                 "edges": [],
             },
             "matchentities": {
-                "candidate": [{"label": "Facility", "matchdirection": "d1"}],
-                "queryentity": [{"label": "Ask", "matchdirection": "d1"}],
+                "candidate": [{"label": "OrbitalDepot", "matchdirection": "d1"}],
+                "queryentity": [{"label": "LaunchWindow", "matchdirection": "d1"}],
             },
             "queryschema": {"matchdirections": ["d1"], "fields": []},
             "gates": [gate],
@@ -228,13 +228,13 @@ class TestNullOperandsFromPredicate:
         tenant = seeded_graph["tenant"]
         await graph_driver.execute_query(
             """
-            MERGE (f:Facility {facility_id: 9903})
+            MERGE (f:OrbitalDepot {depot_id: 9903})
             SET f.min_density = null, f.max_density = 1.2, f.tenant = $tenant
             """,
             parameters={"tenant": tenant},
             database=db,
         )
-        fragment = _facility_gate_fragment(
+        fragment = _depot_gate_fragment(
             {
                 "name": "density_fail",
                 "type": "range",
@@ -246,13 +246,13 @@ class TestNullOperandsFromPredicate:
         )
         try:
             results = await graph_driver.execute_query(
-                f"MATCH (candidate:Facility {{tenant: $tenant}}) WHERE {fragment} RETURN candidate.facility_id AS fid",
+                f"MATCH (candidate:OrbitalDepot {{tenant: $tenant}}) WHERE {fragment} RETURN candidate.depot_id AS fid",
                 parameters={"tenant": tenant, "density": 0.95},
                 database=db,
             )
             assert 9903 not in [r["fid"] for r in results], "FAIL must reject a NULL tested bound"
         finally:
-            await graph_driver.execute_query("MATCH (f:Facility {facility_id: 9903}) DETACH DELETE f", database=db)
+            await graph_driver.execute_query("MATCH (f:OrbitalDepot {depot_id: 9903}) DETACH DELETE f", database=db)
 
     @pytest.mark.asyncio
     async def test_temporalrange_pass_admits_a_null_window(self, graph_driver, seeded_graph):
@@ -260,13 +260,13 @@ class TestNullOperandsFromPredicate:
         tenant = seeded_graph["tenant"]
         await graph_driver.execute_query(
             """
-            MERGE (f:Facility {facility_id: 9904})
+            MERGE (f:OrbitalDepot {depot_id: 9904})
             SET f.available_from = null, f.available_until = null, f.tenant = $tenant
             """,
             parameters={"tenant": tenant},
             database=db,
         )
-        fragment = _facility_gate_fragment(
+        fragment = _depot_gate_fragment(
             {
                 "name": "window_pass",
                 "type": "temporalrange",
@@ -279,10 +279,10 @@ class TestNullOperandsFromPredicate:
         )
         try:
             results = await graph_driver.execute_query(
-                f"MATCH (candidate:Facility {{tenant: $tenant}}) WHERE {fragment} RETURN candidate.facility_id AS fid",
+                f"MATCH (candidate:OrbitalDepot {{tenant: $tenant}}) WHERE {fragment} RETURN candidate.depot_id AS fid",
                 parameters={"tenant": tenant, "ws": "2026-11-01T00:00:00Z", "we": "2026-11-30T00:00:00Z"},
                 database=db,
             )
             assert 9904 in [r["fid"] for r in results], "PASS must admit a candidate with a NULL window"
         finally:
-            await graph_driver.execute_query("MATCH (f:Facility {facility_id: 9904}) DETACH DELETE f", database=db)
+            await graph_driver.execute_query("MATCH (f:OrbitalDepot {depot_id: 9904}) DETACH DELETE f", database=db)

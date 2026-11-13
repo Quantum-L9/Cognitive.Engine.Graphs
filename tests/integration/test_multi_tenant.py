@@ -27,31 +27,31 @@ class TestGraphLevelTenantIsolation:
     """Verify Neo4j queries are tenant-scoped — no cross-tenant data leakage."""
 
     @pytest.mark.asyncio
-    async def test_tenant_a_cannot_see_tenant_b_facilities(self, graph_driver):
-        """Facilities created by tenant_a are invisible to tenant_b queries."""
+    async def test_tenant_a_cannot_see_tenant_b_depots(self, graph_driver):
+        """Depots created by tenant_a are invisible to tenant_b queries."""
         db = "neo4j"
 
         await graph_driver.execute_query(
             """
-            MERGE (f:Facility {facility_id: 8001})
+            MERGE (f:OrbitalDepot {depot_id: 8001})
             SET f.name = 'TenantA-Only', f.tenant = 'tenant_a'
             """,
             database=db,
         )
         await graph_driver.execute_query(
             """
-            MERGE (f:Facility {facility_id: 8002})
+            MERGE (f:OrbitalDepot {depot_id: 8002})
             SET f.name = 'TenantB-Only', f.tenant = 'tenant_b'
             """,
             database=db,
         )
 
         results_a = await graph_driver.execute_query(
-            "MATCH (f:Facility {tenant: 'tenant_a'}) RETURN f.facility_id AS fid",
+            "MATCH (f:OrbitalDepot {tenant: 'tenant_a'}) RETURN f.depot_id AS fid",
             database=db,
         )
         results_b = await graph_driver.execute_query(
-            "MATCH (f:Facility {tenant: 'tenant_b'}) RETURN f.facility_id AS fid",
+            "MATCH (f:OrbitalDepot {tenant: 'tenant_b'}) RETURN f.depot_id AS fid",
             database=db,
         )
 
@@ -65,7 +65,7 @@ class TestGraphLevelTenantIsolation:
 
         # Cleanup
         await graph_driver.execute_query(
-            "MATCH (f:Facility) WHERE f.facility_id IN [8001, 8002] DETACH DELETE f",
+            "MATCH (f:OrbitalDepot) WHERE f.depot_id IN [8001, 8002] DETACH DELETE f",
             database=db,
         )
 
@@ -76,22 +76,22 @@ class TestGraphLevelTenantIsolation:
 
         await graph_driver.execute_query(
             """
-            MERGE (a:Facility {facility_id: 8010, tenant: 'tenant_x', name: 'X-Alpha'})
-            MERGE (b:Facility {facility_id: 8011, tenant: 'tenant_x', name: 'X-Beta'})
-            MERGE (c:Facility {facility_id: 8012, tenant: 'tenant_y', name: 'Y-Gamma'})
+            MERGE (a:OrbitalDepot {depot_id: 8010, tenant: 'tenant_x', name: 'X-Alpha'})
+            MERGE (b:OrbitalDepot {depot_id: 8011, tenant: 'tenant_x', name: 'X-Beta'})
+            MERGE (c:OrbitalDepot {depot_id: 8012, tenant: 'tenant_y', name: 'Y-Gamma'})
             MERGE (a)-[:EXCLUDED_FROM]->(b)
             """,
             database=db,
         )
 
-        # Tenant X: facility 8010 excluded from 8011
+        # Tenant X: depot 8010 excluded from 8011
         results_x = await graph_driver.execute_query(
             """
-            MATCH (f:Facility {tenant: 'tenant_x'})
+            MATCH (f:OrbitalDepot {tenant: 'tenant_x'})
             WHERE NOT EXISTS {
-                MATCH (excluder:Facility {facility_id: 8010})-[:EXCLUDED_FROM]->(f)
+                MATCH (excluder:OrbitalDepot {depot_id: 8010})-[:EXCLUDED_FROM]->(f)
             }
-            RETURN f.facility_id AS fid
+            RETURN f.depot_id AS fid
             """,
             database=db,
         )
@@ -102,8 +102,8 @@ class TestGraphLevelTenantIsolation:
         # Tenant Y: unaffected by Tenant X exclusions
         results_y = await graph_driver.execute_query(
             """
-            MATCH (f:Facility {tenant: 'tenant_y'})
-            RETURN f.facility_id AS fid
+            MATCH (f:OrbitalDepot {tenant: 'tenant_y'})
+            RETURN f.depot_id AS fid
             """,
             database=db,
         )
@@ -111,7 +111,7 @@ class TestGraphLevelTenantIsolation:
         assert 8012 in fids_y, "Tenant Y data must be unaffected by Tenant X exclusions"
 
         await graph_driver.execute_query(
-            "MATCH (f:Facility) WHERE f.facility_id IN [8010, 8011, 8012] DETACH DELETE f",
+            "MATCH (f:OrbitalDepot) WHERE f.depot_id IN [8010, 8011, 8012] DETACH DELETE f",
             database=db,
         )
 
@@ -120,14 +120,14 @@ class TestGraphLevelTenantIsolation:
         """Batch UNWIND/MERGE sets tenant property and doesn't leak across tenants."""
         db = "neo4j"
         batch = [
-            {"facility_id": 8020, "name": "SyncTest-A"},
-            {"facility_id": 8021, "name": "SyncTest-B"},
+            {"depot_id": 8020, "name": "SyncTest-A"},
+            {"depot_id": 8021, "name": "SyncTest-B"},
         ]
 
         await graph_driver.execute_query(
             """
             UNWIND $batch AS row
-            MERGE (f:Facility {facility_id: row.facility_id})
+            MERGE (f:OrbitalDepot {depot_id: row.depot_id})
             SET f += row, f.tenant = $tenant
             """,
             parameters={"batch": batch, "tenant": "sync_tenant"},
@@ -136,19 +136,19 @@ class TestGraphLevelTenantIsolation:
 
         # Verify tenant property set
         results = await graph_driver.execute_query(
-            "MATCH (f:Facility {tenant: 'sync_tenant'}) RETURN f.facility_id AS fid",
+            "MATCH (f:OrbitalDepot {tenant: 'sync_tenant'}) RETURN f.depot_id AS fid",
             database=db,
         )
         assert len(results) == 2
 
         # Verify other tenants don't see it
         results_other = await graph_driver.execute_query(
-            "MATCH (f:Facility {tenant: 'other_tenant'}) RETURN count(f) AS cnt",
+            "MATCH (f:OrbitalDepot {tenant: 'other_tenant'}) RETURN count(f) AS cnt",
             database=db,
         )
         assert results_other[0]["cnt"] == 0
 
         await graph_driver.execute_query(
-            "MATCH (f:Facility {tenant: 'sync_tenant'}) DETACH DELETE f",
+            "MATCH (f:OrbitalDepot {tenant: 'sync_tenant'}) DETACH DELETE f",
             database=db,
         )
