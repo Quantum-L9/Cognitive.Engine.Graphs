@@ -73,7 +73,18 @@ GATE_URL=<gate base URL>
 GATE_ADMIN_TOKEN=<from-secrets>
 L9_GATE_SIGNING_KEY_IDS=<gate ed25519 key id(s), comma-separated>
 L9_VERIFYING_KEYS_JSON={"<gate key id>":"<gate verifying key>"}
+# Operator-owned domain pack root (absolute host path)
+CEG_DOMAINS_DIR=/opt/ceg/domain-packs
 ```
+
+**Domain packs are not in the image (#400).** Neither `Dockerfile` nor
+`Dockerfile.prod` copies a pack directory. `docker-compose.prod.yml` mounts
+`CEG_DOMAINS_DIR` read-only at `/app/domains` and sets `DOMAINS_ROOT` to that
+path, so the engine serves only what the operator placed there. That directory
+is the root `tools/publish_domain_pack.py` publishes reviewed packs into
+(`docs/contracts/DOMAIN_SPEC_VERSIONING.md`). With an empty directory the engine
+starts and serves no domain. The packs kept in this repository are design and
+test material and are never a production source.
 
 Optional, with safe defaults: `NEO4J_USERNAME` (`neo4j`), `L9_SIGNING_KEY_ID`
 (`graph-engine-v1`), `POSTGRES_USER` (`l9_owner`), `POSTGRES_DB` (`l9_graph`),

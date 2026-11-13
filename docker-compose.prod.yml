@@ -10,7 +10,7 @@
 #
 # L9 Graph Cognitive Engine — Production Docker Compose
 # Usage: docker compose -f docker-compose.prod.yml up -d
-# Requires: NEO4J_PASSWORD, API_SECRET_KEY, POSTGRES_PASSWORD and CEG_APP_DB_PASSWORD env vars set (no defaults in prod)
+# Requires: NEO4J_PASSWORD, API_SECRET_KEY, POSTGRES_PASSWORD, CEG_APP_DB_PASSWORD and CEG_DOMAINS_DIR env vars set (no defaults in prod)
 
 services:
 
@@ -83,11 +83,18 @@ services:
       API_SECRET_KEY: ${API_SECRET_KEY:?API_SECRET_KEY must be set for production}
       LOG_LEVEL: info
       CORS_ORIGINS: ${CORS_ORIGINS:-[]}
-      DOMAINS_ROOT: domains
+      # #400 A3: the image ships no packs. The engine serves only the
+      # operator-owned pack root mounted read-only below.
+      DOMAINS_ROOT: /app/domains
       KGE_ENABLED: "true"
       KGE_CONFIDENCE_THRESHOLD: "0.3"
       KGE_EMBEDDING_DIM: "300"
       PARETO_ENABLED: "true"
+    # #400 A3 / D1: operator-owned domain pack root (the directory
+    # tools/publish_domain_pack.py publishes into), mounted read-only.
+    # Required, not defaulted: production never falls back to repository packs.
+    volumes:
+      - ${CEG_DOMAINS_DIR:?CEG_DOMAINS_DIR must be set for production (absolute path of the operator-owned domain pack root)}:/app/domains:ro
     # CEG-007: redis was a depends_on: service_healthy here for a dependency
     # no code imports.
     depends_on:
