@@ -84,3 +84,12 @@ not — those live in `l9-template` (see [BANNED_PATTERNS.md](BANNED_PATTERNS.md
 Feature flags follow their own naming rule: the setting is `snake_case` ending in
 `_enabled`, the env var is the same name uppercased. See
 [FEATURE_FLAG_DISCIPLINE.md](FEATURE_FLAG_DISCIPLINE.md).
+
+## Graph engine pack root (issue #400 A4/A5, 2026-11-13)
+
+The graph engine reads its domain pack root from one variable, `DOMAINS_ROOT`
+(`Settings.domains_root`, default `./domains` outside production). The
+`GRAPH_DOMAINS_DIR` example above is illustrative, and `DOMAIN_SPECS_PATH` is no
+longer read. Under `L9_ENV=prod` `DOMAINS_ROOT` must be set to an absolute,
+existing, readable directory, or startup fails naming it
+(`DOMAINS_ROOT_REQUIRED_IN_PROD`, default `true`; `docs/FEATURE_GATES.md` §34).
