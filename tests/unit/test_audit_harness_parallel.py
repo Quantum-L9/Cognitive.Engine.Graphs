@@ -19,6 +19,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools import audit_harness as ah  # noqa: E402
+from tools import spec_extract as se  # noqa: E402
 
 
 def _write_script(root: Path, name: str, body: str) -> None:
@@ -86,18 +87,23 @@ def test_run_steps_concurrently_empty(tmp_path: Path) -> None:
 
 
 def _harness_root(tmp_path: Path, *, with_contract_wiring: bool) -> Path:
-    """A minimal root holding real copies of the harness's step scripts."""
+    """A minimal root holding real copies of the harness's step scripts and the spec they scan."""
     tools = tmp_path / "tools"
     tools.mkdir()
     # cypher_lint.py: audit_engine delegates the SEC_LABEL rule to it (RU-132).
+    # path_policy.py: spec_extract imports it; without it Spec Coverage crashed
+    # here unnoticed (non-strict), which the baseline ratchet now refuses.
     for name in (
         "audit_engine.py",
         "audit_rules.yaml",
         "cypher_lint.py",
+        "path_policy.py",
         "spec_extract.py",
         "l9_template_manifest.yaml",
     ):
         (tools / name).write_text((REPO_ROOT / "tools" / name).read_text(encoding="utf-8"), encoding="utf-8")
+    for spec in se.spec_candidates(REPO_ROOT):
+        (tmp_path / spec.name).write_text(spec.read_text(encoding="utf-8"), encoding="utf-8")
     if with_contract_wiring:
         _write_script(tools, "verify_contracts.py", "import sys; sys.exit(0)")
     return tmp_path
@@ -106,6 +112,13 @@ def _harness_root(tmp_path: Path, *, with_contract_wiring: bool) -> Path:
 def _run_harness(monkeypatch: pytest.MonkeyPatch, root: Path, *extra: str) -> int:
     monkeypatch.setattr(sys, "argv", ["audit_harness.py", "--root", str(root), *extra])
     return ah.main()
+
+
+def _establish_baseline(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], root: Path) -> None:
+    """Commit-equivalent precondition: a ratchet baseline matching this root, as `make harness-baseline` writes it."""
+    assert _run_harness(monkeypatch, root, "--update-baseline", "--skip-contracts") == 0
+    assert (root / ah.DEFAULT_BASELINE).is_file()
+    capsys.readouterr()  # only the run under test may speak to the assertions below
 
 
 @pytest.mark.unit
@@ -136,6 +149,7 @@ def test_skip_contracts_keeps_explicit_skip_semantics(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = _harness_root(tmp_path, with_contract_wiring=False)
+    _establish_baseline(monkeypatch, capsys, root)
 
     rc = _run_harness(monkeypatch, root, "--skip-contracts")
 
@@ -148,6 +162,7 @@ def test_present_contract_wiring_script_passes_harness(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = _harness_root(tmp_path, with_contract_wiring=True)
+    _establish_baseline(monkeypatch, capsys, root)
 
     rc = _run_harness(monkeypatch, root)
 

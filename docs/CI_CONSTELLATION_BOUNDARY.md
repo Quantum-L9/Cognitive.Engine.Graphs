@@ -49,6 +49,15 @@ or an agent):
   entry per owner/issue/expiry (see `docs/contracts/SHARED_MODELS.md` for the
   `TransportPacket` migration this ledger tracks)
 
+`tools/audit_baseline.json` is not one of these ledgers. It is the ratchet of
+`tools/audit_harness.py` itself (a CEG extension of the harness, no
+constellation code): the harness reads it on every run and fails when a
+finding count rises or spec coverage drops, and it changes only through the
+deliberate `make harness-baseline`, reviewed in the PR like any other diff. It
+sits beside `tools/audit_rules.yaml` rather than in `.l9/baselines/` because
+that directory is reserved for ledgers no agent or CI writes. See
+`docs/AUDIT_HARNESS.md` (Baseline Ratchet).
+
 **Retired 2026-11-08 (#335):** `.github/workflows/baseline-ratchet-caller.yml`
 and `.l9/baselines/test-quarantine.yml`. The caller pinned Core's v1
 `baseline-ratchet.yml`, which Core retired (its 2026-10-22 legacy-retirement

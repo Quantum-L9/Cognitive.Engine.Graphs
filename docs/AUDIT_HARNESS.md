@@ -13,6 +13,7 @@ make harness
             ├── [1] tools/audit_engine.py      → artifacts/audit_report.md
             ├── [2] tools/spec_extract.py       → artifacts/coverage_report.md
             ├── [3] tools/verify_contracts.py   → (stdout)
+            ├── [4] baseline ratchet            ← tools/audit_baseline.json
             └── [*] Consolidated               → artifacts/harness_report.md
 ```
 
@@ -24,11 +25,12 @@ make harness
 | **Forbidden structure checks** | Verifies directories/files that must NOT exist | Fails if `engine/api/` or `engine/middleware.py` reappears |
 | **Required structure checks** | Verifies directories/files/tokens that MUST exist | Fails if `engine/handlers.py` is missing or doesn't contain `register_all` |
 | **Cypher injection pattern detection** | Regex-scans f-strings for label interpolation without `sanitize_label()` | Flags `f"MERGE (n:{spec.target_node} ...)"` with evidence snippet |
-| **Lifecycle anchor verification** | Checks that match/sync/GDS flows reference expected components | Warns if `GateCompiler`, `TraversalAssembler`, `ScoringAssembler` aren't referenced in handler chain |
+| **Lifecycle anchor verification** | Checks that the definition owning each flow uses every expected component (`within_function` / `within_class` in `tools/audit_rules.yaml`) | Warns if `handle_match` stops constructing `GateCompiler`, `TraversalAssembler` or `ScoringAssembler`, or stops calling `execute_query` |
 | **Spec coverage scanning** | Extracts features from spec YAML, scans codebase for implementation evidence | Reports which gates, scoring types, ontology nodes are IMPLEMENTED / PARTIAL / MISSING |
 | **Contract wiring verification** | Checks all 27 contract docs exist and are referenced in `.cursorrules` / `CLAUDE.md` / `AGENTS.md` | Fails if `FIELD_NAMES.md` exists but isn't wired into agent rules |
 | **Evidence-based output** | Every finding includes file path + line range + 7-line code snippet | You see the exact code, not a vague description |
 | **Severity-gated CI exit codes** | Returns exit code 1 if CRITICAL or HIGH findings exist | CI blocks merge; `make harness` fails locally |
+| **Baseline ratchet** | Compares finding counts and spec coverage with the committed `tools/audit_baseline.json` | Fails if MEDIUM findings rise from 0 to 1, or spec IMPLEMENTED drops |
 | **Consolidated report** | Writes `artifacts/harness_report.md` combining all step results | Single doc for PR review |
 
 ## ❌ What It Does NOT Do
@@ -74,12 +76,36 @@ python tools/audit_harness.py --skip-contracts
 
 # JSON output for CI integration
 python tools/audit_harness.py --json
+
+# Deliberate re-baseline of the ratchet (same as `make harness-baseline`)
+python tools/audit_harness.py --update-baseline
 ```
+
+## Baseline Ratchet
+
+`tools/audit_baseline.json` records the finding count per severity and the
+spec-coverage totals. Every run compares against it, and the comparison is in
+`artifacts/harness_report.md` (so in the PR comment) as a baseline vs current
+table.
+
+| Metric | Fails when | Why |
+| :-- | :-- | :-- |
+| `findings.CRITICAL` / `HIGH` / `MEDIUM` / `LOW` | the count rises at all | Pure ratchet: every rule is a precise contract check, so a new finding is a regression, not noise; a tolerance band would let them pile up |
+| `spec_coverage.IMPLEMENTED` | the count drops | A feature lost its implementation evidence |
+| `spec_coverage.MISSING` | the count rises | A feature lost all evidence, or the spec added one nothing implements |
+| `spec_coverage.PARTIAL`, `total` | never (reported only) | They move in either direction whenever a feature changes state |
+
+Improvements pass and are reported. Lock them in by lowering the baseline:
+run `make harness-baseline` and commit `tools/audit_baseline.json`. Use the
+same command, with the reason in the commit message, when a rise is intended.
+A missing, unreadable or malformed baseline, or counts this run did not
+produce (a step that never reached a verdict, or a stale tracked
+`artifacts/` file), fails closed with exit 2.
 
 ## Exit Codes
 
 | Code | Meaning |
 |------|---------|
 | 0 | All checks passed |
-| 1 | CRITICAL/HIGH findings, or contract failures |
-| 2 | Infrastructure error (missing tool, bad YAML) |
+| 1 | CRITICAL/HIGH findings, contract failures, or a regression against the baseline |
+| 2 | Infrastructure error (missing tool, bad YAML, missing or malformed baseline) |
