@@ -105,6 +105,14 @@ class TestConvergenceLoopDisabled:
 
 
 class TestConvergenceLoopEnabled:
+    """The legacy propagation stage, which runs only with feedback_boost_propagation_enabled (CEG-462)."""
+
+    @pytest.fixture(autouse=True)
+    def _legacy_propagation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "feedback_boost_propagation_enabled", True)
+
     @pytest.mark.asyncio
     async def test_enabled_triggers_propagation(self):
         spec = _minimal_spec(feedback_enabled=True)
