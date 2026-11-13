@@ -24,11 +24,11 @@ contracts_to_read:
 
 ## Preconditions
 - `make test` passes
-- Domain ID is unique (not in `domains/` yet)
+- Domain ID is unique (not in `tests/fixtures/design_packs/` yet)
 - Ontology (nodes, edges) is defined
 
 ## Steps
-1. Create `domains/<domain_id>/spec.yaml`
+1. Create `tests/fixtures/design_packs/<domain_id>/spec.yaml`
    - All YAML keys snake_case
    - Version: `0.1.0-seed`
    - Required sections: domain, ontology, traversal, gates, scoring, sync, compliance
@@ -40,7 +40,7 @@ contracts_to_read:
 4. Run `make agent-check`
 
 ## Acceptance Criteria
-- [ ] spec.yaml exists at `domains/<domain_id>/spec.yaml`
+- [ ] spec.yaml exists at `tests/fixtures/design_packs/<domain_id>/spec.yaml`
 - [ ] All YAML keys snake_case (no camelCase, no flatcase)
 - [ ] Config loader validates without error
 - [ ] Version follows DOMAIN_SPEC_VERSIONING.md format

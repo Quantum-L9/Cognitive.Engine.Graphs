@@ -103,8 +103,6 @@ paths = [
     "tests/",
     # Documentation contains example connection strings
     "docs/",
-    # Domain specs contain placeholder values
-    "domains/",
     # Docker Compose uses ${VAR} env substitution, not real secrets
     "docker-compose\\.yml",
     "docker-compose\\.prod\\.yml",

@@ -122,7 +122,7 @@ l9-engine/
 │   │   └── audit.py               # Audit logging
 │   └── db/                        # Database layer
 │       └── neo4j.py               # Async Neo4j driver pool
-├── domains/                       # Domain specification packs
+├── tests/fixtures/design_packs/   # Design and test domain packs (never loaded in production)
 │   ├── plasticos/
 │   ├── mortgage-brokerage/
 │   └── healthcare-matching/
@@ -238,12 +238,21 @@ See [iac/README.md](iac/README.md) for full infrastructure docs.
 
 ## Adding a New Domain
 
-1. Create `domains/<name>/spec.yaml` following the domain spec schema
-2. Add seed data in `domains/<name>/seeds/`
-3. Add migrations in `domains/<name>/migrations/`
-4. Deploy — no code changes required
-
-See existing domains for examples.
+1. Author `<name>/spec.yaml` following the domain spec schema. The packs under
+   `tests/fixtures/design_packs/` are examples to start from
+   (`_template.yaml`); they are design and test material and are never loaded
+   by a deployed engine.
+2. For local development, place the pack (with any `seeds/` and `migrations/`)
+   in the directory the dev stack mounts: `tests/fixtures/design_packs/` by
+   default, or the one `CEG_DOMAINS_DIR` names.
+3. Validate it with the engine's own admission check:
+   `python tools/validate_domain.py <path>/spec.yaml --complete`.
+4. For production, have the spec reviewed (a `-reviewed` or `-production`
+   version) and publish it into the operator-owned pack root with
+   `tools/publish_domain_pack.py`; see `docs/runbooks/domain-pack-publish.md`
+   and `docs/DEPLOYMENT.md`. Runtime images contain no packs, so a domain that
+   was not published there is not served.
+5. No code change or image rebuild is required.
 
 ## License
 

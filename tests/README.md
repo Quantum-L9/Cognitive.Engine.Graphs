@@ -40,7 +40,8 @@ tests/
 │   ├── test_query_latency.py     # p95 < 500ms target
 │   └── test_sync_throughput.py   # 1000 entities < 2s
 └── fixtures/                      # Test data
-    ├── domains/                   # Test domain specs
+    ├── domains/                   # Neutral synthetic test domain specs
+    ├── design_packs/              # Repository design packs (the former top-level domains/)
     └── queries/                   # Sample query payloads
 ```
 

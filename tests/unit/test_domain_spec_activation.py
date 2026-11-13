@@ -62,7 +62,7 @@ def _relax_strict_validation() -> Generator[None, None, None]:
 def plasticos_spec_data() -> dict:
     """Load archived PlasticOS YAML for schema/feature activation coverage.
 
-    Runtime authority remains domains/plasticos/spec.yaml via DomainPackLoader.
+    Runtime authority remains tests/fixtures/design_packs/plasticos/spec.yaml via DomainPackLoader.
     This fixture intentionally reads the archived richer reference spec.
     """
     spec_path = Path(__file__).parent.parent.parent / "docs" / "archive" / "plasticos" / "plasticos_domain_spec.yaml"

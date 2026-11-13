@@ -48,7 +48,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 PAYLOADS = ROOT / "contracts" / "payloads"
-DEFAULT_DOMAINS_ROOT = ROOT / "domains"
+DEFAULT_DOMAINS_ROOT = ROOT / "tests" / "fixtures" / "design_packs"
 DEFAULT_REPORT = ROOT / "artifacts" / "payload-contract-compiler-report.json"
 
 SCHEMA_TO_MODEL: dict[str, str] = {
@@ -380,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
         "--domains-root",
         type=Path,
         default=DEFAULT_DOMAINS_ROOT,
-        help="Domain packs root DomainPackLoader reads (default: domains/)",
+        help="Domain packs root DomainPackLoader reads (default: tests/fixtures/design_packs/)",
     )
     parser.add_argument(
         "--fixtures-root",

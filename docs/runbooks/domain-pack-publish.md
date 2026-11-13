@@ -23,7 +23,7 @@ Default CLI validation uses **authoring mode**, not legacy runtime-parity mode. 
 Run these commands from the repository root. CLI `--root` defaults to the current directory; both spec and any `--receipt` path must remain under that allowed root. For an absolute external input, supply an explicit, existing allowed root containing it (and its receipt, if supplied). Usage/path-policy errors also exit **2**, but are reported on stderr rather than as warning-only validation JSON.
 
 ```bash
-.venv/bin/python tools/validate_domain.py domains/plasticos/spec.yaml --complete --json
+.venv/bin/python tools/validate_domain.py tests/fixtures/design_packs/plasticos/spec.yaml --complete --json
 .venv/bin/python tools/validate_domain.py /operator/input/candidate.yaml \
   --root /operator/input --tenant-id acme --complete --require-reviewed --json
 ```

@@ -71,7 +71,7 @@ def _detect_vertical(business_profile: str, vertical_keywords: VerticalKeywords 
 
 def _load_domain_fields(
     vertical: str,
-    domains_dir: str = "domains",
+    domains_dir: str | Path,
 ) -> list[str]:
     """Extract property names from the domain YAML for a given vertical."""
     domains_path = Path(domains_dir)
@@ -112,7 +112,7 @@ def discover_vertical_fields(
     business_profile: str,
     spec: DomainSpec | None = None,
     *,
-    domains_dir: str = "domains",
+    domains_dir: str | Path | None = None,
     vertical_keywords: VerticalKeywords | None = None,
 ) -> VerticalDiscoveryResult:
     """
@@ -125,7 +125,9 @@ def discover_vertical_fields(
     spec:
         Optional pre-loaded DomainSpec (takes priority over YAML lookup).
     domains_dir:
-        Path to the domains directory for YAML lookups.
+        Pack root for the YAML lookup made when no ``spec`` is given. There is
+        no default directory (issue #400 A5): without one and without a spec,
+        no lookup runs and discovery is suggested.
     vertical_keywords:
         Caller-supplied ``keyword → domain id`` pairs used to detect the
         vertical. The engine ships no table of its own; without one, the
@@ -154,8 +156,8 @@ def discover_vertical_fields(
             discovery_suggested=False,
         )
 
-    # Load from YAML
-    fields = _load_domain_fields(vertical, domains_dir=domains_dir)
+    # Load from YAML, only from a root the caller names
+    fields = _load_domain_fields(vertical, domains_dir) if domains_dir is not None else []
     if not fields:
         logger.info(
             "vertical_yaml_missing",

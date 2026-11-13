@@ -6,7 +6,7 @@ scope:
   paths:
   - engine/config/schema.py
   - engine/config/loader.py
-  - domains/*/spec.yaml
+  - tests/fixtures/design_packs/*/spec.yaml
 preconditions:
 - Scoring dimension added or its defaultweight modified in a domain spec
 postconditions:

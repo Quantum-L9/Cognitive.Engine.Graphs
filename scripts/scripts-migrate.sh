@@ -34,7 +34,7 @@ else
 fi
 
 # Read constraints from domain spec or migration files
-MIGRATION_DIR="$ROOT_DIR/domains/${DOMAIN}/migrations"
+MIGRATION_DIR="$ROOT_DIR/tests/fixtures/design_packs/${DOMAIN}/migrations"
 
 if [[ -d "$MIGRATION_DIR" ]]; then
   for CYPHER_FILE in "$MIGRATION_DIR"/*.cypher; do

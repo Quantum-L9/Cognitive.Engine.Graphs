@@ -115,3 +115,15 @@ class TestCountersPartitionTheAssessedSet:
         assert result["total_assessed"] == 150
         assert result["total_enriched"] == 0
         assert result["total_skipped"] == 150
+
+
+@pytest.fixture(autouse=True)
+def _design_pack_settings_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bind the design packs as Settings.domains_root (DOMAINS_ROOT), the loader's only root.
+
+    The scan's loader is built with an explicit root, which wins over the
+    DOMAIN_SPECS_PATH alias the fixture above sets; this one names that root.
+    """
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "domains_root", DESIGN_PACKS_ROOT)

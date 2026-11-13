@@ -119,7 +119,7 @@ def test_approval_defaults_are_off() -> None:
     assert Settings(_env_file=None).domain_production_stage_required is False
 
 
-@pytest.mark.parametrize("root_setting", ["config_path", "DOMAIN_SPECS_PATH"])
+@pytest.mark.parametrize("root_setting", ["config_path", "DOMAINS_ROOT"])
 def test_legacy_loader_accepts_authorized_symlink_ancestor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, root_setting: str
 ) -> None:
@@ -131,7 +131,7 @@ def test_legacy_loader_accepts_authorized_symlink_ancestor(
     if root_setting == "config_path":
         loader = owner.DomainPackLoader(str(root))
     else:
-        monkeypatch.setenv("DOMAIN_SPECS_PATH", str(root))
+        monkeypatch.setattr(owner.settings, "domains_root", root)
         loader = owner.DomainPackLoader()
     assert loader.load_domain("acme").domain.version == "1.0.0-reviewed"
     assert loader._resolve_spec_path("acme") == path.resolve()
@@ -139,7 +139,7 @@ def test_legacy_loader_accepts_authorized_symlink_ancestor(
     assert path.read_bytes() == draft()
 
 
-@pytest.mark.parametrize("root_setting", ["config_path", "DOMAIN_SPECS_PATH"])
+@pytest.mark.parametrize("root_setting", ["config_path", "DOMAINS_ROOT"])
 def test_receipt_loader_accepts_real_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, root_setting: str) -> None:
     root, digest = receipt_layout(tmp_path)
     monkeypatch.setattr(owner.settings, "domain_pack_receipts_enabled", True)
@@ -147,7 +147,7 @@ def test_receipt_loader_accepts_real_layout(tmp_path: Path, monkeypatch: pytest.
     if root_setting == "config_path":
         loader = owner.DomainPackLoader(str(root))
     else:
-        monkeypatch.setenv("DOMAIN_SPECS_PATH", str(root))
+        monkeypatch.setattr(owner.settings, "domains_root", root)
         loader = owner.DomainPackLoader()
     assert loader.load_domain("acme").domain.version == "1.0.0-reviewed"
     assert loader.list_domains() == ["acme"]
@@ -157,7 +157,7 @@ def test_receipt_loader_accepts_real_layout(tmp_path: Path, monkeypatch: pytest.
     assert (root / "acme" / "revisions" / digest / "spec.yaml").read_bytes() == draft()
 
 
-@pytest.mark.parametrize("root_setting", ["config_path", "DOMAIN_SPECS_PATH"])
+@pytest.mark.parametrize("root_setting", ["config_path", "DOMAINS_ROOT"])
 def test_receipt_loader_refuses_authorized_symlink_ancestor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, root_setting: str
 ) -> None:
@@ -170,7 +170,7 @@ def test_receipt_loader_refuses_authorized_symlink_ancestor(
     if root_setting == "config_path":
         loader = owner.DomainPackLoader(str(root))
     else:
-        monkeypatch.setenv("DOMAIN_SPECS_PATH", str(root))
+        monkeypatch.setattr(owner.settings, "domains_root", root)
         loader = owner.DomainPackLoader()
     with pytest.raises(owner.DomainSpecError, match="symlink"):
         loader.load_domain("acme")

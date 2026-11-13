@@ -16,8 +16,6 @@ Reads from .env file and environment variables.
 Single source of truth for all L9_* configuration.
 """
 
-from pathlib import Path
-
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -63,8 +61,8 @@ class Settings(BaseSettings):
     # Stored in AWS Secrets Manager: clawdbot/l9-api → {"L9_API_KEY": "<value>"}
     l9_api_key: str = ""
 
-    # --- Domain Packs ---
-    domains_root: Path = Path("./domains")
+    # Issue #400 A5: the former `domains_root = ./domains` here was read by
+    # nothing; the pack root is engine/config/settings.py's domains_root only.
 
     # --- Logging ---
     log_level: str = "INFO"

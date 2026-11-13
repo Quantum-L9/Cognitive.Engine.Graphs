@@ -67,7 +67,7 @@ jobs:
 
       - name: Validate domain specs
         run: |
-          # Every pack under domains/<id>/spec.yaml must load as a DomainSpec.
+          # Every pack under tests/fixtures/design_packs/<id>/spec.yaml must load as a DomainSpec.
           # The former glob ('*_domain_spec.yaml') matched no file, so this step
           # validated nothing (Stage 2 follow-up, M12). A pack that does not
           # validate, or an empty match, fails the step.
@@ -76,9 +76,9 @@ jobs:
           from pathlib import Path
           import yaml
           from engine.config.schema import DomainSpec
-          paths = sorted(Path('domains').glob('*/spec.yaml'))
+          paths = sorted(Path('tests/fixtures/design_packs').glob('*/spec.yaml'))
           if not paths:
-              sys.exit('no domains/*/spec.yaml found: the glob matches nothing')
+              sys.exit('no tests/fixtures/design_packs/*/spec.yaml found: the glob matches nothing')
           failures = []
           for path in paths:
               try:
