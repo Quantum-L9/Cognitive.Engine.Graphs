@@ -35,7 +35,7 @@ from engine.config.schema import DomainSpec, PropertySpec, QueryFieldSpec
 from engine.config.settings import settings
 from engine.sync.row_contract import endpoint_shape_defects, stored_shape_defects
 from tests.fixtures import typed_sync as fx
-from tests.fixtures.domain_contracts import SYNTHETIC_DOMAINS_ROOT
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT, SYNTHETIC_DOMAINS_ROOT
 
 pytestmark = pytest.mark.unit
 
@@ -101,8 +101,8 @@ def test_list_and_map_are_not_query_field_types() -> None:
 
 
 def test_every_shipped_spec_still_validates() -> None:
-    paths = sorted([*fx.REPO_ROOT.glob("domains/*/spec.yaml"), *SYNTHETIC_DOMAINS_ROOT.glob("*/spec.yaml")])
-    paths.append(fx.REPO_ROOT / "domains" / "_template.yaml")
+    paths = sorted([*DESIGN_PACKS_ROOT.glob("*/spec.yaml"), *SYNTHETIC_DOMAINS_ROOT.glob("*/spec.yaml")])
+    paths.append(DESIGN_PACKS_ROOT / "_template.yaml")
     for path in paths:
         spec = DomainSpec.model_validate(yaml.safe_load(path.read_text()))
         assert stored_shape_defects(spec) == [], path

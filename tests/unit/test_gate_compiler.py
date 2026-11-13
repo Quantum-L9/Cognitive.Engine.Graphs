@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 import yaml
+
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 pytestmark = pytest.mark.unit
 
@@ -103,7 +103,7 @@ def test_compile_all_gates_empty_returns_empty():
 
 # ── Correctness remediation lane C (plan 0d84ec8) ────────────────────────────
 
-_DOMAINS = Path(__file__).resolve().parents[2] / "domains"
+_DOMAINS = DESIGN_PACKS_ROOT
 
 
 def _pack(domain_id: str):  # type: ignore[no-untyped-def]

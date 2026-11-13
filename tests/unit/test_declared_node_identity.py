@@ -21,7 +21,6 @@ evaluate scored every case 0. The fake driver captures the generated Cypher.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -38,8 +37,9 @@ from engine.handlers import (
     handle_sync,
     init_dependencies,
 )
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
-DOMAINS = Path(__file__).resolve().parents[2] / "domains"
+DOMAINS = DESIGN_PACKS_ROOT
 
 # domain -> (candidate label, declared id property, a match direction)
 PACKS = {

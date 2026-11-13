@@ -14,7 +14,6 @@ Unit tests for R6 counterfactual scenario generation.
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -24,6 +23,7 @@ from engine.causal.counterfactual import (
     CounterfactualGenerator,
 )
 from engine.config.schema import CounterfactualSpec
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 
 def _make_spec(
@@ -268,7 +268,7 @@ class TestCounterfactualGenerator:
 
 # ── RU-005 / CEG-COR-056: outcome map fields stored in one decodable encoding ──
 
-_DOMAINS = Path(__file__).resolve().parents[2] / "domains"
+_DOMAINS = DESIGN_PACKS_ROOT
 
 
 def _fingerprint_rows(actual_weights: object, positive_weights: object) -> list[list[dict]]:

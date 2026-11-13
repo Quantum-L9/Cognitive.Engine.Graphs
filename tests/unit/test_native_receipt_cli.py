@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 from tools.validate_domain import validate_spec
 
 pytestmark = pytest.mark.unit
@@ -27,7 +28,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def _inputs(tmp_path):
-    raw = yaml.safe_load((ROOT / "domains/plasticos/spec.yaml").read_bytes())
+    raw = yaml.safe_load((DESIGN_PACKS_ROOT / "plasticos/spec.yaml").read_bytes())
     raw["domain"]["version"] = "1.3.0-reviewed"
     spec = tmp_path / "plasticos/spec.yaml"
     spec.parent.mkdir()

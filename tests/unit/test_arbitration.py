@@ -8,7 +8,7 @@ pytestmark = pytest.mark.unit
 
 
 def _make_test_policy() -> DecisionPolicy:
-    """Create a test policy matching domains/plasticos/spec.yaml decision_policy section."""
+    """Create a test policy matching tests/fixtures/design_packs/plasticos/spec.yaml decision_policy section."""
     return DecisionPolicy(
         version="1.0.0",
         hard_constraints=[

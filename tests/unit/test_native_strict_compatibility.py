@@ -27,6 +27,7 @@ import pytest
 import yaml
 
 from engine.config import loader as owner
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 from tests.unit.test_domain_pack_loader import _minimal_spec_yaml
 from tools.validate_domain import validate_spec
 
@@ -164,7 +165,7 @@ def test_actual_fixture_cli_matches_pinned_default_and_strict_verdicts(
     assert fixture["path"] == f"domains/{tenant}/spec.yaml"
     verdict = fixture["verdicts"]["strict" if flags else "default"]
     assert verdict["flags"] == list(flags)
-    path = REPO / "domains" / tenant / "spec.yaml"
+    path = DESIGN_PACKS_ROOT / tenant / "spec.yaml"
     before = hashlib.sha256(path.read_bytes()).hexdigest()
     assert before == fixture["sha256"]
     pinned_code, pinned_body = _cli(path, *flags, script=script)
@@ -178,7 +179,7 @@ def test_actual_fixture_cli_matches_pinned_default_and_strict_verdicts(
 
 
 def test_runtime_per_direction_api_remains_unchanged() -> None:
-    path = REPO / "domains/plasticos/spec.yaml"
+    path = DESIGN_PACKS_ROOT / "plasticos/spec.yaml"
     assert owner.validate_native_file(path, "plasticos").domain.version == "1.4.0"
     assert validate_spec(path)[1] == 0
     assert validate_spec(path, complete=True)[1] == 0
