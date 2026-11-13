@@ -11,7 +11,8 @@ status: active
 
 tests/performance/test_sync_throughput.py
 Performance benchmarks for batch sync throughput.
-Measures entities/second for UNWIND/MERGE sync operations against Neo4j.
+Measures entities/second for UNWIND/MERGE sync operations against Neo4j, on
+the synthetic orbital-logistics pack's OrbitalDepot (ADR-112 Stage 4, A16).
 """
 
 from __future__ import annotations
@@ -34,18 +35,18 @@ logger = structlog.get_logger(__name__)
 
 # Production schema setup (admin `init_schema`) gives every node key a
 # uniqueness constraint, so sync MERGE/MATCH by id is an index seek. Without an
-# index here the benchmark measured a :Facility label scan instead, and its
-# speed depended on how many Facility nodes the integration suite had left in
+# index here the benchmark measured a :OrbitalDepot label scan instead, and its
+# speed depended on how many OrbitalDepot nodes the integration suite had left in
 # the shared database (0.53 s for 500 updates, failing the 1000/sec target).
 _BENCH_INDEXES = (
-    ("facility_id", "ceg_bench_facility_id"),
-    ("tenant", "ceg_bench_facility_tenant"),
-    ("_tenant", "ceg_bench_facility_stamp"),
+    ("depot_id", "ceg_bench_depot_id"),
+    ("tenant", "ceg_bench_depot_tenant"),
+    ("_tenant", "ceg_bench_depot_stamp"),
 )
 
 
-async def _ensure_facility_indexes(graph_driver, db: str) -> None:
-    """Index :Facility(facility_id), :Facility(tenant) and :Facility(_tenant) unless already indexed.
+async def _ensure_depot_indexes(graph_driver, db: str) -> None:
+    """Index :OrbitalDepot(depot_id), :OrbitalDepot(tenant) and :OrbitalDepot(_tenant) unless already indexed.
 
     Only a RANGE index serves the benchmark's equality MATCH/MERGE (TEXT,
     FULLTEXT, POINT and VECTOR indexes do not). A uniqueness constraint's
@@ -55,7 +56,7 @@ async def _ensure_facility_indexes(graph_driver, db: str) -> None:
     """
     rows = await graph_driver.execute_query(
         "SHOW INDEXES YIELD type, labelsOrTypes, properties "
-        "WHERE type = 'RANGE' AND labelsOrTypes = ['Facility'] AND size(properties) = 1 "
+        "WHERE type = 'RANGE' AND labelsOrTypes = ['OrbitalDepot'] AND size(properties) = 1 "
         "RETURN properties[0] AS prop",
         database=db,
     )
@@ -63,7 +64,7 @@ async def _ensure_facility_indexes(graph_driver, db: str) -> None:
     for prop, name in _BENCH_INDEXES:
         if prop not in indexed:
             await graph_driver.execute_query(
-                f"CREATE INDEX {name} IF NOT EXISTS FOR (f:Facility) ON (f.{prop})",
+                f"CREATE INDEX {name} IF NOT EXISTS FOR (f:OrbitalDepot) ON (f.{prop})",
                 database=db,
             )
     await graph_driver.execute_query("CALL db.awaitIndexes(120)", database=db)
@@ -74,27 +75,23 @@ class TestSyncThroughput:
     """Benchmark batch sync throughput against live Neo4j."""
 
     @pytest_asyncio.fixture(autouse=True)
-    async def _facility_indexes(self, graph_driver) -> None:
-        await _ensure_facility_indexes(graph_driver, "neo4j")
+    async def _depot_indexes(self, graph_driver) -> None:
+        await _ensure_depot_indexes(graph_driver, "neo4j")
 
     @staticmethod
-    def _generate_facility_batch(size: int, tenant: str) -> list[dict]:
-        """Generate a batch of synthetic facility entities."""
+    def _generate_depot_batch(size: int, tenant: str) -> list[dict]:
+        """Generate a batch of synthetic depot entities (declared types: depot_id is a string)."""
         return [
             {
-                "facility_id": 100_000 + i,
+                "depot_id": f"bench-{100_000 + i}",
                 "name": f"SyncBench-{i}",
                 "lat": 34.0 + (i * 0.001),
                 "lon": -118.0 + (i * 0.001),
-                "process_type": "extrusion",
-                "facility_role": "processor",
-                "min_density": 0.85 + (i % 10) * 0.01,
-                "max_density": 0.95 + (i % 10) * 0.01,
-                "contamination_tolerance": 0.03,
-                "pvc_tolerant": i % 2 == 0,
-                "food_grade_certified": i % 3 == 0,
-                "has_extruder": True,
-                "handles_regrind": True,
+                "docking_ports": 2 + i % 6,
+                "reliability": 0.85 + (i % 10) * 0.01,
+                "accepts_hazmat": i % 2 == 0,
+                "certifications": ["iso-9001"] if i % 3 == 0 else [],
+                "served_orbits": ["LEO"],
                 "gate_mode": "strict",
                 "tenant": tenant,
             }
@@ -102,23 +99,23 @@ class TestSyncThroughput:
         ]
 
     @pytest.mark.asyncio
-    async def test_facility_sync_1000_entities_throughput(self, graph_driver, domain_spec):
+    async def test_depot_sync_1000_entities_throughput(self, graph_driver, domain_spec):
         """
-        Benchmark: sync 1000 facilities via UNWIND/MERGE.
+        Benchmark: sync 1000 depots via UNWIND/MERGE.
         Target: >500 entities/sec on local Neo4j.
         """
         db = "neo4j"
         tenant = f"syncbench-{uuid.uuid4().hex[:6]}"
         batch_size = 1000
 
-        batch = self._generate_facility_batch(batch_size, tenant)
+        batch = self._generate_depot_batch(batch_size, tenant)
 
         # Build the UNWIND/MERGE Cypher
         sync_spec = SyncEndpointSpec(
-            path="/v1/sync/facilities",
+            path="/v1/sync/orbital-depots",
             method="POST",
-            targetnode="Facility",
-            idproperty="facility_id",
+            targetnode="OrbitalDepot",
+            idproperty="depot_id",
             batchstrategy=SyncStrategy.UNWINDMERGE,
         )
         generator = SyncGenerator(domain_spec)
@@ -134,7 +131,7 @@ class TestSyncThroughput:
         for _ in range(5):
             # Clean before each iteration
             await graph_driver.execute_query(
-                "MATCH (f:Facility {_tenant: $tenant}) DETACH DELETE f",
+                "MATCH (f:OrbitalDepot {_tenant: $tenant}) DETACH DELETE f",
                 parameters={"tenant": tenant},
                 database=db,
             )
@@ -153,7 +150,7 @@ class TestSyncThroughput:
 
         logger.info(
             "sync_throughput",
-            facilities=batch_size,
+            depots=batch_size,
             avg_sec=round(avg_sec, 2),
             entities_per_sec=round(throughput),
             min_sec=round(min(latencies), 2),
@@ -162,7 +159,7 @@ class TestSyncThroughput:
 
         # Verify data landed
         count_result = await graph_driver.execute_query(
-            "MATCH (f:Facility {_tenant: $tenant}) RETURN count(f) AS cnt",
+            "MATCH (f:OrbitalDepot {_tenant: $tenant}) RETURN count(f) AS cnt",
             parameters={"tenant": tenant},
             database=db,
         )
@@ -172,7 +169,7 @@ class TestSyncThroughput:
 
         # Cleanup
         await graph_driver.execute_query(
-            "MATCH (f:Facility {_tenant: $tenant}) DETACH DELETE f",
+            "MATCH (f:OrbitalDepot {_tenant: $tenant}) DETACH DELETE f",
             parameters={"tenant": tenant},
             database=db,
         )
@@ -181,28 +178,28 @@ class TestSyncThroughput:
     async def test_incremental_update_throughput(self, graph_driver, domain_spec):
         """
         Benchmark: UNWIND/MATCH/SET for incremental field updates.
-        Updates 500 facilities with new contamination_tolerance values.
+        Updates 500 depots with new reliability values.
         """
         db = "neo4j"
         tenant = f"updatebench-{uuid.uuid4().hex[:6]}"
         batch_size = 500
 
         # Seed initial data
-        batch = self._generate_facility_batch(batch_size, tenant)
+        batch = self._generate_depot_batch(batch_size, tenant)
         seed_cypher = """
         UNWIND $batch AS row
-        MERGE (f:Facility {facility_id: row.facility_id})
+        MERGE (f:OrbitalDepot {depot_id: row.depot_id})
         SET f += row
         """
         await graph_driver.execute_query(seed_cypher, parameters={"batch": batch}, database=db)
 
         # Build update batch
-        update_batch = [{"facility_id": 100_000 + i, "contamination_tolerance": 0.07} for i in range(batch_size)]
+        update_batch = [{"depot_id": f"bench-{100_000 + i}", "reliability": 0.07} for i in range(batch_size)]
 
         update_cypher = """
         UNWIND $batch AS row
-        MATCH (f:Facility {facility_id: row.facility_id})
-        SET f.contamination_tolerance = row.contamination_tolerance,
+        MATCH (f:OrbitalDepot {depot_id: row.depot_id})
+        SET f.reliability = row.reliability,
             f.updated_at = datetime()
         """
 
@@ -217,7 +214,7 @@ class TestSyncThroughput:
 
         logger.info(
             "incremental_update_throughput",
-            facilities=batch_size,
+            depots=batch_size,
             avg_sec=round(avg_sec, 2),
             updates_per_sec=round(throughput),
         )
@@ -225,8 +222,8 @@ class TestSyncThroughput:
         # Verify update applied
         result = await graph_driver.execute_query(
             """
-            MATCH (f:Facility {tenant: $tenant})
-            WHERE f.contamination_tolerance = 0.07
+            MATCH (f:OrbitalDepot {tenant: $tenant})
+            WHERE f.reliability = 0.07
             RETURN count(f) AS cnt
             """,
             parameters={"tenant": tenant},
@@ -237,7 +234,7 @@ class TestSyncThroughput:
         assert throughput > 1000, f"Update throughput {throughput:.0f}/sec below 1000 target"
 
         await graph_driver.execute_query(
-            "MATCH (f:Facility {tenant: $tenant}) DETACH DELETE f",
+            "MATCH (f:OrbitalDepot {tenant: $tenant}) DETACH DELETE f",
             parameters={"tenant": tenant},
             database=db,
         )

@@ -20,6 +20,10 @@ Uses the real engine APIs:
   ScoringAssembler.assemble_scoring_clause(match_direction, weights) -> (clause, meta)
 The compiled query binds every gate queryparam and scoring queryprop, mirroring
 the parameter backfill performed by handle_match.
+
+Runs on the synthetic orbital-logistics pack (ADR-112 Stage 4, A16) plus its
+SERVES_ORBIT traversal gate (tests/fixtures/orbital_match), so the strict chain
+still carries an EXISTS traversal alongside the pack's boolean and threshold gates.
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ import structlog
 from engine.gates.compiler import GateCompiler
 from engine.scoring.assembler import ScoringAssembler
 from engine.traversal.assembler import TraversalAssembler
+from tests.fixtures.orbital_match import DIRECTION, orbit_gated
 
 pytestmark = pytest.mark.integration
 
@@ -43,15 +48,8 @@ def _full_match_params(domain_spec, tenant: str) -> dict:
     """Bind all queryschema fields + scoring queryprops, like handle_match does."""
     params: dict = {
         "tenant": tenant,
-        "polymer_type": "HDPE",
-        "density": 0.95,
-        "mfi": 12.0,
-        "contamination_pct": 0.02,
-        "requires_food_grade": False,
-        "volume_tons": 10.0,
-        "lat": 34.05,
-        "lon": -118.24,
-        "target_price": 800.0,
+        "orbit_class": "GEO",
+        "min_ports": 2,
     }
     # Backfill any remaining queryschema fields and scoring queryprops with null,
     # mirroring the engine's parameter backfill in handle_match.
@@ -68,32 +66,26 @@ def _full_match_params(domain_spec, tenant: str) -> dict:
 class TestMatchQueryLatency:
     """Benchmark end-to-end match query execution latency."""
 
-    async def _seed_matchable_facilities(self, graph_driver, db: str, tenant: str) -> None:
-        """Seed facilities that satisfy the strict gate chain + PROCESSES traversal."""
+    async def _seed_matchable_depots(self, graph_driver, db: str, tenant: str) -> None:
+        """Seed depots that satisfy the strict gate chain + SERVES_ORBIT traversal."""
         await graph_driver.execute_query(
             """
             UNWIND $batch AS row
-            MERGE (f:Facility {facility_id: row.facility_id})
-            SET f += row, f.tenant = $tenant, f.updated_at = datetime()
-            MERGE (p:PolymerFamily {code: 'HDPE'})
-            MERGE (f)-[:PROCESSES]->(p)
+            MERGE (d:OrbitalDepot {depot_id: row.depot_id})
+            SET d += row, d.tenant = $tenant, d.updated_at = datetime()
+            MERGE (o:OrbitClass {class_code: 'GEO'})
+            MERGE (d)-[:SERVES_ORBIT]->(o)
             """,
             parameters={
                 "batch": [
                     {
-                        "facility_id": 9001 + i,
-                        "name": f"Bench Facility {i}",
-                        "min_density": 0.90,
-                        "max_density": 1.00,
-                        "min_mfi": 5.0,
-                        "max_mfi": 20.0,
-                        "contamination_tolerance": 0.05,
-                        "food_grade_certified": False,
-                        "capacity_tons_month": 100.0,
+                        "depot_id": 9001 + i,
+                        "name": f"Bench Depot {i}",
+                        "accepts_hazmat": True,
+                        "docking_ports": 4,
+                        "reliability": 0.9,
                         "lat": 34.05,
                         "lon": -118.24,
-                        "credit_score": 70.0,
-                        "reinforcement_score": 0.5,
                     }
                     for i in range(3)
                 ],
@@ -110,13 +102,14 @@ class TestMatchQueryLatency:
         """
         db = seeded_graph["database"]
         tenant = seeded_graph["tenant"]
-        await self._seed_matchable_facilities(graph_driver, db, tenant)
+        await self._seed_matchable_depots(graph_driver, db, tenant)
+        domain_spec = orbit_gated(domain_spec)
 
         gate_compiler = GateCompiler(domain_spec)
         scoring_assembler = ScoringAssembler(domain_spec)
         traversal_assembler = TraversalAssembler(domain_spec)
 
-        direction = "supply_opportunity_to_buyer_facility"
+        direction = DIRECTION
         where_clause = gate_compiler.compile_all_gates(direction)
         traversal_clauses = traversal_assembler.assemble_traversal(direction)
         weights = {d.weightkey: d.defaultweight for d in domain_spec.scoring.dimensions}
@@ -124,12 +117,12 @@ class TestMatchQueryLatency:
 
         # Build the full Cypher query. The traversal step already introduces
         # `candidate`, so anchor the tenant filter in the WHERE clause.
-        traversal_block = "\n".join(traversal_clauses) if traversal_clauses else "MATCH (candidate:Facility)"
+        traversal_block = "\n".join(traversal_clauses) if traversal_clauses else "MATCH (candidate:OrbitalDepot)"
         cypher = f"""
         {traversal_block}
         WHERE candidate.tenant = $tenant AND {where_clause}
         {scoring_clause}
-        RETURN candidate.facility_id AS fid, candidate.name AS name, score
+        RETURN candidate.depot_id AS fid, candidate.name AS name, score
         ORDER BY score DESC
         LIMIT 10
         """
@@ -138,7 +131,7 @@ class TestMatchQueryLatency:
 
         # Warmup
         results = await graph_driver.execute_query(cypher, parameters=query_params, database=db)
-        assert results, "Seeded facilities should pass the strict gate chain"
+        assert results, "Seeded depots should pass the strict gate chain"
 
         # Benchmark: 50 iterations
         latencies: list[float] = []
@@ -156,7 +149,7 @@ class TestMatchQueryLatency:
         logger.info(
             "match_query_latency",
             n=50,
-            facilities=len(seeded_graph["facility_ids"]),
+            depots=len(seeded_graph["depot_ids"]),
             avg_ms=round(avg, 1),
             p50_ms=round(p50, 1),
             p95_ms=round(p95, 1),
@@ -175,13 +168,13 @@ class TestMatchQueryLatency:
         tenant = seeded_graph["tenant"]
 
         gate_compiler = GateCompiler(domain_spec)
-        direction = "supply_opportunity_to_buyer_facility"
+        direction = DIRECTION
         where_clause = gate_compiler.compile_relaxed(direction)
 
         cypher = f"""
-        MATCH (candidate:Facility {{tenant: $tenant}})
+        MATCH (candidate:OrbitalDepot {{tenant: $tenant}})
         WHERE {where_clause}
-        RETURN candidate.facility_id AS fid, candidate.name AS name
+        RETURN candidate.depot_id AS fid, candidate.name AS name
         ORDER BY candidate.name
         LIMIT 25
         """
