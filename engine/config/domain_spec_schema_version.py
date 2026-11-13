@@ -33,4 +33,4 @@ left unchanged, so the bump itself is a review rule.
 
 from __future__ import annotations
 
-DOMAIN_SPEC_SCHEMA_VERSION = "1.0.0"
+DOMAIN_SPEC_SCHEMA_VERSION = "1.1.0"
