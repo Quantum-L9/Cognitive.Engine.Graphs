@@ -23,7 +23,6 @@ Each engine provides its own concrete loader:
 from __future__ import annotations
 
 import logging
-import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
@@ -72,12 +71,14 @@ class YAMLDomainLoader(BaseDomainLoader):
     Reusable across any engine that stores domain specs as YAML.
 
     Layout expected:
-        domains/{domain_id}/spec.yaml
+        <config_path>/{domain_id}/spec.yaml
+
+    The pack root is a required argument (issue #400 A5): the chassis names no
+    pack directory of its own and reads no environment variable for one.
     """
 
-    def __init__(self, config_path: str | None = None) -> None:
-        raw = config_path or os.getenv("DOMAIN_SPECS_PATH", "domains")
-        self._base_path = Path(raw).resolve()
+    def __init__(self, config_path: str | Path) -> None:
+        self._base_path = Path(config_path).resolve()
         self._cache: dict[str, tuple[dict[str, Any], float]] = {}
 
     def list_domains(self) -> list[str]:
