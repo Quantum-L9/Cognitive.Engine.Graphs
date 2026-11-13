@@ -86,6 +86,10 @@ services:
       # #400 A3: the image ships no packs. The engine serves only the
       # operator-owned pack root mounted read-only below.
       DOMAINS_ROOT: /app/domains
+      # Receipt mode (operator-authorized 2026-11-13): serve only packs published
+      # by tools/publish_domain_pack.py (<tenant>/current.json + revisions/),
+      # verified on every load. A hand-placed <tenant>/spec.yaml is not read.
+      DOMAIN_PACK_RECEIPTS_ENABLED: "true"
       KGE_ENABLED: "true"
       KGE_CONFIDENCE_THRESHOLD: "0.3"
       KGE_EMBEDDING_DIM: "300"
