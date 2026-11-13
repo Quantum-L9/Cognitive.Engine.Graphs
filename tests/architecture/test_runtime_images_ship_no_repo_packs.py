@@ -17,8 +17,9 @@ test material. They must not be a runtime dependency. Decision D1 (2026-11-13):
 a tenant spec reaches production through an operator-owned pack root mounted
 read-only, the directory tools/publish_domain_pack.py publishes into.
 
-Static guards over Dockerfile, Dockerfile.prod and docker-compose.prod.yml:
-neither image copies a pack directory out of the build context, and production
+Static guards over Dockerfile, Dockerfile.prod, chassis/Dockerfile.chassis and
+docker-compose.prod.yml: no image copies a pack directory out of the build
+context or offers a build-time pack selection, and production
 compose serves only a required, read-only, operator-supplied mount. They keep
 that shape from drifting; they do not prove a deployed container's behaviour.
 """
@@ -54,12 +55,13 @@ def api_service() -> dict[str, Any]:
     return service
 
 
-@pytest.mark.parametrize("dockerfile", ["Dockerfile", "Dockerfile.prod"])
+@pytest.mark.parametrize("dockerfile", ["Dockerfile", "Dockerfile.prod", "chassis/Dockerfile.chassis"])
 def test_image_copies_no_pack_directory(dockerfile: str) -> None:
     text = (ROOT / dockerfile).read_text(encoding="utf-8")
     match = _PACK_COPY.search(text)
     assert match is None, f"{dockerfile} copies a domain pack directory into the image: {match.group(0).strip()!r}"
-    assert "DOMAIN_PACKS_SRC" not in text, f"{dockerfile} must not offer a build-time pack selection"
+    for build_arg in ("DOMAIN_PACKS_SRC", "DOMAINS_DIR"):
+        assert build_arg not in text, f"{dockerfile} must not offer a build-time pack selection ({build_arg})"
 
 
 def test_pack_copy_pattern_catches_the_shapes_it_replaced() -> None:
