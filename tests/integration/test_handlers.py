@@ -169,14 +169,14 @@ def test_handle_match_rejects_missing_direction() -> None:
 def test_handle_admin_list_domains() -> None:
     """handle_admin subaction=list_domains returns the domain list."""
     loader = MagicMock(spec=DomainPackLoader)
-    loader.list_domains.return_value = ["plasticos", "freight"]
+    loader.list_domains.return_value = ["orbital-logistics", "cheese-aging"]
     driver = _make_mock_driver()
     _reset_state()
     init_dependencies(graph_driver=driver, domain_loader=loader)
 
     result = asyncio.run(handle_admin("tenant-a", {"subaction": "list_domains"}))
 
-    assert result["domains"] == ["plasticos", "freight"]
+    assert result["domains"] == ["orbital-logistics", "cheese-aging"]
 
 
 def test_handle_admin_rejects_unknown_subaction() -> None:

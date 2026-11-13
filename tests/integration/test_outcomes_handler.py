@@ -9,6 +9,8 @@ Real payload contract (engine/handlers.py::handle_outcomes):
         active_dimensions, dimension_weights, gates_passed,
         match_direction, candidate_count)
 Returns {"status": "recorded", "outcome_id": "out_..."}.
+
+Runs on the synthetic orbital-logistics pack (ADR-112 Stage 4, A16).
 """
 
 from __future__ import annotations
@@ -17,28 +19,30 @@ import pytest
 
 pytestmark = pytest.mark.integration
 
+ORBITAL = "orbital-logistics"
+
 
 @pytest.mark.asyncio
 async def test_outcome_success_recorded(engine_deps, graph_driver, clean_db):
     await graph_driver.execute_write(
-        cypher="MERGE (a:Facility {entity_id: $aid}) MERGE (b:Facility {entity_id: $bid})",
+        cypher="MERGE (a:OrbitalDepot {entity_id: $aid}) MERGE (b:OrbitalDepot {entity_id: $bid})",
         parameters={"aid": "match-001", "bid": "cand-001"},
-        database="plasticos",
+        database=ORBITAL,
     )
     from engine.handlers import handle_outcomes
 
     result = await handle_outcomes(
-        "plasticos",
+        ORBITAL,
         {
             "match_id": "match-001",
             "candidate_id": "cand-001",
             "outcome": "success",
             "value": 0.85,
             "fingerprint": {
-                "active_dimensions": ["geo_proximity"],
-                "dimension_weights": {"geo_proximity": 0.85},
-                "gates_passed": ["contamination_threshold"],
-                "match_direction": "supply_opportunity_to_buyer_facility",
+                "active_dimensions": ["depot_reliability"],
+                "dimension_weights": {"depot_reliability": 0.85},
+                "gates_passed": ["enough_ports"],
+                "match_direction": "window_to_depot",
                 "candidate_count": 2,
             },
         },
@@ -50,14 +54,14 @@ async def test_outcome_success_recorded(engine_deps, graph_driver, clean_db):
 @pytest.mark.asyncio
 async def test_outcome_failure_recorded(engine_deps, graph_driver, clean_db):
     await graph_driver.execute_write(
-        cypher="MERGE (a:Facility {entity_id: $aid}) MERGE (b:Facility {entity_id: $bid})",
+        cypher="MERGE (a:OrbitalDepot {entity_id: $aid}) MERGE (b:OrbitalDepot {entity_id: $bid})",
         parameters={"aid": "match-002", "bid": "cand-002"},
-        database="plasticos",
+        database=ORBITAL,
     )
     from engine.handlers import handle_outcomes
 
     result = await handle_outcomes(
-        "plasticos",
+        ORBITAL,
         {
             "match_id": "match-002",
             "candidate_id": "cand-002",
@@ -75,7 +79,7 @@ async def test_outcome_invalid_value_raises(engine_deps):
 
     with pytest.raises(ValidationError, match="Invalid outcome"):
         await handle_outcomes(
-            "plasticos",
+            ORBITAL,
             {
                 "match_id": "match-003",
                 "candidate_id": "cand-003",
