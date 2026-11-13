@@ -73,7 +73,37 @@ GATE_URL=<gate base URL>
 GATE_ADMIN_TOKEN=<from-secrets>
 L9_GATE_SIGNING_KEY_IDS=<gate ed25519 key id(s), comma-separated>
 L9_VERIFYING_KEYS_JSON={"<gate key id>":"<gate verifying key>"}
+# Operator-owned domain pack root (absolute host path)
+CEG_DOMAINS_DIR=/opt/ceg/domain-packs
 ```
+
+**Domain packs are not in the image (#400).** Neither `Dockerfile` nor
+`Dockerfile.prod` copies a pack directory. `docker-compose.prod.yml` mounts
+`CEG_DOMAINS_DIR` read-only at `/app/domains` and sets `DOMAINS_ROOT` to that
+path, so the engine serves only what the operator placed there. With an empty
+directory the engine starts and serves no domain. The packs kept in this
+repository are design and test material and are never a production source.
+
+Production compose sets `DOMAIN_PACK_RECEIPTS_ENABLED=true` (operator
+authorization 2026-11-13), so the engine reads the publisher's layout from that
+directory and nothing else:
+
+| `DOMAIN_PACK_RECEIPTS_ENABLED` | Layout served | How it gets there |
+|---|---|---|
+| `true` (production compose) | `<root>/<tenant>/current.json` + `revisions/<sha256>/` | `tools/publish_domain_pack.py` |
+| unset / `false` (code default; dev and tests) | `<root>/<tenant>/spec.yaml` | placed by hand |
+
+Consequences for the operator:
+
+- A tenant is served only after its pack is published with
+  `tools/publish_domain_pack.py` (`docs/runbooks/domain-pack-publish.md`): a
+  named reviewer, an approval reference, the reviewed bytes' SHA-256, and a
+  `-reviewed` or `-production` version.
+- A hand-placed `<tenant>/spec.yaml` in the mounted directory is **not** read.
+  The loader lists no domain for it and the service still reports healthy, so
+  check `list_domains` after publishing.
+- The receipts are unsigned assertions. The read-only mount and control of who
+  may write the pack root remain the deployment's responsibility.
 
 Optional, with safe defaults: `NEO4J_USERNAME` (`neo4j`), `L9_SIGNING_KEY_ID`
 (`graph-engine-v1`), `POSTGRES_USER` (`l9_owner`), `POSTGRES_DB` (`l9_graph`),

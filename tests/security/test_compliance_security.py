@@ -4,13 +4,13 @@ Security tests — ECOA prohibited factor enforcement at compliance layer.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
+
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 pytestmark = pytest.mark.unit
 
-DOMAINS_DIR = Path(__file__).parent.parent.parent / "domains"
+DOMAINS_DIR = DESIGN_PACKS_ROOT
 
 ECOA_PROHIBITED = [
     "race",

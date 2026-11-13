@@ -40,14 +40,13 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy application code
 COPY engine/ /app/engine/
-# Domain packs are an explicit build-time selection, not an implicit part of
-# the core image (Stage 2 R08). The default bundles this repository's example
-# packs (PlasticOS among them) so `make dev` and the E2E rails keep working;
-# a consumer deploying its own authorized packs points DOMAIN_PACKS_SRC at
-# them, and DOMAINS_ROOT at runtime selects what the engine serves. The engine
-# boots with an empty pack directory — no named domain is required.
-ARG DOMAIN_PACKS_SRC=domains
-COPY ${DOMAIN_PACKS_SRC}/ /app/domains/
+# The image ships no domain packs (#400 A2, operator decision 2026-11-03: the
+# repository's packs are design/test material and must not be a runtime
+# dependency). Packs are delivered at runtime by mounting a pack directory at
+# /app/domains (#400 D1: mounted read-only volume); DOMAINS_ROOT selects what
+# the engine serves. The engine boots with an empty pack directory — no named
+# domain is required.
+RUN mkdir -p /app/domains
 COPY chassis/ /app/chassis/
 
 # Copy entrypoint

@@ -42,6 +42,7 @@ from engine.health.readiness_scorer import (
     compute_staleness_penalty,
     get_grade,
 )
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 pytestmark = pytest.mark.unit
 
@@ -526,7 +527,7 @@ def _plasticos_with_window_gate():
     from engine.config.loader import DomainPackLoader
     from engine.config.schema import GateSpec, GateType, PropertySpec, PropertyType
 
-    spec = DomainPackLoader().load_domain("plasticos")
+    spec = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT)).load_domain("plasticos")
     nodes = []
     for node in spec.ontology.nodes:
         if node.label == "Facility":

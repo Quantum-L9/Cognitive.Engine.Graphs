@@ -29,8 +29,9 @@ import yaml
 import engine.config.loader as loader_module
 from engine.config.schema import DomainSpec
 from engine.config.settings import Settings
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
-DOMAINS = Path(__file__).resolve().parents[2] / "domains"
+DOMAINS = DESIGN_PACKS_ROOT
 _FLAGS = ("admission_checks_full_match", "exclusion_endpoint_validation")
 _BLACKLIST = {
     "name": "blacklist_exclusion",
@@ -43,7 +44,7 @@ _BLACKLIST = {
 
 @pytest.fixture
 def shipped_admission(monkeypatch: pytest.MonkeyPatch) -> loader_module.DomainPackLoader:
-    """A loader over the repository's domains/ with every admission setting at its shipped default."""
+    """A loader over the repository's tests/fixtures/design_packs/ with every admission setting at its shipped default."""
     for name in (
         *_FLAGS,
         "scoring_admission_check_enabled",

@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
+
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -54,7 +56,7 @@ class TestT601DomainLoaderCache:
         """Cache operations are protected by a threading lock."""
         from engine.config.loader import DomainPackLoader
 
-        loader = DomainPackLoader(config_path=str(ROOT / "domains"))
+        loader = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT))
         assert hasattr(loader, "_lock"), "DomainPackLoader missing _lock attribute"
         assert isinstance(loader._lock, _LOCK_TYPE)
 
@@ -62,7 +64,7 @@ class TestT601DomainLoaderCache:
         """Cache has a TTL-based invalidation policy."""
         from engine.config.loader import DomainPackLoader
 
-        loader = DomainPackLoader(config_path=str(ROOT / "domains"))
+        loader = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT))
         assert hasattr(loader, "_ttl_seconds"), "DomainPackLoader missing _ttl_seconds"
         assert loader._ttl_seconds > 0
 
@@ -70,7 +72,7 @@ class TestT601DomainLoaderCache:
         """Cache has bounded size (LRU eviction)."""
         from engine.config.loader import DomainPackLoader
 
-        loader = DomainPackLoader(config_path=str(ROOT / "domains"))
+        loader = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT))
         assert hasattr(loader, "_max_size"), "DomainPackLoader missing _max_size"
         assert loader._max_size > 0
 

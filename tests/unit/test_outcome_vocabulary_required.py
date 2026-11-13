@@ -31,7 +31,7 @@ from engine.config.loader import DomainPackLoader
 from engine.config.outcome_vocabulary import OutcomeNodeLabelUndeclaredError
 from engine.config.schema import DomainSpec, FeedbackLoopSpec
 from engine.config.settings import settings
-from tests.fixtures.domain_contracts import synthetic_loader
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT, synthetic_loader
 
 pytestmark = pytest.mark.unit
 
@@ -72,7 +72,7 @@ def test_schema_borrows_no_outcome_label() -> None:
 
 def test_every_served_pack_declares_its_outcome_label() -> None:
     """Freight and mortgage declare the label their graphs already hold, so nothing migrates."""
-    loader = DomainPackLoader(config_path="domains")
+    loader = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT))
     labels = {domain: loader.load_domain(domain).feedbackloop.outcome_node_label for domain in loader.list_domains()}
     assert labels == {
         "freight-matching": "TransactionOutcome",

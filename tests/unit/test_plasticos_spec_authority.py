@@ -19,11 +19,12 @@ from pathlib import Path
 import pytest
 
 from engine.config.loader import DomainPackLoader
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[2]
-DOMAINS = ROOT / "domains"
+DOMAINS = DESIGN_PACKS_ROOT
 EXECUTABLE = DOMAINS / "plasticos" / "spec.yaml"
 FLAT_RIVAL = DOMAINS / "plasticos_domain_spec.yaml"
 ARCHIVE_FLAT = ROOT / "docs" / "archive" / "plasticos" / "plasticos_domain_spec.yaml"

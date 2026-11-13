@@ -1,0 +1,142 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: engine-specific
+# engine: graph
+# layer: [test]
+# tags: [test, architecture, domain-neutrality, vocabulary-guard]
+# owner: engine-team
+# status: active
+# --- /L9_META ---
+#
+# Product vocabulary that must not re-enter the domain-neutral core (engine/,
+# chassis/). Read by tests/architecture/test_core_vocabulary_guard.py
+# (ADR-112 Stage 3). Hand-maintained and self-contained: nothing here is
+# derived from a pack directory at test time.
+#
+# Matching modes (the false-positive policy lives in the modes):
+#   identifier  case-sensitive; the term must not be flanked by a letter,
+#               digit or underscore. `Facility` matches `(f:Facility)` and
+#               "Facility fallback", never `facility`, `Facilityx` or
+#               `SubFacility`.
+#   name        case-insensitive substring; each `-` in the term matches `-`,
+#               `_` or nothing, never a space. `idea-portfolio` matches
+#               `idea-portfolio`, `idea_portfolio` and `IdeaPortfolio`, never
+#               the prose "idea portfolio".
+#
+# Adding a term: it must be product-pack vocabulary named by a cited source,
+# and precise enough that ordinary English and generic graph words do not
+# match. A word that is also generic needs a narrower spelling, not a broader
+# one; see `not_denied` for the ones deliberately left out.
+
+schema: l9.ceg.core_vocabulary_denylist.v1
+
+groups:
+  - id: product_names
+    mode: name
+    provenance: >
+      docs/adr/ADR-112-ceg-domain-neutral-core.md, Decision: the core "does not
+      intrinsically understand PlasticOS, IdeaOS, or any other business
+      domain"; item 7 and STAGE2_FINDING_CLOSURE.yaml A12/A13 name Odoo as a
+      producer the engine must not be identified with. `plasticos` is also in
+      _FORMER_BUILT_INS (tests/unit/test_domain_neutrality_acceptance.py).
+    terms:
+      - plasticos
+      - ideaos
+      - odoo
+
+  - id: pack_names
+    mode: name
+    provenance: >
+      docs/audits/2026-10-11-ceg-domain-neutrality-stage2/STAGE2_FINDING_CLOSURE.yaml:
+      A07 (the loader "names no domain"; served packs freight-matching,
+      mortgage-brokerage, plasticos; idea-portfolio dormant) and followup item
+      12, which lists the eleven pack names. Copied from that record, not read
+      from a pack directory.
+    terms:
+      - aios-god-agent
+      - executive-assistant
+      - freight-matching
+      - healthcare-referral
+      - idea-portfolio
+      - legal-discovery
+      - mortgage-brokerage
+      - repo-as-agent
+      - research-agent
+      - roofing-company
+
+  - id: former_built_in_graph_vocabulary
+    mode: identifier
+    provenance: >
+      _FORMER_BUILT_INS in tests/unit/test_domain_neutrality_acceptance.py
+      (labels, relationship types and properties the removed built-in recipes
+      used; the last five were added by the Stage 2 removal follow-up, closure
+      item banned_terms). ADR-112 items 2 and 6.
+    terms:
+      - Facility
+      - TRANSACTED_WITH
+      - RECENTLY_TRANSACTED_WITH
+      - ACCEPTED_MATERIAL_FROM
+      - REJECTED_MATERIAL_FROM
+      - EquipmentType
+      - HAS_EQUIPMENT
+      - supply_opportunity_to_buyer_facility
+      - TransactionOutcome
+      - RESULTED_IN
+      - EXCLUDED_FROM
+      - community_id
+      - communityId
+
+  - id: former_built_in_values
+    mode: name
+    provenance: >
+      _FORMER_BUILT_INS (`closed_won`, the removed preference_attention
+      success default; STAGE2_FINDING_CLOSURE.yaml A09) and A09 evidence
+      "engine/gates/compiler.py: buyer_to_seller / Facility-role docstrings
+      neutralized".
+    terms:
+      - closed-won
+      - buyer-to-seller
+
+  - id: removed_plastics_rules_and_settings
+    mode: name
+    provenance: >
+      ADR-112 "The former plastics inference rules (facility tier from
+      processing capacity, material grade from melt-flow index, contamination
+      tolerance) were removed from CEG"; STAGE2_FINDING_CLOSURE.yaml A02
+      (infer_facility_tier_from_capacity, infer_material_grade_from_mfi,
+      infer_contamination_tolerance, facility_tier) and A10 (the removed
+      settings whose names carry one vertical's vocabulary).
+    terms:
+      - facility-tier
+      - material-grade
+      - melt-flow
+      - contamination-tolerance
+      - decay-facility-halflife
+      - resolution-mfi-tolerance
+      - resolution-density-tolerance
+      - idea-portfolio-enabled
+
+# Named by the same sources but deliberately not denied, with the reason. A
+# reviewer adding one of these must first give it a scoping rule.
+not_denied:
+  - terms: [lat, lon]
+    reason: >
+      _FORMER_BUILT_IN_IDENTIFIERS. Generic coordinate names; the engine's own
+      declared-property plumbing uses them as parameter names.
+  - terms: [geo_decay_km, community_cross_bias, outcome_ema_alpha, decay_structural_halflife, resolution_min_confidence, w_structural, w_geo, w_reinforcement, w_freshness]
+    reason: >
+      Removed settings (A10, followup item 3) whose names are generic scoring
+      words, not one product's vocabulary. tests/unit/test_settings.py and
+      tests/contracts/test_env_contract.py guard their retirement.
+  - terms: [CANONICAL_ENTITY_TYPES, DEFAULT_SEMANTIC_REGISTRY]
+    reason: >
+      Retired allowlist names, not product vocabulary; guarded by
+      test_semantic_registry_allowlist_stays_retired.
+  - terms: [buyer_persona, infer_buyer_persona]
+    reason: >
+      Owner decision "Keep, neutralize persona" (closure item
+      crm_inference_rules): the rule stays, its vocabulary is the pack's.
+  - terms: [facility, material, buyer, freight, mortgage, healthcare]
+    reason: >
+      Bare lowercase words are ordinary English ("key material", "a
+      facility"). Only the precise spellings above are denied.

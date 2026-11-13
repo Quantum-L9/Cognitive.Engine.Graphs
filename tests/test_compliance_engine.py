@@ -14,11 +14,11 @@ Tests for ComplianceEngine orchestrator."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import pytest
 
 from engine.compliance.engine import ComplianceEngine
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 pytestmark = pytest.mark.unit
 
@@ -131,7 +131,7 @@ def _mortgage_engine() -> ComplianceEngine:
 
     return ComplianceEngine(
         DomainSpec.model_validate(
-            yaml.safe_load(Path("domains/mortgage-brokerage/spec.yaml").read_text(encoding="utf-8"))
+            yaml.safe_load((DESIGN_PACKS_ROOT / "mortgage-brokerage/spec.yaml").read_text(encoding="utf-8"))
         )
     )
 
@@ -187,7 +187,7 @@ def _healthcare_engine() -> ComplianceEngine:
 
     from engine.config.schema import DomainSpec
 
-    raw = yaml.safe_load(Path("domains/healthcare-referral/spec.yaml").read_text(encoding="utf-8"))
+    raw = yaml.safe_load((DESIGN_PACKS_ROOT / "healthcare-referral/spec.yaml").read_text(encoding="utf-8"))
     return ComplianceEngine(DomainSpec.model_validate(raw))
 
 
@@ -236,7 +236,7 @@ def _mortgage_spec_audit(audit_on_violation: bool = True):
 
     from engine.config.schema import DomainSpec
 
-    raw = yaml.safe_load(Path("domains/mortgage-brokerage/spec.yaml").read_text(encoding="utf-8"))
+    raw = yaml.safe_load((DESIGN_PACKS_ROOT / "mortgage-brokerage/spec.yaml").read_text(encoding="utf-8"))
     raw["compliance"]["prohibitedfactors"]["auditonviolation"] = audit_on_violation
     return DomainSpec.model_validate(raw)
 
@@ -327,7 +327,7 @@ def _spec_from(path: str, mutate=None):
 
     from engine.config.schema import DomainSpec
 
-    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    raw = yaml.safe_load((DESIGN_PACKS_ROOT / path).read_text(encoding="utf-8"))
     if mutate:
         mutate(raw)
     return DomainSpec.model_validate(raw)
@@ -340,7 +340,7 @@ def _match_response(candidate: dict) -> dict:
 def test_healthcare_declared_fields_are_hashed_not_deleted() -> None:
     from engine.compliance.pii import PIIHandler
 
-    engine = ComplianceEngine(_spec_from("domains/healthcare-referral/spec.yaml"))
+    engine = ComplianceEngine(_spec_from("healthcare-referral/spec.yaml"))
     out = engine.redact_response(_match_response({"name": "Dr Jane Roe", "patientid": "PT-991", "npi": "N1"}), "t")
     candidate = out["candidates"][0]["candidate"]
     assert candidate["name"] == PIIHandler.hash_value("Dr Jane Roe")
@@ -351,7 +351,7 @@ def test_healthcare_declared_fields_are_hashed_not_deleted() -> None:
 
 
 def test_declared_field_match_is_case_insensitive_at_any_depth() -> None:
-    engine = ComplianceEngine(_spec_from("domains/healthcare-referral/spec.yaml"))
+    engine = ComplianceEngine(_spec_from("healthcare-referral/spec.yaml"))
     out = engine.redact_response({"rows": [{"nested": {"PatientId": "PT-1"}}]}, "t")
     assert out["rows"][0]["nested"]["PatientId"] != "PT-1"
 
@@ -359,7 +359,7 @@ def test_declared_field_match_is_case_insensitive_at_any_depth() -> None:
 def test_legal_discovery_declared_redact_uses_fixed_marker() -> None:
     from engine.compliance.pii import REDACTION_MARKER
 
-    engine = ComplianceEngine(_spec_from("domains/legal-discovery/spec.yaml"))
+    engine = ComplianceEngine(_spec_from("legal-discovery/spec.yaml"))
     out = engine.redact_response({"clientname": "Acme LLP", "ssn": "123-45-6789", "matter": "M-1"}, "t")
     assert out == {"clientname": REDACTION_MARKER, "ssn": REDACTION_MARKER, "matter": "M-1"}
 
@@ -371,7 +371,7 @@ def test_unimplemented_handling_fails_closed_to_redact(handling: str, caplog: py
     def mutate(raw: dict) -> None:
         raw["compliance"]["pii"]["handling"] = handling
 
-    engine = ComplianceEngine(_spec_from("domains/legal-discovery/spec.yaml", mutate))
+    engine = ComplianceEngine(_spec_from("legal-discovery/spec.yaml", mutate))
     with caplog.at_level("WARNING"):
         out = engine.redact_response({"clientname": "Acme LLP"}, "t")
     assert out == {"clientname": REDACTION_MARKER}
@@ -383,7 +383,7 @@ def test_pii_enabled_false_turns_declared_handling_off() -> None:
     def mutate(raw: dict) -> None:
         raw["compliance"]["pii"]["enabled"] = False
 
-    engine = ComplianceEngine(_spec_from("domains/healthcare-referral/spec.yaml", mutate))
+    engine = ComplianceEngine(_spec_from("healthcare-referral/spec.yaml", mutate))
     out = engine.redact_response(_match_response({"name": "Dr Jane Roe", "patientid": "PT-991"}), "t")
     assert out["candidates"][0]["candidate"] == {"name": "Dr Jane Roe", "patientid": "PT-991"}
 
@@ -392,7 +392,7 @@ def test_declared_fields_flag_off_restores_builtin_only(monkeypatch: pytest.Monk
     from engine.config.settings import settings
 
     monkeypatch.setattr(settings, "pii_declared_fields_enforced", False)
-    engine = ComplianceEngine(_spec_from("domains/healthcare-referral/spec.yaml"))
+    engine = ComplianceEngine(_spec_from("healthcare-referral/spec.yaml"))
     out = engine.redact_response({"name": "Dr Jane Roe", "ssn": "123-45-6789"}, "t")
     assert out == {"name": "Dr Jane Roe"}  # built-in inference deletes ssn; name survives
 
@@ -405,7 +405,7 @@ def _shipped_engine(domain_id: str) -> ComplianceEngine:
 
     from engine.config.schema import DomainSpec
 
-    raw = yaml.safe_load(Path(f"domains/{domain_id}/spec.yaml").read_text(encoding="utf-8"))
+    raw = yaml.safe_load((DESIGN_PACKS_ROOT / f"{domain_id}/spec.yaml").read_text(encoding="utf-8"))
     return ComplianceEngine(DomainSpec.model_validate(raw))
 
 

@@ -16,13 +16,13 @@ These tests verify that the engine correctly blocks prohibited factors at
 compile-time, preventing discriminatory matching criteria.
 """
 
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 from engine.compliance.prohibited_factors import ProhibitedFactorValidator
 from engine.config.schema import DomainSpec, GateSpec
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 
 def make_mock_domain_spec(blocked_fields: list[str] | None = None, enabled: bool = True) -> MagicMock:
@@ -196,13 +196,13 @@ class TestEnforcementModes:
 # RU-061 / CEG-COR-008: every compiled property reference, casefolded
 # ============================================================================
 
-_MORTGAGE_SPEC_PATH = "domains/mortgage-brokerage/spec.yaml"
+_MORTGAGE_SPEC_PATH = DESIGN_PACKS_ROOT / "mortgage-brokerage/spec.yaml"
 
 
 def _mortgage_spec() -> DomainSpec:
     import yaml
 
-    return DomainSpec.model_validate(yaml.safe_load(Path(_MORTGAGE_SPEC_PATH).read_text(encoding="utf-8")))
+    return DomainSpec.model_validate(yaml.safe_load(_MORTGAGE_SPEC_PATH.read_text(encoding="utf-8")))
 
 
 def _gate(**fields: object) -> GateSpec:
@@ -288,7 +288,7 @@ class TestFullPropertyCoverage:
         from engine.compliance.engine import ComplianceEngine
 
         spec = DomainSpec.model_validate(
-            yaml.safe_load(Path("domains/plasticos/spec.yaml").read_text(encoding="utf-8"))
+            yaml.safe_load((DESIGN_PACKS_ROOT / "plasticos/spec.yaml").read_text(encoding="utf-8"))
         )
         engine = ComplianceEngine(spec)
         engine.validate_gates(spec.gates)
