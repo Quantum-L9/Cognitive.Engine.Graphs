@@ -29,7 +29,6 @@ from typing import Any
 
 import pytest
 
-from engine.config.settings import settings
 from engine.health import nightly_health_scan
 from engine.health.health_schemas import HealthScanProfile
 from engine.health.nightly_health_scan import run_nightly_health_scan
@@ -42,12 +41,8 @@ DOMAIN = "plasticos"
 
 @pytest.fixture(autouse=True)
 def _design_pack_root(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The scan builds its own DomainPackLoader; name the repository design packs as its root.
-
-    The loader's root is Settings.domains_root (DOMAINS_ROOT); DOMAIN_SPECS_PATH
-    is no longer read (issue #400 A5).
-    """
-    monkeypatch.setattr(settings, "domains_root", DESIGN_PACKS_ROOT)
+    """The scan builds its own DomainPackLoader; name the repository design packs as its root."""
+    monkeypatch.setenv("DOMAIN_SPECS_PATH", str(DESIGN_PACKS_ROOT))
 
 
 def _entity(entity_id: str) -> dict[str, Any]:
@@ -120,3 +115,15 @@ class TestCountersPartitionTheAssessedSet:
         assert result["total_assessed"] == 150
         assert result["total_enriched"] == 0
         assert result["total_skipped"] == 150
+
+
+@pytest.fixture(autouse=True)
+def _design_pack_settings_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bind the design packs as Settings.domains_root (DOMAINS_ROOT), the loader's only root.
+
+    DomainPackLoader no longer reads DOMAIN_SPECS_PATH (issue #400 A5), so the
+    environment fixture above is inert; this one names the root the scan uses.
+    """
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "domains_root", DESIGN_PACKS_ROOT)

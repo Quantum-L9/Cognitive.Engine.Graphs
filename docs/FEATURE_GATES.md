@@ -54,7 +54,7 @@ independently of the code default.
 | Pareto Weight Discovery | `PARETO_WEIGHT_DISCOVERY_ENABLED` | `False` | `True` | active (opt-in) |
 | Domain Strict Validation | `DOMAIN_STRICT_VALIDATION` | `True` | `True` | active |
 | Native Domain Approval Receipts | `DOMAIN_PACK_RECEIPTS_ENABLED` | `False` | unchanged | dormant; immutable native revision/receipt admission, no warm-cache fallback; see the native publisher runbook, `docs/runbooks/domain-pack-publish.md` |
-| Pack Root Required in Prod | `DOMAINS_ROOT_REQUIRED_IN_PROD` (`domains_root_required_in_prod`) | `True` | unset | active (hardening); under `L9_ENV=prod` the pack loader refuses an unset, relative, missing, non-directory or unreadable `DOMAINS_ROOT` — see §34 |
+| Pack Root Required in Prod | `DOMAINS_ROOT_REQUIRED_IN_PROD` (`domains_root_required_in_prod`) | `True` | unset | active (hardening); under `L9_ENV=prod` the pack loader refuses an unset, relative, missing, non-directory or unreadable `DOMAINS_ROOT` — see §35 |
 | Production Domain Stage | `DOMAIN_PRODUCTION_STAGE_REQUIRED` | `False` | unchanged | dormant; production legacy admission requires reviewed/production; publisher/receipt mode always enforce stage |
 | Score Clamping | `SCORE_CLAMP_ENABLED` | `True` | `True` | active; a null dimension clamps to `0.0` as well (Stage 2, see §20) |
 | Strict Null Gates | `STRICT_NULL_GATES` | `True` | `True` | active |
@@ -1188,6 +1188,39 @@ Tests: `tests/unit/test_capability_tenant_binding.py`. Production ingress behavi
 for `enrich` (refused by the SDK allowlist before dispatch) and `admin` (admitted,
 then guarded by `admin:write`) is pinned in `tests/unit/test_node_app.py`.
 
+## 35. Production pack root required (issue #400 A4/A5)
+
+**Flag**: `DOMAINS_ROOT_REQUIRED_IN_PROD` (`domains_root_required_in_prod`), default `True` (hardening, C-21).
+
+Before: outside receipt mode a production pack root that was missing listed zero
+domains and the service reported healthy; an unset `DOMAINS_ROOT` silently used
+the relative `./domains`, and the loader also read a second variable,
+`DOMAIN_SPECS_PATH`.
+
+On, under `L9_ENV=prod`: constructing `DomainPackLoader` (which `GraphLifecycle`
+does at startup) raises `DomainSpecError` naming `DOMAINS_ROOT` when the root is
+
+- **not explicitly configured** — `DOMAINS_ROOT` never reached Settings
+  (environment, `.env` or constructor; `domains_root` absent from
+  `settings.model_fields_set`) and the caller passed no root other than the
+  Settings default. Boot passes `str(settings.domains_root)`, so an unset
+  `DOMAINS_ROOT` always refuses;
+- relative (a production root never depends on the working directory);
+- missing, not a directory, or not readable (`os.access(R_OK | X_OK)`).
+
+Off, and in every non-production environment: the former behaviour (a missing
+root lists zero domains). Receipt mode (`DOMAIN_PACK_RECEIPTS_ENABLED`) keeps its
+own absolute/present/no-symlink check on top of this one.
+
+Independently of the flag (issue #400 A5): the loader's root is its argument or
+`Settings.domains_root` only — `DOMAIN_SPECS_PATH` is no longer read; the chassis
+`YAMLDomainLoader` takes a required root; vertical discovery reads YAML only from
+a root its caller names. `Settings.domains_root`'s `./domains` default is the one
+pack-root literal under `engine/` and `chassis/`, enforced by
+`tests/architecture/test_runtime_reads_no_repo_packs.py`.
+
+Tests: `tests/unit/test_domains_root_required.py`.
+
 ## 29. Gate-routed score and Gate key binding (SCORING-GATE-01)
 
 ### Gate signing key binding (`gate_signing_key_binding_enabled`, default `True`) — GATE-KEY-01
@@ -1774,36 +1807,3 @@ isolated; the `feedback` metadata carries `stages` (`ok` or `failed:<ExceptionCl
 the message is logged, not returned, because it can carry driver detail) and
 `status` `complete` or `partial`. The outcome stays `recorded`. Off: the first stage
 failure propagates.
-
-## 34. Production pack root required (issue #400 A4/A5)
-
-**Flag**: `DOMAINS_ROOT_REQUIRED_IN_PROD` (`domains_root_required_in_prod`), default `True` (hardening, C-21).
-
-Before: outside receipt mode a production pack root that was missing listed zero
-domains and the service reported healthy; an unset `DOMAINS_ROOT` silently used
-the relative `./domains`, and the loader also read a second variable,
-`DOMAIN_SPECS_PATH`.
-
-On, under `L9_ENV=prod`: constructing `DomainPackLoader` (which `GraphLifecycle`
-does at startup) raises `DomainSpecError` naming `DOMAINS_ROOT` when the root is
-
-- **not explicitly configured** — `DOMAINS_ROOT` never reached Settings
-  (environment, `.env` or constructor; `domains_root` absent from
-  `settings.model_fields_set`) and the caller passed no root other than the
-  Settings default. Boot passes `str(settings.domains_root)`, so an unset
-  `DOMAINS_ROOT` always refuses;
-- relative (a production root never depends on the working directory);
-- missing, not a directory, or not readable (`os.access(R_OK | X_OK)`).
-
-Off, and in every non-production environment: the former behaviour (a missing
-root lists zero domains). Receipt mode (`DOMAIN_PACK_RECEIPTS_ENABLED`) keeps its
-own absolute/present/no-symlink check on top of this one.
-
-Independently of the flag (issue #400 A5): the loader's root is its argument or
-`Settings.domains_root` only — `DOMAIN_SPECS_PATH` is no longer read; the chassis
-`YAMLDomainLoader` takes a required root; vertical discovery reads YAML only from
-a root its caller names. `Settings.domains_root`'s `./domains` default is the one
-pack-root literal under `engine/` and `chassis/`, enforced by
-`tests/architecture/test_runtime_reads_no_repo_packs.py`.
-
-Tests: `tests/unit/test_domains_root_required.py`.

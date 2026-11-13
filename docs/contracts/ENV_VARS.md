@@ -92,4 +92,4 @@ The graph engine reads its domain pack root from one variable, `DOMAINS_ROOT`
 `GRAPH_DOMAINS_DIR` example above is illustrative, and `DOMAIN_SPECS_PATH` is no
 longer read. Under `L9_ENV=prod` `DOMAINS_ROOT` must be set to an absolute,
 existing, readable directory, or startup fails naming it
-(`DOMAINS_ROOT_REQUIRED_IN_PROD`, default `true`; `docs/FEATURE_GATES.md` §34).
+(`DOMAINS_ROOT_REQUIRED_IN_PROD`, default `true`; `docs/FEATURE_GATES.md` §35).
