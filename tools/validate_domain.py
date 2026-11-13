@@ -4,6 +4,8 @@
 Default CLI checks cross-references, the global weight ceiling, gate compilation,
 traversal warnings and prohibited factors. --strict escalates warnings to exit 1.
 --complete/--receipt select full native operator admission, not authoring policy.
+--list-rules prints the admission rules a JSON Schema cannot express
+(docs/contracts/data/models/domain-admission-rules.json) and validates nothing.
 No YAML bytes, settings or graph semantics are changed by this tool.
 """
 
@@ -13,11 +15,30 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from engine.config.loader import DomainNotFoundError, DomainSpecError, validate_authoring_file, validate_native_file
 from tools.path_policy import PathPolicyError, resolve_root, resolve_under_root
+
+RULES_PATH = Path(__file__).resolve().parent.parent / "docs/contracts/data/models/domain-admission-rules.json"
+
+
+def admission_rules() -> dict[str, Any]:
+    """The committed catalogue of non-schema admission rules, parsed, never recomputed."""
+    catalogue: dict[str, Any] = json.loads(RULES_PATH.read_text(encoding="utf-8"))
+    return catalogue
+
+
+def _print_rules(json_output: bool) -> None:
+    catalogue = admission_rules()
+    if json_output:
+        print(json.dumps(catalogue, indent=2, ensure_ascii=False))
+        return
+    for rule in catalogue["rules"]:
+        print(f"{rule['id']} [{rule['stage']}] {rule['statement']}")
+    print(f"{len(catalogue['rules'])} rules ({catalogue['schema']})")
 
 
 def validate_spec(
@@ -65,7 +86,7 @@ def validate_spec(
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Validate native CEG authoring or complete operator admission")
-    parser.add_argument("spec_path", type=Path)
+    parser.add_argument("spec_path", type=Path, nargs="?")
     parser.add_argument("--tenant-id", help="Expected tenant identity")
     parser.add_argument("--strict", action="store_true", help="Escalate authoring warnings to failures (exit 1)")
     parser.add_argument(
@@ -79,7 +100,17 @@ def main(argv: list[str] | None = None) -> None:
         default=".",
         help="Allowed root for the domain specification and receipt (default: current directory)",
     )
+    parser.add_argument(
+        "--list-rules",
+        action="store_true",
+        help="Print the non-schema admission rule catalogue (with --json: the catalogue file) and exit 0",
+    )
     args = parser.parse_args(argv)
+    if args.list_rules:
+        _print_rules(args.json_output)
+        sys.exit(0)
+    if args.spec_path is None:
+        parser.error("the following arguments are required: spec_path")
     try:
         root = resolve_root(args.root)
         spec_path = resolve_under_root(args.spec_path, root, option="spec_path")
