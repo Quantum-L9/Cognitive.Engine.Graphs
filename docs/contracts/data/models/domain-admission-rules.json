@@ -14,8 +14,9 @@
   "source_issue": "Quantum-L9/Cognitive.Engine.Graphs#400 (WS-B, B3 and B4)",
   "validator": {
     "command": "python tools/validate_domain.py <spec.yaml> --complete --require-reviewed --json",
+    "receipt_command": "python tools/validate_domain.py <spec.yaml> --complete --require-reviewed --receipt <receipt.json> --json",
     "list_command": "python tools/validate_domain.py --list-rules --json",
-    "verdict": "exit_code 0 and one PASS result means every rule below held; exit_code 1 and one FAIL result (check native-admission) carries the refusing rule's message. Admission stops at the first refusing stage, so one run reports one stage; within the withholding stage every defect is listed in one message.",
+    "verdict": "exit_code 0 and one PASS result means every rule the run evaluated held; exit_code 1 and one FAIL result (check native-admission) carries the refusing rule's message. `command` evaluates every stage except receipt: the receipt stage is evaluated only when --receipt names the approval receipt (`receipt_command`), so a PASS from `command` says nothing about a receipt. Admission stops at the first refusing stage, so one run reports one stage; within the withholding stage every defect is listed in one message.",
     "stage_order": [
       "read",
       "model",
@@ -25,7 +26,7 @@
       "withholding",
       "receipt"
     ],
-    "runtime_equivalence": "--complete --require-reviewed applies the checks the runtime applies to a published receipt-layout revision (load_native_revision). The default runtime loader (legacy spec.yaml layout, default settings) applies the subset whose runtime.default_loader is refused; operator overrides never relax --complete."
+    "runtime_equivalence": "`receipt_command` (--complete --require-reviewed --receipt) applies the checks the runtime applies to a published receipt-layout revision (load_native_revision); without --receipt the receipt stage is not evaluated. The default runtime loader (legacy spec.yaml layout, default settings) applies the subset whose runtime.default_loader is refused; operator overrides never relax --complete."
   },
   "fields": {
     "id": "Stable rule id; never reused or renumbered.",
@@ -43,9 +44,9 @@
     {
       "id": "ADM-READ-REGULAR-FILE",
       "stage": "read",
-      "statement": "The spec is a regular file reached through no symlink in any path component.",
+      "statement": "The path handed to admission names a regular file, and no component of that path is a symlink.",
       "enforced_by": ["engine/config/loader.py::read_native_file"],
-      "enforced_when": "always",
+      "enforced_when": "always, on the path admission receives (validate_spec, validate_native_file, the runtime loaders). The validator command line resolves spec_path under --root before admission, so a symlink given on the command line is followed to its target, which must stay under --root, and is not refused by this rule. The legacy runtime loader resolves its pack root first, so a symlinked ancestor of the pack root is accepted; a symlinked spec.yaml inside the pack root is refused.",
       "validator": {
         "check": "native-admission",
         "status": "FAIL",

@@ -712,6 +712,102 @@ def test_require_reviewed_alone_matches_the_runtime_stage_flag(tmp_path: Path, m
 # ── Catalogue drift ──────────────────────────────────────────────────────────
 
 
+# ── What the advertised commands do and do not evaluate (review of #474) ───────
+
+
+def _main(argv: list[str], capsys: pytest.CaptureFixture[str]) -> tuple[int, dict[str, Any]]:
+    with pytest.raises(SystemExit) as exit_info:
+        validate_domain.main(argv)
+    return int(exit_info.value.code or 0), json.loads(capsys.readouterr().out)
+
+
+def test_command_without_receipt_does_not_evaluate_the_receipt_stage(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`validator.command` passes a spec whose receipt is wrong; `receipt_command` refuses it."""
+    data = yaml.safe_dump(_reviewed(), sort_keys=False).encode()
+    spec_path = _place(tmp_path / "packs" / TENANT, data, symlink=False)
+    receipt_path = tmp_path / "receipt.json"
+    receipt_path.write_text(json.dumps(_receipt(TENANT, data, {"reviewed_input_sha256": "b" * 64})))
+    common = [str(spec_path), "--root", str(tmp_path), "--complete", "--require-reviewed", "--json"]
+
+    code, out = _main(common, capsys)
+    assert (code, out["results"][0]["status"]) == (0, "PASS")
+
+    code, out = _main([*common, "--receipt", str(receipt_path)], capsys)
+    assert code == 1
+    assert re.search(RULES["ADM-RECEIPT-BINDS-BYTES"]["validator"]["message_pattern"], out["results"][0]["message"])
+
+
+def test_catalogue_names_the_receipt_command_and_scopes_the_verdict() -> None:
+    validator = admission_rules()["validator"]
+    assert "--receipt" not in validator["command"]
+    assert "--receipt" in validator["receipt_command"]
+    assert "--complete" in validator["receipt_command"]
+    assert "--require-reviewed" in validator["receipt_command"]
+    assert "receipt_command" in validator["verdict"]
+    assert "receipt_command" in validator["runtime_equivalence"]
+    receipt_rules = [rule for rule in RULES.values() if rule["stage"] == "receipt"]
+    assert receipt_rules, "no receipt-stage rule in the catalogue"
+    for rule in receipt_rules:
+        assert "--receipt" in rule["enforced_when"], rule["id"]
+
+
+def test_command_line_follows_an_in_root_symlink_that_admission_itself_refuses(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """ADM-READ-REGULAR-FILE binds the path admission receives; main() resolves the path first."""
+    data = yaml.safe_dump(_reviewed(), sort_keys=False).encode()
+    link = _place(tmp_path / "packs" / TENANT, data, symlink=True)
+    assert link.is_symlink()
+
+    # The path as given: refused by the rule.
+    results, code = validate_spec(link, complete=True, require_reviewed=True)
+    assert code == 1
+    assert re.search(RULES["ADM-READ-REGULAR-FILE"]["validator"]["message_pattern"], results[0]["message"])
+
+    # The command line resolves it under --root, then admits the target's bytes.
+    code, out = _main(
+        [str(link), "--root", str(tmp_path), "--tenant-id", TENANT, "--complete", "--require-reviewed", "--json"],
+        capsys,
+    )
+    assert (code, out["results"][0]["status"]) == (0, "PASS")
+    assert Path(out["spec_path"]) == link.resolve()
+    assert "command line" in RULES["ADM-READ-REGULAR-FILE"]["enforced_when"]
+
+
+def test_command_line_refuses_a_symlink_that_leaves_the_root(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    data = yaml.safe_dump(_reviewed(), sort_keys=False).encode()
+    outside = tmp_path / "outside.yaml"
+    outside.write_bytes(data)
+    root = tmp_path / "root"
+    (root / TENANT).mkdir(parents=True)
+    link = root / TENANT / "spec.yaml"
+    link.symlink_to(outside)
+
+    with pytest.raises(SystemExit) as exit_info:
+        validate_domain.main([str(link), "--root", str(root), "--complete", "--json"])
+    assert exit_info.value.code == 2
+    assert "must stay under --root" in capsys.readouterr().err
+
+
+def test_default_loader_symlink_boundary_matches_the_catalogue(tmp_path: Path) -> None:
+    """A symlinked ancestor of the pack root is accepted; a symlinked spec.yaml inside it is refused."""
+    data = yaml.safe_dump(_reviewed(), sort_keys=False).encode()
+    _place(tmp_path / "actual" / "packs" / TENANT, data, symlink=False)
+    alias = tmp_path / "authorized"
+    alias.symlink_to(tmp_path / "actual", target_is_directory=True)
+    assert isinstance(_load(alias / "packs", TENANT), DomainSpec)
+
+    _place(tmp_path / "linked" / TENANT, data, symlink=True)
+    refusal = _load(tmp_path / "linked", TENANT)
+    assert isinstance(refusal, Exception)
+    assert RULES["ADM-READ-REGULAR-FILE"]["runtime"]["default_loader"] == "refused"
+    assert "symlinked ancestor of the pack root is accepted" in RULES["ADM-READ-REGULAR-FILE"]["enforced_when"]
+
+
 def test_every_catalogue_rule_has_a_negative_case_and_every_case_names_a_rule() -> None:
     exercised = {case.rule for case in CASES}
     assert exercised - set(RULES) == set(), "negative parity case names an unknown rule id"
