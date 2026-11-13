@@ -1015,6 +1015,21 @@ FILE_REGISTRY: list[FileMeta] = [
         ["test", "fixtures", "native-authoring", "predecessor-parity"],
         "engine-team",
     ),
+    # --- Domain admission rule catalogue (#400 WS-B, B3/B4) ---
+    FileMeta(
+        "docs/contracts/data/models/domain-admission-rules.json",
+        "engine-specific",
+        ["docs", "contracts"],
+        ["contracts", "domain-admission", "rule-catalogue"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/unit/test_domain_admission_rules.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "domain-admission", "validator-parity", "catalogue"],
+        "engine-team",
+    ),
     FileMeta(
         "tests/unit/test_native_runbook_cli.py",
         "engine-specific",
