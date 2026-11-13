@@ -12,7 +12,9 @@
 #
 # Build args:
 #   ENGINE_PACKAGE — the engine source directory (e.g. "engine", "enrich")
-#   DOMAINS_DIR   — domain specs directory (default: "domains")
+#
+# The image ships no domain packs (#400): mount a pack directory at
+# /app/domains at runtime; DOMAINS_ROOT selects what the engine serves.
 # ─────────────────────────────────────────────────────────────
 
 # ── Stage 1: Dependencies ────────────────────────────────────
@@ -31,7 +33,6 @@ RUN PIP_PREFIX=/install bash tools/deps/install_locked.sh runtime
 FROM python:3.12-slim@sha256:aa943ce411423c7582288f18707ff66eddcbaeb510502d747a72aeb34f30d159 AS runtime
 
 ARG ENGINE_PACKAGE=engine
-ARG DOMAINS_DIR=domains
 
 WORKDIR /app
 
@@ -44,8 +45,8 @@ COPY chassis/ /app/chassis/
 # Engine-specific code (parameterized)
 COPY ${ENGINE_PACKAGE}/ /app/${ENGINE_PACKAGE}/
 
-# Domain specs
-COPY ${DOMAINS_DIR}/ /app/domains/
+# Empty mount point for domain packs (none are baked into the image)
+RUN mkdir -p /app/domains
 
 # Entrypoint
 COPY scripts/entrypoint.sh /app/entrypoint.sh

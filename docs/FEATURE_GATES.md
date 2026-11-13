@@ -109,6 +109,9 @@ independently of the code default.
 | Learned Weight Renormalization | `LEARNED_WEIGHT_RENORMALIZATION` (`learned_weight_renormalization`) | `True` | unset | active (correctness) for feedback-enabled domains; learning redistributes weight among non-penalised dimensions without raising their sum above the pre-learning (C-22) value, and a learned `0.0` is honoured; `false` restores multiply-only (RU-023 / CEG-COR-083) |
 | Signal Weight Proportion CI | `SIGNAL_WEIGHT_PROPORTION_CI` (`signal_weight_proportion_ci`) | `True` | unset | active (correctness) for feedback-enabled domains; stored DimensionWeight `ci_width`/`confidence` come from the win-rate proportion, so an early positive lift is dampened; `false` restores the lift-based formula (RU-027 / CEG-COR-116) |
 | Propagation Single Application | `PROPAGATION_SINGLE_APPLICATION` (`propagation_single_application`) | `True` | unset | active (correctness); one outcome event updates each tenant DimensionWeight `boost_factor` once, bounded, and `candidates_affected` counts DimensionWeights; `false` restores the row-multiplying query (RU-028 / CEG-COR-117) |
+| Feedback Boost Propagation | `FEEDBACK_BOOST_PROPAGATION_ENABLED` (`feedback_boost_propagation_enabled`) | `False` | unset | retired (CEG-462); the convergence loop writes no `DimensionWeight.boost_factor` and reports `propagation.reason = "boost_propagation_disabled"`; `true` restores the legacy stage for rollback. No engine code reads `boost_factor`, so ranking is identical either way — see §34 |
+| Learned Weight Change Record | `LEARNED_WEIGHT_CHANGE_RECORD_ENABLED` (`learned_weight_change_record_enabled`) | `True` | unset | active (governance, CEG-462) for feedback-enabled domains only; every recalculation appends one `DimensionWeightChange` per dimension, never updated or deleted; `false` keeps no history and never moves a weight by itself (with auto-apply on it is the legacy overwrite) — see §34 |
+| Learned Weight Auto Apply | `LEARNED_WEIGHT_AUTO_APPLY_ENABLED` (`learned_weight_auto_apply_enabled`) | `False` | unset | dormant (operator decision, issue #462 Decision 1); off: a recalculation is an unapplied candidate and `DimensionWeight.weight` is not written; on: approved automatic recalculation, each write recorded; the only switch that writes a weight — see §34 |
 | Drift Requires Both Windows | `DRIFT_REQUIRES_BOTH_WINDOWS` (`drift_requires_both_windows`) | `True` | unset | active (correctness); outcomes `metadata.drift` raises no alert unless both a recent and a baseline distribution exist; `false` restores the one-sided divergence (RU-029 / CEG-COR-118) |
 | Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
 | Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
@@ -1773,3 +1776,69 @@ isolated; the `feedback` metadata carries `stages` (`ok` or `failed:<ExceptionCl
 the message is logged, not returned, because it can carry driver detail) and
 `status` `complete` or `partial`. The outcome stays `recorded`. Off: the first stage
 failure propagates.
+
+## 34. Feedback weight governance and the retired boost_factor (CEG-462)
+
+The outcome path applies only where the feedback loop runs: `feedback_enabled`
+(default `False`) and the domain's `feedbackloop.enabled` must both be true, and
+weight recalculation also needs `feedbackloop.signal_weights.enabled`. A GDS job
+with algorithm `feedback_recalculation` calls the same writer (no shipped pack
+declares one) and reports `weights_computed` and `weights_updated` (applied only).
+
+### Boost propagation (`feedback_boost_propagation_enabled`, default `False`)
+
+`ScorePropagator` multiplied every tenant `DimensionWeight.boost_factor` by
+`feedbackloop.propagation_boost_factor` (a hand-set 1.15) on any success, and
+divided it on any failure, whichever dimension the outcome concerned. No engine
+code reads `boost_factor`, so the stage wrote a number with no evidence behind it
+that never reached ranking. Off: the loop skips the stage and reports
+`propagation = {"propagated": false, "reason": "boost_propagation_disabled"}`;
+`stages` does not list it. On: the legacy stage (§30 claim and clamp), for
+rollback only. `propagation_boost_factor` stays in the spec schema and is inert
+while this flag is off. Ranking is identical in both states.
+
+### Weight change record (`learned_weight_change_record_enabled`, default `True`)
+
+`SignalWeightCalculator._store_weights` overwrote `DimensionWeight.weight` with
+no history. On: each recalculation appends one `DimensionWeightChange` node per
+scoring dimension with `tenant`, `dimension`, `recalculation_id` (shared by the
+dimensions of one recalculation), `prior_weight` (absent when no weight was
+stored), `new_weight`, `applied`, `confidence`, `ci_width`, `lift`,
+`sample_size`, `outcome_count`, `win_count`, `method`
+(`outcome_lift/<ci>/v1`) and `recorded_at`. Nothing in the engine updates or
+deletes one (`tests/unit/test_feedback_weight_governance.py::test_change_records_are_append_only`).
+The whole recalculation is one transaction, so its records (and any weights it
+applies) commit together or not at all; a failed recalculation reports
+`weights_recalculated: false`, `weights_applied: false` and changes nothing.
+`should_recalculate` measures new outcomes from the newer of the last applied
+weight and the last record, so an unapplied recalculation is not repeated on
+every later outcome. A recalculation with no outcomes writes nothing. Off: no
+history; a weight is then written only by the legacy overwrite under
+`learned_weight_auto_apply_enabled`, and with auto-apply also off nothing is
+recalculated or written. This flag never decides whether a weight moves.
+
+### Automatic application (`learned_weight_auto_apply_enabled`, default `False`)
+
+The only switch that writes `DimensionWeight.weight`. Off: a recalculation is recorded with
+`applied: false` and `DimensionWeight` is neither written nor created, so
+`ScoringAssembler.load_learned_weights` keeps returning the weights already
+stored. The outcome response reports `weights_recalculated: true`,
+`weights_applied: false`. On: approved automatic recalculation (issue #462,
+option b). One write transaction locks every target DimensionWeight in its own
+statement, then reads each prior, writes, and records `applied: true` (a
+single-statement lock let the planner read a cached prior: CI run 43130108743).
+Two concurrent first writes of a missing DimensionWeight can each create a node:
+no `(dimension, tenant)` uniqueness constraint exists (unchanged by CEG-462). Turning auto-apply on applies nothing retroactively:
+recorded candidates stay unapplied, and the first applied write waits for
+`min_outcomes_for_recalculation` new outcomes after the last record.
+Bounds are unchanged: `min_outcomes_for_recalculation`, the
+`[min_weight, max_weight]` clamp, confidence dampening and the C-22
+renormalisation in the reader.
+
+Turning this on is the operator's decision. The recalculation counts outcomes
+in which a dimension's `<dim>_score` is present, not outcomes where it scored
+high, and outcomes exist only for candidates that were matched and shown; see
+`docs/contracts/feedback/convergence-loop.yaml` (`weight_governance`).
+
+Tests: `tests/unit/test_feedback_weight_governance.py`,
+`tests/integration/test_feedback_weight_governance.py`.
