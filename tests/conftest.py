@@ -361,9 +361,7 @@ async def design_pack_deps(graph_driver, design_pack_loader, plasticos_database)
     init_dependencies(graph_driver, design_pack_loader)
     yield
     get_state().reset()
-    await graph_driver.execute_write(
-        cypher="MATCH (n) DETACH DELETE n", parameters={}, database=PLASTICOS_DOMAIN_ID
-    )
+    await graph_driver.execute_write(cypher="MATCH (n) DETACH DELETE n", parameters={}, database=PLASTICOS_DOMAIN_ID)
 
 
 # ── Test Isolation ─────────────────────────────────────────────────────────────

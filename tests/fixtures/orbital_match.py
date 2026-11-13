@@ -47,9 +47,7 @@ def with_gates(spec: DomainSpec, *gates: dict[str, Any], fields: tuple[dict[str,
     queryschema = spec.queryschema.model_copy(
         update={"fields": [*spec.queryschema.fields, *(QueryFieldSpec(**f) for f in fields)]}
     )
-    return spec.model_copy(
-        update={"gates": [*spec.gates, *(GateSpec(**g) for g in gates)], "queryschema": queryschema}
-    )
+    return spec.model_copy(update={"gates": [*spec.gates, *(GateSpec(**g) for g in gates)], "queryschema": queryschema})
 
 
 def orbit_gated(spec: DomainSpec) -> DomainSpec:
