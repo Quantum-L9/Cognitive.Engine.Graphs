@@ -9,7 +9,7 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
-Match-test overlays for the synthetic ``orbital-logistics`` pack (ADR-112 Stage 4).
+Integration-test overlays for the synthetic ``orbital-logistics`` pack (ADR-112 Stage 4).
 
 The pack itself stays minimal because many unit suites read it. A Neo4j-backed
 match test that needs one more construct (a traversal gate, an extra query
@@ -55,6 +55,19 @@ def with_gates(spec: DomainSpec, *gates: dict[str, Any], fields: tuple[dict[str,
 def orbit_gated(spec: DomainSpec) -> DomainSpec:
     """``spec`` plus SERVED_ORBIT_GATE and its ``orbit_class`` query field."""
     return with_gates(spec, SERVED_ORBIT_GATE, fields=({"name": "orbit_class", "type": "string"},))
+
+
+def with_feedback_loop(spec: DomainSpec) -> DomainSpec:
+    """``spec`` with the outcome feedback loop and signal-weight learning switched on.
+
+    orbital-logistics declares its outcome vocabulary but leaves the loop off;
+    readers and writers of DimensionWeight return early unless both are enabled.
+    """
+    loop = spec.feedbackloop
+    signal_weights = loop.signal_weights.model_copy(update={"enabled": True, "min_outcomes_for_recalculation": 50})
+    return spec.model_copy(
+        update={"feedbackloop": loop.model_copy(update={"enabled": True, "signal_weights": signal_weights})}
+    )
 
 
 def serve(graph_driver: Any, spec: DomainSpec) -> None:

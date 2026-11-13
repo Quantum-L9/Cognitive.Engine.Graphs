@@ -1,7 +1,7 @@
 """Integration test — causal attribution temporal decay (Contract 17 / C-21).
 
 Exercises the `causal.temporal_decay_enabled` consumer against a live Neo4j
-(testcontainers). Seeds one outcome and two touchpoints whose causal links have
+(testcontainers), on the synthetic orbital-logistics pack (ADR-112 Stage 4, A16). Seeds one outcome and two touchpoints whose causal links have
 different ``created_at`` timestamps, then verifies:
 
   * with the flag ON, the touchpoint reached through the RECENT causal link gets
@@ -23,9 +23,9 @@ pytestmark = pytest.mark.integration
 
 # touchpoint -> outcome causal links; tp_recent is fresh, tp_old is one year old.
 SEED_CYPHER = """
-MERGE (o:TransactionOutcome {outcome_id: $outcome_id, entity_id: $outcome_id})
-MERGE (r:Facility {entity_id: $recent_id})
-MERGE (s:Facility {entity_id: $old_id})
+MERGE (o:DockingResult {outcome_id: $outcome_id, entity_id: $outcome_id})
+MERGE (r:OrbitalDepot {entity_id: $recent_id})
+MERGE (s:OrbitalDepot {entity_id: $old_id})
 MERGE (r)-[er:RESULTED_IN]->(o)
 SET er.confidence = 1.0, er.created_at = datetime()
 MERGE (s)-[es:RESULTED_IN]->(o)
@@ -43,7 +43,7 @@ def _with_decay(spec, enabled: bool):
 
 @pytest.mark.asyncio
 async def test_temporal_decay_favors_recent_touchpoint(engine_deps, graph_driver, domain_loader, clean_db):
-    spec = domain_loader.load_domain("plasticos")
+    spec = domain_loader.load_domain("orbital-logistics")
     outcome_id = "ot-decay-recent"
     await graph_driver.execute_write(
         cypher=SEED_CYPHER,
