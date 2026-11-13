@@ -1,0 +1,1224 @@
+{
+  "schema": "ceg.domain-admission-rules/v1",
+  "title": "CEG domain pack admission rules a JSON Schema cannot express",
+  "description": "Every rule engine/config/loader.py enforces on a domain spec beyond field names, types, enums, bounds and extra-key refusal that DomainSpec's JSON Schema states. Hand-maintained; tests/unit/test_domain_admission_rules.py fails when a rule has no negative parity test, a test names an unknown rule, an enforced_by reference does not resolve or an existing_proof test is gone.",
+  "source_issue": "Quantum-L9/Cognitive.Engine.Graphs#400 (WS-B, B3 and B4)",
+  "validator": {
+    "command": "python tools/validate_domain.py <spec.yaml> --complete --require-reviewed --json",
+    "list_command": "python tools/validate_domain.py --list-rules --json",
+    "verdict": "exit_code 0 and one PASS result means every rule below held; exit_code 1 and one FAIL result (check native-admission) carries the refusing rule's message. Admission stops at the first refusing stage, so one run reports one stage; within the withholding stage every defect is listed in one message.",
+    "stage_order": [
+      "read",
+      "model",
+      "cross-reference",
+      "tenant-mapping",
+      "identity",
+      "withholding",
+      "receipt"
+    ],
+    "runtime_equivalence": "--complete --require-reviewed applies the checks the runtime applies to a published receipt-layout revision (load_native_revision). The default runtime loader (legacy spec.yaml layout, default settings) applies the subset whose runtime.default_loader is refused; operator overrides never relax --complete."
+  },
+  "fields": {
+    "id": "Stable rule id; never reused or renumbered.",
+    "stage": "Admission stage that enforces the rule.",
+    "enforced_by": "path::qualified_name of the enforcing code.",
+    "enforced_when": "Condition under which the rule is evaluated.",
+    "validator.message_pattern": "Python regular expression (re.search) the validator's FAIL message satisfies when this rule refuses the spec.",
+    "validator.error_class": "Loader exception class the runtime raises for the same refusal.",
+    "runtime.default_loader": "Verdict of DomainPackLoader with default settings on the legacy layout for a spec violating only this rule.",
+    "runtime.receipt_loader": "Verdict of DomainPackLoader with domain_pack_receipts_enabled for the same spec.",
+    "runtime.operator_override": "Environment variable that lets the default runtime loader serve a pack violating this rule; null when none exists.",
+    "existing_proof": "Other tests that already prove the rule (path::test)."
+  },
+  "rules": [
+    {
+      "id": "ADM-READ-REGULAR-FILE",
+      "stage": "read",
+      "statement": "The spec is a regular file reached through no symlink in any path component.",
+      "enforced_by": [
+        "engine/config/loader.py::read_native_file"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "^(Cannot read native input|Native input must be a regular file)"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": [
+        "tests/unit/test_native_domain_supply_chain.py::test_secure_file_read_bound_and_nonregular_file"
+      ]
+    },
+    {
+      "id": "ADM-READ-SIZE-LIMIT",
+      "stage": "read",
+      "statement": "The spec is at most MAX_SPEC_BYTES (5 MiB).",
+      "enforced_by": [
+        "engine/config/loader.py::read_native_file",
+        "engine/config/loader.py::_parse_native_bytes"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "^Domain spec exceeds maximum size"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": [
+        "tests/unit/test_domain_pack_loader.py::TestLoadAndValidate.test_oversized_file_raises"
+      ]
+    },
+    {
+      "id": "ADM-YAML-WELL-FORMED",
+      "stage": "read",
+      "statement": "The bytes are UTF-8 safe YAML with unique string mapping keys, no cyclic aliases, nesting depth at most 100 and at most 100000 alias-expanded nodes.",
+      "enforced_by": [
+        "engine/config/loader.py::_bounded_yaml",
+        "engine/config/loader.py::_NativeSafeLoader.construct_mapping",
+        "engine/config/loader.py::_parse_native_bytes"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "^Invalid YAML"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": [
+        "tests/unit/test_native_domain_supply_chain.py::test_duplicate_yaml_keys_rejected",
+        "tests/unit/test_native_domain_supply_chain.py::test_hostile_yaml_cli_fails_without_traceback"
+      ]
+    },
+    {
+      "id": "ADM-YAML-MAPPING-ROOT",
+      "stage": "read",
+      "statement": "The YAML document root is a mapping.",
+      "enforced_by": [
+        "engine/config/loader.py::_parse_native_bytes"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "^Domain spec must be a YAML mapping"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": [
+        "tests/unit/test_domain_pack_loader.py::TestLoadAndValidate.test_non_dict_yaml_raises"
+      ]
+    },
+    {
+      "id": "ADM-COMPLETE-VALIDATION-GUARDS",
+      "stage": "read",
+      "statement": "Complete admission runs only while every validation guard setting is enabled (domain_strict_validation, domain_version_semver_enforced, gate_spec_forbid_unknown_keys, gate_name_uniqueness, domain_undeclared_param_rejected, weight_ceiling_includes_unscoped, traversal_open_range_rejected, prohibited_factor_full_coverage, gate_role_exemption); a disabled guard is a refusal, never a weaker pass.",
+      "enforced_by": [
+        "engine/config/loader.py::_parse_native_bytes"
+      ],
+      "enforced_when": "complete admission only (--complete / --receipt; runtime receipt layout)",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "^Complete native admission requires validation guards"
+      },
+      "runtime": {
+        "default_loader": "admitted",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-COMPLETE-TOP-LEVEL-KEYS",
+      "stage": "read",
+      "statement": "Every top-level key is a DomainSpec field.",
+      "enforced_by": [
+        "engine/config/loader.py::_parse_native_bytes"
+      ],
+      "enforced_when": "complete admission only (--complete / --receipt; runtime receipt layout)",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "^Complete native admission refuses unknown top-level keys"
+      },
+      "runtime": {
+        "default_loader": "admitted",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-ID-TENANT-GRAMMAR",
+      "stage": "identity",
+      "statement": "domain.id is a legal tenant id (the tenant-id grammar; no Neo4j-reserved prefix).",
+      "enforced_by": [
+        "engine/config/loader.py::_parse_native_bytes",
+        "engine/utils/security.py::tenant_id_defect"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainNotFoundError",
+        "message_pattern": "^Invalid domain ID"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": [
+        "tests/unit/test_domain_pack_loader.py::TestResolveSpecPath.test_blocks_ids_outside_the_tenant_grammar_before_touching_disk"
+      ]
+    },
+    {
+      "id": "ADM-ID-MATCHES-TENANT",
+      "stage": "identity",
+      "statement": "domain.id equals the tenant id the pack is looked up by (the directory name of a folder-shaped spec.yaml, or --tenant-id).",
+      "enforced_by": [
+        "engine/config/loader.py::_parse_native_bytes"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "declares domain\\.id .*; the directory name is the lookup key$"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-STAGE-REVIEWED",
+      "stage": "identity",
+      "statement": "domain.version is <major>.<minor>.<patch>-reviewed or -production.",
+      "enforced_by": [
+        "engine/config/loader.py::require_reviewed_stage"
+      ],
+      "enforced_when": "--require-reviewed / --receipt; runtime receipt layout; or settings.domain_production_stage_required in production (default off)",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "^Native publication stage must be reviewed or production$"
+      },
+      "runtime": {
+        "default_loader": "admitted",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": [
+        "tests/unit/test_native_domain_supply_chain.py::test_runtime_stage_flag_parity"
+      ]
+    },
+    {
+      "id": "ADM-MODEL-VERSION-SEMVER",
+      "stage": "model",
+      "statement": "domain.version is <major>.<minor>.<patch> with an optional -seed|-discovered|-inferred|-proposed|-reviewed|-production suffix (ASCII digits, no leading zeros).",
+      "enforced_by": [
+        "engine/config/schema.py::DomainMetadata.validate_version_semver"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*is not semver"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-MODEL-TRAVERSAL-HOP-BOUNDS",
+      "stage": "model",
+      "statement": "Every variable-length hop range in a traversal step pattern is bounded, at least 1 and at most settings.max_hop_hard_cap.",
+      "enforced_by": [
+        "engine/config/schema.py::TraversalSpec.validate_traversal_hops",
+        "engine/config/schema.py::TraversalSpec._validate_hop_ranges"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*Traversal step '.*': (hop count must be >= 1|max hops \\d+ exceeds hard cap|variable-length range .* has no explicit upper bound)"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-MODEL-GATE-KEYS-KNOWN",
+      "stage": "model",
+      "statement": "A gate declares only GateSpec field names as keys.",
+      "enforced_by": [
+        "engine/config/schema.py::GateSpec.reject_unknown_keys"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*Gate '.*' has unknown key\\(s\\)"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-MODEL-GATE-OPERATOR-ALLOWED",
+      "stage": "model",
+      "statement": "A gate operator is one of >=, <=, >, <, =, !=, <>, IN, CONTAINS, STARTS WITH, ENDS WITH.",
+      "enforced_by": [
+        "engine/config/schema.py::GateSpec.validate_operator"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*Gate operator '.*' is not in the allowed set"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-MODEL-GATE-QUERYPARAM-SHAPE",
+      "stage": "model",
+      "statement": "A gate queryparam is a parameter name or a scalar literal.",
+      "enforced_by": [
+        "engine/config/schema.py::GateSpec.validate_queryparam_shape"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*queryparam must be a parameter name or a scalar literal"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-MODEL-PROPERTY-SHAPE",
+      "stage": "model",
+      "statement": "A property declares items iff its type is list and properties iff its type is map; a list of lists is not declarable; map property names are unique.",
+      "enforced_by": [
+        "engine/config/schema.py::PropertySpec.validate_shape",
+        "engine/config/schema.py::ItemSpec.refuse_list_of_list",
+        "engine/config/schema.py::ItemSpec.validate_item_shape"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*(type list requires items|type list declares its element shape|type map requires a non-empty properties list|type map declares its keys|items/properties are declared only|a list of lists is not a declarable shape|duplicate map property name)"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-MODEL-QUERY-PARAMETER-SCALAR",
+      "stage": "model",
+      "statement": "Query schema fields and derived parameters are scalars, never list or map shapes.",
+      "enforced_by": [
+        "engine/config/schema.py::QueryFieldSpec",
+        "engine/config/schema.py::DerivedParameterSpec"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*(query fields are scalars|derived parameters are scalars)"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-MODEL-CALIBRATION-RANGE",
+      "stage": "model",
+      "statement": "A calibration pair's expected_score_min is not above its expected_score_max.",
+      "enforced_by": [
+        "engine/config/schema.py::CalibrationPair.validate_range"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*Calibration pair: expected_score_min"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-MODEL-EVIDENCERELEVANCE-NUMBER",
+      "stage": "model",
+      "statement": "ontology.edges[].evidencerelevance is a number, never a bool or a quoted number.",
+      "enforced_by": [
+        "engine/config/schema.py::EdgeSpec.refuse_non_numeric_relevance"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*evidencerelevance must be a number in \\[0, 1\\]"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-XREF-ONTOLOGY-UNIQUE",
+      "stage": "cross-reference",
+      "statement": "Node labels are unique and (type, from, to) edge signatures are unique.",
+      "enforced_by": [
+        "engine/config/schema.py::OntologySpec.validate_unique_labels",
+        "engine/config/schema.py::OntologySpec.validate_unique_edge_types"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*(Duplicate node labels detected in ontology|Duplicate edge type signatures detected)"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-XREF-MATCH-ENTITY-LABELS",
+      "stage": "cross-reference",
+      "statement": "Every matchentities candidate and queryentity label is an ontology node label.",
+      "enforced_by": [
+        "engine/config/schema.py::DomainSpec.validate_cross_references"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*(Candidate|Query entity) label '.*' not found in ontology"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-XREF-EDGE-ENDPOINTS",
+      "stage": "cross-reference",
+      "statement": "Every ontology edge's from and to are ontology node labels.",
+      "enforced_by": [
+        "engine/config/schema.py::DomainSpec.validate_cross_references"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*Edge '.*' (source|target) '.*' not found in ontology nodes"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-XREF-GATE-NAMES-UNIQUE",
+      "stage": "cross-reference",
+      "statement": "Gate names are unique.",
+      "enforced_by": [
+        "engine/config/schema.py::DomainSpec.validate_cross_references"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*Duplicate gate name\\(s\\)"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-XREF-EXCLUSION-EDGE-TYPE",
+      "stage": "cross-reference",
+      "statement": "An exclusion gate's edgetype is an ontology edge type.",
+      "enforced_by": [
+        "engine/config/schema.py::DomainSpec.validate_cross_references"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*Gate '.*' references unknown edge type"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-XREF-GATE-PARAMETER-DECLARED",
+      "stage": "cross-reference",
+      "statement": "A gate's named queryparam is a queryschema field or derived parameter (or its _min/_max/_start/_end base; a temporalrange gate may instead declare <param>_start and <param>_end). Checked when the spec declares any query field or derived parameter; otherwise ADM-DEFECT-MATCH-DIRECTION reports the unbound parameter.",
+      "enforced_by": [
+        "engine/config/schema.py::DomainSpec.validate_cross_references"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*Gate '.*' references undeclared parameter"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-XREF-WEIGHT-CEILING",
+      "stage": "cross-reference",
+      "statement": "Scoring defaultweight values sum to at most 1.0 in every match direction, with unscoped dimensions counted in each direction.",
+      "enforced_by": [
+        "engine/config/schema.py::DomainSpec.validate_cross_references"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*Scoring dimension default weights sum to"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": [
+        "tests/unit/test_native_domain_supply_chain.py::test_cli_uses_per_direction_weight_semantics"
+      ]
+    },
+    {
+      "id": "ADM-XREF-GDS-PROJECTION",
+      "stage": "cross-reference",
+      "statement": "Every GDS job projection node label and edge type is declared in the ontology.",
+      "enforced_by": [
+        "engine/config/schema.py::DomainSpec.validate_cross_references"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*GDS job '.*' references unknown (node label|edge type)"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-MAP-REFNAMESPACE-NODE-ENDPOINT-ONLY",
+      "stage": "tenant-mapping",
+      "statement": "refnamespace is declared on node sync endpoints (targetnode) only.",
+      "enforced_by": [
+        "engine/config/tenant_mapping.py::_validate_ref_namespaces"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*refnamespace is declared on node endpoints \\(targetnode\\) only"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-MAP-REFNAMESPACE-CONSISTENT",
+      "stage": "tenant-mapping",
+      "statement": "Every sync endpoint of a namespaced node label declares the same refnamespace.",
+      "enforced_by": [
+        "engine/config/tenant_mapping.py::_validate_ref_namespaces"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*every sync endpoint of a namespaced label declares the same refnamespace"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-MAP-REFNAMESPACE-UNIQUE",
+      "stage": "tenant-mapping",
+      "statement": "A refnamespace belongs to exactly one node label.",
+      "enforced_by": [
+        "engine/config/tenant_mapping.py::_validate_ref_namespaces"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*refnamespace '.*' is declared for both"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-MAP-NAMESPACED-LABEL-DIRECT-WRITE",
+      "stage": "tenant-mapping",
+      "statement": "A node label with a refnamespace is written only by its own node sync endpoint, never by childsync or taxonomyedges.",
+      "enforced_by": [
+        "engine/config/tenant_mapping.py::_validate_ref_namespaces"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*has a refnamespace and is written only by its own node sync endpoint"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-MAP-OBSERVEDFROM-NON-EMPTY",
+      "stage": "tenant-mapping",
+      "statement": "observedfrom, when present, is a non-empty list.",
+      "enforced_by": [
+        "engine/config/tenant_mapping.py::_validate_observations"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*observedfrom is a non-empty list"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-MAP-OBSERVED-NODE-NAMESPACED",
+      "stage": "tenant-mapping",
+      "statement": "Both node labels of an endpoint that declares observedfrom declare a refnamespace on their node sync endpoint.",
+      "enforced_by": [
+        "engine/config/tenant_mapping.py::_validate_observations"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*observed node '.*' declares no refnamespace"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-MAP-ASSOCIATION-UNIQUE",
+      "stage": "tenant-mapping",
+      "statement": "A provider association (provider, fromobjecttype, toobjecttype, associationcategory, associationtypeid) is mapped by at most one relationship endpoint.",
+      "enforced_by": [
+        "engine/config/tenant_mapping.py::_validate_observations"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*provider association .* is already mapped by"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-MAP-RELEVANCE-WRITER",
+      "stage": "tenant-mapping",
+      "statement": "An ontology edge that declares evidencerelevance is written by a relationship sync endpoint with that targetedge, fromnode and tonode.",
+      "enforced_by": [
+        "engine/config/tenant_mapping.py::_validate_relevance"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*declares evidencerelevance but no relationship sync endpoint writes it"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-MAP-RELEVANCE-CONSISTENT",
+      "stage": "tenant-mapping",
+      "statement": "Every signature of an edge type that declares evidencerelevance declares the same value.",
+      "enforced_by": [
+        "engine/config/tenant_mapping.py::_validate_relevance"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*every signature declares the same evidencerelevance"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-MAP-RELATIONSHIP-DECLARATION",
+      "stage": "tenant-mapping",
+      "statement": "A relationship endpoint that declares observedfrom or writes a relevance edge declares targetedge, fromnode and tonode without targetnode, uses batchstrategy UNWINDMERGE, and names exactly one ontology edge that is DIRECTED and managedby sync.",
+      "enforced_by": [
+        "engine/config/tenant_mapping.py::_validate_observations",
+        "engine/config/tenant_mapping.py::_validate_relevance",
+        "engine/sync/generator.py::resolve_relationship_declaration"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "validation failed:(.|\\n)*Endpoint '.*': (a relationship endpoint declares targetedge, fromnode and tonode|declares both targetnode and targetedge|relationship sync requires batchstrategy UNWINDMERGE|ontology must declare exactly one edge|edge '.*' must be declared DIRECTED and managedby sync)"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-WITHHOLD-DORMANT",
+      "stage": "withholding",
+      "statement": "A pack declaring domain.activation: dormant is withheld.",
+      "enforced_by": [
+        "engine/config/loader.py::withholding_reason"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainNotFoundError",
+        "message_pattern": "is declared dormant by its pack \\(domain\\.activation: dormant\\)"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": "DORMANT_DOMAIN_PACKS_ENABLED"
+      },
+      "existing_proof": [
+        "tests/unit/test_native_domain_supply_chain.py::test_cli_loader_same_withholding_reason"
+      ]
+    },
+    {
+      "id": "ADM-DEFECT-STRUCTURAL-PROPERTY",
+      "stage": "withholding",
+      "statement": "Every structural property a gate, scoring dimension or GDS job uses is declared by the pack (exclusion edgetype/candidateprop, geodecay latitude/longitude, community property, louvain writeproperty, geoproximity writeproperties).",
+      "enforced_by": [
+        "engine/config/loader.py::admission_defects",
+        "engine/config/structural_vocabulary.py::structural_property_defects"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainNotFoundError",
+        "message_pattern": "is withheld: \\d+ admission defect\\(s\\).*undeclared structural property: "
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": "UNVALIDATED_DOMAIN_PACKS_ENABLED"
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-DEFECT-GATE-STRICTWHEN",
+      "stage": "withholding",
+      "statement": "No gate declares strictwhen (no compiler consumes it).",
+      "enforced_by": [
+        "engine/config/loader.py::admission_defects"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainNotFoundError",
+        "message_pattern": "is withheld: \\d+ admission defect\\(s\\).*strictwhen .* is not consumed by any compiler"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": "UNVALIDATED_DOMAIN_PACKS_ENABLED"
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-DEFECT-GATE-ROLE-FIELDS",
+      "stage": "withholding",
+      "statement": "No gate declares roleexempt or relaxedpenalty (match takes no request role and relaxed matching is not exposed).",
+      "enforced_by": [
+        "engine/config/loader.py::admission_defects",
+        "engine/config/loader.py::_role_field_defects"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainNotFoundError",
+        "message_pattern": "is withheld: \\d+ admission defect\\(s\\).*(roleexempt .* is not consumed|relaxedpenalty .* is not consumed)"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": "UNVALIDATED_DOMAIN_PACKS_ENABLED"
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-DEFECT-GATE-COMPILES",
+      "stage": "withholding",
+      "statement": "Every gate compiles to executable Cypher: the gate compiler accepts it, a traversal gate declares its edgetype (no RELATES_TO fallback) and every $parameter it emits is an identifier.",
+      "enforced_by": [
+        "engine/config/loader.py::admission_defects",
+        "engine/gates/compiler.py::GateCompiler.compile"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainNotFoundError",
+        "message_pattern": "is withheld: \\d+ admission defect\\(s\\).*(: refused by the compiler|RELATES_TO fallback|is not an identifier)"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": "UNVALIDATED_DOMAIN_PACKS_ENABLED"
+      },
+      "existing_proof": [
+        "tests/unit/test_native_domain_supply_chain.py::test_traversal_gate_parity_respects_existing_flags"
+      ]
+    },
+    {
+      "id": "ADM-DEFECT-PLUGIN-RULES",
+      "stage": "withholding",
+      "statement": "plugins.inference_rules names only registered inference rules; inference_rule_parameters are declared only for authorized rules, are present for rules that require them, and are well formed.",
+      "enforced_by": [
+        "engine/config/loader.py::admission_defects",
+        "engine/config/loader.py::_plugin_defects",
+        "engine/inference_rule_registry.py::rule_parameter_defects"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainNotFoundError",
+        "message_pattern": "is withheld: \\d+ admission defect\\(s\\).*plugins\\.inference_rule(s|_parameters)"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": "UNVALIDATED_DOMAIN_PACKS_ENABLED"
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-DEFECT-SYNC-SHAPE",
+      "stage": "withholding",
+      "statement": "The typed sync contract holds: a declared map or list<map> is consumed by a childsync, and each node sync endpoint's idproperty, childsync, taxonomyedges and fieldsupdated fields are declared on its targetnode in a writable shape.",
+      "enforced_by": [
+        "engine/config/loader.py::admission_defects",
+        "engine/config/loader.py::_sync_shape_defects",
+        "engine/sync/row_contract.py::stored_shape_defects",
+        "engine/sync/row_contract.py::endpoint_shape_defects"
+      ],
+      "enforced_when": "always",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainNotFoundError",
+        "message_pattern": "is withheld: \\d+ admission defect\\(s\\).*\\((sync |ontology node |ontology edge )"
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": "UNVALIDATED_DOMAIN_PACKS_ENABLED"
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-DEFECT-SCORING-PRODUCER",
+      "stage": "withholding",
+      "statement": "A scoring dimension's null_strategy inherit_prior or cold_start_fallback structural_similarity has a producer: the pack declares candidate._prior_<dimension> or candidate.shared_neighbor_score.",
+      "enforced_by": [
+        "engine/config/loader.py::admission_defects",
+        "engine/config/loader.py::_scoring_defects",
+        "engine/config/loader.py::_no_producer_defect"
+      ],
+      "enforced_when": "complete admission, or settings.scoring_admission_check_enabled at runtime (default off)",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainNotFoundError",
+        "message_pattern": "is withheld: \\d+ admission defect\\(s\\).*has no producer"
+      },
+      "runtime": {
+        "default_loader": "admitted",
+        "receipt_loader": "refused",
+        "operator_override": "UNVALIDATED_DOMAIN_PACKS_ENABLED"
+      },
+      "existing_proof": [
+        "tests/unit/test_domain_pack_loader.py::TestScoringAdmission.test_options_without_a_producer_are_defects"
+      ]
+    },
+    {
+      "id": "ADM-DEFECT-SCORING-COMPILES",
+      "stage": "withholding",
+      "statement": "Every scoring dimension compiles in each match direction it applies to, the direction's scoring clause assembles, and every $parameter a dimension references is bound by handle_match.",
+      "enforced_by": [
+        "engine/config/loader.py::admission_defects",
+        "engine/config/loader.py::_scoring_defects",
+        "engine/scoring/assembler.py::ScoringAssembler.assemble_scoring_clause"
+      ],
+      "enforced_when": "complete admission, or settings.scoring_admission_check_enabled / settings.admission_checks_full_match at runtime (both default off)",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainNotFoundError",
+        "message_pattern": "is withheld: \\d+ admission defect\\(s\\).*scoring\\[.*\\]( .*)?: (refused by the scoring (compiler|assembler)|references parameter\\(s\\) .*, which nothing binds)"
+      },
+      "runtime": {
+        "default_loader": "admitted",
+        "receipt_loader": "refused",
+        "operator_override": "UNVALIDATED_DOMAIN_PACKS_ENABLED"
+      },
+      "existing_proof": [
+        "tests/unit/test_domain_pack_loader.py::TestScoringAdmission.test_preference_attention_defect_quotes_the_compiler",
+        "tests/unit/test_domain_pack_loader.py::TestScoringAdmission.test_population_mean_names_its_unbound_parameter"
+      ]
+    },
+    {
+      "id": "ADM-DEFECT-MATCH-DIRECTION",
+      "stage": "withholding",
+      "statement": "For every declared match direction the traversal assembles, the gates compile together, and every $parameter they reference is bound by handle_match.",
+      "enforced_by": [
+        "engine/config/loader.py::admission_defects",
+        "engine/config/loader.py::_match_defects",
+        "engine/traversal/assembler.py::TraversalAssembler.assemble_traversal",
+        "engine/gates/compiler.py::GateCompiler.compile_all_gates"
+      ],
+      "enforced_when": "complete admission, or settings.admission_checks_full_match at runtime (default off)",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainNotFoundError",
+        "message_pattern": "is withheld: \\d+ admission defect\\(s\\).*(traversal\\[.*\\]: refused by the traversal assembler|match\\[.*\\]: gates refused by the compiler|match\\[.*\\]: gates or traversal reference parameter\\(s\\) .*, which nothing binds)"
+      },
+      "runtime": {
+        "default_loader": "admitted",
+        "receipt_loader": "refused",
+        "operator_override": "UNVALIDATED_DOMAIN_PACKS_ENABLED"
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-COMPLETE-GATE-EDGE-DECLARED",
+      "stage": "withholding",
+      "statement": "Every gate edgetype (any gate type) is an ontology edge type.",
+      "enforced_by": [
+        "engine/config/loader.py::admission_defects",
+        "engine/config/loader.py::_complete_native_defects"
+      ],
+      "enforced_when": "complete admission only (--complete / --receipt; runtime receipt layout)",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainNotFoundError",
+        "message_pattern": "is withheld: \\d+ admission defect\\(s\\).*gate .*: undeclared edge type"
+      },
+      "runtime": {
+        "default_loader": "admitted",
+        "receipt_loader": "refused",
+        "operator_override": "UNVALIDATED_DOMAIN_PACKS_ENABLED"
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-COMPLETE-TRAVERSAL-WARNINGS",
+      "stage": "withholding",
+      "statement": "The traversal validator reports no warning in any match direction (for example a step referencing an undeclared label or relationship type).",
+      "enforced_by": [
+        "engine/config/loader.py::admission_defects",
+        "engine/config/loader.py::_complete_native_defects",
+        "engine/config/loader.py::_native_traversal_warnings",
+        "engine/traversal/assembler.py::TraversalAssembler.validate_traversal"
+      ],
+      "enforced_when": "complete admission only (--complete / --receipt; runtime receipt layout)",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainNotFoundError",
+        "message_pattern": "is withheld: \\d+ admission defect\\(s\\).*Traversal step '.*': "
+      },
+      "runtime": {
+        "default_loader": "admitted",
+        "receipt_loader": "refused",
+        "operator_override": "UNVALIDATED_DOMAIN_PACKS_ENABLED"
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-COMPLETE-PROHIBITED-FACTORS",
+      "stage": "withholding",
+      "statement": "No gate and no scoring dimension references a field listed in compliance.prohibitedfactors.blockedfields.",
+      "enforced_by": [
+        "engine/config/loader.py::admission_defects",
+        "engine/config/loader.py::_complete_native_defects",
+        "engine/config/loader.py::_validate_native_compliance",
+        "engine/compliance/prohibited_factors.py::ProhibitedFactorValidator.validate_gate",
+        "engine/compliance/prohibited_factors.py::ProhibitedFactorValidator.validate_scoring_dimension"
+      ],
+      "enforced_when": "complete admission only (--complete / --receipt; runtime receipt layout)",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainNotFoundError",
+        "message_pattern": "is withheld: \\d+ admission defect\\(s\\).*compliance: .* references prohibited field"
+      },
+      "runtime": {
+        "default_loader": "admitted",
+        "receipt_loader": "refused",
+        "operator_override": "UNVALIDATED_DOMAIN_PACKS_ENABLED"
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-COMPLETE-SYNC-OWNER",
+      "stage": "withholding",
+      "statement": "Every sync endpoint is accepted by the native sync owner: a node endpoint's targetnode and idproperty are declared by the ontology and its query generates; a relationship endpoint's declaration resolves.",
+      "enforced_by": [
+        "engine/config/loader.py::admission_defects",
+        "engine/config/loader.py::_complete_native_defects",
+        "engine/sync/generator.py::resolve_relationship_declaration",
+        "engine/sync/generator.py::SyncGenerator.generate_sync_query"
+      ],
+      "enforced_when": "complete admission only (--complete / --receipt; runtime receipt layout)",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainNotFoundError",
+        "message_pattern": "is withheld: \\d+ admission defect\\(s\\).*sync .*: (refused by native sync owner|targetnode/idproperty is not declared by ontology)"
+      },
+      "runtime": {
+        "default_loader": "admitted",
+        "receipt_loader": "refused",
+        "operator_override": "UNVALIDATED_DOMAIN_PACKS_ENABLED"
+      },
+      "existing_proof": []
+    },
+    {
+      "id": "ADM-RECEIPT-BINDS-BYTES",
+      "stage": "receipt",
+      "statement": "A native approval receipt is a strict ceg.domain-approval/v1 record whose tenant_id, version, sha256 and reviewed_input_sha256 bind the exact admitted bytes, and whose previous_sha256 is not the revision itself.",
+      "enforced_by": [
+        "engine/config/loader.py::validate_native_approval",
+        "engine/config/loader.py::read_native_record",
+        "engine/config/loader.py::DomainApproval.validate_review",
+        "engine/config/loader.py::load_native_revision"
+      ],
+      "enforced_when": "--receipt; runtime receipt layout (settings.domain_pack_receipts_enabled)",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainSpecError",
+        "message_pattern": "^(Native receipt tenant/hash mismatch or spec tamper|Native approval does not bind exact reviewed input bytes|Native receipt version does not match admitted spec|Native receipt cannot refer to itself as the previous revision|Invalid native record)"
+      },
+      "runtime": {
+        "default_loader": "admitted",
+        "receipt_loader": "refused",
+        "operator_override": null
+      },
+      "existing_proof": [
+        "tests/unit/test_native_receipt_cli.py::test_native_cli_refuses_bad_native_receipt",
+        "tests/unit/test_native_receipt_cli.py::test_duplicate_json_receipt_key_is_refused"
+      ]
+    }
+  ]
+}
