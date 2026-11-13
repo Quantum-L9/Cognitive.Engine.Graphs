@@ -40,7 +40,7 @@ from engine.gds.scheduler import GDSScheduler
 
 pytestmark = pytest.mark.integration
 
-DB = "plasticos"  # created by the plasticos_database fixture; wiped by clean_db
+DB = "orbital-logistics"  # synthetic tenant db (ADR-112 Stage 4, A16): domain_database creates it, clean_db wipes it
 
 # Each pair (a, b) shares `k` private Resource nodes, so Step 1 writes
 # CO_USES with weight k between them.
@@ -140,7 +140,7 @@ def _degrees(edges: set[frozenset[str]]) -> dict[str, int]:
 
 
 @pytest.mark.asyncio
-async def test_k15_keeps_keep_count_per_node_and_is_deterministic(graph_driver, plasticos_database, clean_db) -> None:
+async def test_k15_keeps_keep_count_per_node_and_is_deterministic(graph_driver, domain_database, clean_db) -> None:
     from engine.config.settings import settings
 
     assert settings.gds_cooccurrence_deterministic_prune is True
@@ -164,7 +164,7 @@ async def test_k15_keeps_keep_count_per_node_and_is_deterministic(graph_driver, 
 
 
 @pytest.mark.asyncio
-async def test_star_leaves_below_the_floor_keep_their_edge(graph_driver, plasticos_database, clean_db) -> None:
+async def test_star_leaves_below_the_floor_keep_their_edge(graph_driver, domain_database, clean_db) -> None:
     pairs = [{"a": "hub", "b": f"leaf{i:02d}", "k": 2} for i in range(20)]
     await _seed(graph_driver, pairs)
     spec = _spec()
