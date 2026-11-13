@@ -992,12 +992,14 @@ class GDSScheduler:
 
     async def _run_feedback_recalculation(self, job_spec: GDSJobSpec) -> dict[str, Any]:
         """Recalculate dimension weights based on accumulated outcomes."""
-        from engine.feedback.signal_weights import SignalWeightCalculator
+        from engine.feedback.signal_weights import SignalWeightCalculator, learned_weights_applied
 
         calculator = SignalWeightCalculator(self.graph_driver, self.domain_spec)
         weights = await calculator.recalculate_weights()
-        logger.info(f"Feedback recalculation: {len(weights)} weights updated")
-        return {"algorithm": "feedback_recalculation", "weights_updated": len(weights)}
+        # CEG-462: a recalculation writes DimensionWeight only under learned_weight_auto_apply_enabled.
+        applied = len(weights) if learned_weights_applied() else 0
+        logger.info(f"Feedback recalculation: {len(weights)} weights computed, {applied} applied")
+        return {"algorithm": "feedback_recalculation", "weights_computed": len(weights), "weights_updated": applied}
 
     async def _run_causal_chain_scoring(self, job_spec: GDSJobSpec) -> dict[str, Any]:
         """
