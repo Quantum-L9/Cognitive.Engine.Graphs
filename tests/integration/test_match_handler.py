@@ -6,10 +6,14 @@ Real payload contract (engine/handlers.py::handle_match):
     top_n: int (optional, clamped to [1, 1000])
     weights: dict (optional, validated to [0, 1], sum <= 1.0)
 
-The plasticos spec declares candidate=Facility for direction
-'supply_opportunity_to_buyer_facility' and a traversal gate requiring
-(candidate)-[:PROCESSES]->(:PolymerFamily {code: $polymer_type}), so seed data
-must live in the 'plasticos' database and include that edge.
+Core behaviour runs on the synthetic orbital-logistics pack (ADR-112 Stage 4,
+A16): candidate=OrbitalDepot for direction 'window_to_depot', gated by the
+pack's hazmat and port gates, seeded in the 'orbital-logistics' database. The
+multi-path test adds a SERVES_ORBIT traversal gate (tests/fixtures/orbital_match).
+
+The plasticos and freight-matching tests below guard those design packs' own
+gate declarations (pack regressions, not core behaviour), so they load
+tests/fixtures/design_packs explicitly through ``design_pack_deps``.
 """
 
 from __future__ import annotations
@@ -17,13 +21,113 @@ from __future__ import annotations
 import pytest
 import pytest_asyncio
 
+from tests.fixtures.orbital_match import DIRECTION, ORBITAL, depot, orbit_gated, serve
+
 pytestmark = pytest.mark.integration
 
 SEED_CYPHER = """
 UNWIND $batch AS row
-MERGE (n:Facility {entity_id: row.entity_id})
+MERGE (n:OrbitalDepot {depot_id: row.depot_id})
 SET n += row
 SET n.synced_at = datetime()
+"""
+
+
+def _depot_ids(result: dict) -> list[str]:
+    return [c["candidate"]["depot_id"] for c in result.get("candidates", [])]
+
+
+@pytest.mark.asyncio
+async def test_match_returns_candidates(engine_deps, graph_driver, clean_db):
+    await graph_driver.execute_write(
+        cypher=SEED_CYPHER,
+        parameters={"batch": [depot("d1", docking_ports=6), depot("d2", lat=34.10, lon=-118.30)]},
+        database=ORBITAL,
+    )
+    from engine.handlers import handle_match
+
+    result = await handle_match(
+        ORBITAL,
+        {"query": {"min_ports": 2}, "match_direction": DIRECTION, "top_n": 10},
+    )
+    assert "candidates" in result
+    assert sorted(_depot_ids(result)) == ["d1", "d2"]
+
+
+@pytest.mark.asyncio
+async def test_match_respects_top_n(engine_deps, graph_driver, clean_db):
+    await graph_driver.execute_write(
+        cypher=SEED_CYPHER,
+        parameters={"batch": [depot(f"d{i}") for i in range(5)]},
+        database=ORBITAL,
+    )
+    from engine.handlers import handle_match
+
+    result = await handle_match(
+        ORBITAL,
+        {"query": {"min_ports": 1}, "match_direction": DIRECTION, "top_n": 2},
+    )
+    candidates = result.get("candidates", [])
+    assert len(candidates) <= 2
+
+
+@pytest.mark.asyncio
+async def test_match_unknown_direction_raises(engine_deps):
+    """A match_direction with no candidate entity must raise ValidationError."""
+    from engine.handlers import ValidationError, handle_match
+
+    with pytest.raises(ValidationError, match="No candidate entity"):
+        await handle_match(
+            ORBITAL,
+            {"query": {"min_ports": 1}, "match_direction": "nonexistent_direction", "top_n": 5},
+        )
+
+
+MULTI_PATH_SEED_CYPHER = """
+MERGE (n:OrbitalDepot {depot_id: $depot_id})
+SET n += $props
+WITH n
+UNWIND $codes AS code
+MERGE (o:OrbitClass {class_code: code})
+MERGE (n)-[:SERVES_ORBIT]->(o)
+"""
+
+
+@pytest.mark.asyncio
+async def test_match_returns_multi_path_candidate_once(engine_deps, graph_driver, domain_spec, clean_db):
+    """RU-036 / CEG-COR-007 (RG-048): a depot with 3 SERVES_ORBIT edges is one candidate.
+
+    Before the per-candidate collapse a traversal produced one row per edge and
+    the candidate appeared three times, consuming top_n slots.
+    """
+    for depot_id, codes in (("d_multi", ["LEO", "MEO", "GEO"]), ("d_single", ["LEO"])):
+        await graph_driver.execute_write(
+            cypher=MULTI_PATH_SEED_CYPHER,
+            parameters={"depot_id": depot_id, "props": depot(depot_id), "codes": codes},
+            database=ORBITAL,
+        )
+    serve(graph_driver, orbit_gated(domain_spec))
+    from engine.handlers import handle_match
+
+    result = await handle_match(
+        ORBITAL,
+        {"query": {"orbit_class": "LEO", "min_ports": 1}, "match_direction": DIRECTION, "top_n": 10},
+    )
+    ids = _depot_ids(result)
+    assert ids.count("d_multi") == 1
+    assert sorted(ids) == ["d_multi", "d_single"]
+    assert result["total_candidates"] == len(set(ids))
+
+
+# ── plasticos design pack (pack-specific) ─────────────────────────────────────
+# These guard the plasticos pack's own gate declarations (RU-033/034/040 were
+# pack fixes), so they stay on that pack.
+
+PLASTICOS = "plasticos"
+SEED_FACILITY_CYPHER = """
+UNWIND $batch AS row
+MERGE (n:Facility {entity_id: row.entity_id})
+SET n += row
 WITH n
 MERGE (p:PolymerFamily {code: 'PET'})
 MERGE (n)-[:PROCESSES]->(p)
@@ -44,117 +148,6 @@ def _facility(entity_id: str, **overrides) -> dict:
     return row
 
 
-@pytest.mark.asyncio
-async def test_match_returns_candidates(engine_deps, graph_driver, clean_db):
-    await graph_driver.execute_write(
-        cypher=SEED_CYPHER,
-        parameters={
-            "batch": [
-                _facility("f1", name="Alpha Recycle", contamination_tolerance=0.05),
-                _facility("f2", name="Beta Process", contamination_tolerance=0.10, latitude=34.10, longitude=-118.30),
-            ]
-        },
-        database="plasticos",
-    )
-    from engine.handlers import handle_match
-
-    result = await handle_match(
-        "plasticos",
-        {
-            "query": {
-                "polymer_type": "PET",
-                "contamination_pct": 0.04,
-                "lat": 34.05,
-                "lon": -118.24,
-            },
-            "match_direction": "supply_opportunity_to_buyer_facility",
-            "top_n": 10,
-        },
-    )
-    assert "candidates" in result
-    assert result.get("status") in ("ok", "success", None) or "candidates" in result
-
-
-@pytest.mark.asyncio
-async def test_match_respects_top_n(engine_deps, graph_driver, clean_db):
-    await graph_driver.execute_write(
-        cypher=SEED_CYPHER,
-        parameters={"batch": [_facility(f"f{i}", contamination_tolerance=0.20) for i in range(5)]},
-        database="plasticos",
-    )
-    from engine.handlers import handle_match
-
-    result = await handle_match(
-        "plasticos",
-        {
-            "query": {"polymer_type": "PET", "contamination_pct": 0.01},
-            "match_direction": "supply_opportunity_to_buyer_facility",
-            "top_n": 2,
-        },
-    )
-    candidates = result.get("candidates", [])
-    assert len(candidates) <= 2
-
-
-@pytest.mark.asyncio
-async def test_match_unknown_direction_raises(engine_deps):
-    """A match_direction with no candidate entity must raise ValidationError."""
-    from engine.handlers import ValidationError, handle_match
-
-    with pytest.raises(ValidationError, match="No candidate entity"):
-        await handle_match(
-            "plasticos",
-            {"query": {"polymer_type": "PET"}, "match_direction": "nonexistent_direction", "top_n": 5},
-        )
-
-
-MULTI_PATH_SEED_CYPHER = """
-MERGE (n:Facility {entity_id: $entity_id})
-SET n += $props
-WITH n
-UNWIND $codes AS code
-MERGE (p:PolymerFamily {code: code})
-MERGE (n)-[:PROCESSES]->(p)
-"""
-
-
-@pytest.mark.asyncio
-async def test_match_returns_multi_path_candidate_once(engine_deps, graph_driver, clean_db):
-    """RU-036 / CEG-COR-007 (RG-048): a Facility with 3 PROCESSES edges is one candidate.
-
-    Before the per-candidate collapse the required traversal step produced one
-    row per edge and the facility appeared three times, consuming top_n slots.
-    """
-    await graph_driver.execute_write(
-        cypher=MULTI_PATH_SEED_CYPHER,
-        parameters={
-            "entity_id": "f_multi",
-            "props": _facility("f_multi", contamination_tolerance=0.10),
-            "codes": ["PET", "HDPE", "PP"],
-        },
-        database="plasticos",
-    )
-    await graph_driver.execute_write(
-        cypher=SEED_CYPHER,
-        parameters={"batch": [_facility("f_single", contamination_tolerance=0.10)]},
-        database="plasticos",
-    )
-    from engine.handlers import handle_match
-
-    result = await handle_match(
-        "plasticos",
-        {
-            "query": {"polymer_type": "PET", "contamination_pct": 0.05},
-            "match_direction": "supply_opportunity_to_buyer_facility",
-            "top_n": 10,
-        },
-    )
-    ids = [c["candidate"].get("entity_id") for c in result["candidates"]]
-    assert ids.count("f_multi") == 1
-    assert sorted(ids) == ["f_multi", "f_single"]
-    assert result["total_candidates"] == len(set(ids))
-
-
 def _candidate_ids(result: dict) -> list[str]:
     return [c["candidate"]["entity_id"] for c in result.get("candidates", [])]
 
@@ -164,19 +157,17 @@ def _candidate_ids(result: dict) -> list[str]:
     ("requires_food_grade", "expected"),
     [(False, {"certified", "uncertified"}), (None, {"certified", "uncertified"}), (True, {"certified"})],
 )
-async def test_food_grade_requirement_is_an_implication(
-    engine_deps, graph_driver, clean_db, requires_food_grade, expected
-):
+async def test_food_grade_requirement_is_an_implication(design_pack_deps, graph_driver, requires_food_grade, expected):
     """RG-045 (RU-034 / CEG-COR-005): not requiring food grade must not exclude certified facilities."""
     await graph_driver.execute_write(
-        cypher=SEED_CYPHER,
+        cypher=SEED_FACILITY_CYPHER,
         parameters={
             "batch": [
                 _facility("certified", food_grade_certified=True),
                 _facility("uncertified", food_grade_certified=False),
             ]
         },
-        database="plasticos",
+        database=PLASTICOS,
     )
     from engine.handlers import handle_match
 
@@ -184,7 +175,7 @@ async def test_food_grade_requirement_is_an_implication(
     if requires_food_grade is not None:
         query["requires_food_grade"] = requires_food_grade
     result = await handle_match(
-        "plasticos",
+        PLASTICOS,
         {"query": query, "match_direction": "supply_opportunity_to_buyer_facility", "top_n": 10},
     )
     assert set(_candidate_ids(result)) == expected
@@ -203,9 +194,7 @@ MERGE (n)-[:PROCESSES]->(p)
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("polymer_type", "expected"), [("PET", ["multi"]), ("HDPE", ["multi", "hdpe_only"])])
-async def test_match_returns_only_compatible_facilities_once(
-    engine_deps, graph_driver, clean_db, polymer_type, expected
-):
+async def test_match_returns_only_compatible_facilities_once(design_pack_deps, graph_driver, polymer_type, expected):
     """RG-053 (RU-040 / CEG-COR-013): one row per compatible facility, none for incompatible ones."""
     await graph_driver.execute_write(
         cypher=MULTI_POLYMER_SEED,
@@ -216,12 +205,12 @@ async def test_match_returns_only_compatible_facilities_once(
                 {**_facility("ldpe_only"), "polymers": ["LDPE"]},
             ]
         },
-        database="plasticos",
+        database=PLASTICOS,
     )
     from engine.handlers import handle_match
 
     result = await handle_match(
-        "plasticos",
+        PLASTICOS,
         {
             "query": {"polymer_type": polymer_type, "contamination_pct": 0.04},
             "match_direction": "supply_opportunity_to_buyer_facility",
@@ -249,7 +238,7 @@ MERGE (s)-[:FULFILLS_POLYMER]->(p)
     [(None, {"active"}), (True, {"active"}), (False, {"active", "inactive"})],
 )
 async def test_active_supply_requirement_is_an_implication_with_a_true_default(
-    engine_deps, graph_driver, clean_db, requires_active_supply, expected
+    design_pack_deps, graph_driver, requires_active_supply, expected
 ):
     """RG-043 (RU-033 / CEG-COR-004): omitted/true -> active only; false -> active and inactive.
 
@@ -264,7 +253,7 @@ async def test_active_supply_requirement_is_an_implication_with_a_true_default(
                 {"entity_id": "unknown", "available_tons": 50.0, "polymer_type": "PET"},
             ]
         },
-        database="plasticos",
+        database=PLASTICOS,
     )
     from engine.handlers import handle_match
 
@@ -272,7 +261,7 @@ async def test_active_supply_requirement_is_an_implication_with_a_true_default(
     if requires_active_supply is not None:
         query["requires_active_supply"] = requires_active_supply
     result = await handle_match(
-        "plasticos",
+        PLASTICOS,
         {"query": query, "match_direction": "buyer_demand_to_supply_opportunity", "top_n": 10},
     )
     assert set(_candidate_ids(result)) == expected
@@ -309,6 +298,8 @@ async def test_va_eligibility_fragment_orders_booleans_false_before_true(graph_d
     assert rows[0]["passes"] is expected
 
 
+# freight-matching design pack (pack-specific): RU-046 / RU-059 were fixes to
+# that pack's date and equipment gate declarations.
 FREIGHT_DB = "freight-matching"
 CARRIER_SEED = """
 UNWIND $batch AS row
@@ -349,7 +340,7 @@ def _carrier_ids(result: dict) -> set[str]:
 
 
 @pytest.mark.asyncio
-async def test_freight_carrier_available_before_pickup_qualifies(engine_deps, graph_driver, freight_db):
+async def test_freight_carrier_available_before_pickup_qualifies(design_pack_deps, graph_driver, freight_db):
     """RU-046 / CEG-COR-069: availabledate <= pickupdate (same ISO-8601 string form as the query)."""
     await graph_driver.execute_write(
         cypher=CARRIER_SEED,
@@ -373,7 +364,7 @@ async def test_freight_carrier_available_before_pickup_qualifies(engine_deps, gr
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("equipmenttype", "expected"), [("van", {"van_carrier"}), ("reefer", {"reefer_carrier"})])
 async def test_freight_equipment_match_is_scalar_equality(
-    engine_deps, graph_driver, freight_db, equipmenttype, expected
+    design_pack_deps, graph_driver, freight_db, equipmenttype, expected
 ):
     """RG-074 (RU-059 / CEG-COR-164): equipmenttypes='van' matches 'van' and not 'reefer'."""
     await graph_driver.execute_write(

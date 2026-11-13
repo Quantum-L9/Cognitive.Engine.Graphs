@@ -14,6 +14,11 @@ Integration — feedback weight governance against Neo4j (CEG-462, FEATURE_GATES
 Runs the real ConvergenceLoop on the per-domain ``plasticos`` database
 (enterprise testcontainer), with ``min_outcomes_for_recalculation`` lowered so
 seeded outcomes trigger a recalculation.
+
+Pack-specific: the suite seeds the plasticos design pack's ``geo_proximity``
+dimension and reads its legacy ``geo_proximity_weight`` copy, so it binds
+``domain_spec`` to that pack rather than to the synthetic default (ADR-112
+Stage 4).
 """
 
 from __future__ import annotations
@@ -30,6 +35,12 @@ pytestmark = pytest.mark.integration
 _TENANT = "plasticos"
 _SEEDED_DIM = "geo_proximity"
 _SEEDED_WEIGHT = 0.5
+
+
+@pytest.fixture
+def domain_spec(plasticos_domain_spec: Any) -> Any:
+    """The plasticos design pack's spec: this suite's seeded dimension is that pack's."""
+    return plasticos_domain_spec
 
 
 def _spec(domain_spec: Any) -> Any:

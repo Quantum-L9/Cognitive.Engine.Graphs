@@ -19,7 +19,7 @@ they prove graph effects rather than the shape of the Cypher that was sent.
 The validator judges the edge, not the outcome observation
 (docs/contracts/data/graph-schema.yaml: "RESULTED_IN … Validated by
 CausalEdgeRuntimeValidator (R3)"), so a rejection suppresses the edge and the
-TransactionOutcome node is still recorded.
+WidgetOutcome node is still recorded.
 
 The domain database is ``neo4j`` so the suite runs against both the community
 server and the enterprise testcontainer.
@@ -47,8 +47,8 @@ _RUN_TAG = "ceg_fix_001"
 
 _RESULTED_IN = {
     "edge_type": "RESULTED_IN",
-    "source_label": "Facility",
-    "target_label": "TransactionOutcome",
+    "source_label": "Widget",
+    "target_label": "WidgetOutcome",
     "temporal_validation": True,
     "confidence_threshold": 0.5,
 }
@@ -60,8 +60,8 @@ def _domain_spec(base: DomainSpec, *, causal_enabled: bool = True) -> DomainSpec
     raw["domain"]["id"] = _DB
     raw["causal"] = {"enabled": causal_enabled, "causal_edges": [_RESULTED_IN]}
     # The outcome node label is the domain's declaration (Stage 2 follow-up):
-    # these tests read back the TransactionOutcome node, so the spec declares it.
-    raw["feedbackloop"] = {**raw.get("feedbackloop", {}), "outcome_node_label": "TransactionOutcome"}
+    # these tests read back the WidgetOutcome node, so the spec declares it.
+    raw["feedbackloop"] = {**raw.get("feedbackloop", {}), "outcome_node_label": "WidgetOutcome"}
     return DomainSpec.model_validate(raw)
 
 
@@ -111,16 +111,16 @@ async def wire(graph_driver, minimal_domain_spec) -> AsyncGenerator[_Wire, None]
 
     tag = f"{_RUN_TAG}_{uuid.uuid4().hex[:12]}"
     await graph_driver.execute_write(
-        # RU-002: outcome edges link by the declared id (facility_id); entity_id
+        # RU-002: outcome edges link by the declared id (widget_id); entity_id
         # stays so the SPEC_DECLARED_CANDIDATE_ID=false rollback still links.
-        cypher="CREATE (c:Facility {facility_id: $cid, entity_id: $cid, run_tag: $tag})",
+        cypher="CREATE (c:Widget {widget_id: $cid, entity_id: $cid, run_tag: $tag})",
         parameters={"cid": f"{tag}_cand", "tag": tag},
         database=_DB,
     )
     yield _Wire(graph_driver, tag, minimal_domain_spec)
     get_state().reset()
     await graph_driver.execute_write(
-        cypher=("MATCH (n) WHERE n.run_tag = $tag OR (n:TransactionOutcome AND n.match_id = $match) DETACH DELETE n"),
+        cypher=("MATCH (n) WHERE n.run_tag = $tag OR (n:WidgetOutcome AND n.match_id = $match) DETACH DELETE n"),
         parameters={"tag": tag, "match": f"{tag}_match"},
         database=_DB,
     )
@@ -129,7 +129,7 @@ async def wire(graph_driver, minimal_domain_spec) -> AsyncGenerator[_Wire, None]
 async def _outcome_graph(graph_driver, outcome_id: str) -> dict[str, Any]:
     rows = await graph_driver.execute_query(
         cypher=(
-            "MATCH (o:TransactionOutcome {outcome_id: $oid}) "
+            "MATCH (o:WidgetOutcome {outcome_id: $oid}) "
             "OPTIONAL MATCH (c)-[r:RESULTED_IN]->(o) "
             "RETURN o.tenant AS tenant, o.domain_id AS domain_id, count(r) AS edges"
         ),

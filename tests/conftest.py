@@ -16,9 +16,17 @@ RULE 7 (L9 Contract): DomainPackLoader is instantiated with
     DomainPackLoader(config_path=str(DOMAINS_DIR))
     matching DomainPackLoader.__init__(self, config_path: str | None = None).
 
-DOMAINS_DIR is the repository's design and test packs,
-tests/fixtures/design_packs (DESIGN_PACKS_ROOT in tests/fixtures/domain_contracts.py).
-It is spelled out here so conftest imports no engine module at collection.
+DOMAINS_DIR is the neutral synthetic pack root, tests/fixtures/domains
+(SYNTHETIC_DOMAINS_ROOT in tests/fixtures/domain_contracts.py). The shared
+loader, spec, database and engine fixtures run on SYNTHETIC_DOMAIN_ID
+(ADR-112 Stage 4, closure finding A16), so integration evidence for the core
+does not depend on a product pack.
+
+DESIGN_PACKS_DIR is the repository's design and test packs,
+tests/fixtures/design_packs (DESIGN_PACKS_ROOT). Only the explicitly named
+``plasticos_*`` / ``design_pack_*`` fixtures read it, for tests that prove
+something about that pack itself. Paths are spelled out here so conftest imports
+no engine module at collection.
 """
 
 from __future__ import annotations
@@ -33,7 +41,13 @@ import pytest
 import pytest_asyncio
 
 # ── RULE 9: absolute, repo-rooted path — never relative to __file__ dir ───────
-DOMAINS_DIR: Path = Path(__file__).parent / "fixtures" / "design_packs"
+DOMAINS_DIR: Path = Path(__file__).parent / "fixtures" / "domains"
+DESIGN_PACKS_DIR: Path = Path(__file__).parent / "fixtures" / "design_packs"
+
+# The synthetic tenant every shared fixture runs on. Handlers route queries to
+# database=domain_spec.domain.id, so this is also the per-domain database name.
+SYNTHETIC_DOMAIN_ID = "orbital-logistics"
+PLASTICOS_DOMAIN_ID = "plasticos"
 
 
 # ── Event Loop ─────────────────────────────────────────────────────────────────
@@ -228,8 +242,8 @@ def domain_loader():
 
 @pytest.fixture(scope="session")
 def domain_spec(domain_loader):
-    """Loaded and validated PlasticOS DomainSpec."""
-    return domain_loader.load_domain("plasticos")
+    """Loaded and validated synthetic orbital-logistics DomainSpec."""
+    return domain_loader.load_domain(SYNTHETIC_DOMAIN_ID)
 
 
 @pytest.fixture
@@ -242,12 +256,12 @@ def minimal_domain_spec():
         "ontology": {
             "nodes": [
                 {
-                    "label": "Facility",
+                    "label": "Widget",
                     "managedby": "sync",
                     "candidate": True,
-                    "matchdirection": "supply_opportunity_to_buyer_facility",
+                    "matchdirection": "probe_to_widget",
                     "properties": [
-                        {"name": "facility_id", "type": "int", "required": True},
+                        {"name": "widget_id", "type": "int", "required": True},
                         {"name": "name", "type": "string"},
                     ],
                 },
@@ -255,10 +269,10 @@ def minimal_domain_spec():
             "edges": [],
         },
         "matchentities": {
-            "candidate": [{"label": "Facility", "matchdirection": "supply_opportunity_to_buyer_facility"}],
-            "queryentity": [{"label": "Facility", "matchdirection": "supply_opportunity_to_buyer_facility"}],
+            "candidate": [{"label": "Widget", "matchdirection": "probe_to_widget"}],
+            "queryentity": [{"label": "Widget", "matchdirection": "probe_to_widget"}],
         },
-        "queryschema": {"matchdirections": ["supply_opportunity_to_buyer_facility"], "fields": []},
+        "queryschema": {"matchdirections": ["probe_to_widget"], "fields": []},
         "traversal": {"steps": []},
         "gates": [],
         "scoring": {"dimensions": []},
@@ -269,28 +283,33 @@ def minimal_domain_spec():
 # ── Per-Domain Database (enterprise multi-db) ────────────────────────────────
 
 
-@pytest_asyncio.fixture(scope="session")
-async def plasticos_database(graph_driver) -> AsyncGenerator[None, None]:
-    """Ensure the per-domain 'plasticos' database exists.
-
-    Handlers route queries to database=domain_spec.domain.id (RULE 7: explicit
-    database), so integration tests exercising the plasticos tenant need that
-    database to exist. Requires the neo4j enterprise image used by the
-    testcontainer fixture (community edition rejects CREATE DATABASE).
-    """
+async def _create_database(graph_driver, name: str) -> None:
+    """CREATE DATABASE (backtick-quoted: synthetic ids carry hyphens). Enterprise only."""
     await graph_driver.execute_query(
-        cypher="CREATE DATABASE plasticos IF NOT EXISTS WAIT",
+        cypher=f"CREATE DATABASE `{name}` IF NOT EXISTS WAIT",
         parameters={},
         database="system",
     )
-    yield
+
+
+@pytest_asyncio.fixture(scope="session")
+async def domain_database(graph_driver) -> AsyncGenerator[str, None]:
+    """Ensure the per-domain database of the synthetic tenant exists; yields its name.
+
+    Handlers route queries to database=domain_spec.domain.id (RULE 7: explicit
+    database), so integration tests exercising the synthetic tenant need that
+    database to exist. Requires the neo4j enterprise image used by the
+    testcontainer fixture (community edition rejects CREATE DATABASE).
+    """
+    await _create_database(graph_driver, SYNTHETIC_DOMAIN_ID)
+    yield SYNTHETIC_DOMAIN_ID
 
 
 # ── Engine Dependency Injection ────────────────────────────────────────────────
 
 
 @pytest_asyncio.fixture
-async def engine_deps(graph_driver, domain_loader, plasticos_database) -> AsyncGenerator[None, None]:
+async def engine_deps(graph_driver, domain_loader, domain_database) -> AsyncGenerator[None, None]:
     """Wire the real handler DI (W4-01 EngineState singleton) for handler tests.
 
     Handlers take (tenant, payload) and resolve driver/loader via
@@ -304,6 +323,45 @@ async def engine_deps(graph_driver, domain_loader, plasticos_database) -> AsyncG
     init_dependencies(graph_driver, domain_loader)
     yield
     get_state().reset()
+
+
+# ── Design packs (opt-in, pack-specific tests only) ───────────────────────────
+# Never used by default. A test that proves something about a design pack itself
+# (not about the core) requests these by name and says why in a comment.
+
+
+@pytest.fixture(scope="session")
+def design_pack_loader():
+    """DomainPackLoader over tests/fixtures/design_packs — RULE 7: exact signature."""
+    from engine.config.loader import DomainPackLoader
+
+    return DomainPackLoader(config_path=str(DESIGN_PACKS_DIR))
+
+
+@pytest.fixture(scope="session")
+def plasticos_domain_spec(design_pack_loader):
+    """The PlasticOS design pack's DomainSpec, for pack-specific tests."""
+    return design_pack_loader.load_domain(PLASTICOS_DOMAIN_ID)
+
+
+@pytest_asyncio.fixture(scope="session")
+async def plasticos_database(graph_driver) -> AsyncGenerator[str, None]:
+    """Ensure the per-domain 'plasticos' database exists, for pack-specific tests."""
+    await _create_database(graph_driver, PLASTICOS_DOMAIN_ID)
+    yield PLASTICOS_DOMAIN_ID
+
+
+@pytest_asyncio.fixture
+async def design_pack_deps(graph_driver, design_pack_loader, plasticos_database) -> AsyncGenerator[None, None]:
+    """engine_deps over the design packs; wipes the plasticos database after the test."""
+    from engine.handlers import init_dependencies
+    from engine.state import get_state
+
+    get_state().reset()
+    init_dependencies(graph_driver, design_pack_loader)
+    yield
+    get_state().reset()
+    await graph_driver.execute_write(cypher="MATCH (n) DETACH DELETE n", parameters={}, database=PLASTICOS_DOMAIN_ID)
 
 
 # ── Test Isolation ─────────────────────────────────────────────────────────────
@@ -323,7 +381,7 @@ async def clean_db(graph_driver) -> AsyncGenerator[None, None]:
         await graph_driver.execute_write(
             cypher="MATCH (n) DETACH DELETE n",
             parameters={},
-            database="plasticos",
+            database=SYNTHETIC_DOMAIN_ID,
         )
     except Exception:
         pass  # per-domain db not created in this session — nothing to clean
@@ -340,52 +398,31 @@ def test_tenant() -> str:
 
 # ── Seed Data ──────────────────────────────────────────────────────────────────
 
-SEED_FACILITIES = [
-    {
-        "facility_id": 1,
-        "name": "Alpha Recycling",
-        "contamination_tolerance": 0.03,
-        "latitude": 34.05,
-        "longitude": -118.24,
-        "reinforcement_score": 0.7,
-    },
-    {
-        "facility_id": 2,
-        "name": "Beta Compounding",
-        "contamination_tolerance": 0.05,
-        "latitude": 33.77,
-        "longitude": -118.19,
-        "reinforcement_score": 0.5,
-    },
-    {
-        "facility_id": 3,
-        "name": "Gamma MRF",
-        "contamination_tolerance": 0.10,
-        "latitude": 40.71,
-        "longitude": -74.01,
-        "reinforcement_score": 0.3,
-    },
+SEED_DEPOTS = [
+    {"depot_id": 1, "name": "Alpha Depot", "reliability": 0.03, "lat": 34.05, "lon": -118.24, "trust_score": 0.7},
+    {"depot_id": 2, "name": "Beta Depot", "reliability": 0.05, "lat": 33.77, "lon": -118.19, "trust_score": 0.5},
+    {"depot_id": 3, "name": "Gamma Depot", "reliability": 0.10, "lat": 40.71, "lon": -74.01, "trust_score": 0.3},
 ]
 
 
 @pytest_asyncio.fixture
 async def seeded_graph(graph_driver, test_tenant: str) -> AsyncGenerator[dict[str, Any], None]:
-    """Seed deterministic test data into Neo4j. Cleans up after test."""
+    """Seed deterministic synthetic OrbitalDepot data into Neo4j. Cleans up after test."""
     db = "neo4j"
 
     await graph_driver.execute_query(
         """
         UNWIND $batch AS row
-        MERGE (f:Facility {facility_id: row.facility_id})
-        SET f += row, f.tenant = $tenant, f.updated_at = datetime()
+        MERGE (d:OrbitalDepot {depot_id: row.depot_id})
+        SET d += row, d.tenant = $tenant, d.updated_at = datetime()
         """,
-        parameters={"batch": SEED_FACILITIES, "tenant": test_tenant},
+        parameters={"batch": SEED_DEPOTS, "tenant": test_tenant},
         database=db,
     )
 
     yield {
         "tenant": test_tenant,
-        "facility_ids": [f["facility_id"] for f in SEED_FACILITIES],
+        "depot_ids": [d["depot_id"] for d in SEED_DEPOTS],
         "database": db,
     }
 

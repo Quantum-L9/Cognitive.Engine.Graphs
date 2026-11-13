@@ -38,7 +38,7 @@ from tests.unit.test_gds_scheduler import _minimal_spec
 
 pytestmark = pytest.mark.integration
 
-DB = "plasticos"  # created by the plasticos_database fixture; wiped by clean_db
+DB = "orbital-logistics"  # synthetic tenant db (ADR-112 Stage 4, A16): domain_database creates it, clean_db wipes it
 
 SEED_CYPHER = """
 MERGE (a:Site {site_id: 1})
@@ -86,9 +86,7 @@ async def _overlay(graph_driver) -> dict[int, dict]:
 
 
 @pytest.mark.asyncio
-async def test_overlay_keeps_newest_interaction_and_prunes_aged_edges(
-    graph_driver, plasticos_database, clean_db
-) -> None:
+async def test_overlay_keeps_newest_interaction_and_prunes_aged_edges(graph_driver, domain_database, clean_db) -> None:
     from engine.config.settings import settings
 
     assert settings.gds_temporal_recency_decay_existing is True
@@ -144,9 +142,7 @@ def _shared_writeedge_spec() -> DomainSpec:
 
 
 @pytest.mark.asyncio
-async def test_jobs_sharing_a_writeedge_only_maintain_their_own_label(
-    graph_driver, plasticos_database, clean_db
-) -> None:
+async def test_jobs_sharing_a_writeedge_only_maintain_their_own_label(graph_driver, domain_database, clean_db) -> None:
     """A job's refresh and prune touch only overlay edges between its own node label."""
     await graph_driver.execute_write(cypher=SHARED_WRITEEDGE_SEED, parameters={}, database=DB)
     spec = _shared_writeedge_spec()

@@ -6,22 +6,24 @@ the legacy query produced 3 x 2 rows, multiplying each boost_factor by
 exactly once (1.15) and reports 2 affected; the result is clamped to the
 spec's signal_weights [min_weight, max_weight].
 
-Runs against the per-domain ``plasticos`` database (enterprise testcontainer).
+Runs against the per-domain ``orbital-logistics`` database (synthetic pack,
+ADR-112 Stage 4 / A16; enterprise testcontainer). Outcomes carry the pack's
+declared outcome label, DockingResult.
 """
 
 from __future__ import annotations
 
 import pytest
 
-_TENANT = "plasticos"
-_CANDIDATE = "RU028-F-1"
+_TENANT = "orbital-logistics"
+_CANDIDATE = "RU028-D-1"
 
 
 async def _seed(graph_driver, boost_factor: float = 1.0) -> None:
     await graph_driver.execute_query(
         """
         UNWIND range(1, 3) AS i
-        CREATE (:TransactionOutcome {candidate_id: $candidate_id, tenant: $tenant, outcome: 'success', seq: i})
+        CREATE (:DockingResult {candidate_id: $candidate_id, tenant: $tenant, outcome: 'success', seq: i})
         WITH DISTINCT 1 AS one
         UNWIND ['ru028_dim_a', 'ru028_dim_b'] AS dim
         CREATE (:DimensionWeight {dimension: dim, tenant: $tenant, weight: 1.0, boost_factor: $boost})
@@ -43,7 +45,7 @@ async def _boosts(graph_driver) -> list[float]:
 
 async def _cleanup(graph_driver) -> None:
     await graph_driver.execute_query(
-        "MATCH (o:TransactionOutcome {candidate_id: $candidate_id, tenant: $tenant}) DETACH DELETE o",
+        "MATCH (o:DockingResult {candidate_id: $candidate_id, tenant: $tenant}) DETACH DELETE o",
         parameters={"candidate_id": _CANDIDATE, "tenant": _TENANT},
         database=_TENANT,
     )
@@ -58,7 +60,7 @@ async def _cleanup(graph_driver) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_three_outcomes_apply_factor_once(graph_driver, domain_spec, plasticos_database):
+async def test_three_outcomes_apply_factor_once(graph_driver, domain_spec, domain_database):
     from engine.feedback.score_propagator import ScorePropagator
 
     await _cleanup(graph_driver)
@@ -77,7 +79,7 @@ async def test_three_outcomes_apply_factor_once(graph_driver, domain_spec, plast
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_boost_is_clamped_to_max_weight(graph_driver, domain_spec, plasticos_database):
+async def test_boost_is_clamped_to_max_weight(graph_driver, domain_spec, domain_database):
     from engine.feedback.score_propagator import ScorePropagator
 
     max_weight = domain_spec.feedbackloop.signal_weights.max_weight
@@ -96,7 +98,7 @@ async def test_boost_is_clamped_to_max_weight(graph_driver, domain_spec, plastic
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_no_outcome_no_update(graph_driver, domain_spec, plasticos_database):
+async def test_no_outcome_no_update(graph_driver, domain_spec, domain_database):
     from engine.feedback.score_propagator import ScorePropagator
 
     await _cleanup(graph_driver)

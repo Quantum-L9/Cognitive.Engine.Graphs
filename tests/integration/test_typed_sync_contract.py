@@ -59,11 +59,14 @@ async def _refused(tenant: str, entity_type: str, batch: list[Any]) -> str:
     return str(refused.value)
 
 
-# ── PlasticOS ─────────────────────────────────────────────────────────────────
+# ── PlasticOS design pack (pack-specific) ─────────────────────────────────────
+# These pin the plasticos pack's own sync declarations (its childsync, taxonomy
+# and static nodes), so they load tests/fixtures/design_packs explicitly; the
+# orbital-logistics section below proves the same contract on the core.
 
 
 @pytest_asyncio.fixture
-async def plasticos(engine_deps: None, clean_db: None, graph_driver: GraphDriver) -> GraphDriver:
+async def plasticos(design_pack_deps: None, graph_driver: GraphDriver) -> GraphDriver:
     return graph_driver
 
 

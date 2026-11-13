@@ -13,7 +13,9 @@ Integration — feedback convergence closure against Neo4j (FEEDBACK-IDEMP-01, F
 
 Proves docs/contracts/feedback/convergence-loop.yaml required_proof and
 blocking_validation through the real ``handle_outcomes`` path on the per-domain
-``plasticos`` database (enterprise testcontainer):
+``orbital-logistics`` database (synthetic pack, ADR-112 Stage 4 / A16; enterprise
+testcontainer). The pack declares its outcome vocabulary but leaves the loop
+off, so the fixture serves a copy with the loop and signal weights enabled:
 
 - gated off: no loop, no weight change
 - gated on: one outcome multiplies each DimensionWeight once
@@ -36,7 +38,7 @@ from engine.config.settings import settings
 
 pytestmark = pytest.mark.integration
 
-_TENANT = "plasticos"
+_TENANT = "orbital-logistics"
 _FOREIGN_TENANT = "fbk-foreign-tenant"
 _CANDIDATE = "FBK-CLOSURE-C1"
 _DIMS = ("fbk_dim_a", "fbk_dim_b")
@@ -66,7 +68,7 @@ async def _boosts(graph_driver: Any, tenant: str = _TENANT) -> list[float]:
 
 
 async def _outcome_nodes(graph_driver: Any, outcome_id: str) -> list[dict[str, Any]]:
-    label = "TransactionOutcome"
+    label = "DockingResult"
     rows: list[dict[str, Any]] = await graph_driver.execute_query(
         f"MATCH (o:{label} {{outcome_id: $outcome_id}}) "
         "RETURN o.propagated_at IS NOT NULL AS stamped, o.tenant AS tenant",
@@ -78,8 +80,10 @@ async def _outcome_nodes(graph_driver: Any, outcome_id: str) -> list[dict[str, A
 
 @pytest.fixture
 async def feedback_graph(engine_deps, graph_driver, domain_spec, clean_db, monkeypatch):
-    assert domain_spec.feedbackloop.outcome_node_label == "TransactionOutcome"
-    assert domain_spec.feedbackloop.enabled is True
+    from tests.fixtures.orbital_match import serve, with_feedback_loop
+
+    assert domain_spec.feedbackloop.outcome_node_label == "DockingResult"
+    serve(graph_driver, with_feedback_loop(domain_spec))
     monkeypatch.setattr(settings, "feedback_enabled", True)
     monkeypatch.setattr(settings, "outcome_idempotency_enabled", True)
     monkeypatch.setattr(settings, "feedback_partial_results_enabled", True)

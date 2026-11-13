@@ -522,9 +522,9 @@ def _coefficients(clause: str) -> dict[str, float]:
 
 
 @pytest.fixture
-def plasticos(domain_spec):
-    """The checked-in plasticos spec (conftest ``domain_spec``, repo-rooted DOMAINS_DIR)."""
-    return domain_spec
+def plasticos(plasticos_domain_spec):
+    """The checked-in plasticos design pack (conftest ``plasticos_domain_spec``, DESIGN_PACKS_DIR)."""
+    return plasticos_domain_spec
 
 
 _SUPPLY = "supply_opportunity_to_buyer_facility"
