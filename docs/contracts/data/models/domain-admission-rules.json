@@ -35,9 +35,7 @@
       "id": "ADM-READ-REGULAR-FILE",
       "stage": "read",
       "statement": "The spec is a regular file reached through no symlink in any path component.",
-      "enforced_by": [
-        "engine/config/loader.py::read_native_file"
-      ],
+      "enforced_by": ["engine/config/loader.py::read_native_file"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -111,9 +109,7 @@
       "id": "ADM-YAML-MAPPING-ROOT",
       "stage": "read",
       "statement": "The YAML document root is a mapping.",
-      "enforced_by": [
-        "engine/config/loader.py::_parse_native_bytes"
-      ],
+      "enforced_by": ["engine/config/loader.py::_parse_native_bytes"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -135,9 +131,7 @@
       "id": "ADM-COMPLETE-VALIDATION-GUARDS",
       "stage": "read",
       "statement": "Complete admission runs only while every validation guard setting is enabled (domain_strict_validation, domain_version_semver_enforced, gate_spec_forbid_unknown_keys, gate_name_uniqueness, domain_undeclared_param_rejected, weight_ceiling_includes_unscoped, traversal_open_range_rejected, prohibited_factor_full_coverage, gate_role_exemption); a disabled guard is a refusal, never a weaker pass.",
-      "enforced_by": [
-        "engine/config/loader.py::_parse_native_bytes"
-      ],
+      "enforced_by": ["engine/config/loader.py::_parse_native_bytes"],
       "enforced_when": "complete admission only (--complete / --receipt; runtime receipt layout)",
       "validator": {
         "check": "native-admission",
@@ -157,9 +151,7 @@
       "id": "ADM-COMPLETE-TOP-LEVEL-KEYS",
       "stage": "read",
       "statement": "Every top-level key is a DomainSpec field.",
-      "enforced_by": [
-        "engine/config/loader.py::_parse_native_bytes"
-      ],
+      "enforced_by": ["engine/config/loader.py::_parse_native_bytes"],
       "enforced_when": "complete admission only (--complete / --receipt; runtime receipt layout)",
       "validator": {
         "check": "native-admission",
@@ -204,9 +196,7 @@
       "id": "ADM-ID-MATCHES-TENANT",
       "stage": "identity",
       "statement": "domain.id equals the tenant id the pack is looked up by (the directory name of a folder-shaped spec.yaml, or --tenant-id).",
-      "enforced_by": [
-        "engine/config/loader.py::_parse_native_bytes"
-      ],
+      "enforced_by": ["engine/config/loader.py::_parse_native_bytes"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -226,9 +216,7 @@
       "id": "ADM-STAGE-REVIEWED",
       "stage": "identity",
       "statement": "domain.version is <major>.<minor>.<patch>-reviewed or -production.",
-      "enforced_by": [
-        "engine/config/loader.py::require_reviewed_stage"
-      ],
+      "enforced_by": ["engine/config/loader.py::require_reviewed_stage"],
       "enforced_when": "--require-reviewed / --receipt; runtime receipt layout; or settings.domain_production_stage_required in production (default off)",
       "validator": {
         "check": "native-admission",
@@ -250,9 +238,7 @@
       "id": "ADM-MODEL-VERSION-SEMVER",
       "stage": "model",
       "statement": "domain.version is <major>.<minor>.<patch> with an optional -seed|-discovered|-inferred|-proposed|-reviewed|-production suffix (ASCII digits, no leading zeros).",
-      "enforced_by": [
-        "engine/config/schema.py::DomainMetadata.validate_version_semver"
-      ],
+      "enforced_by": ["engine/config/schema.py::DomainMetadata.validate_version_semver"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -295,9 +281,7 @@
       "id": "ADM-MODEL-GATE-KEYS-KNOWN",
       "stage": "model",
       "statement": "A gate declares only GateSpec field names as keys.",
-      "enforced_by": [
-        "engine/config/schema.py::GateSpec.reject_unknown_keys"
-      ],
+      "enforced_by": ["engine/config/schema.py::GateSpec.reject_unknown_keys"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -317,9 +301,7 @@
       "id": "ADM-MODEL-GATE-OPERATOR-ALLOWED",
       "stage": "model",
       "statement": "A gate operator is one of >=, <=, >, <, =, !=, <>, IN, CONTAINS, STARTS WITH, ENDS WITH.",
-      "enforced_by": [
-        "engine/config/schema.py::GateSpec.validate_operator"
-      ],
+      "enforced_by": ["engine/config/schema.py::GateSpec.validate_operator"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -339,9 +321,7 @@
       "id": "ADM-MODEL-GATE-QUERYPARAM-SHAPE",
       "stage": "model",
       "statement": "A gate queryparam is a parameter name or a scalar literal.",
-      "enforced_by": [
-        "engine/config/schema.py::GateSpec.validate_queryparam_shape"
-      ],
+      "enforced_by": ["engine/config/schema.py::GateSpec.validate_queryparam_shape"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -408,9 +388,7 @@
       "id": "ADM-MODEL-CALIBRATION-RANGE",
       "stage": "model",
       "statement": "A calibration pair's expected_score_min is not above its expected_score_max.",
-      "enforced_by": [
-        "engine/config/schema.py::CalibrationPair.validate_range"
-      ],
+      "enforced_by": ["engine/config/schema.py::CalibrationPair.validate_range"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -430,9 +408,7 @@
       "id": "ADM-MODEL-EVIDENCERELEVANCE-NUMBER",
       "stage": "model",
       "statement": "ontology.edges[].evidencerelevance is a number, never a bool or a quoted number.",
-      "enforced_by": [
-        "engine/config/schema.py::EdgeSpec.refuse_non_numeric_relevance"
-      ],
+      "enforced_by": ["engine/config/schema.py::EdgeSpec.refuse_non_numeric_relevance"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -475,9 +451,7 @@
       "id": "ADM-XREF-MATCH-ENTITY-LABELS",
       "stage": "cross-reference",
       "statement": "Every matchentities candidate and queryentity label is an ontology node label.",
-      "enforced_by": [
-        "engine/config/schema.py::DomainSpec.validate_cross_references"
-      ],
+      "enforced_by": ["engine/config/schema.py::DomainSpec.validate_cross_references"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -497,9 +471,7 @@
       "id": "ADM-XREF-EDGE-ENDPOINTS",
       "stage": "cross-reference",
       "statement": "Every ontology edge's from and to are ontology node labels.",
-      "enforced_by": [
-        "engine/config/schema.py::DomainSpec.validate_cross_references"
-      ],
+      "enforced_by": ["engine/config/schema.py::DomainSpec.validate_cross_references"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -519,9 +491,7 @@
       "id": "ADM-XREF-GATE-NAMES-UNIQUE",
       "stage": "cross-reference",
       "statement": "Gate names are unique.",
-      "enforced_by": [
-        "engine/config/schema.py::DomainSpec.validate_cross_references"
-      ],
+      "enforced_by": ["engine/config/schema.py::DomainSpec.validate_cross_references"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -541,9 +511,7 @@
       "id": "ADM-XREF-EXCLUSION-EDGE-TYPE",
       "stage": "cross-reference",
       "statement": "An exclusion gate's edgetype is an ontology edge type.",
-      "enforced_by": [
-        "engine/config/schema.py::DomainSpec.validate_cross_references"
-      ],
+      "enforced_by": ["engine/config/schema.py::DomainSpec.validate_cross_references"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -563,9 +531,7 @@
       "id": "ADM-XREF-GATE-PARAMETER-DECLARED",
       "stage": "cross-reference",
       "statement": "A gate's named queryparam is a queryschema field or derived parameter (or its _min/_max/_start/_end base; a temporalrange gate may instead declare <param>_start and <param>_end). Checked when the spec declares any query field or derived parameter; otherwise ADM-DEFECT-MATCH-DIRECTION reports the unbound parameter.",
-      "enforced_by": [
-        "engine/config/schema.py::DomainSpec.validate_cross_references"
-      ],
+      "enforced_by": ["engine/config/schema.py::DomainSpec.validate_cross_references"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -585,9 +551,7 @@
       "id": "ADM-XREF-WEIGHT-CEILING",
       "stage": "cross-reference",
       "statement": "Scoring defaultweight values sum to at most 1.0 in every match direction, with unscoped dimensions counted in each direction.",
-      "enforced_by": [
-        "engine/config/schema.py::DomainSpec.validate_cross_references"
-      ],
+      "enforced_by": ["engine/config/schema.py::DomainSpec.validate_cross_references"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -609,9 +573,7 @@
       "id": "ADM-XREF-GDS-PROJECTION",
       "stage": "cross-reference",
       "statement": "Every GDS job projection node label and edge type is declared in the ontology.",
-      "enforced_by": [
-        "engine/config/schema.py::DomainSpec.validate_cross_references"
-      ],
+      "enforced_by": ["engine/config/schema.py::DomainSpec.validate_cross_references"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -631,9 +593,7 @@
       "id": "ADM-MAP-REFNAMESPACE-NODE-ENDPOINT-ONLY",
       "stage": "tenant-mapping",
       "statement": "refnamespace is declared on node sync endpoints (targetnode) only.",
-      "enforced_by": [
-        "engine/config/tenant_mapping.py::_validate_ref_namespaces"
-      ],
+      "enforced_by": ["engine/config/tenant_mapping.py::_validate_ref_namespaces"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -653,9 +613,7 @@
       "id": "ADM-MAP-REFNAMESPACE-CONSISTENT",
       "stage": "tenant-mapping",
       "statement": "Every sync endpoint of a namespaced node label declares the same refnamespace.",
-      "enforced_by": [
-        "engine/config/tenant_mapping.py::_validate_ref_namespaces"
-      ],
+      "enforced_by": ["engine/config/tenant_mapping.py::_validate_ref_namespaces"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -675,9 +633,7 @@
       "id": "ADM-MAP-REFNAMESPACE-UNIQUE",
       "stage": "tenant-mapping",
       "statement": "A refnamespace belongs to exactly one node label.",
-      "enforced_by": [
-        "engine/config/tenant_mapping.py::_validate_ref_namespaces"
-      ],
+      "enforced_by": ["engine/config/tenant_mapping.py::_validate_ref_namespaces"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -697,9 +653,7 @@
       "id": "ADM-MAP-NAMESPACED-LABEL-DIRECT-WRITE",
       "stage": "tenant-mapping",
       "statement": "A node label with a refnamespace is written only by its own node sync endpoint, never by childsync or taxonomyedges.",
-      "enforced_by": [
-        "engine/config/tenant_mapping.py::_validate_ref_namespaces"
-      ],
+      "enforced_by": ["engine/config/tenant_mapping.py::_validate_ref_namespaces"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -719,9 +673,7 @@
       "id": "ADM-MAP-OBSERVEDFROM-NON-EMPTY",
       "stage": "tenant-mapping",
       "statement": "observedfrom, when present, is a non-empty list.",
-      "enforced_by": [
-        "engine/config/tenant_mapping.py::_validate_observations"
-      ],
+      "enforced_by": ["engine/config/tenant_mapping.py::_validate_observations"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -741,9 +693,7 @@
       "id": "ADM-MAP-OBSERVED-NODE-NAMESPACED",
       "stage": "tenant-mapping",
       "statement": "Both node labels of an endpoint that declares observedfrom declare a refnamespace on their node sync endpoint.",
-      "enforced_by": [
-        "engine/config/tenant_mapping.py::_validate_observations"
-      ],
+      "enforced_by": ["engine/config/tenant_mapping.py::_validate_observations"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -763,9 +713,7 @@
       "id": "ADM-MAP-ASSOCIATION-UNIQUE",
       "stage": "tenant-mapping",
       "statement": "A provider association (provider, fromobjecttype, toobjecttype, associationcategory, associationtypeid) is mapped by at most one relationship endpoint.",
-      "enforced_by": [
-        "engine/config/tenant_mapping.py::_validate_observations"
-      ],
+      "enforced_by": ["engine/config/tenant_mapping.py::_validate_observations"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -785,9 +733,7 @@
       "id": "ADM-MAP-RELEVANCE-WRITER",
       "stage": "tenant-mapping",
       "statement": "An ontology edge that declares evidencerelevance is written by a relationship sync endpoint with that targetedge, fromnode and tonode.",
-      "enforced_by": [
-        "engine/config/tenant_mapping.py::_validate_relevance"
-      ],
+      "enforced_by": ["engine/config/tenant_mapping.py::_validate_relevance"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -807,9 +753,7 @@
       "id": "ADM-MAP-RELEVANCE-CONSISTENT",
       "stage": "tenant-mapping",
       "statement": "Every signature of an edge type that declares evidencerelevance declares the same value.",
-      "enforced_by": [
-        "engine/config/tenant_mapping.py::_validate_relevance"
-      ],
+      "enforced_by": ["engine/config/tenant_mapping.py::_validate_relevance"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -853,9 +797,7 @@
       "id": "ADM-WITHHOLD-DORMANT",
       "stage": "withholding",
       "statement": "A pack declaring domain.activation: dormant is withheld.",
-      "enforced_by": [
-        "engine/config/loader.py::withholding_reason"
-      ],
+      "enforced_by": ["engine/config/loader.py::withholding_reason"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
@@ -900,9 +842,7 @@
       "id": "ADM-DEFECT-GATE-STRICTWHEN",
       "stage": "withholding",
       "statement": "No gate declares strictwhen (no compiler consumes it).",
-      "enforced_by": [
-        "engine/config/loader.py::admission_defects"
-      ],
+      "enforced_by": ["engine/config/loader.py::admission_defects"],
       "enforced_when": "always",
       "validator": {
         "check": "native-admission",
