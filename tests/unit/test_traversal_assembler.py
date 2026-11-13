@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
+
 pytestmark = pytest.mark.unit
 
 
@@ -21,7 +23,7 @@ def plasticos_spec():
     from engine.config.loader import DomainPackLoader
     from engine.config.schema import TraversalSpec, TraversalStepSpec
 
-    loader = DomainPackLoader()
+    loader = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT))
     try:
         spec = loader.load_domain("plasticos")
     except Exception:
@@ -40,7 +42,7 @@ def test_served_plasticos_pack_declares_no_row_multiplying_steps():
     from engine.config.loader import DomainPackLoader
     from engine.traversal.assembler import TraversalAssembler
 
-    served = DomainPackLoader().load_domain("plasticos")
+    served = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT)).load_domain("plasticos")
     for direction in served.queryschema.matchdirections:
         assert TraversalAssembler(served).assemble_traversal(direction) == []
 

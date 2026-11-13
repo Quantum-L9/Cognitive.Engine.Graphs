@@ -18,6 +18,7 @@ from engine.sync.idea_portfolio import (
     compile_upsert_command,
     projection_digest,
 )
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -71,7 +72,7 @@ def test_domain_is_dormant_until_enabled(monkeypatch: pytest.MonkeyPatch) -> Non
     No engine code names this domain: the posture is the pack's own, and the
     operator override is the generic `dormant_domain_packs_enabled`.
     """
-    loader = DomainPackLoader(config_path=str(ROOT / "domains"))
+    loader = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT))
     monkeypatch.setattr(settings, "dormant_domain_packs_enabled", False)
     assert "idea-portfolio" not in loader.list_domains()
     with pytest.raises(DomainNotFoundError, match="dormant"):

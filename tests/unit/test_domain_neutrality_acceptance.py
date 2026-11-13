@@ -38,7 +38,12 @@ from engine.gds.scheduler import GDSScheduler
 from engine.scoring.assembler import ScoringAssembler
 from engine.sync.generator import SyncGenerator
 from engine.traversal.assembler import TraversalAssembler
-from tests.fixtures.domain_contracts import SYNTHETIC_DOMAINS_ROOT, SYNTHETIC_VOCABULARY, synthetic_loader
+from tests.fixtures.domain_contracts import (
+    DESIGN_PACKS_ROOT,
+    SYNTHETIC_DOMAINS_ROOT,
+    SYNTHETIC_VOCABULARY,
+    synthetic_loader,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -556,7 +561,7 @@ def test_flag_off_restores_the_former_structural_defaults(monkeypatch: pytest.Mo
 def test_served_packs_declare_every_structural_property_they_use() -> None:
     from engine.config.structural_vocabulary import structural_property_defects
 
-    loader = DomainPackLoader(config_path=str(Path(__file__).resolve().parents[2] / "domains"))
+    loader = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT))
     assert loader.list_domains() == ["freight-matching", "mortgage-brokerage", "plasticos"]
     for domain_id in loader.list_domains():
         assert structural_property_defects(loader.load_domain(domain_id)) == [], domain_id

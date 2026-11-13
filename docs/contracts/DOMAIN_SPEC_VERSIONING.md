@@ -174,3 +174,44 @@ The bounded native CEG publisher (`tools/publish_domain_pack.py`) requires an ex
 Published identity is `tenant_id == domain.id == <root>/<tenant_id>/current.json tenant_id == Neo4j database name`. The atomic `ceg.domain-current/v1` JSON pointer selects `<root>/<tenant_id>/revisions/<bare-sha256>/spec.yaml` plus an immutable `ceg.domain-approval/v1` `receipt.json`. The receipt binds tenant, native version, published and reviewed-input digests, named reviewer, external approval reference, timezone-aware review/assertion time, and the previous admitted digest (required null on first publication). The pointer carries `schema`, `tenant_id`, `version`, and `sha256`; pointer/receipt/YAML/version/path digests must agree.
 
 Changed input bytes require a new native version. Forward publication refuses numeric-version or production-to-reviewed downgrades. Explicit rollback freshly validates an existing reviewed revision and changes only the atomic pointer, not its approval history. Approval receipts are unsigned operator assertions, not authenticated reviewer identities; independent authorization, approval auditing, operator store permissions, read-only runtime mounts, and cross-engine compatible-pair checks remain separately required. Runtime receipt and production-stage flags ship off without changing any existing defaults. See [native publication runbook](../runbooks/domain-pack-publish.md) for exact JSON/API contracts, admission requirements, atomicity, and rollback limits.
+
+## Schema artifact and version
+
+The structure of a domain spec is published as a JSON Schema (2020-12) that
+other repositories pin, for example the semantic compiler's CEG target
+(issue #400 B1/B2). This is the version of the *schema contract*; it is
+unrelated to any spec's own `domain.version`.
+
+| Item | Location |
+|---|---|
+| Authority | `engine/config/schema.py` (`DomainSpec`) |
+| Declared version | `engine/config/domain_spec_schema_version.py` (`DOMAIN_SPEC_SCHEMA_VERSION`) |
+| Generated artifact | `docs/contracts/data/models/domain-spec.schema.json` |
+| Generator and drift check | `tools/export_domain_spec_schema.py` (`--check`) |
+| Test | `tests/contracts/test_domain_spec_schema_export.py` (unit, runs in `make test`) |
+
+The artifact's `$id` ends in `domain-spec/<version>/domain-spec.schema.json`.
+The generator prints the artifact's sha256; a consumer pins the version and
+that digest together. The artifact is generated, never edited by hand.
+
+**Bump rule.** Any field change in `engine/config/schema.py` that changes the
+generated schema requires, in the same change, a bump of
+`DOMAIN_SPEC_SCHEMA_VERSION` and a regenerated artifact
+(`python tools/export_domain_spec_schema.py`).
+
+| Change to the schema | Bump |
+|---|---|
+| A spec that validated is now refused: field removed or renamed, field becomes required, type or enum narrows | major |
+| Every spec that validated still validates: new optional field, widened type or enum | minor |
+| No validation change: titles, descriptions, displayed defaults | patch |
+
+The drift check fails when the artifact no longer matches `schema.py`. It does
+not detect a regenerated artifact whose version was left unchanged, so the bump
+itself is checked in review. The pinned Pydantic version in `uv.lock` is an
+input of the export: an upgrade that changes the output also needs a
+regeneration and at least a patch bump.
+
+**What the schema does not state.** It covers structure only. Pydantic
+validators (cross-references, weight ceiling), the tenant-id grammar and loader
+admission (`withholding_reason`, `admission_defects`) are not expressed, so a
+spec that validates against the schema can still be refused by the loader.

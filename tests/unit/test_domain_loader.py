@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
+
 pytestmark = pytest.mark.unit
 
 
@@ -12,7 +14,7 @@ def test_load_plasticos_returns_domain_spec():
     from engine.config.loader import DomainPackLoader
     from engine.config.schema import DomainSpec
 
-    loader = DomainPackLoader()
+    loader = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT))
     try:
         spec = loader.load_domain("plasticos")
     except Exception:
@@ -25,7 +27,7 @@ def test_load_caches_second_call():
     """Repeated load returns cached instance."""
     from engine.config.loader import DomainPackLoader
 
-    loader = DomainPackLoader()
+    loader = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT))
     try:
         spec1 = loader.load_domain("plasticos")
         spec2 = loader.load_domain("plasticos")
@@ -38,7 +40,7 @@ def test_invalidate_clears_cache():
     """Cache invalidation forces reload."""
     from engine.config.loader import DomainPackLoader
 
-    loader = DomainPackLoader()
+    loader = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT))
     try:
         spec1 = loader.load_domain("plasticos")
         loader.invalidate("plasticos")
@@ -52,7 +54,7 @@ def test_list_domains_includes_plasticos():
     """List domains finds plasticos directory."""
     from engine.config.loader import DomainPackLoader
 
-    loader = DomainPackLoader()
+    loader = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT))
     assert "plasticos" in loader.list_domains()
 
 
@@ -60,7 +62,7 @@ def test_missing_domain_raises():
     """Loading nonexistent domain raises error."""
     from engine.config.loader import DomainPackLoader
 
-    loader = DomainPackLoader()
+    loader = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT))
     with pytest.raises(Exception, match="nonexistent"):
         loader.load_domain("nonexistent")
 

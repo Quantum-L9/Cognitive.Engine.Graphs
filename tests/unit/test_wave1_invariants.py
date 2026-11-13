@@ -15,7 +15,6 @@ Covers W1-01 through W1-05 feature flags, validators, and error paths.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -28,6 +27,7 @@ from engine.config.schema import (
     NullBehavior,
 )
 from engine.config.settings import Settings
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 pytestmark = pytest.mark.unit
 
@@ -912,7 +912,7 @@ class _MatchCypherCapture:
         return []
 
 
-_DOMAINS_DIR = Path(__file__).resolve().parents[2] / "domains"
+_DOMAINS_DIR = DESIGN_PACKS_ROOT
 
 
 async def _plasticos_dir1_match_cypher() -> str:

@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
+
 pytestmark = pytest.mark.unit
 
 
@@ -19,7 +21,7 @@ def plasticos_spec():
     """Load plasticos spec, skip if not loadable."""
     from engine.config.loader import DomainPackLoader
 
-    loader = DomainPackLoader()
+    loader = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT))
     try:
         return loader.load_domain("plasticos")
     except Exception:

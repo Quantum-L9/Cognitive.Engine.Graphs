@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
+
 pytestmark = pytest.mark.unit
 
 INJECTION_STRINGS = [
@@ -33,12 +35,11 @@ def test_sanitize_label_blocks_injection(injection):
 
 def test_sync_generator_uses_parameterized_query():
     """SyncGenerator MUST use $batch param — never interpolate batch values."""
-    from pathlib import Path
 
     from engine.config.loader import DomainPackLoader
     from engine.sync.generator import SyncGenerator
 
-    loader = DomainPackLoader(config_path=str(Path(__file__).parent.parent.parent / "domains"))
+    loader = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT))
     spec = loader.load_domain("plasticos")
     gen = SyncGenerator(spec)
     if not spec.sync.endpoints:
@@ -55,13 +56,12 @@ def test_sync_generator_uses_parameterized_query():
 
 def test_gate_compiler_never_interpolates_values():
     """GateCompiler must emit $param refs — never interpolate values into Cypher."""
-    from pathlib import Path
 
     from engine.config.loader import DomainPackLoader
     from engine.gates.compiler import GateCompiler
 
     evil_value = "'; DROP DATABASE neo4j; //"
-    loader = DomainPackLoader(config_path=str(Path(__file__).parent.parent.parent / "domains"))
+    loader = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT))
     spec = loader.load_domain("plasticos")
     compiler = GateCompiler(spec)
     # Compile every declared direction — values must never appear in Cypher text;

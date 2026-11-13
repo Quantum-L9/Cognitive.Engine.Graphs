@@ -16,6 +16,7 @@ Target Coverage: 90%+
 import pytest
 
 from engine.compliance.audit import DEFAULT_RETENTION, AuditAction, AuditLogger, AuditSeverity
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 
 @pytest.mark.compliance
@@ -322,14 +323,13 @@ class TestAuditSoftSink:
 @pytest.mark.unit
 class TestComplianceEngineSoftSink:
     def _engine(self, pool=None):
-        from pathlib import Path
 
         import yaml
 
         from engine.compliance.engine import ComplianceEngine
         from engine.config.schema import DomainSpec
 
-        raw = yaml.safe_load(Path("domains/plasticos/spec.yaml").read_text(encoding="utf-8"))
+        raw = yaml.safe_load((DESIGN_PACKS_ROOT / "plasticos/spec.yaml").read_text(encoding="utf-8"))
         return ComplianceEngine(DomainSpec.model_validate(raw), db_pool=pool)
 
     def test_buffer_bounded_across_5000_requests_without_pool(self) -> None:
@@ -361,14 +361,13 @@ class TestViolationEntryShape:
     """RU-063 / CEG-COR-050: the denied entry carries regimes and the field name, never a value."""
 
     def test_denied_entry_shape(self) -> None:
-        from pathlib import Path
 
         import yaml
 
         from engine.compliance.engine import ComplianceEngine
         from engine.config.schema import DomainSpec
 
-        raw = yaml.safe_load(Path("domains/mortgage-brokerage/spec.yaml").read_text(encoding="utf-8"))
+        raw = yaml.safe_load((DESIGN_PACKS_ROOT / "mortgage-brokerage/spec.yaml").read_text(encoding="utf-8"))
         engine = ComplianceEngine(DomainSpec.model_validate(raw))
         engine._audit.flush_sync()
         with pytest.raises(ValueError):

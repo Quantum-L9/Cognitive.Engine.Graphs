@@ -192,7 +192,8 @@ class TestConfidenceIntervals:
 
         # The store call should include confidence and ci_width parameters
         store_call = driver.execute_query.call_args_list[-1]
-        params = store_call.kwargs.get("parameters", {})
+        # CEG-462: the recalculation is one UNWIND statement; each row is one dimension.
+        (params,) = store_call.kwargs.get("parameters", {})["rows"]
         assert "confidence" in params
         assert "ci_width" in params
         assert 0.0 <= params["confidence"] <= 1.0
