@@ -464,6 +464,18 @@ class Settings(BaseSettings):
     # the feedback metadata reports status complete|partial with per-stage
     # results. Off: the first stage failure propagates.
     feedback_partial_results_enabled: bool = True
+    # CEG-462 (FEATURE_GATES §34): the propagation stage multiplied every tenant
+    # DimensionWeight.boost_factor by a hand-set 1.15 that nothing reads. Off
+    # (default): skipped and reported as not applied. On: legacy, rollback only.
+    feedback_boost_propagation_enabled: bool = False
+    # CEG-462 (§34): on, each recalculation appends one append-only
+    # DimensionWeightChange per dimension, in one transaction. Off: no history.
+    # This flag never decides whether a weight moves.
+    learned_weight_change_record_enabled: bool = True
+    # CEG-462 (§34): the only switch that writes DimensionWeight.weight (read by
+    # scoring). Off (default): an unapplied candidate. On: approved automatic
+    # recalculation. The operator owns this decision (issue #462, Decision 1).
+    learned_weight_auto_apply_enabled: bool = False
     # RU-029 / CEG-COR-118: DriftDetector treated only a both-empty window pair
     # as insufficient data, so an empty baseline (the first drift_window_days)
     # scored divergence 1.0 and raised alert=True. On: either window empty is

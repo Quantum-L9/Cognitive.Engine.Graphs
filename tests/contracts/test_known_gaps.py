@@ -60,7 +60,7 @@ ALL_ARCH = frozenset(
 OPEN_GAPS: dict[str, str] = {
     "eval/eval-pipeline.yaml": "Quantum-L9/Cognitive.Engine.Graphs#440",
     "eval/benchmarks.yaml": "Quantum-L9/Cognitive.Engine.Graphs#440",
-    "feedback/convergence-loop.yaml": "weight-recalculation governance (owner decision pending)",
+    "feedback/convergence-loop.yaml": "Quantum-L9/Cognitive.Engine.Graphs#462 (owner decision on learned_weight_auto_apply_enabled + CI receipt)",
     "observability/otel-traces.yaml": "Quantum-L9/Cognitive.Engine.Graphs#441, Quantum-L9/Gate_SDK#75",
     "observability/slo-definitions.yaml": "Quantum-L9/Cognitive.Engine.Graphs#441, Quantum-L9/Gate_SDK#75",
     "auth/rbac-policy.yaml": "Quantum-L9/Constellation.Gate#37 (Gate caller-policy evidence; CEG side verified by CAP-TENANT-01)",
@@ -127,27 +127,58 @@ def _wire_engine(capabilities: list[Any], *, feedback_enabled: bool = False) -> 
 
 
 async def _probe_feedback_convergence(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Remaining blocking item: no learned-weight authority without an approved policy.
+    """Remaining blocking item: owner admission of the weight-governance policy (#462).
 
     Replay identity, partial-outcome truth and tenant scoping are proven
-    (convergence-loop.yaml ``partial_proof``). Still open: once
-    ``min_outcomes_for_recalculation`` new outcomes accumulate, the loop writes
-    recalculated DimensionWeight weights with no approval, bypassing the governed
-    admin ``score_feedback`` -> ``apply_weight_proposal`` path.
+    (convergence-loop.yaml ``partial_proof``). CEG-462 landed the mechanism: by
+    default a recalculation is an append-only, unapplied DimensionWeightChange
+    record and DimensionWeight.weight is not written; the stage that wrote the
+    unread ``boost_factor`` is off. Those defaults are checked here first and
+    pinned outside this xfail by tests/unit/test_feedback_weight_governance.py.
+    Still open: the operator's decision on ``learned_weight_auto_apply_enabled``
+    and a CI receipt; the probe passes only once the contract records both.
     """
+    from engine.config.settings import settings
     from engine.feedback.convergence import ConvergenceLoop
     from tests.fixtures.domain_contracts import synthetic_loader
 
     spec = synthetic_loader().load_domain("orbital-logistics")
-    spec = spec.model_copy(update={"feedbackloop": spec.feedbackloop.model_copy(update={"enabled": True})})
-    loop = ConvergenceLoop(MagicMock(), spec)
-    loop._score_propagator.propagate_outcome = AsyncMock(return_value={"propagated": True})  # type: ignore[method-assign]
-    loop._weight_calculator.should_recalculate = AsyncMock(return_value=True)  # type: ignore[method-assign]
-    loop._weight_calculator.recalculate_weights = AsyncMock(return_value={"fit": 2.0})  # type: ignore[method-assign]
-    loop._drift_detector.check_and_alert = AsyncMock(return_value={"drift_detected": False})  # type: ignore[method-assign]
-    await loop.on_outcome_recorded({"outcome_id": "probe-1", "candidate_id": "c-probe", "outcome": "success"})
-    assert loop._weight_calculator.recalculate_weights.await_count == 0, (
-        "the convergence loop applied recalculated weights with no approved proposal"
+    fl = spec.feedbackloop
+    spec = spec.model_copy(
+        update={
+            "feedbackloop": fl.model_copy(
+                update={"enabled": True, "signal_weights": fl.signal_weights.model_copy(update={"enabled": True})}
+            )
+        }
+    )
+    cyphers: list[str] = []
+
+    async def _driver(cypher: str, parameters: dict[str, Any] | None = None, **_: Any) -> list[dict[str, Any]]:
+        cyphers.append(cypher)
+        if "AS new_outcomes" in cypher:
+            return [{"new_outcomes": 1000}]
+        if "AS dim_total" in cypher:
+            return [{"dim_total": 10, "dim_wins": 9}]
+        if "AS total" in cypher:
+            return [{"total": 20, "wins": 10}]
+        return [{"dimension": (parameters or {}).get("dimension")}]
+
+    driver = MagicMock()
+    driver.execute_query = AsyncMock(side_effect=_driver)
+    metadata = await ConvergenceLoop(driver, spec).on_outcome_recorded(
+        {"outcome_id": "probe-1", "candidate_id": "c-probe", "outcome": "success"}
+    )
+    if settings.learned_weight_auto_apply_enabled is False:
+        if metadata["weights_applied"] or any(re.search(r"SET\s+dw\.weight\b", c) for c in cyphers):
+            msg = "the convergence loop applied recalculated weights with no approved policy"
+            raise RuntimeError(msg)  # a regression, not the open gap: fail CI, never xfail
+    if any("boost_factor" in c for c in cyphers) and not settings.feedback_boost_propagation_enabled:
+        msg = "the retired propagation stage wrote boost_factor"
+        raise RuntimeError(msg)
+
+    governance = _contract("feedback/convergence-loop.yaml")["weight_governance"]
+    assert governance["owner_decision"]["status"] == "decided", (
+        "weight-recalculation policy awaits the operator decision (issue #462, Decision 1)"
     )
 
 

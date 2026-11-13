@@ -264,6 +264,12 @@ class TestPropagationClaim:
 
 
 class TestPartialResults:
+    """Stage isolation over all three stages, so the legacy propagation stage is enabled (CEG-462)."""
+
+    @pytest.fixture(autouse=True)
+    def _legacy_propagation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(settings, "feedback_boost_propagation_enabled", True)
+
     @staticmethod
     def _loop(*, propagation: Any = None, recalc: Any = False, drift: Any = None) -> Any:
         from engine.feedback.convergence import ConvergenceLoop
