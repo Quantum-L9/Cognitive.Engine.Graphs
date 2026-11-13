@@ -191,3 +191,15 @@ Generated from `environment/ide/policy.json` in the governance clone by `ops/scr
 > Run tools through `install_locked.sh` or `make setup`: a plain `uv sync`
 > without `--inexact` removes them. `tests/unit/test_core_toolchain_pins.py`
 > fails on any declaration.
+
+> **2026-11-13 correction (additive; append-only):** the repository has no
+> top-level `domains/` directory any more (issue #400 A5/A7, decision D5). The
+> packs that lived there are design and test material under
+> `tests/fixtures/design_packs/` and are never loaded in production; tests and
+> tools read them through `DESIGN_PACKS_ROOT` in
+> `tests/fixtures/domain_contracts.py`. Every `domains/` path above (Project
+> Structure, Boundaries, Key Architecture Rules) now means that directory when
+> it refers to a pack in this repository. `tests/fixtures/domains/` stays the
+> neutral synthetic root (ADR-112) and takes no product pack. A deployment
+> serves only packs an operator publishes into its mounted pack root
+> (`docs/runbooks/domain-pack-publish.md`).

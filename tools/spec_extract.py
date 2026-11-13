@@ -67,7 +67,7 @@ RESEARCH_CATEGORY = "research_pattern"
 GATES_GLOB = "engine/gates/**/*.py"
 SCORING_GLOB = "engine/scoring/**/*.py"
 ENGINE_GLOB = "engine/**/*.py"
-DOMAINS_GLOB = "domains/**/*.yaml"
+DOMAINS_GLOB = "tests/fixtures/design_packs/**/*.yaml"
 COVERAGE_MATRIX_JSON = "coverage_matrix.json"
 
 

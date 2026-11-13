@@ -30,10 +30,11 @@ import yaml
 import engine.config.loader as loader_module
 from engine.config.schema import DomainActivation, DomainSpec
 from engine.config.settings import Settings
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 pytestmark = pytest.mark.unit
 
-DOMAINS = Path(__file__).resolve().parents[2] / "domains"
+DOMAINS = DESIGN_PACKS_ROOT
 
 RETIRED_LEGACY_PACKS = (
     "aios-god-agent",
@@ -127,7 +128,7 @@ WITHHELD_UNTIL_REPAIRED = {
 
 @pytest.fixture
 def default_admission(monkeypatch: pytest.MonkeyPatch) -> loader_module.DomainPackLoader:
-    """A loader over the repository's domains/ with both admission overrides at their defaults."""
+    """A loader over the repository's tests/fixtures/design_packs/ with both admission overrides at their defaults."""
     monkeypatch.setattr(loader_module.settings, "dormant_domain_packs_enabled", False)
     monkeypatch.setattr(loader_module.settings, "unvalidated_domain_packs_enabled", False)
     # The admission hardening checks ship off (owner decision 2026-10-29) and this

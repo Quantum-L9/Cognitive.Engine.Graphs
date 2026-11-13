@@ -1,6 +1,6 @@
-"""CEG-009 — every domain under domains/ must be in the shape the loader reads.
+"""CEG-009 — every domain under tests/fixtures/design_packs/ must be in the shape the loader reads.
 
-``DomainPackLoader`` resolves ``domains/<domain_id>/spec.yaml``
+``DomainPackLoader`` resolves ``tests/fixtures/design_packs/<domain_id>/spec.yaml``
 (``loader.SPEC_FILENAME``). Nine specs used a flat
 ``<name>_domain_spec.yaml`` convention instead and were therefore unreachable:
 they looked like available verticals in a directory listing, but a tenant id
@@ -30,11 +30,12 @@ from engine.config.loader import (
     withholding_reason,
 )
 from engine.config.schema import DomainActivation, DomainSpec
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DOMAINS_ROOT = REPO_ROOT / "domains"
+DOMAINS_ROOT = DESIGN_PACKS_ROOT
 
 
 @pytest.fixture(autouse=True)
@@ -58,7 +59,7 @@ def test_no_flat_domain_spec_files_remain() -> None:
     stragglers = sorted(p.name for p in DOMAINS_ROOT.glob("*_domain_spec.yaml"))
     assert stragglers == [], (
         f"{stragglers} use the flat shape the loader never reads. Move each to "
-        f"domains/<domain_id>/{SPEC_FILENAME}, or delete it if superseded."
+        f"tests/fixtures/design_packs/<domain_id>/{SPEC_FILENAME}, or delete it if superseded."
     )
 
 
@@ -463,7 +464,7 @@ def test_plasticos_recency_uses_the_declared_180_day_horizon() -> None:
 
 # RG-070 (RU-056 / CEG-COR-152): the authoring template is a spec the loader
 # would admit and every direction of which assembles. It stays non-served: it is
-# a file under domains/, not domains/<id>/spec.yaml.
+# a file under tests/fixtures/design_packs/, not tests/fixtures/design_packs/<id>/spec.yaml.
 TEMPLATE_PATH = DOMAINS_ROOT / "_template.yaml"
 
 

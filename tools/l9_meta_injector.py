@@ -343,6 +343,21 @@ FILE_REGISTRY: list[FileMeta] = [
         ["test", "unit", "domain-neutrality", "acceptance"],
         "engine-team",
     ),
+    # ADR-112 Stage 3 core vocabulary guard: the test, its deny list and its baseline.
+    *[
+        FileMeta(
+            f"tests/architecture/{name}",
+            "engine-specific",
+            ["test"],
+            ["test", "architecture", "domain-neutrality", "vocabulary-guard"],
+            "engine-team",
+        )
+        for name in (
+            "test_core_vocabulary_guard.py",
+            "core_vocabulary_denylist.yaml",
+            "core_vocabulary_baseline.yaml",
+        )
+    ],
     FileMeta(
         "tests/unit/test_handlers_enrich_health.py",
         "engine-specific",
@@ -355,6 +370,13 @@ FILE_REGISTRY: list[FileMeta] = [
     ),
     FileMeta(
         "tests/unit/test_rbac_required_proofs.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "capability", "auth"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/unit/test_capability_root_registration.py",
         "engine-specific",
         ["test"],
         ["test", "unit", "capability", "auth"],
@@ -376,6 +398,20 @@ FILE_REGISTRY: list[FileMeta] = [
     ),
     FileMeta(
         "tests/integration/test_feedback_convergence_closure.py",
+        "engine-specific",
+        ["test"],
+        ["test", "integration", "feedback"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/unit/test_feedback_weight_governance.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "feedback", "signal-weights"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/integration/test_feedback_weight_governance.py",
         "engine-specific",
         ["test"],
         ["test", "integration", "feedback"],
@@ -427,6 +463,35 @@ FILE_REGISTRY: list[FileMeta] = [
     ),
     FileMeta("engine/config/settings.py", "engine-specific", ["config"], ["config", "settings"], "engine-team"),
     FileMeta("engine/config/units.py", "engine-specific", ["config"], ["config", "units"], "engine-team"),
+    # --- DomainSpec schema contract (#400 WS-B): version, exporter, generated artifact, drift test ---
+    FileMeta(
+        "engine/config/domain_spec_schema_version.py",
+        "engine-specific",
+        ["config"],
+        ["config", "domain-spec", "schema-version"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tools/export_domain_spec_schema.py",
+        "engine-specific",
+        ["tools"],
+        ["tools", "domain-spec", "json-schema", "contracts"],
+        "engine-team",
+    ),
+    FileMeta(
+        "docs/contracts/data/models/domain-spec.schema.json",
+        "engine-specific",
+        ["docs", "contracts"],
+        ["contracts", "domain-spec", "json-schema", "generated"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/contracts/test_domain_spec_schema_export.py",
+        "engine-specific",
+        ["tests"],
+        ["tests", "contracts", "domain-spec", "json-schema"],
+        "engine-team",
+    ),
     FileMeta("engine/gates/__init__.py", "engine-specific", ["config"], ["gates"], "engine-team"),
     FileMeta("engine/gates/compiler.py", "engine-specific", ["config"], ["gates", "compiler", "cypher"], "engine-team"),
     FileMeta(
@@ -868,7 +933,13 @@ FILE_REGISTRY: list[FileMeta] = [
         ["semgrep", "rules", "fixtures"],
         "platform",
     ),
-    FileMeta("domains/_template.yaml", "domain-specific", ["config"], ["domains", "template"], "domain-team"),
+    FileMeta(
+        "tests/fixtures/design_packs/_template.yaml",
+        "domain-specific",
+        ["config"],
+        ["domains", "template"],
+        "domain-team",
+    ),
     FileMeta(
         "docs/archive/plasticos/plasticos_domain_spec.yaml",
         "domain-specific",
@@ -876,7 +947,13 @@ FILE_REGISTRY: list[FileMeta] = [
         ["domains", "plasticos"],
         "domain-team",
     ),
-    FileMeta("domains/plasticos/spec.yaml", "domain-specific", ["config"], ["domains", "plasticos"], "domain-team"),
+    FileMeta(
+        "tests/fixtures/design_packs/plasticos/spec.yaml",
+        "domain-specific",
+        ["config"],
+        ["domains", "plasticos"],
+        "domain-team",
+    ),
     FileMeta("chassis/__init__.py", "chassis", ["api"], ["chassis"], "platform-team"),
     FileMeta("chassis/actions.py", "chassis", ["api"], ["chassis", "actions"], "platform-team"),
     FileMeta("chassis/audit.py", "chassis", ["api"], ["chassis", "audit"], "platform-team"),
@@ -916,8 +993,16 @@ FILE_REGISTRY: list[FileMeta] = [
     # =========================================================================
     # DOMAIN-SPECIFIC FILES  (origin: domain-specific, owner: domain-team)
     # =========================================================================
-    FileMeta("domains/README.md", "domain-specific", ["config"], ["domains", "docs"], "domain-team"),
-    FileMeta("domains/TESTING_GUIDE.md", "domain-specific", ["test"], ["domains", "testing", "guide"], "domain-team"),
+    FileMeta(
+        "tests/fixtures/design_packs/README.md", "domain-specific", ["config"], ["domains", "docs"], "domain-team"
+    ),
+    FileMeta(
+        "tests/fixtures/design_packs/TESTING_GUIDE.md",
+        "domain-specific",
+        ["test"],
+        ["domains", "testing", "guide"],
+        "domain-team",
+    ),
     # =========================================================================
     # RE-HEADERED FROM SCHEMA v2 (RU-131, DEC-49 option B: v1 is the only schema)
     # Values are the file's v2 header values plus the v1 `owner` field;
@@ -1013,6 +1098,21 @@ FILE_REGISTRY: list[FileMeta] = [
         "engine-specific",
         ["test"],
         ["test", "fixtures", "native-authoring", "predecessor-parity"],
+        "engine-team",
+    ),
+    # --- Domain admission rule catalogue (#400 WS-B, B3/B4) ---
+    FileMeta(
+        "docs/contracts/data/models/domain-admission-rules.json",
+        "engine-specific",
+        ["docs", "contracts"],
+        ["contracts", "domain-admission", "rule-catalogue"],
+        "engine-team",
+    ),
+    FileMeta(
+        "tests/unit/test_domain_admission_rules.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "domain-admission", "validator-parity", "catalogue"],
         "engine-team",
     ),
     FileMeta(

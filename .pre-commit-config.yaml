@@ -51,7 +51,7 @@ repos:
         types_or: [python, pyi]
         require_serial: true
         args: [--ignore-missing-imports, --follow-imports=silent]
-        exclude: ^(tests/|tools/|domains/|current work/|harvest_staging/|docs/|engine/security/|engine/auth/)
+        exclude: ^(tests/|tools/|current work/|harvest_staging/|docs/|engine/security/|engine/auth/)
 
   # Unit tests covering staged Python only. Full catalog: make test / CI pytest.
   # pre-commit run --all-files (≥40 .py files) keeps the historical unit subset.

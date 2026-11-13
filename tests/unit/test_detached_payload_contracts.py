@@ -29,6 +29,7 @@ from engine.models.payloads import (
     admit_payload,
 )
 from tests.fixtures.domain_contracts import (
+    DESIGN_PACKS_ROOT,
     PLASTICOS_EXAMPLE_CONTRACT,
     SYNTHETIC_VOCABULARY,
     example_payload_for,
@@ -304,7 +305,7 @@ class _MatchDriver:
 def _plasticos_spec():  # type: ignore[no-untyped-def]
     from engine.config.schema import DomainSpec
 
-    return DomainSpec.model_validate(yaml.safe_load((ROOT / "domains" / "plasticos" / "spec.yaml").read_text()))
+    return DomainSpec.model_validate(yaml.safe_load((DESIGN_PACKS_ROOT / "plasticos" / "spec.yaml").read_text()))
 
 
 def _wire_plasticos() -> _MatchDriver:

@@ -70,7 +70,17 @@ class Settings(BaseSettings):
     cors_origins: list[str] = []  # Default deny-all; set via CORS_ORIGINS env var
 
     # --- Domain Packs ---
+    # The one pack-root default in engine/ and chassis/ (issue #400 A5): every
+    # reader takes its root from here or from an explicit argument. Production
+    # never serves from it implicitly — see domains_root_required_in_prod.
     domains_root: Path = Path("./domains")
+    # Issue #400 A4: under L9_ENV=prod the pack loader refuses (DomainSpecError
+    # naming DOMAINS_ROOT) a root that is not explicitly configured — DOMAINS_ROOT
+    # unset, so this default would apply — or that is relative, missing, not a
+    # directory or unreadable. Hardening, ships on (C-21). Off: the former
+    # behaviour, where a missing root lists zero domains and the service reports
+    # healthy. Non-production environments are unaffected either way.
+    domains_root_required_in_prod: bool = True
 
     # Native operator supply chain: opt-in only, existing fixture layout unchanged.
     # Receipt mode reads tenant/current.json and verifies the immutable revision
@@ -454,6 +464,18 @@ class Settings(BaseSettings):
     # the feedback metadata reports status complete|partial with per-stage
     # results. Off: the first stage failure propagates.
     feedback_partial_results_enabled: bool = True
+    # CEG-462 (FEATURE_GATES §34): the propagation stage multiplied every tenant
+    # DimensionWeight.boost_factor by a hand-set 1.15 that nothing reads. Off
+    # (default): skipped and reported as not applied. On: legacy, rollback only.
+    feedback_boost_propagation_enabled: bool = False
+    # CEG-462 (§34): on, each recalculation appends one append-only
+    # DimensionWeightChange per dimension, in one transaction. Off: no history.
+    # This flag never decides whether a weight moves.
+    learned_weight_change_record_enabled: bool = True
+    # CEG-462 (§34): the only switch that writes DimensionWeight.weight (read by
+    # scoring). Off (default): an unapplied candidate. On: approved automatic
+    # recalculation. The operator owns this decision (issue #462, Decision 1).
+    learned_weight_auto_apply_enabled: bool = False
     # RU-029 / CEG-COR-118: DriftDetector treated only a both-empty window pair
     # as insufficient data, so an empty baseline (the first drift_window_days)
     # scored divergence 1.0 and raised alert=True. On: either window empty is

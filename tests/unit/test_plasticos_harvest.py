@@ -13,6 +13,7 @@ from engine.config.explanations import (
 )
 from engine.config.loader import DomainPackLoader
 from engine.gates.compiler import GateCompiler
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 pytestmark = pytest.mark.unit
 
@@ -32,7 +33,7 @@ OUTCOMES = {
 
 
 def _spec():
-    return DomainPackLoader(config_path=str(ROOT / "domains")).load_domain("plasticos")
+    return DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT)).load_domain("plasticos")
 
 
 def test_no_tensor_runtime_package() -> None:

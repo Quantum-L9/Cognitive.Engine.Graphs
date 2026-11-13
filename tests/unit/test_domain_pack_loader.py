@@ -27,6 +27,7 @@ from engine.config.loader import (
     DomainPackLoader,
     DomainSpecError,
 )
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 
 def _minimal_spec_yaml(domain_id: str) -> str:
@@ -79,11 +80,20 @@ class TestDomainPackLoaderInit:
         loader = DomainPackLoader(config_path=str(tmp_path))
         assert loader._base_path == tmp_path.resolve()
 
-    def test_init_from_env_var(self, tmp_path: Path) -> None:
-        """DomainPackLoader reads DOMAIN_SPECS_PATH env var."""
-        with patch.dict(os.environ, {"DOMAIN_SPECS_PATH": str(tmp_path)}):
-            loader = DomainPackLoader()
-            assert loader._base_path == tmp_path.resolve()
+    def test_init_from_env_var(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """DomainPackLoader reads DOMAINS_ROOT through Settings; the legacy DOMAIN_SPECS_PATH alias wins when set."""
+        import engine.config.loader as loader_mod
+        from engine.config.settings import Settings
+
+        monkeypatch.setenv("DOMAINS_ROOT", str(tmp_path))
+        monkeypatch.delenv("DOMAIN_SPECS_PATH", raising=False)
+        monkeypatch.setattr(loader_mod, "settings", Settings(_env_file=None))
+        assert DomainPackLoader()._base_path == tmp_path.resolve()
+
+        legacy = tmp_path / "legacy"
+        legacy.mkdir()
+        monkeypatch.setenv("DOMAIN_SPECS_PATH", str(legacy))
+        assert DomainPackLoader()._base_path == legacy.resolve()
 
     def test_init_default_path(self) -> None:
         """DomainPackLoader defaults to 'domains' when no path given."""
@@ -331,7 +341,7 @@ class TestInvalidate:
 # withhold the pack at admission instead of failing every match.
 # ============================================================================
 
-_REPO_DOMAINS = Path(__file__).resolve().parents[2] / "domains"
+_REPO_DOMAINS = DESIGN_PACKS_ROOT
 
 
 def _spec_with_dimensions(  # type: ignore[no-untyped-def]

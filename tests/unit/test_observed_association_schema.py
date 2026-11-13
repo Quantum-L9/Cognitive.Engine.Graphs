@@ -46,7 +46,7 @@ from engine.sync.generator import (
     relationship_precheck_query,
     resolve_relationship_declaration,
 )
-from tests.fixtures.domain_contracts import SYNTHETIC_DOMAINS_ROOT
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT, SYNTHETIC_DOMAINS_ROOT
 
 pytestmark = pytest.mark.unit
 
@@ -365,7 +365,7 @@ async def test_a_node_sync_outside_the_namespace_is_refused_before_any_graph_wri
 
 
 def _shipped_specs() -> list[Path]:
-    return sorted([*REPO_ROOT.glob("domains/*/spec.yaml"), *SYNTHETIC_DOMAINS_ROOT.glob("*/spec.yaml")])
+    return sorted([*DESIGN_PACKS_ROOT.glob("*/spec.yaml"), *SYNTHETIC_DOMAINS_ROOT.glob("*/spec.yaml")])
 
 
 def test_shipped_specs_still_validate_and_declare_no_mapping() -> None:

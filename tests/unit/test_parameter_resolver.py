@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import pytest
 
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
+
 pytestmark = pytest.mark.unit
 
 
@@ -18,7 +20,7 @@ def plasticos_spec():
     """Load plasticos spec, skip if not loadable."""
     from engine.config.loader import DomainPackLoader
 
-    loader = DomainPackLoader()
+    loader = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT))
     try:
         return loader.load_domain("plasticos")
     except Exception:
@@ -69,12 +71,11 @@ def test_input_not_mutated(plasticos_spec):
 
 
 def _freight_spec_with_defaulted_derivation():
-    from pathlib import Path
 
     from engine.config.loader import DomainPackLoader
     from engine.config.schema import DerivedParameterSpec, QueryFieldSpec
 
-    domains = Path(__file__).resolve().parents[2] / "domains"
+    domains = DESIGN_PACKS_ROOT
     base = DomainPackLoader(config_path=str(domains)).load_domain("freight-matching")
     qs = base.queryschema.model_copy(
         update={"fields": [*base.queryschema.fields, QueryFieldSpec(name="r1a_budget", type="float", default=100.0)]}

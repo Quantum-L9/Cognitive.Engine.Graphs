@@ -13,10 +13,10 @@ No matching logic is hardcoded in the engine.
 `DomainPackLoader` resolves **exactly one** path:
 
 ```
-domains/<domain_id>/spec.yaml
+tests/fixtures/design_packs/<domain_id>/spec.yaml
 ```
 
-The flat `domains/<name>_domain_spec.yaml` files are **not loadable**. They are
+The flat `tests/fixtures/design_packs/<name>_domain_spec.yaml` files are **not loadable**. They are
 reference drafts. `DomainPackLoader.list_domains()` returns only directories
 whose packs pass native admission. Inspect the current list rather than assuming
 an inventory from this guide. Putting a new spec at
@@ -27,12 +27,12 @@ Symlinked `spec.yaml` files are rejected by the loader.
 
 ## Steps
 
-1. **Confirm the domain ID is unused**: no `domains/<domain_id>/` directory yet.
+1. **Confirm the domain ID is unused**: no `tests/fixtures/design_packs/<domain_id>/` directory yet.
 2. **Read the schema**: `engine/config/schema.py` defines every spec type.
-3. **Read a working example**: `domains/plasticos/spec.yaml` is the graph-owned
+3. **Read a working example**: `tests/fixtures/design_packs/plasticos/spec.yaml` is the graph-owned
    specimen. Validate it under the current admission flags; do not assume every
    repository example is admitted or that it is EIE's enrichment artifact.
-4. **Create `domains/<domain_id>/spec.yaml`** with these sections:
+4. **Create `tests/fixtures/design_packs/<domain_id>/spec.yaml`** with these sections:
    - `domain` — `id`, `name`, `version` (quoted, see Versioning below)
    - `ontology` — node types, edge types, property declarations
    - `matchentities` — source/candidate entity definitions, as the model declares
@@ -44,7 +44,7 @@ Symlinked `spec.yaml` files are rejected by the loader.
    - `compliance` — PII fields and handling mode, if applicable
 5. **Validate**:
    ```bash
-   python tools/validate_domain.py domains/<domain_id>/spec.yaml --strict
+   python tools/validate_domain.py tests/fixtures/design_packs/<domain_id>/spec.yaml --strict
    ```
    Add `--json` for CI-parseable output.
 6. **Confirm the loader sees it**:
@@ -106,7 +106,7 @@ migration or changes to native model meaning.
 
 ## Validation checklist
 
-- [ ] Spec lives at `domains/<domain_id>/spec.yaml`
+- [ ] Spec lives at `tests/fixtures/design_packs/<domain_id>/spec.yaml`
 - [ ] `list_domains()` includes the new domain
 - [ ] Edge `from`/`to` types reference declared node types
 - [ ] Gate field references match declared node properties

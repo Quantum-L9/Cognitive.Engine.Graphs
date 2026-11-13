@@ -22,6 +22,7 @@ import yaml
 
 from engine.config import loader as owner
 from engine.config.settings import Settings
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 from tests.unit.test_domain_pack_loader import _minimal_spec_yaml
 from tools.validate_domain import validate_spec
 
@@ -89,8 +90,8 @@ def test_cli_loader_same_withholding_reason(tmp_path: Path) -> None:
 
 def test_cli_uses_per_direction_weight_semantics(tmp_path: Path) -> None:
     # PlasticOS is a multi-direction fixture; summing all directions is incorrect.
-    path = REPO / "domains" / "plasticos" / "spec.yaml"
-    assert owner.DomainPackLoader(str(REPO / "domains")).load_domain("plasticos").domain.version == "1.4.0"
+    path = DESIGN_PACKS_ROOT / "plasticos" / "spec.yaml"
+    assert owner.DomainPackLoader(str(DESIGN_PACKS_ROOT)).load_domain("plasticos").domain.version == "1.4.0"
     assert validate_spec(path)[1] == 0
 
 
@@ -118,7 +119,7 @@ def test_approval_defaults_are_off() -> None:
     assert Settings(_env_file=None).domain_production_stage_required is False
 
 
-@pytest.mark.parametrize("root_setting", ["config_path", "DOMAIN_SPECS_PATH"])
+@pytest.mark.parametrize("root_setting", ["config_path", "DOMAINS_ROOT"])
 def test_legacy_loader_accepts_authorized_symlink_ancestor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, root_setting: str
 ) -> None:
@@ -130,7 +131,7 @@ def test_legacy_loader_accepts_authorized_symlink_ancestor(
     if root_setting == "config_path":
         loader = owner.DomainPackLoader(str(root))
     else:
-        monkeypatch.setenv("DOMAIN_SPECS_PATH", str(root))
+        monkeypatch.setattr(owner.settings, "domains_root", root)
         loader = owner.DomainPackLoader()
     assert loader.load_domain("acme").domain.version == "1.0.0-reviewed"
     assert loader._resolve_spec_path("acme") == path.resolve()
@@ -138,7 +139,7 @@ def test_legacy_loader_accepts_authorized_symlink_ancestor(
     assert path.read_bytes() == draft()
 
 
-@pytest.mark.parametrize("root_setting", ["config_path", "DOMAIN_SPECS_PATH"])
+@pytest.mark.parametrize("root_setting", ["config_path", "DOMAINS_ROOT"])
 def test_receipt_loader_accepts_real_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, root_setting: str) -> None:
     root, digest = receipt_layout(tmp_path)
     monkeypatch.setattr(owner.settings, "domain_pack_receipts_enabled", True)
@@ -146,7 +147,7 @@ def test_receipt_loader_accepts_real_layout(tmp_path: Path, monkeypatch: pytest.
     if root_setting == "config_path":
         loader = owner.DomainPackLoader(str(root))
     else:
-        monkeypatch.setenv("DOMAIN_SPECS_PATH", str(root))
+        monkeypatch.setattr(owner.settings, "domains_root", root)
         loader = owner.DomainPackLoader()
     assert loader.load_domain("acme").domain.version == "1.0.0-reviewed"
     assert loader.list_domains() == ["acme"]
@@ -156,7 +157,7 @@ def test_receipt_loader_accepts_real_layout(tmp_path: Path, monkeypatch: pytest.
     assert (root / "acme" / "revisions" / digest / "spec.yaml").read_bytes() == draft()
 
 
-@pytest.mark.parametrize("root_setting", ["config_path", "DOMAIN_SPECS_PATH"])
+@pytest.mark.parametrize("root_setting", ["config_path", "DOMAINS_ROOT"])
 def test_receipt_loader_refuses_authorized_symlink_ancestor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, root_setting: str
 ) -> None:
@@ -169,7 +170,7 @@ def test_receipt_loader_refuses_authorized_symlink_ancestor(
     if root_setting == "config_path":
         loader = owner.DomainPackLoader(str(root))
     else:
-        monkeypatch.setenv("DOMAIN_SPECS_PATH", str(root))
+        monkeypatch.setattr(owner.settings, "domains_root", root)
         loader = owner.DomainPackLoader()
     with pytest.raises(owner.DomainSpecError, match="symlink"):
         loader.load_domain("acme")
@@ -213,8 +214,8 @@ def test_runtime_stage_flag_parity(
 
 
 def test_native_fixture_aliases_and_all_loader_cli_verdicts_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
-    loader = owner.DomainPackLoader(str(REPO / "domains"))
-    for path in sorted((REPO / "domains").glob("*/spec.yaml")):
+    loader = owner.DomainPackLoader(str(DESIGN_PACKS_ROOT))
+    for path in sorted(DESIGN_PACKS_ROOT.glob("*/spec.yaml")):
         before = hashlib.sha256(path.read_bytes()).hexdigest()
         results, code = validate_spec(path)
         try:
