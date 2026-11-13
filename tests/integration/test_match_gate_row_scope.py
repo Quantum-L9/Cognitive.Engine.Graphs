@@ -12,41 +12,37 @@ status: active
 RU-011 / CEG-COR-033 (RG-014): a gate-failing candidate is excluded even when
 the final traversal step is ``required: false``.
 
-Uses a copy of the plasticos pack with a trailing optional PROCESSES step. The
-served pack constrains polymers with an EXISTS gate since RU-040 (CEG-COR-013),
-so the step is added back here and both facilities process the requested
-polymer. Without the ``WITH *`` row boundary the contamination gate binds to the
-OPTIONAL MATCH and the failing facility is returned with a null polymer.
+Runs on the synthetic orbital-logistics pack (ADR-112 Stage 4, A16) with a
+trailing optional SERVES_ORBIT step, and both depots serve the orbit. Without
+the ``WITH *`` row boundary the pack's port gate binds to the OPTIONAL MATCH
+and the failing depot is returned with a null orbit.
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
 
 from engine.config.schema import TraversalStepSpec
+from tests.fixtures.orbital_match import DIRECTION, ORBITAL, depot, serve
 
 pytestmark = pytest.mark.integration
 
 SEED_CYPHER = """
 UNWIND $batch AS row
-MERGE (n:Facility {facility_id: row.facility_id})
+MERGE (n:OrbitalDepot {depot_id: row.depot_id})
 SET n += row
 WITH n
-MERGE (p:PolymerFamily {code: 'PET'})
-MERGE (n)-[:PROCESSES]->(p)
+MERGE (o:OrbitClass {class_code: 'LEO'})
+MERGE (n)-[:SERVES_ORBIT]->(o)
 """
-
-DIRECTION = "supply_opportunity_to_buyer_facility"
 
 
 def _optional_last_step(spec):
     from engine.config.schema import TraversalSpec
 
     step = TraversalStepSpec(
-        name="polymer_capability",
-        pattern="(candidate:Facility)-[:PROCESSES]->(polymer:PolymerFamily)",
+        name="orbit_service",
+        pattern="(candidate:OrbitalDepot)-[:SERVES_ORBIT]->(orbit:OrbitClass)",
         required=False,
         matchdirections=[DIRECTION],
     )
@@ -55,34 +51,22 @@ def _optional_last_step(spec):
 
 @pytest.mark.asyncio
 async def test_gate_failing_candidate_excluded_with_optional_last_step(
-    engine_deps, graph_driver, domain_loader, clean_db
+    engine_deps, graph_driver, domain_spec, clean_db
 ):
-    from engine.handlers import handle_match, init_dependencies
+    from engine.handlers import handle_match
 
-    spec = _optional_last_step(domain_loader.load_domain("plasticos"))
-    loader = MagicMock()
-    loader.load_domain.return_value = spec
-    init_dependencies(graph_driver, loader)
+    serve(graph_driver, _optional_last_step(domain_spec))
 
     await graph_driver.execute_write(
         cypher=SEED_CYPHER,
-        parameters={
-            "batch": [
-                {"facility_id": "f_pass", "name": "Pass", "contamination_tolerance": 0.10},
-                {"facility_id": "f_fail", "name": "Fail", "contamination_tolerance": 0.01},
-            ]
-        },
-        database="plasticos",
+        parameters={"batch": [depot("d_pass", docking_ports=6), depot("d_fail", docking_ports=1)]},
+        database=ORBITAL,
     )
 
     result = await handle_match(
-        "plasticos",
-        {
-            "query": {"polymer_type": "PET", "contamination_pct": 0.05},
-            "match_direction": DIRECTION,
-            "top_n": 10,
-        },
+        ORBITAL,
+        {"query": {"min_ports": 4}, "match_direction": DIRECTION, "top_n": 10},
     )
-    ids = {c["candidate"].get("facility_id") for c in result["candidates"]}
-    assert "f_fail" not in ids
-    assert "f_pass" in ids
+    ids = {c["candidate"].get("depot_id") for c in result["candidates"]}
+    assert "d_fail" not in ids
+    assert "d_pass" in ids
