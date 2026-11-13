@@ -293,7 +293,7 @@ def test_security_gap_is_explicit_not_relabelled_ready() -> None:
     assert r["inconsistency"]["status"] == "source_remediated_local"
     statuses = {item["id"]: item["status"] for item in r["additional_inconsistencies"]}
     assert statuses["AUTH-CAPSET-02"] == "source_remediated_local"
-    assert statuses["AUTH-DELEGATE-04"] == "source_remediated_local"
+    assert statuses["AUTH-DELEGATE-04"] == "verified_local"
     assert statuses["AUTH-GATE-03"] == "unverified"
 
 

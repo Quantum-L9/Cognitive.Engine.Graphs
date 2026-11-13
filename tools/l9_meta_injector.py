@@ -376,6 +376,13 @@ FILE_REGISTRY: list[FileMeta] = [
         "engine-team",
     ),
     FileMeta(
+        "tests/unit/test_capability_root_registration.py",
+        "engine-specific",
+        ["test"],
+        ["test", "unit", "capability", "auth"],
+        "engine-team",
+    ),
+    FileMeta(
         "tests/unit/test_capability_tenant_binding.py",
         "engine-specific",
         ["test"],

@@ -127,12 +127,16 @@ additional_inconsistencies:
   source: engine/handlers.py:handle_admin delegate_capability branch
   mechanism: Delegation now requires source_tenant to equal the packet tenant and an existing active registered parent whose actions and domain scope cover the child. Payload input cannot synthesize a root.
   required_disposition: source_remediated_local; bind root registration and caller identity to canonical ingress for operational closure
-  status: source_remediated_local
+  status: verified_local
+  evidence: tests/unit/test_capability_root_registration.py (no module under engine/ or chassis/ calls register on a capability validator, constructs a Capability, or writes the validator _registry; only engine/auth/capabilities.py can, and derive_capability only narrows a registered parent); tests/unit/test_wave3_capabilities.py::TestDelegatedCapabilityAuthorization (source_tenant must equal the packet tenant)
+  operational_note: No production ingress registers a root, so the validator registry starts empty and delegate_capability is refused in production until a root-issuance path is designed and admitted. That is closure by absence, not admission; root_delegation_has_been_safely_admitted_by_canonical_ingress stays in must_not_claim.
 gate_dependency:
-  main: cfeb81fa4d11eb8c106314fa27310f660a1dfad7
-  pr29: open_at_inspection
-  pr31: open_at_inspection
-  health_assess_canonical_ownership_on_main: not_proven
+  main: ab8fb674e65f2cafe4172178c1ce6de18b4bb0f4
+  inspected_at: '2026-11-11'
+  pr29: merged 2026-11-02 as 8fcfe176e4b55f21dc852ecebd30a288783a279a (ancestor of main)
+  pr31: merged 2026-11-02 as 7ba9ec9779ab2feb2ec6b1a6b9835127c119dcae (ancestor of main)
+  health_assess_canonical_ownership_on_main: declared (constellation_gate/routing/action_ownership.py CANONICAL_ACTION_OWNERS health-assess -> ceg); test evidence pending Quantum-L9/Constellation.Gate#38
+  caller_policy_matrix: Quantum-L9/Constellation.Gate#38 (tests/boundary/test_ceg_caller_policy_matrix.py), not yet on Gate main
 policy_authority_boundary:
   observed_permissions: engine/auth/capabilities.py only; not proof of suitable Gate policy
   desired_policy: proposed_pending_canonical_owner_approval
