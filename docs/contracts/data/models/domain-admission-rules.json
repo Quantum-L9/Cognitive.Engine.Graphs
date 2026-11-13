@@ -849,6 +849,33 @@
       "existing_proof": []
     },
     {
+      "id": "ADM-DEFECT-SCORING-METADATA",
+      "stage": "withholding",
+      "statement": "Every preference_attention scoring dimension declares metadata.success_value, the outcome value the domain counts as success (the engine has no default).",
+      "enforced_by": [
+        "engine/config/loader.py::admission_defects",
+        "engine/config/outcome_vocabulary.py::undeclared_success_value_dimensions",
+        "engine/config/outcome_vocabulary.py::scoring_metadata_defects"
+      ],
+      "enforced_when": "settings.preference_attention_metadata_required_enabled (default on); off, the dimension is refused by the scoring compiler instead (ADM-DEFECT-SCORING-COMPILES)",
+      "validator": {
+        "check": "native-admission",
+        "status": "FAIL",
+        "exit_code": 1,
+        "error_class": "DomainNotFoundError",
+        "message_pattern": "is withheld: \\d+ admission defect\\(s\\).*undeclared scoring metadata: "
+      },
+      "runtime": {
+        "default_loader": "refused",
+        "receipt_loader": "refused",
+        "operator_override": "UNVALIDATED_DOMAIN_PACKS_ENABLED"
+      },
+      "existing_proof": [
+        "tests/unit/test_scoring_dimension_metadata.py::test_missing_success_value_is_withheld_with_the_named_defect",
+        "tests/unit/test_scoring_dimension_metadata.py::test_flag_off_admits_the_pack_and_the_compiler_refuses_at_match_time"
+      ]
+    },
+    {
       "id": "ADM-DEFECT-GATE-STRICTWHEN",
       "stage": "withholding",
       "statement": "No gate declares strictwhen (no compiler consumes it).",
