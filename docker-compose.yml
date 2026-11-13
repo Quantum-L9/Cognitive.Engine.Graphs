@@ -106,7 +106,9 @@ services:
     volumes:
       # Hot-reload: mount source code so changes reflect without rebuild
       - ./engine:/app/engine:ro
-      - ./domains:/app/domains:ro
+      # Dev pack root (#400): the repository's design packs by default; point
+      # CEG_DOMAINS_DIR at another directory to serve different packs.
+      - ${CEG_DOMAINS_DIR:-./tests/fixtures/design_packs}:/app/domains:ro
     # CEG-007: redis was a depends_on: service_healthy here, so the api service
     # could not start without a Redis nothing imports.
     depends_on:
