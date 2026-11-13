@@ -868,7 +868,13 @@ FILE_REGISTRY: list[FileMeta] = [
         ["semgrep", "rules", "fixtures"],
         "platform",
     ),
-    FileMeta("domains/_template.yaml", "domain-specific", ["config"], ["domains", "template"], "domain-team"),
+    FileMeta(
+        "tests/fixtures/design_packs/_template.yaml",
+        "domain-specific",
+        ["config"],
+        ["domains", "template"],
+        "domain-team",
+    ),
     FileMeta(
         "docs/archive/plasticos/plasticos_domain_spec.yaml",
         "domain-specific",
@@ -876,7 +882,13 @@ FILE_REGISTRY: list[FileMeta] = [
         ["domains", "plasticos"],
         "domain-team",
     ),
-    FileMeta("domains/plasticos/spec.yaml", "domain-specific", ["config"], ["domains", "plasticos"], "domain-team"),
+    FileMeta(
+        "tests/fixtures/design_packs/plasticos/spec.yaml",
+        "domain-specific",
+        ["config"],
+        ["domains", "plasticos"],
+        "domain-team",
+    ),
     FileMeta("chassis/__init__.py", "chassis", ["api"], ["chassis"], "platform-team"),
     FileMeta("chassis/actions.py", "chassis", ["api"], ["chassis", "actions"], "platform-team"),
     FileMeta("chassis/audit.py", "chassis", ["api"], ["chassis", "audit"], "platform-team"),
@@ -916,8 +928,16 @@ FILE_REGISTRY: list[FileMeta] = [
     # =========================================================================
     # DOMAIN-SPECIFIC FILES  (origin: domain-specific, owner: domain-team)
     # =========================================================================
-    FileMeta("domains/README.md", "domain-specific", ["config"], ["domains", "docs"], "domain-team"),
-    FileMeta("domains/TESTING_GUIDE.md", "domain-specific", ["test"], ["domains", "testing", "guide"], "domain-team"),
+    FileMeta(
+        "tests/fixtures/design_packs/README.md", "domain-specific", ["config"], ["domains", "docs"], "domain-team"
+    ),
+    FileMeta(
+        "tests/fixtures/design_packs/TESTING_GUIDE.md",
+        "domain-specific",
+        ["test"],
+        ["domains", "testing", "guide"],
+        "domain-team",
+    ),
     # =========================================================================
     # RE-HEADERED FROM SCHEMA v2 (RU-131, DEC-49 option B: v1 is the only schema)
     # Values are the file's v2 header values plus the v1 `owner` field;

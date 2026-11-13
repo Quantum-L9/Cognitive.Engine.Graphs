@@ -48,7 +48,7 @@ REDIS_URL=redis://localhost:6379/0
 # API
 API_PORT=8000
 API_WORKERS=2
-DOMAINS_ROOT=./domains
+DOMAINS_ROOT=./tests/fixtures/design_packs
 LOG_LEVEL=DEBUG
 GDS_ENABLED=true
 CORS_ORIGINS=*

@@ -36,7 +36,7 @@ contracts_to_read:
 - Test happy path + invalid payload
 
 ### FIXTURE_BROKEN
-- Replace `Path("./domains")` with `Path(__file__).parent.parent / "domains"`
+- Replace `Path("./domains")` with `DESIGN_PACKS_ROOT` from `tests/fixtures/domain_contracts.py`
 - Verify fixture instantiates correctly
 
 ## Acceptance

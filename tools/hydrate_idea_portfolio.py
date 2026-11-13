@@ -90,7 +90,7 @@ async def _apply(envelope: IdeaPortfolioHydrationEnvelope) -> dict[str, object]:
     # generic loader admission policy withholds it unless the operator opted in
     # with DORMANT_DOMAIN_PACKS_ENABLED=true. Hydration must not outrun that.
     try:
-        spec = DomainPackLoader(config_path=str(ROOT / "domains")).load_domain(DOMAIN_ID)
+        spec = DomainPackLoader(config_path=str(ROOT / "tests" / "fixtures" / "design_packs")).load_domain(DOMAIN_ID)
     except DomainNotFoundError as exc:
         raise IdeaPortfolioHydrationError(f"idea-portfolio hydration is disabled by configuration: {exc}") from exc
     driver = GraphDriver()

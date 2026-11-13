@@ -202,6 +202,6 @@ class TestQualityAuditor(BaseAuditor):
                     message=msg,
                     file=rel,
                     line=ln,
-                    fix_hint='Use Path(__file__).parent.parent / "domains"',
+                    fix_hint="Use DESIGN_PACKS_ROOT from tests/fixtures/domain_contracts.py",
                 )
         return c
