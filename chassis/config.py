@@ -72,11 +72,18 @@ class YAMLDomainLoader(BaseDomainLoader):
     Reusable across any engine that stores domain specs as YAML.
 
     Layout expected:
-        domains/{domain_id}/spec.yaml
+        <config_path>/{domain_id}/spec.yaml
+
+    The chassis names no pack directory of its own (issue #400 A5): the root is
+    the argument, or the legacy DOMAIN_SPECS_PATH variable this loader read
+    before #400. With neither, construction is refused.
     """
 
-    def __init__(self, config_path: str | None = None) -> None:
-        raw = config_path or os.getenv("DOMAIN_SPECS_PATH", "domains")
+    def __init__(self, config_path: str | Path | None = None) -> None:
+        raw = config_path or os.getenv("DOMAIN_SPECS_PATH")
+        if not raw:
+            msg = "YAMLDomainLoader needs a pack root: pass config_path or set DOMAIN_SPECS_PATH"
+            raise ValueError(msg)
         self._base_path = Path(raw).resolve()
         self._cache: dict[str, tuple[dict[str, Any], float]] = {}
 

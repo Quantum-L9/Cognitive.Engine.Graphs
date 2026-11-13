@@ -96,7 +96,6 @@ def compile_intake(
     business_profile: str,
     spec: DomainSpec,
     *,
-    domains_dir: str = "domains",
     fuzzy_threshold: float = 0.6,
     vertical_keywords: Mapping[str, str] | None = None,
     derivation_graph: DerivationGraph | None = None,
@@ -118,8 +117,6 @@ def compile_intake(
         Free-text business description.
     spec:
         Target DomainSpec to compile against.
-    domains_dir:
-        Path to domains directory for vertical lookups.
     fuzzy_threshold:
         Minimum score for fuzzy field matching.
     vertical_keywords:
@@ -154,9 +151,7 @@ def compile_intake(
     scoring_weights = _scoring_weight_map(spec)
 
     # Phase 2: Vertical discovery (vertical_standard) — keyword table is the caller's
-    vertical = discover_vertical_fields(
-        business_profile, spec=spec, domains_dir=domains_dir, vertical_keywords=vertical_keywords
-    )
+    vertical = discover_vertical_fields(business_profile, spec=spec, vertical_keywords=vertical_keywords)
     vertical_additions: list[FieldMapping] = []
     for field_name in vertical.vertical_fields:
         if field_name not in matched_names:
