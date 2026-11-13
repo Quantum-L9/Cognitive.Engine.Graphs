@@ -1,0 +1,150 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: engine-specific
+# engine: graph
+# layer: [test]
+# tags: [test, architecture, domain-neutrality, vocabulary-guard]
+# owner: engine-team
+# status: active
+# --- /L9_META ---
+#
+# Product vocabulary that already exists in the core (engine/, chassis/) and is
+# tolerated until its owner removes it. Read by
+# tests/architecture/test_core_vocabulary_guard.py (ADR-112 Stage 3).
+#
+# This file only shrinks. When an occurrence is removed, lower its count or
+# delete the entry (the guard fails until you do). Never add an entry or raise
+# a count to make the guard pass: take the vocabulary from the domain spec.
+# Entries are sorted by (file, term); every reason is one line.
+
+schema: l9.ceg.core_vocabulary_baseline.v1
+
+entries:
+  - file: engine/causal/counterfactual.py
+    term: TransactionOutcome
+    count: 2
+    reason: "C-21 flag-off rollback literal in _label() and its comment; kept by owner decision (closure items 6 and 10)"
+  - file: engine/causal/edge_taxonomy.py
+    term: RESULTED_IN
+    count: 3
+    reason: "CausalEdgeType member; ADR-112 defers the outcome edge type (documented as system vocabulary in graph-schema.yaml)"
+  - file: engine/causal/identity.py
+    term: plasticos
+    count: 1
+    reason: "docstring naming the former entity_id default as a PlasticOS convention; provenance prose, no behaviour"
+  - file: engine/config/outcome_vocabulary.py
+    term: TransactionOutcome
+    count: 1
+    reason: "_LEGACY_OUTCOME_NODE_LABEL, the outcome_vocabulary_required_enabled flag-off rollback (closure item 5)"
+  - file: engine/config/schema.py
+    term: RESULTED_IN
+    count: 1
+    reason: "FeedbackLoopSpec.outcome_edge_type default; the edge-type half of A09 is deferred by ADR-112"
+  - file: engine/config/schema.py
+    term: roofing-company
+    count: 1
+    reason: "docstring example of a vertical that is not a tenant; prose only"
+  - file: engine/config/settings.py
+    term: EXCLUDED_FROM
+    count: 1
+    reason: "comment recording the default that declared_structural_properties_required_enabled retired (closure item 8)"
+  - file: engine/config/settings.py
+    term: RESULTED_IN
+    count: 2
+    reason: "flag comments describing the deferred outcome edge (ADR-112, A09)"
+  - file: engine/config/settings.py
+    term: TransactionOutcome
+    count: 1
+    reason: "flag comment recording the formerly hardcoded outcome label (closure item 6)"
+  - file: engine/config/settings.py
+    term: communityId
+    count: 1
+    reason: "comment recording the retired Louvain write default (closure item 8)"
+  - file: engine/config/settings.py
+    term: community_id
+    count: 3
+    reason: "flag comments recording the retired community default and its C-21 rollback (closure items 7 and 8)"
+  - file: engine/config/settings.py
+    term: freight-matching
+    count: 1
+    reason: "operator-decision comment naming the pack a flag default protects; prose only"
+  - file: engine/config/settings.py
+    term: melt-flow
+    count: 1
+    reason: "Stage 2 R10 comment listing the removed settings; provenance prose"
+  - file: engine/config/settings.py
+    term: mortgage-brokerage
+    count: 2
+    reason: "operator-decision comments naming the pack two flag defaults protect; prose only"
+  - file: engine/config/settings.py
+    term: plasticos
+    count: 1
+    reason: "flag comment naming the former entity_id default as a PlasticOS convention; prose only"
+  - file: engine/config/structural_vocabulary.py
+    term: EXCLUDED_FROM
+    count: 2
+    reason: "flag-off rollback table of former structural defaults and its docstring (closure item 8)"
+  - file: engine/config/structural_vocabulary.py
+    term: communityId
+    count: 2
+    reason: "flag-off rollback table of former structural defaults and its docstring (closure item 8)"
+  - file: engine/config/structural_vocabulary.py
+    term: community_id
+    count: 2
+    reason: "flag-off rollback table of former structural defaults and its docstring (closure item 8)"
+  - file: engine/handlers.py
+    term: RESULTED_IN
+    count: 12
+    reason: "outcome write path and causal validation; honouring feedbackloop.outcome_edge_type is deferred by ADR-112 (A09)"
+  - file: engine/handlers.py
+    term: plasticos
+    count: 1
+    reason: "docstring naming the former entity_id default as a PlasticOS convention; prose only"
+  - file: engine/inference_rule_registry.py
+    term: melt-flow
+    count: 1
+    reason: "comment recording the removed plastics rules (A02); provenance prose"
+  - file: engine/inference_rule_registry.py
+    term: plasticos
+    count: 1
+    reason: "comment recording the removed plastics rules as PlasticOS-owned (A02); provenance prose"
+  - file: engine/intake/intake_compiler.py
+    term: contamination-tolerance
+    count: 1
+    reason: "comment giving an example of a caller-supplied derivation recipe (A06); prose only"
+  - file: engine/replay/__init__.py
+    term: odoo
+    count: 4
+    reason: "re-export of ODOO_INPUT_SCHEMA, a registered producer schema id (ADR-112 item 7, A12)"
+  - file: engine/replay/outcome.py
+    term: odoo
+    count: 6
+    reason: "ODOO_INPUT_SCHEMA, the one registered producer entry in ACCEPTED_INPUT_SCHEMAS (ADR-112 item 7, A12)"
+  - file: engine/resolution/similarity.py
+    term: RESULTED_IN
+    count: 4
+    reason: "behavioural-similarity Cypher hardcodes the outcome edge; not closed by Stage 2 (edge type deferred, A09)"
+  - file: engine/resolution/similarity.py
+    term: TransactionOutcome
+    count: 6
+    reason: "behavioural-similarity Cypher and docstrings hardcode the outcome label; open neutrality gap not listed in the closure record"
+  - file: engine/scoring/assembler.py
+    term: community_id
+    count: 4
+    reason: "C-21 flag-off rollback defaults and community_bridge docstring examples (closure items 7 and 8)"
+  - file: engine/sync/idea_portfolio.py
+    term: idea-portfolio
+    count: 29
+    reason: "IdeaOS hydration module, including its file name; A05 is BLOCKED pending an external owner (ADR-112)"
+  - file: engine/sync/idea_portfolio.py
+    term: ideaos
+    count: 4
+    reason: "IdeaOS projection schema id and docstrings; A05 is BLOCKED pending an external owner (ADR-112)"
+  - file: engine/sync/projection.py
+    term: odoo
+    count: 1
+    reason: "docstring stating Odoo remains the authority for projections; prose only"
+  - file: engine/utils/security.py
+    term: healthcare-referral
+    count: 1
+    reason: "comment giving an example of a dashed domain id; prose only"

@@ -343,6 +343,21 @@ FILE_REGISTRY: list[FileMeta] = [
         ["test", "unit", "domain-neutrality", "acceptance"],
         "engine-team",
     ),
+    # ADR-112 Stage 3 core vocabulary guard: the test, its deny list and its baseline.
+    *[
+        FileMeta(
+            f"tests/architecture/{name}",
+            "engine-specific",
+            ["test"],
+            ["test", "architecture", "domain-neutrality", "vocabulary-guard"],
+            "engine-team",
+        )
+        for name in (
+            "test_core_vocabulary_guard.py",
+            "core_vocabulary_denylist.yaml",
+            "core_vocabulary_baseline.yaml",
+        )
+    ],
     FileMeta(
         "tests/unit/test_handlers_enrich_health.py",
         "engine-specific",
