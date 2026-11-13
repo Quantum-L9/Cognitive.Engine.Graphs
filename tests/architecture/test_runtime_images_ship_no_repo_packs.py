@@ -15,9 +15,8 @@ Runtime images contain no repository domain packs (#400 A1-A3, A6).
 Operator decision 2026-11-03: the packs kept in this repository are design and
 test material. They must not be a runtime dependency. Decision D1 (2026-11-13):
 a tenant spec reaches production through an operator-owned pack root mounted
-read-only. Which layout the loader reads there (folder-shaped spec.yaml, or the
-publisher's current.json + revisions) is DOMAIN_PACK_RECEIPTS_ENABLED, a
-separate operator authorization these guards do not decide.
+read-only, the directory tools/publish_domain_pack.py publishes into, read in
+receipt mode (DOMAIN_PACK_RECEIPTS_ENABLED, operator-authorized 2026-11-13).
 
 Static guards over Dockerfile, Dockerfile.prod, chassis/Dockerfile.chassis and
 docker-compose.prod.yml: no image copies a pack directory out of the build
@@ -80,6 +79,15 @@ def test_pack_copy_pattern_catches_the_shapes_it_replaced() -> None:
 
 def test_prod_serves_only_the_mounted_pack_root(api_service: dict[str, Any]) -> None:
     assert api_service["environment"]["DOMAINS_ROOT"] == PACK_MOUNT_TARGET
+
+
+def test_prod_reads_the_publisher_layout_from_the_mount(api_service: dict[str, Any]) -> None:
+    # The mount is the root tools/publish_domain_pack.py writes (current.json +
+    # revisions/). With receipt mode off the loader looks for <tenant>/spec.yaml,
+    # lists no published domain and still reports healthy.
+    assert api_service["environment"].get("DOMAIN_PACK_RECEIPTS_ENABLED") == "true"
+    # Receipt mode in production refuses a relative pack root at loader construction.
+    assert api_service["environment"]["DOMAINS_ROOT"].startswith("/")
 
 
 def test_prod_pack_root_is_a_required_read_only_operator_mount(api_service: dict[str, Any]) -> None:

@@ -86,16 +86,17 @@ services:
       # #400 A3: the image ships no packs. The engine serves only the
       # operator-owned pack root mounted read-only below.
       DOMAINS_ROOT: /app/domains
+      # Receipt mode (operator-authorized 2026-11-13): serve only packs published
+      # by tools/publish_domain_pack.py (<tenant>/current.json + revisions/),
+      # verified on every load. A hand-placed <tenant>/spec.yaml is not read.
+      DOMAIN_PACK_RECEIPTS_ENABLED: "true"
       KGE_ENABLED: "true"
       KGE_CONFIDENCE_THRESHOLD: "0.3"
       KGE_EMBEDDING_DIM: "300"
       PARETO_ENABLED: "true"
-    # #400 A3 / D1: operator-owned domain pack root, mounted read-only.
+    # #400 A3 / D1: operator-owned domain pack root (the directory
+    # tools/publish_domain_pack.py publishes into), mounted read-only.
     # Required, not defaulted: production never falls back to repository packs.
-    # DOMAIN_PACK_RECEIPTS_ENABLED is not set here, so the loader serves the
-    # folder layout <root>/<tenant>/spec.yaml. A root written by
-    # tools/publish_domain_pack.py (current.json + revisions/) is served only
-    # once an operator turns receipt mode on (docs/DEPLOYMENT.md).
     volumes:
       - ${CEG_DOMAINS_DIR:?CEG_DOMAINS_DIR must be set for production (absolute path of the operator-owned domain pack root)}:/app/domains:ro
     # CEG-007: redis was a depends_on: service_healthy here for a dependency
