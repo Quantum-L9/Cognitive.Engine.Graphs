@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from engine.config import loader as owner
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 from tests.unit.test_domain_pack_loader import _minimal_spec_yaml
 from tools.validate_domain import validate_spec
 
@@ -161,7 +162,7 @@ def test_native_fixture_complete_admission_and_disposable_review_candidate(
 ) -> None:
     from tools.publish_domain_pack import publish_pack
 
-    path = REPO / "domains" / tenant / "spec.yaml"
+    path = DESIGN_PACKS_ROOT / tenant / "spec.yaml"
     data = path.read_bytes()
     spec = owner.validate_native_bytes(data, tenant, complete=True)
     assert owner.admission_defects(spec, complete=True) == []

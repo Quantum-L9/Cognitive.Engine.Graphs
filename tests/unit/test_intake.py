@@ -47,6 +47,7 @@ from engine.intake.intake_schema import (
     IntakeResult,
 )
 from engine.intake.vertical_discovery import discover_vertical_fields
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 pytestmark = pytest.mark.unit
 
@@ -291,7 +292,7 @@ class TestIntakeCompiler:
 
         from engine.config.loader import DomainPackLoader
 
-        spec = DomainPackLoader().load_domain("plasticos")
+        spec = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT)).load_domain("plasticos")
         result = compile_intake(
             ["facility_id", "name"],
             "We are a plastics recycler",
@@ -466,7 +467,7 @@ class TestImpactReporter:
     def test_every_plasticos_property_name_is_full_coverage(self) -> None:
         from engine.config.loader import DomainPackLoader
 
-        spec = DomainPackLoader().load_domain("plasticos")
+        spec = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT)).load_domain("plasticos")
         names = sorted({p.name for n in spec.ontology.nodes for p in n.properties})
         mappings = [
             FieldMapping(

@@ -27,6 +27,8 @@ from typing import TYPE_CHECKING
 import pytest
 import yaml
 
+from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
+
 pytestmark = pytest.mark.unit
 
 if TYPE_CHECKING:
@@ -403,7 +405,7 @@ class TestContract12DomainSpecSourceOfTruth:
     def test_domain_pack_loader_exists(self):
         from engine.config.loader import DomainPackLoader
 
-        loader = DomainPackLoader(config_path=str(ROOT / "domains"))
+        loader = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT))
         assert loader is not None
 
 
