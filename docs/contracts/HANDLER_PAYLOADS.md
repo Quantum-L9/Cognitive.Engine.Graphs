@@ -198,6 +198,63 @@ Any other `subaction` raises `ValidationError` (`action="health-assess"`);
 nothing else `handle_admin` offers is reachable from this action.
 
 
+## enrich (CEG-ENRICH-GATE)
+
+CEG's local Cypher-property writer (`handle_enrich`). It is **not** a Gate
+route: Gate owns the action name `enrich` for EIE, `engine/spec.yaml` never
+advertises it, and no checked-in `L9_ALLOWED_ACTIONS` lists it. It is
+registered in `ACTION_HANDLERS`, so a deployment that allowlists `enrich`, or
+the dev-only legacy `/v1/execute` chassis, can still dispatch to it. It ships
+dormant behind `ENRICH_LOCAL_WRITER_ENABLED` (default `False`).
+
+```python
+class EnrichItem(BaseModel):
+    property: str  # sanitize_label(); refused if sync-owned or `_`-prefixed
+    expression: str  # _sanitize_expression() whitelist, see below
+
+
+class EnrichPayload(BaseModel):
+    entity_type: str  # node label; sanitize_label()
+    entity_ids: list[str] = []  # optional; filters on the label's declared id property ($entity_ids)
+    enrichments: list[EnrichItem] = []
+
+
+class EnrichResponse(BaseModel):
+    status: Literal["success"]
+    enriched_count: int
+    entity_type: str
+    tenant: str
+```
+
+Order of refusal, each before any Cypher runs:
+
+1. Flag off → `FeatureNotEnabled` (`flag="ENRICH_LOCAL_WRITER_ENABLED"`, HTTP
+   422). No spec load, no graph access, nothing written.
+2. Tenant allowlist (`_validate_tenant_access`) and the tenant's `enrich`
+   capability, unchanged.
+3. `entity_type` missing → `ValidationError`. Label and every property name go
+   through `sanitize_label()` (`ValueError` on anything outside
+   `[A-Za-z_][A-Za-z0-9_]*`).
+4. Each `expression` passes `_sanitize_expression()`: a literal, or an
+   expression built only from `n.<property>` reads, `$name` parameters, the
+   whitelisted scalar functions and arithmetic. Clause keywords (`CALL`,
+   `MATCH`, `SET`, `MERGE`, `DELETE`, ...), comments, `apoc`/`gds`/`dbms`/`db.`
+   and every character outside letters, digits, `_`, `+-*/%(),.$` and space
+   are refused, so an expression cannot add a clause, a map, a list, a label
+   or a second assignment. It is caller-supplied and is never pack-supplied.
+5. Any `_`-prefixed property (e.g. `_tenant`) → `ValidationError`.
+6. Any property the pack assigns to `sync` on the target label → `ValidationError`
+   naming the properties; one owned property refuses the whole call. Sync
+   ownership: for every node sync endpoint whose `targetnode` is the label, its
+   `idproperty`, every property the ontology declares on that node,
+   `fieldsupdated`, and its taxonomy and childsync row fields; and for every
+   childsync whose `targetnode` is the label, its `targetid` and every property
+   declared on that child node. A label no sync endpoint writes owns nothing.
+
+The write is a single `MATCH (n:<label>) [WHERE n.<id> IN $entity_ids] SET
+n.<prop> = <expr>, ...` on the tenant's own database (`domain_spec.domain.id`).
+
+
 ## Validation Pattern
 
 ```python

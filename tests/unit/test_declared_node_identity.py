@@ -139,7 +139,8 @@ class TestDeclaredNodeIdentity:
         assert f"MATCH (target:{label} {{{id_prop}: $target_id}})" in cypher
         assert "entity_id" not in cypher
 
-    async def test_enrich_by_ids_filters_declared_id(self, pack) -> None:
+    async def test_enrich_by_ids_filters_declared_id(self, pack, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(settings, "enrich_local_writer_enabled", True)  # CEG-ENRICH-GATE
         domain, label, id_prop, _ = pack
         driver = _wire(_load(domain), rows=[{"enriched_count": 2}])
         await handle_enrich(
@@ -173,6 +174,7 @@ class TestDeclaredNodeIdentity:
 
     async def test_flag_off_restores_entity_id_everywhere(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings, "spec_declared_candidate_id", False)
+        monkeypatch.setattr(settings, "enrich_local_writer_enabled", True)  # CEG-ENRICH-GATE
         spec = _load("plasticos")
         driver = _wire(spec, rows=[{"resolution_id": "res_x", "enriched_count": 1}])
         await handle_outcomes("plasticos", {"match_id": "m1", "candidate_id": "C-1", "outcome": "success"})
