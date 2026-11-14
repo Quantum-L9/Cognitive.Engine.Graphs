@@ -32,6 +32,13 @@ _INTERVENTION_ADD_DIMENSION = "add_scoring_dimension"
 _INTERVENTION_CHANGE_WEIGHT = "change_weight"
 _INTERVENTION_ADD_GATE = "add_gate"
 
+# SI-26: what a scenario's number measures and what it does not claim. A
+# scenario compares one negative outcome with a pool of positive outcomes; it
+# never runs the intervention, so the counterfactual outcome is untested.
+_SUPPORT_BASIS = "share_of_compared_positive_outcomes"
+_CLAIM_CO_OCCURRENCE = "co_occurrence"
+_OUTCOME_UNTESTED = "untested"
+
 
 class CounterfactualGenerator:
     """Generates CounterfactualScenario nodes for negative outcomes.
@@ -41,6 +48,8 @@ class CounterfactualGenerator:
     2. COMPARE: Find historical positive outcomes with similar configurations
     3. GENERATE: For each key difference, create a CounterfactualScenario node
     4. SCORE: Assign confidence based on how many winners share the factor
+       (SI-26, ``counterfactual_support_semantics_enabled``: that number is a
+       co-occurrence ``support``, not a confidence, and the outcome is untested)
     """
 
     def __init__(
@@ -85,7 +94,12 @@ class CounterfactualGenerator:
             logger.info("No similar positive outcomes for comparison")
             return []
 
-        scenarios = self._diff_fingerprints(
+        diff = (
+            self._diff_fingerprints_support
+            if settings.counterfactual_support_semantics_enabled
+            else self._diff_fingerprints
+        )
+        scenarios = diff(
             actual_fingerprint=fingerprint,
             positive_fingerprints=positive_fingerprints,
             outcome_node_id=outcome_node_id,
@@ -242,8 +256,69 @@ class CounterfactualGenerator:
 
         return scenarios[:max_scenarios]
 
+    def _diff_fingerprints_support(
+        self,
+        actual_fingerprint: dict[str, Any],
+        positive_fingerprints: list[dict[str, Any]],
+        outcome_node_id: str,
+    ) -> list[dict[str, Any]]:
+        """SI-26: the differences, labelled as co-occurrence support, not causal confidence.
+
+        ``support`` is the share of the compared positive outcomes that carry
+        the difference: for ``add_scoring_dimension`` the positives with the
+        dimension active, for ``change_weight`` the positives whose weight for
+        the dimension exceeds 1.5x the actual one (the legacy value counted
+        positives with the dimension active, whatever its weight). It is an
+        association between a configuration factor and success within the
+        compared pool; it does not estimate the effect of the intervention,
+        which is never run, so ``counterfactual_outcome`` is ``untested``.
+        ``spec.min_confidence`` is applied as the minimum support.
+        """
+        actual_dims = set(actual_fingerprint.get("active_dimensions") or [])
+        max_scenarios = self._spec.max_scenarios_per_outcome
+        min_support = self._spec.min_confidence
+        total_positives = len(positive_fingerprints)
+        if total_positives == 0:
+            return []
+
+        def scenario(intervention_type: str, key_difference: str, count: int) -> dict[str, Any]:
+            return {
+                "scenario_id": f"cf_{uuid.uuid4().hex[:12]}",
+                "actual_outcome": outcome_node_id,
+                "counterfactual_outcome": _OUTCOME_UNTESTED,
+                "intervention_type": intervention_type,
+                "support": round(count / total_positives, 4),
+                "support_count": count,
+                "compared_positives": total_positives,
+                "support_basis": _SUPPORT_BASIS,
+                "claim": _CLAIM_CO_OCCURRENCE,
+                "key_difference": key_difference,
+            }
+
+        candidates = [
+            (_INTERVENTION_ADD_DIMENSION, dim, count)
+            for dim, count in _by_support(_missing_dimension_counts(actual_dims, positive_fingerprints))
+        ]
+        candidates += [
+            (_INTERVENTION_CHANGE_WEIGHT, f"{dim}_weight_increase", count)
+            for dim, count in _by_support(
+                _heavier_weight_counts(actual_dims, actual_fingerprint, positive_fingerprints)
+            )
+        ]
+
+        scenarios: list[dict[str, Any]] = []
+        for intervention_type, key_difference, count in candidates:
+            if len(scenarios) >= max_scenarios:
+                break
+            if count / total_positives >= min_support:
+                scenarios.append(scenario(intervention_type, key_difference, count))
+        return scenarios
+
     async def _store_scenarios(self, scenarios: list[dict[str, Any]]) -> None:
         """Persist CounterfactualScenario nodes in Neo4j."""
+        if settings.counterfactual_support_semantics_enabled:
+            await self._store_support_scenarios(scenarios)
+            return
         cypher = """
         UNWIND $scenarios AS s
         CREATE (cs:CounterfactualScenario {
@@ -262,3 +337,64 @@ class CounterfactualGenerator:
             parameters={"scenarios": scenarios, "domain_id": self._db},
             database=self._db,
         )
+
+    async def _store_support_scenarios(self, scenarios: list[dict[str, Any]]) -> None:
+        """SI-26: persist scenarios with their support fields and no confidence property."""
+        cypher = """
+        UNWIND $scenarios AS s
+        CREATE (cs:CounterfactualScenario {
+            scenario_id: s.scenario_id,
+            actual_outcome: s.actual_outcome,
+            counterfactual_outcome: s.counterfactual_outcome,
+            intervention_type: s.intervention_type,
+            support: s.support,
+            support_count: s.support_count,
+            compared_positives: s.compared_positives,
+            support_basis: s.support_basis,
+            claim: s.claim,
+            key_difference: s.key_difference,
+            domain_id: $domain_id,
+            created_at: datetime()
+        })
+        """
+        await self._graph_driver.execute_query(
+            cypher=cypher,
+            parameters={"scenarios": scenarios, "domain_id": self._db},
+            database=self._db,
+        )
+
+
+def _by_support(counts: dict[str, int]) -> list[tuple[str, int]]:
+    """Dimensions by descending support count, ties by name."""
+    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+
+
+def _missing_dimension_counts(actual_dims: set[str], positive_fingerprints: list[dict[str, Any]]) -> dict[str, int]:
+    """SI-26: positives per dimension active there but not in the actual run."""
+    counts: dict[str, int] = {}
+    for pf in positive_fingerprints:
+        for dim in set(pf.get("active_dimensions") or []) - actual_dims:
+            counts[dim] = counts.get(dim, 0) + 1
+    return counts
+
+
+def _heavier_weight_counts(
+    actual_dims: set[str],
+    actual_fingerprint: dict[str, Any],
+    positive_fingerprints: list[dict[str, Any]],
+) -> dict[str, int]:
+    """SI-26: positives per active dimension weighted over 1.5x the actual weight."""
+    actual_weights = actual_fingerprint.get("dimension_weights") or {}
+    counts: dict[str, int] = {}
+    for pf in positive_fingerprints:
+        positive_weights = pf.get("dimension_weights") or {}
+        for dim in actual_dims:
+            actual_w = actual_weights.get(dim)
+            positive_w = positive_weights.get(dim)
+            if (
+                isinstance(actual_w, (int, float))
+                and isinstance(positive_w, (int, float))
+                and positive_w > actual_w * 1.5
+            ):
+                counts[dim] = counts.get(dim, 0) + 1
+    return counts

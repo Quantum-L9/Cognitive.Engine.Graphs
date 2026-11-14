@@ -85,6 +85,87 @@ class CalibrationReport:
 
 
 DRIFT_KS_THRESHOLD = 0.2
+DRIFT_MEAN_THRESHOLD = 0.05
+
+# SI-29: the claims the engine's drift detectors answer. One signal per claim.
+SIGNAL_SCORE_DISTRIBUTION = "score_distribution"
+SIGNAL_OUTCOME_DIMENSION_MIX = "outcome_dimension_mix"
+STATUS_COMPUTED = "computed"
+STATUS_INSUFFICIENT_DATA = "insufficient_data"
+
+
+@dataclass(frozen=True)
+class ScoreDriftSignal:
+    """SI-29: the canonical answer to "did the score distribution shift between two samples?".
+
+    ``status`` is ``insufficient_data`` when either sample is empty: no
+    comparison was made, so ``drift_detected`` is ``False`` and the
+    statistics are 0.0 — an absent sample is not evidence of drift.
+    """
+
+    signal: str
+    status: str
+    drift_detected: bool
+    delta_mean: float
+    ks_statistic: float
+    baseline_mean: float
+    current_mean: float
+    baseline_count: int
+    current_count: int
+    mean_threshold: float
+    ks_threshold: float
+
+
+def score_distribution_drift(
+    baseline_scores: list[float],
+    current_scores: list[float],
+    mean_threshold: float = DRIFT_MEAN_THRESHOLD,
+    ks_threshold: float = DRIFT_KS_THRESHOLD,
+) -> ScoreDriftSignal:
+    """SI-29: canonical score-distribution drift (two-sample KS statistic and mean shift).
+
+    Drift is detected when ``|mean(current) - mean(baseline)| > mean_threshold``
+    or the two-sample Kolmogorov-Smirnov statistic ``max |CDF_b - CDF_c|``
+    exceeds ``ks_threshold``. It measures score values only; which scoring
+    dimensions outcomes used is a different claim
+    (``engine.feedback.drift_detector.DriftDetector``).
+    """
+    if not baseline_scores or not current_scores:
+        return ScoreDriftSignal(
+            signal=SIGNAL_SCORE_DISTRIBUTION,
+            status=STATUS_INSUFFICIENT_DATA,
+            drift_detected=False,
+            delta_mean=0.0,
+            ks_statistic=0.0,
+            baseline_mean=0.0,
+            current_mean=0.0,
+            baseline_count=len(baseline_scores),
+            current_count=len(current_scores),
+            mean_threshold=mean_threshold,
+            ks_threshold=ks_threshold,
+        )
+    base_mean = statistics.mean(baseline_scores)
+    curr_mean = statistics.mean(current_scores)
+    delta_mean = curr_mean - base_mean
+    n_b, n_c = len(baseline_scores), len(current_scores)
+    ks_stat = 0.0
+    for p in sorted(set(baseline_scores) | set(current_scores)):
+        cdf_b = sum(1 for v in baseline_scores if v <= p) / n_b
+        cdf_c = sum(1 for v in current_scores if v <= p) / n_c
+        ks_stat = max(ks_stat, abs(cdf_b - cdf_c))
+    return ScoreDriftSignal(
+        signal=SIGNAL_SCORE_DISTRIBUTION,
+        status=STATUS_COMPUTED,
+        drift_detected=abs(delta_mean) > mean_threshold or ks_stat > ks_threshold,
+        delta_mean=round(delta_mean, 6),
+        ks_statistic=round(ks_stat, 6),
+        baseline_mean=round(base_mean, 6),
+        current_mean=round(curr_mean, 6),
+        baseline_count=n_b,
+        current_count=n_c,
+        mean_threshold=mean_threshold,
+        ks_threshold=ks_threshold,
+    )
 
 
 class ScoreCalibrator:
@@ -215,7 +296,23 @@ class ScoreCalibrator:
         Args:
             baseline_scores: Historical final scores.
             current_scores: Current period final scores.
+
+        SI-29: with ``drift_canonical_signals_enabled`` on, this delegates to
+        :func:`score_distribution_drift`; an empty sample is then reported as
+        no drift (``ks_statistic`` 0.0) rather than as drift. Off: legacy.
         """
+        from engine.config.settings import settings
+
+        if settings.drift_canonical_signals_enabled:
+            signal = score_distribution_drift(baseline_scores, current_scores)
+            return DriftReport(
+                drift_detected=signal.drift_detected,
+                delta_mean=signal.delta_mean,
+                ks_statistic=signal.ks_statistic,
+                historical_mean=signal.baseline_mean,
+                current_mean=signal.current_mean,
+            )
+
         if not baseline_scores or not current_scores:
             return DriftReport(
                 drift_detected=True,

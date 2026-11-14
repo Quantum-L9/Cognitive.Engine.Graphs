@@ -115,6 +115,7 @@ independently of the code default.
 | Learned Weight Change Record | `LEARNED_WEIGHT_CHANGE_RECORD_ENABLED` (`learned_weight_change_record_enabled`) | `True` | unset | active (governance, CEG-462) for feedback-enabled domains only; every recalculation appends one `DimensionWeightChange` per dimension, never updated or deleted; `false` keeps no history and never moves a weight by itself (with auto-apply on it is the legacy overwrite) — see §34 |
 | Learned Weight Auto Apply | `LEARNED_WEIGHT_AUTO_APPLY_ENABLED` (`learned_weight_auto_apply_enabled`) | `False` | unset | dormant (operator decision, issue #462 Decision 1); off: a recalculation is an unapplied candidate and `DimensionWeight.weight` is not written; on: approved automatic recalculation, each write recorded; the only switch that writes a weight — see §34 |
 | Drift Requires Both Windows | `DRIFT_REQUIRES_BOTH_WINDOWS` (`drift_requires_both_windows`) | `True` | unset | active (correctness); outcomes `metadata.drift` raises no alert unless both a recent and a baseline distribution exist; `false` restores the one-sided divergence (RU-029 / CEG-COR-118) |
+| Drift Canonical Signals | `DRIFT_CANONICAL_SIGNALS_ENABLED` (`drift_canonical_signals_enabled`) | `False` | unset | dormant (correctness, SI-29); score-distribution drift has one canonical signal (`calibration.score_distribution_drift`) that `ScoreCalibrator.detect_score_drift` and `hgkr_utils.check_score_drift` delegate to, and `DriftDetector` results are labelled `outcome_dimension_mix` — see §4 |
 | Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
 | Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
 | Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
@@ -127,14 +128,17 @@ independently of the code default.
 | Prohibited Factor Violation Audit | `PROHIBITED_FACTOR_VIOLATION_AUDIT` (`prohibited_factor_violation_audit`) | `True` | unset | active; a blocked attempt leaves one `denied` audit entry before the error propagates (domain `auditonviolation`) — see lane D |
 | PII Declared Fields Enforced | `PII_DECLARED_FIELDS_ENFORCED` (`pii_declared_fields_enforced`) | `True` | unset | active; the domain's declared `compliance.pii` fields and `handling` mode apply on the response path — see lane D |
 | Causal Attribution Unique Touchpoints | `CAUSAL_ATTRIBUTION_UNIQUE_TOUCHPOINTS` (`causal_attribution_unique_touchpoints`) | `True` | unset | active; attribution weights are computed over unique touchpoints and sum to 1.0 — see lane D |
+| Causal Attribution Time Ordered | `CAUSAL_ATTRIBUTION_TIME_ORDERED` (`causal_attribution_time_ordered`) | `False` | unset | dormant (correctness, SI-27); first_touch / last_touch / position_based order touchpoints by their source label's declared `CausalEdgeSpec.source_timestamp_property`, not path distance; untimestamped touchpoints are excluded and counted — see lane D |
 | Causal Edge Declared Identity | `CAUSAL_EDGE_DECLARED_IDENTITY` (`causal_edge_declared_identity`) | `True` | unset | active; causal edges match declared node identities, anchor predicates in one WHERE with a bound threshold, MERGE on a stable key — see lane D |
 | Causal Validator Batch Edge Type | `CAUSAL_VALIDATOR_BATCH_EDGE_TYPE` (`causal_validator_batch_edge_type`) | `True` | unset | active; declared per-edge temporal validation applies to sync batches — see lane D |
 | safe_eval Rejects Keywords | `SAFE_EVAL_REJECT_KEYWORDS` (`safe_eval_reject_keywords`) | `True` | unset | active; keyword arguments in derived-parameter / unit expressions raise instead of being dropped — see lane D |
 | Causal Serializer Variable Depth | `CAUSAL_SERIALIZER_VARIABLE_DEPTH` (`causal_serializer_variable_depth`) | `True` | unset | active; causal match explanations follow chains up to the requested depth — see lane D |
 | Counterfactual Dedupe and Spec Label | `COUNTERFACTUAL_DEDUPE_AND_SPEC_LABEL` (`counterfactual_dedupe_and_spec_label`) | `True` | unset | active; no duplicate counterfactual scenarios, fingerprints read from the domain's outcome label — see lane D |
+| Counterfactual Support Semantics | `COUNTERFACTUAL_SUPPORT_SEMANTICS_ENABLED` (`counterfactual_support_semantics_enabled`) | `False` | unset | dormant (correctness, SI-26); counterfactual scenarios report co-occurrence `support`, `claim: co_occurrence` and `counterfactual_outcome: untested` instead of a causal `confidence` and an asserted `success` — see lane D |
 | Outcome Vocabulary Required | `OUTCOME_VOCABULARY_REQUIRED_ENABLED` (`outcome_vocabulary_required_enabled`) | `True` | unset | active (hardening, Stage 2 follow-up); `feedbackloop.outcome_node_label` has no engine default, and an outcome write or read on a pack that declares none raises `OutcomeVocabularyUndeclaredError`; every served pack declares its label — see §32 |
 | Declared Structural Properties Required | `DECLARED_STRUCTURAL_PROPERTIES_REQUIRED_ENABLED` (`declared_structural_properties_required_enabled`) | `True` | unset | active (hardening, Stage 2 follow-up); the exclusion edge / target property, community property and geo coordinate / id properties are declarations; a pack whose gate, scoring dimension or GDS job uses one undeclared is withheld (`undeclared structural property: …`); every served pack declares what it uses — see §32 |
 | Preference Attention Declared Community | `PREFERENCE_ATTENTION_DECLARED_COMMUNITY_ENABLED` (`preference_attention_declared_community_enabled`) | `True` | unset | active (correctness, Stage 2 follow-up); `preference_attention` compares the outcome nodes' `metadata.outcome_community_property` (default: the candidate's declared community property) instead of a hardcoded `community_id`; no served pack uses the dimension — see §32 |
+| Communitymatch Membership Scoring | `COMMUNITYMATCH_MEMBERSHIP_SCORING_ENABLED` (`communitymatch_membership_scoring_enabled`) | `False` | unset | dormant (correctness, SI-19 / SI-20); `communitymatch` scores community membership equality only (`soft_match` no longer grades by numeric id distance) and an undeclared `bias` is 1.0 instead of 1.5 — see §32 |
 | Preference Attention Metadata Required | `PREFERENCE_ATTENTION_METADATA_REQUIRED_ENABLED` (`preference_attention_metadata_required_enabled`) | `True` | unset | active (hardening); a pack whose `preference_attention` dimension declares no `metadata.success_value` is withheld at admission (`undeclared scoring metadata: …`) instead of failing every match in the scoring compiler; no served pack uses the dimension — see §32 |
 | PacketStore Packet-Identity Dedup | `PACKET_STORE_PACKET_IDENTITY_DEDUP_ENABLED` (`packet_store_packet_identity_dedup_enabled`) | `True` | unset | active (hardening, RU-078); `packet_store.content_hash` is the SDK `transport_hash`, so distinct packets with equal payloads are both stored, and a packet whose INSERT is skipped as a duplicate writes no hop/delegation/lineage rows; off restores the `payload_hash` key and unconditional child rows — see §7 |
 | PacketStore RLS Tenant Session | `PACKET_STORE_RLS_TENANT_SESSION_ENABLED` (`packet_store_rls_tenant_session_enabled`) | `True` | unset | active (hardening, RU-079); `persist` and `record_outcome` set the transaction-local `app.current_tenant` GUC to the packet's / call's tenant before writing, so an `l9_product` DSN satisfies the DDL's RLS policies; off issues no `set_config` — see §7 |
@@ -276,6 +280,26 @@ Guard: `tests/architecture/test_parked_subsystems_guard.py` fails if
 
 Score calibration runs against the domain spec's `calibration.pairs` section.
 No feature flag needed — available whenever calibration pairs are defined.
+
+### Canonical drift signals (`drift_canonical_signals_enabled`, default `False`) — SI-29
+
+Three detectors answered drift questions with different semantics and none was
+named canonical: `ScoreCalibrator.detect_score_drift` (mean shift and a KS
+statistic; an empty sample was reported as drift), `hgkr_utils.check_score_drift`
+(mean shift only, around a GDS refresh; an empty sample was no drift) and
+`engine/feedback/drift_detector.py` `DriftDetector` (chi-squared divergence of
+the scoring-dimension mix of outcomes). One claim, one signal:
+
+| Claim | Canonical signal | Other paths, flag on |
+|---|---|---|
+| Did the score **values** shift between two samples? (`score_distribution`) | `engine.scoring.calibration.score_distribution_drift` → `ScoreDriftSignal` (`status` `computed` / `insufficient_data`, `delta_mean`, two-sample KS statistic, both sample sizes and thresholds). Drift when `|Δmean| > mean_threshold` (0.05) or KS `> ks_threshold` (0.2) | `ScoreCalibrator.detect_score_drift` and `check_score_drift` delegate to it (`check_score_drift`'s `threshold` is the mean threshold), so a shape change with an unchanged mean is drift in both; an empty sample is `insufficient_data` and never reported as drift |
+| Did the **mix of scoring dimensions** used by recent outcomes shift? (`outcome_dimension_mix`) | `DriftDetector.compute_drift` / `check_and_alert` (unchanged) | Every result carries `signal: "outcome_dimension_mix"` so it is not read as score drift |
+
+`engine/diagnostics/dissimilarity.py` (persona fingerprint dissimilarity) is a
+third claim outside this flag's scope and is unchanged. No detector is deleted.
+
+Off (default): each detector returns its legacy verdict, byte for byte
+(`tests/unit/test_drift_canonical_signals.py`). Rollback: set the flag to `false`.
 
 ---
 
@@ -1274,6 +1298,31 @@ Set `OUTCOME_VOCABULARY_REQUIRED_ENABLED=false`, `DECLARED_STRUCTURAL_PROPERTIES
 `PREFERENCE_ATTENTION_DECLARED_COMMUNITY_ENABLED=false` or
 `PREFERENCE_ATTENTION_METADATA_REQUIRED_ENABLED=false` and restart.
 
+### Community membership scoring (`communitymatch_membership_scoring_enabled`, default `False`) — SI-19 / SI-20
+
+A community id (Louvain's `writeproperty`, or any declared community property) is a
+label, not a coordinate: ids 7 and 8 are no closer than 7 and 1000. `communitymatch`
+with `soft_match: true` nevertheless scored a non-member
+`bias / (1 + |candidate.<prop> - $<prop>|)`, and an undeclared `bias` (and a declared
+`0.0`, via `bias or 1.5`) became 1.5, which the score clamp cut to 1.0.
+
+On:
+
+- only membership equality scores: `soft_match` compiles exactly like the binary match
+  (member → `bias`, non-member → 0.2, either side null → 0.5). Graduated credit would
+  need a declared community-similarity relation, which no spec field expresses today;
+- an undeclared `bias` is **1.0** — full credit for a member, which is what the clamp
+  produced from 1.5 anyway, so with `score_clamp_enabled` on (default; it clamps each
+  dimension to [0, 1] before weighting) a member's score in packs without a `bias` is
+  unchanged.
+  A declared `bias` (including `0.0`) is used as declared. 1.0 was chosen over an
+  admission refusal because every pack that omits `bias` would otherwise be withheld
+  for a value whose clamped effect is already 1.0.
+
+Off: the legacy expression, byte for byte (`tests/unit/test_communitymatch_membership.py`;
+live Neo4j: `tests/integration/test_community_membership.py`). Rollback: set the flag to
+`false`.
+
 
 ## 33. Capability tenant binding (CAP-TENANT-01, W2)
 
@@ -1823,6 +1872,38 @@ Model ordering semantics are unchanged (DEC-27 pending). Off: per-row weighting.
 
 Rollback: set the flag to `false`.
 
+### Causal Attribution Time Ordered (SI-27)
+
+**Flag**: `CAUSAL_ATTRIBUTION_TIME_ORDERED=False` (default off)
+**Declaration**: `CausalEdgeSpec.source_timestamp_property` (optional; domain-spec schema 1.2.0)
+
+`AttributionCalculator` ordered touchpoints by the trace query's `ORDER BY distance ASC`,
+so `first_touch` credited the touchpoint nearest the outcome in the graph and `last_touch`
+the farthest — graph distance, not time. RU-067 only removed duplicate rows.
+
+On, for the order-dependent models (`first_touch`, `last_touch`, `position_based`):
+
+- the trace returns `touchpoint_ts`, a CASE over the causal-edge source labels that
+  declare `source_timestamp_property` (labels and property sanitized, C-9); the engine
+  names no timestamp property of its own;
+- touchpoints are ordered oldest first by that value (Neo4j `DateTime` / `Date` or ISO-8601
+  as instants, a naive value read as UTC; numbers as declared; equal values by touchpoint
+  id). A touchpoint whose label declares no property, whose value is NULL, or whose value
+  is not a timestamp is **excluded and counted**, never placed by distance;
+- the response adds `ordering: "event_timestamp"` and `untimestamped_touchpoints`
+  (`total_touchpoints` counts the ordered ones; temporal decay, when enabled, runs over them);
+- refused with `TouchpointTimestampConflictError` (a `ValueError`): two causal edges
+  declaring different properties for one source label, or a mix of temporal and numeric
+  timestamps in one trace.
+
+`linear` does not depend on order and is unchanged (no timestamp column, nothing
+excluded). Off: the legacy Cypher and weights, byte for byte, whether or not the property
+is declared (`tests/unit/test_attribution_time_order.py`; live Neo4j:
+`tests/integration/test_causal_attribution_time_order.py`).
+
+Rollback: set the flag to `false`. The declaration is optional, so packs that omit it
+validate unchanged.
+
 ### Causal Edge Declared Identity (RU-068 / CEG-COR-057, PO-04)
 
 **Flag**: `CAUSAL_EDGE_DECLARED_IDENTITY=True` (default on)
@@ -1901,6 +1982,33 @@ hardcoded `:TransactionOutcome`. On: a seen-set on `(intervention_type, key_diff
 suppresses duplicates, and `handle_outcomes` passes
 `sanitize_label(feedbackloop.outcome_node_label)` (default `TransactionOutcome`) as the
 queried label. Off: duplicates and the literal label.
+
+Rollback: set the flag to `false`.
+
+### Counterfactual Support Semantics (SI-26)
+
+**Flag**: `COUNTERFACTUAL_SUPPORT_SEMANTICS_ENABLED=False` (default off)
+
+`CounterfactualGenerator` set `confidence = count / total_positives` — the share of the
+compared positive outcomes that carry a factor — and stored
+`counterfactual_outcome: "success"`, as if the intervention had been run and had
+worked. Nothing is intervened on: the number is a co-occurrence frequency within the
+comparison pool, not a causal effect estimate. On, each scenario (and its
+`CounterfactualScenario` node) carries:
+
+| Field | Meaning |
+|---|---|
+| `support` | `support_count / compared_positives`, rounded to 4 places |
+| `support_count`, `compared_positives` | the counts behind it |
+| `support_basis` | `share_of_compared_positive_outcomes` |
+| `claim` | `co_occurrence` — association only, never a causal claim |
+| `counterfactual_outcome` | `untested` |
+
+and no `confidence`. For `change_weight` the support counts the positives whose weight
+for the dimension exceeds 1.5× the actual one (the legacy value counted positives with
+the dimension active, whatever its weight). `counterfactual.min_confidence` is applied
+as the minimum support; `max_scenarios_per_outcome` is unchanged. Off: the legacy
+fields and Cypher (`tests/unit/test_counterfactual_support.py`).
 
 Rollback: set the flag to `false`.
 ## 24. Correctness remediation lane F (plan 0d84ec8)

@@ -493,6 +493,14 @@ class Settings(BaseSettings):
     # scored divergence 1.0 and raised alert=True. On: either window empty is
     # insufficient_data (with both counts). Off: legacy both-empty only.
     drift_requires_both_windows: bool = True
+    # SI-29 (2026-10-11 audit): three score/outcome drift detectors with
+    # different semantics and no canonical claim. On: score-distribution drift
+    # has one canonical signal (calibration.score_distribution_drift, mean +
+    # KS); ScoreCalibrator.detect_score_drift and hgkr_utils.check_score_drift
+    # delegate to it and an empty sample is insufficient data, not drift;
+    # DriftDetector labels its result as outcome dimension-mix drift. Off:
+    # each detector's legacy verdict.
+    drift_canonical_signals_enabled: bool = False
     # Correctness remediation lane C (plan 0d84ec8, RU-020..)
     # RU-020 / CEG-COR-027..029: admission_defects also compiles every declared
     # direction's scoring clause and withholds a pack whose scoring refuses to
@@ -588,6 +596,13 @@ class Settings(BaseSettings):
     # collapsed to unique touchpoint ids keeping the minimum-distance row,
     # whose ages feed temporal decay. Off: per-row weighting.
     causal_attribution_unique_touchpoints: bool = True
+    # SI-27 (2026-10-11 audit): first_touch / last_touch / position_based
+    # ordered touchpoints by path distance, not by time. On: touchpoints are
+    # ordered by the timestamp property their label declares
+    # (CausalEdgeSpec.source_timestamp_property); a touchpoint with no
+    # declared property or a NULL value is excluded and counted
+    # (untimestamped_touchpoints). Off: distance order.
+    causal_attribution_time_ordered: bool = False
     # RU-068 / CEG-COR-057: CausalCompiler matched source and target
     # by a hardcoded `entity_id` (an outcome node has only `outcome_id`),
     # emitted `AND $confidence >= <literal>` without a WHERE when temporal
@@ -616,6 +631,14 @@ class Settings(BaseSettings):
     # queried a hardcoded :TransactionOutcome. On: duplicates suppressed and
     # the domain's feedbackloop.outcome_node_label used. Off: legacy.
     counterfactual_dedupe_and_spec_label: bool = True
+    # SI-26 (2026-10-11 audit): counterfactual scenarios called a
+    # co-occurrence frequency (share of compared positives carrying the
+    # factor) "confidence" and asserted counterfactual_outcome "success"
+    # without testing an intervention. On: the value is stored as `support`
+    # with `support_basis`, the outcome is "untested" and `claim` is
+    # "co_occurrence"; spec.min_confidence is applied as a minimum support.
+    # Off: legacy fields.
+    counterfactual_support_semantics_enabled: bool = False
     # Correctness remediation lane E (plan 0d84ec8, RU-078..RU-090)
     # RU-078 / CEG-COR-040, -095: PacketStore keyed packet_store.content_hash
     # on the payload hash, so two requests with an equal payload collided, the
@@ -850,6 +873,13 @@ class Settings(BaseSettings):
     # defaulting to the candidate's declared community property. Off: the
     # hardcoded `community_id` (C-21 rollback).
     preference_attention_declared_community_enabled: bool = True
+    # SI-19 / SI-20 (2026-10-11 audit): communitymatch soft_match scored
+    # bias / (1 + |candidate community - query community|), treating community
+    # ids (labels) as coordinates, and an undeclared bias defaulted to 1.5,
+    # which the score clamp cut to 1.0. On: membership equality only
+    # (soft_match compiles like a binary match) and an undeclared bias is 1.0.
+    # Off: legacy.
+    communitymatch_membership_scoring_enabled: bool = False
     # ScoringDimensionSpec.metadata (ceg-preference-attention-unreachable): a
     # preference_attention dimension without metadata.success_value is refused
     # by the scoring compiler on every match. On: the loader withholds the pack
