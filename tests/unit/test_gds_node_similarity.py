@@ -152,13 +152,15 @@ class TestPlan:
         ],
     )
     def test_unsafe_identifiers_are_rejected(self, overrides):
+        job = _job(**overrides)
         with pytest.raises(ValueError, match="Invalid label"):
-            build_node_similarity_plan(_job(**overrides))
+            build_node_similarity_plan(job)
 
     @pytest.mark.parametrize("missing", ["writeedge", "writeproperty"])
     def test_missing_write_target_fails_explicitly(self, missing):
+        job = _job(**{missing: None})
         with pytest.raises(ValueError, match=f"requires {missing!r}"):
-            build_node_similarity_plan(_job(**{missing: None}))
+            build_node_similarity_plan(job)
 
     def test_empty_projection_fails_explicitly(self):
         job = _job(projection=GDSProjectionSpec(nodelabels=[], edgetypes=["USES"]))
@@ -198,7 +200,7 @@ class TestScheduler:
         assert len(writes) == 1
 
     def test_alias_set(self):
-        assert {"nodeSimilarity", "node_similarity"} == NODE_SIMILARITY_ALGORITHMS
+        assert NODE_SIMILARITY_ALGORITHMS == {"nodeSimilarity", "node_similarity"}
 
     async def test_runs_in_order_against_tenant_database(self, flag_on):
         driver = _driver()
