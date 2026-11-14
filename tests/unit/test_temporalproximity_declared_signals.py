@@ -191,17 +191,20 @@ def test_the_compiled_clause_is_assembled_with_its_parameters() -> None:
 )
 @pytest.mark.usefixtures("declared")
 def test_inconsistent_declarations_are_refused(metadata: dict[str, Any], message: str) -> None:
+    dimension = _dimension(metadata)
     with pytest.raises(ValueError, match=re.escape(message)):
-        _compile(_dimension(metadata))
+        _compile(dimension)
 
 
 @pytest.mark.usefixtures("declared")
 @pytest.mark.parametrize("prop", ["dock_count) DETACH DELETE candidate //", "1bad", "a b"])
 def test_property_names_pass_sanitize_label(prop: str) -> None:
+    frequency = _dimension({"frequency_property": prop})
+    acceleration = _dimension({"acceleration_property": prop})
     with pytest.raises(ValueError, match="Invalid label"):
-        _compile(_dimension({"frequency_property": prop}))
+        _compile(frequency)
     with pytest.raises(ValueError, match="Invalid label"):
-        _compile(_dimension({"acceleration_property": prop}))
+        _compile(acceleration)
 
 
 @pytest.mark.parametrize(
@@ -214,20 +217,23 @@ def test_property_names_pass_sanitize_label(prop: str) -> None:
     ],
 )
 def test_out_of_range_metadata_is_refused_at_validation(metadata: dict[str, Any], field: str) -> None:
+    dimension = _dimension(metadata)
     with pytest.raises(ValidationError, match=field):
-        _spec(_dimension(metadata))
+        _spec(dimension)
 
 
 def test_metadata_temporalproximity_does_not_read_is_refused() -> None:
     message = "metadata key(s) success_value are not read by computation 'temporalproximity'"
+    dimension = _dimension({"success_value": "docked"})
     with pytest.raises(ValidationError, match=re.escape(message)):
-        _spec(_dimension({"success_value": "docked"}))
+        _spec(dimension)
 
 
 def test_temporalproximity_keys_are_refused_on_other_computations() -> None:
     message = "metadata key(s) frequency_property are not read by computation 'lognormalized'"
+    dimension = _dimension({"frequency_property": "dock_count"}, computation="lognormalized")
     with pytest.raises(ValidationError, match=re.escape(message)):
-        _spec(_dimension({"frequency_property": "dock_count"}, computation="lognormalized"))
+        _spec(dimension)
 
 
 # ── Committed packs: what the flag changes ───────────────────────────────────
