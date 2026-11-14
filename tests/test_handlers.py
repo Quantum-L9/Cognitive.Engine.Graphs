@@ -172,7 +172,14 @@ def _inject_deps() -> None:
     mock_loader = MagicMock()
     mock_loader.load_domain = MagicMock(return_value=_make_domain_spec())
     mock_loader.list_domains = MagicMock(return_value=["plasticos", "mortgage"])
+    # Issue #400 F4: admin list_domains/get_domain read the served revision.
+    mock_loader.list_domain_revisions = MagicMock(return_value=[_revision("plasticos"), _revision("mortgage")])
+    mock_loader.load_domain_revision = MagicMock(side_effect=lambda d: (_make_domain_spec(), _revision(d)))
     init_dependencies(mock_driver, mock_loader)
+
+
+def _revision(tenant_id: str) -> dict[str, object]:
+    return {"tenant_id": tenant_id, "sha256": "0" * 64, "version": "1.0.0", "stage": None, "source": "plain"}
 
 
 @pytest.mark.asyncio
