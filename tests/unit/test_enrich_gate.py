@@ -27,13 +27,14 @@ from unittest.mock import MagicMock
 import pytest
 
 from engine.config.loader import DomainPackLoader
-from engine.config.schema import DomainSpec
+from engine.config.schema import DomainSpec, SyncStrategy
 from engine.config.settings import settings
 from engine.handlers import (
     ENRICH_LOCAL_WRITER_FLAG,
     FeatureNotEnabled,
     ValidationError,
     _enrich_sync_owned_properties,
+    handle_admin,
     handle_enrich,
     init_dependencies,
 )
@@ -200,3 +201,56 @@ class TestSyncOwnership:
         spec_edge = spec.model_copy(update={"sync": spec.sync.model_copy(update={"endpoints": [edge]})})
         assert "intake_status" in _enrich_sync_owned_properties(spec_patch, "MaterialIntake")
         assert _enrich_sync_owned_properties(spec_edge, "MaterialIntake") == frozenset()
+
+
+class TestUnwindMatchSetOwnership:
+    """Codex P2 on #487: ownership follows what generator.py writes for UNWINDMATCHSET."""
+
+    def _spec(self, fieldsupdated: list[str] | None) -> tuple[DomainSpec, str]:
+        spec = _plasticos()
+        assert spec.sync is not None
+        base = next(e for e in spec.sync.endpoints if e.targetnode == "Facility" and not e.targetedge)
+        patch = base.model_copy(
+            update={
+                "batchstrategy": SyncStrategy.UNWINDMATCHSET,
+                "fieldsupdated": fieldsupdated,
+                "taxonomyedges": None,
+                "childsync": None,
+            }
+        )
+        return spec.model_copy(update={"sync": spec.sync.model_copy(update={"endpoints": [patch]})}), base.idproperty
+
+    def test_fieldsupdated_owns_only_written_fields(self) -> None:
+        spec, idprop = self._spec(["name"])
+        owned = _enrich_sync_owned_properties(spec, "Facility")
+        assert owned == frozenset({"name", "updated_at", idprop})
+        declared = {p.name for n in spec.ontology.nodes if n.label == "Facility" for p in n.properties}
+        unrelated = sorted(declared - owned)
+        assert unrelated, "the fixture needs a declared Facility property sync does not write"
+        assert unrelated[0] not in owned
+
+    def test_without_fieldsupdated_set_row_owns_every_declared_property(self) -> None:
+        spec, idprop = self._spec(None)
+        owned = _enrich_sync_owned_properties(spec, "Facility")
+        declared = {p.name for n in spec.ontology.nodes if n.label == "Facility" for p in n.properties}
+        assert declared | {idprop} <= owned
+
+    async def test_writer_accepts_an_unowned_declared_property_and_refuses_updated_at(self, writer_on) -> None:
+        spec, _ = self._spec(["name"])
+        driver, _ = _wire(spec)
+        declared = {p.name for n in spec.ontology.nodes if n.label == "Facility" for p in n.properties}
+        free = sorted(declared - _enrich_sync_owned_properties(spec, "Facility"))[0]
+        await handle_enrich("plasticos", _payload(free))
+        assert len(driver.calls) == 1
+        with pytest.raises(ValidationError, match="updated_at"):
+            await handle_enrich("plasticos", _payload("updated_at"))
+        assert len(driver.calls) == 1
+
+
+async def test_feature_status_reports_the_enrich_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Codex P2 on #487: operators can confirm the writer's state via admin feature_status."""
+    _wire(_plasticos())
+    for value in (False, True):
+        monkeypatch.setattr(settings, "enrich_local_writer_enabled", value)
+        result = await handle_admin("plasticos", {"subaction": "feature_status"})
+        assert result["feature_gates"]["enrich_local_writer_enabled"] is value

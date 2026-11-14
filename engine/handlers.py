@@ -42,7 +42,7 @@ from engine.auth.capabilities import (
 )
 from engine.compliance.engine import ComplianceEngine
 from engine.config.loader import DomainPackLoader
-from engine.config.schema import DomainSpec, SyncEndpointSpec
+from engine.config.schema import DomainSpec, SyncEndpointSpec, SyncStrategy
 from engine.gates.compiler import GateCompiler
 from engine.gds.scheduler import GDSScheduler
 from engine.graph.driver import ExpectedWriteOutcome, GraphDriver
@@ -1971,6 +1971,8 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 # --- Domain pack admission (generic; the engine names no domain) ---
                 "unvalidated_domain_packs_enabled": _fs.unvalidated_domain_packs_enabled,
                 "dormant_domain_packs_enabled": _fs.dormant_domain_packs_enabled,
+                # --- CEG-ENRICH-GATE: local enrich property writer ---
+                "enrich_local_writer_enabled": _fs.enrich_local_writer_enabled,
             },
         }
 
@@ -3220,17 +3222,34 @@ def _enrich_declared_properties(domain_spec: DomainSpec, label: str) -> set[str]
 def _enrich_sync_owned_properties(domain_spec: DomainSpec, label: str) -> frozenset[str]:
     """Node properties of ``label`` the pack assigns to ``sync`` (CEG-ENRICH-GATE).
 
-    A node sync endpoint targeting ``label`` owns its ``idproperty``, every
-    property the ontology declares on that node (the declared-projection MERGE
-    writes them; the legacy ``SET n += row`` writes any of them), its
-    ``fieldsupdated`` fields, and the row keys its taxonomy edges and childsync
-    read. A childsync whose ``targetnode`` is ``label`` owns that child's
+    Ownership follows what ``engine/sync/generator.py`` actually writes:
+
+    * An ``UNWINDMATCHSET`` endpoint that declares ``fieldsupdated`` writes only
+      those fields plus ``updated_at`` (and the system ``_tenant``), matching
+      on ``idproperty``; it owns exactly those, never the rest of the node.
+    * Any other node endpoint targeting ``label`` (MERGE, declared-projection
+      MERGE, or ``UNWINDMATCHSET`` without ``fieldsupdated``, which runs
+      ``SET n += row``) owns its ``idproperty``, every property the ontology
+      declares on that node, its ``fieldsupdated`` fields, and the row keys its
+      taxonomy edges and childsync read.
+
+    A childsync whose ``targetnode`` is ``label`` owns that child's
     ``targetid`` and every property declared on the child node, because sync
     writes ``c += child_row`` there. A label no endpoint writes owns nothing.
     """
     owned: set[str] = set()
     for endpoint in domain_spec.sync.endpoints if domain_spec.sync else []:
-        if endpoint.targetnode == label and not endpoint.targetedge:
+        if (
+            endpoint.targetnode == label
+            and not endpoint.targetedge
+            and endpoint.batchstrategy == SyncStrategy.UNWINDMATCHSET
+            and endpoint.fieldsupdated
+        ):
+            owned.update(endpoint.fieldsupdated)
+            owned.add("updated_at")
+            if endpoint.idproperty:
+                owned.add(endpoint.idproperty)
+        elif endpoint.targetnode == label and not endpoint.targetedge:
             owned |= _enrich_declared_properties(domain_spec, label)
             if endpoint.idproperty:
                 owned.add(endpoint.idproperty)
