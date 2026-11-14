@@ -42,7 +42,7 @@ from engine.auth.capabilities import (
 )
 from engine.compliance.engine import ComplianceEngine
 from engine.config.loader import DomainPackLoader
-from engine.config.schema import DecisionArbitrationSpec, DomainSpec, SyncEndpointSpec
+from engine.config.schema import DomainSpec, SyncEndpointSpec
 from engine.gates.compiler import GateCompiler
 from engine.gds.scheduler import GDSScheduler
 from engine.graph.driver import ExpectedWriteOutcome, GraphDriver
@@ -672,7 +672,7 @@ def _annotate_weighted_confidence(
 
 def _apply_pareto_precut(
     results: list[dict[str, Any]],
-    arbitration: DecisionArbitrationSpec,
+    domain_spec: DomainSpec,
     *,
     id_property: str,
     top_n: int,
@@ -686,6 +686,7 @@ def _apply_pareto_precut(
     """
     from engine.scoring.pareto_integrator import apply_constraint_penalties, pareto_precut
 
+    arbitration = domain_spec.decision_arbitration
     constraint_dicts = [
         {"dimension": c.dimension, "threshold": c.threshold, "hard": c.hard, "penalty": c.penalty}
         for c in arbitration.constraints
@@ -947,7 +948,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     if precut_active and results:
         results, precut_meta = _apply_pareto_precut(
             list(results),
-            arbitration_spec,
+            domain_spec,
             id_property=_candidate_id_property(domain_spec, candidate_labels[0]),
             top_n=top_n,
             pool_limit=fetch_limit,
