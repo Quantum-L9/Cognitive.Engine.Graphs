@@ -50,7 +50,13 @@ def _inject_deps() -> None:
 
 
 class TestHandleEnrich:
-    """Tests for handle_enrich handler."""
+    """Tests for handle_enrich handler (writer enabled; CEG-ENRICH-GATE flag-off is in tests/unit/test_enrich_gate.py)."""
+
+    @pytest.fixture(autouse=True)
+    def _enable_writer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "enrich_local_writer_enabled", True)
 
     @pytest.mark.asyncio
     async def test_enrich_success(self) -> None:

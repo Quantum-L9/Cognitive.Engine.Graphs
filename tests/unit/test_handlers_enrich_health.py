@@ -208,7 +208,13 @@ class TestHandleHealthcheck:
 
 
 class TestHandleEnrich:
-    """Test handle_enrich handler."""
+    """Test handle_enrich handler (writer enabled; flag-off is in tests/unit/test_enrich_gate.py)."""
+
+    @pytest.fixture(autouse=True)
+    def _enable_writer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "enrich_local_writer_enabled", True)
 
     @pytest.mark.asyncio
     async def test_enrich_requires_entity_type(self) -> None:

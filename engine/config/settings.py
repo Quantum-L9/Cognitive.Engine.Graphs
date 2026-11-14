@@ -846,6 +846,16 @@ class Settings(BaseSettings):
     # and the compiler's refusal surfaces at match time, as before.
     preference_attention_metadata_required_enabled: bool = True
 
+    # CEG-ENRICH-GATE: CEG's local `enrich` action (handle_enrich) runs
+    # `MATCH (n:<label>) SET n.<prop> = <expr>` — a second writer of node
+    # properties beside `sync`. Gate owns the action name `enrich` for EIE and no
+    # deployment allowlists it, so it ships dormant. Off: handle_enrich raises
+    # FeatureNotEnabled naming ENRICH_LOCAL_WRITER_ENABLED and writes nothing.
+    # On: it still refuses any property a node sync endpoint of the target label
+    # owns, and every `_`-prefixed system property. docs/FEATURE_GATES.md
+    # "Local enrich property writer".
+    enrich_local_writer_enabled: bool = False
+
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
         """Raise if default secrets are used in production environment."""
