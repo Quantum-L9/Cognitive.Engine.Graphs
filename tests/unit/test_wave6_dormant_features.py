@@ -341,51 +341,110 @@ class TestTriggerKGE:
                     {"subaction": "trigger_kge", "domain_id": "test_domain"},
                 )
 
+    @staticmethod
+    def _kge_settings(mock_settings: MagicMock, *, unparked: bool) -> None:
+        mock_settings.l9_env = "test"
+        mock_settings.kge_enabled = True
+        mock_settings.kge_embedding_dim = 256
+        mock_settings.kge_confidence_threshold = 0.3
+        mock_settings.parked_subsystems_enabled = unparked
+
     @pytest.mark.asyncio
-    async def test_trigger_kge_success(self):
-        """When all conditions met, returns activation status."""
+    async def test_trigger_kge_refuses_parked_model(self):
+        """CEG-KGE-PARK: CompoundE3D is parked, so trigger_kge refuses explicitly
+        and never queries the graph or reports an activation."""
+        from chassis.errors import FeatureNotEnabled
+
         driver = _make_graph_driver()
-        spec = _make_kge_spec()
-        loader = _make_domain_loader(spec)
-        init_dependencies(driver, loader)
+        init_dependencies(driver, _make_domain_loader(_make_kge_spec()))
 
         with patch("engine.config.settings.settings") as mock_settings:
-            mock_settings.l9_env = "test"
-            mock_settings.kge_enabled = True
-            mock_settings.kge_embedding_dim = 256
-            mock_settings.kge_confidence_threshold = 0.3
+            self._kge_settings(mock_settings, unparked=False)
+            with pytest.raises(FeatureNotEnabled, match="parked by operator decision CEG-KGE-PARK") as err:
+                await handle_admin(
+                    "test_domain",
+                    {"subaction": "trigger_kge", "domain_id": "test_domain"},
+                )
+
+        assert err.value.detail == "parked"
+        assert err.value.flag == "PARKED_SUBSYSTEMS_ENABLED"
+        assert err.value.context["decision"] == "CEG-KGE-PARK"
+        assert err.value.context["doc"] == "docs/PARKED_SUBSYSTEMS.md"
+        driver.execute_query.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_trigger_kge_refuses_unimplemented_model(self):
+        """A model with no implementation is refused, never run as CompoundE3D."""
+        from engine.handlers import ValidationError
+
+        spec = _make_kge_spec()
+        spec.kge.model = "TransE"
+        driver = _make_graph_driver()
+        init_dependencies(driver, _make_domain_loader(spec))
+
+        with patch("engine.config.settings.settings") as mock_settings:
+            self._kge_settings(mock_settings, unparked=True)
+            with pytest.raises(ValidationError, match="'TransE' has no implementation"):
+                await handle_admin(
+                    "test_domain",
+                    {"subaction": "trigger_kge", "domain_id": "test_domain"},
+                )
+        driver.execute_query.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_trigger_kge_success_when_unparked_and_index_verified(self):
+        """Under an explicit un-park, activation is reported only after the
+        vector index is verified to exist."""
+        driver = _make_graph_driver()
+        driver.execute_query = AsyncMock(return_value=[{"name": "test_kge_index"}])
+        init_dependencies(driver, _make_domain_loader(_make_kge_spec()))
+
+        with patch("engine.config.settings.settings") as mock_settings:
+            self._kge_settings(mock_settings, unparked=True)
             result = await handle_admin(
                 "test_domain",
                 {"subaction": "trigger_kge", "domain_id": "test_domain"},
             )
 
-        assert result["status"] in ("kge_activated", "kge_activated_with_warnings")
+        assert result["status"] == "kge_activated"
         assert result["embedding_dim"] == 256
         assert result["model"] == "CompoundE3D"
         assert result["training_relations"] == ["SUPPLIES", "CONSUMES"]
-        assert "smoke_test" in result
+        assert result["smoke_test"]["ok"] is True
 
     @pytest.mark.asyncio
-    async def test_trigger_kge_smoke_test_failure(self):
-        """When vector index check fails, returns activated_with_warnings."""
-        driver = _make_graph_driver()
-        driver.execute_query = AsyncMock(side_effect=Exception("index not found"))
-        spec = _make_kge_spec()
-        loader = _make_domain_loader(spec)
-        init_dependencies(driver, loader)
+    async def test_trigger_kge_refuses_when_index_missing(self):
+        """SI-04: an empty SHOW INDEXES result is not an activation."""
+        from engine.handlers import ExecutionError
+
+        driver = _make_graph_driver()  # SHOW INDEXES returns no rows
+        init_dependencies(driver, _make_domain_loader(_make_kge_spec()))
 
         with patch("engine.config.settings.settings") as mock_settings:
-            mock_settings.l9_env = "test"
-            mock_settings.kge_enabled = True
-            mock_settings.kge_embedding_dim = 256
-            mock_settings.kge_confidence_threshold = 0.3
-            result = await handle_admin(
-                "test_domain",
-                {"subaction": "trigger_kge", "domain_id": "test_domain"},
-            )
+            self._kge_settings(mock_settings, unparked=True)
+            with pytest.raises(ExecutionError, match="KGE not activated: vector index 'test_kge_index' does not exist"):
+                await handle_admin(
+                    "test_domain",
+                    {"subaction": "trigger_kge", "domain_id": "test_domain"},
+                )
 
-        assert result["status"] == "kge_activated_with_warnings"
-        assert result["smoke_test"]["ok"] is False
+    @pytest.mark.asyncio
+    async def test_trigger_kge_refuses_when_index_check_fails(self):
+        """SI-04: a failed vector index check refuses instead of reporting
+        activated_with_warnings."""
+        from engine.handlers import ExecutionError
+
+        driver = _make_graph_driver()
+        driver.execute_query = AsyncMock(side_effect=Exception("index not found"))
+        init_dependencies(driver, _make_domain_loader(_make_kge_spec()))
+
+        with patch("engine.config.settings.settings") as mock_settings:
+            self._kge_settings(mock_settings, unparked=True)
+            with pytest.raises(ExecutionError, match="vector index check for 'test_kge_index' failed"):
+                await handle_admin(
+                    "test_domain",
+                    {"subaction": "trigger_kge", "domain_id": "test_domain"},
+                )
 
 
 @pytest.mark.unit
@@ -418,7 +477,9 @@ class TestKGEStatus:
 
         assert result["status"] == "ok"
         assert result["domain_config"]["model"] == "CompoundE3D"
+        assert result["domain_config"]["model_parked"] is True
         assert result["domain_config"]["embeddingdim"] == 256
+        assert result["parked"] == {"decision": "CEG-KGE-PARK", "models": ["CompoundE3D"], "active": True}
 
 
 # ═══════════════════════════════════════════════════════════════

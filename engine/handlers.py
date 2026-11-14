@@ -1701,35 +1701,61 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 action="admin",
                 tenant=tenant,
             )
-        from engine.kge.compound_e3d import CompoundE3D, CompoundE3DConfig
+        # CEG-KGE-PARK: the only implemented model, CompoundE3D, is parked.
+        # Refuse explicitly while parked; never fall back to another model.
+        from engine.kge.parked import (
+            COMPOUND_E3D,
+            PARKED_FLAG,
+            ParkedSubsystemError,
+            construct_compound_e3d,
+        )
 
-        config = CompoundE3DConfig.from_kge_spec(spec.kge)
-        CompoundE3D(config)  # instantiation validates config
-        # Smoke test: verify vector index exists by running a simple query
-        smoke_ok = True
-        smoke_detail = "vector index reachable"
+        if spec.kge.model != COMPOUND_E3D:
+            raise ValidationError(
+                f"KGE model '{spec.kge.model}' has no implementation in this engine",
+                action="admin",
+                tenant=tenant,
+            )
         try:
-            index_name = spec.kge.vectorindex.name if spec.kge.vectorindex else f"{domain_id}_kge_index"
-            await graph_driver.execute_query(
+            model = construct_compound_e3d(spec.kge)  # instantiation validates config
+        except ParkedSubsystemError as exc:
+            raise FeatureNotEnabled(
+                COMPOUND_E3D,
+                flag=PARKED_FLAG,
+                message=str(exc),
+                action="admin",
+                tenant=tenant,
+                detail="parked",
+                context=exc.to_context(),
+            ) from exc
+        config = model.config
+        # SI-04: activation is reported only once the vector index is verified
+        # to exist. A failed check or an empty SHOW INDEXES result refuses.
+        index_name = spec.kge.vectorindex.name if spec.kge.vectorindex else f"{domain_id}_kge_index"
+        try:
+            rows = await graph_driver.execute_query(
                 "SHOW INDEXES YIELD name WHERE name = $idx RETURN name",
                 parameters={"idx": index_name},
                 database=domain_id,
             )
         except Exception as exc:
-            smoke_ok = False
-            smoke_detail = f"vector index check failed: {exc}"
-            logger.warning("KGE smoke test failed for domain=%s: %s", domain_id, exc)
+            msg = f"KGE not activated: vector index check for '{index_name}' failed: {exc}"
+            raise ExecutionError(msg, action="admin", tenant=tenant) from exc
+        if not any(row.get("name") == index_name for row in rows or []):
+            msg = f"KGE not activated: vector index '{index_name}' does not exist in database '{domain_id}'"
+            raise ExecutionError(msg, action="admin", tenant=tenant)
         return {
-            "status": "kge_activated" if smoke_ok else "kge_activated_with_warnings",
+            "status": "kge_activated",
             "domain_id": domain_id,
             "embedding_dim": config.embedding_dim,
             "training_relations": config.training_relations,
             "model": spec.kge.model,
-            "smoke_test": {"ok": smoke_ok, "detail": smoke_detail},
+            "smoke_test": {"ok": True, "detail": f"vector index '{index_name}' exists"},
         }
 
     if subaction == "kge_status":
         from engine.config.settings import settings as _kge_s
+        from engine.kge.parked import PARKED_DECISION, PARKED_KGE_MODELS, is_parked_model, parked_subsystems_enabled
 
         domain_id = _bind_admin_domain(tenant, payload, required=False)
         kge_config_info: dict[str, Any] = {}
@@ -1739,6 +1765,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 if spec.kge:
                     kge_config_info = {
                         "model": spec.kge.model,
+                        "model_parked": is_parked_model(spec.kge.model),
                         "embeddingdim": spec.kge.embeddingdim,
                         "training_relations": list(spec.kge.trainingrelations),
                     }
@@ -1749,6 +1776,11 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             "kge_enabled": _kge_s.kge_enabled,
             "kge_embedding_dim": _kge_s.kge_embedding_dim,
             "kge_confidence_threshold": _kge_s.kge_confidence_threshold,
+            "parked": {
+                "decision": PARKED_DECISION,
+                "models": sorted(PARKED_KGE_MODELS),
+                "active": not parked_subsystems_enabled(),
+            },
             "domain_config": kge_config_info,
         }
 

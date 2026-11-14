@@ -20,7 +20,18 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
+from engine.config.settings import settings
 from engine.kge.compound_e3d import CompoundE3D, CompoundE3DConfig
+
+
+@pytest.fixture(autouse=True)
+def _unparked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CEG-KGE-PARK: prove the parked mechanism under an explicit un-park.
+
+    The default refusal is asserted in tests/unit/test_kge_parked.py.
+    """
+    monkeypatch.setattr(settings, "parked_subsystems_enabled", True)
+
 
 # ============================================================================
 # FIXTURES

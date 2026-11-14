@@ -9,6 +9,11 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
+PARKED (CEG-KGE-PARK, operator decision 2026-11-14): HopRAG is parked.
+Building this config is harmless; GraphIndexBuilder refuses with
+engine.kge.parked.ParkedSubsystemError. Code kept, not deleted — see
+docs/PARKED_SUBSYSTEMS.md.
+
 HopRAG configuration dataclass.
 
 Defines all tunable parameters for the HopRAG subsystem, including:

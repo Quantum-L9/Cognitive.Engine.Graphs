@@ -116,6 +116,11 @@ class Settings(BaseSettings):
     kge_enabled: bool = False
     kge_embedding_dim: int = 256  # Must match KGESpec.embeddingdim default (schema.py)
     kge_confidence_threshold: float = 0.3
+    # CEG-KGE-PARK (operator decision 2026-11-14): HopRAG and CompoundE3D are
+    # parked — their entry points refuse with ParkedSubsystemError. True only
+    # for engine mechanism tests or a recorded un-park decision
+    # (docs/PARKED_SUBSYSTEMS.md). Independent of kge_enabled.
+    parked_subsystems_enabled: bool = False
 
     # --- Pareto / Multi-Objective ---
     pareto_enabled: bool = True

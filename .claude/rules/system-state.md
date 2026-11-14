@@ -18,7 +18,8 @@ Update this file when merging PRs.
 ## Dormant Subsystems
 | System | Blocker | Activation |
 |--------|---------|------------|
-| KGE (CompoundE3D) | kge_enabled=False | Wave 6 merge → trigger_kge admin subaction |
+| KGE (CompoundE3D) | **PARKED** (CEG-KGE-PARK, operator decision 2026-11-14): `CompoundE3D`, KGE beam search, KGE Pareto and cross-dimensional ensembles refuse with `ParkedSubsystemError`; `trigger_kge` refuses. Code in `engine/kge/`, kept | New operator decision recorded in `docs/PARKED_SUBSYSTEMS.md` → `PARKED_SUBSYSTEMS_ENABLED=True`, then `KGE_ENABLED` → trigger_kge |
+| HopRAG | **PARKED** (CEG-KGE-PARK, operator decision 2026-11-14): `GraphIndexBuilder` refuses with `ParkedSubsystemError`; no caller in engine/chassis. Code in `engine/hoprag/`, kept | New operator decision recorded in `docs/PARKED_SUBSYSTEMS.md` → `PARKED_SUBSYSTEMS_ENABLED=True` plus a wired caller |
 | GDPR erasure | erase_subject() unwired | Wave 6 merge → erase_subject admin subaction |
 | PostgreSQL persistence | Not in docker-compose | Provision PostgreSQL → wire asyncpg.Pool |
 | LLM security | FeatureNotEnabled | Set LLM_PROVIDER + LLM_API_KEY |
