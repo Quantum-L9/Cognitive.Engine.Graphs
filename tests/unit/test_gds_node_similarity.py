@@ -1,0 +1,285 @@
+"""
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [test, unit, gds, node-similarity]
+owner: engine-team
+status: active
+--- /L9_META ---
+
+Unit tests — GDS ``nodeSimilarity`` job (CEG-GDS-SIM).
+
+Covers the plan builder (sanitized identifiers, bounds, parameterization),
+scheduler dispatch, tenant database routing, projection cleanup on success
+and failure, the flag-off skip, and GDSJobSpec.nodesimilarity validation.
+All Neo4j calls are mocked; tests/integration/test_gds_node_similarity.py
+proves the edges against a live GDS.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+from unittest.mock import AsyncMock
+
+import pytest
+from pydantic import ValidationError
+
+from engine.config.schema import GDSJobScheduleSpec, GDSJobSpec, GDSNodeSimilaritySpec, GDSProjectionSpec
+from engine.gds.node_similarity import NODE_SIMILARITY_ALGORITHM, build_node_similarity_plan
+from engine.gds.scheduler import GDSScheduler
+from tests.unit.test_gds_scheduler import _minimal_spec
+
+pytestmark = pytest.mark.unit
+
+DB = "test-domain"
+
+
+def _job(**overrides: Any) -> GDSJobSpec:
+    fields: dict[str, Any] = {
+        "name": "site_similarity",
+        "algorithm": "nodeSimilarity",
+        "schedule": GDSJobScheduleSpec(type="manual"),
+        "projection": GDSProjectionSpec(nodelabels=["Site", "Query"], edgetypes=["INTERACTED_WITH"]),
+        "writeedge": "SIMILAR_TO",
+        "writeproperty": "similarity_score",
+    }
+    fields.update(overrides)
+    return GDSJobSpec(**fields)
+
+
+def _driver(write_row: dict[str, Any] | None = None, deleted: int = 3) -> AsyncMock:
+    """Answer each statement by what it is, so ordering is asserted separately."""
+    row = write_row if write_row is not None else {"nodesCompared": 4, "relationshipsWritten": 6}
+
+    async def _answer(cypher: str, parameters: dict[str, Any] | None = None, database: str | None = None):
+        if "gds.nodeSimilarity.write" in cypher:
+            return [row]
+        if "DELETE r" in cypher:
+            return [{"relationships_deleted": deleted}]
+        return []
+
+    driver = AsyncMock()
+    driver.execute_query = AsyncMock(side_effect=_answer)
+    return driver
+
+
+@pytest.fixture
+def flag_on(monkeypatch):
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "gds_node_similarity_enabled", True)
+
+
+# ── Plan builder ─────────────────────────────────────────
+
+
+class TestPlan:
+    def test_algorithm_string_matches_spec_vocabulary(self):
+        assert NODE_SIMILARITY_ALGORITHM == "nodeSimilarity"
+
+    def test_default_bounds_are_parameters(self):
+        plan = build_node_similarity_plan(_job())
+        assert plan.config == {
+            "writeRelationshipType": "SIMILAR_TO",
+            "writeProperty": "similarity_score",
+            "topK": 10,
+            "degreeCutoff": 1,
+            "similarityMetric": "JACCARD",
+        }
+        assert "similarityCutoff" not in plan.config  # unset keeps the GDS default (1E-42)
+        assert plan.params == {
+            "graph_name": "site_similarity_graph",
+            "node_labels": ["Site", "Query"],
+            "edge_types": ["INTERACTED_WITH"],
+            "config": plan.config,
+        }
+
+    def test_declared_bounds_reach_the_config(self):
+        bounds = GDSNodeSimilaritySpec(topk=5, similaritycutoff=0.5, degreecutoff=2, similaritymetric="OVERLAP")
+        plan = build_node_similarity_plan(_job(nodesimilarity=bounds))
+        assert plan.config["topK"] == 5
+        assert plan.config["similarityCutoff"] == 0.5
+        assert plan.config["degreeCutoff"] == 2
+        assert plan.config["similarityMetric"] == "OVERLAP"
+
+    def test_write_statement_interpolates_nothing(self):
+        plan = build_node_similarity_plan(_job())
+        for cypher in (plan.pre_drop_cypher, plan.project_cypher, plan.write_cypher, plan.drop_cypher):
+            assert "SIMILAR_TO" not in cypher
+            assert "similarity_score" not in cypher
+            assert "Site" not in cypher
+        assert "CALL gds.nodeSimilarity.write($graph_name, $config)" in plan.write_cypher
+        assert "gds.graph.project($graph_name, $node_labels, $edge_types)" in plan.project_cypher
+
+    def test_clear_interpolates_only_the_sanitized_edge(self):
+        plan = build_node_similarity_plan(_job())
+        assert "MATCH (a)-[r:SIMILAR_TO]->(b)" in plan.clear_cypher
+        assert "$node_labels" in plan.clear_cypher
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"writeedge": "X]->() DETACH DELETE n //"},
+            {"writeproperty": "score` SET n.x = 1"},
+            {"name": "job name; DROP"},
+            {"projection": GDSProjectionSpec(nodelabels=["Site`"], edgetypes=["USES"])},
+            {"projection": GDSProjectionSpec(nodelabels=["Site"], edgetypes=["USES ON"])},
+        ],
+    )
+    def test_unsafe_identifiers_are_rejected(self, overrides):
+        with pytest.raises(ValueError, match="Invalid label"):
+            build_node_similarity_plan(_job(**overrides))
+
+    @pytest.mark.parametrize("missing", ["writeedge", "writeproperty"])
+    def test_missing_write_target_fails_explicitly(self, missing):
+        with pytest.raises(ValueError, match=f"requires {missing!r}"):
+            build_node_similarity_plan(_job(**{missing: None}))
+
+    def test_empty_projection_fails_explicitly(self):
+        job = _job(projection=GDSProjectionSpec(nodelabels=[], edgetypes=["USES"]))
+        with pytest.raises(ValueError, match="requires a projection"):
+            build_node_similarity_plan(job)
+
+
+# ── Scheduler ────────────────────────────────────────────
+
+
+class TestScheduler:
+    def test_flag_default_off(self):
+        from engine.config.settings import Settings
+
+        assert Settings.model_fields["gds_node_similarity_enabled"].default is False
+
+    async def test_flag_off_skips_with_reason_and_touches_nothing(self, monkeypatch):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gds_node_similarity_enabled", False)
+        driver = _driver()
+        job = _job()
+        result = await GDSScheduler(_minimal_spec([job]), driver).execute_job(job)
+        assert result["status"] == "skipped"
+        assert "gds_node_similarity_enabled" in result["reason"]
+        driver.execute_query.assert_not_called()
+
+    async def test_runs_in_order_against_tenant_database(self, flag_on):
+        driver = _driver()
+        job = _job()
+        result = await GDSScheduler(_minimal_spec([job], domain_id=DB), driver).execute_job(job)
+
+        assert result["status"] == "success"
+        assert result["algorithm"] == "nodeSimilarity"
+        assert result["nodes_compared"] == 4
+        assert result["relationships_written"] == 6
+        assert result["relationships_deleted"] == 3
+        assert result["write_edge"] == "SIMILAR_TO"
+        assert result["top_k"] == 10
+
+        calls = driver.execute_query.call_args_list
+        statements = [str(c.args[0]) for c in calls]
+        markers = ["gds.graph.exists", "gds.graph.project", "DELETE r", "gds.nodeSimilarity.write", "gds.graph.drop"]
+        assert len(statements) == len(markers)
+        for statement, marker in zip(statements, markers, strict=True):
+            assert marker in statement
+        assert all(c.kwargs["database"] == DB for c in calls)
+        assert all(c.kwargs["parameters"]["graph_name"] == "site_similarity_graph" for c in calls)
+
+    async def test_projection_dropped_when_write_fails(self, flag_on):
+        async def _answer(cypher: str, parameters=None, database=None):
+            if "gds.nodeSimilarity.write" in cypher:
+                msg = "procedure failed"
+                raise RuntimeError(msg)
+            if "DELETE r" in cypher:
+                return [{"relationships_deleted": 0}]
+            return []
+
+        driver = AsyncMock()
+        driver.execute_query = AsyncMock(side_effect=_answer)
+        job = _job()
+        result = await GDSScheduler(_minimal_spec([job]), driver).execute_job(job)
+
+        assert result["status"] == "failed"
+        assert "procedure failed" in result["error"]
+        last = str(driver.execute_query.call_args_list[-1].args[0])
+        assert "gds.graph.drop" in last
+
+    async def test_invalid_job_fails_before_any_query(self, flag_on):
+        driver = _driver()
+        job = _job(writeedge=None)
+        result = await GDSScheduler(_minimal_spec([job]), driver).execute_job(job)
+        assert result["status"] == "failed"
+        assert "writeedge" in result["error"]
+        driver.execute_query.assert_not_called()
+
+    async def test_unexpected_pre_drop_error_propagates(self, flag_on):
+        async def _answer(cypher: str, parameters=None, database=None):
+            if "gds.graph.exists" in cypher:
+                msg = "connection refused"
+                raise RuntimeError(msg)
+            return []
+
+        driver = AsyncMock()
+        driver.execute_query = AsyncMock(side_effect=_answer)
+        job = _job()
+        result = await GDSScheduler(_minimal_spec([job]), driver).execute_job(job)
+        assert result["status"] == "failed"
+        assert driver.execute_query.call_count == 1
+
+
+# ── Schema ───────────────────────────────────────────────
+
+
+class TestSchema:
+    def test_existing_jobs_validate_unchanged(self):
+        job = GDSJobSpec(
+            name="communities",
+            algorithm="louvain",
+            schedule=GDSJobScheduleSpec(type="manual"),
+            projection=GDSProjectionSpec(nodelabels=["Site"], edgetypes=["USES"]),
+        )
+        assert job.nodesimilarity is None
+
+    def test_accepts_valid_bounds_from_yaml_shape(self):
+        job = GDSJobSpec.model_validate(
+            {
+                "name": "j",
+                "algorithm": "nodeSimilarity",
+                "schedule": {"type": "manual"},
+                "projection": {"nodelabels": ["Site"], "edgetypes": ["USES"]},
+                "nodesimilarity": {
+                    "topk": 100,
+                    "similaritycutoff": 1.0,
+                    "degreecutoff": 3,
+                    "similaritymetric": "COSINE",
+                },
+            }
+        )
+        assert job.nodesimilarity == GDSNodeSimilaritySpec(
+            topk=100, similaritycutoff=1.0, degreecutoff=3, similaritymetric="COSINE"
+        )
+
+    def test_defaults(self):
+        bounds = GDSNodeSimilaritySpec()
+        assert (bounds.topk, bounds.similaritycutoff, bounds.degreecutoff, bounds.similaritymetric) == (
+            10,
+            None,
+            1,
+            "JACCARD",
+        )
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            {"topk": 0},
+            {"topk": 101},
+            {"similaritycutoff": -0.01},
+            {"similaritycutoff": 1.01},
+            {"degreecutoff": 0},
+            {"similaritymetric": "EUCLIDEAN"},
+            {"topK": 5},  # GDS spelling is not the spec spelling; unknown keys are refused
+        ],
+    )
+    def test_rejects_out_of_range(self, bad):
+        with pytest.raises(ValidationError):
+            GDSNodeSimilaritySpec(**bad)

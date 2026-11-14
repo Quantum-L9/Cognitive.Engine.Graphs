@@ -1899,3 +1899,48 @@ high, and outcomes exist only for candidates that were matched and shown; see
 
 Tests: `tests/unit/test_feedback_weight_governance.py`,
 `tests/integration/test_feedback_weight_governance.py`.
+
+## GDS node similarity job (CEG-GDS-SIM)
+
+**Flag**: `gds_node_similarity_enabled` (`GDS_NODE_SIMILARITY_ENABLED`), default `False` (new behaviour, C-21).
+
+A GDS job may declare `algorithm: nodeSimilarity` (exact string, the spelling
+the domain spec uses). With the flag on, `GDSScheduler` runs it against the
+tenant's domain database (`domain.id`), all through `GraphDriver.execute_query`:
+
+1. drop a stale projection named `<job name>_graph`, if one exists;
+2. `gds.graph.project($graph_name, $node_labels, $edge_types)` over the job's
+   `projection.nodelabels` / `projection.edgetypes`;
+3. delete the job's previous `writeedge` relationships between projected nodes,
+   so a re-run replaces its output instead of duplicating it
+   (`gds.nodeSimilarity.write` always creates);
+4. `gds.nodeSimilarity.write($graph_name, $config)`, writing `writeedge`
+   relationships scored in `writeproperty`;
+5. drop the projection, always (also when a step fails).
+
+`writeedge`, `writeproperty` and a non-empty projection are required; a job
+missing any of them fails with a `ValueError` naming the field. Every label,
+type and property name passes `sanitize_label()` and reaches GDS as a
+parameter; only the sanitized `writeedge` is interpolated (step 3). Bounds come
+from the optional job block `nodesimilarity` (`GDSNodeSimilaritySpec`):
+
+| Field | GDS key | Default | Range |
+|---|---|---|---|
+| `topk` | `topK` | `10` | 1–100 (always sent; at most `topk` relationships per compared node) |
+| `similaritycutoff` | `similarityCutoff` | unset (GDS default 1E-42) | 0.0–1.0 |
+| `degreecutoff` | `degreeCutoff` | `1` | ≥ 1 |
+| `similaritymetric` | `similarityMetric` | `JACCARD` | `JACCARD`, `OVERLAP`, `COSINE` |
+
+Unknown keys in the block are refused. Written relationships are directed: a
+pair similar both ways gets two relationships. Steps 3 and 4 are separate
+transactions, so a failure at step 4 leaves the job's edges deleted until the
+next successful run (the job reports `failed`).
+
+Off: the job returns `status: skipped` with reason
+`gds_node_similarity_enabled is off; nodeSimilarity job not run` and touches no
+database. Before this flag the job fell to `unknown algorithm` and was likewise
+never run, so turning it off is the prior behaviour.
+
+Requires the Neo4j Graph Data Science plugin. Tests:
+`tests/unit/test_gds_node_similarity.py`,
+`tests/integration/test_gds_node_similarity.py`.
