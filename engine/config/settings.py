@@ -121,6 +121,13 @@ class Settings(BaseSettings):
     pareto_enabled: bool = True
     pareto_n_samples: int = 50
     pareto_weight_discovery_enabled: bool = False  # off until outcome data flows
+    # SI-06: handle_match cut to top_n in Cypher, then ran decision_arbitration's
+    # Pareto filter on the cut list as metadata only, so a dominated candidate
+    # could hold a top_n slot a non-dominated one lost. On (and the spec declares
+    # decision_arbitration objectives): fetch a bounded pool
+    # (pareto_integrator.precut_pool_limit), order it by Pareto front, then cut.
+    # A missing objective value is never filled with 0.0. Off: unchanged.
+    pareto_precut_enabled: bool = False
 
     # --- Wave 1: Invariant & Validation Hardening (seL4-inspired) ---
     domain_strict_validation: bool = True  # W1-01: cross-reference validators at load time

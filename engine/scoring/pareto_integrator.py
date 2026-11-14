@@ -21,6 +21,8 @@ primitives.  Provides:
    ``ParetoCandidate`` instances using dimension names from the spec
 3. ``apply_constraint_penalties()`` — enforces hard/soft constraints from
    the ``DecisionArbitrationSpec``
+4. ``pareto_precut()`` / ``precut_pool_limit()`` — SI-06: order a bounded
+   pool by Pareto front before the ``top_n`` cut (``pareto_precut_enabled``)
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ import math
 from collections.abc import Mapping
 from typing import Any
 
-from engine.scoring.pareto import ParetoCandidate, ParetoFront, compute_pareto_front
+from engine.scoring.pareto import ParetoCandidate, ParetoFront, compute_pareto_front, non_dominated_ranks
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,22 @@ def _lookup_dimension_score(record: dict[str, Any], dim: str) -> Any:
     if value is not None:
         return value
     return record.get(f"{dim}_score")
+
+
+def _numeric_dimension_value(record: dict[str, Any], dim: str) -> float | None:
+    """The dimension's value as a finite float, or ``None`` when absent or not a number.
+
+    SI-06: ``None`` stays unknown — nothing here substitutes ``0.0`` or ``inf``.
+    A ``bool`` is not a score, and ``NaN`` orders against nothing.
+    """
+    raw = _lookup_dimension_score(record, dim)
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(value) else value
 
 
 # ── Candidate construction ───────────────────────────────────────────────────
@@ -94,6 +112,10 @@ def build_pareto_candidates(
     from engine.config.settings import settings
 
     zero_present = settings.arbitration_zero_score_present
+    # SI-06: under pareto_precut_enabled an absent or non-numeric value is left
+    # out of dimension_scores instead of being filled; callers treat the
+    # candidate as unranked (L9-UNKNOWN-001: an unknown is never a 0.0 score).
+    omit_missing = settings.pareto_precut_enabled
     minimized = {d for d, v in (directions or {}).items() if v == "minimize"}
     candidates: list[ParetoCandidate] = []
     for idx, record in enumerate(results):
@@ -102,6 +124,11 @@ def build_pareto_candidates(
 
         dim_scores: dict[str, float] = {}
         for dim in dimension_names:
+            if omit_missing:
+                value = _numeric_dimension_value(record, dim)
+                if value is not None:
+                    dim_scores[dim] = value
+                continue
             if zero_present:
                 # RU-018: 0.0 is a score; only an absent / None value is missing.
                 # RU-019: a missing minimised value is the worst cost, never the best.
@@ -312,7 +339,16 @@ def apply_pareto_filter(
             "pruned_pct": 0.0,
         }
 
-    front: ParetoFront = compute_pareto_front(pareto_candidates, directions=resolved_directions)
+    # SI-06: a candidate missing an objective cannot be placed on or off the
+    # front without inventing that value, so it is reported, not compared.
+    unranked: list[ParetoCandidate] = []
+    comparable = pareto_candidates
+    if settings.pareto_precut_enabled:
+        wanted = set(dimension_names)
+        comparable = [c for c in pareto_candidates if set(c.dimension_scores) == wanted]
+        unranked = [c for c in pareto_candidates if set(c.dimension_scores) != wanted]
+
+    front: ParetoFront = compute_pareto_front(comparable, directions=resolved_directions)
 
     kept = list(front.non_dominated)
     trimmed_ids: list[str] = []
@@ -343,10 +379,125 @@ def apply_pareto_filter(
         len(trimmed_ids),
     )
 
-    return {
+    filtered: dict[str, Any] = {
         "nondominated": nondominated_ids,
         "dominated": dominated_ids,
         "trimmed": trimmed_ids,
         "frontsize": front_size,
         "pruned_pct": pruned_pct,
     }
+    if settings.pareto_precut_enabled:
+        filtered["unranked"] = [c.candidate_id for c in unranked]
+    return filtered
+
+
+# ── Pareto pre-cut (SI-06) ───────────────────────────────────────────────────
+
+# The pool handle_match fetches when pareto_precut_enabled: PRECUT_POOL_MULTIPLIER
+# times top_n, never more than PRECUT_POOL_CEILING rows and never fewer than
+# top_n. The ceiling equals handle_match's own top_n cap (1000), bounding the
+# O(n² · d) front sort and its O(n²) dominance lists.
+PRECUT_POOL_MULTIPLIER = 4
+PRECUT_POOL_CEILING = 1000
+
+
+def precut_pool_limit(top_n: int) -> int:
+    """Rows to fetch so Pareto arbitration sees more than the ``top_n`` it returns."""
+    return max(top_n, min(top_n * PRECUT_POOL_MULTIPLIER, PRECUT_POOL_CEILING))
+
+
+def _composite_score(record: dict[str, Any]) -> float | None:
+    raw = record.get("score")
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or math.isnan(raw):
+        return None
+    return float(raw)
+
+
+def _score_order(score: float | None) -> tuple[int, float]:
+    """Higher composite score first; a row without a numeric score after every scored one."""
+    return (1, 0.0) if score is None else (0, -score)
+
+
+def pareto_precut(
+    candidates: list[dict[str, Any]],
+    dimension_names: list[str],
+    *,
+    top_n: int,
+    pool_limit: int,
+    candidate_id_key: str = "entity_id",
+    directions: Mapping[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Order a candidate pool by Pareto front over ``dimension_names``, then cut to ``top_n``.
+
+    Order (deterministic for a given pool):
+
+    1. Rows carrying every objective, by front rank ascending (fast
+       non-dominated sort; rank 0 is the non-dominated set).
+    2. Within a rank: composite ``score`` descending, then candidate id
+       ascending, then pool position.
+    3. Rows missing any objective (``unranked``) after every ranked row, by the
+       same score / id / position key. Their missing values are never filled.
+
+    Directions follow ``apply_pareto_filter``: honoured only while
+    ``arbitration_objective_direction`` is on. ``front_size_limit`` is not
+    applied: the ``top_n`` cut bounds the output.
+
+    Returns the kept rows and the ``arbitration`` metadata block.
+    """
+    from engine.config.settings import settings
+
+    resolved = _resolve_directions(directions) if settings.arbitration_objective_direction else None
+    dims = sorted(set(dimension_names))
+
+    ids: list[str] = []
+    vectors: list[dict[str, float] | None] = []
+    for idx, record in enumerate(candidates):
+        cand_dict = record.get("candidate", {})
+        ids.append(str(cand_dict.get(candidate_id_key, idx)) if isinstance(cand_dict, dict) else str(idx))
+        values: dict[str, float] = {}
+        for dim in dims:
+            value = _numeric_dimension_value(record, dim)
+            if value is None:
+                break
+            values[dim] = value
+        # A row missing any objective stays unranked: its vector is not built.
+        vectors.append(values if len(values) == len(dims) else None)
+
+    ranked_positions = [i for i, v in enumerate(vectors) if v is not None]
+    ranked_vectors = [v for v in vectors if v is not None]
+    ranks_of_ranked = non_dominated_ranks(ranked_vectors, dims, resolved)
+    rank: dict[int, int] = dict(zip(ranked_positions, ranks_of_ranked, strict=True))
+
+    def _key(position: int) -> tuple[int, int, int, float, str, int]:
+        bucket, score = _score_order(_composite_score(candidates[position]))
+        if position in rank:
+            return (0, rank[position], bucket, score, ids[position], position)
+        return (1, 0, bucket, score, ids[position], position)
+
+    order = sorted(range(len(candidates)), key=_key)
+    kept_positions = order[:top_n]
+
+    front_ids = [ids[i] for i in order if rank.get(i) == 0]
+    total = len(candidates)
+    meta: dict[str, Any] = {
+        "frontsize": len(front_ids),
+        "pruned_pct": round((1.0 - len(front_ids) / total) * 100, 1) if total else 0.0,
+        "nondominated_ids": front_ids,
+        "precut": {
+            "pool_limit": pool_limit,
+            "pool_size": total,
+            "returned": len(kept_positions),
+            "cut_count": total - len(kept_positions),
+            "front_ranks": [rank.get(i) for i in kept_positions],
+            "unranked_ids": [ids[i] for i in order if i not in rank],
+        },
+    }
+    logger.info(
+        "Pareto pre-cut: pool %d (limit %d) -> %d returned, %d on front 0, %d unranked",
+        total,
+        pool_limit,
+        len(kept_positions),
+        len(front_ids),
+        total - len(ranked_positions),
+    )
+    return [candidates[i] for i in kept_positions], meta
