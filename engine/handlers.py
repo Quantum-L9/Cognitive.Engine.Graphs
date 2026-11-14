@@ -3239,28 +3239,26 @@ def _enrich_sync_owned_properties(domain_spec: DomainSpec, label: str) -> frozen
     """
     owned: set[str] = set()
     for endpoint in domain_spec.sync.endpoints if domain_spec.sync else []:
-        if (
-            endpoint.targetnode == label
-            and not endpoint.targetedge
-            and endpoint.batchstrategy == SyncStrategy.UNWINDMATCHSET
-            and endpoint.fieldsupdated
-        ):
-            owned.update(endpoint.fieldsupdated)
-            owned.add("updated_at")
-            if endpoint.idproperty:
-                owned.add(endpoint.idproperty)
-        elif endpoint.targetnode == label and not endpoint.targetedge:
+        if endpoint.targetnode == label and not endpoint.targetedge:
+            owned |= _enrich_node_endpoint_owned(domain_spec, label, endpoint)
+        if any(child.targetnode == label for child in endpoint.childsync or []):
             owned |= _enrich_declared_properties(domain_spec, label)
-            if endpoint.idproperty:
-                owned.add(endpoint.idproperty)
-            owned.update(endpoint.fieldsupdated or [])
-            owned.update(edge.field for edge in endpoint.taxonomyedges or [])
-            owned.update(child.field for child in endpoint.childsync or [])
-        for child in endpoint.childsync or []:
-            if child.targetnode == label:
-                owned |= _enrich_declared_properties(domain_spec, label)
-                owned.add(child.targetid)
+            owned.update(child.targetid for child in endpoint.childsync or [] if child.targetnode == label)
     return frozenset(owned)
+
+
+def _enrich_node_endpoint_owned(domain_spec: DomainSpec, label: str, endpoint: SyncEndpointSpec) -> set[str]:
+    """Properties one node sync endpoint targeting ``label`` writes (see the caller's rules)."""
+    if endpoint.batchstrategy == SyncStrategy.UNWINDMATCHSET and endpoint.fieldsupdated:
+        owned = {*endpoint.fieldsupdated, "updated_at"}
+    else:
+        owned = _enrich_declared_properties(domain_spec, label)
+        owned.update(endpoint.fieldsupdated or [])
+        owned.update(edge.field for edge in endpoint.taxonomyedges or [])
+        owned.update(child.field for child in endpoint.childsync or [])
+    if endpoint.idproperty:
+        owned.add(endpoint.idproperty)
+    return owned
 
 
 def _enrich_refuse_owned(tenant: str, label: str, props: list[str], owned: frozenset[str]) -> None:

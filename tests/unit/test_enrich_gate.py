@@ -81,8 +81,9 @@ def test_flag_ships_off() -> None:
 async def test_flag_off_refuses_typed_and_writes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "enrich_local_writer_enabled", False)
     driver, loader = _wire(_plasticos())
+    payload = _payload("enrich_note")
     with pytest.raises(FeatureNotEnabled) as exc:
-        await handle_enrich("plasticos", _payload("enrich_note"))
+        await handle_enrich("plasticos", payload)
     assert exc.value.flag == ENRICH_LOCAL_WRITER_FLAG == "ENRICH_LOCAL_WRITER_ENABLED"
     assert ENRICH_LOCAL_WRITER_FLAG in str(exc.value)
     assert driver.calls == []
@@ -106,8 +107,9 @@ class TestWriterEnabled:
     @pytest.mark.parametrize("prop", ["credit_score", "facility_id", "processed_polymers", "community_id"])
     async def test_refuses_sync_owned_property_before_cypher(self, prop: str) -> None:
         driver, _ = _wire(_plasticos())
+        payload = _payload(prop)
         with pytest.raises(ValidationError, match="sync endpoint of the pack owns"):
-            await handle_enrich("plasticos", _payload(prop))
+            await handle_enrich("plasticos", payload)
         assert driver.calls == []
 
     async def test_one_owned_property_refuses_the_whole_call(self) -> None:
@@ -125,8 +127,9 @@ class TestWriterEnabled:
 
     async def test_refuses_system_property(self) -> None:
         driver, _ = _wire(_plasticos())
+        payload = _payload("_tenant", "'other'")
         with pytest.raises(ValidationError, match="system properties"):
-            await handle_enrich("plasticos", _payload("_tenant", "'other'"))
+            await handle_enrich("plasticos", payload)
         assert driver.calls == []
 
     async def test_label_no_sync_endpoint_writes_owns_nothing(self) -> None:
@@ -168,8 +171,9 @@ class TestWriterEnabled:
 
         monkeypatch.setattr("engine.handlers._validate_tenant_access", _deny)
         driver, _ = _wire(_plasticos())
+        payload = _payload("enrich_note")
         with pytest.raises(ValidationError, match="tenant not allowed"):
-            await handle_enrich("plasticos", _payload("enrich_note"))
+            await handle_enrich("plasticos", payload)
         assert seen == [("plasticos", "enrich")]
         assert driver.calls == []
 
@@ -242,8 +246,9 @@ class TestUnwindMatchSetOwnership:
         free = sorted(declared - _enrich_sync_owned_properties(spec, "Facility"))[0]
         await handle_enrich("plasticos", _payload(free))
         assert len(driver.calls) == 1
+        payload = _payload("updated_at")
         with pytest.raises(ValidationError, match="updated_at"):
-            await handle_enrich("plasticos", _payload("updated_at"))
+            await handle_enrich("plasticos", payload)
         assert len(driver.calls) == 1
 
 
