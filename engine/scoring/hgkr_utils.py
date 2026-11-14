@@ -178,7 +178,37 @@ def check_score_drift(
 
     Returns:
         DriftCheckResult with drift detection flag and metrics.
+
+    SI-29: with ``drift_canonical_signals_enabled`` on, the verdict is the
+    canonical score-distribution signal
+    (:func:`engine.scoring.calibration.score_distribution_drift`, mean shift
+    against ``threshold`` and the KS statistic against its canonical
+    threshold), so a shift in shape that keeps the mean is drift too. Off: the
+    mean shift alone.
     """
+    from engine.config.settings import settings
+
+    if settings.drift_canonical_signals_enabled:
+        from engine.scoring.calibration import score_distribution_drift
+
+        signal = score_distribution_drift(pre_scores, post_scores, mean_threshold=threshold)
+        if signal.drift_detected:
+            logger.warning(
+                "Score drift detected after GDS job '%s': delta_mean=%.4f ks=%.4f (threshold=%.4f)",
+                job_name,
+                signal.delta_mean,
+                signal.ks_statistic,
+                threshold,
+            )
+        return DriftCheckResult(
+            drift_detected=signal.drift_detected,
+            delta_mean=signal.delta_mean,
+            pre_scores=pre_scores,
+            post_scores=post_scores,
+            job_name=job_name,
+            threshold=threshold,
+        )
+
     if not pre_scores or not post_scores:
         return DriftCheckResult(
             drift_detected=False,

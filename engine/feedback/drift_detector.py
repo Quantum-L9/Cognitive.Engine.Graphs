@@ -26,6 +26,7 @@ import structlog
 from engine.config.outcome_vocabulary import outcome_node_label
 from engine.config.schema import DomainSpec
 from engine.graph.driver import GraphDriver
+from engine.scoring.calibration import SIGNAL_OUTCOME_DIMENSION_MIX
 from engine.utils.security import sanitize_label
 
 logger = structlog.get_logger(__name__)
@@ -38,6 +39,13 @@ class DriftDetector:
     Compares the fingerprint distribution of recent outcomes (configurable
     window) against the historical baseline. Triggers alert when divergence
     exceeds threshold.
+
+    SI-29: this answers "has the mix of scoring dimensions used by recent
+    outcomes shifted?" (``outcome_dimension_mix``). It says nothing about
+    score values; score-distribution drift is
+    :func:`engine.scoring.calibration.score_distribution_drift`. With
+    ``drift_canonical_signals_enabled`` on, every result carries
+    ``signal: "outcome_dimension_mix"``.
     """
 
     def __init__(self, graph_driver: GraphDriver, domain_spec: DomainSpec) -> None:
@@ -116,12 +124,15 @@ class DriftDetector:
         insufficient = (
             (not recent or not baseline) if settings.drift_requires_both_windows else (not recent and not baseline)
         )
+        # SI-29: name the claim this result answers (flag on).
+        labelled = {"signal": SIGNAL_OUTCOME_DIMENSION_MIX} if settings.drift_canonical_signals_enabled else {}
         if insufficient:
             return {
                 "divergence": 0.0,
                 "recent_dimensions": len(recent),
                 "baseline_dimensions": len(baseline),
                 "status": "insufficient_data",
+                **labelled,
             }
 
         divergence = self.chi_squared_divergence(recent, baseline)
@@ -136,6 +147,7 @@ class DriftDetector:
             "baseline_dimensions": len(baseline),
             "dimension_deltas": dimension_deltas,
             "status": "computed",
+            **labelled,
         }
 
     async def check_and_alert(

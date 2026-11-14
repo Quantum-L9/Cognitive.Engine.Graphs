@@ -411,10 +411,23 @@ class ScoringAssembler:
 
         Returns bias score if communities match, graduated score otherwise.
         Does not require APOC - uses native Cypher only.
+
+        SI-19 / SI-20: with ``communitymatch_membership_scoring_enabled`` on, a
+        community id is a label: only membership equality scores, so
+        ``soft_match`` compiles exactly like the binary match (no partial
+        credit from the numeric difference of two ids), and an undeclared
+        ``bias`` is 1.0 (full credit for a match) instead of a hidden 1.5 the
+        score clamp cut to 1.0. A declared ``bias`` (including 0.0) is used
+        as declared. Off: legacy.
         """
+        from engine.config.settings import settings
         from engine.config.structural_vocabulary import declared, required
 
-        bias = cypher_number(dim.bias or 1.5)
+        membership = settings.communitymatch_membership_scoring_enabled
+        if membership:
+            bias = cypher_number(dim.bias if dim.bias is not None else 1.0)
+        else:
+            bias = cypher_number(dim.bias or 1.5)
         # Stage 2 follow-up (item 8): the community property is the domain's
         # declaration; the query parameter defaults to the same declared name.
         cand_prop = sanitize_label(
@@ -422,7 +435,7 @@ class ScoringAssembler:
         )
         query_prop = sanitize_label(dim.queryprop or (cand_prop if required() else "community_id"))
 
-        if getattr(dim, "soft_match", False):
+        if getattr(dim, "soft_match", False) and not membership:
             # S2-17: Graduated community scoring — Hierarchical Attention Network pattern.
             # Uses absolute community ID difference as proxy for dendrogram distance.
             # Closer community IDs ≈ closer in hierarchy → higher partial credit.
