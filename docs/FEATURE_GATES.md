@@ -1834,6 +1834,47 @@ the message is logged, not returned, because it can carry driver detail) and
 `status` `complete` or `partial`. The outcome stays `recorded`. Off: the first stage
 failure propagates.
 
+
+## Local enrich property writer (CEG-ENRICH-GATE)
+
+| Capability | Env Var | Default | Status |
+|---|---|---|---|
+| CEG local `enrich` property writer | `ENRICH_LOCAL_WRITER_ENABLED` | `False` | dormant |
+
+`handle_enrich` runs `MATCH (n:<label>) SET n.<prop> = <expr>`: a second writer
+of node properties beside `sync`, able to overwrite values sync wrote and
+scoring reads. It had only a capability check. Gate owns the action name
+`enrich` for EIE (`engine/spec.yaml` never advertises it; no checked-in
+`L9_ALLOWED_ACTIONS` lists it), and no engine code calls the handler, so it now
+ships dormant (`enrich_local_writer_enabled` in `engine/config/settings.py`).
+
+**Off (default):** `enrich` raises `FeatureNotEnabled` naming
+`ENRICH_LOCAL_WRITER_ENABLED` (HTTP 422) before any spec load or graph access.
+Nothing is written; it is never a silent no-op.
+
+**On:** the call keeps its tenant allowlist, capability check, label/property
+sanitization and expression whitelist, and additionally refuses, before any
+Cypher runs, every `_`-prefixed system property and every property the pack
+assigns to `sync` on the target label: a node sync endpoint's `idproperty`,
+every ontology-declared property of its `targetnode`, its `fieldsupdated`,
+taxonomy and childsync row fields, and the `targetid` and declared properties of
+a childsync `targetnode`. Declared properties are refused even when sync never
+sends them, because the legacy `SET n += row` path writes any of them; this also
+keeps enrich off declared properties another engine writer fills (e.g. a
+declared `community_id`). Undeclared row keys that legacy sync (`SYNC_DECLARED_PROJECTION_ENABLED`
+off) still copies onto a node are not visible in the pack and are not covered.
+
+The `expression` form is kept: it is caller-supplied, never pack-supplied, and
+the whitelist admits only literals, `n.<property>` reads, `$name` parameters,
+whitelisted scalar functions and arithmetic — no clause keyword, map, list,
+label or second assignment can be expressed. Contract:
+`docs/contracts/HANDLER_PAYLOADS.md` "enrich".
+
+Turning this on is the operator's decision, and does not route `enrich` from
+Gate: ownership of the action name with EIE is unchanged.
+
+Tests: `tests/unit/test_enrich_gate.py`, `tests/integration/test_enrich_gate.py`.
+
 ## 34. Feedback weight governance and the retired boost_factor (CEG-462)
 
 The outcome path applies only where the feedback loop runs: `feedback_enabled`
@@ -1899,44 +1940,3 @@ high, and outcomes exist only for candidates that were matched and shown; see
 
 Tests: `tests/unit/test_feedback_weight_governance.py`,
 `tests/integration/test_feedback_weight_governance.py`.
-
-
-## Local enrich property writer (CEG-ENRICH-GATE)
-
-| Capability | Env Var | Default | Status |
-|---|---|---|---|
-| CEG local `enrich` property writer | `ENRICH_LOCAL_WRITER_ENABLED` | `False` | dormant |
-
-`handle_enrich` runs `MATCH (n:<label>) SET n.<prop> = <expr>`: a second writer
-of node properties beside `sync`, able to overwrite values sync wrote and
-scoring reads. It had only a capability check. Gate owns the action name
-`enrich` for EIE (`engine/spec.yaml` never advertises it; no checked-in
-`L9_ALLOWED_ACTIONS` lists it), and no engine code calls the handler, so it now
-ships dormant (`enrich_local_writer_enabled` in `engine/config/settings.py`).
-
-**Off (default):** `enrich` raises `FeatureNotEnabled` naming
-`ENRICH_LOCAL_WRITER_ENABLED` (HTTP 422) before any spec load or graph access.
-Nothing is written; it is never a silent no-op.
-
-**On:** the call keeps its tenant allowlist, capability check, label/property
-sanitization and expression whitelist, and additionally refuses, before any
-Cypher runs, every `_`-prefixed system property and every property the pack
-assigns to `sync` on the target label: a node sync endpoint's `idproperty`,
-every ontology-declared property of its `targetnode`, its `fieldsupdated`,
-taxonomy and childsync row fields, and the `targetid` and declared properties of
-a childsync `targetnode`. Declared properties are refused even when sync never
-sends them, because the legacy `SET n += row` path writes any of them; this also
-keeps enrich off declared properties another engine writer fills (e.g. a
-declared `community_id`). Undeclared row keys that legacy sync (`SYNC_DECLARED_PROJECTION_ENABLED`
-off) still copies onto a node are not visible in the pack and are not covered.
-
-The `expression` form is kept: it is caller-supplied, never pack-supplied, and
-the whitelist admits only literals, `n.<property>` reads, `$name` parameters,
-whitelisted scalar functions and arithmetic — no clause keyword, map, list,
-label or second assignment can be expressed. Contract:
-`docs/contracts/HANDLER_PAYLOADS.md` "enrich".
-
-Turning this on is the operator's decision, and does not route `enrich` from
-Gate: ownership of the action name with EIE is unchanged.
-
-Tests: `tests/unit/test_enrich_gate.py`, `tests/integration/test_enrich_gate.py`.
