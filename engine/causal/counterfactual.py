@@ -295,41 +295,23 @@ class CounterfactualGenerator:
                 "key_difference": key_difference,
             }
 
-        dim_counts: dict[str, int] = {}
-        for pf in positive_fingerprints:
-            for dim in set(pf.get("active_dimensions") or []):
-                dim_counts[dim] = dim_counts.get(dim, 0) + 1
+        candidates = [
+            (_INTERVENTION_ADD_DIMENSION, dim, count)
+            for dim, count in _by_support(_missing_dimension_counts(actual_dims, positive_fingerprints))
+        ]
+        candidates += [
+            (_INTERVENTION_CHANGE_WEIGHT, f"{dim}_weight_increase", count)
+            for dim, count in _by_support(
+                _heavier_weight_counts(actual_dims, actual_fingerprint, positive_fingerprints)
+            )
+        ]
 
         scenarios: list[dict[str, Any]] = []
-        missing = sorted(
-            ((dim, count) for dim, count in dim_counts.items() if dim not in actual_dims),
-            key=lambda item: (-item[1], item[0]),
-        )
-        for dim, count in missing:
+        for intervention_type, key_difference, count in candidates:
             if len(scenarios) >= max_scenarios:
                 break
             if count / total_positives >= min_support:
-                scenarios.append(scenario(_INTERVENTION_ADD_DIMENSION, dim, count))
-
-        actual_weights = actual_fingerprint.get("dimension_weights") or {}
-        heavier: dict[str, int] = {}
-        for pf in positive_fingerprints:
-            pw = pf.get("dimension_weights") or {}
-            for dim in actual_dims:
-                actual_w = actual_weights.get(dim)
-                positive_w = pw.get(dim)
-                if (
-                    isinstance(actual_w, (int, float))
-                    and isinstance(positive_w, (int, float))
-                    and positive_w > actual_w * 1.5
-                ):
-                    heavier[dim] = heavier.get(dim, 0) + 1
-        for dim, count in sorted(heavier.items(), key=lambda item: (-item[1], item[0])):
-            if len(scenarios) >= max_scenarios:
-                break
-            if count / total_positives >= min_support:
-                scenarios.append(scenario(_INTERVENTION_CHANGE_WEIGHT, f"{dim}_weight_increase", count))
-
+                scenarios.append(scenario(intervention_type, key_difference, count))
         return scenarios
 
     async def _store_scenarios(self, scenarios: list[dict[str, Any]]) -> None:
@@ -380,3 +362,39 @@ class CounterfactualGenerator:
             parameters={"scenarios": scenarios, "domain_id": self._db},
             database=self._db,
         )
+
+
+def _by_support(counts: dict[str, int]) -> list[tuple[str, int]]:
+    """Dimensions by descending support count, ties by name."""
+    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+
+
+def _missing_dimension_counts(actual_dims: set[str], positive_fingerprints: list[dict[str, Any]]) -> dict[str, int]:
+    """SI-26: positives per dimension active there but not in the actual run."""
+    counts: dict[str, int] = {}
+    for pf in positive_fingerprints:
+        for dim in set(pf.get("active_dimensions") or []) - actual_dims:
+            counts[dim] = counts.get(dim, 0) + 1
+    return counts
+
+
+def _heavier_weight_counts(
+    actual_dims: set[str],
+    actual_fingerprint: dict[str, Any],
+    positive_fingerprints: list[dict[str, Any]],
+) -> dict[str, int]:
+    """SI-26: positives per active dimension weighted over 1.5x the actual weight."""
+    actual_weights = actual_fingerprint.get("dimension_weights") or {}
+    counts: dict[str, int] = {}
+    for pf in positive_fingerprints:
+        positive_weights = pf.get("dimension_weights") or {}
+        for dim in actual_dims:
+            actual_w = actual_weights.get(dim)
+            positive_w = positive_weights.get(dim)
+            if (
+                isinstance(actual_w, (int, float))
+                and isinstance(positive_w, (int, float))
+                and positive_w > actual_w * 1.5
+            ):
+                counts[dim] = counts.get(dim, 0) + 1
+    return counts

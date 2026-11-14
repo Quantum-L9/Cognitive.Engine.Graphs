@@ -174,12 +174,14 @@ class TestFlagOnTimeOrder:
             spec.causal.causal_edges[0].model_copy(update={"source_timestamp_property": "other_at"}),
         ]
         spec = spec.model_copy(update={"causal": spec.causal.model_copy(update={"causal_edges": edges})})
+        calc = _calc([], spec)
         with pytest.raises(TouchpointTimestampConflictError):
-            _calc([], spec)._touchpoint_timestamp_expression()
+            calc._touchpoint_timestamp_expression()
 
     def test_unsafe_property_rejected(self) -> None:
+        calc = _calc([], _spec("x} RETURN 1 //"))
         with pytest.raises(ValueError):
-            _calc([], _spec("x} RETURN 1 //"))._touchpoint_timestamp_expression()
+            calc._touchpoint_timestamp_expression()
 
 
 class TestOrderingHelpers:
@@ -202,7 +204,6 @@ class TestOrderingHelpers:
         assert excluded == 0
 
     def test_mixed_kinds_refused(self) -> None:
+        rows = [{"touchpoint_id": "a", "touchpoint_ts": 5}, {"touchpoint_id": "b", "touchpoint_ts": date(2026, 1, 1)}]
         with pytest.raises(TouchpointTimestampConflictError):
-            _time_ordered_rows(
-                [{"touchpoint_id": "a", "touchpoint_ts": 5}, {"touchpoint_id": "b", "touchpoint_ts": date(2026, 1, 1)}]
-            )
+            _time_ordered_rows(rows)
