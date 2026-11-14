@@ -896,6 +896,17 @@
           "title": "Name",
           "type": "string"
         },
+        "nodesimilarity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GDSNodeSimilaritySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "per_relation_params": {
           "additionalProperties": {
             "additionalProperties": true,
@@ -1032,6 +1043,50 @@
       },
       "required": ["name", "algorithm", "schedule", "projection"],
       "title": "GDSJobSpec",
+      "type": "object"
+    },
+    "GDSNodeSimilaritySpec": {
+      "additionalProperties": false,
+      "description": "Bounds for a ``nodeSimilarity`` GDS job (CEG-GDS-SIM).\n\nMaps one-to-one onto the ``gds.nodeSimilarity.write`` configuration keys\n``topK``, ``similarityCutoff``, ``degreeCutoff`` and ``similarityMetric``.\n``topk`` is always sent and capped, so a run writes at most ``topk``\nrelationships per compared node. ``similaritycutoff`` left unset keeps the\nGDS default (1E-42: zero-similarity pairs are never written).",
+      "properties": {
+        "degreecutoff": {
+          "default": 1,
+          "description": "Lowest node degree compared",
+          "minimum": 1,
+          "title": "Degreecutoff",
+          "type": "integer"
+        },
+        "similaritycutoff": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lowest similarity score written; unset keeps the GDS default",
+          "title": "Similaritycutoff"
+        },
+        "similaritymetric": {
+          "default": "JACCARD",
+          "enum": ["JACCARD", "OVERLAP", "COSINE"],
+          "title": "Similaritymetric",
+          "type": "string"
+        },
+        "topk": {
+          "default": 10,
+          "description": "Similar nodes written per source node",
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Topk",
+          "type": "integer"
+        }
+      },
+      "title": "GDSNodeSimilaritySpec",
       "type": "object"
     },
     "GDSProjectionSpec": {

@@ -38,6 +38,11 @@ from apscheduler.triggers.cron import CronTrigger
 
 from engine.config.schema import AggregationStrategy, DomainSpec, EdgeCategory, GDSJobSpec
 from engine.config.structural_vocabulary import declared
+from engine.gds.node_similarity import (
+    NODE_SIMILARITY_ALGORITHM,
+    NODE_SIMILARITY_ALGORITHMS,
+    build_node_similarity_plan,
+)
 from engine.graph.driver import GraphDriver
 from engine.utils.security import cypher_number, sanitize_label
 
@@ -74,6 +79,9 @@ class GDSScheduler:
         - geoproximity: Haversine distance-based proximity edges
         - equipmentsync: Boolean property → edge to a declared type node
           (the algorithm id is historical; the vocabulary is the job spec's)
+        - nodeSimilarity (alias node_similarity): GDS node similarity over the job's projection,
+          written as ``writeedge`` relationships scored in ``writeproperty``
+          (gated by ``gds_node_similarity_enabled``; see node_similarity.py)
     """
 
     def __init__(self, domain_spec: DomainSpec, graph_driver: GraphDriver):
@@ -405,6 +413,8 @@ class GDSScheduler:
                     result = await self._run_feedback_recalculation(job_spec)
                 elif algo == "causal_chain_scoring":
                     result = await self._run_causal_chain_scoring(job_spec)
+                elif algo in NODE_SIMILARITY_ALGORITHMS:
+                    result = await self._run_node_similarity(job_spec)
                 else:
                     logger.warning(f"Unknown algorithm: {algo}")
                     result = {"status": "skipped", "reason": f"unknown algorithm: {algo}"}
@@ -495,6 +505,68 @@ class GDSScheduler:
                 await self.graph_driver.execute_query(drop_cypher, parameters=gds_params, database=db)
             except Exception:
                 logger.exception(f"Failed to drop projected graph '{graph_name}'")
+
+    async def _run_node_similarity(self, job_spec: GDSJobSpec) -> dict[str, Any]:
+        """CEG-GDS-SIM: run ``gds.nodeSimilarity.write`` over the job's projection.
+
+        Flag off → skipped with an explicit reason and no database call. On:
+        drop any stale projection, clear this job's leftover staging edges,
+        project, write into the job's staging type, then swap: one statement
+        deletes the edges this job wrote last time (ownership marker) and
+        promotes the staged ones. The previous result survives any failure
+        before the swap. The projection is always dropped. All statements
+        target the tenant's domain database.
+        """
+        from engine.config.settings import settings
+
+        if not settings.gds_node_similarity_enabled:
+            return {
+                "status": "skipped",
+                "reason": "gds_node_similarity_enabled is off; nodeSimilarity job not run",
+            }
+
+        plan = build_node_similarity_plan(job_spec)
+        db = self.domain_spec.domain.id
+        try:
+            await self.graph_driver.execute_query(plan.pre_drop_cypher, parameters=plan.params, database=db)
+        except Exception as exc:
+            exc_msg = str(exc).lower()
+            if "not found" not in exc_msg and "does not exist" not in exc_msg:
+                logger.exception("GDS pre-drop failed unexpectedly for %s", plan.graph_name)
+                raise
+
+        await self.graph_driver.execute_query(plan.clear_staging_cypher, parameters=plan.params, database=db)
+        try:
+            # Inside the cleanup scope: a projection the server registered
+            # before the call failed is still dropped.
+            await self.graph_driver.execute_query(plan.project_cypher, parameters=plan.params, database=db)
+            written = await self.graph_driver.execute_query(plan.write_cypher, parameters=plan.params, database=db)
+            data = written[0] if written else {}
+            swapped = await self.graph_driver.execute_query(plan.swap_cypher, parameters=plan.params, database=db)
+            swap = swapped[0] if swapped else {}
+        finally:
+            try:
+                await self.graph_driver.execute_query(plan.drop_cypher, parameters=plan.params, database=db)
+            except Exception:
+                logger.exception("Failed to drop projected graph '%s'", plan.graph_name)
+
+        deleted = swap.get("relationships_deleted", 0)
+        logger.info(
+            "nodeSimilarity %s: %s nodes compared, %s relationships written, %s replaced",
+            job_spec.name,
+            data.get("nodesCompared"),
+            data.get("relationshipsWritten"),
+            deleted,
+        )
+        return {
+            "algorithm": NODE_SIMILARITY_ALGORITHM,
+            "nodes_compared": data.get("nodesCompared"),
+            "relationships_written": swap.get("relationships_written", 0),
+            "relationships_deleted": deleted,
+            "write_edge": plan.write_edge,
+            "write_property": plan.write_property,
+            "top_k": plan.config["topK"],
+        }
 
     async def _run_cooccurrence(self, job_spec: GDSJobSpec) -> dict[str, Any]:
         """Build co-occurrence edges from bipartite projection.
