@@ -78,6 +78,32 @@ python tools/spec_extract.py --fail-on MISSING        # exit 1 if any MISSING
 - `artifacts/coverage_matrix.json` — IMPLEMENTED / PARTIAL / MISSING per feature
 - `artifacts/coverage_report.md` — human-readable markdown report
 
+### What the three statuses mean
+
+Status is decided by evidence, never by how many files mention a name:
+
+| Status | Meaning |
+|---|---|
+| IMPLEMENTED | The implementation is present in the feature's owning code **and** at least one test under `tests/` references it |
+| PARTIAL | The implementation is present, but no test references it |
+| MISSING | No implementation is present |
+
+Implementation evidence per category (read with `ast`, nothing imported):
+
+| Category | Spec source | Implementation evidence | Test evidence |
+|---|---|---|---|
+| `gates` | `gatetypes[].name` | `GateType` member registered in `engine/gates/registry.py` | `GateType.<MEMBER>` or the registered gate class |
+| `scoring` | `scoringcomputationtypes[].name` | `ComputationType` member the assembler (`engine/scoring/assembler.py`) references | `ComputationType.<MEMBER>` or the quoted value |
+| `gds_algorithm` | `gdsjobs.algorithms[].name` + every job's `algorithm` | A literal `engine/gds/scheduler.py` dispatches on | The quoted literal |
+| `action_handler` | `endpoints.universal[].path` (`/v1/<action>`) + `ENGINE_CONTRACT_FEATURES` | Key of `ACTION_HANDLERS`, or the declared admin subaction (`ENDPOINT_REALIZATIONS`) | The handler name, or the quoted subaction |
+| `research_pattern` | `tools/research/top5_leverage_patterns_detailed.json` | A declared `engine_mapping` token in a declared search file | A declared token |
+
+Names compare lower-case, letters and digits only (`temporal_recency` == `temporalrecency`).
+A name the spec only mentions in prose is not a feature, and domain-pack vocabulary
+(`node_labels`, `edge_registry`) is not counted: the engine is domain-neutral. Tests
+of the audit tool itself are not evidence. An owning file that exists but lost the
+anchor a probe reads makes the extractor exit 2 instead of reporting a status.
+
 ---
 
 ## How the Two Tools Work Together
@@ -93,8 +119,8 @@ make audit
   │
   └─→ tools/spec_extract.py          (spec feature coverage)
         ├─ Reads: graph-cognitive-engine-spec-v1.1.0.yaml
-        ├─ Extracts: gates, scoring, ontology, v1.1 additions, actions, GDS
-        ├─ Scans: engine/**/*.py + tests/fixtures/design_packs/**/*.yaml
+        ├─ Extracts: gatetypes, scoringcomputationtypes, gdsjobs, endpoints (+ research patterns)
+        ├─ Scans: owning engine modules (implementation) + tests/**/*.py (test references)
         └─ Writes: artifacts/coverage_report.md
                    artifacts/coverage_matrix.json
                    artifacts/spec_checklist.json
@@ -104,7 +130,7 @@ make audit
 
 **`spec_extract.py`** answers: *"Does this repo implement everything the spec requires?"*
 
-Together they produce a complete picture. The architecture audit catches structural violations (wrong imports, missing handlers, injection risks). The spec coverage catches functional gaps (missing gate types, unimplemented scoring dimensions, absent v1.1 nodes).
+Together they produce a complete picture. The architecture audit catches structural violations (wrong imports, missing handlers, injection risks). The spec coverage catches functional gaps (missing gate types, unimplemented scoring computations, GDS algorithms with no scheduler branch).
 
 ---
 
@@ -126,4 +152,4 @@ The `.github/workflows/audit.yml` workflow runs both tools on every PR and push 
 2. Spec coverage (`python tools/spec_extract.py --fail-on NONE`)
 3. Upload reports to artifacts
 
-Use `--fail-on MISSING` when you're ready to enforce full spec coverage (CI will block merge if any feature is MISSING). Use `--fail-on NONE` during active development so you can see the matrix without blocking. When all features are IMPLEMENTED or PARTIAL, switch to `--fail-on MISSING` to gate merges on spec coverage.
+Use `--fail-on MISSING` when you're ready to enforce full spec coverage (CI will block merge if any feature is MISSING). Use `--fail-on NONE` during active development so you can see the matrix without blocking. When no feature is MISSING, switch to `--fail-on MISSING` to gate merges on spec coverage.

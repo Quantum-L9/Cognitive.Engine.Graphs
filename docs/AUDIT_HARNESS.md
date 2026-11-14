@@ -26,7 +26,7 @@ make harness
 | **Required structure checks** | Verifies directories/files/tokens that MUST exist | Fails if `engine/handlers.py` is missing or doesn't contain `register_all` |
 | **Cypher injection pattern detection** | Regex-scans f-strings for label interpolation without `sanitize_label()` | Flags `f"MERGE (n:{spec.target_node} ...)"` with evidence snippet |
 | **Lifecycle anchor verification** | Checks that the definition owning each flow uses every expected component (`within_function` / `within_class` in `tools/audit_rules.yaml`) | Warns if `handle_match` stops constructing `GateCompiler`, `TraversalAssembler` or `ScoringAssembler`, or stops calling `execute_query` |
-| **Spec coverage scanning** | Extracts features from spec YAML, scans codebase for implementation evidence | Reports which gates, scoring types, ontology nodes are IMPLEMENTED / PARTIAL / MISSING |
+| **Spec coverage scanning** | Extracts features from the spec YAML's structured sections, then checks each feature's owning code for implementation evidence and `tests/` for a test that references it | IMPLEMENTED = implemented and tested; PARTIAL = implemented, no test references it; MISSING = no implementation (rules per category: `tools/spec_extract.py` docstring) |
 | **Contract wiring verification** | Checks all 27 contract docs exist and are referenced in `.cursorrules` / `CLAUDE.md` / `AGENTS.md` | Fails if `FIELD_NAMES.md` exists but isn't wired into agent rules |
 | **Evidence-based output** | Every finding includes file path + line range + 7-line code snippet | You see the exact code, not a vague description |
 | **Severity-gated CI exit codes** | Returns exit code 1 if CRITICAL or HIGH findings exist | CI blocks merge; `make harness` fails locally |
@@ -92,7 +92,7 @@ table.
 | :-- | :-- | :-- |
 | `findings.CRITICAL` / `HIGH` / `MEDIUM` / `LOW` | the count rises at all | Pure ratchet: every rule is a precise contract check, so a new finding is a regression, not noise; a tolerance band would let them pile up |
 | `spec_coverage.IMPLEMENTED` | the count drops | A feature lost its implementation evidence |
-| `spec_coverage.MISSING` | the count rises | A feature lost all evidence, or the spec added one nothing implements |
+| `spec_coverage.MISSING` | the count rises | A feature lost its implementation, or the spec added one nothing implements |
 | `spec_coverage.PARTIAL`, `total` | never (reported only) | They move in either direction whenever a feature changes state |
 
 Improvements pass and are reported. Lock them in by lowering the baseline:

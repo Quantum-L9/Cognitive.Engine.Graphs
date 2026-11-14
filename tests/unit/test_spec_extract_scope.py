@@ -34,35 +34,74 @@ def _synthetic_root(root: Path) -> Path:
     (root / "tests").mkdir()
     (root / "tools").mkdir()
     (root / "engine" / "gates" / "real.py").write_text("class RangeGate: pass\n", encoding="utf-8")
-    (root / "tests" / "test_phantom.py").write_text("# phantom_gate is not implemented yet\n", encoding="utf-8")
+    (root / "tests" / "test_phantom.py").write_text(
+        "def test_phantom():\n    assert run('phantom_gate')\n", encoding="utf-8"
+    )
     (root / "tools" / "helper.py").write_text("PHANTOM_GATE = 'phantom_gate'\n", encoding="utf-8")
-    (root / "my-spec.yaml").write_text("gates:\n  types:\n    phantom_gate: {}\n", encoding="utf-8")
+    (root / "my-spec.yaml").write_text("gatetypes:\n  - name: phantom_gate\n", encoding="utf-8")
     return root
 
 
-def test_phantom_gate_outside_scope_is_missing(tmp_path: Path) -> None:
+def _phantom(search_files: list[str]) -> se.SpecFeature:
+    return se.SpecFeature(
+        category=se.RESEARCH_CATEGORY,
+        name="phantom",
+        spec_reference="x",
+        search_tokens=["phantom_gate"],
+        search_files=search_files,
+    )
+
+
+def test_phantom_token_outside_scope_is_missing(tmp_path: Path) -> None:
     root = _synthetic_root(tmp_path)
-    feats = se.extract_gate_features({"gates": {"types": {"phantom_gate": {}}}})
-    assert feats, "extractor produced no gate feature"
+    feat = _phantom(["engine/gates/**/*.py"])
 
-    se.scan_codebase(root, feats)
+    se.scan_codebase(root, [feat])
 
-    for feat in feats:
-        assert feat.status == se.Status.MISSING.value, (feat.name, feat.evidence_files)
-        assert feat.evidence_files == []
+    assert feat.status == se.Status.MISSING.value, feat.evidence_files
+    assert feat.evidence_files == []
 
 
-def test_gate_evidence_never_comes_from_spec_tests_or_tools(tmp_path: Path) -> None:
+def test_token_evidence_never_comes_from_spec_tests_or_tools(tmp_path: Path) -> None:
+    """Only the in-scope engine file is implementation; the test file is test evidence, never implementation."""
     root = _synthetic_root(tmp_path)
     (root / "engine" / "gates" / "types").mkdir()
     (root / "engine" / "gates" / "types" / "phantom.py").write_text("class PhantomGate: ...  # phantom_gate\n")
-    feats = se.extract_gate_features({"gates": {"types": {"phantom_gate": {}}}})
+    feat = _phantom(["engine/gates/**/*.py"])
+
+    se.scan_codebase(root, [feat])
+
+    assert feat.evidence_files == ["engine/gates/types/phantom.py"], feat.evidence_files
+    assert feat.test_files == ["tests/test_phantom.py"]
+    assert feat.status == se.Status.IMPLEMENTED.value
+
+
+def test_a_comment_in_a_test_file_is_not_test_evidence(tmp_path: Path) -> None:
+    """Codex P2 on #486: only executable test code counts, never a comment or a docstring."""
+    root = _synthetic_root(tmp_path)
+    (root / "tests" / "test_phantom.py").write_text(
+        '"""phantom_gate"""\n# phantom_gate is not implemented yet\n', encoding="utf-8"
+    )
+    (root / "engine" / "gates" / "types").mkdir()
+    (root / "engine" / "gates" / "types" / "phantom.py").write_text("class PhantomGate: ...  # phantom_gate\n")
+    feat = _phantom(["engine/gates/**/*.py"])
+
+    se.scan_codebase(root, [feat])
+
+    assert feat.test_files == []
+    assert feat.status == se.Status.PARTIAL.value
+
+
+def test_spec_gate_without_engine_owner_is_missing(tmp_path: Path) -> None:
+    """A spec gate whose owning files are absent has no implementation, whatever text mentions it."""
+    root = _synthetic_root(tmp_path)
+    feats = se.extract_gate_features({"gatetypes": [{"name": "phantom_gate"}]})
+    assert [f.name for f in feats] == ["phantom_gate"]
 
     se.scan_codebase(root, feats)
 
-    for feat in feats:
-        assert feat.evidence_files == ["engine/gates/types/phantom.py"], feat.evidence_files
-        assert feat.status == se.Status.PARTIAL.value
+    assert feats[0].status == se.Status.MISSING.value
+    assert feats[0].evidence_files == []
 
 
 @pytest.mark.parametrize(
@@ -91,13 +130,7 @@ def test_search_file_glob_matching(pattern: str, path: str, expected: bool) -> N
 
 def test_empty_scoped_set_does_not_fall_back_to_whole_tree(tmp_path: Path) -> None:
     root = _synthetic_root(tmp_path)
-    feat = se.SpecFeature(
-        category="x",
-        name="phantom",
-        spec_reference="x",
-        search_tokens=["phantom_gate"],
-        search_files=["engine/does_not_exist/"],
-    )
+    feat = _phantom(["engine/does_not_exist/"])
 
     se.scan_codebase(root, [feat])
 
@@ -125,7 +158,7 @@ def test_research_features_counted_once(tmp_path: Path, monkeypatch: pytest.Monk
     src = repo / se.RESEARCH_DIR / se.RESEARCH_PATTERNS_FILE
     (research / se.RESEARCH_PATTERNS_FILE).write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
     spec = tmp_path / "my-spec.yaml"
-    spec.write_text("gates:\n  types: {}\n", encoding="utf-8")
+    spec.write_text("gatetypes: []\n", encoding="utf-8")
     mapped = len(se.extract_research_features(tmp_path))
     assert mapped == 5
 

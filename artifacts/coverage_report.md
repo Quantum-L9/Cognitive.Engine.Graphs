@@ -1,253 +1,235 @@
 # L9 Spec Coverage Report
 
-- Generated: 2026-08-02T10:08:52.645999+00:00
+- Generated: 2026-11-14T18:24:39.033067+00:00
 - Template tag: `L9_TEMPLATE`
+- Status: IMPLEMENTED = implementation present in its owning code AND referenced by a test under tests/; PARTIAL = implementation present, no test references it; MISSING = no implementation present. Evidence rules per category: tools/spec_extract.py module docstring.
 
 ## Summary
 
 | Category | Implemented | Partial | Missing | Total |
 |----------|-------------|---------|---------|-------|
 | gates | 10 | 0 | 0 | 10 |
-| scoring | 7 | 0 | 0 | 7 |
-| v1.1_node | 2 | 0 | 0 | 2 |
-| v1.1_edge | 2 | 0 | 0 | 2 |
-| v1.1_action | 0 | 2 | 0 | 2 |
-| v1.1_scoring | 1 | 1 | 0 | 2 |
-| action_handler | 0 | 6 | 0 | 6 |
-| gds_algorithm | 5 | 0 | 0 | 5 |
-| research_pattern | 10 | 0 | 0 | 10 |
-| **TOTAL** | **37** | **9** | **0** | **46** |
+| scoring | 9 | 0 | 3 | 12 |
+| gds_algorithm | 6 | 0 | 2 | 8 |
+| action_handler | 9 | 0 | 0 | 9 |
+| research_pattern | 5 | 0 | 0 | 5 |
+| **TOTAL** | **39** | **0** | **5** | **44** |
 
-## ⚠️ PARTIAL
+## ❌ MISSING
 
-### v1.1_action → `outcomes`
-- Spec ref: `v1.1 addition: outcomes action/endpoint`
-- Found in: `engine/handlers.py`
-- Lines: engine/handlers.py:1595, engine/handlers.py:2021
+### scoring → `realtime_reranking`
+- Spec ref: `scoringcomputationtypes[realtime_reranking]`
+- **No implementation found**
 
-### v1.1_action → `resolve`
-- Spec ref: `v1.1 addition: resolve action/endpoint`
-- Found in: `engine/handlers.py`
-- Lines: engine/handlers.py:1788, engine/handlers.py:2022
+### scoring → `multihop_traversal`
+- Spec ref: `scoringcomputationtypes[multihop_traversal]`
+- **No implementation found**
 
-### v1.1_scoring → `outcome_weighted`
-- Spec ref: `v1.1 addition: outcome_weighted scoring type`
-- Found in: `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:207, tools/spec_extract.py:264
+### scoring → `churn_detection`
+- Spec ref: `scoringcomputationtypes[churn_detection]`
+- **No implementation found**
 
-### action_handler → `match`
-- Spec ref: `chassis action: match`
-- Found in: `engine/handlers.py`
-- Lines: engine/handlers.py:393, engine/handlers.py:1439, engine/handlers.py:1486, engine/handlers.py:2018
+### gds_algorithm → `custom_aggregation`
+- Spec ref: `gdsjobs.patch001_nightly_jobs[reinforcement_polymer_history].algorithm; gdsjobs.patch001_weekly_jobs[competitive_overlap].algorithm; gdsjobs.patch001_weekly_jobs[market_supply_aggregation].algorithm; gdsjobs.patch001_weekly_jobs[churn_detection].algorithm`
+- **No implementation found**
 
-### action_handler → `sync`
-- Spec ref: `chassis action: sync`
-- Found in: `engine/handlers.py`
-- Lines: engine/handlers.py:645, engine/handlers.py:2019
-
-### action_handler → `admin`
-- Spec ref: `chassis action: admin`
-- Found in: `engine/handlers.py`
-- Lines: engine/handlers.py:775, engine/handlers.py:2020
-
-### action_handler → `query`
-- Spec ref: `chassis action: query`
-- Found in: `engine/handlers.py`
-- Lines: engine/handlers.py:399, engine/handlers.py:1443, engine/handlers.py:1469, engine/handlers.py:1478
-
-### action_handler → `enrich`
-- Spec ref: `chassis action: enrich`
-- Found in: `engine/handlers.py`
-- Lines: engine/handlers.py:1942, engine/handlers.py:2025
-
-### action_handler → `healthcheck`
-- Spec ref: `chassis action: healthcheck`
-- Found in: `engine/handlers.py`
-- Lines: engine/handlers.py:1937, engine/handlers.py:2024
+### gds_algorithm → `louvain_to_topology`
+- Spec ref: `gdsjobs.patch001_weekly_jobs[community_membership].algorithm`
+- **No implementation found**
 
 ## ✅ IMPLEMENTED
 
 ### gates → `range`
-- Spec ref: `gates (detected in spec text)`
-- Found in: `agents/cursor/GMP-v2.0-Perplex-Py-Scripts/script_3.py`, `agents/cursor/cursor_workflow_kernel.yaml`, `agents/cursor/gmp_meta_learning.py`, `agents/cursor/gmp_protocol/gmp-contract.yaml`, `agents/cursor/gmp_protocol/gmp-report-contract.yaml`, `agents/cursor/gmp_protocol/phase0-scope-template.yaml`, `agents/cursor/integrations/cursor_gateway.py`, `docs/archive/plasticos/PlasticOS Graph Cognitive Engine.yaml`, `docs/archive/plasticos/plasticos_domain_spec.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml`, `docs/contracts/config/env-contract.yaml`, `domains/MASTER-SPEC-ALL-DOMAINS.yaml`, `domains/_template.yaml`, `domains/freight_matching_domain_spec.yaml`, `domains/healthcare_referral_domain_spec.yaml`, `domains/legal_discovery_domain_spec.yaml`, `domains/mortgage_brokerage_domain_spec.yaml`, `domains/plasticos/spec.yaml`, `domains/roofing_company_domain_spec.yaml`, `engine/arbitration/schema.py`, `engine/config/schema.py`, `engine/diagnostics/fingerprint.py`, `engine/gates/compiler.py`, `engine/gates/null_semantics.py`, `engine/gates/registry.py`, `engine/gates/types/__init__.py`, `engine/gates/types/all_gates.py`, `engine/gds/scheduler.py`, `engine/handlers.py`, `engine/intake/intake_compiler.py`, `engine/kge/beam_search.py`, `engine/kge/compound_e3d.py`, `engine/kge/cross_dimensional_ensemble.py`, `engine/kge/ensemble.py`, `engine/kge/pareto_ensemble.py`, `engine/kge/transformations.py`, `engine/personas/composer.py`, `engine/scoring/assembler.py`, `engine/scoring/calibration.py`, `engine/scoring/pareto.py`, `engine/traversal/multihop.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/contracts/test_contract_registry.py`, `tests/contracts/test_contracts.py`, `tests/contracts/test_env_contract.py`, `tests/integration/test_hoprag_pipeline.py`, `tests/integration/test_match_handler.py`, `tests/integration/test_null_semantics.py`, `tests/performance/test_query_latency.py`, `tests/performance/test_sync_throughput.py`, `tests/property/test_gates_property.py`, `tests/property/test_scoring_property.py`, `tests/scoring/test_benchmark.py`, `tests/test_boot_and_registry.py`, `tests/test_pareto_wiring.py`, `tests/unit/test_arbitration.py`, `tests/unit/test_audit_harness_parallel.py`, `tests/unit/test_causal_edges.py`, `tests/unit/test_config_schema.py`, `tests/unit/test_counterfactual.py`, `tests/unit/test_edge_merger.py`, `tests/unit/test_gates_all_types.py`, `tests/unit/test_health_engine.py`, `tests/unit/test_helpfulness.py`, `tests/unit/test_hgkr_schema.py`, `tests/unit/test_intake.py`, `tests/unit/test_kge_ensemble.py`, `tests/unit/test_multihop_traversal.py`, `tests/unit/test_persona_selector.py`, `tests/unit/test_pseudo_query.py`, `tests/unit/test_safe_eval.py`, `tests/unit/test_wave1_invariants.py`, `tests/unit/test_wave2_calibration.py`, `tests/unit/test_wave2_feedback.py`, `tests/unit/test_wave2_normalization.py`, `tests/unit/test_wave4_state_resilience.py`, `tools/audit_engine.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:138, tools/spec_extract.py:144, tools/spec_extract.py:146, tools/spec_extract.py:148, tools/audit_engine.py:91
+- Spec ref: `gatetypes[range]`
+- Implementation: engine/config/schema.py:85, engine/gates/registry.py:39
+- Tests: `tests/contracts/test_contracts.py`, `tests/integration/test_null_semantics.py`, `tests/property/test_gates_property.py`, `tests/test_boot_and_registry.py`, `tests/unit/test_config_schema.py`
 
 ### gates → `threshold`
-- Spec ref: `gates (detected in spec text)`
-- Found in: `.github/governance/quality-thresholds.yaml`, `.github/pr_review_config.yaml`, `agents/cursor/GMP-v2.0-Perplex-Py-Scripts/script_3.py`, `agents/cursor/GMP-v2.0-Perplex-Py-Scripts/script_4.py`, `agents/cursor/cursor_memory_client.py`, `agents/cursor/cursor_memory_kernel.py`, `agents/cursor/cursor_memory_kernel.yaml`, `agents/cursor/cursor_workflow_kernel.yaml`, `agents/cursor/gmp_meta_learning.py`, `chassis/auth/settings.py`, `chassis/middleware.py`, `config/perplexity_audit.yaml`, `docs/archive/plasticos/PlasticOS Graph Cognitive Engine.yaml`, `docs/archive/plasticos/plasticos_domain_spec.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml`, `docs/contracts/config/env-contract.yaml`, `docs/contracts/data/graph-schema.yaml`, `docs/contracts/dependencies/neo4j.yaml`, `domains/MASTER-SPEC-ALL-DOMAINS.yaml`, `domains/_template.yaml`, `domains/aios_god_agent_domain_spec.yaml`, `domains/executive_assistant_domain_spec.yaml`, `domains/freight_matching_domain_spec.yaml`, `domains/healthcare_referral_domain_spec.yaml`, `domains/mortgage_brokerage_domain_spec.yaml`, `domains/plasticos/spec.yaml`, `domains/repo_as_agent_domain_spec.yaml`, `domains/research_agent_domain_spec.yaml`, `domains/roofing_company_domain_spec.yaml`, `engine/arbitration/engine.py`, `engine/causal/causal_compiler.py`, `engine/causal/causal_validator.py`, `engine/config/schema.py`, `engine/config/settings.py`, `engine/diagnostics/dissimilarity.py`, `engine/feedback/convergence.py`, `engine/feedback/drift_detector.py`, `engine/feedback/pattern_matcher.py`, `engine/feedback/signal_weights.py`, `engine/gates/compiler.py`, `engine/gates/null_semantics.py`, `engine/gates/registry.py`, `engine/gates/types/__init__.py`, `engine/gates/types/all_gates.py`, `engine/gds/scheduler.py`, `engine/graph/circuit_breaker.py`, `engine/graph/driver.py`, `engine/handlers.py`, `engine/health/nightly_health_scan.py`, `engine/health/readiness_scorer.py`, `engine/hoprag/config.py`, `engine/hoprag/indexer.py`, `engine/inference_rule_registry.py`, `engine/intake/crm_field_scanner.py`, `engine/intake/impact_reporter.py`, `engine/intake/intake_compiler.py`, `engine/kge/beam_search.py`, `engine/kge/ensemble.py`, `engine/personas/constants.py`, `engine/personas/selector.py`, `engine/resolution/resolver.py`, `engine/resolution/similarity.py`, `engine/scoring/assembler.py`, `engine/scoring/calibration.py`, `engine/scoring/confidence.py`, `engine/scoring/hgkr_utils.py`, `engine/scoring/pareto.py`, `engine/scoring/pareto_integrator.py`, `engine/traversal/edge_merger.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/contracts/test_contracts.py`, `tests/contracts/test_env_contract.py`, `tests/fixtures/hgkr_benchmark_domain.yaml`, `tests/integration/test_null_semantics.py`, `tests/integration/test_outcomes_handler.py`, `tests/invariants/test_configuration.py`, `tests/property/test_gates_property.py`, `tests/scoring/test_benchmark.py`, `tests/test_algorithmic_upgrades.py`, `tests/test_boot_and_registry.py`, `tests/test_pareto_wiring.py`, `tests/unit/test_arbitration.py`, `tests/unit/test_causal_edges.py`, `tests/unit/test_causal_validator.py`, `tests/unit/test_config_schema.py`, `tests/unit/test_domain_spec_activation.py`, `tests/unit/test_drift_detector.py`, `tests/unit/test_edge_merger.py`, `tests/unit/test_feedback_loop.py`, `tests/unit/test_gates_all_types.py`, `tests/unit/test_health_engine.py`, `tests/unit/test_hgkr_pass2.py`, `tests/unit/test_kge_beam_search.py`, `tests/unit/test_kge_ensemble.py`, `tests/unit/test_negative_penalty.py`, `tests/unit/test_pattern_matcher.py`, `tests/unit/test_persona_selector.py`, `tests/unit/test_resolver.py`, `tests/unit/test_scoring_security.py`, `tests/unit/test_scoring_weights.py`, `tests/unit/test_settings.py`, `tests/unit/test_signal_weights.py`, `tests/unit/test_wave1_invariants.py`, `tests/unit/test_wave2_confidence.py`, `tests/unit/test_wave4_state_resilience.py`, `tests/unit/test_wave6_dormant_features.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:139, chassis/middleware.py:75, chassis/middleware.py:78, chassis/middleware.py:80, chassis/middleware.py:89
+- Spec ref: `gatetypes[threshold]`
+- Implementation: engine/config/schema.py:86, engine/gates/registry.py:40
+- Tests: `tests/integration/test_null_semantics.py`, `tests/property/test_gates_property.py`, `tests/test_boot_and_registry.py`, `tests/test_handlers.py`, `tests/unit/test_config_schema.py`
 
 ### gates → `boolean`
-- Spec ref: `gates (detected in spec text)`
-- Found in: `agents/cursor/GMP-v2.0-Perplex-Py-Scripts/script_2.py`, `agents/cursor/cursor_workflow_kernel.yaml`, `agents/cursor/gmp_meta_learning.py`, `contracts/payloads/canonical-projection.schema.yaml`, `contracts/payloads/match-response.schema.yaml`, `docs/archive/plasticos/PlasticOS Graph Cognitive Engine.yaml`, `docs/archive/plasticos/plasticos_domain_spec.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml`, `docs/contracts/api/openapi.yaml`, `docs/contracts/config/env-contract.yaml`, `docs/contracts/data/graph-schema.yaml`, `domains/MASTER-SPEC-ALL-DOMAINS.yaml`, `domains/_template.yaml`, `domains/healthcare_referral_domain_spec.yaml`, `domains/legal_discovery_domain_spec.yaml`, `domains/mortgage_brokerage_domain_spec.yaml`, `domains/plasticos/spec.yaml`, `domains/research_agent_domain_spec.yaml`, `domains/roofing_company_domain_spec.yaml`, `engine/config/schema.py`, `engine/gates/compiler.py`, `engine/gates/null_semantics.py`, `engine/gates/registry.py`, `engine/gates/types/__init__.py`, `engine/gates/types/all_gates.py`, `engine/gds/scheduler.py`, `engine/intake/intake_compiler.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/contracts/test_contracts.py`, `tests/contracts/test_env_contract.py`, `tests/integration/test_null_semantics.py`, `tests/property/test_gates_property.py`, `tests/test_boot_and_registry.py`, `tests/unit/test_gate_compiler.py`, `tests/unit/test_gates_all_types.py`, `tests/unit/test_handlers_enrich_health.py`, `tests/unit/test_intake.py`, `tests/unit/test_safe_eval.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:140, tests/test_boot_and_registry.py:94, tests/test_boot_and_registry.py:118, tests/unit/test_handlers_enrich_health.py:44, tests/unit/test_handlers_enrich_health.py:45
+- Spec ref: `gatetypes[boolean]`
+- Implementation: engine/config/schema.py:87, engine/gates/registry.py:41
+- Tests: `tests/contracts/test_contracts.py`, `tests/integration/test_null_semantics.py`, `tests/property/test_gates_property.py`, `tests/test_boot_and_registry.py`, `tests/unit/test_gate_compiler.py`
 
 ### gates → `composite`
-- Spec ref: `gates (detected in spec text)`
-- Found in: `agents/cursor/cursor_workflow_kernel.yaml`, `docs/archive/plasticos/plasticos_domain_spec.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `domains/_template.yaml`, `engine/arbitration/engine.py`, `engine/arbitration/schema.py`, `engine/config/schema.py`, `engine/gates/compiler.py`, `engine/gates/null_semantics.py`, `engine/gates/registry.py`, `engine/gates/types/__init__.py`, `engine/gates/types/all_gates.py`, `engine/health/field_health.py`, `engine/intake/intake_schema.py`, `engine/personas/__init__.py`, `engine/personas/composer.py`, `engine/personas/constants.py`, `engine/personas/selector.py`, `engine/personas/types.py`, `engine/scoring/belief_propagation.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/property/test_gates_property.py`, `tests/property/test_scoring_property.py`, `tests/test_boot_and_registry.py`, `tests/unit/test_arbitration.py`, `tests/unit/test_persona_composer.py`, `tests/unit/test_persona_selector.py`, `tests/unit/test_scoring_assembler.py`, `tools/check_action_refs.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:141, tools/check_action_refs.py:71, tests/test_boot_and_registry.py:95, tests/unit/test_arbitration.py:36, tests/unit/test_arbitration.py:45
+- Spec ref: `gatetypes[composite]`
+- Implementation: engine/config/schema.py:88, engine/gates/registry.py:42
+- Tests: `tests/test_boot_and_registry.py`, `tests/unit/test_gates_all_types.py`
 
-### gates → `enum_map`
-- Spec ref: `gates (detected in spec text)`
-- Found in: `agents/cursor/cursor_workflow_kernel.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `domains/MASTER-SPEC-ALL-DOMAINS.yaml`, `domains/_template.yaml`, `domains/freight_matching_domain_spec.yaml`, `domains/mortgage_brokerage_domain_spec.yaml`, `domains/roofing_company_domain_spec.yaml`, `engine/config/schema.py`, `engine/gates/compiler.py`, `engine/gates/null_semantics.py`, `engine/gates/registry.py`, `engine/gates/types/__init__.py`, `engine/gates/types/all_gates.py`, `engine/intake/intake_compiler.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/contracts/test_contracts.py`, `tests/property/test_gates_property.py`, `tests/test_boot_and_registry.py`, `tests/unit/test_gates_all_types.py`, `tests/unit/test_intake.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:142, tests/test_boot_and_registry.py:96, tests/unit/test_intake.py:120, tests/unit/test_gates_all_types.py:131, tests/unit/test_gates_all_types.py:132
+### gates → `enummap`
+- Spec ref: `gatetypes[enummap]`
+- Implementation: engine/config/schema.py:89, engine/gates/registry.py:43
+- Tests: `tests/contracts/test_contracts.py`, `tests/property/test_gates_property.py`, `tests/test_boot_and_registry.py`, `tests/unit/test_gates_all_types.py`, `tests/unit/test_intake.py`
 
 ### gates → `exclusion`
-- Spec ref: `gates (detected in spec text)`
-- Found in: `agents/cursor/cursor_workflow_kernel.yaml`, `config/perplexity_audit.yaml`, `docs/archive/plasticos/plasticos_domain_spec.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml`, `domains/MASTER-SPEC-ALL-DOMAINS.yaml`, `domains/_template.yaml`, `domains/mortgage_brokerage_domain_spec.yaml`, `domains/plasticos/spec.yaml`, `engine/config/schema.py`, `engine/gates/compiler.py`, `engine/gates/null_semantics.py`, `engine/gates/registry.py`, `engine/gates/types/__init__.py`, `engine/gates/types/all_gates.py`, `engine/gds/scheduler.py`, `engine/personas/constants.py`, `engine/personas/synthesis.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/integration/test_multi_tenant.py`, `tests/integration/test_null_semantics.py`, `tests/test_boot_and_registry.py`, `tests/unit/test_config_schema.py`, `tests/unit/test_gates_all_types.py`, `tests/unit/test_intake.py`, `tests/unit/test_wave1_invariants.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:143, tests/test_boot_and_registry.py:97, tests/unit/test_config_schema.py:77, tests/unit/test_config_schema.py:147, tests/unit/test_config_schema.py:209
+- Spec ref: `gatetypes[exclusion]`
+- Implementation: engine/config/schema.py:90, engine/gates/registry.py:44
+- Tests: `tests/integration/test_null_semantics.py`, `tests/test_boot_and_registry.py`, `tests/unit/test_cypher_lint.py`, `tests/unit/test_gates_all_types.py`
 
-### gates → `self_range`
-- Spec ref: `gates (detected in spec text)`
-- Found in: `agents/cursor/cursor_workflow_kernel.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `domains/MASTER-SPEC-ALL-DOMAINS.yaml`, `domains/_template.yaml`, `domains/healthcare_referral_domain_spec.yaml`, `domains/roofing_company_domain_spec.yaml`, `engine/config/schema.py`, `engine/gates/compiler.py`, `engine/gates/null_semantics.py`, `engine/gates/registry.py`, `engine/gates/types/__init__.py`, `engine/gates/types/all_gates.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/property/test_gates_property.py`, `tests/test_boot_and_registry.py`, `tests/unit/test_gates_all_types.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:144, tests/test_boot_and_registry.py:98, tests/unit/test_gates_all_types.py:161, tests/unit/test_gates_all_types.py:162, tests/unit/test_gates_all_types.py:165
+### gates → `selfrange`
+- Spec ref: `gatetypes[selfrange]`
+- Implementation: engine/config/schema.py:91, engine/gates/registry.py:45
+- Tests: `tests/property/test_gates_property.py`, `tests/test_boot_and_registry.py`, `tests/unit/test_gates_all_types.py`
 
 ### gates → `freshness`
-- Spec ref: `gates (detected in spec text)`
-- Found in: `agents/cursor/cursor_workflow_kernel.yaml`, `chassis/auth/settings.py`, `docs/archive/plasticos/plasticos_domain_spec.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml`, `docs/contracts/api/openapi.yaml`, `docs/contracts/config/env-contract.yaml`, `domains/MASTER-SPEC-ALL-DOMAINS.yaml`, `domains/_template.yaml`, `domains/research_agent_domain_spec.yaml`, `engine/boot.py`, `engine/config/schema.py`, `engine/config/settings.py`, `engine/gates/compiler.py`, `engine/gates/null_semantics.py`, `engine/gates/registry.py`, `engine/gates/types/__init__.py`, `engine/gates/types/all_gates.py`, `engine/health/gap_prioritizer.py`, `engine/health/readiness_scorer.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/contracts/test_contracts.py`, `tests/contracts/test_data_models.py`, `tests/contracts/test_env_contract.py`, `tests/fixtures/hgkr_benchmark_domain.yaml`, `tests/integration/test_null_semantics.py`, `tests/property/test_gates_property.py`, `tests/test_boot_and_registry.py`, `tests/unit/test_gates_all_types.py`, `tests/unit/test_settings.py`, `tests/unit/test_wave1_invariants.py`, `tests/unit/test_wave2_confidence.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:145, tests/test_boot_and_registry.py:99, engine/boot.py:47, engine/boot.py:52, chassis/auth/settings.py:78
+- Spec ref: `gatetypes[freshness]`
+- Implementation: engine/config/schema.py:92, engine/gates/registry.py:46
+- Tests: `tests/integration/test_null_semantics.py`, `tests/property/test_gates_property.py`, `tests/test_boot_and_registry.py`, `tests/unit/test_gates_all_types.py`
 
-### gates → `temporal_range`
-- Spec ref: `gates (detected in spec text)`
-- Found in: `agents/cursor/cursor_workflow_kernel.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `domains/MASTER-SPEC-ALL-DOMAINS.yaml`, `domains/_template.yaml`, `domains/freight_matching_domain_spec.yaml`, `domains/legal_discovery_domain_spec.yaml`, `engine/config/schema.py`, `engine/gates/compiler.py`, `engine/gates/null_semantics.py`, `engine/gates/registry.py`, `engine/gates/types/__init__.py`, `engine/gates/types/all_gates.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/test_boot_and_registry.py`, `tests/unit/test_gates_all_types.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:146, tests/test_boot_and_registry.py:100, tests/unit/test_gates_all_types.py:195, tests/unit/test_gates_all_types.py:196, tests/unit/test_gates_all_types.py:199
+### gates → `temporalrange`
+- Spec ref: `gatetypes[temporalrange]`
+- Implementation: engine/config/schema.py:93, engine/gates/registry.py:47
+- Tests: `tests/test_boot_and_registry.py`, `tests/unit/test_gates_all_types.py`, `tests/unit/test_health_engine.py`, `tests/unit/test_intake.py`
 
 ### gates → `traversal`
-- Spec ref: `gates (detected in spec text)`
-- Found in: `.github/governance/semgrep-identity-map.yaml`, `.github/pr_review_config.yaml`, `agents/cursor/cursor_workflow_kernel.yaml`, `docs/archive/plasticos/plasticos_domain_spec.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml`, `docs/contracts/agents/tool-schemas/_index.yaml`, `docs/contracts/config/env-contract.yaml`, `domains/MASTER-SPEC-ALL-DOMAINS.yaml`, `domains/_template.yaml`, `domains/aios_god_agent_domain_spec.yaml`, `domains/executive_assistant_domain_spec.yaml`, `domains/healthcare_referral_domain_spec.yaml`, `domains/mortgage_brokerage_domain_spec.yaml`, `domains/plasticos/spec.yaml`, `domains/repo_as_agent_domain_spec.yaml`, `domains/roofing_company_domain_spec.yaml`, `engine/compliance/engine.py`, `engine/config/__init__.py`, `engine/config/loader.py`, `engine/config/schema.py`, `engine/config/settings.py`, `engine/gates/compiler.py`, `engine/gates/null_semantics.py`, `engine/gates/registry.py`, `engine/gates/types/__init__.py`, `engine/gates/types/all_gates.py`, `engine/handlers.py`, `engine/hoprag/__init__.py`, `engine/hoprag/config.py`, `engine/hoprag/indexer.py`, `engine/scoring/assembler.py`, `engine/scoring/helpfulness.py`, `engine/scoring/importance.py`, `engine/security/_5_llm_security.py`, `engine/traversal/__init__.py`, `engine/traversal/assembler.py`, `engine/traversal/edge_merger.py`, `engine/traversal/multihop.py`, `engine/traversal/pseudo_query.py`, `engine/traversal/resolver.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/conftest.py`, `tests/contracts/test_contracts.py`, `tests/integration/test_hoprag_pipeline.py`, `tests/integration/test_match_handler.py`, `tests/integration/test_null_semantics.py`, `tests/invariants/test_trust_boundary.py`, `tests/performance/test_query_latency.py`, `tests/test_boot_and_registry.py`, `tests/test_config_loader.py`, `tests/test_handlers.py`, `tests/test_scoring_extended.py`, `tests/unit/test_causal_serializer.py`, `tests/unit/test_config_schema.py`, `tests/unit/test_domain_pack_loader.py`, `tests/unit/test_edge_merger.py`, `tests/unit/test_first_match_direction.py`, `tests/unit/test_gates_all_types.py`, `tests/unit/test_gds_scheduler.py`, `tests/unit/test_multihop_traversal.py`, `tests/unit/test_parameter_resolver.py`, `tests/unit/test_pseudo_query.py`, `tests/unit/test_second_match_direction.py`, `tests/unit/test_sync_and_traversal.py`, `tests/unit/test_traversal.py`, `tests/unit/test_traversal_assembler.py`, `tests/unit/test_wave1_invariants.py`, `tools/audit_rules.yaml`, `tools/hoprag_benchmark.py`, `tools/l9_meta_injector.py`, `tools/spec_extract.py`, `tools/validate_domain.py`
-- Lines: tools/hoprag_benchmark.py:12, tools/hoprag_benchmark.py:16, tools/hoprag_benchmark.py:176, tools/spec_extract.py:147, tools/validate_domain.py:8
+- Spec ref: `gatetypes[traversal]`
+- Implementation: engine/config/schema.py:94, engine/gates/registry.py:48
+- Tests: `tests/integration/test_null_semantics.py`, `tests/test_boot_and_registry.py`, `tests/unit/test_config_schema.py`, `tests/unit/test_gates_all_types.py`
 
-### scoring → `geo_decay`
-- Spec ref: `scoring (detected in spec text)`
-- Found in: `agents/cursor/cursor_workflow_kernel.yaml`, `chassis/auth/settings.py`, `docs/archive/plasticos/plasticos_domain_spec.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml`, `docs/contracts/config/env-contract.yaml`, `domains/MASTER-SPEC-ALL-DOMAINS.yaml`, `domains/_template.yaml`, `domains/freight_matching_domain_spec.yaml`, `domains/healthcare_referral_domain_spec.yaml`, `domains/plasticos/spec.yaml`, `engine/config/schema.py`, `engine/config/settings.py`, `engine/kge/cross_dimensional_ensemble.py`, `engine/scoring/assembler.py`, `engine/scoring/pareto_integrator.py`, `engine/scoring/weight_discovery.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/contracts/test_contracts.py`, `tests/fixtures/hgkr_benchmark_domain.yaml`, `tests/scoring/test_benchmark.py`, `tests/test_pareto_wiring.py`, `tests/unit/test_confidence_intervals.py`, `tests/unit/test_config_schema.py`, `tests/unit/test_counterfactual.py`, `tests/unit/test_cross_dimensional_ensemble.py`, `tests/unit/test_negative_penalty.py`, `tests/unit/test_scoring.py`, `tests/unit/test_settings.py`, `tests/unit/test_signal_weights.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:200, tests/test_pareto_wiring.py:45, tests/test_pareto_wiring.py:52, tests/test_pareto_wiring.py:55, tests/test_pareto_wiring.py:56
+### scoring → `geodecay`
+- Spec ref: `scoringcomputationtypes[geodecay]`
+- Implementation: engine/config/schema.py:107, engine/scoring/assembler.py:320
+- Tests: `tests/contracts/test_contracts.py`, `tests/scoring/test_benchmark.py`, `tests/unit/test_confidence_intervals.py`, `tests/unit/test_config_schema.py`, `tests/unit/test_counterfactual.py`
 
-### scoring → `log_normalized`
-- Spec ref: `scoring (detected in spec text)`
-- Found in: `agents/cursor/cursor_workflow_kernel.yaml`, `docs/archive/plasticos/plasticos_domain_spec.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `domains/MASTER-SPEC-ALL-DOMAINS.yaml`, `domains/_template.yaml`, `domains/legal_discovery_domain_spec.yaml`, `domains/plasticos/spec.yaml`, `domains/research_agent_domain_spec.yaml`, `engine/config/schema.py`, `engine/scoring/assembler.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/contracts/test_contracts.py`, `tests/scoring/test_benchmark.py`, `tests/unit/test_intake.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:201, tests/unit/test_intake.py:128, tests/contracts/test_contracts.py:420, tests/scoring/test_benchmark.py:105, engine/config/schema.py:95
+### scoring → `lognormalized`
+- Spec ref: `scoringcomputationtypes[lognormalized]`
+- Implementation: engine/config/schema.py:108, engine/scoring/assembler.py:321
+- Tests: `tests/contracts/test_contracts.py`, `tests/integration/test_clamp_nan.py`, `tests/scoring/test_benchmark.py`, `tests/unit/test_intake.py`, `tests/unit/test_scoring_dimension_metadata.py`
 
-### scoring → `community_match`
-- Spec ref: `scoring (detected in spec text)`
-- Found in: `agents/cursor/cursor_workflow_kernel.yaml`, `docs/archive/plasticos/plasticos_domain_spec.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `domains/MASTER-SPEC-ALL-DOMAINS.yaml`, `domains/_template.yaml`, `domains/mortgage_brokerage_domain_spec.yaml`, `domains/plasticos/spec.yaml`, `engine/config/schema.py`, `engine/handlers.py`, `engine/kge/cross_dimensional_ensemble.py`, `engine/scoring/assembler.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/contracts/test_contracts.py`, `tests/fixtures/benchmark_data.py`, `tests/fixtures/hgkr_benchmark_domain.yaml`, `tests/scoring/test_benchmark.py`, `tests/unit/test_counterfactual.py`, `tests/unit/test_cross_dimensional_ensemble.py`, `tests/unit/test_hgkr_pass2.py`, `tests/unit/test_hgkr_schema.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:202, engine/handlers.py:445, tests/unit/test_counterfactual.py:62, tests/unit/test_counterfactual.py:63, tests/unit/test_counterfactual.py:73
+### scoring → `communitymatch`
+- Spec ref: `scoringcomputationtypes[communitymatch]`
+- Implementation: engine/config/schema.py:109, engine/scoring/assembler.py:322
+- Tests: `tests/contracts/test_contracts.py`, `tests/scoring/test_benchmark.py`, `tests/unit/test_counterfactual.py`, `tests/unit/test_domain_neutrality_acceptance.py`, `tests/unit/test_domain_pack_shape.py`
 
-### scoring → `inverse_linear`
-- Spec ref: `scoring (detected in spec text)`
-- Found in: `agents/cursor/cursor_workflow_kernel.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `domains/MASTER-SPEC-ALL-DOMAINS.yaml`, `domains/_template.yaml`, `domains/aios_god_agent_domain_spec.yaml`, `domains/executive_assistant_domain_spec.yaml`, `domains/healthcare_referral_domain_spec.yaml`, `domains/mortgage_brokerage_domain_spec.yaml`, `domains/plasticos/spec.yaml`, `domains/repo_as_agent_domain_spec.yaml`, `domains/roofing_company_domain_spec.yaml`, `engine/config/schema.py`, `engine/scoring/assembler.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/contracts/test_contracts.py`, `tests/unit/test_hgkr_schema.py`, `tests/unit/test_scoring.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:203, tests/unit/test_scoring.py:74, tests/unit/test_scoring.py:81, tests/unit/test_hgkr_schema.py:203, tests/contracts/test_contracts.py:422
+### scoring → `inverselinear`
+- Spec ref: `scoringcomputationtypes[inverselinear]`
+- Implementation: engine/config/schema.py:110, engine/scoring/assembler.py:323
+- Tests: `tests/contracts/test_contracts.py`, `tests/unit/test_hgkr_schema.py`, `tests/unit/test_scoring.py`
 
-### scoring → `candidate_property`
-- Spec ref: `scoring (detected in spec text)`
-- Found in: `agents/cursor/cursor_workflow_kernel.yaml`, `docs/archive/plasticos/plasticos_domain_spec.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `domains/MASTER-SPEC-ALL-DOMAINS.yaml`, `domains/_template.yaml`, `domains/aios_god_agent_domain_spec.yaml`, `domains/executive_assistant_domain_spec.yaml`, `domains/freight_matching_domain_spec.yaml`, `domains/healthcare_referral_domain_spec.yaml`, `domains/legal_discovery_domain_spec.yaml`, `domains/mortgage_brokerage_domain_spec.yaml`, `domains/plasticos/spec.yaml`, `domains/repo_as_agent_domain_spec.yaml`, `domains/research_agent_domain_spec.yaml`, `domains/roofing_company_domain_spec.yaml`, `engine/config/schema.py`, `engine/scoring/assembler.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/contracts/test_contracts.py`, `tests/fixtures/hgkr_benchmark_domain.yaml`, `tests/integration/test_null_semantics.py`, `tests/scoring/test_benchmark.py`, `tests/test_scoring_extended.py`, `tests/unit/test_confidence_intervals.py`, `tests/unit/test_hgkr_pass2.py`, `tests/unit/test_hgkr_schema.py`, `tests/unit/test_intake.py`, `tests/unit/test_negative_penalty.py`, `tests/unit/test_scoring.py`, `tests/unit/test_scoring_weights.py`, `tests/unit/test_signal_weights.py`, `tests/unit/test_wave1_invariants.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:204, tests/test_scoring_extended.py:12, tests/test_scoring_extended.py:81, tests/test_scoring_extended.py:82, tests/test_scoring_extended.py:83
+### scoring → `candidateproperty`
+- Spec ref: `scoringcomputationtypes[candidateproperty]`
+- Implementation: engine/config/schema.py:111, engine/scoring/assembler.py:335
+- Tests: `tests/compliance/test_prohibited_factors.py`, `tests/contracts/test_contracts.py`, `tests/scoring/test_benchmark.py`, `tests/test_compliance_engine.py`, `tests/test_scoring_extended.py`
 
-### scoring → `custom_cypher`
-- Spec ref: `scoring (detected in spec text)`
-- Found in: `agents/cursor/cursor_workflow_kernel.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `domains/MASTER-SPEC-ALL-DOMAINS.yaml`, `domains/_template.yaml`, `domains/repo_as_agent_domain_spec.yaml`, `engine/config/schema.py`, `engine/scoring/assembler.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/contracts/test_contracts.py`, `tests/unit/test_scoring_security.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:205, tests/unit/test_scoring_security.py:12, tests/unit/test_scoring_security.py:14, tests/unit/test_scoring_security.py:25, tests/contracts/test_contracts.py:427
+### scoring → `weightedrate`
+- Spec ref: `scoringcomputationtypes[weightedrate]`
+- Implementation: engine/config/schema.py:112, engine/scoring/assembler.py:324
+- Tests: `tests/contracts/test_contracts.py`
 
-### scoring → `temporal_decay`
-- Spec ref: `scoring (detected in spec text)`
-- Found in: `docs/archive/plasticos/plasticos_domain_spec.yaml`, `engine/causal/attribution.py`, `engine/config/schema.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/integration/test_causal_temporal_decay.py`, `tests/unit/test_causal_edges.py`, `tests/unit/test_settings.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:206, tools/spec_extract.py:264, tests/unit/test_causal_edges.py:30, tests/unit/test_causal_edges.py:511, tests/unit/test_causal_edges.py:512
+### scoring → `pricealignment`
+- Spec ref: `scoringcomputationtypes[pricealignment]`
+- Implementation: engine/config/schema.py:113, engine/scoring/assembler.py:325
+- Tests: `tests/contracts/test_contracts.py`, `tests/integration/test_pricealignment_integer_operands.py`, `tests/unit/test_counterfactual.py`, `tests/unit/test_domain_pack_shape.py`, `tests/unit/test_scoring_assembler.py`
 
-### v1.1_node → `TransactionOutcome`
-- Spec ref: `v1.1 addition: TransactionOutcome node`
-- Found in: `docs/archive/plasticos/plasticos_domain_spec.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml`, `docs/contracts/agents/tool-schemas/_index.yaml`, `docs/contracts/data/graph-schema.yaml`, `domains/plasticos/spec.yaml`, `engine/causal/attribution.py`, `engine/causal/counterfactual.py`, `engine/config/schema.py`, `engine/feedback/convergence.py`, `engine/feedback/pattern_matcher.py`, `engine/feedback/signal_weights.py`, `engine/handlers.py`, `engine/packet/packet_store.py`, `engine/resolution/similarity.py`, `engine/scoring/assembler.py`, `engine/scoring/hgkr_utils.py`, `tests/contracts/test_data_models.py`, `tests/integration/test_causal_temporal_decay.py`, `tests/unit/test_causal_edges.py`, `tests/unit/test_causal_serializer.py`, `tests/unit/test_domain_spec_activation.py`, `tests/unit/test_hgkr_pass2.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:261, engine/handlers.py:823, engine/handlers.py:1214, engine/handlers.py:1355, engine/handlers.py:1596
+### scoring → `temporalproximity`
+- Spec ref: `scoringcomputationtypes[temporalproximity]`
+- Implementation: engine/config/schema.py:114, engine/scoring/assembler.py:326
+- Tests: `tests/contracts/test_contracts.py`
 
-### v1.1_node → `SignalEvent`
-- Spec ref: `v1.1 addition: SignalEvent node`
-- Found in: `docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:261, docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml:562, docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml:1055, docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml:1650
-
-### v1.1_edge → `RESULTED_IN`
-- Spec ref: `v1.1 addition: RESULTED_IN edge`
-- Found in: `docs/archive/plasticos/plasticos_domain_spec.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml`, `docs/contracts/agents/tool-schemas/_index.yaml`, `docs/contracts/data/graph-schema.yaml`, `domains/plasticos/spec.yaml`, `engine/causal/edge_taxonomy.py`, `engine/config/schema.py`, `engine/handlers.py`, `engine/resolution/similarity.py`, `engine/scoring/assembler.py`, `tests/contracts/test_data_models.py`, `tests/integration/test_causal_temporal_decay.py`, `tests/unit/test_causal_edges.py`, `tests/unit/test_causal_serializer.py`, `tests/unit/test_causal_validator.py`, `tests/unit/test_domain_spec_activation.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:262, engine/handlers.py:1596, engine/handlers.py:1615, engine/handlers.py:1625, engine/handlers.py:1628
-
-### v1.1_edge → `RESOLVED_FROM`
-- Spec ref: `v1.1 addition: RESOLVED_FROM edge`
-- Found in: `docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml`, `docs/contracts/agents/tool-schemas/_index.yaml`, `docs/contracts/data/graph-schema.yaml`, `engine/handlers.py`, `engine/resolution/resolver.py`, `tests/contracts/test_data_models.py`, `tests/unit/test_handlers_extended.py`, `tests/unit/test_resolver.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:262, engine/handlers.py:1789, engine/handlers.py:1793, engine/handlers.py:1858, tests/unit/test_handlers_extended.py:307
-
-### v1.1_scoring → `temporal_decay`
-- Spec ref: `v1.1 addition: temporal_decay scoring type`
-- Found in: `docs/archive/plasticos/plasticos_domain_spec.yaml`, `engine/causal/attribution.py`, `engine/config/schema.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/integration/test_causal_temporal_decay.py`, `tests/unit/test_causal_edges.py`, `tests/unit/test_settings.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:206, tools/spec_extract.py:264, tests/unit/test_causal_edges.py:30, tests/unit/test_causal_edges.py:511, tests/unit/test_causal_edges.py:512
+### scoring → `customcypher`
+- Spec ref: `scoringcomputationtypes[customcypher]`
+- Implementation: engine/config/schema.py:115, engine/scoring/assembler.py:337
+- Tests: `tests/contracts/test_contracts.py`
 
 ### gds_algorithm → `louvain`
-- Spec ref: `gds (detected in spec text)`
-- Found in: `agents/cursor/cursor_workflow_kernel.yaml`, `docs/archive/plasticos/plasticos_domain_spec.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml`, `domains/MASTER-SPEC-ALL-DOMAINS.yaml`, `domains/_template.yaml`, `domains/mortgage_brokerage_domain_spec.yaml`, `domains/plasticos/spec.yaml`, `engine/gds/scheduler.py`, `engine/graph/community_export.py`, `engine/scoring/assembler.py`, `engine/scoring/hgkr_utils.py`, `engine/startup_wiring.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/contracts/test_contracts.py`, `tests/fixtures/hgkr_benchmark_domain.yaml`, `tests/gap_fixes/test_gap2_return_channel.py`, `tests/unit/test_config_schema.py`, `tests/unit/test_gds_scheduler.py`, `tests/unit/test_handlers_enrich_health.py`, `tests/unit/test_handlers_extended.py`, `tests/unit/test_hgkr_gds_dag.py`, `tests/unit/test_hgkr_pass2.py`, `tests/unit/test_hgkr_schema.py`, `tests/unit/test_scoring_security.py`, `tests/unit/test_wave6_dormant_features.py`, `tools/audit_rules.yaml`, `tools/l9_meta_injector.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:332, tools/l9_meta_injector.py:370, engine/startup_wiring.py:64, tests/unit/test_handlers_enrich_health.py:125, tests/unit/test_config_schema.py:341
+- Spec ref: `gdsjobs.algorithms[louvain]`
+- Implementation: engine/gds/scheduler.py:396
+- Tests: `tests/contracts/test_contracts.py`, `tests/unit/test_config_schema.py`, `tests/unit/test_domain_neutrality_acceptance.py`, `tests/unit/test_gds_node_similarity.py`, `tests/unit/test_gds_scheduler.py`
 
 ### gds_algorithm → `cooccurrence`
-- Spec ref: `gds (detected in spec text)`
-- Found in: `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `engine/gds/scheduler.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/unit/test_gds_scheduler.py`, `tests/unit/test_hgkr_gds_dag.py`, `tools/audit_rules.yaml`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:333, tests/unit/test_hgkr_gds_dag.py:66, tests/unit/test_hgkr_gds_dag.py:69, tests/unit/test_hgkr_gds_dag.py:70, tests/unit/test_hgkr_gds_dag.py:75
+- Spec ref: `gdsjobs.algorithms[cooccurrence]`
+- Implementation: engine/gds/scheduler.py:402
+- Tests: `tests/integration/test_gds_cooccurrence_prune.py`, `tests/unit/test_gds_scheduler.py`, `tests/unit/test_hgkr_gds_dag.py`
 
 ### gds_algorithm → `reinforcement`
-- Spec ref: `gds (detected in spec text)`
-- Found in: `chassis/auth/settings.py`, `contracts/payloads/outcome-feedback.schema.yaml`, `docs/archive/plasticos/plasticos_domain_spec.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml`, `docs/contracts/api/openapi.yaml`, `docs/contracts/config/env-contract.yaml`, `domains/_template.yaml`, `engine/boot.py`, `engine/config/settings.py`, `engine/gds/scheduler.py`, `engine/outcomes/engine.py`, `engine/outcomes/schema.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/conftest.py`, `tests/contracts/test_contracts.py`, `tests/contracts/test_data_models.py`, `tests/contracts/test_env_contract.py`, `tests/integration/test_match_handler.py`, `tests/performance/test_query_latency.py`, `tests/unit/test_gds_scheduler.py`, `tests/unit/test_hgkr_gds_dag.py`, `tests/unit/test_hgkr_pass2.py`, `tests/unit/test_settings.py`, `tests/unit/test_wave1_invariants.py`, `tests/unit/test_wave2_confidence.py`, `tools/audit_rules.yaml`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:334, tests/conftest.py:253, tests/conftest.py:261, tests/conftest.py:269, engine/boot.py:47
+- Spec ref: `gdsjobs.algorithms[reinforcement]`
+- Implementation: engine/gds/scheduler.py:404
+- Tests: `tests/contracts/test_data_models.py`, `tests/unit/test_domain_neutrality_acceptance.py`, `tests/unit/test_gds_scheduler.py`, `tests/unit/test_hgkr_gds_dag.py`, `tests/unit/test_hgkr_pass2.py`
 
 ### gds_algorithm → `temporal_recency`
-- Spec ref: `gds (detected in spec text)`
-- Found in: `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml`, `engine/gds/scheduler.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/unit/test_gds_scheduler.py`, `tools/audit_rules.yaml`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:335, tests/unit/test_gds_scheduler.py:215, engine/gds/scheduler.py:264, engine/gds/scheduler.py:499, graph-cognitive-engine-spec-v1.1.0.yaml:585
+- Spec ref: `gdsjobs.algorithms[temporal_recency]`
+- Implementation: engine/gds/scheduler.py:406
+- Tests: `tests/integration/test_gds_temporal_recency.py`, `tests/unit/test_gds_scheduler.py`, `tests/unit/test_hgkr_gds_dag.py`
 
-### gds_algorithm → `similarity`
-- Spec ref: `gds (detected in spec text)`
-- Found in: `agents/cursor/cursor_memory_client.py`, `agents/cursor/cursor_workflow_kernel.yaml`, `agents/cursor/integrations/cursor_gateway.py`, `docs/archive/plasticos/plasticos_domain_spec.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.3.0.yaml`, `docs/archive/plasticos/plasticos_domain_spec_v0.4.yaml`, `docs/contracts/data/graph-schema.yaml`, `domains/MASTER-SPEC-ALL-DOMAINS.yaml`, `domains/_template.yaml`, `domains/mortgage_brokerage_domain_spec.yaml`, `domains/plasticos/spec.yaml`, `engine/config/schema.py`, `engine/diagnostics/__init__.py`, `engine/diagnostics/dissimilarity.py`, `engine/diagnostics/fingerprint.py`, `engine/feedback/pattern_matcher.py`, `engine/handlers.py`, `engine/hoprag/__init__.py`, `engine/hoprag/config.py`, `engine/hoprag/indexer.py`, `engine/intake/crm_field_scanner.py`, `engine/kge/beam_search.py`, `engine/kge/compound_e3d.py`, `engine/resolution/__init__.py`, `engine/resolution/resolver.py`, `engine/resolution/similarity.py`, `engine/scoring/assembler.py`, `engine/scoring/helpfulness.py`, `engine/scoring/hgkr_utils.py`, `engine/spec.yaml`, `engine/traversal/edge_merger.py`, `engine/traversal/multihop.py`, `engine/traversal/pseudo_query.py`, `graph-cognitive-engine-spec-v1.1.0.yaml`, `tests/fixtures/hgkr_benchmark_domain.yaml`, `tests/integration/test_hoprag_pipeline.py`, `tests/test_algorithmic_upgrades.py`, `tests/unit/test_domain_spec_activation.py`, `tests/unit/test_edge_merger.py`, `tests/unit/test_feedback_loop.py`, `tests/unit/test_helpfulness.py`, `tests/unit/test_hgkr_pass2.py`, `tests/unit/test_kge_beam_search.py`, `tests/unit/test_kge_compound_e3d.py`, `tests/unit/test_multihop_traversal.py`, `tests/unit/test_pattern_matcher.py`, `tests/unit/test_resolver.py`, `tools/spec_extract.py`
-- Lines: tools/spec_extract.py:336, tests/test_algorithmic_upgrades.py:4, tests/test_algorithmic_upgrades.py:26, tests/test_algorithmic_upgrades.py:27, tests/test_algorithmic_upgrades.py:126
+### gds_algorithm → `equipment_sync`
+- Spec ref: `gdsjobs.algorithms[equipment_sync]`
+- Implementation: engine/gds/scheduler.py:410
+- Tests: `tests/unit/test_gds_scheduler.py`, `tests/unit/test_hgkr_gds_dag.py`
+
+### gds_algorithm → `nodeSimilarity`
+- Spec ref: `gdsjobs.patch001_weekly_jobs[form_cooccurrence].algorithm; gdsjobs.patch001_weekly_jobs[capability_similarity].algorithm`
+- Implementation: engine/gds/scheduler.py:416
+- Tests: `tests/integration/test_gds_node_similarity.py`, `tests/unit/test_gds_node_similarity.py`
+
+### action_handler → `match`
+- Spec ref: `endpoints.universal[/v1/match]`
+- Implementation: engine/handlers.py:3601
+- Tests: `tests/integration/test_handlers.py`, `tests/integration/test_match_gate_row_scope.py`, `tests/integration/test_match_handler.py`, `tests/integration/test_sync_handler.py`, `tests/test_handlers.py`
+
+### action_handler → `sync`
+- Spec ref: `endpoints.universal[/v1/sync/{entity_type}]`
+- Implementation: engine/handlers.py:3602
+- Tests: `tests/integration/test_graph_evidence_score.py`, `tests/integration/test_handlers.py`, `tests/integration/test_sync_handler.py`, `tests/integration/test_tenant_mapping_identity.py`, `tests/integration/test_typed_sync_contract.py`
+
+### action_handler → `outcomes`
+- Spec ref: `endpoints.universal[/v1/outcomes]`
+- Implementation: engine/handlers.py:3604
+- Tests: `tests/contracts/test_data_models.py`, `tests/integration/test_feedback_convergence_closure.py`, `tests/integration/test_outcomes_causal_integrity.py`, `tests/integration/test_outcomes_handler.py`, `tests/test_handlers.py`
+
+### action_handler → `resolve`
+- Spec ref: `endpoints.universal[/v1/resolve/{entity_type}]`
+- Implementation: engine/handlers.py:3605
+- Tests: `tests/contracts/test_data_models.py`, `tests/test_handlers.py`, `tests/unit/test_declared_node_identity.py`, `tests/unit/test_handlers_extended.py`, `tests/unit/test_rbac_required_proofs.py`
+
+### action_handler → `admin`
+- Spec ref: `endpoints.universal[/v1/admin/rebuild]`
+- Implementation: engine/handlers.py:3603
+- Tests: `tests/architecture/test_seam_gate_only.py`, `tests/contracts/test_contracts.py`, `tests/contracts/test_tool_schemas.py`, `tests/integration/test_admin_handler.py`, `tests/integration/test_handlers.py`
+
+### action_handler → `domains`
+- Spec ref: `endpoints.universal[/v1/domains] — realized as admin subaction list_domains: the engine lists domain packs through admin subaction list_domains; the chassis owns the HTTP route`
+- Implementation: engine/handlers.py:3603, engine/handlers.py:1449
+- Tests: `tests/architecture/test_seam_gate_only.py`, `tests/integration/test_admin_handler.py`, `tests/integration/test_handlers.py`, `tests/test_handlers.py`, `tests/unit/test_handlers_extended.py`
+
+### action_handler → `health`
+- Spec ref: `endpoints.universal[/v1/health]`
+- Implementation: engine/handlers.py:3606
+- Tests: `tests/test_handlers.py`
+
+### action_handler → `healthcheck`
+- Spec ref: `engine contract: AGENTS.md Project Structure (engine/handlers.py action handlers) — chassis liveness action the engine declares; the spec's endpoints section predates it`
+- Implementation: engine/handlers.py:3607
+- Tests: `tests/test_enrich.py`, `tests/unit/test_handlers_enrich_health.py`
+
+### action_handler → `enrich`
+- Spec ref: `engine contract: AGENTS.md Project Structure (engine/handlers.py action handlers) — enrichment action the engine declares; the spec's endpoints section predates it`
+- Implementation: engine/handlers.py:3609
+- Tests: `tests/test_enrich.py`, `tests/unit/test_declared_node_identity.py`, `tests/unit/test_handlers_enrich_health.py`
 
 ### research_pattern → `Behavioral Graph Collaborative Filtering`
 - Spec ref: `tools/research/top5_leverage_patterns_detailed.json#1_COLLABORATIVE_FILTERING_AT_SCALE`
-- Found in: `engine/gds/scheduler.py`, `engine/scoring/assembler.py`
-- Lines: engine/gds/scheduler.py:42, engine/gds/scheduler.py:45, engine/gds/scheduler.py:61, engine/gds/scheduler.py:259, engine/gds/scheduler.py:260
+- Implementation: engine/gds/scheduler.py:55, engine/gds/scheduler.py:58, engine/gds/scheduler.py:74, engine/gds/scheduler.py:402, engine/gds/scheduler.py:403
+- Tests: `tests/contracts/test_contracts.py`, `tests/integration/test_gds_cooccurrence_prune.py`, `tests/scoring/test_benchmark.py`, `tests/unit/test_counterfactual.py`, `tests/unit/test_domain_neutrality_acceptance.py`
 
 ### research_pattern → `Context-Aware Entity Resolution`
 - Spec ref: `tools/research/top5_leverage_patterns_detailed.json#2_ENTITY_DISAMBIGUATION_VIA_CONTEXT`
-- Found in: `engine/handlers.py`, `engine/resolution/resolver.py`
-- Lines: engine/resolution/resolver.py:30, engine/handlers.py:1804, engine/handlers.py:1806
+- Implementation: engine/handlers.py:2981, engine/handlers.py:2983, engine/resolution/resolver.py:59
+- Tests: `tests/contracts/test_data_models.py`, `tests/integration/test_resolver_merge_order.py`, `tests/test_handlers.py`, `tests/unit/test_declared_node_identity.py`, `tests/unit/test_handlers_extended.py`
 
 ### research_pattern → `Low-Dimensional Similarity via Graph Embeddings`
 - Spec ref: `tools/research/top5_leverage_patterns_detailed.json#3_GRAPH_EMBEDDINGS_FOR_SIMILARITY`
-- Found in: `engine/config/schema.py`, `engine/config/settings.py`, `engine/kge/__init__.py`, `engine/kge/beam_search.py`, `engine/kge/compound_e3d.py`, `engine/kge/ensemble.py`, `engine/kge/transformations.py`
-- Lines: engine/kge/transformations.py:12, engine/kge/transformations.py:199, engine/kge/compound_e3d.py:12, engine/kge/compound_e3d.py:15, engine/kge/compound_e3d.py:43
+- Implementation: engine/config/schema.py:1002, engine/config/settings.py:116, engine/kge/__init__.py:14, engine/kge/__init__.py:21, engine/kge/__init__.py:43
+- Tests: `tests/contracts/test_contracts.py`, `tests/invariants/test_compliance.py`, `tests/unit/test_admin_tenant_binding.py`, `tests/unit/test_api_error_handling.py`, `tests/unit/test_config_schema.py`
 
 ### research_pattern → `Session-Context Dynamic Re-Ranking`
 - Spec ref: `tools/research/top5_leverage_patterns_detailed.json#4_REAL_TIME_CONTEXT_AWARE_RANKING`
-- Found in: `engine/scoring/assembler.py`, `engine/scoring/calibration.py`, `engine/scoring/feedback.py`, `engine/scoring/hgkr_utils.py`
-- Lines: engine/scoring/feedback.py:19, engine/scoring/hgkr_utils.py:7, engine/scoring/hgkr_utils.py:19, engine/scoring/hgkr_utils.py:35, engine/scoring/hgkr_utils.py:45
+- Implementation: engine/scoring/assembler.py:326, engine/scoring/assembler.py:493, engine/scoring/calibration.py:7, engine/scoring/calibration.py:12, engine/scoring/calibration.py:15
+- Tests: `tests/contracts/test_contracts.py`, `tests/unit/test_admin_tenant_binding.py`, `tests/unit/test_domain_admission_rules.py`, `tests/unit/test_hgkr_pass2.py`, `tests/unit/test_outcome_vocabulary_required.py`
 
 ### research_pattern → `Transitive Relationship Discovery via Multi-Hop Traversal`
 - Spec ref: `tools/research/top5_leverage_patterns_detailed.json#5_MULTI_HOP_TRAVERSAL_FOR_ENRICHMENT`
-- Found in: `engine/hoprag/__init__.py`, `engine/traversal/multihop.py`
-- Lines: engine/traversal/multihop.py:138, engine/traversal/multihop.py:151, engine/traversal/multihop.py:174, engine/traversal/multihop.py:283, engine/hoprag/__init__.py:30
-
-### research_pattern → `Behavioral Graph Collaborative Filtering`
-- Spec ref: `tools/research/top5_leverage_patterns_detailed.json#1_COLLABORATIVE_FILTERING_AT_SCALE`
-- Found in: `engine/gds/scheduler.py`, `engine/scoring/assembler.py`
-- Lines: engine/gds/scheduler.py:42, engine/gds/scheduler.py:45, engine/gds/scheduler.py:61, engine/gds/scheduler.py:259, engine/gds/scheduler.py:260
-
-### research_pattern → `Context-Aware Entity Resolution`
-- Spec ref: `tools/research/top5_leverage_patterns_detailed.json#2_ENTITY_DISAMBIGUATION_VIA_CONTEXT`
-- Found in: `engine/handlers.py`, `engine/resolution/resolver.py`
-- Lines: engine/resolution/resolver.py:30, engine/handlers.py:1804, engine/handlers.py:1806
-
-### research_pattern → `Low-Dimensional Similarity via Graph Embeddings`
-- Spec ref: `tools/research/top5_leverage_patterns_detailed.json#3_GRAPH_EMBEDDINGS_FOR_SIMILARITY`
-- Found in: `engine/config/schema.py`, `engine/config/settings.py`, `engine/kge/__init__.py`, `engine/kge/beam_search.py`, `engine/kge/compound_e3d.py`, `engine/kge/ensemble.py`, `engine/kge/transformations.py`
-- Lines: engine/kge/transformations.py:12, engine/kge/transformations.py:199, engine/kge/compound_e3d.py:12, engine/kge/compound_e3d.py:15, engine/kge/compound_e3d.py:43
-
-### research_pattern → `Session-Context Dynamic Re-Ranking`
-- Spec ref: `tools/research/top5_leverage_patterns_detailed.json#4_REAL_TIME_CONTEXT_AWARE_RANKING`
-- Found in: `engine/scoring/assembler.py`, `engine/scoring/calibration.py`, `engine/scoring/feedback.py`, `engine/scoring/hgkr_utils.py`
-- Lines: engine/scoring/feedback.py:19, engine/scoring/hgkr_utils.py:7, engine/scoring/hgkr_utils.py:19, engine/scoring/hgkr_utils.py:35, engine/scoring/hgkr_utils.py:45
-
-### research_pattern → `Transitive Relationship Discovery via Multi-Hop Traversal`
-- Spec ref: `tools/research/top5_leverage_patterns_detailed.json#5_MULTI_HOP_TRAVERSAL_FOR_ENRICHMENT`
-- Found in: `engine/hoprag/__init__.py`, `engine/traversal/multihop.py`
-- Lines: engine/traversal/multihop.py:138, engine/traversal/multihop.py:151, engine/traversal/multihop.py:174, engine/traversal/multihop.py:283, engine/hoprag/__init__.py:30
+- Implementation: engine/hoprag/__init__.py:30, engine/traversal/multihop.py:136, engine/traversal/multihop.py:149, engine/traversal/multihop.py:173, engine/traversal/multihop.py:282
+- Tests: `tests/integration/test_hoprag_pipeline.py`, `tests/unit/test_multihop_traversal.py`

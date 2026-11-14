@@ -461,7 +461,14 @@ def write_harness_report(
     # Spec coverage summary
     if coverage and "totals" in coverage:
         totals = coverage["totals"]
+        try:
+            from tools.spec_extract import STATUS_DEFINITIONS
+        except ImportError:  # run as `python tools/audit_harness.py`: tools/ is sys.path[0]
+            from spec_extract import STATUS_DEFINITIONS  # type: ignore[import-not-found,no-redef]
+
         lines.append("## Spec Coverage")
+        lines.append("")
+        lines.append(f"> {STATUS_DEFINITIONS}")
         lines.append("")
         lines.append(f"- ✅ Implemented: {totals.get('IMPLEMENTED', 0)}")
         lines.append(f"- ⚠️ Partial: {totals.get('PARTIAL', 0)}")
