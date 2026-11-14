@@ -92,6 +92,8 @@ dim.metadata  # ScoringDimensionMetadata | None — computation-specific keys:
 #   preference_attention: success_value, success_property, outcome_relation,
 #                         outcome_node, outcome_community_property
 #   community_bridge:     community_properties
+#   temporalproximity:    frequency_property, frequency_weight, frequency_scale,
+#                         acceleration_property, acceleration_weight
 # Other computation keys are top-level fields: alias, expression, minvalue,
 # maxvalue, decayconstant, candidateprop_lon, queryprop_lon, bias, aggregation,
 # null_strategy, cold_start_fallback, soft_match, entity_types. There is no `params` dict.

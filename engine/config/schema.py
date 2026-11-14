@@ -662,6 +662,8 @@ class ScoringDimensionMetadata(BaseModel):
     outcome value counts as success is the domain's declaration),
     ``success_property``, ``outcome_relation``, ``outcome_node``,
     ``outcome_community_property``. ``community_bridge``: ``community_properties``.
+    ``temporalproximity``: ``frequency_property``, ``frequency_weight``,
+    ``frequency_scale``, ``acceleration_property``, ``acceleration_weight``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -674,6 +676,15 @@ class ScoringDimensionMetadata(BaseModel):
     outcome_community_property: str | None = None
     # --- community_bridge ---
     community_properties: list[str] | None = None
+    # --- temporalproximity (CEG-FEEDBACK-1, FEATURE_GATES §37) ---
+    # Auxiliary recency signals, each contributing only when declared: a count
+    # property (divided by frequency_scale, clamped to [0, 1]) and an
+    # acceleration flag (0/1).
+    frequency_property: str | None = None
+    frequency_weight: float | None = Field(default=None, ge=0.0, le=1.0)
+    frequency_scale: float | None = Field(default=None, gt=0.0)
+    acceleration_property: str | None = None
+    acceleration_weight: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
 # The metadata keys each computation reads (engine/scoring/assembler.py).
@@ -682,6 +693,9 @@ _METADATA_KEYS_READ: dict[ComputationType, frozenset[str]] = {
         {"success_value", "success_property", "outcome_relation", "outcome_node", "outcome_community_property"}
     ),
     ComputationType.COMMUNITYBRIDGE: frozenset({"community_properties"}),
+    ComputationType.TEMPORALPROXIMITY: frozenset(
+        {"frequency_property", "frequency_weight", "frequency_scale", "acceleration_property", "acceleration_weight"}
+    ),
 }
 
 

@@ -2352,8 +2352,34 @@
     },
     "ScoringDimensionMetadata": {
       "additionalProperties": false,
-      "description": "Computation-specific declarations of a scoring dimension (``metadata:``).\n\nExactly the keys ``ScoringAssembler`` reads, typed. Unknown keys are refused\n(a new model, strict from the start), so a misspelled key fails validation\ninstead of being dropped; a key the dimension's computation does not read is\nrefused by ``ScoringDimensionSpec``.\n\n``preference_attention``: ``success_value`` (required at admission \u2014 which\noutcome value counts as success is the domain's declaration),\n``success_property``, ``outcome_relation``, ``outcome_node``,\n``outcome_community_property``. ``community_bridge``: ``community_properties``.",
+      "description": "Computation-specific declarations of a scoring dimension (``metadata:``).\n\nExactly the keys ``ScoringAssembler`` reads, typed. Unknown keys are refused\n(a new model, strict from the start), so a misspelled key fails validation\ninstead of being dropped; a key the dimension's computation does not read is\nrefused by ``ScoringDimensionSpec``.\n\n``preference_attention``: ``success_value`` (required at admission \u2014 which\noutcome value counts as success is the domain's declaration),\n``success_property``, ``outcome_relation``, ``outcome_node``,\n``outcome_community_property``. ``community_bridge``: ``community_properties``.\n``temporalproximity``: ``frequency_property``, ``frequency_weight``,\n``frequency_scale``, ``acceleration_property``, ``acceleration_weight``.",
       "properties": {
+        "acceleration_property": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Acceleration Property"
+        },
+        "acceleration_weight": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Acceleration Weight"
+        },
         "community_properties": {
           "anyOf": [
             {
@@ -2368,6 +2394,45 @@
           ],
           "default": null,
           "title": "Community Properties"
+        },
+        "frequency_property": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Frequency Property"
+        },
+        "frequency_scale": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Frequency Scale"
+        },
+        "frequency_weight": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Frequency Weight"
         },
         "outcome_community_property": {
           "anyOf": [
