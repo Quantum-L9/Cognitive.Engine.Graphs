@@ -104,6 +104,13 @@ Consequences for the operator:
   check `list_domains` after publishing.
 - The receipts are unsigned assertions. The read-only mount and control of who
   may write the pack root remain the deployment's responsibility.
+- Confirm the served revision: admin `get_domain` returns `served_revision`
+  (`sha256`, `version`, `stage`, `source`) for the tenant, and `list_domains`
+  returns `served_revisions` for every admitted tenant. In receipt mode
+  `sha256` is the `revisions/<sha256>` directory the pointer named and the
+  loader verified; compare it with the `--reviewed-input-sha256` passed to
+  `tools/publish_domain_pack.py`, and with the digest other nodes report for
+  the same tenant.
 
 Optional, with safe defaults: `NEO4J_USERNAME` (`neo4j`), `L9_SIGNING_KEY_ID`
 (`graph-engine-v1`), `POSTGRES_USER` (`l9_owner`), `POSTGRES_DB` (`l9_graph`),

@@ -152,7 +152,30 @@ class AdminPayload(BaseModel):
 class AdminResponse(BaseModel):
     # Varies by subaction — always a dict
     pass
+
+
+class ServedRevision(TypedDict):  # engine/config/loader.py
+    tenant_id: str  # == domain.id == pack directory
+    sha256: str  # 64 lowercase hex
+    version: str  # domain.version as admitted
+    stage: str | None  # version's -<stage> suffix; None when unsuffixed
+    source: Literal["receipt", "plain"]
+
+
+# list_domains -> {"domains": list[str], "served_revisions": dict[str, ServedRevision]}
+# get_domain   -> {"domain": <DomainSpec as JSON>, "served_revision": ServedRevision}
 ```
+
+Served revision (issue #400 F4): `get_domain` and `list_domains` report, per
+admitted tenant, which revision CEG serves, so an operator can confirm two
+nodes serve the same bytes. The values are captured by the loader at admission,
+from the same load that produced the spec beside them — never a second read.
+`source: receipt` (`DOMAIN_PACK_RECEIPTS_ENABLED=true`) carries the
+`revisions/<sha256>` digest the loader verified against its receipt;
+`source: plain` carries the SHA-256 of the `spec.yaml` bytes it admitted. The
+record holds no path and no spec content. A tampered or otherwise unadmitted
+revision is refused as before and appears in neither list. `domains` and the
+keys of `served_revisions` come from one admission pass and always match.
 
 RU-003 (`ADMIN_TENANT_BOUND_DOMAIN`, default on): the identity contract binds a
 tenant to the domain pack with the same id, so every domain-bearing admin
@@ -163,7 +186,8 @@ subaction (`get_domain`, `init_schema`, `trigger_gds`, `calibration_run`,
 `evaluate`) takes `domain_id` absent (where optional; it defaults to the
 tenant) or equal to the packet tenant. Anything else raises `ValidationError`
 before any domain load or query. `evaluate` runs its matches as the packet
-tenant. `list_domains` is unchanged.
+tenant. `list_domains` is not tenant-bound (it lists every admitted pack, and
+now each pack's served revision).
 
 `delegate_capability` binds `source_tenant` to the packet tenant. It requires a
 previously registered, active parent capability owned by that tenant; the

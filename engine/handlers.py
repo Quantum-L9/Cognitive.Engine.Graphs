@@ -1447,12 +1447,18 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     _enforce_capability(tenant, "admin", domain_loader.load_domain(tenant))
 
     if subaction == "list_domains":
-        return {"domains": domain_loader.list_domains()}
+        # Issue #400 F4: one admission pass yields the names and, per tenant,
+        # the digest/version/stage the loader admitted (no path, no content).
+        revisions = domain_loader.list_domain_revisions()
+        return {
+            "domains": [revision["tenant_id"] for revision in revisions],
+            "served_revisions": {revision["tenant_id"]: dict(revision) for revision in revisions},
+        }
 
     if subaction == "get_domain":
         domain_id = _bind_admin_domain(tenant, payload, required=True)
-        spec = domain_loader.load_domain(domain_id)
-        return {"domain": spec.model_dump(mode="json")}
+        spec, revision = domain_loader.load_domain_revision(domain_id)
+        return {"domain": spec.model_dump(mode="json"), "served_revision": dict(revision)}
 
     if subaction == "init_schema":
         domain_id = _bind_admin_domain(tenant, payload, required=True)

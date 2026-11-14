@@ -120,6 +120,42 @@ class DomainApproval(RootModel[_ApprovalRecord]):
         return self
 
 
+class ServedRevision(TypedDict):
+    """Issue #400 F4: identity of the exact spec revision a tenant is served.
+
+    Captured at admission from the bytes the loader actually admitted — never
+    recomputed from a second read. Carries no path and no spec content.
+    ``source`` is ``receipt`` (the revision digest verified against its
+    receipt) or ``plain`` (sha256 of the ``spec.yaml`` bytes loaded).
+    ``stage`` is the ``domain.version`` suffix, or ``None`` when unsuffixed.
+    """
+
+    tenant_id: str
+    sha256: str
+    version: str
+    stage: str | None
+    source: Literal["receipt", "plain"]
+
+
+_VERSION_STAGE = re.compile(r"-(seed|discovered|inferred|proposed|reviewed|production)$")
+
+
+def version_stage(version: str) -> str | None:
+    """Stage suffix of an admitted ``domain.version``; ``None`` when it has none."""
+    found = _VERSION_STAGE.search(version)
+    return found.group(1) if found else None
+
+
+def _served_revision(spec: DomainSpec, sha256: str, source: Literal["receipt", "plain"]) -> ServedRevision:
+    return {
+        "tenant_id": spec.domain.id,
+        "sha256": sha256,
+        "version": spec.domain.version,
+        "stage": version_stage(spec.domain.version),
+        "source": source,
+    }
+
+
 def read_native_file(path: Path, *, limit: int = MAX_SPEC_BYTES) -> bytes:
     """Read one bounded regular file, rejecting symlinks in every path component.
 
@@ -968,6 +1004,9 @@ class DomainPackLoader:
         self._native_root = Path(raw).absolute()
         self._base_path = Path(raw).resolve()
         self._cache: dict[str, tuple[DomainSpec, float, float]] = {}
+        # Issue #400 F4: the revision each cached spec was admitted from. Kept
+        # in step with ``_cache`` under ``_lock`` (same keys, same bound).
+        self._revisions: dict[str, ServedRevision] = {}
         self._lock = threading.Lock()
         # C-24 bounded cache, sized by Settings (contract variables
         # DOMAIN_CACHE_MAXSIZE / DOMAIN_CACHE_TTL_SECONDS, CEG-COR-078).
@@ -982,38 +1021,60 @@ class DomainPackLoader:
         and the same verdict applies to ``list_domains``.
         """
         if settings.domain_pack_receipts_enabled:
+            return self._load_current(domain_id)[0]
+        return self._load_plain(domain_id, require_revision=False)[0]
+
+    def load_domain_revision(self, domain_id: str) -> tuple[DomainSpec, ServedRevision]:
+        """Issue #400 F4: the admitted spec together with the revision it came from.
+
+        Same admission as ``load_domain`` (nothing widened); the pair comes from
+        one load, so the identity always describes the spec returned beside it.
+        """
+        if settings.domain_pack_receipts_enabled:
             return self._load_current(domain_id)
+        spec, revision = self._load_plain(domain_id, require_revision=True)
+        if revision is None:  # pragma: no cover - require_revision guarantees it
+            raise DomainSpecError(f"Served revision unavailable for domain {domain_id!r}")
+        return spec, revision
+
+    def _load_plain(self, domain_id: str, *, require_revision: bool) -> tuple[DomainSpec, ServedRevision | None]:
         spec_path = self._resolve_spec_path(domain_id)
 
         with self._lock:
             if domain_id in self._cache:
                 cached_spec, cached_mtime, cached_at = self._cache[domain_id]
-                if (time.monotonic() - cached_at) < self._ttl_seconds:
-                    return cached_spec
+                cached_revision = self._revisions.get(domain_id)
+                usable = cached_revision is not None or not require_revision
+                if usable and (time.monotonic() - cached_at) < self._ttl_seconds:
+                    return cached_spec, cached_revision
                 current_mtime = spec_path.stat().st_mtime
-                if cached_mtime >= current_mtime:
+                if usable and cached_mtime >= current_mtime:
                     self._cache[domain_id] = (cached_spec, cached_mtime, time.monotonic())
-                    return cached_spec
+                    return cached_spec, cached_revision
                 logger.info("Domain spec changed on disk, reloading: %s", domain_id)
             else:
                 current_mtime = spec_path.stat().st_mtime
 
-            spec = self._load_and_validate(spec_path, domain_id)
+            spec, revision = self._load_and_validate(spec_path, domain_id)
             if len(self._cache) >= self._max_size and domain_id not in self._cache:
                 oldest_key = min(self._cache, key=lambda k: self._cache[k][2])
                 del self._cache[oldest_key]
+                self._revisions.pop(oldest_key, None)
                 logger.debug("Evicted oldest domain cache entry: %s", oldest_key)
 
             self._cache[domain_id] = (spec, current_mtime, time.monotonic())
-            return spec
+            self._revisions[domain_id] = revision
+            return spec, revision
 
     def invalidate(self, domain_id: str | None = None) -> None:
         """Force cache invalidation."""
         with self._lock:
             if domain_id:
                 self._cache.pop(domain_id, None)
+                self._revisions.pop(domain_id, None)
             else:
                 self._cache.clear()
+                self._revisions.clear()
 
     async def load_domain_async(self, domain_id: str) -> DomainSpec:
         """Async domain loading with per-domain stampede prevention."""
@@ -1061,7 +1122,7 @@ class DomainPackLoader:
             admitted.append(d.name)
         return admitted
 
-    def _load_current(self, domain_id: str) -> DomainSpec:
+    def _load_current(self, domain_id: str) -> tuple[DomainSpec, ServedRevision]:
         """Read pointer once, then hash/validate only its fixed immutable revision.
 
         No legacy fallback and no cache hit after a changed pointer or tamper.
@@ -1073,10 +1134,11 @@ class DomainPackLoader:
         pointer = read_native_record(self._native_root / domain_id / "current.json", DomainCurrent)
         if pointer.root["tenant_id"] != domain_id:
             raise DomainSpecError("Native current pointer tenant mismatch")
-        spec, _receipt = load_native_revision(self._native_root, domain_id, pointer.root["sha256"])
+        spec, receipt = load_native_revision(self._native_root, domain_id, pointer.root["sha256"])
         if pointer.root["version"] != spec.domain.version:
             raise DomainSpecError("Native current pointer version mismatch")
-        return spec
+        # load_native_revision proved receipt sha256 == sha256 of the admitted bytes.
+        return spec, _served_revision(spec, receipt.root["sha256"], "receipt")
 
     def _resolve_spec_path(self, domain_id: str) -> Path:
         """Resolve and validate spec file path, preventing traversal and symlinks.
@@ -1110,6 +1172,33 @@ class DomainPackLoader:
         # Receipt admission instead opens _native_root with strict O_NOFOLLOW.
         return candidate
 
-    def _load_and_validate(self, path: Path, domain_id: str) -> DomainSpec:
-        """Delegate schema and actual admission to the shared native owner."""
-        return validate_native_file(path, domain_id)
+    def _load_and_validate(self, path: Path, domain_id: str) -> tuple[DomainSpec, ServedRevision]:
+        """Delegate schema and actual admission to the shared native owner.
+
+        Reads the file once; the digest is of exactly the bytes admitted
+        (the same read and the same ``validate_native_bytes`` call that
+        ``validate_native_file`` makes for this caller).
+        """
+        data = read_native_file(path)
+        spec = validate_native_bytes(data, domain_id)
+        return spec, _served_revision(spec, hashlib.sha256(data).hexdigest(), "plain")
+
+    def list_domain_revisions(self) -> list[ServedRevision]:
+        """Issue #400 F4: ``list_domains`` with each admitted tenant's served revision.
+
+        One admission pass; a pack ``list_domains`` would omit is omitted here.
+        """
+        if not self._base_path.is_dir():
+            return []
+        filename = "current.json" if settings.domain_pack_receipts_enabled else SPEC_FILENAME
+        admitted: list[ServedRevision] = []
+        for d in sorted(self._base_path.iterdir()):
+            if not (d.is_dir() and (d / filename).exists()):
+                continue
+            try:
+                _spec, revision = self.load_domain_revision(d.name)
+            except (DomainNotFoundError, DomainSpecError) as exc:
+                logger.info("Domain pack %s not admitted: %s", d.name, exc)
+                continue
+            admitted.append(revision)
+        return admitted
