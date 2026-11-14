@@ -1910,19 +1910,27 @@ reports `algorithm: nodeSimilarity`. No other spelling is accepted. With the fla
 tenant's domain database (`domain.id`), all through `GraphDriver.execute_query`:
 
 1. drop a stale projection named `<job name>_graph`, if one exists;
-2. `gds.graph.project($graph_name, $node_labels, $edge_types)` over the job's
+2. delete the job's leftover staging relationships from a crashed run;
+3. `gds.graph.project($graph_name, $node_labels, $edge_types)` over the job's
    `projection.nodelabels` / `projection.edgetypes`;
-3. delete the job's previous `writeedge` relationships between projected nodes,
-   so a re-run replaces its output instead of duplicating it
-   (`gds.nodeSimilarity.write` always creates);
-4. `gds.nodeSimilarity.write($graph_name, $config)`, writing `writeedge`
-   relationships scored in `writeproperty`;
-5. drop the projection, always (also when a step fails).
+4. `gds.nodeSimilarity.write($graph_name, $config)` into the job's private
+   staging relationship type (`GDS_STAGING_<16 hex of sha256(job name)>`);
+5. swap, in one statement and so one transaction: delete the `writeedge`
+   relationships this job wrote last time, then turn every staging
+   relationship into a `writeedge` relationship carrying `writeproperty` and
+   the ownership marker `gds_job = <job name>`;
+6. drop the projection, always (also when a step fails, including a failed
+   projection call).
 
-`writeedge`, `writeproperty` and a non-empty projection are required; a job
-missing any of them fails with a `ValueError` naming the field. Every label,
-type and property name passes `sanitize_label()` and reaches GDS as a
-parameter; only the sanitized `writeedge` is interpolated (step 3). Bounds come
+The previous result survives any failure before the swap, so a failed run
+leaves the last good edges in place (the job reports `failed`). Only
+relationships whose `gds_job` equals this job's name are ever deleted: another
+job or application data that uses the same relationship type is never
+touched. `writeedge`, `writeproperty` and a non-empty projection are required;
+a job missing any of them fails with a `ValueError` naming the field. Every
+label, type and property name passes `sanitize_label()`; values reach Cypher as
+parameters, and only the sanitized `writeedge`, staging type and
+`writeproperty` are interpolated (steps 2 and 5). Bounds come
 from the optional job block `nodesimilarity` (`GDSNodeSimilaritySpec`):
 
 | Field | GDS key | Default | Range |
@@ -1933,9 +1941,7 @@ from the optional job block `nodesimilarity` (`GDSNodeSimilaritySpec`):
 | `similaritymetric` | `similarityMetric` | `JACCARD` | `JACCARD`, `OVERLAP`, `COSINE` |
 
 Unknown keys in the block are refused. Written relationships are directed: a
-pair similar both ways gets two relationships. Steps 3 and 4 are separate
-transactions, so a failure at step 4 leaves the job's edges deleted until the
-next successful run (the job reports `failed`).
+pair similar both ways gets two relationships.
 
 Off: the job returns `status: skipped` with reason
 `gds_node_similarity_enabled is off; nodeSimilarity job not run` and touches no

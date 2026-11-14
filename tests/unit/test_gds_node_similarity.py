@@ -30,7 +30,9 @@ from engine.config.schema import GDSJobScheduleSpec, GDSJobSpec, GDSNodeSimilari
 from engine.gds.node_similarity import (
     NODE_SIMILARITY_ALGORITHM,
     NODE_SIMILARITY_ALGORITHMS,
+    OWNER_PROPERTY,
     build_node_similarity_plan,
+    staging_edge_for,
 )
 from engine.gds.scheduler import GDSScheduler
 from tests.unit.test_gds_scheduler import _minimal_spec
@@ -53,15 +55,18 @@ def _job(**overrides: Any) -> GDSJobSpec:
     return GDSJobSpec(**fields)
 
 
-def _driver(write_row: dict[str, Any] | None = None, deleted: int = 3) -> AsyncMock:
+STAGE = staging_edge_for("site_similarity")
+
+
+def _driver(write_row: dict[str, Any] | None = None, deleted: int = 3, promoted: int = 6) -> AsyncMock:
     """Answer each statement by what it is, so ordering is asserted separately."""
     row = write_row if write_row is not None else {"nodesCompared": 4, "relationshipsWritten": 6}
 
     async def _answer(cypher: str, parameters: dict[str, Any] | None = None, database: str | None = None):
         if "gds.nodeSimilarity.write" in cypher:
             return [row]
-        if "DELETE r" in cypher:
-            return [{"relationships_deleted": deleted}]
+        if "relationships_deleted, relationships_written" in cypher:
+            return [{"relationships_deleted": deleted, "relationships_written": promoted}]
         return []
 
     driver = AsyncMock()
@@ -86,7 +91,7 @@ class TestPlan:
     def test_default_bounds_are_parameters(self):
         plan = build_node_similarity_plan(_job())
         assert plan.config == {
-            "writeRelationshipType": "SIMILAR_TO",
+            "writeRelationshipType": STAGE,
             "writeProperty": "similarity_score",
             "topK": 10,
             "degreeCutoff": 1,
@@ -95,6 +100,7 @@ class TestPlan:
         assert "similarityCutoff" not in plan.config  # unset keeps the GDS default (1E-42)
         assert plan.params == {
             "graph_name": "site_similarity_graph",
+            "job_id": "site_similarity",
             "node_labels": ["Site", "Query"],
             "edge_types": ["INTERACTED_WITH"],
             "config": plan.config,
@@ -117,10 +123,23 @@ class TestPlan:
         assert "CALL gds.nodeSimilarity.write($graph_name, $config)" in plan.write_cypher
         assert "gds.graph.project($graph_name, $node_labels, $edge_types)" in plan.project_cypher
 
-    def test_clear_interpolates_only_the_sanitized_edge(self):
+    def test_gds_writes_into_the_jobs_own_staging_type(self):
         plan = build_node_similarity_plan(_job())
-        assert "MATCH (a)-[r:SIMILAR_TO]->(b)" in plan.clear_cypher
-        assert "$node_labels" in plan.clear_cypher
+        assert plan.staging_edge == STAGE
+        assert plan.config["writeRelationshipType"] == STAGE != "SIMILAR_TO"
+        assert staging_edge_for("other_job") != STAGE
+        assert staging_edge_for("x" * 500).startswith("GDS_STAGING_")  # bounded for any job name
+
+    def test_swap_deletes_only_relationships_this_job_owns(self):
+        plan = build_node_similarity_plan(_job())
+        assert "MATCH ()-[old:SIMILAR_TO]->()" in plan.swap_cypher
+        assert f"WHERE old.{OWNER_PROPERTY} = $job_id" in plan.swap_cypher
+        assert f"MATCH (a)-[s:{STAGE}]->(b)" in plan.swap_cypher
+        assert f"r.similarity_score = s.similarity_score, r.{OWNER_PROPERTY} = $job_id" in plan.swap_cypher
+        assert "DELETE s" in plan.swap_cypher
+        # The staging clear touches only the job's private staging type.
+        assert f"MATCH ()-[s:{STAGE}]->()" in plan.clear_staging_cypher
+        assert "SIMILAR_TO" not in plan.clear_staging_cypher
 
     @pytest.mark.parametrize(
         "overrides",
@@ -196,20 +215,29 @@ class TestScheduler:
 
         calls = driver.execute_query.call_args_list
         statements = [str(c.args[0]) for c in calls]
-        markers = ["gds.graph.exists", "gds.graph.project", "DELETE r", "gds.nodeSimilarity.write", "gds.graph.drop"]
+        markers = [
+            "gds.graph.exists",
+            "staging_deleted",
+            "gds.graph.project",
+            "gds.nodeSimilarity.write",
+            "relationships_deleted, relationships_written",
+            "gds.graph.drop",
+        ]
         assert len(statements) == len(markers)
         for statement, marker in zip(statements, markers, strict=True):
             assert marker in statement
         assert all(c.kwargs["database"] == DB for c in calls)
         assert all(c.kwargs["parameters"]["graph_name"] == "site_similarity_graph" for c in calls)
 
-    async def test_projection_dropped_when_write_fails(self, flag_on):
+    @pytest.mark.parametrize("failing", ["gds.graph.project", "gds.nodeSimilarity.write"])
+    async def test_failure_keeps_previous_result_and_drops_projection(self, flag_on, failing):
+        """Codex P1/P2 on #485: nothing deletes the last good output before the
+        replacement exists, and a failed or interrupted projection is still dropped."""
+
         async def _answer(cypher: str, parameters=None, database=None):
-            if "gds.nodeSimilarity.write" in cypher:
+            if failing in cypher:
                 msg = "procedure failed"
                 raise RuntimeError(msg)
-            if "DELETE r" in cypher:
-                return [{"relationships_deleted": 0}]
             return []
 
         driver = AsyncMock()
@@ -219,8 +247,10 @@ class TestScheduler:
 
         assert result["status"] == "failed"
         assert "procedure failed" in result["error"]
-        last = str(driver.execute_query.call_args_list[-1].args[0])
-        assert "gds.graph.drop" in last
+        statements = [str(c.args[0]) for c in driver.execute_query.call_args_list]
+        assert not any("relationships_deleted, relationships_written" in st for st in statements)
+        assert not any("MATCH ()-[old:SIMILAR_TO]" in st for st in statements)
+        assert "gds.graph.drop" in statements[-1]
 
     async def test_invalid_job_fails_before_any_query(self, flag_on):
         driver = _driver()

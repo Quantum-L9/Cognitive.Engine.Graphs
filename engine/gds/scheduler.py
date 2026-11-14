@@ -510,9 +510,12 @@ class GDSScheduler:
         """CEG-GDS-SIM: run ``gds.nodeSimilarity.write`` over the job's projection.
 
         Flag off → skipped with an explicit reason and no database call. On:
-        drop any stale projection, project, delete this job's previous
-        ``writeedge`` output between projected nodes, write, and always drop
-        the projection. All statements target the tenant's domain database.
+        drop any stale projection, clear this job's leftover staging edges,
+        project, write into the job's staging type, then swap: one statement
+        deletes the edges this job wrote last time (ownership marker) and
+        promotes the staged ones. The previous result survives any failure
+        before the swap. The projection is always dropped. All statements
+        target the tenant's domain database.
         """
         from engine.config.settings import settings
 
@@ -532,18 +535,22 @@ class GDSScheduler:
                 logger.exception("GDS pre-drop failed unexpectedly for %s", plan.graph_name)
                 raise
 
-        await self.graph_driver.execute_query(plan.project_cypher, parameters=plan.params, database=db)
+        await self.graph_driver.execute_query(plan.clear_staging_cypher, parameters=plan.params, database=db)
         try:
-            cleared = await self.graph_driver.execute_query(plan.clear_cypher, parameters=plan.params, database=db)
-            deleted = cleared[0]["relationships_deleted"] if cleared else 0
+            # Inside the cleanup scope: a projection the server registered
+            # before the call failed is still dropped.
+            await self.graph_driver.execute_query(plan.project_cypher, parameters=plan.params, database=db)
             written = await self.graph_driver.execute_query(plan.write_cypher, parameters=plan.params, database=db)
             data = written[0] if written else {}
+            swapped = await self.graph_driver.execute_query(plan.swap_cypher, parameters=plan.params, database=db)
+            swap = swapped[0] if swapped else {}
         finally:
             try:
                 await self.graph_driver.execute_query(plan.drop_cypher, parameters=plan.params, database=db)
             except Exception:
                 logger.exception("Failed to drop projected graph '%s'", plan.graph_name)
 
+        deleted = swap.get("relationships_deleted", 0)
         logger.info(
             "nodeSimilarity %s: %s nodes compared, %s relationships written, %s replaced",
             job_spec.name,
@@ -554,7 +561,7 @@ class GDSScheduler:
         return {
             "algorithm": NODE_SIMILARITY_ALGORITHM,
             "nodes_compared": data.get("nodesCompared"),
-            "relationships_written": data.get("relationshipsWritten"),
+            "relationships_written": swap.get("relationships_written", 0),
             "relationships_deleted": deleted,
             "write_edge": plan.write_edge,
             "write_property": plan.write_property,

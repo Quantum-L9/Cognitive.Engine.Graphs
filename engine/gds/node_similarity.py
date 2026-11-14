@@ -16,20 +16,30 @@ A domain pack declares a GDS job with ``algorithm: nodeSimilarity``; the
 scheduler builds a :class:`NodeSimilarityPlan` from it and runs the plan's
 statements in order against the tenant database:
 
-1. ``pre_drop``  — drop a stale in-memory projection left by a crashed run;
-2. ``project``   — ``gds.graph.project`` over the job's declared labels/types;
-3. ``clear``     — delete the job's previous ``writeedge`` relationships
-                   between projected nodes, so a re-run replaces rather than
-                   duplicates (``gds.nodeSimilarity.write`` always CREATEs);
-4. ``write``     — ``gds.nodeSimilarity.write`` with the declared bounds;
-5. ``drop``      — drop the projection (always, in a ``finally``).
+1. ``pre_drop``      — drop a stale in-memory projection left by a crashed run;
+2. ``clear_staging`` — delete this job's staging relationships left by a crashed run;
+3. ``project``       — ``gds.graph.project`` over the job's declared labels/types;
+4. ``write``         — ``gds.nodeSimilarity.write`` into the job's **staging**
+                       relationship type, with the declared bounds;
+5. ``swap``          — one statement (one transaction): delete the edges this job
+                       wrote last time, then turn each staging relationship into a
+                       ``writeedge`` relationship carrying ``writeproperty`` and the
+                       job's ownership marker;
+6. ``drop``          — drop the projection (always, in a ``finally``).
+
+The previous result survives until the replacement is fully written: a failed
+project or write leaves it in place, and the swap replaces it atomically.
+Only relationships carrying this job's ownership marker
+(``gds_job`` = the job name) are ever deleted, so another job or
+application data that uses the same relationship type is never touched.
 
 Every label, relationship type and property name comes from the job spec and
-passes through ``sanitize_label``; all of them reach Cypher as ``$parameters``
-except the relationship type in ``clear``, which Cypher cannot parameterize
-and is interpolated only after sanitization. There is no built-in vocabulary:
-a job missing ``writeedge``, ``writeproperty`` or a projection fails with a
-``ValueError`` naming the job and the missing field.
+passes through ``sanitize_label``. Values reach Cypher as ``$parameters``; the
+relationship types and the score property in ``clear_staging`` and ``swap``,
+which Cypher cannot parameterize, are interpolated only after sanitization.
+There is no built-in vocabulary: a job missing ``writeedge``,
+``writeproperty`` or a projection fails with a ``ValueError`` naming the job
+and the missing field.
 
 GDS API: ``gds.nodeSimilarity.write(graphName, configuration)`` with
 ``writeRelationshipType``, ``writeProperty``, ``topK``, ``similarityCutoff``,
@@ -39,6 +49,7 @@ GDS API: ``gds.nodeSimilarity.write(graphName, configuration)`` with
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -72,16 +83,48 @@ RETURN nodesCompared, relationshipsWritten
 
 DROP_CYPHER = "CALL gds.graph.drop($graph_name) YIELD graphName RETURN graphName"
 
+# Engine-owned marker on every relationship a nodeSimilarity job writes; its
+# value is the job name. Cleanup deletes only relationships carrying this job's
+# marker, never another producer's relationships of the same type.
+OWNER_PROPERTY = "gds_job"
 
-def _clear_cypher(write_edge: str) -> str:
-    """Delete the job's prior output: ``write_edge`` relationships between projected nodes."""
-    edge = sanitize_label(write_edge)  # the one identifier Cypher cannot take as a $parameter
+
+def staging_edge_for(job_name: str) -> str:
+    """The job's private staging relationship type (unique per job, valid identifier)."""
+    digest = hashlib.sha256(job_name.encode("utf-8")).hexdigest()[:16]
+    return sanitize_label(f"GDS_STAGING_{digest}")
+
+
+def _clear_staging_cypher(staging_edge: str) -> str:
+    """Delete staging relationships a crashed run of this job left behind."""
+    stage = sanitize_label(staging_edge)
     return f"""
-MATCH (a)-[r:{edge}]->(b)
-WHERE any(l IN labels(a) WHERE l IN $node_labels)
-  AND any(l IN labels(b) WHERE l IN $node_labels)
-DELETE r
-RETURN count(r) AS relationships_deleted
+MATCH ()-[s:{stage}]->()
+DELETE s
+RETURN count(s) AS staging_deleted
+"""
+
+
+def _swap_cypher(write_edge: str, staging_edge: str, write_property: str) -> str:
+    """Replace this job's previous output with the staged result, in one statement."""
+    edge = sanitize_label(write_edge)
+    stage = sanitize_label(staging_edge)
+    prop = sanitize_label(write_property)
+    return f"""
+CALL {{
+  MATCH ()-[old:{edge}]->()
+  WHERE old.{OWNER_PROPERTY} = $job_id
+  DELETE old
+  RETURN count(old) AS relationships_deleted
+}}
+CALL {{
+  MATCH (a)-[s:{stage}]->(b)
+  CREATE (a)-[r:{edge}]->(b)
+  SET r.{prop} = s.{prop}, r.{OWNER_PROPERTY} = $job_id
+  DELETE s
+  RETURN count(r) AS relationships_written
+}}
+RETURN relationships_deleted, relationships_written
 """
 
 
@@ -93,9 +136,11 @@ class NodeSimilarityPlan:
     node_labels: list[str]
     edge_types: list[str]
     write_edge: str
+    staging_edge: str
     write_property: str
     config: dict[str, Any]
-    clear_cypher: str
+    clear_staging_cypher: str
+    swap_cypher: str
     params: dict[str, Any] = field(default_factory=dict)
 
     pre_drop_cypher: str = PRE_DROP_CYPHER
@@ -128,9 +173,10 @@ def build_node_similarity_plan(job_spec: GDSJobSpec) -> NodeSimilarityPlan:
     write_edge = _required(job_spec, "writeedge", job_spec.writeedge)
     write_property = _required(job_spec, "writeproperty", job_spec.writeproperty)
     bounds = job_spec.nodesimilarity or GDSNodeSimilaritySpec()
+    staging_edge = staging_edge_for(job_spec.name)
 
     config: dict[str, Any] = {
-        "writeRelationshipType": write_edge,
+        "writeRelationshipType": staging_edge,
         "writeProperty": write_property,
         "topK": bounds.topk,
         "degreeCutoff": bounds.degreecutoff,
@@ -145,11 +191,14 @@ def build_node_similarity_plan(job_spec: GDSJobSpec) -> NodeSimilarityPlan:
         node_labels=node_labels,
         edge_types=edge_types,
         write_edge=write_edge,
+        staging_edge=staging_edge,
         write_property=write_property,
         config=config,
-        clear_cypher=_clear_cypher(write_edge),
+        clear_staging_cypher=_clear_staging_cypher(staging_edge),
+        swap_cypher=_swap_cypher(write_edge, staging_edge, write_property),
         params={
             "graph_name": graph_name,
+            "job_id": job_spec.name,
             "node_labels": node_labels,
             "edge_types": edge_types,
             "config": config,

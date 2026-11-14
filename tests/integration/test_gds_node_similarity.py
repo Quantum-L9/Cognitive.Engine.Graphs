@@ -22,7 +22,9 @@ bipartite graph: Sites USE Resources.
 It proves the declared ``writeedge`` relationships are written with the
 declared ``writeproperty``, that ``similaritycutoff`` bounds them, that a
 second run replaces rather than duplicates, that the in-memory projection is
-dropped, and that the flag off writes nothing.
+dropped, that relationships of the same type another producer wrote survive
+(only the job's own, marked output is replaced), that no staging
+relationship is left behind, and that the flag off writes nothing.
 
 Requires a live Neo4j; skips automatically when testcontainers / NEO4J_TEST_URI
 is unavailable (fails under CEG_REQUIRE_INTEGRATION=1).
@@ -39,6 +41,7 @@ from engine.config.schema import (
     GDSNodeSimilaritySpec,
     GDSProjectionSpec,
 )
+from engine.gds.node_similarity import OWNER_PROPERTY, staging_edge_for
 from engine.gds.scheduler import GDSScheduler
 
 pytestmark = pytest.mark.integration
@@ -191,3 +194,35 @@ async def test_flag_off_writes_nothing(graph_driver, domain_database, clean_db) 
     result = await GDSScheduler(spec, graph_driver).execute_job(spec.gdsjobs[0])
     assert result["status"] == "skipped"
     assert await _similar(graph_driver) == {}
+
+
+@pytest.mark.asyncio
+async def test_rerun_keeps_another_producers_edges_of_the_same_type(
+    graph_driver, domain_database, clean_db, flag_on
+) -> None:
+    """Codex P1 on #485: cleanup deletes only relationships this job marked as its own."""
+    await _seed(graph_driver)
+    await graph_driver.execute_write(
+        cypher="MATCH (a:Site {sid: 's3'}), (b:Site {sid: 's4'}) CREATE (a)-[:SIMILAR_SITE {similarity: 0.9}]->(b)",
+        parameters={},
+        database=DB,
+    )
+    spec = _spec()
+    scheduler = GDSScheduler(spec, graph_driver)
+    for _ in range(2):
+        result = await scheduler.execute_job(spec.gdsjobs[0])
+        assert result["status"] == "success", result
+
+    edges = await _similar(graph_driver)
+    assert edges[("s3", "s4")] == pytest.approx(0.9)  # foreign edge untouched by both runs
+    owned = await graph_driver.execute_query(
+        f"MATCH (:Site)-[r:SIMILAR_SITE]->(:Site) WHERE r.{OWNER_PROPERTY} = $job RETURN count(r) AS n",
+        parameters={"job": "site_similarity"},
+        database=DB,
+    )
+    assert owned[0]["n"] == len(edges) - 1
+    stage = staging_edge_for("site_similarity")
+    leftovers = await graph_driver.execute_query(
+        f"MATCH ()-[s:{stage}]->() RETURN count(s) AS n", parameters={}, database=DB
+    )
+    assert leftovers[0]["n"] == 0
