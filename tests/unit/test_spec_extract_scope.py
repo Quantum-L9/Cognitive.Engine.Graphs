@@ -34,7 +34,9 @@ def _synthetic_root(root: Path) -> Path:
     (root / "tests").mkdir()
     (root / "tools").mkdir()
     (root / "engine" / "gates" / "real.py").write_text("class RangeGate: pass\n", encoding="utf-8")
-    (root / "tests" / "test_phantom.py").write_text("# phantom_gate is not implemented yet\n", encoding="utf-8")
+    (root / "tests" / "test_phantom.py").write_text(
+        "def test_phantom():\n    assert run('phantom_gate')\n", encoding="utf-8"
+    )
     (root / "tools" / "helper.py").write_text("PHANTOM_GATE = 'phantom_gate'\n", encoding="utf-8")
     (root / "my-spec.yaml").write_text("gatetypes:\n  - name: phantom_gate\n", encoding="utf-8")
     return root
@@ -72,6 +74,22 @@ def test_token_evidence_never_comes_from_spec_tests_or_tools(tmp_path: Path) -> 
     assert feat.evidence_files == ["engine/gates/types/phantom.py"], feat.evidence_files
     assert feat.test_files == ["tests/test_phantom.py"]
     assert feat.status == se.Status.IMPLEMENTED.value
+
+
+def test_a_comment_in_a_test_file_is_not_test_evidence(tmp_path: Path) -> None:
+    """Codex P2 on #486: only executable test code counts, never a comment or a docstring."""
+    root = _synthetic_root(tmp_path)
+    (root / "tests" / "test_phantom.py").write_text(
+        '"""phantom_gate"""\n# phantom_gate is not implemented yet\n', encoding="utf-8"
+    )
+    (root / "engine" / "gates" / "types").mkdir()
+    (root / "engine" / "gates" / "types" / "phantom.py").write_text("class PhantomGate: ...  # phantom_gate\n")
+    feat = _phantom(["engine/gates/**/*.py"])
+
+    se.scan_codebase(root, [feat])
+
+    assert feat.test_files == []
+    assert feat.status == se.Status.PARTIAL.value
 
 
 def test_spec_gate_without_engine_owner_is_missing(tmp_path: Path) -> None:

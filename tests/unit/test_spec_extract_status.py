@@ -394,3 +394,42 @@ def test_report_header_states_the_rule(engine_root: Path) -> None:
     assert se.STATUS_DEFINITIONS in report
     checklist = json.loads((engine_root / "artifacts" / "spec_checklist.json").read_text(encoding="utf-8"))
     assert checklist[0]["test_files"] == ["tests/unit/test_engine_behaviour.py"]
+
+
+# ── Test evidence ignores non-executable text (Codex P2 on #486) ─────────────
+
+
+def test_executable_source_blanks_comments_docstrings_and_skip_reasons() -> None:
+    source = '''"""Module docstring naming ThresholdGate."""
+import pytest
+
+# TODO: test ThresholdGate
+
+
+def test_other() -> None:
+    """Docstring naming ThresholdGate."""
+    "inert string naming ThresholdGate"
+    assert True
+
+
+@pytest.mark.skip(reason="ThresholdGate not ready")
+def test_skipped() -> None:
+    pass
+'''
+    text = se._executable_source(source)
+    assert "ThresholdGate" not in text
+    assert len(text) == len(source)
+    assert text.count("\n") == source.count("\n")
+
+
+def test_executable_source_keeps_strings_that_code_uses() -> None:
+    source = 'spec = {"algorithm": "nodeSimilarity"}\nresult = run(GateType.THRESHOLD)  # ThresholdGate\n'
+    text = se._executable_source(source)
+    assert '"nodeSimilarity"' in text
+    assert "GateType.THRESHOLD" in text
+    assert "ThresholdGate" not in text
+
+
+def test_unparseable_source_still_drops_comments() -> None:
+    source = "def broken(:\n    x = 1  # ThresholdGate\n"
+    assert "ThresholdGate" not in se._executable_source(source)

@@ -90,9 +90,11 @@ from __future__ import annotations
 
 import argparse
 import ast
+import io
 import json
 import re
 import sys
+import tokenize
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -691,6 +693,56 @@ def _token_implementation(feature: SpecFeature, all_files: dict[str, str]) -> Im
     return Implementation(lines=tuple(lines), test_patterns=patterns)
 
 
+def _executable_source(source: str) -> str:
+    """``source`` with non-executable text blanked: comments, docstrings and other
+    bare string statements, and ``reason=`` strings (skip / xfail reasons).
+
+    Test evidence is matched against this text, so ``# TODO: test ThresholdGate``,
+    a docstring that names a feature or a skip reason never counts as a test
+    referencing it. String literals that executable code uses (for example
+    ``{"algorithm": "nodeSimilarity"}``) are kept: they are real references.
+    Lengths and line structure are preserved. Unparseable source keeps only the
+    comment stripping.
+    """
+    lines = source.splitlines(keepends=True)
+    offsets = [0]
+    for line in lines:
+        offsets.append(offsets[-1] + len(line))
+    chars = list(source)
+
+    def blank(start: tuple[int, int], end: tuple[int, int]) -> None:
+        a = offsets[start[0] - 1] + start[1]
+        b = offsets[end[0] - 1] + end[1]
+        for i in range(a, min(b, len(chars))):
+            if chars[i] != "\n":
+                chars[i] = " "
+
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+            if tok.type == tokenize.COMMENT:
+                blank(tok.start, tok.end)
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        pass  # keep the comments found before the tokenizer gave up
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return "".join(chars)
+    for node in ast.walk(tree):
+        target = _non_executable_string(node)
+        if target is not None and target.end_lineno is not None and target.end_col_offset is not None:
+            blank((target.lineno, target.col_offset), (target.end_lineno, target.end_col_offset))
+    return "".join(chars)
+
+
+def _non_executable_string(node: ast.AST) -> ast.expr | None:
+    """A docstring / bare string statement, or a ``reason=`` value; else None."""
+    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+        return node.value
+    if isinstance(node, ast.keyword) and node.arg == "reason":
+        return node.value
+    return None
+
+
 def scan_codebase(root: Path, features: list[SpecFeature]) -> None:
     """Assign each feature its status from implementation evidence and test evidence."""
     py_files = _read_tree(root, ".py", (".venv", "__pycache__"))
@@ -698,7 +750,7 @@ def scan_codebase(root: Path, features: list[SpecFeature]) -> None:
     all_files = {**py_files, **yaml_files}
     index = EngineIndex(py_files)
     test_sources = {
-        fpath: content
+        fpath: _executable_source(content)
         for fpath, content in py_files.items()
         if fpath.startswith(f"{TESTS_DIR}/") and AUDIT_TOOL_MARKER not in content
     }
