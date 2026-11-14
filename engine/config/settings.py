@@ -692,6 +692,11 @@ class Settings(BaseSettings):
     # duration clock) are timezone-aware UTC, so staleness is the same under
     # any process TZ. Off: naive local time, which consumers read as UTC.
     gds_history_utc_timestamps: bool = True
+    # CEG-GDS-SIM: a GDS job declaring ``algorithm: nodeSimilarity`` runs
+    # gds.nodeSimilarity.write over its projection and replaces its declared
+    # writeedge relationships. Off: the job is skipped with an explicit reason
+    # (no write), as before this flag existed it fell to "unknown algorithm".
+    gds_node_similarity_enabled: bool = False
     # RU-101 / CEG-COR-059..061: entity resolution threads and validates the
     # batch threshold, verifies each member against the chosen canonical,
     # MERGEs RESOLVED_FROM (at most one per pair, no cycles) and skips batch

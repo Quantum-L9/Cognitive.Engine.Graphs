@@ -1899,3 +1899,55 @@ high, and outcomes exist only for candidates that were matched and shown; see
 
 Tests: `tests/unit/test_feedback_weight_governance.py`,
 `tests/integration/test_feedback_weight_governance.py`.
+
+## GDS node similarity job (CEG-GDS-SIM)
+
+**Flag**: `gds_node_similarity_enabled` (`GDS_NODE_SIMILARITY_ENABLED`), default `False` (new behaviour, C-21).
+
+A GDS job may declare `algorithm: nodeSimilarity` (canonical) or its documented
+alias `algorithm: node_similarity`; both dispatch to the same job, whose result
+reports `algorithm: nodeSimilarity`. No other spelling is accepted. With the flag on, `GDSScheduler` runs it against the
+tenant's domain database (`domain.id`), all through `GraphDriver.execute_query`:
+
+1. drop a stale projection named `<job name>_graph`, if one exists;
+2. delete the job's leftover staging relationships from a crashed run;
+3. `gds.graph.project($graph_name, $node_labels, $edge_types)` over the job's
+   `projection.nodelabels` / `projection.edgetypes`;
+4. `gds.nodeSimilarity.write($graph_name, $config)` into the job's private
+   staging relationship type (`GDS_STAGING_<16 hex of sha256(job name)>`);
+5. swap, in one statement and so one transaction: delete the `writeedge`
+   relationships this job wrote last time, then turn every staging
+   relationship into a `writeedge` relationship carrying `writeproperty` and
+   the ownership marker `gds_job = <job name>`;
+6. drop the projection, always (also when a step fails, including a failed
+   projection call).
+
+The previous result survives any failure before the swap, so a failed run
+leaves the last good edges in place (the job reports `failed`). Only
+relationships whose `gds_job` equals this job's name are ever deleted: another
+job or application data that uses the same relationship type is never
+touched. `writeedge`, `writeproperty` and a non-empty projection are required;
+a job missing any of them fails with a `ValueError` naming the field. Every
+label, type and property name passes `sanitize_label()`; values reach Cypher as
+parameters, and only the sanitized `writeedge`, staging type and
+`writeproperty` are interpolated (steps 2 and 5). Bounds come
+from the optional job block `nodesimilarity` (`GDSNodeSimilaritySpec`):
+
+| Field | GDS key | Default | Range |
+|---|---|---|---|
+| `topk` | `topK` | `10` | 1–100 (always sent; at most `topk` relationships per compared node) |
+| `similaritycutoff` | `similarityCutoff` | unset (GDS default 1E-42) | 0.0–1.0 |
+| `degreecutoff` | `degreeCutoff` | `1` | ≥ 1 |
+| `similaritymetric` | `similarityMetric` | `JACCARD` | `JACCARD`, `OVERLAP`, `COSINE` |
+
+Unknown keys in the block are refused. Written relationships are directed: a
+pair similar both ways gets two relationships.
+
+Off: the job returns `status: skipped` with reason
+`gds_node_similarity_enabled is off; nodeSimilarity job not run` and touches no
+database. Before this flag the job fell to `unknown algorithm` and was likewise
+never run, so turning it off is the prior behaviour.
+
+Requires the Neo4j Graph Data Science plugin. Tests:
+`tests/unit/test_gds_node_similarity.py`,
+`tests/integration/test_gds_node_similarity.py`.

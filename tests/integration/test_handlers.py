@@ -170,6 +170,11 @@ def test_handle_admin_list_domains() -> None:
     """handle_admin subaction=list_domains returns the domain list."""
     loader = MagicMock(spec=DomainPackLoader)
     loader.list_domains.return_value = ["orbital-logistics", "cheese-aging"]
+    # Issue #400 F4: admin list_domains reads the served revisions in one pass.
+    loader.list_domain_revisions.return_value = [
+        {"tenant_id": t, "sha256": "0" * 64, "version": "1.0.0", "stage": None, "source": "plain"}
+        for t in ("orbital-logistics", "cheese-aging")
+    ]
     driver = _make_mock_driver()
     _reset_state()
     init_dependencies(graph_driver=driver, domain_loader=loader)

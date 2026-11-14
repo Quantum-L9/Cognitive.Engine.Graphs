@@ -901,6 +901,26 @@ class GDSProjectionSpec(BaseModel):
     edgetypes: list[str]
 
 
+class GDSNodeSimilaritySpec(BaseModel):
+    """Bounds for a ``nodeSimilarity`` GDS job (CEG-GDS-SIM).
+
+    Maps one-to-one onto the ``gds.nodeSimilarity.write`` configuration keys
+    ``topK``, ``similarityCutoff``, ``degreeCutoff`` and ``similarityMetric``.
+    ``topk`` is always sent and capped, so a run writes at most ``topk``
+    relationships per compared node. ``similaritycutoff`` left unset keeps the
+    GDS default (1E-42: zero-similarity pairs are never written).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    topk: int = Field(default=10, ge=1, le=100, description="Similar nodes written per source node")
+    similaritycutoff: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="Lowest similarity score written; unset keeps the GDS default"
+    )
+    degreecutoff: int = Field(default=1, ge=1, description="Lowest node degree compared")
+    similaritymetric: Literal["JACCARD", "OVERLAP", "COSINE"] = "JACCARD"
+
+
 class GDSJobSpec(BaseModel):
     """GDS job definition."""
 
@@ -939,6 +959,9 @@ class GDSJobSpec(BaseModel):
         description="Per-relation-type algorithm parameter overrides",
     )
     stability_runs: int = 1  # S2-15: multi-run averaging for non-deterministic algos
+    # CEG-GDS-SIM: bounds for algorithm ``nodeSimilarity``; unset uses the
+    # GDSNodeSimilaritySpec defaults. Ignored by every other algorithm.
+    nodesimilarity: GDSNodeSimilaritySpec | None = None
 
 
 class GDSSpec(BaseModel):

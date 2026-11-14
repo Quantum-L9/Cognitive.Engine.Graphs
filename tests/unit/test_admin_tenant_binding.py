@@ -91,6 +91,7 @@ async def test_cross_tenant_domain_is_rejected_before_any_access(subaction: str,
         await handle_admin(TENANT, payload)
     assert driver.calls == []
     loaded = [c.args[0] for c in loader.load_domain.call_args_list]
+    loaded += [c.args[0] for c in loader.load_domain_revision.call_args_list]
     assert OTHER not in loaded
 
 
@@ -98,8 +99,9 @@ async def test_cross_tenant_domain_is_rejected_before_any_access(subaction: str,
 @pytest.mark.finding("CEG-COR-003")
 async def test_same_tenant_domain_is_served(wired) -> None:
     driver, loader = wired
-    spec = DomainPackLoader(config_path=str(DOMAINS)).load_domain(TENANT)
-    loader.load_domain.return_value = spec
+    served = DomainPackLoader(config_path=str(DOMAINS)).load_domain_revision(TENANT)
+    loader.load_domain.return_value = served[0]
+    loader.load_domain_revision.return_value = served
     result = await handle_admin(TENANT, {"subaction": "get_domain", "domain_id": TENANT})
     assert result["domain"]["domain"]["id"] == TENANT
     result = await handle_admin(TENANT, {"subaction": "domain_density_report", "domain_id": TENANT})
