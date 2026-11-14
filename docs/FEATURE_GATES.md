@@ -52,6 +52,7 @@ independently of the code default.
 | Confidence Checking | `CONFIDENCE_CHECK_ENABLED` | `True` | `True` | active |
 | Pareto Ensemble | `PARETO_ENABLED` | `True` | `True` | active |
 | Pareto Weight Discovery | `PARETO_WEIGHT_DISCOVERY_ENABLED` | `False` | `True` | active (opt-in) |
+| Pareto Pre-cut Arbitration | `PARETO_PRECUT_ENABLED` (`pareto_precut_enabled`) | `False` | unset | dormant (opt-in, SI-06); with declared `decision_arbitration` objectives, match orders a bounded pool by Pareto front before the `top_n` cut; see §36 |
 | Domain Strict Validation | `DOMAIN_STRICT_VALIDATION` | `True` | `True` | active |
 | Native Domain Approval Receipts | `DOMAIN_PACK_RECEIPTS_ENABLED` | `False` | unchanged | dormant; immutable native revision/receipt admission, no warm-cache fallback; see the native publisher runbook, `docs/runbooks/domain-pack-publish.md` |
 | Pack Root Required in Prod | `DOMAINS_ROOT_REQUIRED_IN_PROD` (`domains_root_required_in_prod`) | `True` | unset | active (hardening); under `L9_ENV=prod` the pack loader refuses an unset, relative, missing, non-directory or unreadable `DOMAINS_ROOT` — see §35 |
@@ -294,6 +295,69 @@ Enables the outcome feedback convergence loop. When active, outcome records
 **Flag**: `SCORE_NORMALIZE=True`
 
 Post-query min-max normalization of match scores to [0, 1] range.
+
+---
+
+## 36. Pareto Pre-cut Arbitration (SI-06)
+
+**State**: Dormant
+**Flag**: `PARETO_PRECUT_ENABLED` (`pareto_precut_enabled`, default `False`)
+
+`handle_match` ranks by composite `score` and cuts to `top_n` in Cypher. Before
+SI-06, `decision_arbitration`'s Pareto filter then ran on the cut list and only
+wrote `pareto.arbitration` metadata, so a candidate dominated on every declared
+objective could hold a `top_n` slot that a non-dominated candidate lost.
+
+With the flag on **and** the pack declaring `decision_arbitration.enabled: true`
+with at least one `pareto_config.objectives` entry:
+
+1. **Pool.** The match Cypher is unchanged; `$top_n` is bound to
+   `precut_pool_limit(top_n) = max(top_n, min(4 * top_n, 1000))`
+   (`PRECUT_POOL_MULTIPLIER = 4`, `PRECUT_POOL_CEILING = 1000`,
+   `engine/scoring/pareto_integrator.py`). Gates and scoring stay in Cypher; the
+   pool is the same score-ordered, LIMIT-bounded query, so memory and the
+   O(n² · d) front sort are bounded by 1000 rows.
+2. **Constraints.** `decision_arbitration.constraints` (hard reject / soft
+   penalty) apply to the whole pool, as they applied to the cut list before.
+3. **Order.** A fast non-dominated sort (`engine.scoring.pareto.non_dominated_ranks`)
+   assigns each row a front rank over the declared objectives, honouring
+   `direction: minimize` while `arbitration_objective_direction` is on. Rows are
+   ordered by front rank ascending, then composite `score` descending, then
+   candidate id ascending, then pool position — deterministic for a given pool.
+4. **Missing objectives.** A row whose value for any declared objective is
+   absent, `null`, non-numeric or NaN is **unranked**: it is never filled with
+   `0.0` (or `inf`) and never compared; unranked rows follow every ranked row in
+   score / id order. Under the flag, `build_pareto_candidates` likewise omits a
+   missing value instead of filling `0.0`, and `apply_pareto_filter` reports such
+   candidates as `unranked` instead of placing them on or off the front.
+5. **Cut.** The ordered pool is cut to `top_n`. Normalization, confidence checks
+   and causal explanations run on the returned rows, as before.
+   `front_size_limit` is not applied: the `top_n` cut bounds the output.
+
+`pareto.arbitration` then describes the pool: `frontsize`, `pruned_pct` and
+`nondominated_ids` are front 0 of the pool, there is no `trimmed_ids`, and a
+`precut` block reports `pool_limit`, `pool_size` (after hard constraints),
+`returned`, `cut_count`, `front_ranks` (rank per returned candidate, `null` when
+unranked) and `unranked_ids`.
+
+**Pool-boundary note.** Membership of the pool itself is the Cypher score order;
+rows tied on score at the pool boundary are subject to Neo4j's tie order, exactly
+as rows tied at the `top_n` boundary are with the flag off.
+
+### Validation
+
+- `tests/unit/test_pareto_precut.py`: flag off reproduces the base revision's
+  response and Cypher byte for byte; flag on replaces a dominated candidate with a
+  non-dominated one, is deterministic across replays and row order, bounds the
+  pool, applies constraints to the pool, honours `minimize`, keeps a missing
+  objective unranked.
+- `tests/integration/test_pareto_precut.py`: on orbital-logistics against Neo4j,
+  `top_n=2` is `[best, dominated]` with the flag off and `[best, wide]` with it on.
+
+### Rollback
+
+Set `PARETO_PRECUT_ENABLED=false` (the default). The query binds `$top_n = top_n`
+and arbitration returns to metadata over the cut list.
 
 ---
 

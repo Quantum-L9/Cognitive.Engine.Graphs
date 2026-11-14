@@ -670,6 +670,40 @@ def _annotate_weighted_confidence(
             cand["confidence_detail"] = detail
 
 
+def _apply_pareto_precut(
+    results: list[dict[str, Any]],
+    domain_spec: DomainSpec,
+    *,
+    id_property: str,
+    top_n: int,
+    pool_limit: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """SI-06: decision arbitration on the fetched pool, before the ``top_n`` cut.
+
+    Hard / soft constraints apply to the whole pool first, exactly as the
+    post-cut path applies them to the cut list; the survivors are then ordered
+    by Pareto front over the declared objectives (``pareto_precut``) and cut.
+    """
+    from engine.scoring.pareto_integrator import apply_constraint_penalties, pareto_precut
+
+    arbitration = domain_spec.decision_arbitration
+    constraint_dicts = [
+        {"dimension": c.dimension, "threshold": c.threshold, "hard": c.hard, "penalty": c.penalty}
+        for c in arbitration.constraints
+    ]
+    if constraint_dicts:
+        results = apply_constraint_penalties(results, constraint_dicts)
+    objectives = arbitration.pareto_config.objectives
+    return pareto_precut(
+        results,
+        [obj.dimension for obj in objectives],
+        top_n=top_n,
+        pool_limit=pool_limit,
+        candidate_id_key=id_property,
+        directions={obj.dimension: obj.direction for obj in objectives},
+    )
+
+
 def _match_request_as_legacy(tenant: str, payload: dict[str, Any], domain_loader: DomainPackLoader) -> dict[str, Any]:
     """RU-012 / CEG-COR-063 (R1a-DEC-04): admit a contract-versioned MatchRequest.
 
@@ -863,6 +897,18 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     # and never removes a row; `WITH *` makes the gates a row filter while every
     # traversal variable stays in scope.
     gate_row_boundary = "WITH *\n" if _match_settings.gate_where_row_scope else ""
+    # SI-06: with pareto_precut_enabled and declared arbitration objectives the
+    # same `LIMIT $top_n` binds a bounded pool larger than top_n; arbitration
+    # orders that pool by Pareto front and the cut to top_n happens after it.
+    arbitration_spec = domain_spec.decision_arbitration
+    precut_active = bool(
+        _match_settings.pareto_precut_enabled and arbitration_spec.enabled and arbitration_spec.pareto_config.objectives
+    )
+    fetch_limit = top_n
+    if precut_active:
+        from engine.scoring.pareto_integrator import precut_pool_limit
+
+        fetch_limit = precut_pool_limit(top_n)
     cypher = (
         f"MATCH (candidate:{sanitize_label(candidate_labels[0])})\n"
         + "\n".join(traversal_clauses)
@@ -880,7 +926,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         # bound by the compiler under generated names; merge them like scoring's.
         parameters = {
             **resolved_query,
-            "top_n": top_n,
+            "top_n": fetch_limit,
             **gate_compiler.last_query_params,
             **scoring_assembler.last_query_params,
         }
@@ -897,6 +943,16 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             tenant=tenant,
             detail="Query execution error",
         ) from exc
+
+    precut_meta: dict[str, Any] | None = None
+    if precut_active and results:
+        results, precut_meta = _apply_pareto_precut(
+            list(results),
+            domain_spec,
+            id_property=_candidate_id_property(domain_spec, candidate_labels[0]),
+            top_n=top_n,
+            pool_limit=fetch_limit,
+        )
 
     # Build Pareto candidates from results and compute front metadata
     pareto_candidates_input: list[Any] | None = None
@@ -932,8 +988,14 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 match_direction, weights, pareto_candidates=pareto_candidates_input
             )
 
+        if precut_meta is not None:
+            # SI-06: constraints and the front were applied to the pool above.
+            if pareto_metadata is None:
+                pareto_metadata = {}
+            pareto_metadata["arbitration"] = precut_meta
+
         # --- Milestone 2.1: Spec-driven constraint enforcement ---
-        if domain_spec.decision_arbitration.enabled:
+        elif domain_spec.decision_arbitration.enabled:
             from engine.scoring.pareto_integrator import (
                 apply_constraint_penalties,
                 apply_pareto_filter,

@@ -168,6 +168,61 @@ def compute_pareto_front(
     )
 
 
+def non_dominated_ranks(
+    vectors: list[dict[str, float]],
+    dims: list[str],
+    directions: Mapping[str, str] | None = None,
+) -> list[int]:
+    """Front rank of every vector: 0 for the non-dominated set, 1 for the set
+    non-dominated once rank 0 is removed, and so on (fast non-dominated sort).
+
+    SI-06 (``pareto_precut_enabled``): one pairwise pass, O(n² · d) time and
+    O(n²) worst-case memory, so callers bound ``n``. Every vector must carry
+    every dimension in ``dims``: a missing value is never invented here.
+    """
+    dominates, dominated_count = _domination_graph(vectors, dims, directions)
+    return _peel_fronts(dominates, dominated_count)
+
+
+def _domination_graph(
+    vectors: list[dict[str, float]],
+    dims: list[str],
+    directions: Mapping[str, str] | None,
+) -> tuple[list[list[int]], list[int]]:
+    """For each vector, the indices it dominates and the count dominating it."""
+    n = len(vectors)
+    dominated_count = [0] * n
+    dominates: list[list[int]] = [[] for _ in range(n)]
+    for i in range(n):
+        for j in range(i + 1, n):
+            if _dominates(vectors[i], vectors[j], dims, directions):
+                dominates[i].append(j)
+                dominated_count[j] += 1
+            elif _dominates(vectors[j], vectors[i], dims, directions):
+                dominates[j].append(i)
+                dominated_count[i] += 1
+    return dominates, dominated_count
+
+
+def _peel_fronts(dominates: list[list[int]], dominated_count: list[int]) -> list[int]:
+    """Assign front ranks by repeatedly removing the current non-dominated set."""
+    remaining = list(dominated_count)
+    ranks = [0] * len(remaining)
+    current = [i for i, count in enumerate(remaining) if count == 0]
+    rank = 0
+    while current:
+        following: list[int] = []
+        for i in current:
+            ranks[i] = rank
+            for j in dominates[i]:
+                remaining[j] -= 1
+                if remaining[j] == 0:
+                    following.append(j)
+        current = following
+        rank += 1
+    return ranks
+
+
 # ── Weight discovery via Dirichlet sampling ──────────────────────────────────
 
 

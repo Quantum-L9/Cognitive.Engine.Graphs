@@ -46,6 +46,17 @@ class MatchResponse(BaseModel):
     execution_time_ms: float
 ```
 
+> SI-06 (`PARETO_PRECUT_ENABLED`, default off): when on and the tenant's pack declares
+> `decision_arbitration` (`enabled: true`, at least one `pareto_config.objectives` entry),
+> which candidates fill `top_n` and their order are decided by Pareto front over the declared
+> objectives on a bounded pool (`precut_pool_limit(top_n)`: 4 x `top_n`, at most 1000, never
+> fewer than `top_n`), not by the composite `score` alone. Order: front rank ascending, then
+> `score` descending, then candidate id ascending; candidates missing an objective value come
+> last and are listed in `pareto.arbitration.precut.unranked_ids`. `pareto.arbitration` then
+> describes the pool and gains a `precut` block (`pool_limit`, `pool_size`, `returned`,
+> `cut_count`, `front_ranks`, `unranked_ids`) and no `trimmed_ids`. Off, or without declared
+> objectives: the response is unchanged. See `docs/FEATURE_GATES.md` §36.
+
 
 ## sync
 
