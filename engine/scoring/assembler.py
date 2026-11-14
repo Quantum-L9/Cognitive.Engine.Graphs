@@ -496,7 +496,17 @@ class ScoringAssembler:
         score = w1 * recency_decay + w2 * touch_frequency + w3 * acceleration_flag
 
         Reads last_activity_date, touch_count_30d, and is_accelerating from node.
+
+        CEG-FEEDBACK-1 (FEATURE_GATES §37): with
+        ``settings.temporalproximity_declared_signals_enabled`` on, the
+        auxiliary signals are only those the dimension declares in
+        ``metadata`` (``_compile_temporalproximity_declared``); off keeps the
+        legacy fixed weights below.
         """
+        from engine.config.settings import settings
+
+        if settings.temporalproximity_declared_signals_enabled:
+            return self._compile_temporalproximity_declared(dim)
         date_prop = sanitize_label(dim.candidateprop or "last_activity_date")
         decay_days = cypher_number(dim.maxvalue or 90.0)
         default = float(dim.defaultwhennull)
@@ -510,6 +520,73 @@ class ScoringAssembler:
             f"  + {w3} * toFloat(coalesce(candidate.is_accelerating, 0))"
             f") END"
         )
+
+    def _compile_temporalproximity_declared(self, dim: ScoringDimensionSpec) -> str:
+        """temporalproximity over the signals the dimension declares (FEATURE_GATES §37).
+
+        score = w_r * recency_decay + w_f * min(frequency / scale, 1) + w_a * acceleration
+
+        ``metadata.frequency_property`` / ``metadata.acceleration_property`` name
+        the auxiliary candidate properties; each contributes only when declared,
+        with ``frequency_weight`` (default 0.25) / ``acceleration_weight``
+        (default 0.15) and ``frequency_scale`` (default 30.0, the count that
+        scores 1.0). Recency takes the remaining weight ``1 - w_f - w_a``, so a
+        dimension declaring no auxiliary signal is pure recency decay in
+        [0, 1]. A weight or scale declared without its property, or auxiliary
+        weights summing past 1.0, is refused. Weights and the scale bind as
+        query parameters; every property name passes ``sanitize_label`` (C-9).
+        """
+        metadata = dimension_metadata(dim)
+        for key, prop_key in (
+            ("frequency_weight", "frequency_property"),
+            ("frequency_scale", "frequency_property"),
+            ("acceleration_weight", "acceleration_property"),
+        ):
+            if key in metadata and prop_key not in metadata:
+                msg = f"Dimension '{dim.name}': temporalproximity metadata.{key} requires metadata.{prop_key}"
+                raise ValueError(msg)
+
+        date_prop = sanitize_label(dim.candidateprop or "last_activity_date")
+        decay_days = cypher_number(dim.maxvalue or 90.0)
+        default = float(dim.defaultwhennull)
+        safe_dim = sanitize_label(dim.name)
+
+        terms: list[str] = []
+        aux_weight = 0.0
+        if "frequency_property" in metadata:
+            freq_prop = sanitize_label(metadata["frequency_property"])
+            freq_weight = cypher_number(metadata.get("frequency_weight", 0.25))
+            freq_scale = cypher_number(metadata.get("frequency_scale", 30.0))
+            if freq_scale <= 0:
+                msg = f"Dimension '{dim.name}': temporalproximity metadata.frequency_scale must be > 0"
+                raise ValueError(msg)
+            weight_key, scale_key = f"tp_freq_w_{safe_dim}", f"tp_freq_scale_{safe_dim}"
+            self._query_params[weight_key] = freq_weight
+            self._query_params[scale_key] = freq_scale
+            aux_weight += freq_weight
+            freq = f"toFloat(coalesce(candidate.{freq_prop}, 0)) / ${scale_key}"
+            terms.append(f"${weight_key} * CASE WHEN {freq} > 1.0 THEN 1.0 WHEN {freq} < 0.0 THEN 0.0 ELSE {freq} END")
+        if "acceleration_property" in metadata:
+            accel_prop = sanitize_label(metadata["acceleration_property"])
+            accel_weight = cypher_number(metadata.get("acceleration_weight", 0.15))
+            weight_key = f"tp_accel_w_{safe_dim}"
+            self._query_params[weight_key] = accel_weight
+            aux_weight += accel_weight
+            terms.append(
+                f"${weight_key} * CASE WHEN candidate.{accel_prop} = true OR candidate.{accel_prop} = 1 "
+                f"THEN 1.0 ELSE 0.0 END"
+            )
+        if aux_weight > 1.0 + 1e-9:
+            msg = (
+                f"Dimension '{dim.name}': temporalproximity auxiliary signal weights sum to {aux_weight:.4f}, "
+                "exceeding 1.0"
+            )
+            raise ValueError(msg)
+        recency_key = f"tp_recency_w_{safe_dim}"
+        self._query_params[recency_key] = max(0.0, 1.0 - aux_weight)
+        recency = f"${recency_key} * exp(-1.0 * duration.inDays(candidate.{date_prop}, datetime()).days / {decay_days})"
+        body = " + ".join([recency, *terms])
+        return f"CASE WHEN candidate.{date_prop} IS NULL THEN {default} ELSE ({body}) END"
 
     def _compile_traversalalias(self, dim: ScoringDimensionSpec) -> str:
         """Read a property from a traversal step alias."""

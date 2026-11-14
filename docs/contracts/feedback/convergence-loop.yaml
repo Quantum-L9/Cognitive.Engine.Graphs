@@ -135,6 +135,7 @@ weight_governance:
   boost_factor: retired behind feedback_boost_propagation_enabled (default false); nothing reads boost_factor, so ranking is identical; propagation_boost_factor stays in the schema, inert
   method_findings_for_the_owner:
   - the per-dimension lift counts outcomes where <dim>_score IS NOT NULL (presence), not outcomes where the dimension scored high, as the recalculate_weights docstring describes; a lift therefore measures which dimensions were recorded, not whether they predict wins
+  - no engine writer sets <dim>_score; the outcome handler stores fingerprint.dimension_scores (RU-005 JSON), so with signal_weight_dimension_scores_enabled off (default) every per-dimension count is 0 and every weight stays at the baseline. On, an outcome also counts when its stored dimension_scores records the dimension (presence, as before); FEATURE_GATES §36, tests/integration/test_feedback_dimension_scores.py
   - outcomes exist only for candidates that were matched and shown, so the win rates carry exposure/selection bias; there is no held-out comparison against the unchanged baseline
   - outcomes are deduplicated by outcome_id (FEEDBACK-IDEMP-01), but outcomes sharing one upstream event under different ids are counted as independent
   proof:

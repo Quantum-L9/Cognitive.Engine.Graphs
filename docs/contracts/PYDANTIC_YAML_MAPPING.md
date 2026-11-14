@@ -133,6 +133,19 @@ scoring:
       defaultweight: 0.1
       metadata:
         community_properties: [orbit_cluster, supply_cluster]   # or declare candidateprop
+    - name: depot_freshness
+      source: candidateproperty
+      computation: temporalproximity
+      candidateprop: last_seen               # the recency date property
+      maxvalue: 45.0                         # decay horizon in days
+      weightkey: w_freshness
+      defaultweight: 0.05
+      metadata:                              # read only under temporalproximity_declared_signals_enabled
+        frequency_property: dock_count       # optional; counts / frequency_scale, clamped to [0, 1]
+        frequency_weight: 0.25               # optional; default 0.25
+        frequency_scale: 30.0                # optional; default 30.0 (the count that scores 1.0)
+        acceleration_property: dock_rate_rising   # optional; true or 1 scores 1.0
+        acceleration_weight: 0.15            # optional; default 0.15
 ```
 
 ```python
@@ -143,6 +156,11 @@ class ScoringDimensionMetadata(BaseModel):  # extra="forbid"
     outcome_node: str | None = None  # preference_attention
     outcome_community_property: str | None = None  # preference_attention
     community_properties: list[str] | None = None  # community_bridge
+    frequency_property: str | None = None  # temporalproximity
+    frequency_weight: float | None = None  # temporalproximity, [0, 1]
+    frequency_scale: float | None = None  # temporalproximity, > 0
+    acceleration_property: str | None = None  # temporalproximity
+    acceleration_weight: float | None = None  # temporalproximity, [0, 1]
 
 
 class ScoringDimensionSpec(BaseModel):
@@ -153,6 +171,12 @@ class ScoringDimensionSpec(BaseModel):
 A `preference_attention` dimension without `success_value` is withheld at
 admission (`undeclared scoring metadata: …`, flag
 `preference_attention_metadata_required_enabled`).
+
+A `temporalproximity` dimension's recency takes the weight its declared
+auxiliary signals leave (1.0 when it declares none); a weight or scale
+declared without its property, or auxiliary weights summing past 1.0, is
+refused by the compiler. The keys are read only under
+`temporalproximity_declared_signals_enabled` (FEATURE_GATES §37).
 
 ## BANNED Patterns
 

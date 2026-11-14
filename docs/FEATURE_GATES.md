@@ -1209,6 +1209,89 @@ Tests: `tests/unit/test_capability_tenant_binding.py`. Production ingress behavi
 for `enrich` (refused by the SDK allowlist before dispatch) and `admin` (admitted,
 then guarded by `admin:write`) is pinned in `tests/unit/test_node_app.py`.
 
+## 36. Learned weights read the outcome handler's dimension scores (CEG-FEEDBACK-1)
+
+### `signal_weight_dimension_scores_enabled` (default `False`)
+
+`SignalWeightCalculator._compute_dimension_weight` counted an outcome for a
+dimension only when the outcome node carried `<dim>_score`. No engine writer
+sets that property. The outcome handler (`_build_outcome_write`, both the
+CREATE and the keyed MERGE form) stores `fingerprint.dimension_scores` under
+`outcome_schema_unified` as one string property, the RU-005 codec's sorted-key
+JSON (`encode_outcome_map`), because a Neo4j property cannot hold a map
+(proved against the enterprise testcontainer in
+`tests/integration/test_feedback_dimension_scores.py`). So with the feedback
+loop on, every per-dimension count was 0 and every learned weight stayed at
+`baseline_weight`; the CEG-462 suite passed only because it seeds
+`geo_proximity_score` itself.
+
+The stored representation is the established one (RU-005/RU-006, already read
+by `discover_weights` and the score-feedback reader), so the reader moves to
+it and the writer is unchanged. On: an outcome counts for a dimension when
+`o.<dim>_score IS NOT NULL` **or** its stored `dimension_scores` text contains
+the dimension's key. The key is `"<dim>": ` derived from the codec
+(`dimension_scores_key`) and bound as `$dimension_key`, never interpolated;
+dimension names pass `sanitize_label`, scores are finite numbers, so the key
+occurs exactly when the dimension was recorded (a longer name ending in it is
+preceded by a name character, not a quote). Semantics are unchanged: presence,
+not "scored high" (`docs/contracts/feedback/convergence-loop.yaml`). Off: the
+legacy `<dim>_score` predicate only, byte for byte as before.
+
+Stored data: nothing is written, migrated or deleted, and no outcome-node
+property changes. Outcomes written with `dimension_scores` before the flag is
+turned on are counted once it is on (they become evidence for the next
+recalculation). Outcomes carrying only `<dim>_score` keep counting.
+Outcomes written while `outcome_schema_unified` was off carry neither and
+stay uncounted. Turning the flag on moves no weight by itself: a
+recalculation records `DimensionWeightChange` candidates and only
+`learned_weight_auto_apply_enabled` (§34) applies one.
+
+Tests: `tests/unit/test_signal_weight_dimension_scores.py`,
+`tests/integration/test_feedback_dimension_scores.py`.
+
+## 37. temporalproximity reads declared auxiliary signals (CEG-FEEDBACK-1)
+
+### `temporalproximity_declared_signals_enabled` (default `False`)
+
+`ScoringAssembler._compile_temporalproximity` scored
+`0.6 * recency + 0.25 * candidate.touch_count_30d / 30 + 0.15 * candidate.is_accelerating`,
+naming two properties no committed pack declares. Declared-projection sync
+drops undeclared properties, so those terms read null and a pack's recency
+ranged over [0, 0.6] (a fresh candidate scores 0.6; verified in Neo4j).
+
+On: a `temporalproximity` dimension declares its auxiliary signals in
+`metadata` (`ScoringDimensionMetadata`):
+
+| Key | Meaning | Default |
+|---|---|---|
+| `frequency_property` | candidate count property; contributes `min(max(value / frequency_scale, 0), 1)` | not declared: no term |
+| `frequency_weight` | weight of that term, [0, 1] | 0.25 |
+| `frequency_scale` | the count that scores 1.0, > 0 | 30.0 |
+| `acceleration_property` | candidate flag; `true` or `1` scores 1.0, anything else 0.0 | not declared: no term |
+| `acceleration_weight` | weight of that term, [0, 1] | 0.15 |
+
+Recency takes the weight the declared signals leave, `1 - frequency_weight -
+acceleration_weight`, so an undeclared signal contributes nothing and a
+dimension declaring none is pure recency decay over [0, 1] (renormalised, not
+capped). Every weight and the scale bind as query parameters
+(`tp_recency_w_<dim>`, `tp_freq_w_<dim>`, `tp_freq_scale_<dim>`,
+`tp_accel_w_<dim>`); property names pass `sanitize_label`. The compiler
+refuses a weight or scale declared without its property and auxiliary weights
+summing past 1.0; with `scoring_admission_check_enabled` that refusal withholds
+the pack at admission. The keys are refused at validation on any other
+computation ("metadata the compilers do not read is refused"), and a
+misspelled key is refused everywhere (`extra="forbid"`). No engine default
+names a domain property.
+
+Effect on committed packs (`tests/fixtures/design_packs`): none declares the
+legacy properties or the new keys, so under the flag each `temporalproximity`
+dimension's value is its legacy value divided by 0.6. The ranking order among
+candidates within that dimension is unchanged; its contribution to the
+weighted total grows. Off: the legacy text, byte for byte, and `metadata` on a
+`temporalproximity` dimension is accepted but not read.
+
+Tests: `tests/unit/test_temporalproximity_declared_signals.py`.
+
 ## 35. Production pack root required (issue #400 A4/A5)
 
 **Flag**: `DOMAINS_ROOT_REQUIRED_IN_PROD` (`domains_root_required_in_prod`), default `True` (hardening, C-21).

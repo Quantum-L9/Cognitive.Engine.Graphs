@@ -845,6 +845,22 @@ class Settings(BaseSettings):
     # C-21): no served pack declares the dimension. Off: the pack is admitted
     # and the compiler's refusal surfaces at match time, as before.
     preference_attention_metadata_required_enabled: bool = True
+    # CEG-FEEDBACK-1 (FEATURE_GATES §36): SignalWeightCalculator counted an
+    # outcome for a dimension only when it carried `<dim>_score`, which no
+    # engine writer sets; the outcome handler stores fingerprint.dimension_scores
+    # (RU-005 JSON), so learned weights never left the baseline. On: an outcome
+    # also counts when its stored dimension_scores records the dimension. Off
+    # (default, C-21): the legacy `<dim>_score` predicate only. Read-side only:
+    # no stored outcome property changes.
+    signal_weight_dimension_scores_enabled: bool = False
+    # CEG-FEEDBACK-1 (FEATURE_GATES §37): temporalproximity added
+    # 0.25 * candidate.touch_count_30d / 30 and 0.15 * candidate.is_accelerating
+    # to 0.6 * recency, reading properties no pack declares (declared-projection
+    # sync drops them), so recency was capped at 0.6. On: only the auxiliary
+    # signals the dimension declares in metadata contribute, recency takes the
+    # remaining weight (1.0 when none is declared) and the frequency term is
+    # clamped to [0, 1]. Off (default, C-21): the legacy fixed 0.6/0.25/0.15.
+    temporalproximity_declared_signals_enabled: bool = False
 
     # CEG-ENRICH-GATE: CEG's local `enrich` action (handle_enrich) runs
     # `MATCH (n:<label>) SET n.<prop> = <expr>` — a second writer of node

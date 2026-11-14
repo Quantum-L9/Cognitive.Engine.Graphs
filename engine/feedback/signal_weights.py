@@ -25,6 +25,7 @@ from engine.config.outcome_vocabulary import outcome_node_label
 from engine.config.schema import DomainSpec
 from engine.config.settings import settings
 from engine.graph.driver import GraphDriver
+from engine.models.outcomes import encode_outcome_map
 from engine.utils.security import sanitize_label
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,40 @@ _LAST_RECALC_WITH_RECORDS = """OPTIONAL MATCH (dw:DimensionWeight {tenant: $tena
             WHEN last_applied IS NOT NULL AND last_applied > last_recorded THEN last_applied
             ELSE last_recorded
         END AS last_recalc"""
+
+
+def dimension_scores_key(dimension_name: str) -> str:
+    """The text a stored ``dimension_scores`` value holds for one recorded dimension.
+
+    CEG-FEEDBACK-1 (FEATURE_GATES §36): the outcome writer stores
+    ``fingerprint.dimension_scores`` through the RU-005 codec
+    (``encode_outcome_map``: sorted-key JSON) because Neo4j cannot hold a map
+    property. A dimension name is a sanitized label (``[A-Za-z_][A-Za-z0-9_]*``)
+    and every stored score is a finite number, so the quoted key followed by the
+    codec's key separator occurs in the stored text exactly when that dimension
+    was recorded; a longer name ending in this one is preceded by a name
+    character, not a quote. Derived from the codec itself, so a codec change
+    moves the key with it.
+    """
+    safe_dim = sanitize_label(dimension_name)
+    encoded = encode_outcome_map({safe_dim: 0})
+    return encoded[1 : encoded.rindex("0")]
+
+
+def _dimension_presence_predicate(dimension_name: str) -> str:
+    """WHERE fragment: the outcome recorded a score for this dimension.
+
+    Off (``signal_weight_dimension_scores_enabled``, default): the legacy
+    ``o.<dim>_score`` property, which no engine writer sets. On: that property
+    or the dimension's key in the stored ``dimension_scores`` text, the shape
+    the outcome handler writes.
+    """
+    # Validated here so this helper is safe on its own, not only via its callers (C-009).
+    safe_dim = sanitize_label(dimension_name)
+    legacy = f"o.{safe_dim}_score IS NOT NULL"
+    if not settings.signal_weight_dimension_scores_enabled:
+        return legacy
+    return f"({legacy} OR o.dimension_scores CONTAINS $dimension_key)"
 
 
 def learned_weights_applied() -> bool:
@@ -224,14 +259,17 @@ class SignalWeightCalculator:
         # Query outcomes where this dimension scored above median
         dim_cypher = f"""
         MATCH (o:{outcome_label})
-        WHERE o.tenant = $tenant AND o.{safe_dim}_score IS NOT NULL
+        WHERE o.tenant = $tenant AND {_dimension_presence_predicate(safe_dim)}
         WITH count(o) AS dim_total,
              sum(CASE WHEN o.outcome = 'success' THEN 1 ELSE 0 END) AS dim_wins
         RETURN dim_total, dim_wins
         """
+        dim_parameters: dict[str, Any] = {"tenant": self._db}
+        if settings.signal_weight_dimension_scores_enabled:
+            dim_parameters["dimension_key"] = dimension_scores_key(safe_dim)
         result = await self._driver.execute_query(
             dim_cypher,
-            parameters={"tenant": self._db},
+            parameters=dim_parameters,
             database=self._db,
         )
 
