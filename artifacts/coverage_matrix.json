@@ -13,9 +13,9 @@
       "total": 12
     },
     "gds_algorithm": {
-      "IMPLEMENTED": 5,
+      "IMPLEMENTED": 6,
       "PARTIAL": 0,
-      "MISSING": 3,
+      "MISSING": 2,
       "total": 8
     },
     "action_handler": {
@@ -32,10 +32,10 @@
     }
   },
   "totals": {
-    "IMPLEMENTED": 38,
+    "IMPLEMENTED": 39,
     "PARTIAL": 0,
-    "MISSING": 6,
+    "MISSING": 5,
     "total": 44
   },
-  "generated_at": "2026-11-14T17:45:40.781934+00:00"
+  "generated_at": "2026-11-14T18:24:39.032342+00:00"
 }

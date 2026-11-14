@@ -354,11 +354,12 @@
     "search_files": [],
     "status": "IMPLEMENTED",
     "evidence_files": ["engine/gds/scheduler.py"],
-    "evidence_lines": ["engine/gds/scheduler.py:388"],
+    "evidence_lines": ["engine/gds/scheduler.py:396"],
     "test_files": [
       "tests/contracts/test_contracts.py",
       "tests/unit/test_config_schema.py",
       "tests/unit/test_domain_neutrality_acceptance.py",
+      "tests/unit/test_gds_node_similarity.py",
       "tests/unit/test_gds_scheduler.py",
       "tests/unit/test_gds_scheduler_registry.py",
       "tests/unit/test_handlers_extended.py",
@@ -377,7 +378,7 @@
     "search_files": [],
     "status": "IMPLEMENTED",
     "evidence_files": ["engine/gds/scheduler.py"],
-    "evidence_lines": ["engine/gds/scheduler.py:394"],
+    "evidence_lines": ["engine/gds/scheduler.py:402"],
     "test_files": [
       "tests/integration/test_gds_cooccurrence_prune.py",
       "tests/unit/test_gds_scheduler.py",
@@ -392,7 +393,7 @@
     "search_files": [],
     "status": "IMPLEMENTED",
     "evidence_files": ["engine/gds/scheduler.py"],
-    "evidence_lines": ["engine/gds/scheduler.py:396"],
+    "evidence_lines": ["engine/gds/scheduler.py:404"],
     "test_files": [
       "tests/contracts/test_data_models.py",
       "tests/unit/test_domain_neutrality_acceptance.py",
@@ -410,7 +411,7 @@
     "search_files": [],
     "status": "IMPLEMENTED",
     "evidence_files": ["engine/gds/scheduler.py"],
-    "evidence_lines": ["engine/gds/scheduler.py:398"],
+    "evidence_lines": ["engine/gds/scheduler.py:406"],
     "test_files": [
       "tests/integration/test_gds_temporal_recency.py",
       "tests/unit/test_gds_scheduler.py",
@@ -425,7 +426,7 @@
     "search_files": [],
     "status": "IMPLEMENTED",
     "evidence_files": ["engine/gds/scheduler.py"],
-    "evidence_lines": ["engine/gds/scheduler.py:402"],
+    "evidence_lines": ["engine/gds/scheduler.py:410"],
     "test_files": ["tests/unit/test_gds_scheduler.py", "tests/unit/test_hgkr_gds_dag.py"]
   },
   {
@@ -456,10 +457,13 @@
     "spec_reference": "gdsjobs.patch001_weekly_jobs[form_cooccurrence].algorithm; gdsjobs.patch001_weekly_jobs[capability_similarity].algorithm",
     "search_tokens": [],
     "search_files": [],
-    "status": "MISSING",
-    "evidence_files": [],
-    "evidence_lines": [],
-    "test_files": []
+    "status": "IMPLEMENTED",
+    "evidence_files": ["engine/gds/scheduler.py"],
+    "evidence_lines": ["engine/gds/scheduler.py:416"],
+    "test_files": [
+      "tests/integration/test_gds_node_similarity.py",
+      "tests/unit/test_gds_node_similarity.py"
+    ]
   },
   {
     "category": "action_handler",
@@ -469,20 +473,15 @@
     "search_files": [],
     "status": "IMPLEMENTED",
     "evidence_files": ["engine/handlers.py"],
-    "evidence_lines": ["engine/handlers.py:3595"],
+    "evidence_lines": ["engine/handlers.py:3601"],
     "test_files": [
-      "tests/compliance/test_hipaa.py",
       "tests/integration/test_handlers.py",
       "tests/integration/test_match_gate_row_scope.py",
       "tests/integration/test_match_handler.py",
       "tests/integration/test_sync_handler.py",
-      "tests/performance/test_query_latency.py",
       "tests/test_handlers.py",
-      "tests/test_pareto_wiring.py",
       "tests/unit/test_admin_tenant_binding.py",
-      "tests/unit/test_declared_node_identity.py",
       "tests/unit/test_detached_payload_contracts.py",
-      "tests/unit/test_domain_neutrality_acceptance.py",
       "tests/unit/test_domain_pack_loader.py",
       "tests/unit/test_domain_pack_shape.py",
       "tests/unit/test_evidence_priority.py",
@@ -494,9 +493,7 @@
       "tests/unit/test_parameter_resolver.py",
       "tests/unit/test_scoring_weights.py",
       "tests/unit/test_wave1_invariants.py",
-      "tests/unit/test_wave2_confidence.py",
-      "tests/unit/test_wave2_handlers.py",
-      "tests/unit/test_wave2_normalization.py"
+      "tests/unit/test_wave2_confidence.py"
     ]
   },
   {
@@ -507,14 +504,13 @@
     "search_files": [],
     "status": "IMPLEMENTED",
     "evidence_files": ["engine/handlers.py"],
-    "evidence_lines": ["engine/handlers.py:3596"],
+    "evidence_lines": ["engine/handlers.py:3602"],
     "test_files": [
       "tests/integration/test_graph_evidence_score.py",
       "tests/integration/test_handlers.py",
       "tests/integration/test_sync_handler.py",
       "tests/integration/test_tenant_mapping_identity.py",
       "tests/integration/test_typed_sync_contract.py",
-      "tests/performance/test_sync_throughput.py",
       "tests/test_handlers.py",
       "tests/unit/test_declared_node_identity.py",
       "tests/unit/test_feedback_convergence_closure.py",
@@ -534,7 +530,7 @@
     "search_files": [],
     "status": "IMPLEMENTED",
     "evidence_files": ["engine/handlers.py"],
-    "evidence_lines": ["engine/handlers.py:3598"],
+    "evidence_lines": ["engine/handlers.py:3604"],
     "test_files": [
       "tests/contracts/test_data_models.py",
       "tests/integration/test_feedback_convergence_closure.py",
@@ -548,9 +544,7 @@
       "tests/unit/test_handlers_extended.py",
       "tests/unit/test_outcome_vocabulary_required.py",
       "tests/unit/test_outcomes.py",
-      "tests/unit/test_outcomes_causal_rejection.py",
-      "tests/unit/test_wave2_feedback.py",
-      "tests/unit/test_wave2_handlers.py"
+      "tests/unit/test_outcomes_causal_rejection.py"
     ]
   },
   {
@@ -561,7 +555,7 @@
     "search_files": [],
     "status": "IMPLEMENTED",
     "evidence_files": ["engine/handlers.py"],
-    "evidence_lines": ["engine/handlers.py:3599"],
+    "evidence_lines": ["engine/handlers.py:3605"],
     "test_files": [
       "tests/contracts/test_data_models.py",
       "tests/test_handlers.py",
@@ -580,7 +574,7 @@
     "search_files": [],
     "status": "IMPLEMENTED",
     "evidence_files": ["engine/handlers.py"],
-    "evidence_lines": ["engine/handlers.py:3597"],
+    "evidence_lines": ["engine/handlers.py:3603"],
     "test_files": [
       "tests/architecture/test_seam_gate_only.py",
       "tests/contracts/test_contracts.py",
@@ -598,6 +592,7 @@
       "tests/unit/test_health_api.py",
       "tests/unit/test_outcome_vocabulary_required.py",
       "tests/unit/test_outcomes.py",
+      "tests/unit/test_served_revision.py",
       "tests/unit/test_wave2_handlers.py",
       "tests/unit/test_wave3_capabilities.py",
       "tests/unit/test_wave6_dormant_features.py"
@@ -611,7 +606,7 @@
     "search_files": [],
     "status": "IMPLEMENTED",
     "evidence_files": ["engine/handlers.py"],
-    "evidence_lines": ["engine/handlers.py:3597", "engine/handlers.py:1449"],
+    "evidence_lines": ["engine/handlers.py:3603", "engine/handlers.py:1449"],
     "test_files": [
       "tests/architecture/test_seam_gate_only.py",
       "tests/integration/test_admin_handler.py",
@@ -619,6 +614,7 @@
       "tests/test_handlers.py",
       "tests/unit/test_handlers_extended.py",
       "tests/unit/test_health_api.py",
+      "tests/unit/test_served_revision.py",
       "tests/unit/test_wave3_capabilities.py"
     ]
   },
@@ -630,13 +626,8 @@
     "search_files": [],
     "status": "IMPLEMENTED",
     "evidence_files": ["engine/handlers.py"],
-    "evidence_lines": ["engine/handlers.py:3600"],
-    "test_files": [
-      "tests/test_enrich.py",
-      "tests/test_handlers.py",
-      "tests/test_health_check.py",
-      "tests/unit/test_graph_driver_database_binding.py"
-    ]
+    "evidence_lines": ["engine/handlers.py:3606"],
+    "test_files": ["tests/test_handlers.py"]
   },
   {
     "category": "action_handler",
@@ -646,7 +637,7 @@
     "search_files": [],
     "status": "IMPLEMENTED",
     "evidence_files": ["engine/handlers.py"],
-    "evidence_lines": ["engine/handlers.py:3601"],
+    "evidence_lines": ["engine/handlers.py:3607"],
     "test_files": ["tests/test_enrich.py", "tests/unit/test_handlers_enrich_health.py"]
   },
   {
@@ -657,7 +648,7 @@
     "search_files": [],
     "status": "IMPLEMENTED",
     "evidence_files": ["engine/handlers.py"],
-    "evidence_lines": ["engine/handlers.py:3603"],
+    "evidence_lines": ["engine/handlers.py:3609"],
     "test_files": [
       "tests/test_enrich.py",
       "tests/unit/test_declared_node_identity.py",
@@ -673,16 +664,16 @@
     "status": "IMPLEMENTED",
     "evidence_files": ["engine/gds/scheduler.py", "engine/scoring/assembler.py"],
     "evidence_lines": [
-      "engine/gds/scheduler.py:50",
-      "engine/gds/scheduler.py:53",
-      "engine/gds/scheduler.py:69",
-      "engine/gds/scheduler.py:394",
-      "engine/gds/scheduler.py:395",
-      "engine/gds/scheduler.py:499",
-      "engine/gds/scheduler.py:529",
-      "engine/gds/scheduler.py:530",
-      "engine/gds/scheduler.py:532",
-      "engine/gds/scheduler.py:544"
+      "engine/gds/scheduler.py:55",
+      "engine/gds/scheduler.py:58",
+      "engine/gds/scheduler.py:74",
+      "engine/gds/scheduler.py:402",
+      "engine/gds/scheduler.py:403",
+      "engine/gds/scheduler.py:571",
+      "engine/gds/scheduler.py:601",
+      "engine/gds/scheduler.py:602",
+      "engine/gds/scheduler.py:604",
+      "engine/gds/scheduler.py:616"
     ],
     "test_files": [
       "tests/contracts/test_contracts.py",
@@ -706,8 +697,8 @@
     "status": "IMPLEMENTED",
     "evidence_files": ["engine/handlers.py", "engine/resolution/resolver.py"],
     "evidence_lines": [
-      "engine/handlers.py:2975",
-      "engine/handlers.py:2977",
+      "engine/handlers.py:2981",
+      "engine/handlers.py:2983",
       "engine/resolution/resolver.py:59"
     ],
     "test_files": [
@@ -739,7 +730,7 @@
       "engine/kge/transformations.py"
     ],
     "evidence_lines": [
-      "engine/config/schema.py:979",
+      "engine/config/schema.py:1002",
       "engine/config/settings.py:116",
       "engine/kge/__init__.py:14",
       "engine/kge/__init__.py:21",

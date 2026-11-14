@@ -489,6 +489,38 @@ class EngineIndex:
             raise EvidenceUnresolvedError(msg)
         return registry
 
+    def constant_value(self, rel: str, name: str, depth: int = 0) -> ast.expr | None:
+        """The expression a module-level ``name`` is assigned in ``rel``, following one
+        ``from engine... import name`` hop into the defining module (None if unresolved).
+
+        Names inside the returned expression are resolved by the caller against
+        ``rel``; ``constant_value`` re-resolves them against the defining module.
+        """
+        module = self.tree(rel)
+        if module is None or depth > 2:
+            return None
+        for node in module.body:
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                if any(isinstance(t, ast.Name) and t.id == name for t in targets) and node.value is not None:
+                    return self._inline_names(rel, node.value, depth)
+            elif isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("engine."):
+                for alias in node.names:
+                    if (alias.asname or alias.name) == name:
+                        source = node.module.replace(".", "/") + ".py"
+                        return self.constant_value(source, alias.name, depth + 1)
+        return None
+
+    def _inline_names(self, rel: str, expr: ast.expr, depth: int) -> ast.expr:
+        """Copy of ``expr`` with every bare Name replaced by its module-level value in ``rel``."""
+
+        class _Inline(ast.NodeTransformer):
+            def visit_Name(inner, node: ast.Name) -> ast.AST:  # noqa: N805
+                value = self.constant_value(rel, node.id, depth + 1)
+                return ast.copy_location(value, node) if value is not None else node
+
+        return _Inline().visit(ast.parse(ast.unparse(expr), mode="eval").body)
+
     def gds_dispatch(self) -> dict[str, tuple[str, int]]:
         """``{normalised literal: (literal, line)}`` the scheduler dispatches an algorithm on."""
         module = self.tree(GDS_SCHEDULER_FILE)
@@ -501,12 +533,28 @@ class EngineIndex:
                 isinstance(expr, ast.Attribute) and expr.attr == "algorithm"
             )
 
-        def record(expr: ast.expr | None) -> None:
+        def record(expr: ast.expr | None, line: int | None = None, depth: int = 0) -> None:
+            at = line if line is not None else getattr(expr, "lineno", 0)
             if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
-                dispatch.setdefault(normalize_name(expr.value), (expr.value, expr.lineno))
+                dispatch.setdefault(normalize_name(expr.value), (expr.value, at))
             elif isinstance(expr, (ast.Tuple, ast.List, ast.Set)):
                 for element in expr.elts:
-                    record(element)
+                    record(element, line, depth)
+            elif depth < 4 and isinstance(expr, ast.Name):
+                # ``algo in NAMED_SET``: resolve the module-level constant it names,
+                # here or in the module it is imported from, to its string members.
+                record(self.constant_value(GDS_SCHEDULER_FILE, expr.id), at, depth + 1)
+            elif depth < 4 and isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.BitOr):
+                record(expr.left, line, depth + 1)
+                record(expr.right, line, depth + 1)
+            elif (
+                depth < 4
+                and isinstance(expr, ast.Call)
+                and isinstance(expr.func, ast.Name)
+                and expr.func.id in {"frozenset", "set", "tuple"}
+                and len(expr.args) == 1
+            ):
+                record(expr.args[0], line, depth + 1)
 
         for node in ast.walk(module):
             if isinstance(node, ast.Compare) and is_algorithm(node.left):

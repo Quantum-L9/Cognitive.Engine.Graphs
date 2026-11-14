@@ -381,8 +381,9 @@ def test_real_repo_node_similarity_status_tracks_the_scheduler(real_spec: dict) 
     """The real GDS similarity gap is reported MISSING exactly while the scheduler has no branch for it."""
     feature = next(f for f in se.collect_features(real_spec, REPO) if f.name == "nodeSimilarity")
     se.scan_codebase(REPO, [feature])
-    scheduler = (REPO / se.GDS_SCHEDULER_FILE).read_text(encoding="utf-8")
-    index = se.EngineIndex({se.GDS_SCHEDULER_FILE: scheduler})
+    # The same sources scan_codebase reads, so a dispatch through an imported
+    # constant (``algo in NODE_SIMILARITY_ALGORITHMS``) resolves here too.
+    index = se.EngineIndex(se._read_tree(REPO, ".py", (".venv", "__pycache__")))
     dispatched = "nodesimilarity" in index.gds_dispatch()
     assert (feature.status == se.Status.MISSING.value) is not dispatched
 
@@ -433,3 +434,39 @@ def test_executable_source_keeps_strings_that_code_uses() -> None:
 def test_unparseable_source_still_drops_comments() -> None:
     source = "def broken(:\n    x = 1  # ThresholdGate\n"
     assert "ThresholdGate" not in se._executable_source(source)
+
+
+def test_gds_dispatch_resolves_a_named_set_imported_from_another_module() -> None:
+    """``algo in NAMED_SET`` counts as dispatch: the probe resolves the set to its members."""
+    sources = {
+        se.GDS_SCHEDULER_FILE: (
+            "from engine.gds.extra import EXTRA_ALGORITHMS\n"
+            "async def run(algo):\n"
+            "    if algo == 'louvain':\n"
+            "        return 1\n"
+            "    elif algo in EXTRA_ALGORITHMS:\n"
+            "        return 2\n"
+        ),
+        "engine/gds/extra.py": (
+            "CANONICAL = 'nodeSimilarity'\n"
+            "ALIASES: frozenset[str] = frozenset({'node_similarity'})\n"
+            "EXTRA_ALGORITHMS: frozenset[str] = frozenset({CANONICAL}) | ALIASES\n"
+        ),
+    }
+    dispatch = se.EngineIndex(sources).gds_dispatch()
+    assert {"louvain", "nodesimilarity"} <= set(dispatch)
+    assert dispatch["nodesimilarity"][0] in {"nodeSimilarity", "node_similarity"}
+    assert dispatch["nodesimilarity"][1] == 5  # the dispatch line, not the constant's line
+
+
+def test_gds_dispatch_ignores_an_unresolvable_name() -> None:
+    sources = {
+        se.GDS_SCHEDULER_FILE: (
+            "async def run(algo):\n"
+            "    if algo == 'louvain':\n"
+            "        return 1\n"
+            "    elif algo in SOMEWHERE_ELSE:\n"
+            "        return 2\n"
+        )
+    }
+    assert set(se.EngineIndex(sources).gds_dispatch()) == {"louvain"}

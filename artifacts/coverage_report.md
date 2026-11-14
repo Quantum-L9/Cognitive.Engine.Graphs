@@ -1,6 +1,6 @@
 # L9 Spec Coverage Report
 
-- Generated: 2026-11-14T17:45:40.782931+00:00
+- Generated: 2026-11-14T18:24:39.033067+00:00
 - Template tag: `L9_TEMPLATE`
 - Status: IMPLEMENTED = implementation present in its owning code AND referenced by a test under tests/; PARTIAL = implementation present, no test references it; MISSING = no implementation present. Evidence rules per category: tools/spec_extract.py module docstring.
 
@@ -10,10 +10,10 @@
 |----------|-------------|---------|---------|-------|
 | gates | 10 | 0 | 0 | 10 |
 | scoring | 9 | 0 | 3 | 12 |
-| gds_algorithm | 5 | 0 | 3 | 8 |
+| gds_algorithm | 6 | 0 | 2 | 8 |
 | action_handler | 9 | 0 | 0 | 9 |
 | research_pattern | 5 | 0 | 0 | 5 |
-| **TOTAL** | **38** | **0** | **6** | **44** |
+| **TOTAL** | **39** | **0** | **5** | **44** |
 
 ## ❌ MISSING
 
@@ -35,10 +35,6 @@
 
 ### gds_algorithm → `louvain_to_topology`
 - Spec ref: `gdsjobs.patch001_weekly_jobs[community_membership].algorithm`
-- **No implementation found**
-
-### gds_algorithm → `nodeSimilarity`
-- Spec ref: `gdsjobs.patch001_weekly_jobs[form_cooccurrence].algorithm; gdsjobs.patch001_weekly_jobs[capability_similarity].algorithm`
 - **No implementation found**
 
 ## ✅ IMPLEMENTED
@@ -140,87 +136,92 @@
 
 ### gds_algorithm → `louvain`
 - Spec ref: `gdsjobs.algorithms[louvain]`
-- Implementation: engine/gds/scheduler.py:388
-- Tests: `tests/contracts/test_contracts.py`, `tests/unit/test_config_schema.py`, `tests/unit/test_domain_neutrality_acceptance.py`, `tests/unit/test_gds_scheduler.py`, `tests/unit/test_gds_scheduler_registry.py`
+- Implementation: engine/gds/scheduler.py:396
+- Tests: `tests/contracts/test_contracts.py`, `tests/unit/test_config_schema.py`, `tests/unit/test_domain_neutrality_acceptance.py`, `tests/unit/test_gds_node_similarity.py`, `tests/unit/test_gds_scheduler.py`
 
 ### gds_algorithm → `cooccurrence`
 - Spec ref: `gdsjobs.algorithms[cooccurrence]`
-- Implementation: engine/gds/scheduler.py:394
+- Implementation: engine/gds/scheduler.py:402
 - Tests: `tests/integration/test_gds_cooccurrence_prune.py`, `tests/unit/test_gds_scheduler.py`, `tests/unit/test_hgkr_gds_dag.py`
 
 ### gds_algorithm → `reinforcement`
 - Spec ref: `gdsjobs.algorithms[reinforcement]`
-- Implementation: engine/gds/scheduler.py:396
+- Implementation: engine/gds/scheduler.py:404
 - Tests: `tests/contracts/test_data_models.py`, `tests/unit/test_domain_neutrality_acceptance.py`, `tests/unit/test_gds_scheduler.py`, `tests/unit/test_hgkr_gds_dag.py`, `tests/unit/test_hgkr_pass2.py`
 
 ### gds_algorithm → `temporal_recency`
 - Spec ref: `gdsjobs.algorithms[temporal_recency]`
-- Implementation: engine/gds/scheduler.py:398
+- Implementation: engine/gds/scheduler.py:406
 - Tests: `tests/integration/test_gds_temporal_recency.py`, `tests/unit/test_gds_scheduler.py`, `tests/unit/test_hgkr_gds_dag.py`
 
 ### gds_algorithm → `equipment_sync`
 - Spec ref: `gdsjobs.algorithms[equipment_sync]`
-- Implementation: engine/gds/scheduler.py:402
+- Implementation: engine/gds/scheduler.py:410
 - Tests: `tests/unit/test_gds_scheduler.py`, `tests/unit/test_hgkr_gds_dag.py`
+
+### gds_algorithm → `nodeSimilarity`
+- Spec ref: `gdsjobs.patch001_weekly_jobs[form_cooccurrence].algorithm; gdsjobs.patch001_weekly_jobs[capability_similarity].algorithm`
+- Implementation: engine/gds/scheduler.py:416
+- Tests: `tests/integration/test_gds_node_similarity.py`, `tests/unit/test_gds_node_similarity.py`
 
 ### action_handler → `match`
 - Spec ref: `endpoints.universal[/v1/match]`
-- Implementation: engine/handlers.py:3595
-- Tests: `tests/compliance/test_hipaa.py`, `tests/integration/test_handlers.py`, `tests/integration/test_match_gate_row_scope.py`, `tests/integration/test_match_handler.py`, `tests/integration/test_sync_handler.py`
+- Implementation: engine/handlers.py:3601
+- Tests: `tests/integration/test_handlers.py`, `tests/integration/test_match_gate_row_scope.py`, `tests/integration/test_match_handler.py`, `tests/integration/test_sync_handler.py`, `tests/test_handlers.py`
 
 ### action_handler → `sync`
 - Spec ref: `endpoints.universal[/v1/sync/{entity_type}]`
-- Implementation: engine/handlers.py:3596
+- Implementation: engine/handlers.py:3602
 - Tests: `tests/integration/test_graph_evidence_score.py`, `tests/integration/test_handlers.py`, `tests/integration/test_sync_handler.py`, `tests/integration/test_tenant_mapping_identity.py`, `tests/integration/test_typed_sync_contract.py`
 
 ### action_handler → `outcomes`
 - Spec ref: `endpoints.universal[/v1/outcomes]`
-- Implementation: engine/handlers.py:3598
+- Implementation: engine/handlers.py:3604
 - Tests: `tests/contracts/test_data_models.py`, `tests/integration/test_feedback_convergence_closure.py`, `tests/integration/test_outcomes_causal_integrity.py`, `tests/integration/test_outcomes_handler.py`, `tests/test_handlers.py`
 
 ### action_handler → `resolve`
 - Spec ref: `endpoints.universal[/v1/resolve/{entity_type}]`
-- Implementation: engine/handlers.py:3599
+- Implementation: engine/handlers.py:3605
 - Tests: `tests/contracts/test_data_models.py`, `tests/test_handlers.py`, `tests/unit/test_declared_node_identity.py`, `tests/unit/test_handlers_extended.py`, `tests/unit/test_rbac_required_proofs.py`
 
 ### action_handler → `admin`
 - Spec ref: `endpoints.universal[/v1/admin/rebuild]`
-- Implementation: engine/handlers.py:3597
+- Implementation: engine/handlers.py:3603
 - Tests: `tests/architecture/test_seam_gate_only.py`, `tests/contracts/test_contracts.py`, `tests/contracts/test_tool_schemas.py`, `tests/integration/test_admin_handler.py`, `tests/integration/test_handlers.py`
 
 ### action_handler → `domains`
 - Spec ref: `endpoints.universal[/v1/domains] — realized as admin subaction list_domains: the engine lists domain packs through admin subaction list_domains; the chassis owns the HTTP route`
-- Implementation: engine/handlers.py:3597, engine/handlers.py:1449
+- Implementation: engine/handlers.py:3603, engine/handlers.py:1449
 - Tests: `tests/architecture/test_seam_gate_only.py`, `tests/integration/test_admin_handler.py`, `tests/integration/test_handlers.py`, `tests/test_handlers.py`, `tests/unit/test_handlers_extended.py`
 
 ### action_handler → `health`
 - Spec ref: `endpoints.universal[/v1/health]`
-- Implementation: engine/handlers.py:3600
-- Tests: `tests/test_enrich.py`, `tests/test_handlers.py`, `tests/test_health_check.py`, `tests/unit/test_graph_driver_database_binding.py`
+- Implementation: engine/handlers.py:3606
+- Tests: `tests/test_handlers.py`
 
 ### action_handler → `healthcheck`
 - Spec ref: `engine contract: AGENTS.md Project Structure (engine/handlers.py action handlers) — chassis liveness action the engine declares; the spec's endpoints section predates it`
-- Implementation: engine/handlers.py:3601
+- Implementation: engine/handlers.py:3607
 - Tests: `tests/test_enrich.py`, `tests/unit/test_handlers_enrich_health.py`
 
 ### action_handler → `enrich`
 - Spec ref: `engine contract: AGENTS.md Project Structure (engine/handlers.py action handlers) — enrichment action the engine declares; the spec's endpoints section predates it`
-- Implementation: engine/handlers.py:3603
+- Implementation: engine/handlers.py:3609
 - Tests: `tests/test_enrich.py`, `tests/unit/test_declared_node_identity.py`, `tests/unit/test_handlers_enrich_health.py`
 
 ### research_pattern → `Behavioral Graph Collaborative Filtering`
 - Spec ref: `tools/research/top5_leverage_patterns_detailed.json#1_COLLABORATIVE_FILTERING_AT_SCALE`
-- Implementation: engine/gds/scheduler.py:50, engine/gds/scheduler.py:53, engine/gds/scheduler.py:69, engine/gds/scheduler.py:394, engine/gds/scheduler.py:395
+- Implementation: engine/gds/scheduler.py:55, engine/gds/scheduler.py:58, engine/gds/scheduler.py:74, engine/gds/scheduler.py:402, engine/gds/scheduler.py:403
 - Tests: `tests/contracts/test_contracts.py`, `tests/integration/test_gds_cooccurrence_prune.py`, `tests/scoring/test_benchmark.py`, `tests/unit/test_counterfactual.py`, `tests/unit/test_domain_neutrality_acceptance.py`
 
 ### research_pattern → `Context-Aware Entity Resolution`
 - Spec ref: `tools/research/top5_leverage_patterns_detailed.json#2_ENTITY_DISAMBIGUATION_VIA_CONTEXT`
-- Implementation: engine/handlers.py:2975, engine/handlers.py:2977, engine/resolution/resolver.py:59
+- Implementation: engine/handlers.py:2981, engine/handlers.py:2983, engine/resolution/resolver.py:59
 - Tests: `tests/contracts/test_data_models.py`, `tests/integration/test_resolver_merge_order.py`, `tests/test_handlers.py`, `tests/unit/test_declared_node_identity.py`, `tests/unit/test_handlers_extended.py`
 
 ### research_pattern → `Low-Dimensional Similarity via Graph Embeddings`
 - Spec ref: `tools/research/top5_leverage_patterns_detailed.json#3_GRAPH_EMBEDDINGS_FOR_SIMILARITY`
-- Implementation: engine/config/schema.py:979, engine/config/settings.py:116, engine/kge/__init__.py:14, engine/kge/__init__.py:21, engine/kge/__init__.py:43
+- Implementation: engine/config/schema.py:1002, engine/config/settings.py:116, engine/kge/__init__.py:14, engine/kge/__init__.py:21, engine/kge/__init__.py:43
 - Tests: `tests/contracts/test_contracts.py`, `tests/invariants/test_compliance.py`, `tests/unit/test_admin_tenant_binding.py`, `tests/unit/test_api_error_handling.py`, `tests/unit/test_config_schema.py`
 
 ### research_pattern → `Session-Context Dynamic Re-Ranking`
