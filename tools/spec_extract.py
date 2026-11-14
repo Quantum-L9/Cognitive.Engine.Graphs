@@ -456,13 +456,14 @@ def _dispatch_operands(node: ast.AST) -> list[ast.expr | None]:
     if isinstance(node, ast.Match) and _is_algorithm_expr(node.subject):
         return [sub.value for case in node.cases for sub in ast.walk(case.pattern) if isinstance(sub, ast.MatchValue)]
     if isinstance(node, ast.Dict):
-        operands: list[ast.expr | None] = []
-        for key, value in zip(node.keys, node.values, strict=True):
-            target = value.attr if isinstance(value, ast.Attribute) else getattr(value, "id", "")
-            if isinstance(target, str) and target.startswith("_run_"):
-                operands.append(key)
-        return operands
+        return [key for key, value in zip(node.keys, node.values, strict=True) if _is_run_method(value)]
     return []
+
+
+def _is_run_method(value: ast.expr) -> bool:
+    """``self._run_x`` / ``_run_x``: a value in an algorithm → job-method table."""
+    target = value.attr if isinstance(value, ast.Attribute) else getattr(value, "id", "")
+    return isinstance(target, str) and target.startswith("_run_")
 
 
 def _collection_members(expr: ast.expr | None) -> list[ast.expr]:
