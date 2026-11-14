@@ -26,8 +26,19 @@ from typing import Any
 
 import pytest
 
+from engine.config.settings import settings
 from engine.hoprag.config import HopRAGConfig
 from engine.hoprag.indexer import GraphIndexBuilder
+
+
+@pytest.fixture(autouse=True)
+def _unparked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CEG-KGE-PARK: prove the parked mechanism under an explicit un-park.
+
+    The default refusal is asserted in tests/unit/test_kge_parked.py.
+    """
+    monkeypatch.setattr(settings, "parked_subsystems_enabled", True)
+
 
 pytestmark = pytest.mark.unit
 

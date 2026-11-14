@@ -7,12 +7,22 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from engine.config.settings import settings
 from engine.kge.ensemble import EnsembleResult, VariantScore
 from engine.kge.pareto_ensemble import (
     ParetoEnsembleResult,
     _min_confidence,
     _weight_entropy,
 )
+
+
+@pytest.fixture(autouse=True)
+def _unparked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CEG-KGE-PARK: prove the parked mechanism under an explicit un-park.
+
+    The default refusal is asserted in tests/unit/test_kge_parked.py.
+    """
+    monkeypatch.setattr(settings, "parked_subsystems_enabled", True)
 
 
 @pytest.mark.unit

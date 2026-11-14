@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from engine.config.settings import settings
 from engine.kge.beam_search import (
     BeamCandidate,
     BeamSearchConfig,
@@ -27,6 +28,16 @@ from engine.kge.beam_search import (
 )
 from engine.kge.compound_e3d import CompoundE3D, CompoundE3DConfig
 from engine.kge.transformations import Scale
+
+
+@pytest.fixture(autouse=True)
+def _unparked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CEG-KGE-PARK: prove the parked mechanism under an explicit un-park.
+
+    The default refusal is asserted in tests/unit/test_kge_parked.py.
+    """
+    monkeypatch.setattr(settings, "parked_subsystems_enabled", True)
+
 
 # ============================================================================
 # FIXTURES

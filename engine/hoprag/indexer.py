@@ -9,6 +9,11 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
+PARKED (CEG-KGE-PARK, operator decision 2026-11-14): HopRAG is parked. No runtime path
+may construct, train or run it; its entry point raises
+engine.kge.parked.ParkedSubsystemError. Code kept, not deleted — see
+docs/PARKED_SUBSYSTEMS.md.
+
 Graph index builder for HopRAG.
 
 Orchestrates the full HopRAG index construction pipeline:
@@ -39,6 +44,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from engine.hoprag.config import HopRAGConfig
+from engine.kge.parked import HOPRAG, require_unparked
 from engine.traversal.edge_merger import EdgeMerger, EdgeTriplet, MergeResult
 from engine.traversal.pseudo_query import (
     PassageQueries,
@@ -149,7 +155,11 @@ class GraphIndexBuilder:
             query_generator: Pseudo-query generator with LLM.
             graph_store: Graph store for read/write.
             edge_merger: Optional edge merger (created from config if None).
+
+        Raises:
+            ParkedSubsystemError: While HopRAG is parked.
         """
+        require_unparked(HOPRAG)
         self._config = config
         self._query_gen = query_generator
         self._store = graph_store

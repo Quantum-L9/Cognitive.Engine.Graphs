@@ -9,6 +9,11 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
+PARKED (CEG-KGE-PARK, operator decision 2026-11-14): CompoundE3D is parked. No runtime path
+may construct, train or run it; its entry point raises
+engine.kge.parked.ParkedSubsystemError. Code kept, not deleted — see
+docs/PARKED_SUBSYSTEMS.md.
+
 CompoundE3D — 3-D Knowledge Graph Embedding Model.
 
 Implements the core embedding model referenced by:
@@ -36,6 +41,7 @@ import numpy.typing as npt
 
 from engine.config.schema import KGESpec
 from engine.config.settings import settings
+from engine.kge.parked import COMPOUND_E3D, require_unparked
 from engine.kge.transformations import Rotation, Scale, Transformation3D
 
 logger = logging.getLogger(__name__)
@@ -103,6 +109,7 @@ class CompoundE3D:
     """
 
     def __init__(self, config: CompoundE3DConfig) -> None:
+        require_unparked(COMPOUND_E3D)
         self.config = config
         self.dim = config.embedding_dim
         self._entity_embeddings: dict[str, npt.NDArray[np.float64]] = {}

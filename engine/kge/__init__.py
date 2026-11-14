@@ -11,30 +11,53 @@ status: active
 
 Knowledge Graph Embedding (KGE) — Phase 4 module.
 
-Provides CompoundE3D model, beam search variant discovery,
-and ensemble fusion for the GRAPH Cognitive Engine.
+PARKED (CEG-KGE-PARK, operator decision 2026-11-14): CompoundE3D, KGE beam
+search, the KGE Pareto ensemble and the cross-dimensional ensemble are parked.
+Their constructors raise ``engine.kge.parked.ParkedSubsystemError``. Code kept,
+not deleted — see docs/PARKED_SUBSYSTEMS.md. ``EnsembleController`` and the 3D
+transformations are generic and stay unparked.
 
-All imports gated behind settings.kge_enabled.
+``ParkedSubsystemError`` is imported eagerly from ``engine.kge.parked``, which
+imports no parked module. The other public names resolve lazily (PEP 562):
+importing ``engine.kge`` loads no parked module. ``from engine.kge import X``
+still works and loads only the module that defines ``X``.
 """
 
-from engine.kge.beam_search import BeamSearchConfig, BeamSearchEngine, CascadeVariant
-from engine.kge.compound_e3d import CompoundE3D, CompoundE3DConfig
-from engine.kge.cross_dimensional_ensemble import (
-    CrossDimensionalEnsemble,
-    CrossDimensionalResult,
-    DimensionalScore,
-)
-from engine.kge.ensemble import EnsembleController, VariantScore
-from engine.kge.pareto_ensemble import ParetoEnsembleController, ParetoEnsembleResult
-from engine.kge.transformations import (
-    Flip,
-    Hyperplane,
-    Rotation,
-    Scale,
-    Shear,
-    Transformation3D,
-    Translation,
-)
+from __future__ import annotations
+
+import importlib
+from typing import Any
+
+from engine.kge.parked import ParkedSubsystemError
+
+_BEAM_SEARCH = "engine.kge.beam_search"
+_COMPOUND_E3D = "engine.kge.compound_e3d"
+_CROSS_DIMENSIONAL = "engine.kge.cross_dimensional_ensemble"
+_ENSEMBLE = "engine.kge.ensemble"
+_PARETO_ENSEMBLE = "engine.kge.pareto_ensemble"
+_TRANSFORMATIONS = "engine.kge.transformations"
+
+_EXPORTS: dict[str, str] = {
+    "BeamSearchConfig": _BEAM_SEARCH,
+    "BeamSearchEngine": _BEAM_SEARCH,
+    "CascadeVariant": _BEAM_SEARCH,
+    "CompoundE3D": _COMPOUND_E3D,
+    "CompoundE3DConfig": _COMPOUND_E3D,
+    "CrossDimensionalEnsemble": _CROSS_DIMENSIONAL,
+    "CrossDimensionalResult": _CROSS_DIMENSIONAL,
+    "DimensionalScore": _CROSS_DIMENSIONAL,
+    "EnsembleController": _ENSEMBLE,
+    "VariantScore": _ENSEMBLE,
+    "ParetoEnsembleController": _PARETO_ENSEMBLE,
+    "ParetoEnsembleResult": _PARETO_ENSEMBLE,
+    "Flip": _TRANSFORMATIONS,
+    "Hyperplane": _TRANSFORMATIONS,
+    "Rotation": _TRANSFORMATIONS,
+    "Scale": _TRANSFORMATIONS,
+    "Shear": _TRANSFORMATIONS,
+    "Transformation3D": _TRANSFORMATIONS,
+    "Translation": _TRANSFORMATIONS,
+}
 
 __all__ = [
     "BeamSearchConfig",
@@ -50,6 +73,7 @@ __all__ = [
     "Hyperplane",
     "ParetoEnsembleController",
     "ParetoEnsembleResult",
+    "ParkedSubsystemError",
     "Rotation",
     "Scale",
     "Shear",
@@ -57,3 +81,13 @@ __all__ = [
     "Translation",
     "VariantScore",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    module = _EXPORTS.get(name)
+    if module is None:
+        msg = f"module 'engine.kge' has no attribute {name!r}"
+        raise AttributeError(msg)
+    value = getattr(importlib.import_module(module), name)
+    globals()[name] = value
+    return value

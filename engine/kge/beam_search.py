@@ -9,6 +9,12 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
+PARKED (CEG-KGE-PARK, operator decision 2026-11-14): KGE beam search, which needs a
+CompoundE3D model, is parked. No runtime path
+may construct, train or run it; its entry point raises
+engine.kge.parked.ParkedSubsystemError. Code kept, not deleted — see
+docs/PARKED_SUBSYSTEMS.md.
+
 Beam Search for CompoundE3D Variant Discovery.
 
 Implements efficient beam search over 3D transformation space to discover
@@ -46,6 +52,7 @@ import numpy.typing as npt
 from engine.config.schema import KGEBeamSearchSpec
 from engine.config.settings import settings
 from engine.kge.compound_e3d import CompoundE3D
+from engine.kge.parked import require_unparked
 from engine.kge.transformations import (
     Flip,
     Hyperplane,
@@ -203,6 +210,7 @@ class BeamSearchEngine:
         model: CompoundE3D,
         config: BeamSearchConfig,
     ) -> None:
+        require_unparked("KGE beam search")
         self.model = model
         self.config = config
         self.search_history: list[dict[str, Any]] = []

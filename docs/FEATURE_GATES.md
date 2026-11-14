@@ -153,7 +153,8 @@ independently of the code default.
 
 ## 1. KGE — CompoundE3D Embeddings
 
-**State**: Dormant
+**State**: Dormant; the CompoundE3D model is **parked** (§1a) — `trigger_kge`
+refuses while it is parked, whatever `KGE_ENABLED` says.
 **Flag**: `KGE_ENABLED=True`
 **Settings**: `kge_embedding_dim` (default 256), `kge_confidence_threshold` (default 0.3)
 
@@ -169,12 +170,43 @@ independently of the code default.
 4. Verify with `kge_status` subaction.
 
 ### Validation
-- `kge_status` returns `enabled: true` with config details.
-- `trigger_kge` smoke test confirms vector index is reachable.
+- `kge_status` returns `enabled: true` with config details, and a `parked` block.
+- `trigger_kge` reports `kge_activated` only after `SHOW INDEXES` returns the
+  vector index; a failed check or a missing index raises `ExecutionError`
+  (SI-04). There is no `kge_activated_with_warnings` any more.
 
 ### Rollback
 - Set `KGE_ENABLED=False`. KGE scoring dimensions return 0.0.
 - No data deletion needed — embeddings remain in Neo4j but are unused.
+
+---
+
+## 1a. Parked Subsystems — HopRAG and CompoundE3D (CEG-KGE-PARK)
+
+**State**: Parked (operator decision 2026-11-14) — code kept, not deleted
+**Flag**: `PARKED_SUBSYSTEMS_ENABLED` (`parked_subsystems_enabled`), default `False`
+**Record**: `docs/PARKED_SUBSYSTEMS.md`
+
+HopRAG (`engine/hoprag/`) and CompoundE3D with the KGE beam search, the KGE
+Pareto ensemble and the cross-dimensional ensemble (`engine/kge/`) are parked.
+Every entry point (`GraphIndexBuilder`, `CompoundE3D`, `BeamSearchEngine`,
+`ParetoEnsembleController`, `CrossDimensionalEnsemble`,
+`engine.kge.parked.construct_compound_e3d`) raises
+`engine.kge.parked.ParkedSubsystemError`; admin `trigger_kge` turns it into
+`FeatureNotEnabled` (`detail="parked"`, 422) naming the decision. Importing the
+modules stays harmless. `kge_status` reports `parked` and per-domain
+`model_parked`.
+
+The flag is not an activation switch: it exists so the engine can prove the
+parked mechanisms in tests, and so a recorded un-park decision can take effect
+without a code change. Only a literal `True` un-parks. Leave it unset.
+
+`KGESpec.model` still defaults to `"CompoundE3D"` and every pack validates as
+before; the parked model is refused at use, not at admission.
+
+Guard: `tests/architecture/test_parked_subsystems_guard.py` fails if
+`engine/handlers.py`, `engine/boot.py`, `chassis/`, `engine/scoring/` or
+`engine/gds/` imports parked code other than through `engine.kge.parked`.
 
 ---
 

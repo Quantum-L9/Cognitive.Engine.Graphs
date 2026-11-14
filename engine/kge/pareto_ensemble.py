@@ -9,6 +9,12 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
+PARKED (CEG-KGE-PARK, operator decision 2026-11-14): the KGE Pareto ensemble, which only
+serves CompoundE3D beam-search variants, is parked. No runtime path
+may construct, train or run it; its entry point raises
+engine.kge.parked.ParkedSubsystemError. Code kept, not deleted — see
+docs/PARKED_SUBSYSTEMS.md.
+
 Multi-objective Pareto-front ensemble controller extending
 ``engine.kge.ensemble.EnsembleController``.
 """
@@ -21,12 +27,14 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from engine.config.schema import KGEEnsembleSpec
 from engine.kge.ensemble import (
     EnsembleController,
     EnsembleResult,
     FusionStrategy,
     VariantScore,
 )
+from engine.kge.parked import require_unparked
 from engine.scoring.pareto import _dominates
 
 logger = logging.getLogger(__name__)
@@ -108,6 +116,10 @@ class ParetoEnsembleResult:
 class ParetoEnsembleController(EnsembleController):
     """Extends ``EnsembleController`` to produce a Pareto front across all
     fusion strategies rather than routing to a single strategy."""
+
+    def __init__(self, spec: KGEEnsembleSpec | None = None) -> None:
+        require_unparked("KGE Pareto ensemble")
+        super().__init__(spec)
 
     def predict_pareto(self, scores: list[VariantScore]) -> ParetoEnsembleResult:
         """Run all ensemble strategies and build a Pareto front.

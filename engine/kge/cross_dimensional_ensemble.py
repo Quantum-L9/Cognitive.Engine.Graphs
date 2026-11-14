@@ -9,6 +9,12 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
+PARKED (CEG-KGE-PARK, operator decision 2026-11-14): the cross-dimensional ensemble, never
+created at runtime, is parked with the KGE pieces it serves. No runtime path
+may construct, train or run it; its entry point raises
+engine.kge.parked.ParkedSubsystemError. Code kept, not deleted — see
+docs/PARKED_SUBSYSTEMS.md.
+
 Cross-Dimensional Ensemble — HGKR Semantic-Level Fusion.
 
 Implements the semantic-level cross-graph propagation concept from:
@@ -33,6 +39,8 @@ import logging
 import math
 from dataclasses import dataclass, field
 from typing import Any
+
+from engine.kge.parked import require_unparked
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +114,9 @@ class CrossDimensionalEnsemble:
 
         Raises:
             ValueError: If propagation_depth is outside [1, 5].
+            ParkedSubsystemError: While the subsystem is parked.
         """
+        require_unparked("KGE cross-dimensional ensemble")
         if not 1 <= propagation_depth <= 5:
             msg = f"propagation_depth must be 1-5 (got {propagation_depth}). HGKR paper shows L>3 causes overfitting."
             raise ValueError(msg)
