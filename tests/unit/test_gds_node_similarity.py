@@ -200,7 +200,7 @@ class TestScheduler:
         assert len(writes) == 1
 
     def test_alias_set(self):
-        assert NODE_SIMILARITY_ALGORITHMS == {"nodeSimilarity", "node_similarity"}
+        assert set(NODE_SIMILARITY_ALGORITHMS) == {"nodeSimilarity", "node_similarity"}
 
     async def test_runs_in_order_against_tenant_database(self, flag_on):
         driver = _driver()
