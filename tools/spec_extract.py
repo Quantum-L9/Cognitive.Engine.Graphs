@@ -607,10 +607,11 @@ class EngineIndex:
 
     def _inline_names(self, rel: str, expr: ast.expr, depth: int) -> ast.expr:
         """Copy of ``expr`` with every bare Name replaced by its module-level value in ``rel``."""
+        index = self  # the transformer's own ``self`` must not shadow this index
 
         class _Inline(ast.NodeTransformer):
-            def visit_Name(inner, node: ast.Name) -> ast.AST:  # noqa: N805
-                value = self.constant_value(rel, node.id, depth + 1)
+            def visit_Name(self, node: ast.Name) -> ast.AST:
+                value = index.constant_value(rel, node.id, depth + 1)
                 return ast.copy_location(value, node) if value is not None else node
 
         return _Inline().visit(ast.parse(ast.unparse(expr), mode="eval").body)
