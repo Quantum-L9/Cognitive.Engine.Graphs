@@ -17,8 +17,9 @@ Their constructors raise ``engine.kge.parked.ParkedSubsystemError``. Code kept,
 not deleted — see docs/PARKED_SUBSYSTEMS.md. ``EnsembleController`` and the 3D
 transformations are generic and stay unparked.
 
-The public names below resolve lazily (PEP 562): importing ``engine.kge`` or
-``engine.kge.parked`` loads no parked module. ``from engine.kge import X``
+``ParkedSubsystemError`` is imported eagerly from ``engine.kge.parked``, which
+imports no parked module. The other public names resolve lazily (PEP 562):
+importing ``engine.kge`` loads no parked module. ``from engine.kge import X``
 still works and loads only the module that defines ``X``.
 """
 
@@ -27,27 +28,35 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
+from engine.kge.parked import ParkedSubsystemError
+
+_BEAM_SEARCH = "engine.kge.beam_search"
+_COMPOUND_E3D = "engine.kge.compound_e3d"
+_CROSS_DIMENSIONAL = "engine.kge.cross_dimensional_ensemble"
+_ENSEMBLE = "engine.kge.ensemble"
+_PARETO_ENSEMBLE = "engine.kge.pareto_ensemble"
+_TRANSFORMATIONS = "engine.kge.transformations"
+
 _EXPORTS: dict[str, str] = {
-    "BeamSearchConfig": "engine.kge.beam_search",
-    "BeamSearchEngine": "engine.kge.beam_search",
-    "CascadeVariant": "engine.kge.beam_search",
-    "CompoundE3D": "engine.kge.compound_e3d",
-    "CompoundE3DConfig": "engine.kge.compound_e3d",
-    "CrossDimensionalEnsemble": "engine.kge.cross_dimensional_ensemble",
-    "CrossDimensionalResult": "engine.kge.cross_dimensional_ensemble",
-    "DimensionalScore": "engine.kge.cross_dimensional_ensemble",
-    "EnsembleController": "engine.kge.ensemble",
-    "VariantScore": "engine.kge.ensemble",
-    "ParetoEnsembleController": "engine.kge.pareto_ensemble",
-    "ParetoEnsembleResult": "engine.kge.pareto_ensemble",
-    "Flip": "engine.kge.transformations",
-    "Hyperplane": "engine.kge.transformations",
-    "Rotation": "engine.kge.transformations",
-    "Scale": "engine.kge.transformations",
-    "Shear": "engine.kge.transformations",
-    "Transformation3D": "engine.kge.transformations",
-    "Translation": "engine.kge.transformations",
-    "ParkedSubsystemError": "engine.kge.parked",
+    "BeamSearchConfig": _BEAM_SEARCH,
+    "BeamSearchEngine": _BEAM_SEARCH,
+    "CascadeVariant": _BEAM_SEARCH,
+    "CompoundE3D": _COMPOUND_E3D,
+    "CompoundE3DConfig": _COMPOUND_E3D,
+    "CrossDimensionalEnsemble": _CROSS_DIMENSIONAL,
+    "CrossDimensionalResult": _CROSS_DIMENSIONAL,
+    "DimensionalScore": _CROSS_DIMENSIONAL,
+    "EnsembleController": _ENSEMBLE,
+    "VariantScore": _ENSEMBLE,
+    "ParetoEnsembleController": _PARETO_ENSEMBLE,
+    "ParetoEnsembleResult": _PARETO_ENSEMBLE,
+    "Flip": _TRANSFORMATIONS,
+    "Hyperplane": _TRANSFORMATIONS,
+    "Rotation": _TRANSFORMATIONS,
+    "Scale": _TRANSFORMATIONS,
+    "Shear": _TRANSFORMATIONS,
+    "Transformation3D": _TRANSFORMATIONS,
+    "Translation": _TRANSFORMATIONS,
 }
 
 __all__ = [

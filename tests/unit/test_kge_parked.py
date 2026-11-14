@@ -147,7 +147,7 @@ class TestImportsStayHarmless:
         code = (
             "import engine.kge.compound_e3d, engine.kge.beam_search, "
             "engine.kge.pareto_ensemble, engine.kge.cross_dimensional_ensemble, "
-            "engine.hoprag, engine.hoprag.indexer; print('ok')"
+            "engine.hoprag, engine.hoprag.indexer, sys; sys.stdout.write('ok')"
         )
         out = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True, check=True)
         assert out.stdout.strip() == "ok"
@@ -156,7 +156,7 @@ class TestImportsStayHarmless:
         code = (
             "import sys, engine.kge, engine.kge.parked\n"
             "loaded = sorted(m for m in sys.modules if m.startswith(('engine.kge.', 'engine.hoprag')))\n"
-            "print(','.join(loaded))"
+            "sys.stdout.write(','.join(loaded))"
         )
         out = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True, check=True)
         assert out.stdout.strip() == "engine.kge.parked"
