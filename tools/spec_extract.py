@@ -486,6 +486,7 @@ def _string_constants_and_dict(module: ast.Module, dict_name: str) -> tuple[dict
     constants: dict[str, str] = {}
     table: ast.Dict | None = None
     for node in module.body:
+        value: ast.expr | None
         if isinstance(node, ast.Assign):
             targets, value = list(node.targets), node.value
         elif isinstance(node, ast.AnnAssign):
@@ -614,7 +615,8 @@ class EngineIndex:
                 value = index.constant_value(rel, node.id, depth + 1)
                 return ast.copy_location(value, node) if value is not None else node
 
-        return _Inline().visit(ast.parse(ast.unparse(expr), mode="eval").body)
+        inlined = _Inline().visit(ast.parse(ast.unparse(expr), mode="eval").body)
+        return inlined if isinstance(inlined, ast.expr) else expr
 
     def gds_dispatch(self) -> dict[str, tuple[str, int]]:
         """``{normalised literal: (literal, line)}`` the scheduler dispatches an algorithm on."""
@@ -739,11 +741,11 @@ def _probe_action(index: EngineIndex, feature: SpecFeature) -> Implementation | 
     host_entry = handlers.get(host)
     if host_entry is None:
         return None
-    line = index.subactions(host_entry[0]).get(subaction)
-    if line is None:
+    sub_line = index.subactions(host_entry[0]).get(subaction)
+    if sub_line is None:
         return None
     return Implementation(
-        lines=(f"{HANDLERS_FILE}:{host_entry[1]}", f"{HANDLERS_FILE}:{line}"),
+        lines=(f"{HANDLERS_FILE}:{host_entry[1]}", f"{HANDLERS_FILE}:{sub_line}"),
         test_patterns=(_quoted(subaction),),
     )
 
