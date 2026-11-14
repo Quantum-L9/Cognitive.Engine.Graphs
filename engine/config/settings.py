@@ -19,7 +19,7 @@ Single source of truth for all L9_* configuration.
 import sys
 from pathlib import Path
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEFAULT_SECRETS = frozenset({"password", "change-me-in-production"})
@@ -145,6 +145,11 @@ class Settings(BaseSettings):
     gdpr_erasure_enabled: bool = False  # W6-02: GDPR erasure endpoint (opt-in)
     gdpr_dry_run: bool = True  # W6-02: when True, compute erasure scope without executing
     gds_max_staleness_hours: int = 25  # W6-03: max hours before GDS job considered stale
+    # GDS-STALE-01: a cron job is stale once it misses its next scheduled run
+    # (after its last run) by more than gds_staleness_grace_minutes; a manual
+    # job is never stale by age. Off: every job uses gds_max_staleness_hours.
+    gds_staleness_per_schedule_enabled: bool = True
+    gds_staleness_grace_minutes: int = Field(default=60, ge=0)
 
     # --- Wave 2: Refinement-Inspired Scoring ---
     feedback_enabled: bool = False  # W2-02: outcome feedback loop (opt-in)

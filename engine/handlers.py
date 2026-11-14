@@ -1984,15 +1984,16 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {"status": "triggered", "job": job_name, "result": result}
 
     if subaction == "gds_health":
-        from datetime import UTC, datetime, timedelta
+        from datetime import UTC, datetime
 
-        from engine.config.settings import settings as _gds_s
+        from engine.gds.staleness import StalenessPolicy, job_staleness, parse_history_timestamp
 
         domain_id = _bind_admin_domain(tenant, payload, required=True)
         spec = domain_loader.load_domain(domain_id)
         scheduler = _get_or_create_scheduler(spec, graph_driver)
         history = await scheduler.get_job_history()
-        max_staleness = timedelta(hours=_gds_s.gds_max_staleness_hours)
+        policy = StalenessPolicy.from_settings()
+        jobs = {job.name: job for job in spec.gdsjobs}
         now = datetime.now(tz=UTC)
         algo_health: dict[str, Any] = {}
         # Build per-job health from most recent entry (prefer job name, fallback to algorithm)
@@ -2001,30 +2002,24 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             if algo in algo_health:
                 continue
             ts_str = entry.get("timestamp")
-            if ts_str:
-                try:
-                    ts = datetime.fromisoformat(ts_str)
-                    if ts.tzinfo is None:
-                        ts = ts.replace(tzinfo=UTC)
-                    stale = (now - ts) > max_staleness
-                except (ValueError, TypeError):
-                    stale = True
-            else:
-                stale = True
+            verdict = job_staleness(jobs.get(algo), parse_history_timestamp(ts_str), now, policy)
             algo_health[algo] = {
                 "last_run": ts_str,
                 "status": entry.get("status"),
-                "stale": stale,
+                "stale": verdict.stale,
+                "stale_after": verdict.deadline.isoformat() if verdict.deadline else None,
             }
         # Check for algorithms that have never run
         for job in spec.gdsjobs:
             if job.name not in algo_health:
-                algo_health[job.name] = {"last_run": None, "status": "never_run", "stale": True}
+                algo_health[job.name] = {"last_run": None, "status": "never_run", "stale": True, "stale_after": None}
         all_healthy = all(not v.get("stale") for v in algo_health.values())
         return {
             "status": "healthy" if all_healthy else "degraded",
             "domain_id": domain_id,
-            "max_staleness_hours": _gds_s.gds_max_staleness_hours,
+            "max_staleness_hours": int(policy.max_staleness.total_seconds() // 3600),
+            "staleness_per_schedule": policy.per_schedule,
+            "staleness_grace_minutes": int(policy.grace.total_seconds() // 60),
             "algorithms": algo_health,
         }
 
@@ -2063,6 +2058,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 "gdpr_erasure_enabled": _fs.gdpr_erasure_enabled,
                 "gdpr_dry_run": _fs.gdpr_dry_run,
                 "gds_max_staleness_hours": _fs.gds_max_staleness_hours,
+                "gds_staleness_per_schedule_enabled": _fs.gds_staleness_per_schedule_enabled,
                 # --- Constellation seam (EIE <-> Gate <-> CEG) ---
                 "auto_enrich_via_gate": _fs.auto_enrich_via_gate,
                 "graph_inference_feedback_enabled": _fs.graph_inference_feedback_enabled,

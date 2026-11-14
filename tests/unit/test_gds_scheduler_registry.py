@@ -179,7 +179,25 @@ class TestSharedRegistryOn:
             result = await lifecycle._gds_health_check()
         finally:
             await lifecycle.shutdown()
-        # The probe sees the registered scheduler's stale run.
+        # The probe sees the registered scheduler's stale run, named by job
+        # (GDS-STALE-01: staleness is per job, so two jobs sharing an algorithm
+        # are reported separately).
+        assert result["gds"] == f"degraded: stale jobs: {CRON_JOB}"
+
+    async def test_health_probe_keys_by_algorithm_when_per_schedule_is_off(
+        self, monkeypatch: pytest.MonkeyPatch, probe: _Probe, lifecycle_env: MagicMock
+    ) -> None:
+        monkeypatch.setattr(settings, "gds_shared_scheduler_registry", True)
+        monkeypatch.setattr(settings, "gds_staleness_per_schedule_enabled", False)
+        lifecycle = boot.GraphLifecycle()
+        await lifecycle.startup()
+        try:
+            get_state().gds_schedulers[DOMAIN_ID]._job_history.append(
+                {"job": CRON_JOB, "algorithm": "louvain", "timestamp": "2020-01-01T00:00:00+00:00"}
+            )
+            result = await lifecycle._gds_health_check()
+        finally:
+            await lifecycle.shutdown()
         assert result["gds"] == "degraded: stale jobs: louvain"
 
     async def test_gds_disabled_admin_starts_no_apscheduler(

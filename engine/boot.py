@@ -175,32 +175,36 @@ class GraphLifecycle(LifecycleHook):
         """W6-03: Register a health probe that checks GDS algorithm staleness."""
 
         async def gds_health_check() -> dict[str, Any]:
-            from datetime import UTC, datetime, timedelta
+            from datetime import UTC, datetime
 
-            max_staleness = timedelta(hours=settings.gds_max_staleness_hours)
+            from engine.gds.staleness import StalenessPolicy, job_staleness, parse_history_timestamp
+
+            policy = StalenessPolicy.from_settings()
             now = datetime.now(tz=UTC)
             stale_jobs: list[str] = []
             for scheduler in self._registered_schedulers():
                 history = await scheduler.get_job_history()
-                # Group by algorithm, check most recent entry
+                jobs = {job.name: job for job in scheduler.domain_spec.gdsjobs}
+                # Most recent entry per job. GDS-STALE-01 keys by job name, so two
+                # jobs sharing an algorithm are judged separately; off keeps the
+                # legacy algorithm key.
                 seen: set[str] = set()
                 for entry in reversed(history):
-                    algo = entry.get("algorithm") or entry.get("job", "unknown")
-                    if algo in seen:
-                        continue
-                    seen.add(algo)
-                    ts_str = entry.get("timestamp")
-                    if ts_str:
-                        try:
-                            ts = datetime.fromisoformat(ts_str)
-                            if ts.tzinfo is None:
-                                ts = ts.replace(tzinfo=UTC)
-                            if (now - ts) > max_staleness:
-                                stale_jobs.append(algo)
-                        except (ValueError, TypeError):
-                            stale_jobs.append(algo)
+                    if policy.per_schedule:
+                        key = entry.get("job") or entry.get("algorithm", "unknown")
                     else:
-                        stale_jobs.append(algo)
+                        key = entry.get("algorithm") or entry.get("job", "unknown")
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    verdict = job_staleness(
+                        jobs.get(entry.get("job", "")),
+                        parse_history_timestamp(entry.get("timestamp")),
+                        now,
+                        policy,
+                    )
+                    if verdict.stale:
+                        stale_jobs.append(key)
             if stale_jobs:
                 return {"gds": f"degraded: stale jobs: {', '.join(stale_jobs)}"}
             return {"gds": "ok"}
