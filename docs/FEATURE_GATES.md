@@ -1215,7 +1215,9 @@ On:
   (member → `bias`, non-member → 0.2, either side null → 0.5). Graduated credit would
   need a declared community-similarity relation, which no spec field expresses today;
 - an undeclared `bias` is **1.0** — full credit for a member, which is what the clamp
-  produced from 1.5 anyway, so clamped scores of packs without a `bias` are unchanged.
+  produced from 1.5 anyway, so with `score_clamp_enabled` on (default; it clamps each
+  dimension to [0, 1] before weighting) a member's score in packs without a `bias` is
+  unchanged.
   A declared `bias` (including `0.0`) is used as declared. 1.0 was chosen over an
   admission refusal because every pack that omits `bias` would otherwise be withheld
   for a value whose clamped effect is already 1.0.
