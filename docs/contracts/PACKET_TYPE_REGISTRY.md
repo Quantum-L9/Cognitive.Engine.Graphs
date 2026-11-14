@@ -39,7 +39,7 @@ lowercases its input, and contract scanner rule `PKT-001` rejects an uppercase
 What a packet *does* is `header.action`, not `packet_type`: a lowercase string
 matching `^[a-z0-9][a-z0-9._-]{0,63}$` (SDK `TransportHeader.validate_action`). Chassis
 ingress actions are the registered handlers (`match`, `sync`, `admin`, `outcomes`,
-`resolve`, `health`, `healthcheck`, `health-assess`, `enrich`); `PacketBridge` emits
+`resolve`, `health`, `healthcheck`, `health-assess`, `enrich`, `score`); `PacketBridge` emits
 `event` packets with actions `routing_decision` and `outcome_event`.
 
 ## WRONG (agents generate these)
