@@ -133,6 +133,61 @@ def test_committed_runtime_installers_do_not_resolve_dependencies() -> None:
     assert not offenders, "runtime and developer installers must delegate to locked profiles: " + ", ".join(offenders)
 
 
+_APPLICATION_DOCKERFILES = ["Dockerfile", "Dockerfile.prod", "chassis/Dockerfile.chassis"]
+_COPY = re.compile(r"^[ \t]*COPY[ \t]+(?P<args>[^\n]+)$", re.MULTILINE)
+
+
+def _copy_sources(text: str) -> list[str]:
+    """Build-context sources of every COPY that does not read from another stage."""
+    sources: list[str] = []
+    for match in _COPY.finditer(text):
+        words = match.group("args").split()
+        if any(word.startswith("--from=") for word in words):
+            continue
+        sources.extend(word for word in words[:-1] if not word.startswith("--"))
+    return sources
+
+
+@pytest.mark.parametrize("dockerfile", _APPLICATION_DOCKERFILES)
+def test_application_docker_copies_only_tracked_sources(dockerfile: str) -> None:
+    """A COPY of a path the repository no longer has fails only at build time.
+
+    chassis/Dockerfile.chassis kept copying requirements-runtime.lock after
+    uv.lock replaced it, so the chassis image no longer built.
+    """
+    text = (ROOT / dockerfile).read_text(encoding="utf-8")
+    sources = [source for source in _copy_sources(text) if "$" not in source]
+    assert sources, f"{dockerfile} copies nothing from the build context"
+    missing = [source for source in sources if not (ROOT / source.rstrip("/")).exists()]
+    assert not missing, f"{dockerfile} copies paths absent from the repository: {missing}"
+
+
+@pytest.mark.parametrize("dockerfile", _APPLICATION_DOCKERFILES)
+def test_application_docker_installs_from_uv_lock(dockerfile: str) -> None:
+    text = (ROOT / dockerfile).read_text(encoding="utf-8")
+    sources = _copy_sources(text)
+    assert "uv.lock" in sources, f"{dockerfile} must install from uv.lock"
+    assert "pyproject.toml" in sources, f"{dockerfile} must copy the manifest uv.lock is checked against"
+    assert "install_locked.sh runtime" in text, f"{dockerfile} must use the locked runtime profile"
+    stray = [source for source in sources if re.search(r"requirements|poetry\.lock|Pipfile", source)]
+    assert not stray, f"{dockerfile} copies a retired dependency manifest: {stray}"
+
+
+def test_copy_source_parser_reads_the_shapes_it_guards() -> None:
+    text = (
+        "COPY requirements-runtime.lock requirements-runtime.lock\n"
+        "COPY tools/deps/install_locked.sh tools/deps/uv-bootstrap.txt tools/deps/\n"
+        "COPY --from=deps /opt/venv /opt/venv\n"
+        "COPY --chown=l9:l9 chassis/ /app/chassis/\n"
+    )
+    assert _copy_sources(text) == [
+        "requirements-runtime.lock",
+        "tools/deps/install_locked.sh",
+        "tools/deps/uv-bootstrap.txt",
+        "chassis/",
+    ]
+
+
 def test_locked_installer_is_rooted_and_hash_enforced() -> None:
     script = (ROOT / "tools" / "deps" / "install_locked.sh").read_text()
     assert 'ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"' in script
