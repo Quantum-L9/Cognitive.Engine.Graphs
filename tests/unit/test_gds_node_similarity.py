@@ -27,7 +27,11 @@ import pytest
 from pydantic import ValidationError
 
 from engine.config.schema import GDSJobScheduleSpec, GDSJobSpec, GDSNodeSimilaritySpec, GDSProjectionSpec
-from engine.gds.node_similarity import NODE_SIMILARITY_ALGORITHM, build_node_similarity_plan
+from engine.gds.node_similarity import (
+    NODE_SIMILARITY_ALGORITHM,
+    NODE_SIMILARITY_ALGORITHMS,
+    build_node_similarity_plan,
+)
 from engine.gds.scheduler import GDSScheduler
 from tests.unit.test_gds_scheduler import _minimal_spec
 
@@ -162,6 +166,20 @@ class TestScheduler:
         assert result["status"] == "skipped"
         assert "gds_node_similarity_enabled" in result["reason"]
         driver.execute_query.assert_not_called()
+
+    @pytest.mark.parametrize("spelling", ["nodeSimilarity", "node_similarity"])
+    async def test_both_spellings_dispatch_to_the_same_job(self, flag_on, spelling):
+        driver = _driver()
+        job = _job(algorithm=spelling)
+        result = await GDSScheduler(_minimal_spec([job], domain_id=DB), driver).execute_job(job)
+        assert result["status"] == "success", result
+        assert result["algorithm"] == NODE_SIMILARITY_ALGORITHM  # reported under the canonical name
+        assert result["relationships_written"] == 6
+        writes = [c for c in driver.execute_query.call_args_list if "gds.nodeSimilarity.write" in str(c.args[0])]
+        assert len(writes) == 1
+
+    def test_alias_set(self):
+        assert {"nodeSimilarity", "node_similarity"} == NODE_SIMILARITY_ALGORITHMS
 
     async def test_runs_in_order_against_tenant_database(self, flag_on):
         driver = _driver()

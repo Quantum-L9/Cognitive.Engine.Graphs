@@ -46,6 +46,10 @@ from engine.config.schema import GDSJobSpec, GDSNodeSimilaritySpec
 from engine.utils.security import sanitize_label
 
 NODE_SIMILARITY_ALGORITHM = "nodeSimilarity"
+# Packs spell the algorithm two ways; ``node_similarity`` is a documented alias
+# of the canonical ``nodeSimilarity`` and dispatches to the same job.
+NODE_SIMILARITY_ALIASES: frozenset[str] = frozenset({"node_similarity"})
+NODE_SIMILARITY_ALGORITHMS: frozenset[str] = frozenset({NODE_SIMILARITY_ALGORITHM}) | NODE_SIMILARITY_ALIASES
 
 PRE_DROP_CYPHER = """
 CALL gds.graph.exists($graph_name) YIELD exists

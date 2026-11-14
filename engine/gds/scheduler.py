@@ -38,7 +38,11 @@ from apscheduler.triggers.cron import CronTrigger
 
 from engine.config.schema import AggregationStrategy, DomainSpec, EdgeCategory, GDSJobSpec
 from engine.config.structural_vocabulary import declared
-from engine.gds.node_similarity import NODE_SIMILARITY_ALGORITHM, build_node_similarity_plan
+from engine.gds.node_similarity import (
+    NODE_SIMILARITY_ALGORITHM,
+    NODE_SIMILARITY_ALGORITHMS,
+    build_node_similarity_plan,
+)
 from engine.graph.driver import GraphDriver
 from engine.utils.security import cypher_number, sanitize_label
 
@@ -75,7 +79,7 @@ class GDSScheduler:
         - geoproximity: Haversine distance-based proximity edges
         - equipmentsync: Boolean property → edge to a declared type node
           (the algorithm id is historical; the vocabulary is the job spec's)
-        - nodeSimilarity: GDS node similarity over the job's projection,
+        - nodeSimilarity (alias node_similarity): GDS node similarity over the job's projection,
           written as ``writeedge`` relationships scored in ``writeproperty``
           (gated by ``gds_node_similarity_enabled``; see node_similarity.py)
     """
@@ -409,7 +413,7 @@ class GDSScheduler:
                     result = await self._run_feedback_recalculation(job_spec)
                 elif algo == "causal_chain_scoring":
                     result = await self._run_causal_chain_scoring(job_spec)
-                elif algo == NODE_SIMILARITY_ALGORITHM:
+                elif algo in NODE_SIMILARITY_ALGORITHMS:
                     result = await self._run_node_similarity(job_spec)
                 else:
                     logger.warning(f"Unknown algorithm: {algo}")

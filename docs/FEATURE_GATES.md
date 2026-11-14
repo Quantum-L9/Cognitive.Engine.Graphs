@@ -1904,8 +1904,9 @@ Tests: `tests/unit/test_feedback_weight_governance.py`,
 
 **Flag**: `gds_node_similarity_enabled` (`GDS_NODE_SIMILARITY_ENABLED`), default `False` (new behaviour, C-21).
 
-A GDS job may declare `algorithm: nodeSimilarity` (exact string, the spelling
-the domain spec uses). With the flag on, `GDSScheduler` runs it against the
+A GDS job may declare `algorithm: nodeSimilarity` (canonical) or its documented
+alias `algorithm: node_similarity`; both dispatch to the same job, whose result
+reports `algorithm: nodeSimilarity`. No other spelling is accepted. With the flag on, `GDSScheduler` runs it against the
 tenant's domain database (`domain.id`), all through `GraphDriver.execute_query`:
 
 1. drop a stale projection named `<job name>_graph`, if one exists;
