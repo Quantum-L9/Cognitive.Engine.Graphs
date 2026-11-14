@@ -584,6 +584,13 @@ class Settings(BaseSettings):
     # collapsed to unique touchpoint ids keeping the minimum-distance row,
     # whose ages feed temporal decay. Off: per-row weighting.
     causal_attribution_unique_touchpoints: bool = True
+    # SI-27 (2026-10-11 audit): first_touch / last_touch / position_based
+    # ordered touchpoints by path distance, not by time. On: touchpoints are
+    # ordered by the timestamp property their label declares
+    # (CausalEdgeSpec.source_timestamp_property); a touchpoint with no
+    # declared property or a NULL value is excluded and counted
+    # (untimestamped_touchpoints). Off: distance order.
+    causal_attribution_time_ordered: bool = False
     # RU-068 / CEG-COR-057: CausalCompiler matched source and target
     # by a hardcoded `entity_id` (an outcome node has only `outcome_id`),
     # emitted `AND $confidence >= <literal>` without a WHERE when temporal

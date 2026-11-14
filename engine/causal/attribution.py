@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import math
+from datetime import UTC, date, datetime
 from typing import Any
 
 from engine.causal.identity import FALLBACK_ID_PROPERTY, node_id_property
@@ -51,6 +52,66 @@ def _unique_touchpoint_rows(results: list[dict[str, Any]]) -> list[dict[str, Any
         seen.add(tp_id)
         unique.append(row)
     return unique
+
+
+# SI-27: models whose result depends on touchpoint order.
+_ORDERED_MODELS = frozenset({"first_touch", "last_touch", "position_based"})
+
+
+class TouchpointTimestampConflictError(ValueError):
+    """Touchpoint timestamps that cannot be ordered against each other (SI-27)."""
+
+
+def _timestamp_key(value: Any) -> tuple[str, float] | None:
+    """An orderable ``(kind, value)`` for a declared touchpoint timestamp, or ``None`` when absent/unusable.
+
+    Temporal values (Neo4j DateTime / Date, ISO-8601 strings) order as POSIX
+    seconds, a naive datetime read as UTC; numbers order as declared. The two
+    kinds are never compared with each other (the caller refuses a mix).
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return ("number", float(value)) if math.isfinite(float(value)) else None
+    to_native = getattr(value, "to_native", None)
+    if callable(to_native):
+        value = to_native()
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    if isinstance(value, datetime):
+        moment = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return ("temporal", moment.timestamp())
+    if isinstance(value, date):
+        return ("temporal", datetime(value.year, value.month, value.day, tzinfo=UTC).timestamp())
+    return None
+
+
+def _time_ordered_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """SI-27: rows ordered by ``touchpoint_ts`` (oldest first) and the number excluded.
+
+    A row with no usable timestamp is excluded and counted, never placed by
+    distance. Equal timestamps order by touchpoint id (deterministic). A mix of
+    temporal and numeric timestamps cannot be ordered and is refused.
+    """
+    keyed: list[tuple[tuple[str, float], dict[str, Any]]] = []
+    excluded = 0
+    for row in rows:
+        if not row.get("touchpoint_id"):
+            continue
+        key = _timestamp_key(row.get("touchpoint_ts"))
+        if key is None:
+            excluded += 1
+            continue
+        keyed.append((key, row))
+    kinds = {key[0] for key, _ in keyed}
+    if len(kinds) > 1:
+        msg = "touchpoint timestamps mix temporal and numeric values; declare one kind of source_timestamp_property"
+        raise TouchpointTimestampConflictError(msg)
+    keyed.sort(key=lambda item: (item[0][1], str(item[1]["touchpoint_id"])))
+    return [row for _, row in keyed], excluded
 
 
 def _temporal_decay_factor(age_days: float, halflife_days: float) -> float:
@@ -108,10 +169,17 @@ class AttributionCalculator:
         # Trace backward from outcome to find contributing touchpoints. Per-edge
         # ages (in days) are computed in Cypher for the temporal-decay refinement;
         # a missing created_at coalesces to now -> age 0 -> no decay (NULL-safe).
+        # SI-27: with causal_attribution_time_ordered on, order-dependent
+        # models read each touchpoint's declared event timestamp.
+        time_ordered = settings.causal_attribution_time_ordered and model in _ORDERED_MODELS
+        timestamp_column = (
+            f"       {self._touchpoint_timestamp_expression()} AS touchpoint_ts,\n" if time_ordered else ""
+        )
         cypher = (
             f"MATCH (outcome:{outcome_label} {{outcome_id: $outcome_id}})\n"
             f"MATCH path = (touchpoint)-{rel_pattern}->(outcome)\n"
             f"RETURN {self._touchpoint_id_expression()} AS touchpoint_id,\n"
+            f"{timestamp_column}"
             f"       length(path) AS distance,\n"
             f"       [r IN relationships(path) | r.confidence] AS confidences,\n"
             f"       [r IN relationships(path) | duration.inDays(coalesce(r.created_at, datetime()), datetime()).days] AS ages_days\n"
@@ -125,10 +193,17 @@ class AttributionCalculator:
         )
 
         if not results:
+            if time_ordered:
+                return {"touchpoints": {}, "model": model, "chain_depth": 0, "untimestamped_touchpoints": 0}
             return {"touchpoints": {}, "model": model, "chain_depth": 0}
 
-        touchpoints = self._assign_weights(results, model)
         retained = _unique_touchpoint_rows(results)
+        untimestamped = 0
+        if time_ordered:
+            retained, untimestamped = _time_ordered_rows(retained)
+            touchpoints = self._assign_weights(retained, model)
+        else:
+            touchpoints = self._assign_weights(results, model)
 
         response: dict[str, Any] = {
             "touchpoints": touchpoints,
@@ -136,6 +211,9 @@ class AttributionCalculator:
             "chain_depth": max((r["distance"] for r in results), default=0),
             "total_touchpoints": len(touchpoints),
         }
+        if time_ordered:
+            response["ordering"] = "event_timestamp"
+            response["untimestamped_touchpoints"] = untimestamped
 
         # Temporal-decay refinement (feature-flagged, per-domain). Down-weights
         # touchpoints reached through older causal links and renormalizes so the
@@ -187,6 +265,34 @@ class AttributionCalculator:
         if not branches:
             return "touchpoint.entity_id"
         return f"CASE {' '.join(branches)} ELSE touchpoint.entity_id END"
+
+    def _touchpoint_timestamp_expression(self) -> str:
+        """SI-27: each touchpoint's declared event timestamp, per source label.
+
+        A CASE over the causal-edge source labels that declare
+        ``source_timestamp_property`` (labels and property names sanitized,
+        C-9); a label with no declaration yields ``null``, so its touchpoints
+        are excluded from ordering and counted. Two edges declaring different
+        properties for one source label are refused.
+        """
+        declared: dict[str, str] = {}
+        for edge in self._spec.causal.causal_edges:
+            prop = getattr(edge, "source_timestamp_property", None)
+            if prop is None or not str(prop).strip():
+                continue
+            label = sanitize_label(edge.source_label)
+            prop = sanitize_label(prop)
+            if declared.get(label, prop) != prop:
+                msg = (
+                    f"causal edges declare different source_timestamp_property values for source label {label!r}: "
+                    f"{declared[label]!r} and {prop!r}"
+                )
+                raise TouchpointTimestampConflictError(msg)
+            declared[label] = prop
+        if not declared:
+            return "null"
+        branches = " ".join(f"WHEN touchpoint:{label} THEN touchpoint.{prop}" for label, prop in declared.items())
+        return f"CASE {branches} ELSE null END"
 
     @staticmethod
     def _assign_weights(

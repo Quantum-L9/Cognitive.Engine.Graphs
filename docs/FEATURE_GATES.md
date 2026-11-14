@@ -127,6 +127,7 @@ independently of the code default.
 | Prohibited Factor Violation Audit | `PROHIBITED_FACTOR_VIOLATION_AUDIT` (`prohibited_factor_violation_audit`) | `True` | unset | active; a blocked attempt leaves one `denied` audit entry before the error propagates (domain `auditonviolation`) — see lane D |
 | PII Declared Fields Enforced | `PII_DECLARED_FIELDS_ENFORCED` (`pii_declared_fields_enforced`) | `True` | unset | active; the domain's declared `compliance.pii` fields and `handling` mode apply on the response path — see lane D |
 | Causal Attribution Unique Touchpoints | `CAUSAL_ATTRIBUTION_UNIQUE_TOUCHPOINTS` (`causal_attribution_unique_touchpoints`) | `True` | unset | active; attribution weights are computed over unique touchpoints and sum to 1.0 — see lane D |
+| Causal Attribution Time Ordered | `CAUSAL_ATTRIBUTION_TIME_ORDERED` (`causal_attribution_time_ordered`) | `False` | unset | dormant (correctness, SI-27); first_touch / last_touch / position_based order touchpoints by their source label's declared `CausalEdgeSpec.source_timestamp_property`, not path distance; untimestamped touchpoints are excluded and counted — see lane D |
 | Causal Edge Declared Identity | `CAUSAL_EDGE_DECLARED_IDENTITY` (`causal_edge_declared_identity`) | `True` | unset | active; causal edges match declared node identities, anchor predicates in one WHERE with a bound threshold, MERGE on a stable key — see lane D |
 | Causal Validator Batch Edge Type | `CAUSAL_VALIDATOR_BATCH_EDGE_TYPE` (`causal_validator_batch_edge_type`) | `True` | unset | active; declared per-edge temporal validation applies to sync batches — see lane D |
 | safe_eval Rejects Keywords | `SAFE_EVAL_REJECT_KEYWORDS` (`safe_eval_reject_keywords`) | `True` | unset | active; keyword arguments in derived-parameter / unit expressions raise instead of being dropped — see lane D |
@@ -1691,6 +1692,38 @@ and that row's link ages feed temporal decay; `total_touchpoints` counts unique 
 Model ordering semantics are unchanged (DEC-27 pending). Off: per-row weighting.
 
 Rollback: set the flag to `false`.
+
+### Causal Attribution Time Ordered (SI-27)
+
+**Flag**: `CAUSAL_ATTRIBUTION_TIME_ORDERED=False` (default off)
+**Declaration**: `CausalEdgeSpec.source_timestamp_property` (optional; domain-spec schema 1.2.0)
+
+`AttributionCalculator` ordered touchpoints by the trace query's `ORDER BY distance ASC`,
+so `first_touch` credited the touchpoint nearest the outcome in the graph and `last_touch`
+the farthest — graph distance, not time. RU-067 only removed duplicate rows.
+
+On, for the order-dependent models (`first_touch`, `last_touch`, `position_based`):
+
+- the trace returns `touchpoint_ts`, a CASE over the causal-edge source labels that
+  declare `source_timestamp_property` (labels and property sanitized, C-9); the engine
+  names no timestamp property of its own;
+- touchpoints are ordered oldest first by that value (Neo4j `DateTime` / `Date` or ISO-8601
+  as instants, a naive value read as UTC; numbers as declared; equal values by touchpoint
+  id). A touchpoint whose label declares no property, whose value is NULL, or whose value
+  is not a timestamp is **excluded and counted**, never placed by distance;
+- the response adds `ordering: "event_timestamp"` and `untimestamped_touchpoints`
+  (`total_touchpoints` counts the ordered ones; temporal decay, when enabled, runs over them);
+- refused with `TouchpointTimestampConflictError` (a `ValueError`): two causal edges
+  declaring different properties for one source label, or a mix of temporal and numeric
+  timestamps in one trace.
+
+`linear` does not depend on order and is unchanged (no timestamp column, nothing
+excluded). Off: the legacy Cypher and weights, byte for byte, whether or not the property
+is declared (`tests/unit/test_attribution_time_order.py`; live Neo4j:
+`tests/integration/test_causal_attribution_time_order.py`).
+
+Rollback: set the flag to `false`. The declaration is optional, so packs that omit it
+validate unchanged.
 
 ### Causal Edge Declared Identity (RU-068 / CEG-COR-057, PO-04)
 

@@ -1236,6 +1236,10 @@ class CausalEdgeSpec(BaseModel):
     required_properties: list[str] = Field(default_factory=list)
     temporal_validation: bool = True
     confidence_threshold: float = 0.0
+    # SI-27: the source node's event-timestamp property. With
+    # settings.causal_attribution_time_ordered on, first/last/position-based
+    # attribution orders touchpoints of this source label by it.
+    source_timestamp_property: str | None = None
 
 
 class CausalSubgraphSpec(BaseModel):
