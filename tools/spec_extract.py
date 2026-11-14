@@ -268,18 +268,26 @@ def extract_gds_features(spec: dict) -> list[SpecFeature]:
     return features
 
 
+def _endpoint_actions(spec: dict) -> list[tuple[str, str]]:
+    """``(action, path)`` for each distinct spec endpoint ``/v1/<action>[/...]``, in order."""
+    endpoints = spec.get("endpoints")
+    universal = endpoints.get("universal") if isinstance(endpoints, dict) else None
+    found: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for item in universal if isinstance(universal, list) else []:
+        path = item.get("path") if isinstance(item, dict) else None
+        match = re.match(r"^/v\d+/([A-Za-z0-9_-]+)", path) if isinstance(path, str) else None
+        if match is not None and match.group(1) not in seen:
+            seen.add(match.group(1))
+            found.append((match.group(1), str(path)))
+    return found
+
+
 def extract_action_features(spec: dict) -> list[SpecFeature]:
     """Spec endpoints ``/v1/<action>[/...]``, then the declared engine-contract actions."""
     features: list[SpecFeature] = []
     seen: set[str] = set()
-    endpoints = spec.get("endpoints")
-    universal = endpoints.get("universal") if isinstance(endpoints, dict) else None
-    for item in universal if isinstance(universal, list) else []:
-        path = item.get("path") if isinstance(item, dict) else None
-        match = re.match(r"^/v\d+/([A-Za-z0-9_-]+)", path) if isinstance(path, str) else None
-        if match is None or match.group(1) in seen:
-            continue
-        action = match.group(1)
+    for action, path in _endpoint_actions(spec):
         seen.add(action)
         reference = f"endpoints.universal[{path}]"
         if action in ENDPOINT_REALIZATIONS:
@@ -412,6 +420,95 @@ def _quoted(literal: str) -> re.Pattern[str]:
     return re.compile(rf"[\"']{re.escape(literal)}[\"']")
 
 
+def _assigned_value(node: ast.stmt, name: str) -> ast.expr | None:
+    """The value a module-level ``name = ...`` / ``name: T = ...`` statement assigns, else None."""
+    if isinstance(node, ast.Assign):
+        targets: list[ast.expr] = list(node.targets)
+    elif isinstance(node, ast.AnnAssign):
+        targets = [node.target]
+    else:
+        return None
+    if node.value is not None and any(isinstance(t, ast.Name) and t.id == name for t in targets):
+        return node.value
+    return None
+
+
+def _imported_from_engine(node: ast.stmt, name: str) -> tuple[str, str] | None:
+    """``(module file, original name)`` when ``node`` is ``from engine.x import name``."""
+    if not (isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("engine.")):
+        return None
+    for alias in node.names:
+        if (alias.asname or alias.name) == name:
+            return node.module.replace(".", "/") + ".py", alias.name
+    return None
+
+
+def _is_algorithm_expr(expr: ast.expr) -> bool:
+    return (isinstance(expr, ast.Name) and expr.id in {"algo", "algorithm"}) or (
+        isinstance(expr, ast.Attribute) and expr.attr == "algorithm"
+    )
+
+
+def _dispatch_operands(node: ast.AST) -> list[ast.expr | None]:
+    """What ``node`` compares the algorithm against: ``==``/``in`` operands, match values, run-table keys."""
+    if isinstance(node, ast.Compare) and _is_algorithm_expr(node.left):
+        return list(node.comparators) if all(isinstance(op, (ast.Eq, ast.In)) for op in node.ops) else []
+    if isinstance(node, ast.Match) and _is_algorithm_expr(node.subject):
+        return [sub.value for case in node.cases for sub in ast.walk(case.pattern) if isinstance(sub, ast.MatchValue)]
+    if isinstance(node, ast.Dict):
+        operands: list[ast.expr | None] = []
+        for key, value in zip(node.keys, node.values, strict=True):
+            target = value.attr if isinstance(value, ast.Attribute) else getattr(value, "id", "")
+            if isinstance(target, str) and target.startswith("_run_"):
+                operands.append(key)
+        return operands
+    return []
+
+
+def _collection_members(expr: ast.expr | None) -> list[ast.expr]:
+    """Members of a set/tuple/list literal, ``a | b``, or ``frozenset(x)``/``set(x)``/``tuple(x)``."""
+    if isinstance(expr, (ast.Tuple, ast.List, ast.Set)):
+        return list(expr.elts)
+    if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.BitOr):
+        return [expr.left, expr.right]
+    if (
+        isinstance(expr, ast.Call)
+        and isinstance(expr.func, ast.Name)
+        and expr.func.id in {"frozenset", "set", "tuple"}
+        and len(expr.args) == 1
+    ):
+        return [expr.args[0]]
+    return []
+
+
+def _string_constants_and_dict(module: ast.Module, dict_name: str) -> tuple[dict[str, str], ast.Dict | None]:
+    """Module-level ``NAME = "literal"`` constants, and the dict literal assigned to ``dict_name``."""
+    constants: dict[str, str] = {}
+    table: ast.Dict | None = None
+    for node in module.body:
+        if isinstance(node, ast.Assign):
+            targets, value = list(node.targets), node.value
+        elif isinstance(node, ast.AnnAssign):
+            targets, value = [node.target], node.value
+        else:
+            continue
+        for target in (t for t in targets if isinstance(t, ast.Name)):
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                constants[target.id] = value.value
+            if target.id == dict_name and isinstance(value, ast.Dict):
+                table = value
+    return constants, table
+
+
+def _dict_key_string(key: ast.expr | None, constants: dict[str, str]) -> str | None:
+    """A dict key that is a string literal or a module constant naming one."""
+    if isinstance(key, ast.Constant) and isinstance(key.value, str):
+        return key.value
+    if isinstance(key, ast.Name):
+        return constants.get(key.id)
+    return None
+
+
 class EngineIndex:
     """Parsed anchors of the owning engine files, read once from the scanned sources."""
 
@@ -500,15 +597,12 @@ class EngineIndex:
         if module is None or depth > 2:
             return None
         for node in module.body:
-            if isinstance(node, (ast.Assign, ast.AnnAssign)):
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                if any(isinstance(t, ast.Name) and t.id == name for t in targets) and node.value is not None:
-                    return self._inline_names(rel, node.value, depth)
-            elif isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("engine."):
-                for alias in node.names:
-                    if (alias.asname or alias.name) == name:
-                        source = node.module.replace(".", "/") + ".py"
-                        return self.constant_value(source, alias.name, depth + 1)
+            value = _assigned_value(node, name)
+            if value is not None:
+                return self._inline_names(rel, value, depth)
+            imported = _imported_from_engine(node, name)
+            if imported is not None:
+                return self.constant_value(imported[0], imported[1], depth + 1)
         return None
 
     def _inline_names(self, rel: str, expr: ast.expr, depth: int) -> ast.expr:
@@ -527,89 +621,51 @@ class EngineIndex:
         if module is None:
             return {}
         dispatch: dict[str, tuple[str, int]] = {}
-
-        def is_algorithm(expr: ast.expr) -> bool:
-            return (isinstance(expr, ast.Name) and expr.id in {"algo", "algorithm"}) or (
-                isinstance(expr, ast.Attribute) and expr.attr == "algorithm"
-            )
-
-        def record(expr: ast.expr | None, line: int | None = None, depth: int = 0) -> None:
-            at = line if line is not None else getattr(expr, "lineno", 0)
-            if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
-                dispatch.setdefault(normalize_name(expr.value), (expr.value, at))
-            elif isinstance(expr, (ast.Tuple, ast.List, ast.Set)):
-                for element in expr.elts:
-                    record(element, line, depth)
-            elif depth < 4 and isinstance(expr, ast.Name):
-                # ``algo in NAMED_SET``: resolve the module-level constant it names,
-                # here or in the module it is imported from, to its string members.
-                record(self.constant_value(GDS_SCHEDULER_FILE, expr.id), at, depth + 1)
-            elif depth < 4 and isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.BitOr):
-                record(expr.left, line, depth + 1)
-                record(expr.right, line, depth + 1)
-            elif (
-                depth < 4
-                and isinstance(expr, ast.Call)
-                and isinstance(expr.func, ast.Name)
-                and expr.func.id in {"frozenset", "set", "tuple"}
-                and len(expr.args) == 1
-            ):
-                record(expr.args[0], line, depth + 1)
-
         for node in ast.walk(module):
-            if isinstance(node, ast.Compare) and is_algorithm(node.left):
-                if all(isinstance(op, (ast.Eq, ast.In)) for op in node.ops):
-                    for comparator in node.comparators:
-                        record(comparator)
-            elif isinstance(node, ast.Match) and is_algorithm(node.subject):
-                for case in node.cases:
-                    for sub in ast.walk(case.pattern):
-                        if isinstance(sub, ast.MatchValue):
-                            record(sub.value)
-            elif isinstance(node, ast.Dict):
-                for key, value in zip(node.keys, node.values, strict=True):
-                    target = value.attr if isinstance(value, ast.Attribute) else getattr(value, "id", "")
-                    if isinstance(target, str) and target.startswith("_run_"):
-                        record(key)
+            for operand in _dispatch_operands(node):
+                self._record_dispatch(operand, dispatch)
         if not dispatch:
             msg = f"{GDS_SCHEDULER_FILE} has no algorithm dispatch; GDS features cannot be evaluated"
             raise EvidenceUnresolvedError(msg)
         return dispatch
+
+    def _record_dispatch(
+        self, expr: ast.expr | None, dispatch: dict[str, tuple[str, int]], line: int | None = None, depth: int = 0
+    ) -> None:
+        """Record every algorithm string ``expr`` denotes, at the dispatch line.
+
+        ``expr`` is a string literal, a collection of them, or a module-level
+        constant naming one (``algo in NAMED_SET``), resolved here or one import
+        hop away through set/tuple/list literals, ``frozenset()``/``set()``/
+        ``tuple()`` and ``|``.
+        """
+        at = line if line is not None else getattr(expr, "lineno", 0)
+        if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+            dispatch.setdefault(normalize_name(expr.value), (expr.value, at))
+            return
+        if depth >= 4:
+            return
+        if isinstance(expr, ast.Name):
+            self._record_dispatch(self.constant_value(GDS_SCHEDULER_FILE, expr.id), dispatch, at, depth + 1)
+            return
+        for member in _collection_members(expr):
+            self._record_dispatch(member, dispatch, at, depth + 1)
 
     def action_handlers(self) -> dict[str, tuple[str, int]]:
         """``{action: (handler function, line)}`` from the ``ACTION_HANDLERS`` dict literal."""
         module = self.tree(HANDLERS_FILE)
         if module is None:
             return {}
-        constants: dict[str, str] = {}
-        table: ast.Dict | None = None
-        for node in module.body:
-            targets: list[ast.expr] = []
-            value: ast.expr | None = None
-            if isinstance(node, ast.Assign):
-                targets, value = list(node.targets), node.value
-            elif isinstance(node, ast.AnnAssign):
-                targets, value = [node.target], node.value
-            for target in targets:
-                if not isinstance(target, ast.Name):
-                    continue
-                if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                    constants[target.id] = value.value
-                if target.id == "ACTION_HANDLERS" and isinstance(value, ast.Dict):
-                    table = value
+        constants, table = _string_constants_and_dict(module, "ACTION_HANDLERS")
         if table is None:
             msg = f"{HANDLERS_FILE} has no ACTION_HANDLERS dict; action features cannot be evaluated"
             raise EvidenceUnresolvedError(msg)
-        handlers: dict[str, tuple[str, int]] = {}
         self._handler_functions = {
             node.name: node for node in module.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         }
+        handlers: dict[str, tuple[str, int]] = {}
         for key, value in zip(table.keys, table.values, strict=True):
-            action = None
-            if isinstance(key, ast.Constant) and isinstance(key.value, str):
-                action = key.value
-            elif isinstance(key, ast.Name):
-                action = constants.get(key.id)
+            action = _dict_key_string(key, constants)
             if action is not None and isinstance(value, ast.Name) and key is not None:
                 handlers[action] = (value.id, key.lineno)
         return handlers
@@ -769,7 +825,7 @@ def _executable_source(source: str) -> str:
         for tok in tokenize.generate_tokens(io.StringIO(source).readline):
             if tok.type == tokenize.COMMENT:
                 blank(tok.start, tok.end)
-    except (tokenize.TokenError, IndentationError, SyntaxError):
+    except (tokenize.TokenError, SyntaxError):
         pass  # keep the comments found before the tokenizer gave up
     try:
         tree = ast.parse(source)

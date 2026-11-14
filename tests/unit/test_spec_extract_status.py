@@ -308,8 +308,9 @@ def test_present_owner_without_anchor_is_unresolved_not_missing(
 ) -> None:
     _write(engine_root, rel, text)
     name = {se.GATES_CATEGORY: "range", se.GDS_CATEGORY: "louvain", se.ACTION_CATEGORY: "match"}[category]
+    features = [_feature(category, name)]
     with pytest.raises(se.EvidenceUnresolvedError):
-        se.scan_codebase(engine_root, [_feature(category, name)])
+        se.scan_codebase(engine_root, features)
 
 
 def test_main_exits_2_on_unresolved_evidence(engine_root: Path) -> None:
