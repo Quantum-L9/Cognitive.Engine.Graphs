@@ -7,59 +7,35 @@
       "total": 10
     },
     "scoring": {
-      "IMPLEMENTED": 7,
+      "IMPLEMENTED": 9,
       "PARTIAL": 0,
-      "MISSING": 0,
-      "total": 7
-    },
-    "v1.1_node": {
-      "IMPLEMENTED": 2,
-      "PARTIAL": 0,
-      "MISSING": 0,
-      "total": 2
-    },
-    "v1.1_edge": {
-      "IMPLEMENTED": 2,
-      "PARTIAL": 0,
-      "MISSING": 0,
-      "total": 2
-    },
-    "v1.1_action": {
-      "IMPLEMENTED": 0,
-      "PARTIAL": 2,
-      "MISSING": 0,
-      "total": 2
-    },
-    "v1.1_scoring": {
-      "IMPLEMENTED": 1,
-      "PARTIAL": 1,
-      "MISSING": 0,
-      "total": 2
-    },
-    "action_handler": {
-      "IMPLEMENTED": 0,
-      "PARTIAL": 6,
-      "MISSING": 0,
-      "total": 6
+      "MISSING": 3,
+      "total": 12
     },
     "gds_algorithm": {
       "IMPLEMENTED": 5,
       "PARTIAL": 0,
-      "MISSING": 0,
-      "total": 5
+      "MISSING": 3,
+      "total": 8
     },
-    "research_pattern": {
-      "IMPLEMENTED": 10,
+    "action_handler": {
+      "IMPLEMENTED": 9,
       "PARTIAL": 0,
       "MISSING": 0,
-      "total": 10
+      "total": 9
+    },
+    "research_pattern": {
+      "IMPLEMENTED": 5,
+      "PARTIAL": 0,
+      "MISSING": 0,
+      "total": 5
     }
   },
   "totals": {
-    "IMPLEMENTED": 37,
-    "PARTIAL": 9,
-    "MISSING": 0,
-    "total": 46
+    "IMPLEMENTED": 38,
+    "PARTIAL": 0,
+    "MISSING": 6,
+    "total": 44
   },
-  "generated_at": "2026-08-02T10:08:52.645581+00:00"
+  "generated_at": "2026-11-14T17:45:40.781934+00:00"
 }

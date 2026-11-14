@@ -12,12 +12,68 @@ status: active
 tools/spec_extract.py
 L9_TEMPLATE: true
 
-Extracts required features from the graph-cognitive-engine spec YAML,
-then scans engine/ code to produce a coverage matrix.
+Extracts the features the graph-cognitive-engine spec YAML declares, then
+reports, per feature, whether the engine implements it and whether a test
+exercises it.
 
-Two input sources:
-    graph-cognitive-engine-spec-v1.1.0.yaml  — contracted spec features
-    tools/research/                          — researched leverage patterns
+Feature sources (every counted feature is traceable to exactly one):
+    graph-cognitive-engine-spec-v1.1.0.yaml  — the spec's structured sections:
+        gatetypes[].name                     → category ``gates``
+        scoringcomputationtypes[].name       → category ``scoring``
+        gdsjobs.algorithms[].name and every
+        distinct gdsjobs.*_jobs[].algorithm  → category ``gds_algorithm``
+        endpoints.universal[].path (/v1/<x>) → category ``action_handler``
+    ENGINE_CONTRACT_FEATURES (below)         — engine contracts the spec
+        predates, each with its declaring document and reason
+    tools/research/top5_leverage_patterns_detailed.json
+                                             — researched leverage patterns
+        (the spec's ``traceability`` section cites this file), category
+        ``research_pattern``
+
+A name the spec only mentions in prose is not a feature: there is no
+"detected in spec text" path. Spec sections that carry domain-pack
+vocabulary (``node_labels``, ``edge_registry``, ``query_templates``) are not
+engine features — the engine is domain-neutral
+(tests/architecture/test_core_vocabulary_guard.py) — and are not counted.
+
+Status rule (evidence, not file counts):
+    IMPLEMENTED  the feature's implementation is present in its owning code
+                 AND at least one test under tests/ references it
+    PARTIAL      the implementation is present but no test references it
+    MISSING      no implementation is present
+
+Implementation evidence, per category (read with ``ast``; nothing is imported):
+    gates            the spec name is a ``GateType`` member value
+                     (engine/config/schema.py) whose member is a key of the
+                     gate registry dict (engine/gates/registry.py)
+    scoring          the spec name is a ``ComputationType`` member value whose
+                     member the scoring assembler references
+                     (engine/scoring/assembler.py)
+    gds_algorithm    a string literal the GDS scheduler dispatches on
+                     (``algo``/``job_spec.algorithm`` compared to it, a ``case``
+                     pattern, or a dict key mapped to a ``_run_*`` method in
+                     engine/gds/scheduler.py) equals the spec algorithm
+    action_handler   the action is a key of ``ACTION_HANDLERS``
+                     (engine/handlers.py), or, for an endpoint declared in
+                     ENDPOINT_REALIZATIONS, its host handler dispatches the
+                     declared ``subaction`` literal
+    research_pattern a token the pattern's ``engine_mapping`` declares occurs in
+                     one of its declared ``search_files`` (the mapping is
+                     authored in tools/research; it is not checked semantically)
+Names are compared normalised: lower-case, letters and digits only, so the
+spec's ``temporal_recency`` is the engine's ``temporalrecency``.
+
+Test evidence: a ``tests/**/*.py`` file references the implementation —
+``GateType.<MEMBER>`` or the registered gate class, ``ComputationType.<MEMBER>``
+or the quoted computation value, the quoted GDS dispatch literal, the handler
+function name (the quoted subaction for a realized endpoint), or (research)
+a declared token. Tests of this audit tool (files
+that mention ``spec_extract``) are not evidence for any feature.
+
+An owning file that is absent means no implementation (MISSING). An owning file
+that is present but unparseable, or no longer has the anchor the probe reads
+(the enum, the registry dict, the dispatch, ``ACTION_HANDLERS``), is unresolved:
+the extractor exits 2 rather than report a status it cannot establish.
 
 Usage:
     python tools/spec_extract.py                          # default spec path
@@ -33,9 +89,11 @@ Outputs:
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -64,17 +122,67 @@ L9_TEMPLATE_TAG = "L9_TEMPLATE"
 RESEARCH_DIR = "tools/research"
 RESEARCH_PATTERNS_FILE = "top5_leverage_patterns_detailed.json"
 RESEARCH_CATEGORY = "research_pattern"
-GATES_GLOB = "engine/gates/**/*.py"
-SCORING_GLOB = "engine/scoring/**/*.py"
-ENGINE_GLOB = "engine/**/*.py"
-DOMAINS_GLOB = "tests/fixtures/design_packs/**/*.yaml"
 COVERAGE_MATRIX_JSON = "coverage_matrix.json"
+
+GATES_CATEGORY = "gates"
+SCORING_CATEGORY = "scoring"
+GDS_CATEGORY = "gds_algorithm"
+ACTION_CATEGORY = "action_handler"
+
+SCHEMA_FILE = "engine/config/schema.py"
+GATE_REGISTRY_FILE = "engine/gates/registry.py"
+ASSEMBLER_FILE = "engine/scoring/assembler.py"
+GDS_SCHEDULER_FILE = "engine/gds/scheduler.py"
+HANDLERS_FILE = "engine/handlers.py"
+TESTS_DIR = "tests"
+AUDIT_TOOL_MARKER = "spec_extract"
+
+STATUS_DEFINITIONS = (
+    "IMPLEMENTED = implementation present in its owning code AND referenced by a test under tests/; "
+    "PARTIAL = implementation present, no test references it; "
+    "MISSING = no implementation present. "
+    "Evidence rules per category: tools/spec_extract.py module docstring."
+)
+
+# Engine contracts the spec does not list. Each entry is
+# (category, name, declaring document, reason). Nothing else outside the spec
+# file and the research file is counted.
+ENGINE_CONTRACT_FEATURES: tuple[tuple[str, str, str, str], ...] = (
+    (
+        ACTION_CATEGORY,
+        "healthcheck",
+        "AGENTS.md Project Structure (engine/handlers.py action handlers)",
+        "chassis liveness action the engine declares; the spec's endpoints section predates it",
+    ),
+    (
+        ACTION_CATEGORY,
+        "enrich",
+        "AGENTS.md Project Structure (engine/handlers.py action handlers)",
+        "enrichment action the engine declares; the spec's endpoints section predates it",
+    ),
+)
+
+
+# Spec endpoints the engine serves as a subaction of another action rather than
+# as an action of their own: {endpoint action: (host action, subaction, reason)}.
+# A declared compatibility, verified against the host handler's dispatch.
+ENDPOINT_REALIZATIONS: dict[str, tuple[str, str, str]] = {
+    "domains": (
+        "admin",
+        "list_domains",
+        "the engine lists domain packs through admin subaction list_domains; the chassis owns the HTTP route",
+    ),
+}
 
 
 class Status(StrEnum):
     IMPLEMENTED = "IMPLEMENTED"
     PARTIAL = "PARTIAL"
     MISSING = "MISSING"
+
+
+class EvidenceUnresolvedError(RuntimeError):
+    """An owning file exists but the probe cannot read the anchor it relies on."""
 
 
 @dataclass
@@ -87,6 +195,7 @@ class SpecFeature:
     status: str = "MISSING"
     evidence_files: list[str] = field(default_factory=list)
     evidence_lines: list[str] = field(default_factory=list)
+    test_files: list[str] = field(default_factory=list)
 
 
 def load_yaml_file(path: Path) -> dict[str, Any]:
@@ -96,290 +205,91 @@ def load_yaml_file(path: Path) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
-def deep_get(d: dict, *keys: str, default: Any = None) -> Any:
-    for k in keys:
-        if isinstance(d, dict):
-            d = d.get(k, default)
-        else:
-            return default
-    return d
+def normalize_name(name: str) -> str:
+    """Lower-case, letters and digits only: ``temporal_recency`` == ``temporalrecency``."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def _named_entries(section: Any) -> list[dict[str, Any]]:
+    if not isinstance(section, list):
+        return []
+    return [item for item in section if isinstance(item, dict) and isinstance(item.get("name"), str)]
 
 
 def extract_gate_features(spec: dict) -> list[SpecFeature]:
-    features = []
-    gates_section = deep_get(spec, "gates", default={})
-
-    if isinstance(gates_section, dict):
-        gate_types = gates_section.get("types", gates_section.get("gate_types", {}))
-        if isinstance(gate_types, dict):
-            for gate_name, gate_def in gate_types.items():
-                features.append(
-                    SpecFeature(
-                        category="gates",
-                        name=gate_name,
-                        spec_reference=f"gates.types.{gate_name}",
-                        search_tokens=[
-                            gate_name,
-                            gate_name.replace("_", ""),
-                            f"class {gate_name.title().replace('_', '')}Gate",
-                            f'"{gate_name}"',
-                            f"'{gate_name}'",
-                            f"GateType.{gate_name.upper()}",
-                        ],
-                        search_files=[GATES_GLOB],
-                    )
-                )
-        elif isinstance(gate_types, list):
-            for item in gate_types:
-                name = item if isinstance(item, str) else item.get("type", item.get("name", str(item)))
-                features.append(
-                    SpecFeature(
-                        category="gates",
-                        name=str(name),
-                        spec_reference=f"gates.types.{name}",
-                        search_tokens=[
-                            str(name),
-                            str(name).replace("_", ""),
-                            f"class {str(name).title().replace('_', '')}Gate",
-                            f'"{name}"',
-                            f"GateType.{str(name).upper()}",
-                        ],
-                        search_files=[GATES_GLOB],
-                    )
-                )
-
-    if not features:
-        all_text = json.dumps(spec)
-        known_gates = [
-            "range",
-            "threshold",
-            "boolean",
-            "composite",
-            "enum_map",
-            "exclusion",
-            "self_range",
-            "freshness",
-            "temporal_range",
-            "traversal",
-            "multi_range",
-            "weighted_enum",
-            "geo_radius",
-            "set_intersection",
-        ]
-        for g in known_gates:
-            if g in all_text or g.replace("_", "") in all_text:
-                features.append(
-                    SpecFeature(
-                        category="gates",
-                        name=g,
-                        spec_reference="gates (detected in spec text)",
-                        search_tokens=[g, g.replace("_", ""), f'"{g}"', f"GateType.{g.upper()}"],
-                        search_files=[GATES_GLOB],
-                    )
-                )
-
-    return features
+    return [
+        SpecFeature(category=GATES_CATEGORY, name=item["name"], spec_reference=f"gatetypes[{item['name']}]")
+        for item in _named_entries(spec.get("gatetypes"))
+    ]
 
 
 def extract_scoring_features(spec: dict) -> list[SpecFeature]:
-    features = []
-    scoring = deep_get(spec, "scoring", default={})
-
-    if isinstance(scoring, dict):
-        dims = scoring.get("dimensions", scoring.get("computation_types", scoring.get("types", {})))
-        if isinstance(dims, (dict, list)):
-            items = dims.items() if isinstance(dims, dict) else enumerate(dims)
-            for key, val in items:
-                non_str_name = val.get("type", val.get("name", str(key))) if isinstance(val, dict) else str(val)
-                name = val if isinstance(val, str) else non_str_name
-                features.append(
-                    SpecFeature(
-                        category="scoring",
-                        name=str(name),
-                        spec_reference=f"scoring.{name}",
-                        search_tokens=[
-                            str(name),
-                            str(name).replace("_", ""),
-                            f'"{name}"',
-                            f"ScoringType.{str(name).upper()}",
-                        ],
-                        search_files=[SCORING_GLOB],
-                    )
-                )
-
-    if not features:
-        all_text = json.dumps(spec)
-        known_scoring = [
-            "geo_decay",
-            "log_normalized",
-            "community_match",
-            "inverse_linear",
-            "candidate_property",
-            "custom_cypher",
-            "temporal_decay",
-            "outcome_weighted",
-            "set_overlap",
-        ]
-        for s in known_scoring:
-            if s in all_text or s.replace("_", "") in all_text:
-                features.append(
-                    SpecFeature(
-                        category="scoring",
-                        name=s,
-                        spec_reference="scoring (detected in spec text)",
-                        search_tokens=[s, s.replace("_", ""), f'"{s}"'],
-                        search_files=[SCORING_GLOB],
-                    )
-                )
-
-    return features
-
-
-def extract_ontology_features(spec: dict) -> list[SpecFeature]:
-    features = []
-    ontology = deep_get(spec, "ontology", default={})
-
-    for section_key, category_label in [("nodes", "ontology_node"), ("edges", "ontology_edge")]:
-        items = ontology.get(section_key, [])
-        if isinstance(items, list):
-            for item in items:
-                name = (
-                    item if isinstance(item, str) else item.get("label", item.get("type", item.get("name", str(item))))
-                )
-                features.append(
-                    SpecFeature(
-                        category=category_label,
-                        name=str(name),
-                        spec_reference=f"ontology.{section_key}.{name}",
-                        search_tokens=[f'"{name}"', f"'{name}'", str(name)],
-                        search_files=[ENGINE_GLOB, DOMAINS_GLOB],
-                    )
-                )
-        elif isinstance(items, dict):
-            for name in items:
-                features.append(
-                    SpecFeature(
-                        category=category_label,
-                        name=str(name),
-                        spec_reference=f"ontology.{section_key}.{name}",
-                        search_tokens=[f'"{name}"', f"'{name}'", str(name)],
-                        search_files=[ENGINE_GLOB, DOMAINS_GLOB],
-                    )
-                )
-
-    return features
-
-
-def extract_v11_additions(spec: dict) -> list[SpecFeature]:
-    v11_nodes = ["TransactionOutcome", "SignalEvent"]
-    v11_edges = ["RESULTED_IN", "RESOLVED_FROM"]
-    v11_endpoints = ["outcomes", "resolve"]
-    v11_scoring = ["temporal_decay", "outcome_weighted"]
-
-    features = []
-    for node in v11_nodes:
-        features.append(
-            SpecFeature(
-                category="v1.1_node",
-                name=node,
-                spec_reference=f"v1.1 addition: {node} node",
-                search_tokens=[node, f'"{node}"', f"'{node}'"],
-                search_files=[ENGINE_GLOB, DOMAINS_GLOB],
-            )
+    return [
+        SpecFeature(
+            category=SCORING_CATEGORY,
+            name=item["name"],
+            spec_reference=f"scoringcomputationtypes[{item['name']}]",
         )
-    for edge in v11_edges:
-        features.append(
-            SpecFeature(
-                category="v1.1_edge",
-                name=edge,
-                spec_reference=f"v1.1 addition: {edge} edge",
-                search_tokens=[edge, f'"{edge}"', f"'{edge}'"],
-                search_files=[ENGINE_GLOB, DOMAINS_GLOB],
-            )
-        )
-    for ep in v11_endpoints:
-        features.append(
-            SpecFeature(
-                category="v1.1_action",
-                name=ep,
-                spec_reference=f"v1.1 addition: {ep} action/endpoint",
-                search_tokens=[f"handle_{ep}", f'"{ep}"', f"'{ep}'", ep],
-                search_files=["engine/handlers.py", ENGINE_GLOB],
-            )
-        )
-    for sc in v11_scoring:
-        features.append(
-            SpecFeature(
-                category="v1.1_scoring",
-                name=sc,
-                spec_reference=f"v1.1 addition: {sc} scoring type",
-                search_tokens=[sc, sc.replace("_", ""), f'"{sc}"'],
-                search_files=[SCORING_GLOB],
-            )
-        )
+        for item in _named_entries(spec.get("scoringcomputationtypes"))
+    ]
 
+
+def extract_gds_features(spec: dict) -> list[SpecFeature]:
+    """One feature per distinct algorithm: the registry list, then every job's ``algorithm``."""
+    gds = spec.get("gdsjobs")
+    if not isinstance(gds, dict):
+        return []
+    features: list[SpecFeature] = []
+    seen: dict[str, SpecFeature] = {}
+
+    def add(name: str, ref: str) -> None:
+        key = normalize_name(name)
+        if not key:
+            return
+        if key in seen:
+            if ref not in seen[key].spec_reference:
+                seen[key].spec_reference += f"; {ref}"
+            return
+        feature = SpecFeature(category=GDS_CATEGORY, name=name, spec_reference=ref)
+        seen[key] = feature
+        features.append(feature)
+
+    for item in _named_entries(gds.get("algorithms")):
+        add(item["name"], f"gdsjobs.algorithms[{item['name']}]")
+    for section, jobs in gds.items():
+        if section == "algorithms":
+            continue
+        for job in _named_entries(jobs):
+            algorithm = job.get("algorithm")
+            if isinstance(algorithm, str):
+                add(algorithm, f"gdsjobs.{section}[{job['name']}].algorithm")
     return features
 
 
 def extract_action_features(spec: dict) -> list[SpecFeature]:
-    actions = ["match", "sync", "admin", "query", "enrich", "healthcheck"]
-    features = []
-    for action in actions:
-        features.append(
-            SpecFeature(
-                category="action_handler",
-                name=action,
-                spec_reference=f"chassis action: {action}",
-                search_tokens=[f"handle_{action}", f'"{action}"', f'register_handler("{action}"'],
-                search_files=["engine/handlers.py"],
+    """Spec endpoints ``/v1/<action>[/...]``, then the declared engine-contract actions."""
+    features: list[SpecFeature] = []
+    seen: set[str] = set()
+    endpoints = spec.get("endpoints")
+    universal = endpoints.get("universal") if isinstance(endpoints, dict) else None
+    for item in universal if isinstance(universal, list) else []:
+        path = item.get("path") if isinstance(item, dict) else None
+        match = re.match(r"^/v\d+/([A-Za-z0-9_-]+)", path) if isinstance(path, str) else None
+        if match is None or match.group(1) in seen:
+            continue
+        action = match.group(1)
+        seen.add(action)
+        reference = f"endpoints.universal[{path}]"
+        if action in ENDPOINT_REALIZATIONS:
+            host, subaction, reason = ENDPOINT_REALIZATIONS[action]
+            reference += f" — realized as {host} subaction {subaction}: {reason}"
+        features.append(SpecFeature(category=ACTION_CATEGORY, name=action, spec_reference=reference))
+    for category, name, source, reason in ENGINE_CONTRACT_FEATURES:
+        if category == ACTION_CATEGORY and name not in seen:
+            seen.add(name)
+            features.append(
+                SpecFeature(category=category, name=name, spec_reference=f"engine contract: {source} — {reason}")
             )
-        )
-    return features
-
-
-def extract_gds_features(spec: dict) -> list[SpecFeature]:
-    gds = deep_get(spec, "gds_jobs", default=deep_get(spec, "gds", default={}))
-    features = []
-
-    known_algos = [
-        "louvain",
-        "cooccurrence",
-        "reinforcement",
-        "temporal_recency",
-        "similarity",
-        "pagerank",
-        "label_propagation",
-    ]
-
-    if isinstance(gds, dict):
-        jobs = gds.get("jobs", gds.get("algorithms", []))
-        if isinstance(jobs, list):
-            for job in jobs:
-                name = job if isinstance(job, str) else job.get("algorithm", job.get("name", str(job)))
-                features.append(
-                    SpecFeature(
-                        category="gds_algorithm",
-                        name=str(name),
-                        spec_reference=f"gds_jobs.{name}",
-                        search_tokens=[str(name), f"_run_{name}", f'"{name}"'],
-                        search_files=["engine/gds/**/*.py"],
-                    )
-                )
-
-    if not features:
-        all_text = json.dumps(spec)
-        for algo in known_algos:
-            if algo in all_text:
-                features.append(
-                    SpecFeature(
-                        category="gds_algorithm",
-                        name=algo,
-                        spec_reference="gds (detected in spec text)",
-                        search_tokens=[algo, f"_run_{algo}", f'"{algo}"'],
-                        search_files=["engine/gds/**/*.py"],
-                    )
-                )
-
     return features
 
 
@@ -434,14 +344,12 @@ def spec_candidates(root: Path) -> list[Path]:
 
 
 def collect_features(spec: dict, root: Path) -> list[SpecFeature]:
-    """Every feature the coverage report counts: the spec's, then the research patterns, each once."""
+    """Every feature the coverage report counts: the spec's, the engine contracts, the research patterns."""
     features: list[SpecFeature] = []
     features += extract_gate_features(spec)
     features += extract_scoring_features(spec)
-    features += extract_ontology_features(spec)
-    features += extract_v11_additions(spec)
-    features += extract_action_features(spec)
     features += extract_gds_features(spec)
+    features += extract_action_features(spec)
     features += extract_research_features(root)
     return features
 
@@ -483,66 +391,337 @@ def matches_search_file(path: str, pattern: str) -> bool:
     return path == prefix or path.startswith(prefix + "/")
 
 
+# ── Implementation probes ──────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Implementation:
+    """Where a feature is implemented and what a test must name to exercise it."""
+
+    lines: tuple[str, ...]
+    test_patterns: tuple[re.Pattern[str], ...]
+
+
+def _word(token: str) -> re.Pattern[str]:
+    return re.compile(rf"(?<![A-Za-z0-9_]){re.escape(token)}(?![A-Za-z0-9_])")
+
+
+def _quoted(literal: str) -> re.Pattern[str]:
+    return re.compile(rf"[\"']{re.escape(literal)}[\"']")
+
+
+class EngineIndex:
+    """Parsed anchors of the owning engine files, read once from the scanned sources."""
+
+    def __init__(self, sources: dict[str, str]) -> None:
+        self._sources = sources
+        self._trees: dict[str, ast.Module | None] = {}
+        self._handler_functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+
+    def tree(self, rel: str) -> ast.Module | None:
+        """The parsed module, or None when the owning file is absent (no implementation)."""
+        if rel not in self._trees:
+            source = self._sources.get(rel)
+            if source is None:
+                self._trees[rel] = None
+            else:
+                try:
+                    self._trees[rel] = ast.parse(source, filename=rel)
+                except SyntaxError as exc:
+                    msg = f"{rel} does not parse ({exc.msg}, line {exc.lineno}); its features cannot be evaluated"
+                    raise EvidenceUnresolvedError(msg) from exc
+        return self._trees[rel]
+
+    def enum_members(self, class_name: str) -> dict[str, tuple[str, str, int]]:
+        """``{normalised value: (MEMBER, value, line)}`` of a ``StrEnum`` in the schema module."""
+        module = self.tree(SCHEMA_FILE)
+        if module is None:
+            return {}
+        for node in module.body:
+            if isinstance(node, ast.ClassDef) and node.name == class_name:
+                members: dict[str, tuple[str, str, int]] = {}
+                for stmt in node.body:
+                    if (
+                        isinstance(stmt, ast.Assign)
+                        and len(stmt.targets) == 1
+                        and isinstance(stmt.targets[0], ast.Name)
+                        and isinstance(stmt.value, ast.Constant)
+                        and isinstance(stmt.value.value, str)
+                    ):
+                        value = stmt.value.value
+                        members[normalize_name(value)] = (stmt.targets[0].id, value, stmt.lineno)
+                return members
+        msg = f"{SCHEMA_FILE} has no class {class_name}; the probe that reads it cannot run"
+        raise EvidenceUnresolvedError(msg)
+
+    def attribute_refs(self, rel: str, owner: str) -> dict[str, int]:
+        """``{MEMBER: first line}`` for every ``owner.MEMBER`` attribute in *rel*."""
+        module = self.tree(rel)
+        if module is None:
+            return {}
+        refs: dict[str, int] = {}
+        for node in ast.walk(module):
+            if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == owner:
+                refs.setdefault(node.attr, node.lineno)
+        return refs
+
+    def gate_registry(self) -> dict[str, tuple[str, int]]:
+        """``{GateType member: (registered class, line)}`` from the registry dict literal."""
+        module = self.tree(GATE_REGISTRY_FILE)
+        if module is None:
+            return {}
+        registry: dict[str, tuple[str, int]] = {}
+        for node in ast.walk(module):
+            if not isinstance(node, ast.Dict):
+                continue
+            for key, value in zip(node.keys, node.values, strict=True):
+                if (
+                    isinstance(key, ast.Attribute)
+                    and isinstance(key.value, ast.Name)
+                    and key.value.id == "GateType"
+                    and isinstance(value, ast.Name)
+                ):
+                    registry[key.attr] = (value.id, key.lineno)
+        if not registry:
+            msg = f"{GATE_REGISTRY_FILE} has no GateType → gate class dict; gate features cannot be evaluated"
+            raise EvidenceUnresolvedError(msg)
+        return registry
+
+    def gds_dispatch(self) -> dict[str, tuple[str, int]]:
+        """``{normalised literal: (literal, line)}`` the scheduler dispatches an algorithm on."""
+        module = self.tree(GDS_SCHEDULER_FILE)
+        if module is None:
+            return {}
+        dispatch: dict[str, tuple[str, int]] = {}
+
+        def is_algorithm(expr: ast.expr) -> bool:
+            return (isinstance(expr, ast.Name) and expr.id in {"algo", "algorithm"}) or (
+                isinstance(expr, ast.Attribute) and expr.attr == "algorithm"
+            )
+
+        def record(expr: ast.expr | None) -> None:
+            if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+                dispatch.setdefault(normalize_name(expr.value), (expr.value, expr.lineno))
+            elif isinstance(expr, (ast.Tuple, ast.List, ast.Set)):
+                for element in expr.elts:
+                    record(element)
+
+        for node in ast.walk(module):
+            if isinstance(node, ast.Compare) and is_algorithm(node.left):
+                if all(isinstance(op, (ast.Eq, ast.In)) for op in node.ops):
+                    for comparator in node.comparators:
+                        record(comparator)
+            elif isinstance(node, ast.Match) and is_algorithm(node.subject):
+                for case in node.cases:
+                    for sub in ast.walk(case.pattern):
+                        if isinstance(sub, ast.MatchValue):
+                            record(sub.value)
+            elif isinstance(node, ast.Dict):
+                for key, value in zip(node.keys, node.values, strict=True):
+                    target = value.attr if isinstance(value, ast.Attribute) else getattr(value, "id", "")
+                    if isinstance(target, str) and target.startswith("_run_"):
+                        record(key)
+        if not dispatch:
+            msg = f"{GDS_SCHEDULER_FILE} has no algorithm dispatch; GDS features cannot be evaluated"
+            raise EvidenceUnresolvedError(msg)
+        return dispatch
+
+    def action_handlers(self) -> dict[str, tuple[str, int]]:
+        """``{action: (handler function, line)}`` from the ``ACTION_HANDLERS`` dict literal."""
+        module = self.tree(HANDLERS_FILE)
+        if module is None:
+            return {}
+        constants: dict[str, str] = {}
+        table: ast.Dict | None = None
+        for node in module.body:
+            targets: list[ast.expr] = []
+            value: ast.expr | None = None
+            if isinstance(node, ast.Assign):
+                targets, value = list(node.targets), node.value
+            elif isinstance(node, ast.AnnAssign):
+                targets, value = [node.target], node.value
+            for target in targets:
+                if not isinstance(target, ast.Name):
+                    continue
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    constants[target.id] = value.value
+                if target.id == "ACTION_HANDLERS" and isinstance(value, ast.Dict):
+                    table = value
+        if table is None:
+            msg = f"{HANDLERS_FILE} has no ACTION_HANDLERS dict; action features cannot be evaluated"
+            raise EvidenceUnresolvedError(msg)
+        handlers: dict[str, tuple[str, int]] = {}
+        self._handler_functions = {
+            node.name: node for node in module.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        for key, value in zip(table.keys, table.values, strict=True):
+            action = None
+            if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                action = key.value
+            elif isinstance(key, ast.Name):
+                action = constants.get(key.id)
+            if action is not None and isinstance(value, ast.Name) and key is not None:
+                handlers[action] = (value.id, key.lineno)
+        return handlers
+
+    def subactions(self, handler: str) -> dict[str, int]:
+        """``{subaction literal: line}`` the named handler dispatches on (``subaction == "<x>"``)."""
+        self.action_handlers()
+        function = self._handler_functions.get(handler)
+        if function is None:
+            return {}
+        found: dict[str, int] = {}
+        for node in ast.walk(function):
+            if (
+                isinstance(node, ast.Compare)
+                and isinstance(node.left, ast.Name)
+                and node.left.id == "subaction"
+                and all(isinstance(op, ast.Eq) for op in node.ops)
+            ):
+                for comparator in node.comparators:
+                    if isinstance(comparator, ast.Constant) and isinstance(comparator.value, str):
+                        found.setdefault(comparator.value, comparator.lineno)
+        return found
+
+
+def _probe_gate(index: EngineIndex, feature: SpecFeature) -> Implementation | None:
+    member = index.enum_members("GateType").get(normalize_name(feature.name))
+    if member is None:
+        return None
+    registered = index.gate_registry().get(member[0])
+    if registered is None:
+        return None
+    gate_class, line = registered
+    return Implementation(
+        lines=(f"{SCHEMA_FILE}:{member[2]}", f"{GATE_REGISTRY_FILE}:{line}"),
+        test_patterns=(_word(f"GateType.{member[0]}"), _word(gate_class)),
+    )
+
+
+def _probe_scoring(index: EngineIndex, feature: SpecFeature) -> Implementation | None:
+    member = index.enum_members("ComputationType").get(normalize_name(feature.name))
+    if member is None:
+        return None
+    name, value, enum_line = member
+    line = index.attribute_refs(ASSEMBLER_FILE, "ComputationType").get(name)
+    if line is None:
+        return None
+    return Implementation(
+        lines=(f"{SCHEMA_FILE}:{enum_line}", f"{ASSEMBLER_FILE}:{line}"),
+        test_patterns=(_word(f"ComputationType.{name}"), _quoted(value)),
+    )
+
+
+def _probe_gds(index: EngineIndex, feature: SpecFeature) -> Implementation | None:
+    found = index.gds_dispatch().get(normalize_name(feature.name))
+    if found is None:
+        return None
+    literal, line = found
+    return Implementation(lines=(f"{GDS_SCHEDULER_FILE}:{line}",), test_patterns=(_quoted(literal),))
+
+
+def _probe_action(index: EngineIndex, feature: SpecFeature) -> Implementation | None:
+    handlers = index.action_handlers()
+    found = handlers.get(feature.name)
+    if found is not None:
+        handler, line = found
+        return Implementation(lines=(f"{HANDLERS_FILE}:{line}",), test_patterns=(_word(handler),))
+    if feature.name not in ENDPOINT_REALIZATIONS:
+        return None
+    host, subaction, _reason = ENDPOINT_REALIZATIONS[feature.name]
+    host_entry = handlers.get(host)
+    if host_entry is None:
+        return None
+    line = index.subactions(host_entry[0]).get(subaction)
+    if line is None:
+        return None
+    return Implementation(
+        lines=(f"{HANDLERS_FILE}:{host_entry[1]}", f"{HANDLERS_FILE}:{line}"),
+        test_patterns=(_quoted(subaction),),
+    )
+
+
+PROBES: dict[str, Callable[[EngineIndex, SpecFeature], Implementation | None]] = {
+    GATES_CATEGORY: _probe_gate,
+    SCORING_CATEGORY: _probe_scoring,
+    GDS_CATEGORY: _probe_gds,
+    ACTION_CATEGORY: _probe_action,
+}
+
+
+def _read_tree(root: Path, suffix: str, skip: tuple[str, ...]) -> dict[str, str]:
+    files: dict[str, str] = {}
+    for path in root.rglob(f"*{suffix}"):
+        if any(part in path.parts for part in skip):
+            continue
+        try:
+            safe = resolve_under_root(path, root, option=f"discovered {suffix} file")
+            files[path.relative_to(root).as_posix()] = safe.read_text(encoding="utf-8", errors="replace")
+        except (OSError, PathPolicyError):
+            # Unreadable or escaping file (permissions, symlink out of root):
+            # it is not evidence; keep scanning the rest of the tree.
+            pass
+    return files
+
+
+def _token_implementation(feature: SpecFeature, all_files: dict[str, str]) -> Implementation | None:
+    """Declared-token evidence (research patterns, ad-hoc features): a token in a declared search file.
+
+    Scope = union of the files matched by the declared search_files. An empty
+    scoped set means no implementation; it never widens to the whole tree.
+    """
+    scope = all_files
+    if feature.search_files:
+        scope = {
+            fpath: content
+            for fpath, content in all_files.items()
+            if any(matches_search_file(fpath, glob_pat) for glob_pat in feature.search_files)
+        }
+    lines: list[str] = []
+    for fpath, content in sorted(scope.items()):
+        lowered = content.lower()
+        for token in feature.search_tokens:
+            needle = token.lower()
+            if needle in lowered:
+                lines.extend(f"{fpath}:{i}" for i, line in enumerate(content.splitlines(), 1) if needle in line.lower())
+                break
+    if not lines:
+        return None
+    patterns = tuple(re.compile(re.escape(t), re.IGNORECASE) for t in feature.search_tokens)
+    return Implementation(lines=tuple(lines), test_patterns=patterns)
+
+
 def scan_codebase(root: Path, features: list[SpecFeature]) -> None:
-    py_cache: dict[str, str] = {}
-    yaml_cache: dict[str, str] = {}
-
-    for py_file in root.rglob("*.py"):
-        if ".venv" in py_file.parts or "__pycache__" in py_file.parts:
-            continue
-        try:
-            safe_py_file = resolve_under_root(py_file, root, option="discovered Python file")
-            py_cache[str(py_file.relative_to(root))] = safe_py_file.read_text(encoding="utf-8", errors="replace")
-        except (OSError, PathPolicyError):
-            # Unreadable file (permissions, transient IO): skip it and keep
-            # scanning the rest of the tree.
-            pass
-
-    for yaml_file in root.rglob("*.yaml"):
-        if ".venv" in yaml_file.parts:
-            continue
-        try:
-            safe_yaml_file = resolve_under_root(yaml_file, root, option="discovered YAML file")
-            yaml_cache[str(yaml_file.relative_to(root))] = safe_yaml_file.read_text(encoding="utf-8", errors="replace")
-        except (OSError, PathPolicyError):
-            # Unreadable file (permissions, transient IO): skip it and keep
-            # scanning the rest of the tree.
-            pass
-
-    all_files = {**py_cache, **yaml_cache}
+    """Assign each feature its status from implementation evidence and test evidence."""
+    py_files = _read_tree(root, ".py", (".venv", "__pycache__"))
+    yaml_files = _read_tree(root, ".yaml", (".venv",))
+    all_files = {**py_files, **yaml_files}
+    index = EngineIndex(py_files)
+    test_sources = {
+        fpath: content
+        for fpath, content in py_files.items()
+        if fpath.startswith(f"{TESTS_DIR}/") and AUDIT_TOOL_MARKER not in content
+    }
 
     for feature in features:
-        matched_files = []
-        matched_lines = []
+        probe = PROBES.get(feature.category) if not feature.search_tokens else None
+        implementation = probe(index, feature) if probe else _token_implementation(feature, all_files)
 
-        # Scope = union of the files matched by the declared search_files. An empty
-        # scoped set means MISSING; it never widens to the whole tree.
-        search_scope = all_files
-        if feature.search_files:
-            search_scope = {
-                fpath: content
-                for fpath, content in all_files.items()
-                if any(matches_search_file(fpath, glob_pat) for glob_pat in feature.search_files)
-            }
-
-        for fpath, content in search_scope.items():
-            for token in feature.search_tokens:
-                if token.lower() in content.lower():
-                    matched_files.append(fpath)
-                    for i, line in enumerate(content.splitlines(), 1):
-                        if token.lower() in line.lower():
-                            matched_lines.append(f"{fpath}:{i}")
-                    break
-
-        feature.evidence_files = sorted(set(matched_files))
-        feature.evidence_lines = matched_lines[:10]
-
-        if len(feature.evidence_files) >= 2:
-            feature.status = Status.IMPLEMENTED.value
-        elif len(feature.evidence_files) == 1:
-            feature.status = Status.PARTIAL.value
-        else:
+        if implementation is None:
+            feature.evidence_files = []
+            feature.evidence_lines = []
+            feature.test_files = []
             feature.status = Status.MISSING.value
+            continue
+
+        feature.evidence_files = sorted({line.rsplit(":", 1)[0] for line in implementation.lines})
+        feature.evidence_lines = list(implementation.lines[:10])
+        feature.test_files = sorted(
+            fpath
+            for fpath, content in test_sources.items()
+            if any(pattern.search(content) for pattern in implementation.test_patterns)
+        )
+        feature.status = Status.IMPLEMENTED.value if feature.test_files else Status.PARTIAL.value
 
 
 def _artifact_file(out_dir: Path, name: str, root: Path) -> Path:
@@ -608,7 +787,7 @@ def write_coverage_matrix(out_dir: Path, features: list[SpecFeature], root: Path
 
     matrix = {"categories": by_category, "totals": totals, "generated_at": datetime.now(UTC).isoformat()}
     _artifact_file(out_dir, COVERAGE_MATRIX_JSON, root)
-    write_text_no_follow(out_dir, COVERAGE_MATRIX_JSON, json.dumps(matrix, indent=2))
+    write_text_no_follow(out_dir, COVERAGE_MATRIX_JSON, json.dumps(matrix, indent=2) + "\n")
 
 
 def write_coverage_report(out_dir: Path, features: list[SpecFeature], matrix: dict, root: Path) -> None:
@@ -617,6 +796,7 @@ def write_coverage_report(out_dir: Path, features: list[SpecFeature], matrix: di
     lines.append("# L9 Spec Coverage Report")
     lines.append(f"\n- Generated: {datetime.now(UTC).isoformat()}")
     lines.append(f"- Template tag: `{L9_TEMPLATE_TAG}`")
+    lines.append(f"- Status: {STATUS_DEFINITIONS}")
     lines.append("")
 
     lines.append("## Summary")
@@ -647,12 +827,14 @@ def write_coverage_report(out_dir: Path, features: list[SpecFeature], matrix: di
         for f in filtered:
             lines.append(f"### {f.category} → `{f.name}`")
             lines.append(f"- Spec ref: `{f.spec_reference}`")
-            if f.evidence_files:
-                lines.append(f"- Found in: {', '.join(f'`{e}`' for e in f.evidence_files)}")
             if f.evidence_lines:
-                lines.append(f"- Lines: {', '.join(f.evidence_lines[:5])}")
+                lines.append(f"- Implementation: {', '.join(f.evidence_lines[:5])}")
             else:
-                lines.append("- **No code references found**")
+                lines.append("- **No implementation found**")
+            if f.test_files:
+                lines.append(f"- Tests: {', '.join(f'`{t}`' for t in f.test_files[:5])}")
+            elif f.evidence_lines:
+                lines.append("- **No test references it**")
             lines.append("")
 
     _artifact_file(out_dir, "coverage_report.md", root)
@@ -713,7 +895,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Extracted {len(features)} features from spec ({research_count} from {RESEARCH_DIR})")
     print(f"Scanning codebase at {root} ...")
 
-    scan_codebase(root, features)
+    try:
+        scan_codebase(root, features)
+    except EvidenceUnresolvedError as exc:
+        print(f"ERROR: evidence unresolved: {exc}", file=sys.stderr)
+        return 2
 
     try:
         write_checklist(out_dir, features, root)

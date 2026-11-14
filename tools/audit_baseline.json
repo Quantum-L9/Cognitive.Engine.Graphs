@@ -11,5 +11,5 @@
   "schema": "l9.audit_baseline.v1",
   "description": "Audit-harness ratchet (tools/audit_harness.py). The harness fails when a finding count rises, spec IMPLEMENTED drops or spec MISSING rises against these numbers. Re-baseline deliberately with `make harness-baseline` and commit the result.",
   "findings": { "CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0 },
-  "spec_coverage": { "IMPLEMENTED": 21, "PARTIAL": 15, "MISSING": 5, "total": 41 }
+  "spec_coverage": { "IMPLEMENTED": 38, "PARTIAL": 0, "MISSING": 6, "total": 44 }
 }
