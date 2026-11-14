@@ -291,8 +291,13 @@ class AttributionCalculator:
             declared[label] = prop
         if not declared:
             return "null"
-        branches = " ".join(f"WHEN touchpoint:{label} THEN touchpoint.{prop}" for label, prop in declared.items())
-        return f"CASE {branches} ELSE null END"
+        branches: list[str] = []
+        for source_label, timestamp_prop in declared.items():
+            # Re-sanitized at the interpolation site (C-9; cypher-lint traces this form).
+            branches.append(
+                f"WHEN touchpoint:{sanitize_label(source_label)} THEN touchpoint.{sanitize_label(timestamp_prop)}"
+            )
+        return f"CASE {' '.join(branches)} ELSE null END"
 
     @staticmethod
     def _assign_weights(
