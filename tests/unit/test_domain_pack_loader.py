@@ -233,7 +233,7 @@ class TestLoadDomain:
         mock_spec = MagicMock()
         with (
             patch.object(loader, "_resolve_spec_path") as mock_resolve,
-            patch.object(loader, "_load_and_validate", return_value=mock_spec),
+            patch.object(loader, "_load_and_validate", return_value=(mock_spec, MagicMock())),
         ):
             mock_path = MagicMock()
             mock_path.stat.return_value.st_mtime = 1000.0
@@ -262,7 +262,7 @@ class TestLoadDomain:
         loader._cache["stale"] = (old_spec, 1000.0, 0.0)
         with (
             patch.object(loader, "_resolve_spec_path") as mock_resolve,
-            patch.object(loader, "_load_and_validate", return_value=new_spec),
+            patch.object(loader, "_load_and_validate", return_value=(new_spec, MagicMock())),
         ):
             mock_path = MagicMock()
             mock_path.stat.return_value.st_mtime = 2000.0

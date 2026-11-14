@@ -743,6 +743,16 @@ def _admin_wired(capabilities: list[CapabilitySpec]) -> MagicMock:
     loader = MagicMock()
     loader.load_domain.return_value = spec
     loader.list_domains.return_value = ["orbital-logistics"]
+    # Issue #400 F4: admin list_domains reads the served revisions.
+    loader.list_domain_revisions.return_value = [
+        {
+            "tenant_id": "orbital-logistics",
+            "sha256": "0" * 64,
+            "version": spec.domain.version,
+            "stage": None,
+            "source": "plain",
+        }
+    ]
     init_dependencies(driver, loader)
     get_state()._tenant_allowlist = {"orbital-logistics"}
     return driver

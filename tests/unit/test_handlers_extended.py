@@ -68,7 +68,14 @@ def _mock_deps():
     loader = MagicMock()
     loader.load_domain.return_value = _mock_domain_spec()
     loader.list_domains.return_value = ["plasticos", "mortgage"]
+    # Issue #400 F4: admin list_domains/get_domain read the served revision too.
+    loader.list_domain_revisions.return_value = [_revision("plasticos"), _revision("mortgage")]
+    loader.load_domain_revision.side_effect = lambda domain_id: (loader.load_domain(domain_id), _revision(domain_id))
     return driver, loader
+
+
+def _revision(tenant_id: str) -> dict[str, object]:
+    return {"tenant_id": tenant_id, "sha256": "0" * 64, "version": "1.0.0", "stage": None, "source": "plain"}
 
 
 # ============================================================================
