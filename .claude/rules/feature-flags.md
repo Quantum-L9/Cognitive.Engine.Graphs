@@ -48,11 +48,11 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | health_commercial_mode_enabled | False | Tier entitlements, upgrade prompts and conversion events on the health surface; off = full capabilities, no funnel. The request's `tier` never grants (HEALTH-02 / COMM-01 / COMM-02) |
 | health_entitled_tier | `seed` | Server-owned tier used only while commercial mode is on |
 | health_batch_max_entities / health_batch_cost_ceiling_usd | 100 / 10.0 | Server-owned ceilings for `health_batch_assess`; a request may lower, never raise (BATCH-01) |
+| health_batch_entity_cost_usd | 0.05 | Server-owned cost charged to the batch ceiling per entity with a gap (critical gap or enrichment target); no-gap entities cost 0 (replaced the retired ROI priority, 2026-11-15; FEATURE_GATES §22) |
 | packet_store_enabled / packet_store_dsn | False / unset | PacketStore persistence, read through Settings (PERSIST-01; env names unchanged) |
-| auto_enrich_via_gate | False | Dispatch `enrich` to EIE through Gate (spends EIE budget) |
 | graph_inference_feedback_enabled | False | Emit `graph-inference-result` to EIE through Gate (EIE-008 / CEG-006) |
 | auto_create_domain_database | False | Provision the tenant domain database on first use (CEG-008; Enterprise-only CREATE DATABASE) |
-| health_api_enabled | True | Expose engine/health/api.py via the `health-assess` action (CEG-006); on since 2026-11-15 for EIE's enrichment trigger |
+| health_api_enabled | True | Expose engine/health/api.py via the `health-assess` action (CEG-006); on since 2026-11-15 for EIE's enrichment trigger. CEG's own trigger and `auto_enrich_via_gate` were retired 2026-11-15: CEG sends no `enrich` |
 | packet_store_packet_identity_dedup_enabled | True | PacketStore `content_hash` = SDK `transport_hash`; a duplicate-skipped packet writes no child rows (RU-078) |
 | packet_store_rls_tenant_session_enabled | True | PacketStore sets transaction-local `app.current_tenant` before each write so the RLS policies admit an `l9_product` DSN (RU-079) |
 | inference_geo_usps_zones_enabled | True | Postal-code region follows USPS first-digit zones; declared non-US `country` yields no region (RU-084) |
@@ -64,7 +64,6 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | health_absent_confidence_counts_enabled | True | Readiness counts a populated field unless an explicit confidence < 0.70 discounts it; batch/report forward `field_confidences`; blocking_fields = uncounted gate fields (RU-108 / CEG-COR-044); off restores None→0 coercion |
 | health_range_gate_fields_enabled | True | Health marks every candidate property a gate reads (candidateprop, candidateprop_min/max/start/end) gate-critical (RU-109 / CEG-COR-045); off restores candidateprop only |
 | health_blocked_score_scale_enabled | True | A blocked readiness (gate completeness < 0.50) scores the 60% gate component `round(gc*60, 2)`, keeping readiness monotonic (RU-110 / CEG-COR-046); off restores `gc*100` |
-| health_priority_staleness_enabled | True | compute_enrichment_priority's 10% staleness term is computed from the entity's field health (RU-111 / CEG-COR-047); off restores the always-zero term |
 
 ## Domain Pack Admission (generic; the engine names no domain)
 | Flag | Default | Purpose |

@@ -17,7 +17,7 @@ All handlers: `async def handle_*(tenant: str, payload: dict) -> dict`
 | health | handle_health | Field-level health assessment + readiness |
 | healthcheck | handle_healthcheck | Alias for health |
 | health-assess | handle_health_assess | Canonical Gate health route (HEALTH-01): only `health_assess` / `health_batch_assess` / `health_report`, never the rest of admin |
-| enrich | handle_enrich | ROI-based re-enrichment triggering |
+| enrich | handle_enrich | Local enrich property writer (CEG-ENRICH-GATE; dormant). Not an enrichment trigger: that lives in EIE |
 | score | handle_score_remote | Gate-routed cohort score (SCORING-GATE-01): default off, explicit tenant `score:read`, builds the evidence binding from the admitted spec, then calls the local `handle_score` |
 
 ## Admin Subactions (payload["subaction"])
@@ -36,9 +36,8 @@ All handlers: `async def handle_*(tenant: str, payload: dict) -> dict`
 | emit_inference_feedback | Run inference rules and send `graph-inference-result` to EIE via Gate (flag: `graph_inference_feedback_enabled`) |
 
 CEG-006: the three `health_*` subactions are what makes `engine/health/api.py`
-reachable. It was imported by nothing, so `trigger_reenrichment_v2` — and with
-it the whole CEG → Gate → EIE enrichment request — had no trigger any inbound
-packet could reach. HEALTH-01: Gate reaches them through the advertised
+reachable. They assess and report only: the enrichment trigger lives in EIE
+(operator decision 2026-11-15), and CEG sends no `enrich` request. HEALTH-01: Gate reaches them through the advertised
 `health-assess` action (`handle_health_assess`), never through `admin`; the
 admin subactions remain a direct operator surface. Both share `_dispatch_health`.
 

@@ -259,7 +259,7 @@ class BatchHealthReport(BaseModel):
     ``dispatched`` counts enrichment requests actually sent through Gate. The
     batch scan sends none, so it reports ``0`` until a dispatch path exists
     and produces evidence. ``cost_usd`` is the *estimated* cost of the eligible
-    set, not spend: ``estimated_eligible`` × ``health_batch_entity_cost_usd``.
+    set, not spend: ``estimated_eligible`` * ``health_batch_entity_cost_usd``.
     """
 
     domain: str

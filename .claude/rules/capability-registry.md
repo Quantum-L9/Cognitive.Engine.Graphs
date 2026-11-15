@@ -28,7 +28,7 @@ Before building any of these, check if it already exists. Use the existing imple
 | Pareto scoring | engine/scoring/pareto.py | multi-objective optimization |
 | Convergence loop | engine/feedback/convergence.py | `ConvergenceLoop` |
 | Label sanitization | engine/utils/security.py | `sanitize_label()` |
-| CEG → Gate → EIE egress (the ONLY peer egress) | engine/gate_egress.py | `request_enrichment()`, `emit_graph_inference_result()` |
+| CEG → Gate → EIE egress (the ONLY peer egress) | engine/gate_egress.py | `emit_graph_inference_result()` (CEG sends no `enrich`: the trigger lives in EIE, 2026-11-15) |
 | Inference outputs → EIE wire shape | engine/gate_egress.py | `build_inference_outputs()` (0.55 floor, matches EIE) |
 | Domain database provisioning | engine/graph/driver.py | `GraphDriver.ensure_database()` (flag: `auto_create_domain_database`) |
 | Database-name validation for DDL | engine/utils/security.py | `sanitize_database_name()` — `sanitize_label()` forbids the dashes domain ids use |
