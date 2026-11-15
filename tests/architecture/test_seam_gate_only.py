@@ -5,7 +5,9 @@ Locks the CEG side of the bidirectional seam:
   * the SDK TransportPacket chassis is the default and legacy is dev/test only;
   * every outbound packet CEG authors is addressed to Gate;
   * no peer URL awareness and no raw HTTP transport to a peer outside the SDK;
-  * the reverse path (CEG -> Gate -> EIE `enrich`) is wired, not dormant.
+  * CEG sends no `enrich` request: the enrichment trigger lives in EIE
+    (operator decision 2026-11-15); CEG -> Gate -> EIE carries only
+    `graph-inference-result`.
 """
 
 from __future__ import annotations
@@ -186,14 +188,69 @@ def test_no_raw_http_transport_to_execute_outside_sdk():
     assert offenders == [], f"raw HTTP transport to a Gate/peer endpoint outside the SDK: {offenders}"
 
 
-def test_reverse_path_is_wired_through_gate_egress():
-    """CEG -> Gate -> EIE: the health trigger must actually send via engine.gate_egress."""
-    src = (ENGINE / "health" / "enrichment_trigger.py").read_text(encoding="utf-8")
-    assert "from engine.gate_egress import request_enrichment" in src
-    assert re.search(r"await request_enrichment\(", src)
+_RETIRED_TRIGGER_SYMBOLS = (
+    "request_enrichment",
+    "trigger_reenrichment_v2",
+    "compute_enrichment_priority",
+    "auto_enrich_via_gate",
+)
+
+
+def _code_identifiers(src: str) -> set[str]:
+    """Identifiers the code defines, imports, reads or calls (docstrings and comments excluded)."""
+    names: set[str] = set()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Name):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.add(node.attr)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            names.update(alias.asname or alias.name for alias in node.names)
+        elif isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.isidentifier():
+            names.add(node.value)  # getattr(settings, "...") and __all__ entries
+    return names
+
+
+def _outbound_actions(src: str) -> list[str]:
+    """Every literal ``action=`` passed to an ``.execute(...)`` call in ``src``."""
+    actions: list[str] = []
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "execute"):
+            continue
+        for kw in node.keywords:
+            if kw.arg == "action" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                actions.append(kw.value.value)
+            elif kw.arg == "action" and isinstance(kw.value, ast.Name):
+                actions.append(kw.value.id)
+    return actions
+
+
+def test_ceg_sends_no_enrichment_request():
+    """The enrichment trigger lives in EIE (operator decision 2026-11-15).
+
+    No production code defines, imports, reads or calls the retired trigger,
+    priority, dispatch or its flag (docstrings may record the history), and no Gate ``execute`` call carries the ``enrich`` action, whether
+    spelled as a literal or through a constant. The only Gate egress action
+    left is ``graph-inference-result``.
+    """
+    named = [
+        f"{rel}: {sym}"
+        for rel, src in _production_sources()
+        for sym in _RETIRED_TRIGGER_SYMBOLS
+        if sym in _code_identifiers(src)
+    ]
+    assert named == [], f"retired CEG enrichment trigger still referenced: {named}"
+
     egress = (ENGINE / "gate_egress.py").read_text(encoding="utf-8")
+    assert 'GRAPH_INFERENCE_ACTION = "graph-inference-result"' in egress
+    assert "ENRICH_ACTION" not in egress
+    sent = sorted({a for _rel, src in _production_sources() for a in _outbound_actions(src)})
+    assert "enrich" not in sent, f"CEG sends `enrich`: {sent}"
+    assert "ENRICH_ACTION" not in sent, f"CEG sends `enrich`: {sent}"
+    assert "GRAPH_INFERENCE_ACTION" in sent, f"graph-inference-result egress missing: {sent}"
     assert "get_gate_client()" in egress
-    assert 'ENRICH_ACTION = "enrich"' in egress
     assert "GateClientError" in egress, "SDK errors must be reported, not swallowed"
 
 

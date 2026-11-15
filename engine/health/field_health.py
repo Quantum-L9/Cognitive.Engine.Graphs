@@ -10,7 +10,7 @@ status: active
 --- /L9_META ---
 
 Core health models: FieldHealth, ReadinessScore, EnrichmentTarget, EntityHealth,
-EnrichmentPriority, MatchQualityDelta.
+MatchQualityDelta.
 """
 
 from __future__ import annotations
@@ -71,18 +71,6 @@ class EntityHealth(BaseModel):
     inference_unlock_potential: float = 0.0
     recommended_actions: list[str] = []
     next_enrichment_priority: Literal["urgent", "high", "normal", "low"] = "normal"
-
-
-class EnrichmentPriority(BaseModel):
-    """ROI-based enrichment recommendation."""
-
-    priority_score: float  # 0-100
-    estimated_cost_tokens: int
-    estimated_cost_usd: float
-    expected_value_usd: float
-    roi: float
-    recommendation: Literal["enrich_now", "enrich_low_priority", "skip"]
-    reasoning: str = ""
 
 
 class MatchQualityDelta(BaseModel):

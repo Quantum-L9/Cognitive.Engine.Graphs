@@ -13,7 +13,8 @@ The health API is on (operator decision 2026-11-15) and CEG still dispatches no 
 
 EIE's enrichment trigger reads readiness through Gate `health-assess`. The
 contract agreed with EIE: the surface answers, and CEG never triggers
-enrichment itself, so `auto_enrich_via_gate` stays off.
+enrichment itself. The CEG trigger and its `auto_enrich_via_gate` flag were
+retired once EIE's trigger shipped (operator decision 2026-11-15).
 """
 
 from __future__ import annotations
@@ -38,8 +39,9 @@ def test_health_api_is_on_by_default() -> None:
     assert _default("health_api_enabled") is True
 
 
-def test_ceg_dispatches_no_enrichment_by_default() -> None:
-    assert _default("auto_enrich_via_gate") is False
+def test_ceg_has_no_enrichment_dispatch_flag() -> None:
+    """Retired, not defaulted off: nothing in CEG can dispatch enrichment."""
+    assert "auto_enrich_via_gate" not in Settings.model_fields
 
 
 def test_production_compose_states_the_health_api_explicitly() -> None:

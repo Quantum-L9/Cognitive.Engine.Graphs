@@ -232,6 +232,15 @@ class Settings(BaseSettings):
     # request may lower either value; it can never raise it above these.
     health_batch_max_entities: int = 100
     health_batch_cost_ceiling_usd: float = 10.0
+    # Server-owned cost model for health_batch_assess (operator decision
+    # 2026-11-15: the enrichment trigger and its ROI priority moved to EIE).
+    # Estimated cost of one entity that has a gap (a critical gap or an
+    # enrichment target); an entity with no gap costs 0 and is not eligible.
+    # 0.05 is below the retired priority's estimate for a typical entity (2
+    # critical + 3 scoring gaps: 11,200 tokens at $5/M = $0.056), so the
+    # default $10 ceiling admits at least as many such entities (200) as before
+    # (178) — more than the default 100-entity window. See FEATURE_GATES §22.
+    health_batch_entity_cost_usd: float = Field(default=0.05, ge=0.0)
 
     # CEG-008: `match` and `sync` route queries to a Neo4j database named after
     # the domain id, and nothing ever created it — Neo4j does not create
@@ -244,11 +253,9 @@ class Settings(BaseSettings):
     # missing database and the command that provides it.
     auto_create_domain_database: bool = False
     # CEG-006: the `health_*` admin subactions make engine/health/api.py
-    # reachable. auto_enrich_via_gate gates only the eventual outbound Gate
-    # request, not assessment, reporting or conversion tracking, so the surface
-    # itself needs its own gate. Active (operator decision 2026-11-15): EIE's
-    # enrichment trigger reads readiness through Gate `health-assess`. Nothing
-    # is dispatched from here while auto_enrich_via_gate stays off.
+    # reachable; the surface needs its own gate. Active (operator decision
+    # 2026-11-15): EIE's enrichment trigger reads readiness through Gate
+    # `health-assess`. CEG dispatches no enrichment: the trigger lives in EIE.
     health_api_enabled: bool = True
     # CEG-009: some domain packs compile to Cypher that cannot execute (a
     # `RELATES_TO` fallback for gates written with `pattern`/`condition`, scalar
@@ -337,14 +344,10 @@ class Settings(BaseSettings):
     # faithfully. See docs/FEATURE_GATES.md §21.
     gate_declared_bounds_enabled: bool = True
 
-    # Seam audit / PR remediation: paid-tier enrich_now Gate dispatch is opt-in.
-    # Default off so deploy does not immediately spend EIE budget until enabled.
-    auto_enrich_via_gate: bool = False
     # EIE-008 / CEG-006: emit `graph-inference-result` to EIE through Gate. EIE
     # advertises and implements the consumer side end to end; nothing here ever
-    # produced the packet, so the feedback loop had no producer. Off by default
-    # for the same reason as auto_enrich_via_gate — each emission queues
-    # re-enrichment targets and so spends EIE budget.
+    # produced the packet, so the feedback loop had no producer. Off by default:
+    # each emission queues re-enrichment targets and so spends EIE budget.
     graph_inference_feedback_enabled: bool = False
     # QM.POC0.CEG.GRAPH_EVIDENCE.002A: relationship evidence sync for `targetedge`
     # endpoints. On (default, operator decision 2026-10-30): every declaration,
@@ -769,11 +772,6 @@ class Settings(BaseSettings):
     # score 40.0. On: the blocked score is the 60% gate component
     # round(gate_score * 60, 2), always < 30. Off: gate_score * 100.
     health_blocked_score_scale_enabled: bool = True
-    # RU-111 / CEG-COR-047: compute_enrichment_priority's documented 10%
-    # staleness term read a staleness_penalty attribute EntityHealth does not
-    # have, so it was always 0. On: the term is
-    # compute_staleness_penalty(entity_health.field_health). Off: the zero term.
-    health_priority_staleness_enabled: bool = True
     # Correctness remediation lane I (plan 0d84ec8, RU-044..RU-057)
     # RU-044 / CEG-COR-024: the default-weight ceiling summed each scope bucket
     # alone, so {'*': 0.6, 'd1': 0.6} loaded with an effective d1 sum of 1.2.

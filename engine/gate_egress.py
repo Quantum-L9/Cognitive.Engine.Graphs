@@ -12,18 +12,19 @@ status: active
 engine/gate_egress.py — the only CEG -> peer egress: CEG -> Gate -> EIE.
 
 CEG never addresses the enrichment node. It asks Gate to run an EIE-owned
-action (``enrich``, ``graph-inference-result``; see Gate's
-CANONICAL_ACTION_OWNERS) and receives Gate's response packet. The SDK owns
-packet construction, signing, the single HTTP attempt, and the deadline derived
-from ``timeout_ms``.
+action (``graph-inference-result``; see Gate's CANONICAL_ACTION_OWNERS) and
+receives Gate's response packet. The SDK owns packet construction, signing, the
+single HTTP attempt, and the deadline derived from ``timeout_ms``.
 
-Two directions live here:
+One direction lives here: ``emit_graph_inference_result`` — CEG hands EIE
+values it derived from the graph, which EIE's ``GraphReturnChannel`` feeds into
+the convergence loop.
 
-* ``request_enrichment`` — CEG asks EIE to research fields it is missing.
-* ``emit_graph_inference_result`` — CEG hands EIE values it derived from the
-  graph, which EIE's ``GraphReturnChannel`` feeds into the convergence loop.
+CEG sends no enrichment request. ``request_enrichment`` (the ``enrich`` action)
+was retired with CEG's enrichment trigger: the trigger lives in EIE, which
+reads readiness from CEG ``health-assess`` (operator decision 2026-11-15).
 
-The second closes a loop that was open in one direction only (EIE-008 /
+``emit_graph_inference_result`` closes a loop that was open in one direction only (EIE-008 /
 CEG-006): EIE advertised ``graph-inference-result`` to Gate and implemented the
 whole consumer side — validation, per-tenant queues, target extraction — while
 no code in CEG ever constructed such a packet. The two halves were even built
@@ -50,9 +51,7 @@ from engine.gate_client import get_gate_client
 
 logger = logging.getLogger(__name__)
 
-ENRICH_ACTION = "enrich"
 GRAPH_INFERENCE_ACTION = "graph-inference-result"
-DEFAULT_ENRICH_TIMEOUT_MS = 25_000
 DEFAULT_INFERENCE_TIMEOUT_MS = 10_000
 _SEAM_TAGS: tuple[str, ...] = ("INTER_NODE",)
 
@@ -62,123 +61,6 @@ _SEAM_TAGS: tuple[str, ...] = ("INTER_NODE",)
 # Filtering here too means a packet never carries outputs the receiver will
 # silently discard, so "sent 6, queued 2" is visible at the sender.
 INFERENCE_CONFIDENCE_FLOOR = 0.55
-
-
-def build_enrichment_request(
-    *,
-    entity_id: str,
-    domain: str,
-    target_fields: Sequence[str],
-    entity: dict[str, Any] | None = None,
-    objective: str | None = None,
-    idempotency_key: str | None = None,
-) -> dict[str, Any]:
-    """Shape the payload EIE's `enrich` handler validates (EIE ``EnrichRequest``).
-
-    Keys: ``entity`` (record fields), ``object_type`` (source object name),
-    ``schema`` ({field: type}), ``objective`` (natural-language instruction),
-    ``kb_context`` (KB profile selector). EIE owns that model; CEG adapts to it.
-
-    SEAM-02 (producer side): the body also carries the identity EIE's consumer
-    reads at the top level — ``entity_id`` and ``domain`` — and ``entity.id``
-    beside ``entity.entity_id``, plus ``idempotency_key`` so the key the SDK
-    puts on the packet is visible in the body EIE persists. Before this the
-    identity lived only inside ``entity`` and the key only on the envelope, and
-    the consumer had to reconstruct both.
-    """
-    fields = [f for f in dict.fromkeys(target_fields) if f]
-    if not entity_id or not domain:
-        msg = "entity_id and domain are required for an enrichment request"
-        raise ValueError(msg)
-    if not fields:
-        msg = "at least one target field is required for an enrichment request"
-        raise ValueError(msg)
-    record = {**(entity or {}), "id": entity_id, "entity_id": entity_id, "domain": domain}
-    return {
-        "entity_id": entity_id,
-        "domain": domain,
-        "idempotency_key": idempotency_key,
-        "entity": record,
-        "object_type": domain,
-        "schema": dict.fromkeys(fields, "string"),
-        "objective": objective
-        or (
-            f"Fill {len(fields)} gate-critical field(s) for entity {entity_id} in domain {domain}: {', '.join(fields)}"
-        ),
-        "kb_context": domain,
-    }
-
-
-def enrichment_idempotency_key(tenant: str, entity_id: str, target_fields: Sequence[str]) -> str:
-    digest = hashlib.sha256("|".join([tenant, entity_id, *sorted(set(target_fields))]).encode("utf-8")).hexdigest()
-    return f"ceg:enrich:{tenant}:{entity_id}:{digest[:16]}"
-
-
-async def request_enrichment(
-    *,
-    tenant: str,
-    entity_id: str,
-    domain: str,
-    target_fields: Sequence[str],
-    entity: dict[str, Any] | None = None,
-    objective: str | None = None,
-    timeout_ms: int = DEFAULT_ENRICH_TIMEOUT_MS,
-    correlation_id: str | None = None,
-) -> dict[str, Any]:
-    """Ask Gate to run EIE's `enrich` for one entity. One attempt, fail closed."""
-    key = enrichment_idempotency_key(tenant, entity_id, target_fields)
-    if not os.environ.get("GATE_URL", "").strip():
-        logger.warning("gate_egress: GATE_URL unset — enrichment request for %s not sent", entity_id)
-        return {
-            "status": "failed",
-            "error": "gate_not_configured",
-            "action": ENRICH_ACTION,
-            "idempotency_key": key,
-        }
-
-    payload = build_enrichment_request(
-        entity_id=entity_id,
-        domain=domain,
-        target_fields=target_fields,
-        entity=entity,
-        objective=objective,
-        idempotency_key=key,
-    )
-
-    try:
-        # See emit_graph_inference_result: get_gate_client() raises ValueError on
-        # missing or invalid SDK environment material, which is a configuration
-        # failure this module reports as a typed result, never one it propagates.
-        client = get_gate_client()
-        response = await client.execute(
-            action=ENRICH_ACTION,
-            payload=payload,
-            tenant=tenant,
-            idempotency_key=key,
-            timeout_ms=timeout_ms,
-            correlation_id=correlation_id,
-            compliance_tags=_SEAM_TAGS,
-        )
-    except (GateClientError, ValueError) as exc:
-        logger.warning("gate_egress: %s for entity=%s tenant=%s: %s", type(exc).__name__, entity_id, tenant, exc)
-        return {
-            "status": "failed",
-            "error": type(exc).__name__,
-            "detail": str(exc),
-            "action": ENRICH_ACTION,
-            "idempotency_key": key,
-        }
-
-    failed = response.header.packet_type == "failure"
-    return {
-        "status": "failed" if failed else "ok",
-        "action": ENRICH_ACTION,
-        "idempotency_key": key,
-        "packet_id": str(response.header.packet_id),
-        "packet_type": response.header.packet_type,
-        "correlation_id": str(response.header.correlation_id) if response.header.correlation_id else None,
-        "payload": dict(response.payload),
-    }
 
 
 def inference_idempotency_key(tenant: str, entity_id: str, outputs: Sequence[dict[str, Any]]) -> str:
@@ -250,8 +132,8 @@ async def emit_graph_inference_result(
     and feeds the convergence loop, so this is the producer for the action EIE
     has advertised and implemented all along (EIE-008).
 
-    Returns a result dict shaped like ``request_enrichment``'s, with
-    ``sent_outputs`` so a caller can see how many findings survived the floor.
+    Returns ``status`` / ``action`` / ``idempotency_key`` and, when sent, the
+    response packet identity and payload, with ``sent_outputs`` so a caller can see how many findings survived the floor.
     A call with nothing above the floor is reported as ``skipped`` and sends no
     packet — an empty ``inference_outputs`` list is valid to EIE and would cost
     a Gate round trip to queue nothing.
@@ -324,15 +206,10 @@ async def emit_graph_inference_result(
 
 
 __all__ = [
-    "DEFAULT_ENRICH_TIMEOUT_MS",
     "DEFAULT_INFERENCE_TIMEOUT_MS",
-    "ENRICH_ACTION",
     "GRAPH_INFERENCE_ACTION",
     "INFERENCE_CONFIDENCE_FLOOR",
-    "build_enrichment_request",
     "build_inference_outputs",
     "emit_graph_inference_result",
-    "enrichment_idempotency_key",
     "inference_idempotency_key",
-    "request_enrichment",
 ]
