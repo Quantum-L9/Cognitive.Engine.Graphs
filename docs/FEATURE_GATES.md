@@ -79,7 +79,7 @@ independently of the code default.
 | Observed Association Required | `OBSERVED_ASSOCIATION_REQUIRED` (`observed_association_required`) | `False` | unset | staged (D-9, #386); a present `observed_association` is always checked; on, an observed row on an `observedfrom` endpoint must carry one — see §28 |
 | Evidence Identity Per Type | `EVIDENCE_IDENTITY_PER_TYPE_ENABLED` (`evidence_identity_per_type_enabled`) | `False` | unset | dormant; score dedupes on `(relationship_type, evidence_ref)` — see §28 |
 | Domain Database Provisioning | `AUTO_CREATE_DOMAIN_DATABASE` (`auto_create_domain_database`) | `False` | unset | dormant; create the tenant domain database on first use — see §14 |
-| Health API (admin health_* subactions) | `HEALTH_API_ENABLED` (`health_api_enabled`) | `False` | unset | dormant; AI-readiness assess/report surface — see §15 |
+| Health API (admin health_* subactions) | `HEALTH_API_ENABLED` (`health_api_enabled`) | `True` | unset | active (operator decision 2026-11-15); AI-readiness assess/report surface for EIE's enrichment trigger — see §15 |
 | Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; seven packs whose gates do not compile to executable, faithful Cypher — see §16 |
 | SDK Participation | `SDK_PARTICIPATION_ENABLED` (`sdk_participation_enabled`) | `True` | unset | active; Gate_SDK owns registration and readiness; off restores CEG's loop — see §17 |
 | Gate Re-registration | `GATE_REREGISTRATION_ENABLED` (`gate_reregistration_enabled`), `GATE_REREGISTRATION_INTERVAL_SECONDS` | `True`, `300` | unset | active only while SDK participation is off — see §17 |
@@ -839,8 +839,15 @@ strict default without an opt-out.
 
 ## 15. Health API (CEG-006)
 
-**State**: Dormant
-**Flag**: `HEALTH_API_ENABLED=False` (default off)
+**State**: Active (operator decision 2026-11-15)
+**Flag**: `HEALTH_API_ENABLED=True` (default on; `docker-compose.prod.yml` also sets it explicitly)
+
+EIE's enrichment trigger is the intended caller: it sends `health-assess`
+through Gate and reads `critical_gaps`, `enrichment_targets`, `readiness_score`,
+`grade` and `gate_completeness`. CEG dispatches no enrichment for those calls:
+`auto_enrich_via_gate` stays off, and `health_batch_assess` never dispatches.
+Set `HEALTH_API_ENABLED=false` to restore the dormant surface (every health
+subaction answers `{"status": "disabled"}`).
 
 Exposes `engine/health/api.py` through the subactions `health_assess`,
 `health_batch_assess` and `health_report`. That module implemented three
