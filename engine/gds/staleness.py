@@ -22,10 +22,10 @@ stale, as before. A history entry naming a job the spec no longer declares,
 and a schedule type other than ``cron`` or ``manual``, keep the global
 ``gds_max_staleness_hours`` age.
 
-The next fire time is computed with ``CronTrigger.from_crontab``, the same
-constructor ``GDSScheduler._register_cron_job`` uses, so the deadline matches
-what the scheduler will actually run (including APScheduler 3's numbering of
-``day_of_week``). An unparsable cron expression or timestamp is stale: health
+The next fire time is computed with ``engine.gds.cron.crontab_trigger``, the
+same constructor ``GDSScheduler._register_cron_job`` uses, so the deadline
+matches what the scheduler will actually run (including the weekday numbering
+``gds_cron_posix_weekday_enabled`` selects, GDS-CRON-01). An unparsable cron expression or timestamp is stale: health
 never reports a job fresh on evidence it could not read.
 
 Off: every job uses the global ``gds_max_staleness_hours`` age.
@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from apscheduler.triggers.cron import CronTrigger
+from engine.gds.cron import crontab_trigger
 
 if TYPE_CHECKING:
     from engine.config.schema import GDSJobSpec
@@ -121,7 +121,7 @@ def _next_fire_after(cron: str | None, last_run: datetime) -> datetime | None:
     if not cron:
         return None
     try:
-        trigger = CronTrigger.from_crontab(cron)
+        trigger = crontab_trigger(cron)
     except ValueError:
         return None
     fire = trigger.get_next_fire_time(None, last_run + _PAST_LAST_RUN)
