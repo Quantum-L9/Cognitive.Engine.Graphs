@@ -1618,7 +1618,7 @@ def read_header(content: str, path: str, engine: str) -> FileMeta | str | None:
 
 
 # =============================================================================
-# DISCOVERY — the eligible file set is the git index, not a hand list
+# DISCOVERY — the eligible file set is git (index + untracked, not ignored), not a hand list
 # =============================================================================
 
 # contracts/contract_18.yaml `scope.paths`, verbatim (a unit test keeps the two
@@ -2054,6 +2054,22 @@ def tracked_files(root: Path) -> list[str]:
     Raises RuntimeError when *root* is not a repository top level or git fails:
     an undeterminable eligible set must fail the check, never shrink it.
     """
+    return _git_ls_files(root, [])
+
+
+def untracked_files(root: Path) -> list[str]:
+    """Untracked, not-ignored paths of the repository whose top level is *root*.
+
+    These are the files about to be committed that are not yet in the index
+    (Cursor-Governance#922): CI checks the committed tree, so leaving them out
+    let a new headerless file pass locally and fail CI with NOHEADER. Files
+    ignored by .gitignore, .git/info/exclude or core.excludesFile stay out.
+    Same failure contract as tracked_files().
+    """
+    return _git_ls_files(root, ["--others", "--exclude-standard"])
+
+
+def _git_ls_files(root: Path, extra: list[str]) -> list[str]:
     try:
         top = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"], cwd=root, capture_output=True, text=True, check=False
@@ -2061,7 +2077,7 @@ def tracked_files(root: Path) -> list[str]:
         if top.returncode != 0 or Path(top.stdout.strip()).resolve() != root:
             msg = f"{root} is not the top level of a git repository"
             raise RuntimeError(msg)
-        listed = subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True, check=False)
+        listed = subprocess.run(["git", "ls-files", "-z", *extra], cwd=root, capture_output=True, check=False)
     except OSError as exc:
         msg = f"git is not available ({exc})"
         raise RuntimeError(msg) from exc
@@ -2082,8 +2098,10 @@ FAILING_STATUSES = ("PENDING", "MISSING", "NOHEADER", "INVALID", "ERROR")
 def main(argv: list[str] | None = None) -> int:
     """Verify (default, or ``check``) or ``--apply`` L9_META headers; return the exit status.
 
-    Eligible files are every FILE_REGISTRY entry plus every git-tracked file
-    matching SCOPE_PATTERNS, minus EXCLUDED_PATTERNS. Registered files must
+    Eligible files are every FILE_REGISTRY entry plus every git-tracked or
+    untracked-but-not-ignored file matching SCOPE_PATTERNS, minus
+    EXCLUDED_PATTERNS. Untracked files count so a new file fails here before it
+    is committed, as it would fail CI after (Cursor-Governance#922). Registered files must
     carry exactly the registered header. Unregistered files must carry a
     canonical schema-v1 header, unless HEADERLESS_ALLOWED_PATTERNS or
     HEADERLESS_BASELINE allow them to have none.
@@ -2113,12 +2131,14 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         tracked = tracked_files(root)
+        untracked = set(untracked_files(root))
     except RuntimeError as exc:
         print(f"  ERROR    cannot determine the eligible file set: {exc}")
         return 1
 
     registry = {fm.path: fm for fm in FILE_REGISTRY}
-    eligible = sorted(set(registry) | {p for p in tracked if in_scope(p) and not is_excluded(p)})
+    candidates = set(tracked) | untracked
+    eligible = sorted(set(registry) | {p for p in candidates if in_scope(p) and not is_excluded(p)})
 
     for rel in eligible:
         fpath = root / rel
@@ -2135,7 +2155,8 @@ def main(argv: list[str] | None = None) -> int:
                     if headerless_allowed(rel):
                         counts["EXEMPT"] += 1
                     else:
-                        print(f"  NOHEADER {rel}  (tracked, no L9_META header; register it and run --apply)")
+                        state = "untracked" if rel in untracked else "tracked"
+                        print(f"  NOHEADER {rel}  ({state}, no L9_META header; register it and run --apply)")
                         counts["NOHEADER"] += 1
                     continue
                 if isinstance(found, str):

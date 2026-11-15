@@ -355,8 +355,39 @@ def test_new_tracked_engine_file_without_header_is_reported(
     assert "NOHEADER" in out
 
 
-def test_untracked_file_is_not_eligible(scratch_repo: Path) -> None:
-    _write(scratch_repo, "engine/scratch.py", "X = 1\n")
+@pytest.mark.parametrize("mode", [[], ["check"]])
+def test_untracked_new_file_without_header_is_reported(
+    scratch_repo: Path, mode: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Cursor-Governance#922: a new file not yet `git add`ed must fail locally
+    # exactly as it will fail CI once committed, not only after `git add -N`.
+    _write(scratch_repo, "tests/unit/test_new.py", '"""New test."""\n')
+    assert _verdict([*mode, "--root", str(scratch_repo)]) == 1
+    out = capsys.readouterr().out
+    assert "NOHEADER tests/unit/test_new.py" in out
+
+
+def test_untracked_file_with_canonical_header_passes(scratch_repo: Path) -> None:
+    fm = inj.FileMeta("engine/extra.py", "engine-specific", ["engine"], ["extra"], "engine-team")
+    _write(scratch_repo, "engine/extra.py", inj.inject_meta("X = 1\n", fm, "graph"))
+    assert _verdict(["check", "--root", str(scratch_repo)]) == 0
+
+
+def test_ignored_file_is_not_eligible(scratch_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _write(scratch_repo, ".gitignore", "scratch/\n")
+    _write(scratch_repo, "scratch/local.py", "X = 1\n")
+    assert _verdict(["check", "--root", str(scratch_repo)]) == 0
+    assert "scratch/local.py" not in capsys.readouterr().out
+
+
+def test_untracked_excluded_file_is_not_eligible(scratch_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(inj, "EXCLUDED_PATTERNS", {"engine/generated.py": "generated in this test"})
+    _write(scratch_repo, "engine/generated.py", "X = 1\n")
+    assert _verdict(["check", "--root", str(scratch_repo)]) == 0
+
+
+def test_untracked_out_of_scope_file_is_not_eligible(scratch_repo: Path) -> None:
+    _write(scratch_repo, "scratch.txt", "no header needed\n")
     assert _verdict(["check", "--root", str(scratch_repo)]) == 0
 
 
