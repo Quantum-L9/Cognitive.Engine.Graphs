@@ -3230,7 +3230,10 @@ async def handle_healthcheck(tenant: str, payload: dict[str, Any]) -> dict[str, 
 
 # ── HEALTH-01: canonical `health-assess` action ──────────────────────────────
 # Gate's action-ownership map gives `health-assess` to `ceg` (Constellation.Gate
-# lane G3): consumer and operator keys may call it, worker keys are refused it.
+# lane G3): consumer and operator keys may call it; worker keys are refused it,
+# except EIE's node `enrichment-engine`, admitted for `health-assess` alone
+# (HEALTH-01 amendment 2026-11-15, Constellation.Gate #43). CEG checks only Gate
+# provenance, never caller kind.
 # `admin` is never advertised and never routed by Gate, so the health subactions
 # need a route of their own. The subaction names are kept so a payload that
 # works through `admin` in dev works unchanged through Gate.
