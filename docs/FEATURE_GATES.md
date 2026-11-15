@@ -863,7 +863,10 @@ surface needs a gate of its own, which is what this is.
 Health is **not** routed through `admin` (operator decision 2026-10-22). The
 canonical route is the advertised action `health-assess`, owned by `ceg` in
 Gate's action-ownership map (Constellation.Gate lane G3: consumer and operator
-keys call it, worker keys are refused it). `engine/handlers.py::handle_health_assess`
+keys call it; worker keys are refused it, except EIE's node `enrichment-engine`,
+which Gate admits for `health-assess` alone — HEALTH-01 amendment 2026-11-15,
+Constellation.Gate #43, `WORKER_ORIGINATED_OPERATOR_ACTIONS`). CEG checks only
+Gate provenance, never caller kind. `engine/handlers.py::handle_health_assess`
 dispatches exactly the three subactions above and refuses every other
 `subaction` with `ValidationError`, so nothing else `admin` offers is reachable
 from a Gate-routed packet. `admin`, `health` and `healthcheck` are never
