@@ -150,6 +150,11 @@ class Settings(BaseSettings):
     # job is never stale by age. Off: every job uses gds_max_staleness_hours.
     gds_staleness_per_schedule_enabled: bool = True
     gds_staleness_grace_minutes: int = Field(default=60, ge=0)
+    # GDS-CRON-01: a GDS job's cron reads day_of_week as standard crontab
+    # (0 and 7 Sunday, 1-6 Monday-Saturday) in the scheduler and the staleness
+    # probe alike (engine/gds/cron.py). Off: CronTrigger.from_crontab exactly,
+    # APScheduler 3's 0 = Monday, so a numeric weekly job runs a day late.
+    gds_cron_posix_weekday_enabled: bool = True
 
     # --- Wave 2: Refinement-Inspired Scoring ---
     feedback_enabled: bool = False  # W2-02: outcome feedback loop (opt-in)

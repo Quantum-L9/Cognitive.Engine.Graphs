@@ -34,10 +34,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
 
 from engine.config.schema import AggregationStrategy, DomainSpec, EdgeCategory, GDSJobSpec
 from engine.config.structural_vocabulary import declared
+from engine.gds.cron import crontab_trigger
 from engine.gds.node_similarity import (
     NODE_SIMILARITY_ALGORITHM,
     NODE_SIMILARITY_ALGORITHMS,
@@ -359,7 +359,7 @@ class GDSScheduler:
     def _register_cron_job(self, job_spec: GDSJobSpec) -> None:
         if not job_spec.schedule.cron:
             raise ValueError(f"Job {job_spec.name}: cron expression required")
-        trigger = CronTrigger.from_crontab(job_spec.schedule.cron)
+        trigger = crontab_trigger(job_spec.schedule.cron)
         self.scheduler.add_job(
             func=self.execute_job,
             trigger=trigger,
