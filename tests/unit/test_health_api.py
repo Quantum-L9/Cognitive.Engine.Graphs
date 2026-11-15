@@ -17,14 +17,16 @@ Findings covered:
                                   upgrade prompts and conversion events only in
                                   commercial mode
   BATCH-01 / BATCH-02             server-owned caps; honest batch accounting
-  HEALTH-03                       assess surfaces the trigger_reenrichment_v2 outcome;
-                                  reason token == dispatch.error
+  HEALTH-03 (retired 2026-11-15)  the enrichment trigger moved to EIE: assess and
+                                  batch never dispatch; enrichment_priority and
+                                  enrichment_dispatch are always null; the batch
+                                  cost model is server-owned
   HEALTH-05                       payload.domain must equal the packet tenant
   HEALTH-01                       the canonical `health-assess` action dispatches the same
                                   three subactions with the same results as `admin`
 
-The field analysis pipeline (analyzer, scorer, field map, gap prioritizer,
-ROI priority) is replaced with deterministic fakes: these tests are about the
+The field analysis pipeline (analyzer, scorer, field map, gap prioritizer)
+is replaced with deterministic fakes: these tests are about the
 handlers' orchestration — what they grant, count, surface and refuse — not
 about the scoring math, which tests/unit/test_health_engine.py owns.
 """
@@ -40,8 +42,7 @@ import pytest
 
 from engine.config.settings import Settings
 from engine.health import api as health_api
-from engine.health import enrichment_trigger
-from engine.health.field_health import EnrichmentPriority, EnrichmentTarget, FieldHealth, ReadinessScore
+from engine.health.field_health import EnrichmentTarget, FieldHealth, ReadinessScore
 from engine.health.health_schemas import (
     FULL_CAPABILITY_TIER,
     TIER_FEATURES,
@@ -62,34 +63,15 @@ def _fh(name: str, *, populated: bool, gate_critical: bool = False) -> FieldHeal
     return FieldHealth(field_name=name, is_populated=populated, is_gate_critical=gate_critical, scoring_weight=0.1)
 
 
-def _priority(recommendation: str, cost_usd: float = 0.02) -> EnrichmentPriority:
-    return EnrichmentPriority(
-        priority_score=90.0,
-        estimated_cost_tokens=4000,
-        estimated_cost_usd=cost_usd,
-        expected_value_usd=50.0,
-        roi=5.0,
-        recommendation=recommendation,  # type: ignore[arg-type]
-        reasoning="fake",
-    )
-
-
 class _Pipeline:
     """Deterministic stand-in for the analysis pipeline, with recorders."""
 
     def __init__(self) -> None:
         self.gaps: list[str] = ["capacity"]
-        self.recommendations: list[str] = []  # consumed in order by compute_enrichment_priority
-        self.default_recommendation = "enrich_now"
-        self.cost_usd = 0.02
+        # Per-entity gaps, consumed in order by analyze(); falls back to ``gaps``.
+        self.gap_sequence: list[list[str]] = []
+        self._current: list[str] = []
         self.events: list[tuple[str, str, str]] = []
-        self.dispatch_calls: list[tuple[str, str]] = []
-        self.dispatch_result: dict[str, Any] = {
-            "triggered": False,
-            "reason": "auto_enrich_via_gate_disabled",
-            "recommendation": "enrich_now",
-            "dispatch": {"status": "skipped", "error": "auto_enrich_via_gate_disabled"},
-        }
         self.loaded_domains: list[str] = []
 
     # -- fakes -----------------------------------------------------------
@@ -98,7 +80,8 @@ class _Pipeline:
         return SimpleNamespace(domain=SimpleNamespace(id=domain_id, description="test marketplace"))
 
     def analyze(self, *, entity: dict[str, Any], domain_spec: Any, node_label: str, **_: Any) -> list[FieldHealth]:
-        return [_fh("name", populated=True), *(_fh(g, populated=False, gate_critical=True) for g in self.gaps)]
+        self._current = self.gap_sequence.pop(0) if self.gap_sequence else list(self.gaps)
+        return [_fh("name", populated=True), *(_fh(g, populated=False, gate_critical=True) for g in self._current)]
 
     def readiness(self, field_health: list[FieldHealth], domain_spec: Any) -> ReadinessScore:
         return ReadinessScore(overall_score=42.0, grade="D", gate_completeness=0.5, scoring_dimension_coverage=0.5)
@@ -107,15 +90,7 @@ class _Pipeline:
         return SimpleNamespace(inference_rules=[])
 
     def targets(self, field_health: list[FieldHealth], domain_spec: Any, *, inference_rules: Any) -> list[Any]:
-        return [EnrichmentTarget(field_name=g, priority_score=700.0, is_gate_critical=True) for g in self.gaps]
-
-    def priority(self, entity_health: Any, domain_spec: Any, *_: Any) -> EnrichmentPriority:
-        rec = self.recommendations.pop(0) if self.recommendations else self.default_recommendation
-        return _priority(rec, self.cost_usd)
-
-    async def trigger(self, entity_health: Any, domain_spec: Any, tenant: str, *_: Any) -> dict[str, Any]:
-        self.dispatch_calls.append((tenant, entity_health.entity_id))
-        return dict(self.dispatch_result)
+        return [EnrichmentTarget(field_name=g, priority_score=700.0, is_gate_critical=True) for g in self._current]
 
     def track(self, tenant: str, entity_id: str, event_type: str, **_: Any) -> Any:
         self.events.append((tenant, entity_id, event_type))
@@ -132,8 +107,6 @@ def pipeline(monkeypatch: pytest.MonkeyPatch) -> _Pipeline:
     monkeypatch.setattr(health_api, "compute_readiness_score_v2", p.readiness)
     monkeypatch.setattr(health_api, "build_field_map", p.field_map)
     monkeypatch.setattr(health_api, "prioritize_gaps_v2", p.targets)
-    monkeypatch.setattr(health_api, "compute_enrichment_priority", p.priority)
-    monkeypatch.setattr(health_api, "trigger_reenrichment_v2", p.trigger)
     monkeypatch.setattr(health_api, "track_conversion_event", p.track)
     return p
 
@@ -216,10 +189,10 @@ class TestAssessTierGrantsNothing:
         assert result["tier"] == FULL_CAPABILITY_TIER
         assert result["requested_tier"] == "seed"
         assert result["commercial_mode"] is False
-        # Full capability set: targets, priority and the auto-enrich attempt all happen.
+        # Full capability set: targets are returned; priority and dispatch are retired (null).
         assert [t["field_name"] for t in result["entity_health"]["enrichment_targets"]] == ["capacity"]
-        assert result["enrichment_priority"]["recommendation"] == "enrich_now"
-        assert pipeline.dispatch_calls == [(TENANT, "ent-1")]
+        assert result["enrichment_priority"] is None
+        assert result["enrichment_dispatch"] is None
 
     async def test_autonomous_request_gets_seed_when_server_entitles_seed(
         self, pipeline: _Pipeline, settings_commercial_seed: Settings
@@ -230,7 +203,6 @@ class TestAssessTierGrantsNothing:
         assert result["entity_health"]["enrichment_targets"] == []
         assert result["enrichment_priority"] is None
         assert result["enrichment_dispatch"] is None
-        assert pipeline.dispatch_calls == [], "a self-declared tier must not buy an EIE dispatch"
 
 
 @pytest.mark.finding("COMM-02")
@@ -325,10 +297,13 @@ class TestBatchServerOwnedCaps:
 @pytest.mark.finding("BATCH-02")
 class TestBatchAccounting:
     async def test_buckets_partition_the_request(self, pipeline: _Pipeline) -> None:
-        # window of 3 out of 4; first is eligible at 0.02 which meets the 0.02 ceiling,
-        # so the second iteration stops: 1 scanned, 2 unassessed-in-window, 1 truncated.
-        pipeline.recommendations = ["enrich_now", "skip", "enrich_now"]
-        s = _settings(health_batch_max_entities=3, health_batch_cost_ceiling_usd=0.02)
+        # window of 3 out of 4; first has a gap and costs 0.02, which meets the 0.02
+        # ceiling, so the second iteration stops: 1 scanned, 2 unassessed-in-window,
+        # 1 truncated.
+        pipeline.gap_sequence = [["capacity"], [], ["capacity"]]
+        s = _settings(
+            health_batch_max_entities=3, health_batch_cost_ceiling_usd=0.02, health_batch_entity_cost_usd=0.02
+        )
         with patch("engine.config.settings.settings", s):
             result = await health_api.handle_health_batch_assess(TENANT, {"entities": _entities(4)})
         assert result["total_candidates"] == 4
@@ -344,8 +319,9 @@ class TestBatchAccounting:
         # Two eligible entities at 0.02 each against a 0.03 ceiling: the second
         # would take the batch to 0.04, so it is never admitted and cost_usd
         # stays within the server-owned ceiling (it used to report 0.04).
-        pipeline.cost_usd = 0.02
-        s = _settings(health_batch_max_entities=3, health_batch_cost_ceiling_usd=0.03)
+        s = _settings(
+            health_batch_max_entities=3, health_batch_cost_ceiling_usd=0.03, health_batch_entity_cost_usd=0.02
+        )
         with patch("engine.config.settings.settings", s):
             result = await health_api.handle_health_batch_assess(TENANT, {"entities": _entities(3)})
         assert result["total_scanned"] == 1
@@ -355,8 +331,8 @@ class TestBatchAccounting:
         assert result["cost_usd"] <= result["cost_ceiling_usd"]
         assert result["cost_ceiling_reached"] is True
 
-    async def test_skip_recommendations_count_once(self, pipeline: _Pipeline, settings_off: Settings) -> None:
-        pipeline.recommendations = ["skip", "enrich_low_priority", "skip"]
+    async def test_no_gap_entities_count_once_as_skipped(self, pipeline: _Pipeline, settings_off: Settings) -> None:
+        pipeline.gap_sequence = [[], ["capacity"], []]
         result = await health_api.handle_health_batch_assess(TENANT, {"entities": _entities(3)})
         assert result["total_scanned"] == 3
         assert result["estimated_eligible"] == 1
@@ -369,8 +345,9 @@ class TestBatchAccounting:
     ) -> None:
         result = await health_api.handle_health_batch_assess(TENANT, {"entities": _entities(2)})
         assert result["dispatched"] == 0
-        assert pipeline.dispatch_calls == [], "batch scan sends nothing through Gate"
         assert result["estimated_eligible"] == 2
+        assert all(e["enrichment_priority"] is None for e in result["entities"])
+        assert all(e["enrichment_dispatch"] is None for e in result["entities"])
 
     async def test_batch_scan_refused_when_effective_tier_lacks_it(
         self, pipeline: _Pipeline, settings_commercial_seed: Settings
@@ -380,44 +357,104 @@ class TestBatchAccounting:
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  H3 — HEALTH-03
+#  H3 — the enrichment trigger moved to EIE (operator decision 2026-11-15)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
 @pytest.mark.finding("HEALTH-03")
-class TestAssessSurfacesDispatchOutcome:
-    async def test_dispatch_result_is_returned_verbatim(self, pipeline: _Pipeline, settings_off: Settings) -> None:
+class TestCegDispatchesNoEnrichment:
+    async def test_assess_with_gaps_returns_null_priority_and_dispatch(
+        self, pipeline: _Pipeline, settings_off: Settings
+    ) -> None:
+        pipeline.gaps = ["capacity", "rate_per_ton"]
         result = await health_api.handle_health_assess(TENANT, _assess_payload())
-        assert result["enrichment_dispatch"] == pipeline.dispatch_result
-        assert result["enrichment_dispatch"]["reason"] == result["enrichment_dispatch"]["dispatch"]["error"]
-
-    async def test_no_dispatch_when_not_recommended(self, pipeline: _Pipeline, settings_off: Settings) -> None:
-        pipeline.default_recommendation = "enrich_low_priority"
-        result = await health_api.handle_health_assess(TENANT, _assess_payload())
+        # The keys stay for wire compatibility; EIE reads only entity_health.
+        assert "enrichment_priority" in result
+        assert "enrichment_dispatch" in result
+        assert result["enrichment_priority"] is None
         assert result["enrichment_dispatch"] is None
-        assert pipeline.dispatch_calls == []
+        health = result["entity_health"]
+        assert health["critical_gaps"] == ["capacity", "rate_per_ton"]
+        assert [t["field_name"] for t in health["enrichment_targets"]] == ["capacity", "rate_per_ton"]
+        assert {"readiness_score", "grade", "gate_completeness"} <= set(health)
 
-    async def test_trigger_reason_token_matches_dispatch_error_when_gate_disabled(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(enrichment_trigger.settings, "auto_enrich_via_gate", False)
-        monkeypatch.setattr(enrichment_trigger, "compute_enrichment_priority", lambda *_: _priority("enrich_now"))
-        health = SimpleNamespace(entity_id="ent-1", domain=TENANT, enrichment_targets=[], critical_gaps=["capacity"])
-        result = await enrichment_trigger.trigger_reenrichment_v2(health, SimpleNamespace(), TENANT)  # type: ignore[arg-type]
-        assert result["triggered"] is False
-        assert result["reason"] == "auto_enrich_via_gate_disabled"
-        assert result["reason"] == result["dispatch"]["error"]
+    def test_retired_keys_reject_a_value(self) -> None:
+        from engine.health.field_health import EntityHealth
+        from engine.health.health_schemas import EntityHealthResponse
 
-    async def test_trigger_reason_token_matches_dispatch_error_when_skipped(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setattr(enrichment_trigger, "compute_enrichment_priority", lambda *_: _priority("skip"))
-        health = SimpleNamespace(entity_id="ent-1", domain=TENANT, enrichment_targets=[], critical_gaps=[])
-        result = await enrichment_trigger.trigger_reenrichment_v2(health, SimpleNamespace(), TENANT)  # type: ignore[arg-type]
-        assert result["triggered"] is False
-        assert result["reason"] == "enrichment_not_recommended"
-        assert result["reason"] == result["dispatch"]["error"]
-        assert result["priority"]["reasoning"] == "fake", "the human ROI breakdown stays on priority"
+        health = EntityHealth(entity_id="ent-1", domain=TENANT, readiness_score=50.0)
+        with pytest.raises(ValueError):
+            EntityHealthResponse(entity_health=health, enrichment_dispatch={"triggered": True})  # type: ignore[arg-type]
+        with pytest.raises(ValueError):
+            EntityHealthResponse(entity_health=health, enrichment_priority={"roi": 5.0})  # type: ignore[arg-type]
+
+    def test_api_module_has_no_egress(self) -> None:
+        assert not hasattr(health_api, "trigger_reenrichment_v2")
+        assert not hasattr(health_api, "compute_enrichment_priority")
+        assert not hasattr(health_api, "request_enrichment")
+
+
+@pytest.mark.finding("BATCH-01")
+class TestBatchCostModel:
+    async def test_cost_is_server_entity_cost_times_eligible(self, pipeline: _Pipeline) -> None:
+        pipeline.gap_sequence = [["capacity"], [], ["capacity", "rate_per_ton"]]
+        s = _settings(health_batch_entity_cost_usd=0.07)
+        with patch("engine.config.settings.settings", s):
+            result = await health_api.handle_health_batch_assess(TENANT, {"entities": _entities(3)})
+        assert result["estimated_eligible"] == 2
+        assert result["total_skipped"] == 1
+        assert result["cost_usd"] == pytest.approx(0.14)
+        assert result["cost_ceiling_reached"] is False
+
+    async def test_no_gap_entity_costs_nothing(self, pipeline: _Pipeline) -> None:
+        pipeline.gaps = []
+        s = _settings(health_batch_cost_ceiling_usd=0.01, health_batch_entity_cost_usd=5.0)
+        with patch("engine.config.settings.settings", s):
+            result = await health_api.handle_health_batch_assess(TENANT, {"entities": _entities(4)})
+        assert result["cost_usd"] == 0.0
+        assert result["estimated_eligible"] == 0
+        assert result["total_scanned"] == 4
+        assert result["total_skipped"] == 4
+        assert result["cost_ceiling_reached"] is False
+
+    async def test_ceiling_reached_stops_admission(self, pipeline: _Pipeline) -> None:
+        s = _settings(
+            health_batch_max_entities=10, health_batch_cost_ceiling_usd=0.25, health_batch_entity_cost_usd=0.1
+        )
+        with patch("engine.config.settings.settings", s):
+            result = await health_api.handle_health_batch_assess(TENANT, {"entities": _entities(5)})
+        assert result["estimated_eligible"] == 2
+        assert result["total_scanned"] == 2
+        assert result["total_skipped"] == 3
+        assert result["cost_usd"] == pytest.approx(0.2)
+        assert result["cost_usd"] <= result["cost_ceiling_usd"]
+        assert result["cost_ceiling_reached"] is True
+
+    async def test_request_may_lower_the_ceiling(self, pipeline: _Pipeline) -> None:
+        s = _settings(health_batch_cost_ceiling_usd=10.0, health_batch_entity_cost_usd=0.1)
+        with patch("engine.config.settings.settings", s):
+            result = await health_api.handle_health_batch_assess(
+                TENANT, {"entities": _entities(5), "cost_ceiling_usd": 0.1}
+            )
+        assert result["cost_ceiling_usd"] == 0.1
+        assert result["estimated_eligible"] == 1
+        assert result["cost_ceiling_reached"] is True
+
+    async def test_request_may_not_raise_the_ceiling(self, pipeline: _Pipeline) -> None:
+        s = _settings(health_batch_cost_ceiling_usd=0.1, health_batch_entity_cost_usd=0.1)
+        with patch("engine.config.settings.settings", s):
+            result = await health_api.handle_health_batch_assess(
+                TENANT, {"entities": _entities(5), "cost_ceiling_usd": 1000.0}
+            )
+        assert result["cost_ceiling_usd"] == 0.1
+        assert result["estimated_eligible"] == 1
+        assert result["cost_usd"] == pytest.approx(0.1)
+        assert result["cost_ceiling_reached"] is True
+
+    def test_default_entity_cost_and_bounds(self) -> None:
+        assert Settings.model_fields["health_batch_entity_cost_usd"].default == 0.05
+        with pytest.raises(ValueError):
+            _settings(health_batch_entity_cost_usd=-0.01)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -638,18 +675,13 @@ _FACILITY = {
 
 @pytest.fixture
 def real_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The real analysis pipeline over the checked-in plasticos pack; only the loader and dispatch are fakes."""
+    """The real analysis pipeline over the checked-in plasticos pack; only the loader is a fake."""
     from engine.config.loader import DomainPackLoader
 
     spec = DomainPackLoader(config_path=str(DESIGN_PACKS_ROOT)).load_domain(TENANT)
     loader = MagicMock()
     loader.load_domain.return_value = spec
     monkeypatch.setattr(health_api, "_get_domain_loader", lambda: loader)
-
-    async def _no_dispatch(*_: Any, **__: Any) -> dict[str, Any]:
-        return {"triggered": False, "reason": "test", "dispatch": {"status": "skipped", "error": "test"}}
-
-    monkeypatch.setattr(health_api, "trigger_reenrichment_v2", _no_dispatch)
 
 
 async def _three_readings(confidences: dict[str, float] | None) -> list[tuple[float, str, float]]:

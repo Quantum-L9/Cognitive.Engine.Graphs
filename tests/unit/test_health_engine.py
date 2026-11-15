@@ -10,7 +10,8 @@ status: active
 --- /L9_META ---
 
 Test suite for HEALTH service v4.0.
-Tests readiness_scorer, gap_prioritizer, enrichment_trigger, field_analyzer.
+Tests readiness_scorer, gap_prioritizer, enrichment impact measurement, field_analyzer.
+The enrichment priority and trigger moved to EIE (operator decision 2026-11-15).
 """
 
 from __future__ import annotations
@@ -19,13 +20,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from engine.health.enrichment_trigger import (
-    compute_enrichment_priority,
-    estimate_match_probability,
-    measure_health_impact,
-)
+from engine.health.enrichment_trigger import measure_health_impact
 from engine.health.field_health import (
-    EnrichmentPriority,
     EnrichmentTarget,
     EntityHealth,
     FieldHealth,
@@ -380,120 +376,6 @@ class TestGapPrioritizer:
         spec = _make_domain_spec()
         cost = estimate_research_cost(gap, spec)
         assert cost > 800  # Gate-critical base + complexity
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-#  ENRICHMENT PRIORITY
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-
-class TestEnrichmentPriority:
-    """Tests for enrichment_trigger.compute_enrichment_priority."""
-
-    def test_enrich_now_threshold(self):
-        """High priority + high ROI → enrich_now."""
-        entity = EntityHealth(
-            entity_id="e1",
-            domain="test",
-            readiness_score=30.0,
-            grade="F",
-            field_health=[
-                _make_field_health("g1", populated=False, gate_critical=True),
-                _make_field_health("g2", populated=False, gate_critical=True),
-            ],
-            critical_gaps=["g1", "g2"],
-            gate_completeness=0.0,
-        )
-        spec = _make_domain_spec()
-        priority = compute_enrichment_priority(entity, spec)
-
-        assert isinstance(priority, EnrichmentPriority)
-        assert priority.estimated_cost_tokens > 0
-        assert priority.estimated_cost_usd > 0
-
-    def test_skip_when_no_gaps(self):
-        """No gaps → skip recommendation."""
-        entity = EntityHealth(
-            entity_id="e1",
-            domain="test",
-            readiness_score=95.0,
-            grade="A",
-            field_health=[
-                _make_field_health("f1", populated=True, gate_critical=True),
-            ],
-            critical_gaps=[],
-            gate_completeness=1.0,
-        )
-        spec = _make_domain_spec()
-        priority = compute_enrichment_priority(entity, spec)
-
-        assert priority.recommendation == "skip"
-
-    def test_enrich_low_priority_mid_range(self):
-        """Mid-range priority → enrich_low_priority or skip."""
-        entity = EntityHealth(
-            entity_id="e1",
-            domain="test",
-            readiness_score=60.0,
-            grade="D",
-            field_health=[
-                _make_field_health("s1", populated=False, scoring_weight=0.3),
-            ],
-            critical_gaps=[],
-            gate_completeness=0.8,
-        )
-        spec = _make_domain_spec()
-        priority = compute_enrichment_priority(entity, spec)
-
-        assert priority.recommendation in ("enrich_low_priority", "skip")
-
-    # -- RU-111 / CEG-COR-047: the 10% staleness term is computed from field health --
-
-    @staticmethod
-    def _entity(staleness_days: int | None) -> EntityHealth:
-        return EntityHealth(
-            entity_id="e1",
-            domain="test",
-            readiness_score=60.0,
-            grade="D",
-            field_health=[
-                _make_field_health("g1", populated=True, gate_critical=True, staleness_days=staleness_days),
-                _make_field_health("g2", populated=False, gate_critical=True, staleness_days=staleness_days),
-                _make_field_health("s1", populated=True, scoring_weight=0.3, staleness_days=staleness_days),
-            ],
-            critical_gaps=["g2"],
-            gate_completeness=0.5,
-            scoring_dimension_coverage=1.0,
-        )
-
-    def test_stale_entity_priority_is_ten_points_higher(self):
-        spec = _make_domain_spec()
-        fresh = compute_enrichment_priority(self._entity(0), spec)
-        stale = compute_enrichment_priority(self._entity(365), spec)
-
-        assert stale.priority_score == pytest.approx(fresh.priority_score + 10.0, abs=0.01)
-        assert stale.roi == fresh.roi
-        assert stale.estimated_cost_usd == fresh.estimated_cost_usd
-
-    def test_staleness_flag_off_restores_zero_term(self, monkeypatch):
-        from engine.config.settings import settings
-
-        monkeypatch.setattr(settings, "health_priority_staleness_enabled", False)
-        spec = _make_domain_spec()
-        fresh = compute_enrichment_priority(self._entity(0), spec)
-        stale = compute_enrichment_priority(self._entity(365), spec)
-
-        assert stale.priority_score == fresh.priority_score
-
-    def test_estimate_match_probability_sigmoid(self):
-        """Sigmoid approximation should increase with readiness score."""
-        low = estimate_match_probability(30.0)
-        mid = estimate_match_probability(60.0)
-        high = estimate_match_probability(90.0)
-
-        assert low < mid < high
-        assert 0 < low < 1
-        assert 0 < high < 1
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

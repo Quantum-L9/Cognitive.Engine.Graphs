@@ -23,6 +23,11 @@ exist only while ``health_commercial_mode_enabled`` is on.
 Identity (HEALTH-05): tenant id == domain spec id == Neo4j database name.
 ``payload.domain`` may name the packet tenant or be absent; any other value is
 rejected. There is no mapping layer.
+
+Enrichment (operator decision 2026-11-15): the enrichment trigger lives in EIE.
+These handlers assess and report; they never compute an enrichment priority and
+never dispatch enrichment. ``enrichment_priority`` and ``enrichment_dispatch``
+stay on ``EntityHealthResponse`` for wire compatibility and are always null.
 """
 
 from __future__ import annotations
@@ -33,7 +38,6 @@ from typing import Any
 
 from engine.config.loader import DomainPackLoader
 from engine.health.domain_field_mapper import build_field_map
-from engine.health.enrichment_trigger import compute_enrichment_priority, trigger_reenrichment_v2
 from engine.health.field_analyzer import analyze_entity_fields
 from engine.health.field_health import EntityHealth
 from engine.health.gap_prioritizer import prioritize_gaps_v2
@@ -88,8 +92,8 @@ async def handle_health_assess(tenant: str, payload: dict[str, Any]) -> dict[str
     """POST /assess — Single entity health assessment.
 
     Capabilities come from the server-side resolver, not from ``payload.tier``.
-    When auto-enrichment is attempted, the full dispatch outcome is returned in
-    ``enrichment_dispatch`` (HEALTH-03).
+    Nothing is dispatched: ``enrichment_priority`` and ``enrichment_dispatch``
+    are always null (the trigger moved to EIE, operator decision 2026-11-15).
     """
     request = HealthAssessmentRequest(**payload)
     domain = resolve_domain(tenant, request.domain)
@@ -132,16 +136,6 @@ async def handle_health_assess(tenant: str, payload: dict[str, Any]) -> dict[str
         next_enrichment_priority=_classify_priority(readiness.overall_score),  # type: ignore[arg-type]
     )
 
-    # Enrichment priority when the capability set includes targets
-    enrichment_priority = None
-    if caps.allows("enrichment_targets"):
-        enrichment_priority = compute_enrichment_priority(entity_health, domain_spec)
-
-    # Auto-enrich: surface the whole dispatch result, not just that it was attempted.
-    enrichment_dispatch: dict[str, Any] | None = None
-    if caps.allows("auto_enrich") and enrichment_priority and enrichment_priority.recommendation == "enrich_now":
-        enrichment_dispatch = await trigger_reenrichment_v2(entity_health, domain_spec, tenant)
-
     # Conversion funnel — commercial mode only (COMM-02)
     upgrade_prompt = None
     if caps.conversion_tracking:
@@ -163,15 +157,18 @@ async def handle_health_assess(tenant: str, payload: dict[str, Any]) -> dict[str
 
     response = EntityHealthResponse(
         entity_health=entity_health,
-        enrichment_priority=enrichment_priority,
         tier=tier,
         requested_tier=caps.requested_tier,
         commercial_mode=caps.commercial_mode,
         upgrade_prompt=upgrade_prompt,
-        enrichment_dispatch=enrichment_dispatch,
     )
 
     return response.model_dump()
+
+
+def _has_gap(entity_health: EntityHealth) -> bool:
+    """An entity is eligible for the batch cost model only when it has a gap."""
+    return bool(entity_health.critical_gaps or entity_health.enrichment_targets)
 
 
 def _bounded(requested: float | None, ceiling: float) -> float:
@@ -188,6 +185,12 @@ async def handle_health_batch_assess(tenant: str, payload: dict[str, Any]) -> di
     ``cost_ceiling_usd`` are bounded by the server-owned ceilings in Settings
     (BATCH-01); the report's buckets are defined on ``BatchHealthReport``
     (BATCH-02). No enrichment is dispatched here, so ``dispatched`` is 0.
+
+    Cost model (server-owned): an entity with a gap — a critical gap or an
+    enrichment target — is eligible and costs
+    ``settings.health_batch_entity_cost_usd``; an entity with no gap costs
+    nothing, is not eligible and counts as skipped. The request may lower
+    ``cost_ceiling_usd``, never raise it.
     """
     from engine.config.settings import settings
 
@@ -201,6 +204,7 @@ async def handle_health_batch_assess(tenant: str, payload: dict[str, Any]) -> di
         raise ValueError(msg)
 
     cost_ceiling = _bounded(request.cost_ceiling_usd, settings.health_batch_cost_ceiling_usd)
+    entity_cost = settings.health_batch_entity_cost_usd
     max_entities = int(_bounded(request.max_entities, settings.health_batch_max_entities))
     scan_profile = request.scan_profile or HealthScanProfile()
 
@@ -247,17 +251,15 @@ async def handle_health_batch_assess(tenant: str, payload: dict[str, Any]) -> di
             scoring_dimension_coverage=readiness.scoring_dimension_coverage,
         )
 
-        priority = compute_enrichment_priority(entity_health, domain_spec)
-
-        if priority.recommendation != "skip":
+        if _has_gap(entity_health):
             # The ceiling bounds what this batch may commit to, so an eligible
             # entity is admitted only if its estimate still fits; otherwise it
             # stays unassessed (counted from the window below) and cost_usd
             # never exceeds the server-owned ceiling.
-            if total_cost + priority.estimated_cost_usd > cost_ceiling:
+            if total_cost + entity_cost > cost_ceiling:
                 ceiling_reached = True
                 break
-            total_cost += priority.estimated_cost_usd
+            total_cost += entity_cost
             estimated_eligible += 1
         else:
             total_skipped += 1
@@ -265,7 +267,6 @@ async def handle_health_batch_assess(tenant: str, payload: dict[str, Any]) -> di
         results.append(
             EntityHealthResponse(
                 entity_health=entity_health,
-                enrichment_priority=priority,
                 tier=tier,
                 requested_tier=caps.requested_tier,
                 commercial_mode=caps.commercial_mode,

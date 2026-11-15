@@ -2060,7 +2060,6 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 "gds_max_staleness_hours": _fs.gds_max_staleness_hours,
                 "gds_staleness_per_schedule_enabled": _fs.gds_staleness_per_schedule_enabled,
                 # --- Constellation seam (EIE <-> Gate <-> CEG) ---
-                "auto_enrich_via_gate": _fs.auto_enrich_via_gate,
                 "graph_inference_feedback_enabled": _fs.graph_inference_feedback_enabled,
                 "health_api_enabled": _fs.health_api_enabled,
                 "auto_create_domain_database": _fs.auto_create_domain_database,
@@ -2306,8 +2305,8 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # ── CEG-006 / HEALTH-01: AI-readiness health, reachable from an inbound packet
     # engine/health/api.py implemented three handlers and was imported by
-    # nothing, so `request_enrichment` — the whole CEG -> Gate -> EIE direction
-    # — had no trigger any packet could reach. The canonical route is the
+    # nothing (CEG-006). The trigger that once dispatched enrichment from here
+    # moved to EIE (operator decision 2026-11-15). The canonical route is the
     # advertised `health-assess` action (handle_health_assess; operator decision
     # 2026-10-22). The subactions stay on `admin` as the operator surface so a
     # direct dev call keeps working; both routes share _dispatch_health.
@@ -3253,9 +3252,8 @@ async def _dispatch_health(tenant: str, payload: dict[str, Any], subaction: str,
     from engine.config.settings import settings as _health_settings
 
     # Mechanism ships dormant, operator activates — the same contract every
-    # other behavioural surface here follows. auto_enrich_via_gate gates only
-    # the eventual outbound request, not assessment, reporting or conversion
-    # tracking, so making these reachable needs a gate of their own.
+    # other behavioural surface here follows. These handlers assess and report
+    # only; CEG dispatches no enrichment (the trigger lives in EIE).
     if not _health_settings.health_api_enabled:
         return {
             "status": "disabled",

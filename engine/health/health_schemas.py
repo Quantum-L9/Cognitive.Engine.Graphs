@@ -20,7 +20,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from engine.health.field_health import EnrichmentPriority, EntityHealth, MatchQualityDelta
+from engine.health.field_health import EntityHealth, MatchQualityDelta
 
 logger = logging.getLogger(__name__)
 
@@ -205,20 +205,23 @@ class EntityHealthResponse(BaseModel):
     """Full health assessment response.
 
     ``tier`` is the *effective* tier the call ran with (server-resolved);
-    ``requested_tier`` is what the caller declared. ``enrichment_dispatch`` is
-    the full ``trigger_reenrichment_v2`` result when auto-enrichment was
-    attempted (HEALTH-03), so a caller can see whether Gate accepted the request
-    rather than inferring it from a priority recommendation.
+    ``requested_tier`` is what the caller declared.
+
+    ``enrichment_priority`` and ``enrichment_dispatch`` are deprecated and always
+    null. CEG computed an ROI enrichment priority and dispatched enrichment
+    through Gate until the trigger moved to EIE (operator decision 2026-11-15);
+    EIE never read either key. They are retained, typed ``None``, so the wire
+    shape does not change; a later change may remove them.
     """
 
     entity_health: EntityHealth
-    enrichment_priority: EnrichmentPriority | None = None
+    enrichment_priority: None = Field(default=None, description="Deprecated; always null (trigger moved to EIE).")
     match_quality_delta: MatchQualityDelta | None = None
     tier: str = "seed"
     requested_tier: str | None = None
     commercial_mode: bool = False
     upgrade_prompt: str | None = None
-    enrichment_dispatch: dict[str, Any] | None = None
+    enrichment_dispatch: None = Field(default=None, description="Deprecated; always null (trigger moved to EIE).")
 
 
 class HealthReport(BaseModel):
@@ -244,10 +247,11 @@ class BatchHealthReport(BaseModel):
     the four buckets below):
 
     * ``total_scanned``      — assessed in this call;
-    * ``estimated_eligible`` — assessed and recommended for enrichment
-      (formerly ``total_enriched``, which overstated: no enrichment is sent
-      by a batch scan);
-    * ``total_skipped``      — assessed with recommendation ``skip``, plus
+    * ``estimated_eligible`` — assessed and carrying a gap (a critical gap or
+      an enrichment target), so counted against the cost ceiling (formerly
+      ``total_enriched``, which overstated: no enrichment is sent by a batch
+      scan);
+    * ``total_skipped``      — assessed with no gap, plus
       entities inside the ``max_entities`` window left unassessed once the
       cost ceiling was reached;
     * ``total_truncated``    — beyond the ``max_entities`` window, never looked at.
@@ -255,7 +259,7 @@ class BatchHealthReport(BaseModel):
     ``dispatched`` counts enrichment requests actually sent through Gate. The
     batch scan sends none, so it reports ``0`` until a dispatch path exists
     and produces evidence. ``cost_usd`` is the *estimated* cost of the eligible
-    set, not spend.
+    set, not spend: ``estimated_eligible`` * ``health_batch_entity_cost_usd``.
     """
 
     domain: str

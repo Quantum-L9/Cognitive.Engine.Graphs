@@ -63,7 +63,7 @@ independently of the code default.
 | LLM Security (ValidatedLLMClient) | `LLM_PROVIDER` | `openai` (implicit) | `openai` | active — fully implemented, requires `OPENAI_API_KEY` |
 | PacketStore Persistence | `PACKET_STORE_ENABLED` (`packet_store_enabled`), `PACKET_STORE_DSN` (`packet_store_dsn`) | `False` | `True` | active (opt-in; read through `Settings` since PERSIST-01 — see §7) |
 | Health Commercial Mode | `HEALTH_COMMERCIAL_MODE_ENABLED` (`health_commercial_mode_enabled`), `HEALTH_ENTITLED_TIER` | `False`, `seed` | unset | dormant; tier entitlements, upgrade prompts and conversion events — see §22 |
-| Health Batch Ceilings | `HEALTH_BATCH_MAX_ENTITIES`, `HEALTH_BATCH_COST_CEILING_USD` | `100`, `10.0` | unset | active; server-owned caps a request may lower but not raise — see §22 |
+| Health Batch Ceilings | `HEALTH_BATCH_MAX_ENTITIES`, `HEALTH_BATCH_COST_CEILING_USD`, `HEALTH_BATCH_ENTITY_COST_USD` | `100`, `10.0`, `0.05` | unset | active; server-owned caps a request may lower but not raise, and the server-owned per-entity cost model — see §22 |
 | Tenant Allowlist Required in Prod | `TENANT_ALLOWLIST_REQUIRED_IN_PROD` (`tenant_allowlist_required_in_prod`) | `True` | unset | active (hardening); an unset `TENANT_ALLOWLIST` denies every tenant under `L9_ENV=prod` — see §11 |
 | Gate Declared Bounds | `GATE_DECLARED_BOUNDS_ENABLED` (`gate_declared_bounds_enabled`) | `True` | unset | active; range honours `queryparam_min`/`queryparam_max`, temporalrange honours `candidateprop_start`/`candidateprop_end` — see §21 |
 | Strict Tenant Database | `STRICT_TENANT_DATABASE` (`strict_tenant_database`) | `True` | unset | active (hardening); an omitted `database=` on `GraphDriver` raises — see §23 |
@@ -150,7 +150,7 @@ independently of the code default.
 | Health Absent Confidence Counts | `HEALTH_ABSENT_CONFIDENCE_COUNTS_ENABLED` (`health_absent_confidence_counts_enabled`) | `True` | unset | active (hardening); an absent field confidence is "no signal", only an explicit confidence < 0.70 discounts a populated field; batch/report forward `field_confidences` (RU-108 / CEG-COR-044) — see §15 |
 | Health Range Gate Fields | `HEALTH_RANGE_GATE_FIELDS_ENABLED` (`health_range_gate_fields_enabled`) | `True` | unset | active (hardening); range/window bound properties (`candidateprop_min/max/start/end`) are gate-critical in health readiness (RU-109 / CEG-COR-045) — see §15 |
 | Health Blocked Score Scale | `HEALTH_BLOCKED_SCORE_SCALE_ENABLED` (`health_blocked_score_scale_enabled`) | `True` | unset | active (hardening); a blocked readiness reports the 60% gate component `round(gc*60, 2)` so the score is monotonic in gate completeness (RU-110 / CEG-COR-046) — see §15 |
-| Health Priority Staleness | `HEALTH_PRIORITY_STALENESS_ENABLED` (`health_priority_staleness_enabled`) | `True` | unset | active (hardening); the 10% staleness term of the enrichment priority is computed from field staleness instead of always 0 (RU-111 / CEG-COR-047) — see §15 |
+| Health Priority Staleness | `HEALTH_PRIORITY_STALENESS_ENABLED` (`health_priority_staleness_enabled`) | — | — | **retired 2026-11-15** with the enrichment priority it tuned (the trigger moved to EIE) — see §15 |
 | Legacy Chassis Auth | `LEGACY_CHASSIS_AUTH_ENABLED` (`legacy_chassis_auth_enabled`) | `True` | unset | active (hardening, dev/test-only legacy chassis); with `L9_API_KEY` set, `chassis_app.create_app` registers `BearerAuthMiddleware` (`/v1/health` public) and POST `/v1/execute` returns 403 for a tenant outside the token's `allowed_tenants` while `TENANT_AUTH_ENABLED`; the factory also refuses to build outside dev/local/test while `REQUIRE_SDK_CHASSIS_IN_PROD` (RU-082 / CEG-COR-039); off restores the unauthenticated factory — see §11 |
 | Legacy Chassis Status Mapping | `LEGACY_CHASSIS_STATUS_MAPPING_ENABLED` (`legacy_chassis_status_mapping_enabled`) | `True` | unset | active (correctness, dev/test-only legacy chassis); `chassis.actions.execute_action` attaches an HTTP status hint that POST `/v1/execute` honours: circuit open → 503 + `Retry-After`, `ChassisError` (e.g. `FeatureNotEnabled`) → its `status_code`, engine `ValidationError` → 422, other `EngineError` → 500 with its message, anything else → 500 `Internal server error` (the exception text stays in logs and the persisted response packet) (RU-083 / CEG-COR-087 / CEG-COR-088); off restores 200 for circuit open and the keyword mapping with the raw exception text — see §11 |
 
@@ -711,8 +711,8 @@ round trip to queue nothing.
 ### Rollback
 
 Set the flag back to `False`. Each emission queues re-enrichment targets in EIE
-and therefore spends EIE budget, which is why it ships off — the same reason as
-`AUTO_ENRICH_VIA_GATE`.
+and therefore spends EIE budget, which is why it ships off. This is now CEG's
+only egress to EIE: CEG sends no `enrich` request (§15).
 
 ---
 
@@ -760,7 +760,7 @@ whether or not the flag is on.
 **State**: Dormant
 **Flags**: `HEALTH_COMMERCIAL_MODE_ENABLED=False` (default off),
 `HEALTH_ENTITLED_TIER=seed`, `HEALTH_BATCH_MAX_ENTITIES=100`,
-`HEALTH_BATCH_COST_CEILING_USD=10.0`
+`HEALTH_BATCH_COST_CEILING_USD=10.0`, `HEALTH_BATCH_ENTITY_COST_USD=0.05`
 
 The health surface (§15) carries a Seed → Enrich → Discover → Autonomous
 commercial model: `TIER_FEATURES` in `engine/health/health_schemas.py`, upgrade
@@ -780,11 +780,11 @@ as `requested_tier` and grants nothing, in either mode.
 | on | `HEALTH_ENTITLED_TIER` (server-owned; unknown value → `seed`, logged) | yes | per the entitled tier's `TIER_FEATURES` row |
 
 The enum, `TIER_FEATURES` and the report helpers are retained; only who
-selects the row changed. Auto-enrichment is still separately gated by
-`AUTO_ENRICH_VIA_GATE` (the outbound Gate request), and every assess response
-now carries `enrichment_dispatch` — the full `trigger_reenrichment_v2` result —
-with `reason` equal to `dispatch.error` on every non-dispatched path
-(HEALTH-03).
+selects the row changed. The `auto_enrich` tier feature no longer has any
+effect: CEG's enrichment trigger was retired (operator decision 2026-11-15, see
+§15), together with `AUTO_ENRICH_VIA_GATE`. `enrichment_priority` and
+`enrichment_dispatch` remain on every assess and batch entry for wire
+compatibility and are always `null` (HEALTH-03 retired).
 
 ### Batch ceilings
 
@@ -794,7 +794,29 @@ with `reason` equal to `dispatch.error` on every non-dispatched path
 it, and a negative or non-numeric value is rejected (422). The report's buckets
 partition the request: `total_scanned` + `total_skipped` + `total_truncated`
 = `total_candidates`; `estimated_eligible` replaces `total_enriched` (a batch
-scan enriches nothing) and `dispatched` is `0` until a dispatch path exists.
+scan enriches nothing) and `dispatched` is always `0`: CEG dispatches no
+enrichment.
+
+**Cost model** (server-owned, 2026-11-15). The ceiling used to be charged with
+the retired ROI priority's per-entity estimate. It is now charged with
+`HEALTH_BATCH_ENTITY_COST_USD` (`health_batch_entity_cost_usd`, default `0.05`,
+must be ≥ 0) for each entity that has a gap — a critical gap or an enrichment
+target. An entity with no gap costs nothing, is not counted in
+`estimated_eligible` and is counted in `total_skipped`, as before. An entity is
+admitted only while `cost_usd + HEALTH_BATCH_ENTITY_COST_USD` stays within the
+ceiling; `cost_usd` = `estimated_eligible` × the entity cost and never exceeds
+`cost_ceiling_usd`. The request may lower `cost_ceiling_usd`, never raise it.
+
+Choosing the default: the retired priority estimated
+`(800 × critical gaps + 400 × scoring gaps) × min(3 + 0.5 × critical gaps, 5)`
+tokens at $5 per million. A typical entity with 2 critical and 3 scoring gaps
+came to 11,200 tokens, $0.056 (1 + 2: $0.028; 3 + 5: $0.099). `0.05` sits just
+below the typical estimate, so the default $10 ceiling admits 200 such entities
+where it admitted 178 — more than the default 100-entity window, so the window,
+not the ceiling, bounds a default batch, as before. One difference is
+intentional: the old rule also skipped an entity *with* gaps whose ROI fell
+below its thresholds; that ROI judgement now belongs to EIE, so every entity
+with a gap is eligible.
 
 ### Activation Steps
 
@@ -843,20 +865,29 @@ strict default without an opt-out.
 **Flag**: `HEALTH_API_ENABLED=True` (default on; `docker-compose.prod.yml` also sets it explicitly)
 
 EIE's enrichment trigger is the intended caller: it sends `health-assess`
-through Gate and reads `critical_gaps`, `enrichment_targets`, `readiness_score`,
-`grade` and `gate_completeness`. CEG dispatches no enrichment for those calls:
-`auto_enrich_via_gate` stays off, and `health_batch_assess` never dispatches.
+through Gate (`health_batch_assess` for sweeps, `health_assess` for single
+records) and reads `entity_health.critical_gaps`, `enrichment_targets`,
+`readiness_score`, `grade` and `gate_completeness`.
+
+**The enrichment trigger lives in EIE (operator decision 2026-11-15).** CEG's
+own trigger — `compute_enrichment_priority` (the ROI priority),
+`trigger_reenrichment_v2` and `engine.gate_egress.request_enrichment` (the
+CEG → Gate → EIE `enrich` request) — was retired once EIE's trigger shipped
+(EIE #350, #351, #352), with its flags `AUTO_ENRICH_VIA_GATE` and
+`HEALTH_PRIORITY_STALENESS_ENABLED` and the unreachable
+`engine/health/nightly_health_scan.py` (an ROI-sorted enrichment queue no
+scheduler, handler or chassis called). CEG sends no enrichment request.
+`enrichment_priority` and `enrichment_dispatch` stay on every response,
+always `null`, deprecated and retained for wire compatibility; EIE never read
+them. `tests/architecture/test_seam_gate_only.py::test_ceg_sends_no_enrichment_request`
+locks this.
 Set `HEALTH_API_ENABLED=false` to restore the dormant surface (every health
 subaction answers `{"status": "disabled"}`).
 
 Exposes `engine/health/api.py` through the subactions `health_assess`,
 `health_batch_assess` and `health_report`. That module implemented three
-handlers and was imported by nothing, so `request_enrichment` — the whole
-CEG → Gate → EIE direction — had no trigger an inbound packet could reach.
-
-`AUTO_ENRICH_VIA_GATE` is not a substitute: it gates only the eventual outbound
-Gate request, not assessment, reporting, or conversion-event tracking. The
-surface needs a gate of its own, which is what this is.
+handlers and was imported by nothing (CEG-006). The surface needs a gate of its
+own, which is what this is.
 
 ### Route (HEALTH-01)
 
