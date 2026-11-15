@@ -56,6 +56,7 @@ services:
       # canonical `health-assess` route (HEALTH-01). Parity with engine/spec.yaml is
       # asserted by tests/architecture/test_seam_gate_only.py.
       L9_ALLOWED_ACTIONS: match,sync,admin,outcomes,resolve,health,healthcheck,health-assess,score
+      HEALTH_API_ENABLED: "true"
       # GATE-KEY-01: Gate ed25519 key id(s); startup refuses prod without them and
       # refuses hmac-sha256 Gate signatures. score stays off (REMOTE_SCORE_ENABLED unset).
       L9_GATE_SIGNING_KEY_IDS: ${L9_GATE_SIGNING_KEY_IDS:?L9_GATE_SIGNING_KEY_IDS must name the Gate ed25519 key id(s) (GATE-KEY-01)}

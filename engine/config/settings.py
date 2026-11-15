@@ -246,8 +246,10 @@ class Settings(BaseSettings):
     # CEG-006: the `health_*` admin subactions make engine/health/api.py
     # reachable. auto_enrich_via_gate gates only the eventual outbound Gate
     # request, not assessment, reporting or conversion tracking, so the surface
-    # itself needs its own gate. Mechanism ships dormant; operator activates.
-    health_api_enabled: bool = False
+    # itself needs its own gate. Active (operator decision 2026-11-15): EIE's
+    # enrichment trigger reads readiness through Gate `health-assess`. Nothing
+    # is dispatched from here while auto_enrich_via_gate stays off.
+    health_api_enabled: bool = True
     # CEG-009: some domain packs compile to Cypher that cannot execute (a
     # `RELATES_TO` fallback for gates written with `pattern`/`condition`, scalar
     # `queryparam` values emitted as parameter names such as `$85.0`, or a
