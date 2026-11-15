@@ -1,0 +1,216 @@
+# --- L9_META ---
+# l9_schema: 1
+# repo: Quantum-L9/Cognitive.Engine.Graphs
+# path: .l9/deployment.yaml
+# layer: deployment
+# owner: platform
+# status: candidate
+# updated: 2026-11-15
+# --- /L9_META ---
+#
+# CEG's deployment contract (l9.deployment-profile/v2, Quantum-L9/l9-deploy
+# ADR-0008), rendered from l9-deploy templates/consumer/stateful-container. The
+# candidate names its own target. A committed profile deploys nothing by
+# itself: only a release request for an allowed source ref reaches l9-deploy,
+# and l9-deploy still requires its protected-environment approval.
+#
+# Supersedes .github/workflows/k8s-deploy.yml (it needs a KUBECONFIG secret
+# that does not exist, and its chart path does not exist); that workflow is
+# left in place until this path has shipped a release.
+#
+# Human go-live steps: Quantum-L9/Constellation.Gate
+# docs/runbooks/l9-deploy-go-live.md.
+schema: l9.deployment-profile/v2
+project:
+  # Compose project name on the host; on the l9-runtime network the container
+  # answers as cognitive-engine-graphs-app-1, the address Gate's
+  # node_registry.l9-runtime.yaml routes to.
+  id: cognitive-engine-graphs
+  repository: Quantum-L9/Cognitive.Engine.Graphs
+  owner_team: platform
+  # Durable state is the external Neo4j graph; the container holds none.
+  runtime_profile: stateful-container
+artifact:
+  registry: ghcr.io
+  image: ghcr.io/quantum-l9/cognitive.engine.graphs
+runtime:
+  architecture: linux/amd64
+  container_port: 8000
+  user: non_root
+  read_only_root_filesystem: false
+  stop_grace_seconds: 30
+  # Non-secret, environment-invariant settings only (mirroring
+  # docker-compose.prod.yml). Compose gives these precedence over the rendered
+  # runtime.env. Every secret and every environment-specific value
+  # (L9_ENVIRONMENT, L9_ENV, L9_SIGNING_*, L9_GATE_SIGNING_KEY_IDS,
+  # NEO4J_PASSWORD) comes from Infisical.
+  environment:
+    L9_CHASSIS: sdk
+    L9_NODE_NAME: graph
+    L9_GATE_NODE_NAME: gate
+    GATE_URL: http://constellation-gate-app-1:9000
+    # CEG registers from engine/spec.yaml, whose internal_url is
+    # http://graph:8000, and the SDK offers no override. l9-deploy reaches a
+    # release only at <project.id>-app-1, so self-registration would point Gate
+    # at an address that does not resolve on l9-runtime. Gate instead seeds CEG
+    # from its node_registry.l9-runtime.yaml (same actions, owner ceg). With
+    # registration off the SDK reports participation `disabled`, which is ready.
+    GATE_REGISTRATION_ENABLED: "false"
+    L9_REQUIRE_SIGNATURE: "true"
+    L9_ENFORCE_GATE_ONLY_INGRESS: "true"
+    # The SDK node config defaults HOST to loopback; inside the container it
+    # must bind all interfaces. ingress none publishes no host port.
+    HOST: 0.0.0.0
+    API_PORT: "8000"
+    NEO4J_URI: bolt://ceg-neo4j:7687
+    NEO4J_USERNAME: neo4j
+    NEO4J_DATABASE: neo4j
+    L9_WAIT_FOR_NEO4J: "true"
+    DOMAINS_ROOT: /app/domains
+  # Domain packs are not baked into the image; the operator owns the pack root
+  # (docker-compose.prod.yml CEG_DOMAINS_DIR). Read-only.
+  volumes:
+    - source: /srv/l9/config/cognitive-engine-graphs/domains
+      target: /app/domains
+      read_only: true
+health:
+  # No published ingress: CEG is reached only by Gate. HTTP probes run on the
+  # deployment runner and need published ingress, so these run on the host and
+  # call the liveness route from inside the release container.
+  startup:
+    type: command
+    command:
+      - docker
+      - exec
+      - cognitive-engine-graphs-app-1
+      - python
+      - -c
+      - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health', timeout=5)"
+    timeout_seconds: 15
+    interval_seconds: 5
+    attempts: 24
+  post_deploy:
+    type: command
+    command:
+      - docker
+      - exec
+      - cognitive-engine-graphs-app-1
+      - python
+      - -c
+      - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health', timeout=5)"
+    timeout_seconds: 15
+    interval_seconds: 5
+    attempts: 12
+release:
+  strategy: replace
+  automatic_rollback: true
+  stabilization_seconds: 30
+migrations:
+  # CEG has no migration tool; the graph schema is applied by the engine.
+  enabled: false
+  backup_required: false
+storage:
+  persistent_volumes: []
+services:
+  # The operator-provisioned Neo4j 5 Enterprise (+ GDS) container on the
+  # external network l9-runtime with a named volume and no published host port
+  # (runbook, "Databases"). mode external: l9-deploy never creates it. The
+  # probe runs inside the release container, which is on that network.
+  # PostgreSQL (POSTGRES_DSN, audit flush) is optional and off by default.
+  neo4j:
+    mode: external
+    required: true
+    probe:
+      type: database
+      command:
+        - docker
+        - exec
+        - cognitive-engine-graphs-app-1
+        - python
+        - -c
+        - "import socket; socket.create_connection(('ceg-neo4j', 7687), 5).close()"
+      timeout_seconds: 15
+      interval_seconds: 5
+      attempts: 6
+backup:
+  # Argument vectors l9-deploy runs on the host over SSH after str.format_map
+  # with project, environment and request_id (a literal brace would have to be
+  # doubled; these use none). With no migration and no before_deploy volume
+  # there is no pre-deploy backup; these run from l9-deploy's backup-verify
+  # workflow. Neo4j 5 Enterprise serves online backup on 127.0.0.1:6362 inside
+  # its own container by default, so neo4j-admin runs there and the artifact is
+  # copied out; no credential is on any command line.
+  command:
+    - sh
+    - -c
+    - |-
+      set -eu
+      umask 077
+      dir=/srv/l9/backups/{project}/{environment}
+      out="$dir/{request_id}.tar.gz"
+      mkdir -p "$dir"
+      trap 'rm -f "$out.tmp"; docker exec ceg-neo4j rm -rf /tmp/l9-backup >/dev/null 2>&1 || true' EXIT
+      docker exec ceg-neo4j rm -rf /tmp/l9-backup
+      docker exec ceg-neo4j mkdir -p /tmp/l9-backup
+      docker exec ceg-neo4j neo4j-admin database backup --to-path=/tmp/l9-backup neo4j
+      docker cp ceg-neo4j:/tmp/l9-backup - | gzip > "$out.tmp"
+      gzip -dc "$out.tmp" | tar -t | grep -q '\.backup$'
+      mv "$out.tmp" "$out"
+      sha256sum "$out" > "$out.sha256"
+      printf '%s\n' "$out"
+  verify_command:
+    - sh
+    - -c
+    - >-
+      f="$(ls -1t /srv/l9/backups/{project}/{environment}/*.tar.gz | head -n 1)"
+      && test -n "$f"
+      && exec /usr/local/sbin/l9-backup-verify "$f"
+  # Isolated restore: the newest verified backup is restored into a throwaway,
+  # network-less Neo4j of the same pinned image, never into the live database,
+  # and must pass a consistency check.
+  restore_test_command:
+    - sh
+    - -c
+    - >-
+      set -eu;
+      f="$(ls -1t /srv/l9/backups/{project}/{environment}/*.tar.gz | head -n 1)";
+      /usr/local/sbin/l9-backup-verify "$f";
+      t="$(mktemp -d)";
+      trap 'rm -rf "$t"' EXIT;
+      gzip -dc "$f" | tar -x -C "$t";
+      docker run --rm --network none -e NEO4J_ACCEPT_LICENSE_AGREEMENT=yes -v "$t":/backups:ro
+      neo4j:5.15-enterprise@sha256:b8491b6dcf998f216079d4793dde4b7d81759d8c05792fa48787c810e9e21e52
+      sh -c 'neo4j-admin database restore --from-path=/backups/l9-backup neo4j && neo4j-admin database check neo4j'
+  timeout_seconds: 1800
+secrets:
+  authority: infisical
+  runtime_mode: deploy_render
+  # Proposed slug; an Infisical project gets its slug at creation. If it
+  # differs, this value changes to match.
+  project_slug: cognitive-engine-graphs
+targets:
+  # PROPOSAL, not yet operator-confirmed: the shared host C1 named by
+  # Quantum-L9/l9-graphiti-memory's production target (protected; host key is
+  # an evidence lead to re-verify over a trusted channel before any release).
+  # docker: verify never changes the host's Docker. ingress: none publishes
+  # nothing; only Gate reaches CEG, over l9-runtime. backup_tools: postgres
+  # installs /usr/local/sbin/l9-backup-verify, which the backup commands call.
+  # staging: not declared. l9-deploy names the Compose project after
+  # project.id alone, so staging and production of one project cannot share a
+  # host; the staging server is a human decision.
+  production:
+    server:
+      address: 46.62.243.82
+      ssh:
+        user: actions
+        port: 22
+      host_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICMwpLXB2J962/OrrUqXNGwiHb39e7f9jSKixo97xJxU
+    host:
+      docker: verify
+      backup_tools: postgres
+    ingress:
+      mode: none
+      hostnames: []
+    allowed_source_refs:
+      - refs/tags/v*
+    secrets_environment: prod
