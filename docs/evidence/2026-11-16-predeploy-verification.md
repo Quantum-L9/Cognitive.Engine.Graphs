@@ -77,8 +77,15 @@ signatures not made under `L9_GATE_SIGNING_KEY_IDS` (GATE-KEY-01).
 
 Tenant: `plasticos` for every entry. This matches CEG's identity rule (tenant id
 == domain spec id == Neo4j database name, HEALTH-05) and the tracked PlasticOS
-pack (`domain.id: plasticos`). Whether the deployed CEG serves a `plasticos`
-pack and database is **UNVERIFIED** until CEG is running (`admin get_domain`).
+pack (`domain.id: plasticos`). Two separate checks remain **UNVERIFIED** until
+CEG is running:
+
+- Pack admission: `admin get_domain` for `plasticos` returns the spec. This
+  only loads the domain pack (`engine/handlers.py`, subaction `get_domain`); it
+  never touches Neo4j.
+- Database access: a tenant-scoped query reaches the `plasticos` Neo4j database
+  (for example `admin init_schema`, which runs through `GraphDriver` against
+  `database=plasticos`). `get_domain` succeeding proves nothing about this.
 
 ## 4. GitHub settings
 
@@ -97,6 +104,21 @@ variables and packages endpoints (HTTP 403 "not permitted through this proxy").
 They need an operator-side read (GitHub settings page, or `gh api` with an
 admin token).
 
+### 4.1 l9-deploy
+
+Source: CTO State Node, read-only, l9-deploy main `2878596`. Not read by this
+session.
+
+| # | Check | Status |
+|---|---|---|
+| G8 | A self-hosted runner labelled exactly `self-hosted`, `l9-deployment`, `hetzner-private` is online. The deploy job runs there and connects over SSH with that host's own key; there is no SSH-key secret in GitHub. | **UNVERIFIED** |
+| G9 | That runner's public key is in the target's `authorized_keys` for the contract's `ssh.user`; the contract's host key matches the fingerprint `deploy-preflight.yml` prints and a key read over a trusted channel (F8). | **UNVERIFIED** |
+| G10 | `secrets.GH_TOKEN` (read by `deploy-dispatch.yml`, `rollback.yml`) and `vars.INFISICAL_IDENTITY_ID` (OIDC audience `https://github.com/Quantum-L9`; the identity must trust l9-deploy and read each consumer's `secrets.project_slug` project) exist. | **UNVERIFIED** |
+| G11 | Environment `production` has a required reviewer other than the requester, with self-review prevented. | **UNVERIFIED** |
+
+`L9_RUNNER_REGISTRATION_TOKEN` and `L9_RUNNER_SHA256` serve runner maintenance
+only; AWS and `L9_STATE_ROLE_ARN` are not used by application deploys.
+
 ## 5. Findings
 
 | # | Severity | Owner | Finding | Fix |
@@ -107,7 +129,7 @@ admin token).
 | F4 | Medium | CTO CEG (Gate, CEG) | Gate main has no deletion/force-push protection; CEG's "CI Gate" ruleset targets no branch. | Add `~DEFAULT_BRANCH` to CEG's ruleset; add an equivalent ruleset to Gate. Operator action in repository settings. |
 | F5 | High | CTO CEG (Gate, CEG) | Release is driven by `refs/tags/v*`, but no tag ruleset restricts who can create those tags. | Add a tag ruleset limiting `v*` creation to release owners. Operator action. |
 | F6 | Low | Gate (pre-existing) | Gate main fails SonarCloud's quality gate on new-code security rating "C" (workflow pip installs, Dockerfile `--only-binary`, missing lock file, a path-traversal hotspot in a script). Pre-dates #43/#44. | Gate PR #34 covers part; workflow and Dockerfile edits need operator approval. |
-| F7 | Medium | Template owner (unassigned) | `l9-release.yml` in Gate #45 and CEG #499 is hand-written, not the l9-deploy template; the template itself pins `container-release.yml@v1` (a movable tag). Scorecard flags the job-level write permissions. | Fix once in the template (per-job least privilege, SHA pin, documented need for packages/id-token/attestations); repos adopt verbatim copies. |
+| F7 | Medium | Template owner (unassigned) | `l9-release.yml` in Gate #45 and CEG #499 is hand-written, not the l9-deploy template, because the template calls the reusable workflow `container-release.yml@v1`, which does not exist in l9-ci-core (recorded in CEG #499's workflow header); both PRs use Core's published composite action `.github/actions/container-release` at a pinned SHA instead. The template is therefore not runnable as written. Scorecard also flags the job-level write permissions. | Fix once in the template: replace the nonexistent reusable workflow with Core's `container-release` composite action, pin it by SHA, set per-job least privilege, document the need for packages/id-token/attestations; repos then adopt verbatim copies. |
 | F8 | Info | Operator | Both deployment profiles name C1 (`46.62.243.82`) as production, marked "PROPOSAL, not yet operator-confirmed"; the SSH host key must be re-verified over a trusted channel. | Operator confirmation before any release. |
 | F9 | Info | Operator | CEG's `docker-compose.prod.yml` signs with `hmac-sha256`, so Gate must hold CEG's shared secret as its verifying key. Gate's own signature must be ed25519 (GATE-KEY-01); the nodes' algorithm is not decided. | Decide node signing algorithm (ed25519 recommended) before keys are generated. |
 
@@ -116,5 +138,5 @@ admin token).
 1. T10 run and green.
 2. K1, K2 and K4 generated and exchanged; K3's Odoo signing env solved.
 3. F1–F5 fixed; F7 template owner named and template fixed.
-4. G5–G7 confirmed by an operator-side read.
+4. G5–G11 confirmed by an operator-side read.
 5. F8 and F9 decided by the operator.
