@@ -13,8 +13,8 @@
 # to start with zero jobs, because it resolves to no commit.
 #
 # Pin record (ops/governance-v1-pin.txt):
-#   Quantum-L9/.github/.github/workflows/governance-pr.yml@v1
-#   Quantum-L9/.github/.github/workflows/governance-issue.yml@v1
+#   Quantum-L9/.github/.github/workflows/governance-pr.yml@d632486ed5f2d4f7515eb89242b3a7a9123a41cb
+#   Quantum-L9/.github/.github/workflows/governance-issue.yml@d632486ed5f2d4f7515eb89242b3a7a9123a41cb
 # Preflight (verified 2026-08-24) — read the PEELED ref, not the tag ref:
 #   git ls-remote https://github.com/Quantum-L9/.github.git 'refs/tags/v1^{}'
 # must match the pinned commit before re-seeding this caller.
@@ -46,11 +46,13 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: Quantum-L9/.github/.github/workflows/governance-pr.yml@3e841ea4f7f8be2a8c9fc45cad5bed46fe801d08 # v1
+    uses: Quantum-L9/.github/.github/workflows/governance-pr.yml@d632486ed5f2d4f7515eb89242b3a7a9123a41cb # v1
+    secrets:
+      L9_GITHUB_READ_TOKEN: ${{ secrets.L9_GITHUB_READ_TOKEN }}
 
   issue:
     if: github.event_name == 'issues'
     permissions:
       contents: read
       issues: write
-    uses: Quantum-L9/.github/.github/workflows/governance-issue.yml@3e841ea4f7f8be2a8c9fc45cad5bed46fe801d08 # v1
+    uses: Quantum-L9/.github/.github/workflows/governance-issue.yml@d632486ed5f2d4f7515eb89242b3a7a9123a41cb # v1
