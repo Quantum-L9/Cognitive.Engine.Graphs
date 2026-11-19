@@ -662,7 +662,10 @@ async def test_plasticos_buyer_scores_match_independent_dimensions(design_pack_d
         assert row["eligible"] is True
         assert row["score_scale"] == "0_to_1"
         assert row["entity_ref"] == facility_id
-        assert row.get("confidence_flag") != "monoculture"
+        flags = row.get("confidence_flag")
+        if isinstance(flags, str):
+            flags = [flags]
+        assert "monoculture" not in list(flags or [])
     assert "facility:pvc-only" not in got
     assert "facility:blank-form" not in got
     assert "facility:no-form" not in got

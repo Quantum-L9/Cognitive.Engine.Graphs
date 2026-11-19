@@ -141,6 +141,7 @@ def test_plasticos_facilities_sync_links_processed_polymers(plasticos_spec):
     assert "FOREACH (child_row IN coalesce(row.children.processed_polymers, []) |" in cypher
     assert "MERGE (c:PolymerFamily {code: child_row.code})" in cypher
     assert "ON CREATE SET c += child_row{.*, line_id: null, direction: null, form: null}, c._tenant = $tenant" in cypher
+    assert "DELETE stale" in cypher
     assert "MERGE (n)-[rel:PROCESSES {line_id: child_row.line_id}]->(c)" in cypher
     assert (
         "SET rel.line_id = child_row.line_id, rel.direction = child_row.direction, rel.form = child_row.form, rel._tenant = $tenant"

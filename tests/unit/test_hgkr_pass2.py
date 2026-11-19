@@ -617,15 +617,22 @@ class TestSoftCommunityMatch:
 class TestNegativeSampling:
     """S2-19: Negative sampling for evaluation robustness."""
 
-    @pytest.mark.asyncio
-    @pytest.mark.skip(reason="Evaluate subaction uses different implementation from PR #62")
-    async def test_evaluate_with_negatives_computes_auc(self) -> None:
-        """Evaluate subaction should compute AUC when negatives provided.
+    def test_supported_evaluate_is_precision_recall_and_ndcg_not_auc(self) -> None:
+        """The admin evaluate path reports precision, recall, and NDCG.
 
-        Note: This test was designed for a different evaluate implementation.
-        The current evaluate subaction (from PR #62) uses precision/recall/NDCG
-        metrics instead of the AUC-based approach tested here.
+        The retired test expected an AUC from a pre-PR-62 evaluator. That
+        metric is not what ``_handle_evaluate`` returns, so it is not a
+        supported scoring capability and it is not skipped into a pass.
         """
+        import inspect
+
+        from engine.handlers import _handle_evaluate
+
+        source = inspect.getsource(_handle_evaluate)
+        assert "precision_at_k" in source or "precision" in source
+        assert "recall" in source
+        assert "ndcg_at_k" in source
+        assert "auc" not in source.lower()
 
 
 # ═══════════════════════════════════════════════════════════

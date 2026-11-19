@@ -1524,21 +1524,36 @@ def missing_edge_property_reason(spec: DomainSpec, gate: GateSpec) -> str | None
     if not predicates:
         return None
     edge_type = gate.edgetype or ""
-    declared: set[str] | None = None
-    for edge in spec.ontology.edges:
-        if edge.type == edge_type:
-            declared = {prop.name for prop in edge.properties}
-            break
-    if declared is None:
+    matched = [
+        edge
+        for edge in spec.ontology.edges
+        if edge.type == edge_type
+        and (gate.fromnode is None or edge.from_ == gate.fromnode)
+        and (gate.tonode is None or edge.to == gate.tonode)
+    ]
+    if not matched:
         return "Gate " + gate.name + " edge predicate references unknown edge type " + edge_type
+    if len(matched) > 1:
+        return "Gate " + gate.name + " edge predicate matches more than one " + edge_type + " edge"
+    declared = {prop.name: prop for prop in matched[0].properties}
     for predicate in predicates:
-        if predicate.property not in declared:
+        prop = declared.get(predicate.property)
+        if prop is None:
             return (
                 "Gate "
                 + gate.name
                 + " edge predicate property "
                 + predicate.property
                 + " is not declared on edge "
+                + edge_type
+            )
+        if predicate.present and prop.type is not PropertyType.STRING:
+            return (
+                "Gate "
+                + gate.name
+                + " edge predicate present on "
+                + predicate.property
+                + " requires a string property of edge "
                 + edge_type
             )
     return None

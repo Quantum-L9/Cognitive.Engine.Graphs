@@ -11,6 +11,8 @@ Coverage:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from engine.scoring.belief_propagation import (
@@ -167,3 +169,14 @@ class TestHopTrustFromEntry:
         for status in ("COMPLETED", "PENDING", "FAILED", "TIMEOUT"):
             trust = hop_trust_from_entry(status, 10000, 30000)
             assert 0.0 <= trust <= 1.0
+
+
+def test_belief_propagation_has_no_engine_caller() -> None:
+    """The module is dormant: no engine module imports it, so it cannot change a score."""
+    root = Path(__file__).resolve().parents[2] / "engine"
+    hits = [
+        str(path.relative_to(root.parent))
+        for path in root.rglob("*.py")
+        if path.name != "belief_propagation.py" and "belief_propagation" in path.read_text(encoding="utf-8")
+    ]
+    assert hits == []

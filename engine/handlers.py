@@ -1226,12 +1226,18 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                         scaled = round((cand["score"] - raw_min) / score_range, 6)
                         changed = changed or not _same_score(float(scaled), float(cand["score"]))
                         cand["score"] = scaled
-            elif len(finite_scores) == 1 and len(candidates_out) == 1 and isinstance(candidates_out[0], dict):
-                if not _same_score(float(candidates_out[0]["score"]), 1.0):
-                    candidates_out[0]["score"] = 1.0
-                    changed = True
+            elif len(finite_scores) == 1:
+                for cand in candidates_out:
+                    if isinstance(cand, dict) and isinstance(cand.get("score"), (int, float)):
+                        if not _same_score(float(cand["score"]), 1.0):
+                            cand["score"] = 1.0
+                            changed = True
             # A tied range leaves every finite score unchanged. Do not label it normalized.
             scoring_meta["normalization_applied"] = changed
+        if not _w2_settings.null_score_ineligible_enabled:
+            for cand in candidates_out:
+                if isinstance(cand, dict) and cand.get("score") is None:
+                    cand["score"] = 0.0
     else:
         scoring_meta["raw_max"] = 0.0
         scoring_meta["raw_min"] = 0.0
@@ -1280,7 +1286,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                     )
                     c["match_explanation"] = explanation
 
-    if candidates_out:
+    if candidates_out and _w2_settings.match_consumer_contract_enabled:
         _attach_match_consumer_fields(
             candidates_out,
             id_property=_candidate_id_property(domain_spec, candidate_labels[0]),

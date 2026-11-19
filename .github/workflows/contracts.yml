@@ -82,8 +82,18 @@ jobs:
     needs: [contract-files, contract-scan, meta-headers, lint]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+      - name: Checkout pinned Odoo consumer
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        with:
+          repository: cryptoxdog/IB-Odoo_19
+          ref: 3d7212355cfa7db838807c2f39181cf95473ca76
+          path: odoo-consumer
+          persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
       - run: bash tools/deps/install_locked.sh full
-      - run: PYTHONPATH=. pytest tests/ -v --tb=short
+      - name: Test Suite
+        env:
+          L9_ODOO_CONSUMER: ${{ github.workspace }}/odoo-consumer
+        run: PYTHONPATH=. pytest tests/ -v --tb=short

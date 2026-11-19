@@ -18,6 +18,7 @@ It is not a published interface and it is not the subject of the proof.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -29,7 +30,17 @@ from referencing import Registry, Resource
 _CEG = Path(__file__).resolve().parents[2]
 _PAYLOADS = _CEG / "contracts" / "payloads"
 _SCHEMA = _PAYLOADS / "match-response.schema.yaml"
-_OPPORTUNITY = _CEG.parent / "odoo" / "contracts" / "schemas" / "examples" / "supply-opportunity.json"
+
+
+def odoo_consumer_root() -> Path:
+    """Pinned Odoo checkout. CI sets L9_ODOO_CONSUMER; a sibling ../odoo is the local default."""
+    override = os.environ.get("L9_ODOO_CONSUMER")
+    if override:
+        return Path(override)
+    return _CEG.parent / "odoo"
+
+
+_OPPORTUNITY = odoo_consumer_root() / "contracts" / "schemas" / "examples" / "supply-opportunity.json"
 _REQUEST_FIXTURE = _PAYLOADS / "examples" / "match-request.json"
 
 UNPUBLISHED_REQUIRED = (
@@ -74,7 +85,7 @@ def partner_id(entity_ref: object) -> int | None:
 
 def map_match_if_sibling(result: dict[str, Any]) -> Any | None:
     """The unmodified sibling mapper when that checkout is present, else None."""
-    mapper = _CEG.parent / "odoo" / "plasticos_gate" / "services" / "gate_mappers.py"
+    mapper = odoo_consumer_root() / "plasticos_gate" / "services" / "gate_mappers.py"
     if not mapper.is_file():
         return None
     import sys

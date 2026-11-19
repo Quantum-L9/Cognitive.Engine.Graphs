@@ -230,8 +230,25 @@ def _line_identity_defects(scope: _EndpointScope, child: ChildSyncSpec, declared
     defects: list[str] = []
     if child.edgeidentity is None or child.edgeidentity not in names:
         defects.append(f"{scope.where}: childsync {child.field!r} edgeidentity must be one of its edgeproperties")
+    if child.targetid in names or child.edgeidentity == child.targetid:
+        defects.append(
+            f"{scope.where}: childsync {child.field!r} must not use targetid {child.targetid!r} as an edge property"
+        )
     item_props = {prop.name: prop for prop in _item_properties(declared)}
-    edge = next((item for item in scope.domain_spec.ontology.edges if item.type == child.edgetype), None)
+    if child.edgedirection == "childtoparent":
+        source_label, target_label = child.targetnode, scope.target.label
+    else:
+        source_label, target_label = scope.target.label, child.targetnode
+    matched = [
+        item
+        for item in scope.domain_spec.ontology.edges
+        if item.type == child.edgetype and item.from_ == source_label and item.to == target_label
+    ]
+    edge = matched[0] if len(matched) == 1 else None
+    if len(matched) > 1:
+        defects.append(
+            f"{scope.where}: childsync edgetype {child.edgetype!r} matches more than one {source_label}->{target_label} edge"
+        )
     edge_props = {prop.name: prop for prop in edge.properties} if edge is not None else {}
     if edge is None:
         defects.append(f"{scope.where}: childsync edgetype {child.edgetype!r} is not declared in ontology.edges")
