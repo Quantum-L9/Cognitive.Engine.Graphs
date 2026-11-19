@@ -9,8 +9,8 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
-G01-CEG-ODOO-RESPONSE against Neo4j. ``handle_match`` runs on the synthetic
-orbital pack; its payload is decoded by the unmodified Odoo mapper.
+Generic Neo4j regression for a namespaced ref on the orbital pack. PlasticOS
+buyer selection is the plasticos identity test. The mapper is not copied.
 """
 
 from __future__ import annotations

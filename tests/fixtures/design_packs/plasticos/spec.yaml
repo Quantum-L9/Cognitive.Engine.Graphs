@@ -42,8 +42,8 @@ ontology:
       type: string
       required: false
       description: >
-        Stored buyer identity. Match returns it only when it is res.partner:<integer>.
-        A bare facility id is not rewritten into one.
+        Stored source identity. Match returns a namespaced ref unchanged.
+        A bare facility id is not given a namespace.
     - name: name
       type: string
       required: true

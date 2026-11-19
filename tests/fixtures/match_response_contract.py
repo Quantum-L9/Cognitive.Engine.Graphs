@@ -87,6 +87,16 @@ def map_match_if_sibling(result: dict[str, Any]) -> Any | None:
     return map_match_response(result)
 
 
+def require_unmodified_odoo_mapper(result: dict[str, Any]) -> Any:
+    """The sibling mapper. An absent checkout does not count as a passing consumer proof."""
+    import pytest
+
+    mapped = map_match_if_sibling(result)
+    if mapped is None:
+        pytest.fail("G01 consumer proof is NOT_RUN: the sibling Odoo mapper is absent, so this test does not pass")
+    return mapped
+
+
 def diagnostic_request_quantity_lbs() -> float:
     """The draft match-request fixture's quantity, used only to compare with the frozen payload."""
     payload = json.loads(_REQUEST_FIXTURE.read_text(encoding="utf-8"))

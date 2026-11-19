@@ -589,19 +589,18 @@ def _candidate_id_property(domain_spec: DomainSpec, label: str) -> str:
     return _FALLBACK_CANDIDATE_ID_PROPERTY
 
 
-_PARTNER_ENTITY_REF = re.compile(r"^res\.partner:[0-9]+$")
+def _namespaced_entity_ref(value: Any) -> str | None:
+    """A stored ``namespace:id`` identity, or None.
 
-
-def _partner_entity_ref(value: Any) -> str | None:
-    """A stored ``res.partner:<integer>`` identity, or None.
-
-    A bare facility id is not given a model, and any other ``<model>:<id>``
-    is left unresolved rather than presented as the buyer.
+    The pattern is the contract ``ENTITY_REF_PATTERN``. A bare id is not given
+    a namespace, and a namespaced id is returned unchanged.
     """
+    from engine.models.payloads import ENTITY_REF_PATTERN
+
     if not isinstance(value, str):
         return None
     text = value.strip()
-    if _PARTNER_ENTITY_REF.fullmatch(text) is None:
+    if re.fullmatch(ENTITY_REF_PATTERN, text) is None:
         return None
     return text
 
@@ -669,7 +668,8 @@ def _attach_match_consumer_fields(
 ) -> None:
     """Lift the fields a match consumer reads onto each returned row.
 
-    The buyer identity is the stored ``res.partner:<integer>`` ref. A non-finite
+    The candidate identity is a stored namespaced ref, or the domain id when
+    that id is already namespaced. A bare id is omitted. A non-finite
     score is not eligible and receives no rank. A finite dimension projection is
     evidence only when its source was stored; a clamped zero from an absent
     source stays missing evidence. The draft MatchResponse model is not emitted.
@@ -681,9 +681,9 @@ def _attach_match_consumer_fields(
         node = row.get("candidate")
         node = node if isinstance(node, dict) else {}
         entity_ref = (
-            _partner_entity_ref(row.get("entity_ref"))
-            or _partner_entity_ref(node.get("entity_ref"))
-            or _partner_entity_ref(node.get(id_property))
+            _namespaced_entity_ref(row.get("entity_ref"))
+            or _namespaced_entity_ref(node.get("entity_ref"))
+            or _namespaced_entity_ref(node.get(id_property))
         )
         if entity_ref is not None:
             row["entity_ref"] = entity_ref
