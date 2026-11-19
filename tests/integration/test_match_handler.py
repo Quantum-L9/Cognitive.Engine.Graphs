@@ -18,6 +18,8 @@ tests/fixtures/design_packs explicitly through ``design_pack_deps``.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 import pytest_asyncio
 
@@ -404,3 +406,395 @@ async def test_scalar_membership_and_equality_forms_on_neo4j(graph_driver):
     except ClientError:
         return  # Neo4j rejects IN over a non-list operand outright (type error)
     assert rows[0]["member"] is not True
+
+
+# G03-MATCH-SCORING. point.distance on this Neo4j uses spherical radius 6_378_140 m:
+# one degree of latitude is that radius times pi/180. The formulas below are the
+# dimension definitions, not the assembler's text.
+
+_EARTH_RADIUS_M = 6_378_140.0
+_BUYER = "supply_opportunity_to_buyer_facility"
+_SUPPLY = "buyer_demand_to_supply_opportunity"
+_MATCH_TONS = 18.0
+_OPPORTUNITY_TONS = 22.0
+_LOAD_LBS = 40000
+_BUYER_WEIGHTS = {
+    "geo_proximity": 0.25,
+    "credit_score": 0.15,
+    "contamination_tolerance_score": 0.1,
+    "community_match": 0.1,
+    "rate_score": 0.15,
+    "price_alignment": 0.15,
+    "recency": 0.1,
+}
+
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    radians = math.pi / 180.0
+    dlat = (lat2 - lat1) * radians
+    dlon = (lon2 - lon1) * radians
+    chord = math.sin(dlat / 2.0) ** 2 + math.cos(lat1 * radians) * math.cos(lat2 * radians) * math.sin(dlon / 2.0) ** 2
+    return 2.0 * _EARTH_RADIUS_M * math.asin(math.sqrt(chord))
+
+
+def _clamp(value: float) -> float:
+    if math.isnan(value):
+        return 0.0
+    return min(1.0, max(0.0, value))
+
+
+def _log_norm(value: float, maximum: float) -> float:
+    return _clamp(math.log(1.0 + value) / math.log(1.0 + maximum))
+
+
+def _buyer_dims(
+    *,
+    lat: float,
+    credit: float,
+    contamination: float,
+    community: int,
+    rate: float,
+    dated: bool,
+) -> dict[str, float]:
+    distance = _haversine_m(40.0, -75.0, lat, -75.0)
+    community_score = 0.92 if community == 7 else 0.2
+    price = 1.0 - abs(math.log(rate / 1000.0)) / 2.0 if rate > 0 else 0.0
+    recency = 0.6 if dated else 0.0
+    return {
+        "geo_proximity": _clamp(1.0 / (1.0 + distance / 800_000.0)),
+        "credit_score": _log_norm(credit, 100.0) if credit > -1.0 else 0.0,
+        "contamination_tolerance_score": _clamp(1.0 - contamination / 100.0),
+        "community_match": community_score,
+        "rate_score": _log_norm(rate, 1000.0) if rate > -1.0 else 0.0,
+        "price_alignment": _clamp(price),
+        "recency": recency,
+    }
+
+
+def _weighted(dims: dict[str, float]) -> float:
+    return sum(_BUYER_WEIGHTS[name] * value for name, value in dims.items())
+
+
+_FACILITY_SEED = """
+UNWIND $batch AS row
+MERGE (n:Facility {facility_id: row.facility_id})
+SET n += row.props
+SET n.last_transaction_date = CASE WHEN row.stamp_now THEN datetime() ELSE null END
+WITH n, row
+UNWIND row.lines AS line
+MERGE (p:PolymerFamily {code: line.code})
+MERGE (n)-[rel:PROCESSES {line_id: line.line_id}]->(p)
+SET rel.line_id = line.line_id, rel.direction = line.direction, rel.form = line.form
+"""
+
+
+def _line(facility_id: str, direction: str, form: str | None, code: str = "HDPE") -> dict[str, object]:
+    line: dict[str, object] = {"line_id": f"{facility_id}-line", "code": code, "direction": direction}
+    if form is not None:
+        line["form"] = form
+    return line
+
+
+def _props(lat: float = 40.0, **overrides: object) -> dict[str, object]:
+    props: dict[str, object] = {
+        "name": "Buyer",
+        "lat": lat,
+        "lon": -75.0,
+        "credit_score": 100.0,
+        "min_density": 0.9,
+        "max_density": 1.0,
+        "min_mfi": 2.0,
+        "max_mfi": 12.0,
+        "contamination_tolerance": 0.0,
+        "food_grade_certified": False,
+        "capacity_tons_month": 40.0,
+        "community_id": 7,
+        "rate_per_ton": 1000.0,
+    }
+    props.update(overrides)
+    return props
+
+
+@pytest.mark.asyncio
+async def test_plasticos_buyer_scores_match_independent_dimensions(design_pack_deps, graph_driver):
+    """Every active buyer dimension, plus a failed hard gate that a high score cannot restore."""
+    batch = [
+        {
+            "facility_id": "facility:fit",
+            "stamp_now": True,
+            "props": _props(),
+            "lines": [_line("facility:fit", "in", "PALLETS")],
+        },
+        {
+            "facility_id": "facility:offset",
+            "stamp_now": True,
+            "props": _props(lat=41.0),
+            "lines": [_line("facility:offset", "in", "TOTERS")],
+        },
+        {
+            "facility_id": "facility:null-capacity",
+            "stamp_now": True,
+            "props": _props(),
+            "lines": [_line("facility:null-capacity", "in", "PALLETS")],
+        },
+        {
+            "facility_id": "facility:outlier",
+            "stamp_now": False,
+            "props": _props(credit_score=-5.0, community_id=3, rate_per_ton=1_000_000.0),
+            "lines": [_line("facility:outlier", "in", "BALES")],
+        },
+        {
+            "facility_id": "facility:low-capacity",
+            "stamp_now": True,
+            "props": _props(capacity_tons_month=10.0),
+            "lines": [_line("facility:low-capacity", "in", "PALLETS")],
+        },
+        {
+            "facility_id": "facility:null-contamination",
+            "stamp_now": True,
+            "props": _props(),
+            "lines": [_line("facility:null-contamination", "in", "PALLETS")],
+        },
+        {
+            "facility_id": "facility:out-only",
+            "stamp_now": True,
+            "props": _props(),
+            "lines": [_line("facility:out-only", "out", "REGRIND")],
+        },
+        {
+            "facility_id": "facility:blank-form",
+            "stamp_now": True,
+            "props": _props(),
+            "lines": [_line("facility:blank-form", "in", "")],
+        },
+        {
+            "facility_id": "facility:no-form",
+            "stamp_now": True,
+            "props": _props(),
+            "lines": [_line("facility:no-form", "in", None)],
+        },
+        {
+            "facility_id": "facility:density-fail",
+            "stamp_now": True,
+            "props": _props(max_density=0.2),
+            "lines": [_line("facility:density-fail", "in", "PALLETS")],
+        },
+        {
+            "facility_id": "facility:wrong-polymer",
+            "stamp_now": True,
+            "props": _props(),
+            "lines": [_line("facility:wrong-polymer", "in", "PALLETS", code="PP")],
+        },
+    ]
+    batch[2]["props"].pop("capacity_tons_month")
+    batch[5]["props"].pop("contamination_tolerance")
+    await graph_driver.execute_write(cypher=_FACILITY_SEED, parameters={"batch": batch}, database=PLASTICOS)
+
+    from engine.handlers import handle_match
+
+    query = {
+        "polymer_type": "HDPE",
+        "density": 0.95,
+        "mfi": 8.0,
+        "contamination_pct": 0.0,
+        "requires_food_grade": False,
+        "volume_tons": _MATCH_TONS,
+        "lat": 40.0,
+        "lon": -75.0,
+        "target_price": 1000.0,
+        "community_id": 7,
+        "form": "PALLETS",
+        "color": "NATURAL",
+        "material_grade": "A",
+        "quantity_per_load_lbs": _LOAD_LBS,
+    }
+    payload = {"query": query, "match_direction": _BUYER, "top_n": 20}
+    first = await handle_match(PLASTICOS, payload)
+    second = await handle_match(PLASTICOS, payload)
+
+    expected = {
+        "facility:fit": _buyer_dims(lat=40.0, credit=100.0, contamination=0.0, community=7, rate=1000.0, dated=True),
+        "facility:offset": _buyer_dims(lat=41.0, credit=100.0, contamination=0.0, community=7, rate=1000.0, dated=True),
+        "facility:null-capacity": _buyer_dims(
+            lat=40.0, credit=100.0, contamination=0.0, community=7, rate=1000.0, dated=True
+        ),
+        "facility:outlier": _buyer_dims(
+            lat=40.0, credit=-5.0, contamination=0.0, community=3, rate=1_000_000.0, dated=False
+        ),
+    }
+    assert _weighted(expected["facility:fit"]) == pytest.approx(0.952)
+    assert _weighted(expected["facility:outlier"]) == pytest.approx(0.52)
+
+    def scored(result: dict) -> dict[str, dict]:
+        return {row["candidate"]["facility_id"]: row for row in result["candidates"]}
+
+    got = scored(first)
+    assert set(got) == set(expected)
+    assert got["facility:fit"]["score"] > got["facility:outlier"]["score"]
+    for facility_id, dims in expected.items():
+        row = got[facility_id]
+        for name, value in dims.items():
+            assert row["dimension_scores"][name] == pytest.approx(value, abs=1e-6)
+        assert row["score"] == pytest.approx(_weighted(dims), abs=1e-6)
+        assert row["score"] == pytest.approx(
+            sum(_BUYER_WEIGHTS[name] * row["dimension_scores"][name] for name in _BUYER_WEIGHTS),
+            abs=1e-6,
+        )
+        assert 0.0 <= row["score"] <= 1.0
+        assert row["eligible"] is True
+        assert row["score_scale"] == "0_to_1"
+        assert row["entity_ref"] == facility_id
+        assert row.get("confidence_flag") != "monoculture"
+    assert first["scoring_meta"]["normalization_applied"] is False
+    assert scored(second)["facility:fit"]["score"] == pytest.approx(got["facility:fit"]["score"])
+    assert scored(second)["facility:offset"]["dimension_scores"] == pytest.approx(
+        got["facility:offset"]["dimension_scores"]
+    )
+
+    stored = await graph_driver.execute_query(
+        cypher="MATCH (n) WHERE n.quantity_per_load_lbs IS NOT NULL RETURN count(n) AS n",
+        parameters={},
+        database=PLASTICOS,
+    )
+    assert stored[0]["n"] == 0
+
+
+@pytest.mark.asyncio
+async def test_declared_recency_feature_on_is_pure_decay(design_pack_deps, graph_driver, monkeypatch):
+    """The disabled legacy recency mix is not evidence for the declared-signal path."""
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "temporalproximity_declared_signals_enabled", True)
+    await graph_driver.execute_write(
+        cypher=_FACILITY_SEED,
+        parameters={
+            "batch": [
+                {
+                    "facility_id": "facility:fit",
+                    "stamp_now": True,
+                    "props": _props(),
+                    "lines": [_line("facility:fit", "in", "PALLETS")],
+                }
+            ]
+        },
+        database=PLASTICOS,
+    )
+    from engine.handlers import handle_match
+
+    result = await handle_match(
+        PLASTICOS,
+        {
+            "query": {
+                "polymer_type": "HDPE",
+                "contamination_pct": 0.0,
+                "volume_tons": _MATCH_TONS,
+                "lat": 40.0,
+                "lon": -75.0,
+                "target_price": 1000.0,
+                "community_id": 7,
+            },
+            "match_direction": _BUYER,
+            "top_n": 5,
+        },
+    )
+    row = result["candidates"][0]
+    assert row["dimension_scores"]["recency"] == pytest.approx(1.0, abs=1e-6)
+    dims = _buyer_dims(lat=40.0, credit=100.0, contamination=0.0, community=7, rate=1000.0, dated=True)
+    dims["recency"] = 1.0
+    assert row["score"] == pytest.approx(_weighted(dims), abs=1e-6)
+    assert row["score"] == pytest.approx(0.992, abs=1e-6)
+
+
+_OPPORTUNITY_SEED = """
+UNWIND $batch AS row
+MERGE (s:SupplyOpportunity {opportunity_id: row.opportunity_id})
+SET s += row
+WITH s
+MERGE (p:PolymerFamily {code: s.polymer_type})
+MERGE (s)-[:FULFILLS_POLYMER]->(p)
+"""
+
+
+@pytest.mark.asyncio
+async def test_supply_match_quantity_is_the_opportunity_payload(design_pack_deps, graph_driver):
+    """available_tons is the frozen opportunity quantity. A failing hard gate stays out."""
+    await graph_driver.execute_write(
+        cypher=_OPPORTUNITY_SEED,
+        parameters={
+            "batch": [
+                {
+                    "opportunity_id": "opportunity:approved",
+                    "facility_id": "facility:buyer-a",
+                    "polymer_type": "HDPE",
+                    "available_tons": _OPPORTUNITY_TONS,
+                    "lat": 40.0,
+                    "lon": -75.0,
+                    "rate_per_ton": 500.0,
+                    "active": True,
+                },
+                {
+                    "opportunity_id": "opportunity:short",
+                    "facility_id": "facility:buyer-a",
+                    "polymer_type": "HDPE",
+                    "available_tons": 10.0,
+                    "lat": 40.0,
+                    "lon": -75.0,
+                    "rate_per_ton": 500.0,
+                    "active": True,
+                },
+                {
+                    "opportunity_id": "opportunity:null-tons",
+                    "facility_id": "facility:buyer-a",
+                    "polymer_type": "HDPE",
+                    "lat": 40.0,
+                    "lon": -75.0,
+                    "rate_per_ton": 500.0,
+                    "active": True,
+                },
+                {
+                    "opportunity_id": "opportunity:inactive",
+                    "facility_id": "facility:buyer-a",
+                    "polymer_type": "HDPE",
+                    "available_tons": _OPPORTUNITY_TONS,
+                    "lat": 40.0,
+                    "lon": -75.0,
+                    "rate_per_ton": 500.0,
+                    "active": False,
+                },
+            ]
+        },
+        database=PLASTICOS,
+    )
+    from engine.handlers import handle_match
+
+    result = await handle_match(
+        PLASTICOS,
+        {
+            "query": {
+                "polymer_type": "HDPE",
+                "volume_tons": _MATCH_TONS,
+                "lat": 40.0,
+                "lon": -75.0,
+                "target_price": 500.0,
+                "quantity_per_load_lbs": _LOAD_LBS,
+            },
+            "match_direction": _SUPPLY,
+            "top_n": 10,
+        },
+    )
+    assert [row["candidate"]["opportunity_id"] for row in result["candidates"]] == ["opportunity:approved"]
+    row = result["candidates"][0]
+    assert row["dimension_scores"]["active_supply_geo"] == pytest.approx(1.0, abs=1e-9)
+    assert row["dimension_scores"]["active_supply_price"] == pytest.approx(1.0, abs=1e-9)
+    assert row["score"] == pytest.approx(1.0, abs=1e-9)
+    assert row["score_scale"] == "0_to_1"
+    stored = await graph_driver.execute_query(
+        cypher=(
+            "MATCH (s:SupplyOpportunity {opportunity_id: 'opportunity:approved'}) "
+            "RETURN s.available_tons AS tons, s.quantity_per_load_lbs AS load"
+        ),
+        parameters={},
+        database=PLASTICOS,
+    )
+    assert stored[0]["tons"] == _OPPORTUNITY_TONS
+    assert stored[0]["load"] is None
