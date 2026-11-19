@@ -634,6 +634,69 @@ class TestNegativeSampling:
         assert "ndcg_at_k" in source
         assert "auc" not in source.lower()
 
+    async def test_evaluate_known_ranking_is_half_precision_half_recall_and_ndcg(self) -> None:
+        """One relevant hit at rank 1, one miss at rank 2, and a second relevant id absent.
+
+        k = 2. Precision is 1/2. Recall is 1/2. DCG is 1/log2(2). Ideal DCG also
+        places the missing relevant id at rank 2, so NDCG is 1 / (1 + 1/log2(3)),
+        which rounds to 0.6131. F1 of the two averages is 0.5.
+        """
+        from unittest.mock import MagicMock
+
+        from engine.config.loader import DomainPackLoader
+        from engine.handlers import handle_admin, init_dependencies
+        from engine.state import get_state
+        from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
+
+        spec = DomainPackLoader(str(DESIGN_PACKS_ROOT)).load_domain("plasticos")
+        rows = [
+            {"candidate": {"facility_id": "facility:hit"}, "score": 0.9, "dimension_scores": {}},
+            {"candidate": {"facility_id": "facility:miss"}, "score": 0.2, "dimension_scores": {}},
+        ]
+
+        class _Ranked:
+            async def execute_query(self, *, cypher: str, parameters: dict, database: str) -> list[dict]:
+                return [dict(row) for row in rows]
+
+        loader = MagicMock()
+        loader.load_domain.return_value = spec
+        loader.list_domains.return_value = ["plasticos"]
+        get_state().reset()
+        init_dependencies(_Ranked(), loader)  # type: ignore[arg-type]
+        try:
+            result = await handle_admin(
+                "plasticos",
+                {
+                    "subaction": "evaluate",
+                    "domain_id": "plasticos",
+                    "k": 2,
+                    "test_set": [
+                        {
+                            "query": {"polymer_type": "HDPE"},
+                            "match_direction": "supply_opportunity_to_buyer_facility",
+                            "expected_ids": ["facility:hit", "facility:also"],
+                        }
+                    ],
+                },
+            )
+        finally:
+            get_state().reset()
+
+        case = result["per_case"][0]
+        assert case.get("error") is None
+        assert case["relevant_returned"] == 1
+        assert case["returned_count"] == 2
+        assert case["precision_at_k"] == 0.5
+        assert case["recall_at_k"] == 0.5
+        assert case["ndcg_at_k"] == 0.6131
+        assert result["aggregate"] == {
+            "precision_at_k": 0.5,
+            "recall_at_k": 0.5,
+            "f1_at_k": 0.5,
+            "ndcg_at_k": 0.6131,
+        }
+        assert "auc" not in result["aggregate"]
+
 
 # ═══════════════════════════════════════════════════════════
 # S2-20: Cold-start fallback
