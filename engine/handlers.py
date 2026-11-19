@@ -548,10 +548,14 @@ def _validate_match_weights(
     weight_sum = 0.0
     for key, val in source.items():
         try:
-            weight_sum += float(val)
+            number = float(val)
         except (TypeError, ValueError) as exc:
             msg = f"Weight '{key}' is not a valid number"
             raise ValidationError(msg, action="match", tenant=tenant) from exc
+        if not math.isfinite(number):
+            msg = f"Weight '{key}' is not a finite number"
+            raise ValidationError(msg, action="match", tenant=tenant)
+        weight_sum += number
     if weight_sum > _WEIGHT_CEILING + _WEIGHT_SUM_TOLERANCE:
         msg = f"Weights sum to {weight_sum:.4f}, exceeding {_WEIGHT_CEILING}"
         raise ValidationError(msg, action="match", tenant=tenant)

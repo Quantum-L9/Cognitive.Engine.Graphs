@@ -209,7 +209,14 @@ def check_score_drift(
             threshold=threshold,
         )
 
-    if not pre_scores or not post_scores:
+    def _finite(values: list[float]) -> list[float]:
+        return [
+            float(v) for v in values if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+        ]
+
+    finite_pre = _finite(pre_scores)
+    finite_post = _finite(post_scores)
+    if not finite_pre or not finite_post:
         return DriftCheckResult(
             drift_detected=False,
             delta_mean=0.0,
@@ -219,8 +226,8 @@ def check_score_drift(
             threshold=threshold,
         )
 
-    pre_mean = sum(pre_scores) / len(pre_scores)
-    post_mean = sum(post_scores) / len(post_scores)
+    pre_mean = sum(finite_pre) / len(finite_pre)
+    post_mean = sum(finite_post) / len(finite_post)
     delta = post_mean - pre_mean
 
     drift_detected = abs(delta) > threshold
