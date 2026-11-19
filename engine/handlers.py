@@ -606,11 +606,19 @@ def _partner_entity_ref(value: Any) -> str | None:
     return text
 
 
+_SCORE_IDENTITY_ABS_TOL = 1e-12
+
+
 def _finite_match_score(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     number = float(value)
     return number if math.isfinite(number) else None
+
+
+def _same_score(left: float, right: float) -> bool:
+    """True when two scores are identical at the normalization tolerance."""
+    return math.isclose(left, right, rel_tol=0.0, abs_tol=_SCORE_IDENTITY_ABS_TOL)
 
 
 def _match_score_scale(score: float | None, *, normalized: bool) -> str:
@@ -1216,10 +1224,10 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 for cand in candidates_out:
                     if isinstance(cand, dict) and isinstance(cand.get("score"), (int, float)):
                         scaled = round((cand["score"] - raw_min) / score_range, 6)
-                        changed = changed or scaled != cand["score"]
+                        changed = changed or not _same_score(float(scaled), float(cand["score"]))
                         cand["score"] = scaled
             elif len(finite_scores) == 1 and len(candidates_out) == 1 and isinstance(candidates_out[0], dict):
-                if candidates_out[0]["score"] != 1.0:
+                if not _same_score(float(candidates_out[0]["score"]), 1.0):
                     candidates_out[0]["score"] = 1.0
                     changed = True
             # A tied range leaves every finite score unchanged. Do not label it normalized.

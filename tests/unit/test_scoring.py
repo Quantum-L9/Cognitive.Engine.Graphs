@@ -775,3 +775,13 @@ class TestPlasticosMatchScoringProof:
         assert gap["capacity_evidence"]["capacity_tons_month"] == pytest.approx(10.0)
         assert gap["capacity_evidence"]["volume_tons"] == pytest.approx(MATCH_QUANTITY_TONS)
         assert gap["capacity_evidence"]["shortfall_tons"] == pytest.approx(MATCH_QUANTITY_TONS - 10.0)
+
+
+@pytest.mark.unit
+def test_same_score_uses_identity_tolerance() -> None:
+    from engine.handlers import _same_score
+
+    assert _same_score(1.0, 1.0)
+    assert _same_score(1.0, 1.0 + 1e-13)
+    assert not _same_score(1.0, 1.000001)
+    assert not _same_score(0.2, 1.0)
