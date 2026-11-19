@@ -22,9 +22,7 @@ from __future__ import annotations
 
 import copy
 import math
-import sys
 from collections.abc import Iterator, Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -45,26 +43,13 @@ from tests.fixtures.match_response_contract import (
     diagnostic_request_quantity_lbs,
     example_response_matches_draft_schema,
     frozen_opportunity_quantity,
+    map_match_if_sibling,
     schema_messages,
     schema_text,
 )
 from tests.fixtures.orbital_match import DIRECTION, ORBITAL
 
 pytestmark = pytest.mark.unit
-
-
-def _map_match_if_sibling(result: dict[str, Any]) -> Any | None:
-    """The sibling mapper when that checkout is present. CI has no sibling."""
-    mapper = Path(__file__).resolve().parents[3] / "odoo" / "plasticos_gate" / "services" / "gate_mappers.py"
-    if not mapper.is_file():
-        return None
-    root = str(mapper.parents[2])
-    if root not in sys.path:
-        sys.path.insert(0, root)
-    from plasticos_gate.services.gate_mappers import map_match_response
-
-    return map_match_response(result)
-
 
 _REL = "SYNTHETIC_POSITIVE_REL"
 _SCORED_REF = "hubspot.company:101"
@@ -206,7 +191,7 @@ async def test_handle_match_payload_against_draft_schema_and_odoo_mapper() -> No
         assert score is None or (isinstance(score, float) and math.isfinite(score))
 
     _assert_draft_stays_unpublished(schema_messages(result))
-    mapped = _map_match_if_sibling(result)
+    mapped = map_match_if_sibling(result)
     if mapped is None:
         return
     assert mapped.match_direction == DIRECTION
