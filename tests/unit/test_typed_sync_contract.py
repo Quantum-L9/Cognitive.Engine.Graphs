@@ -97,7 +97,7 @@ def test_the_projection_keeps_only_writable_properties() -> None:
             "node": {"depot_id": "d1", "reliability": None, "certifications": ["iso"], "served_orbits": ["LEO"]},
             "children": {"stocked_grades": [{"grade_code": "LOX", "purity": 0.99}]},
         },
-        {"node": {"depot_id": "d2"}, "children": {"stocked_grades": []}},
+        {"node": {"depot_id": "d2"}, "children": {"stocked_grades": None}},
     ]
     assert dropped == {"colour": 2, "stocked_grades[].batch": 1}
 
