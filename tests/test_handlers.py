@@ -417,8 +417,8 @@ def _loaded_spec_for_results() -> MagicMock:
 
 @pytest.mark.asyncio
 async def test_match_null_score_stays_null_under_normalization(monkeypatch) -> None:
-    """A null score stays null. Normalization uses only finite scores and does not
-    turn the missing one into the floor of the range."""
+    """A null score stays null and ineligible. The one finite score beside it is
+    the sole normalized value, and the missing score is not turned into zero."""
     from engine.config.settings import settings
     from engine.state import get_state
 
@@ -435,12 +435,12 @@ async def test_match_null_score_stays_null_under_normalization(monkeypatch) -> N
 
     scores = [c["score"] for c in result["candidates"]]
     assert scores[0] is None
-    assert scores[1] == pytest.approx(0.4)
+    assert scores[1] == pytest.approx(1.0)
     assert result["candidates"][0]["eligible"] is False
     assert result["candidates"][1]["eligible"] is True
     assert result["scoring_meta"]["raw_min"] == 0.4
     assert result["scoring_meta"]["raw_max"] == 0.4
-    assert result["scoring_meta"]["normalization_applied"] is False
+    assert result["scoring_meta"]["normalization_applied"] is True
 
 
 @pytest.mark.asyncio
