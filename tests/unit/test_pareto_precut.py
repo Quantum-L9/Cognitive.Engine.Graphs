@@ -117,12 +117,28 @@ MAIN_FLAG_OFF_RESPONSE: dict[str, Any] = {
         {
             "candidate": {"depot_id": "a"},
             "dimension_scores": {"depot_reliability": 0.9, "port_capacity": 0.9},
+            "eligible": True,
+            "feature_contributions": [
+                {"contribution": 0.9, "evidence_refs": [], "feature_id": "depot_reliability"},
+                {"contribution": 0.9, "evidence_refs": [], "feature_id": "port_capacity"},
+            ],
+            "missing_evidence": [],
+            "rank": 1,
             "score": 0.9,
+            "score_scale": "0_to_1",
         },
         {
             "candidate": {"depot_id": "b"},
             "dimension_scores": {"depot_reliability": 0.8, "port_capacity": 0.8},
+            "eligible": True,
+            "feature_contributions": [
+                {"contribution": 0.8, "evidence_refs": [], "feature_id": "depot_reliability"},
+                {"contribution": 0.8, "evidence_refs": [], "feature_id": "port_capacity"},
+            ],
+            "missing_evidence": [],
+            "rank": 2,
             "score": 0.8,
+            "score_scale": "0_to_1",
         },
     ],
     "match_direction": "window_to_depot",
