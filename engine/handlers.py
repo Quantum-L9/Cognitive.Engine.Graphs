@@ -643,6 +643,9 @@ def _attach_match_consumer_fields(
         if entity_ref is not None:
             row["entity_ref"] = entity_ref
         score = _finite_match_score(row.get("score"))
+        # A null or non-finite score is not a zero and is not eligible. Writing
+        # it back stops NaN from leaving the row as a number the mapper can rank.
+        row["score"] = score
         eligible = score is not None
         row["eligible"] = eligible
         if eligible:
@@ -651,6 +654,8 @@ def _attach_match_consumer_fields(
         else:
             row["rank"] = None
         row["score_scale"] = _match_score_scale(score, normalized=normalized)
+        raw_failed = row.get("failed_gates")
+        row["failed_gates"] = list(raw_failed) if isinstance(raw_failed, list) else []
         raw_dims = row.get("dimension_scores")
         dims = raw_dims if isinstance(raw_dims, dict) else {}
         contributions: list[dict[str, Any]] = []
@@ -1134,26 +1139,35 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     }
 
     if candidates_out:
-        # A null Cypher score (clamp disabled, unscored property) ranks as 0.0
-        # instead of crashing max()/min() on None. Coerce the stored score, not
-        # a copy, so normalization below never subtracts from None and a
-        # singleton null is not promoted to 1.0.
-        for c in candidates_out:
-            if isinstance(c, dict) and not isinstance(c.get("score"), (int, float)):
-                c["score"] = 0.0
-        raw_scores = [c["score"] if isinstance(c, dict) else 0.0 for c in candidates_out]
-        scoring_meta["raw_max"] = max(raw_scores) if raw_scores else 0.0
-        scoring_meta["raw_min"] = min(raw_scores) if raw_scores else 0.0
+        # Null and non-finite scores are not zeros. They stay None, stay out of
+        # min/max, and are never the singleton that normalization promotes to 1.0.
+        # A finite zero remains a real score.
+        finite_scores: list[float] = []
+        for cand in candidates_out:
+            if not isinstance(cand, dict):
+                continue
+            finite = _finite_match_score(cand.get("score"))
+            if finite is None:
+                cand["score"] = None
+                continue
+            cand["score"] = finite
+            finite_scores.append(finite)
+        if finite_scores:
+            scoring_meta["raw_max"] = max(finite_scores)
+            scoring_meta["raw_min"] = min(finite_scores)
+        else:
+            scoring_meta["raw_max"] = 0.0
+            scoring_meta["raw_min"] = 0.0
 
-        if _w2_settings.score_normalize and len(candidates_out) > 0:
+        if _w2_settings.score_normalize and finite_scores:
             raw_max = scoring_meta["raw_max"]
             raw_min = scoring_meta["raw_min"]
             score_range = raw_max - raw_min
             if score_range > 0:
-                for c in candidates_out:
-                    if isinstance(c, dict) and "score" in c:
-                        c["score"] = round((c["score"] - raw_min) / score_range, 6)
-            elif len(candidates_out) == 1 and isinstance(candidates_out[0], dict):
+                for cand in candidates_out:
+                    if isinstance(cand, dict) and isinstance(cand.get("score"), (int, float)):
+                        cand["score"] = round((cand["score"] - raw_min) / score_range, 6)
+            elif len(finite_scores) == 1 and len(candidates_out) == 1 and isinstance(candidates_out[0], dict):
                 candidates_out[0]["score"] = 1.0
             scoring_meta["normalization_applied"] = True
     else:
@@ -1217,6 +1231,9 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         "candidates": candidates_out,
         "query_id": f"q_{uuid.uuid4().hex[:12]}",
         "match_direction": match_direction,
+        # The Odoo mapper reads `direction`. The runtime contract keeps
+        # `match_direction`. This is not the unpublished MatchResponse envelope.
+        "direction": match_direction,
         "total_candidates": len(candidates_out),
         "execution_time_ms": round(execution_time_ms, 2),
         "scoring_meta": scoring_meta,
