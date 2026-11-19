@@ -130,7 +130,8 @@ MERGE (n:Facility {entity_id: row.entity_id})
 SET n += row
 WITH n
 MERGE (p:PolymerFamily {code: 'PET'})
-MERGE (n)-[:PROCESSES]->(p)
+MERGE (n)-[rel:PROCESSES {line_id: row.entity_id}]->(p)
+SET rel.direction = 'in', rel.form = 'PELLET', rel.line_id = row.entity_id
 """
 
 
@@ -188,7 +189,8 @@ SET n += row{.*, polymers: null}
 WITH n, row
 UNWIND row.polymers AS code
 MERGE (p:PolymerFamily {code: code})
-MERGE (n)-[:PROCESSES]->(p)
+MERGE (n)-[rel:PROCESSES {line_id: row.entity_id + '-' + code}]->(p)
+SET rel.direction = 'in', rel.form = 'PELLET', rel.line_id = row.entity_id + '-' + code
 """
 
 

@@ -68,9 +68,10 @@ def test_orbital_cypher_writes_only_declared_shapes() -> None:
 def test_a_static_child_is_written_on_create_only() -> None:
     spec = fx.plasticos()
     cypher = SyncGenerator(spec).generate_sync_query(fx.endpoint(spec, "/v1/sync/facilities"), [])
-    assert "  ON CREATE SET c += child_row, c._tenant = $tenant" in cypher
-    assert "row{.*" not in cypher
+    assert "  ON CREATE SET c += child_row{.*, line_id: null, direction: null, form: null}, c._tenant = $tenant" in cypher
+    assert "SET n += row{.*" not in cypher
     assert "SET n += row," not in cypher
+    assert "MERGE (n)-[rel:PROCESSES {line_id: child_row.line_id}]->(c)" in cypher
 
 
 def test_the_projection_keeps_only_writable_properties() -> None:

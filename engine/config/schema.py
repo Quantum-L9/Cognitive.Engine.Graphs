@@ -558,6 +558,29 @@ class TraversalSpec(BaseModel):
         return self
 
 
+class EdgePredicateSpec(BaseModel):
+    """One predicate on the relationship a traversal gate matches.
+
+    ``equals`` is a literal operand (bound by the compiler, never a parameter
+    name). ``present`` requires the property to be a non-empty string. Exactly
+    one of the two is set. Unknown keys are refused.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    property: str
+    equals: str | int | float | bool | None = None
+    present: bool = False
+
+    @model_validator(mode="after")
+    def exactly_one_test(self) -> EdgePredicateSpec:
+        has_equals = self.equals is not None
+        if has_equals == self.present:
+            msg = f"edge predicate {self.property!r} must set exactly one of equals or present"
+            raise ValueError(msg)
+        return self
+
+
 class GateSpec(BaseModel):
     """Gate definition."""
 
@@ -648,6 +671,10 @@ class GateSpec(BaseModel):
     candidateprop_end: str | None = None
     pattern: str | None = None  # For traversal gate
     condition: str | None = None
+    # Traversal only: predicates on the matched relationship, AND-ed with the
+    # target-node comparison inside the same EXISTS. Empty keeps the target-only
+    # form. Honoured when buyer_line_identity_enabled is on.
+    edgepredicates: list[EdgePredicateSpec] | None = None
 
 
 class ScoringDimensionMetadata(BaseModel):
@@ -836,6 +863,14 @@ class ChildSyncSpec(BaseModel):
     targetid: str
     edgetype: str
     edgedirection: str  # parenttochild, childtoparent
+    # When set, each item is also a relationship identity: MERGE keys the edge
+    # on ``edgeidentity`` and writes ``edgeproperties`` on that relationship,
+    # not on the child node. ``fromrow`` names parent-row keys copied onto an
+    # item that omits them (the item value wins). Honoured when
+    # buyer_line_identity_enabled is on. Admission: engine/sync/row_contract.py.
+    edgeidentity: str | None = None
+    edgeproperties: list[str] | None = None
+    fromrow: list[str] | None = None
 
 
 PROVIDER_TOKEN_PATTERN = r"^[a-z][a-z0-9_-]{1,31}$"

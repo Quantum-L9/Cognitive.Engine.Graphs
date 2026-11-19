@@ -216,7 +216,38 @@ def _childsync_defects(scope: _EndpointScope, child: ChildSyncSpec) -> list[str]
     if child_node is None:
         defects.append(f"{scope.where}: childsync targetnode {child.targetnode!r} is not declared in ontology.nodes")
     node_defect = _scalar_key_defect(child_node, child.targetid, role="childsync", where=scope.where)
-    return defects + ([node_defect] if node_defect else [])
+    defects.extend([node_defect] if node_defect else [])
+    defects.extend(_line_identity_defects(scope, child, declared))
+    return defects
+
+
+def _line_identity_defects(scope: _EndpointScope, child: ChildSyncSpec, declared: PropertySpec | None) -> list[str]:
+    """edgeidentity / edgeproperties / fromrow are scalars of the item and of the edge."""
+    names = list(child.edgeproperties or [])
+    carried = list(child.fromrow or [])
+    if child.edgeidentity is None and not names and not carried:
+        return []
+    defects: list[str] = []
+    if child.edgeidentity is None or child.edgeidentity not in names:
+        defects.append(f"{scope.where}: childsync {child.field!r} edgeidentity must be one of its edgeproperties")
+    item_props = {prop.name: prop for prop in _item_properties(declared)}
+    edge = next((item for item in scope.domain_spec.ontology.edges if item.type == child.edgetype), None)
+    edge_props = {prop.name: prop for prop in edge.properties} if edge is not None else {}
+    if edge is None:
+        defects.append(f"{scope.where}: childsync edgetype {child.edgetype!r} is not declared in ontology.edges")
+    for name in names:
+        if not _is_scalar(item_props.get(name)):
+            defects.append(
+                f"{scope.where}: childsync edge property {name!r} must be a scalar property of {child.field}'s items"
+            )
+        if edge is not None and not _is_scalar(edge_props.get(name)):
+            defects.append(
+                f"{scope.where}: childsync edge property {name!r} must be a scalar property of edge {child.edgetype}"
+            )
+    for name in carried:
+        if name not in names:
+            defects.append(f"{scope.where}: childsync fromrow {name!r} must be one of edgeproperties {names}")
+    return defects
 
 
 def _taxonomy_defects(scope: _EndpointScope, edge: TaxonomyEdgeSpec) -> list[str]:
@@ -463,6 +494,8 @@ class ChildProjection:
     item: PropertySpec  # the list<map> declaration on the parent
     writable: frozenset[str]  # item ∩ child node declared, storable
     static: bool
+    edge_keys: frozenset[str]  # item keys written on the relationship, not the child node
+    fromrow: tuple[str, ...]  # parent-row keys that fill an item missing that edge key
 
     @classmethod
     def from_spec(cls, domain_spec: DomainSpec, item: PropertySpec, child: ChildSyncSpec) -> ChildProjection:
@@ -474,16 +507,46 @@ class ChildProjection:
             for prop in _item_properties(item)
             if prop.name in child_props and not prop.wire_only and not child_props[prop.name].wire_only
         )
+        item_names = {prop.name for prop in _item_properties(item)}
+        edge_keys = frozenset(name for name in (child.edgeproperties or []) if name in item_names)
+        fromrow = tuple(name for name in (child.fromrow or []) if name in edge_keys)
         static = child_node is not None and child_node.managedby is ManagedByType.STATIC
-        return cls(child.field, child.targetid, item, writable, static)
+        return cls(child.field, child.targetid, item, writable, static, edge_keys, fromrow)
 
-    def project(self, items: Any) -> list[dict[str, Any]]:
-        """Each item map keeping only the writable keys; non-maps are dropped."""
-        return [
-            {key: value for key, value in item.items() if key in self.writable}
-            for item in items or []
-            if isinstance(item, dict)
-        ]
+    def carried_prop(self, key: str) -> PropertySpec | None:
+        """The item declaration of a parent-row key this child copies onto its edge."""
+        if key not in self.fromrow:
+            return None
+        for prop in _item_properties(self.item):
+            if prop.name == key:
+                return prop
+        return None
+
+    def project(self, items: Any, parent: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Each item map keeping only the writable keys; non-maps are dropped.
+
+        With buyer line identity on, edge keys are kept too, and a parent-row
+        ``fromrow`` value fills an item that does not carry that key. The item
+        value wins, including a blank string.
+        """
+        from engine.config.settings import settings
+
+        keep = self.writable
+        fill: dict[str, Any] = {}
+        if settings.buyer_line_identity_enabled and self.edge_keys:
+            keep = self.writable | self.edge_keys
+            source = parent or {}
+            fill = {key: source[key] for key in self.fromrow if key in source}
+        projected: list[dict[str, Any]] = []
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            row = {key: value for key, value in item.items() if key in keep}
+            for key, value in fill.items():
+                if key not in row:
+                    row[key] = value
+            projected.append(row)
+        return projected
 
 
 @dataclass(frozen=True)
@@ -528,6 +591,10 @@ class SyncRowContract:
         """One top-level key of a row: undeclared, null, or a value to check."""
         prop = self.properties.get(key)
         if prop is None:
+            carried = self._carried(key)
+            if carried is not None:
+                self._check_carried(walk, index, key, carried, value)
+                return
             walk.undeclared_key(index, key, counted_as=key, value=value)
         elif value is None:
             if key != self.idproperty and not prop.nullable:
@@ -545,6 +612,26 @@ class SyncRowContract:
             walk.defect(index, self.idproperty, f"{id_declared} (required id)", got)
         for key, value in row.items():
             self._walk_field(walk, index, key, value)
+
+    def _carried(self, key: str) -> PropertySpec | None:
+        """A parent-row key a childsync copies onto its relationship, when line identity is on."""
+        from engine.config.settings import settings
+
+        if not settings.buyer_line_identity_enabled:
+            return None
+        for child in self.children:
+            carried = child.carried_prop(key)
+            if carried is not None:
+                return carried
+        return None
+
+    def _check_carried(self, walk: _Walk, index: int, key: str, carried: PropertySpec, value: Any) -> None:
+        """Type-check a fromrow value. It is declared, so it is not an undeclared drop."""
+        if value is None:
+            if not carried.nullable:
+                walk.defect(index, key, f"{carried.declared_type} (non-null)", "null")
+            return
+        _check_value(_At(walk, index, key, key), carried, value)
 
     def _walk(self, batch: list[Any], *, refuse_undeclared: bool) -> _Walk:
         walk = _Walk(refuse_undeclared=refuse_undeclared)
@@ -569,7 +656,7 @@ class SyncRowContract:
         rows = [
             {
                 "node": {key: value for key, value in row.items() if key in stored},
-                "children": {child.field: child.project(row.get(child.field)) for child in self.children},
+                "children": {child.field: child.project(row.get(child.field), row) for child in self.children},
             }
             for row in batch
         ]

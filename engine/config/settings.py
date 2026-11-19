@@ -329,6 +329,15 @@ class Settings(BaseSettings):
     # Off: the `row{.*}` contract and the childsync_foreach_projection paths.
     # (Admission of the declarations themselves is unconditional: loader.py.)
     sync_declared_projection_enabled: bool = True
+    # Buyer capability lines (G02). On: a childsync that declares edgeidentity
+    # MERGEs one relationship per line_id and writes the declared edge
+    # properties there (parent fromrow keys fill an item that omits them; the
+    # child node stays the taxonomy). A traversal gate's edgepredicates are
+    # AND-ed inside the same EXISTS, so polymer, direction and form are one
+    # line. Ships on — it restores the invariant that a buyer is a stored In
+    # line with a form, and that two lines are not one directionless edge.
+    # Off: the relationship is unkeyed and edgepredicates are not compiled.
+    buyer_line_identity_enabled: bool = True
     # Sync ingress validation: every node-endpoint row is checked against the
     # tenant spec's declared types (SyncRowContract) before compliance logs the
     # request or any Cypher runs; any defect refuses the whole batch, listing

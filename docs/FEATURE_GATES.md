@@ -91,6 +91,7 @@ independently of the code default.
 | Traversal Gate EXISTS Subquery | `TRAVERSAL_GATE_EXISTS_SUBQUERY` (`traversal_gate_exists_subquery`) | `True` | unset | active; traversal gates compile to an `EXISTS { … }` subquery Neo4j 5 accepts — see §20 |
 | Childsync FOREACH Projection | `CHILDSYNC_FOREACH_PROJECTION` (`childsync_foreach_projection`) | `True` | unset | active; childsync writes children in `FOREACH` without copying them onto the parent — see §20 |
 | Sync Declared Projection | `SYNC_DECLARED_PROJECTION_ENABLED` (`sync_declared_projection_enabled`) | `True` | unset | active (restores "the domain spec is the single source of truth"); node sync writes only the target node's declared, storable properties (`SET n += row.node`), each childsync child only what its item map and node declare (a `static` child on create only), a `list<scalar>` taxonomy field links one node per element; off restores `row{.*}` — see §31 |
+| Buyer Line Identity | `BUYER_LINE_IDENTITY_ENABLED` (`buyer_line_identity_enabled`) | `True` | unset | active (correctness, G02); a declared `edgeidentity` MERGEs one relationship per line and a traversal `edgepredicates` list is AND-ed in that same EXISTS; off restores an unkeyed relationship and a target-only traversal gate — see §38 |
 | Sync Row Type Validation | `SYNC_ROW_TYPE_VALIDATION_ENABLED` (`sync_row_type_validation_enabled`) | `True` | unset | active; every node-sync row is validated against the spec's declared types before compliance logging or Cypher; any defect refuses the batch (`SyncRowRejectedError`, nothing written) listing every `row <i> <field>: expected <declared>, got <actual>` — see §31 |
 | Sync Undeclared Property Refusal | `SYNC_UNDECLARED_PROPERTY_REFUSAL_ENABLED` (`sync_undeclared_property_refusal_enabled`) | `False` | unset | staged; off, undeclared row keys are dropped by the projection and counted in `undeclared_properties`; on, they are row defects that refuse the batch — see §31 |
 | Match Dimension Projection | `MATCH_DIMENSION_PROJECTION` (`match_dimension_projection`) | `True` | unset | active (correctness, RU-001); match RETURNs the active dimension scores as `dimension_scores` so Pareto, arbitration and confidence checks see real values; off restores `RETURN candidate, score` |
@@ -2322,3 +2323,26 @@ never run, so turning it off is the prior behaviour.
 Requires the Neo4j Graph Data Science plugin. Tests:
 `tests/unit/test_gds_node_similarity.py`,
 `tests/integration/test_gds_node_similarity.py`.
+
+## 38. Buyer line identity (G02)
+
+`buyer_line_identity_enabled` (env `BUYER_LINE_IDENTITY_ENABLED`, default `True`).
+
+A childsync may declare `edgeidentity`, `edgeproperties` and `fromrow`. On, each
+item with a non-empty identity MERGEs its own relationship
+(`MERGE (n)-[rel:TYPE {line_id: child_row.line_id}]->(c)`) and writes those
+properties on the relationship. The child node stays the declared taxonomy:
+edge properties are null-overridden out of its `SET`. A parent-row `fromrow`
+key fills an item that omits it; a value on the item wins, including a blank.
+An item with no identity keeps the unkeyed `MERGE (n)-[:TYPE]->(c)` and stores
+no line properties. A traversal gate's `edgepredicates` (`equals` literal or
+`present`) are AND-ed inside the same `EXISTS` as the target-node comparison,
+so polymer, direction and form are one line. Labels pass `sanitize_label()`;
+literal operands are compiler parameters.
+
+Off: the relationship is unkeyed, `fromrow` keys are undeclared, and
+`edgepredicates` are not compiled. PlasticOS 1.5.0 declares this on
+`PROCESSES` for `supply_opportunity_to_buyer_facility`: direction `in` and a
+non-empty form, on the same relationship as the polymer.
+
+Tests: `tests/unit/test_buyer_line_identity.py`.
