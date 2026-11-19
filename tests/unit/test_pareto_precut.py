@@ -118,6 +118,7 @@ MAIN_FLAG_OFF_RESPONSE: dict[str, Any] = {
             "candidate": {"depot_id": "a"},
             "dimension_scores": {"depot_reliability": 0.9, "port_capacity": 0.9},
             "eligible": True,
+            "failed_gates": [],
             "feature_contributions": [
                 {"contribution": 0.9, "evidence_refs": [], "feature_id": "depot_reliability"},
                 {"contribution": 0.9, "evidence_refs": [], "feature_id": "port_capacity"},
@@ -131,6 +132,7 @@ MAIN_FLAG_OFF_RESPONSE: dict[str, Any] = {
             "candidate": {"depot_id": "b"},
             "dimension_scores": {"depot_reliability": 0.8, "port_capacity": 0.8},
             "eligible": True,
+            "failed_gates": [],
             "feature_contributions": [
                 {"contribution": 0.8, "evidence_refs": [], "feature_id": "depot_reliability"},
                 {"contribution": 0.8, "evidence_refs": [], "feature_id": "port_capacity"},
@@ -142,6 +144,7 @@ MAIN_FLAG_OFF_RESPONSE: dict[str, Any] = {
         },
     ],
     "match_direction": "window_to_depot",
+    "direction": "window_to_depot",
     "pareto": {
         "arbitration": {"frontsize": 1, "nondominated_ids": ["a"], "pruned_pct": 50.0, "trimmed_ids": []},
         "dimension_names": ["depot_reliability", "port_capacity"],

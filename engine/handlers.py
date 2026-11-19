@@ -1231,8 +1231,6 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         "candidates": candidates_out,
         "query_id": f"q_{uuid.uuid4().hex[:12]}",
         "match_direction": match_direction,
-        # The Odoo mapper reads `direction`. The runtime contract keeps
-        # `match_direction`. This is not the unpublished MatchResponse envelope.
         "direction": match_direction,
         "total_candidates": len(candidates_out),
         "execution_time_ms": round(execution_time_ms, 2),
