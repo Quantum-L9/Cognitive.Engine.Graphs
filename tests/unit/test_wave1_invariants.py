@@ -952,12 +952,18 @@ class TestMatchCollapsesTraversalRows:
         cypher = await _plasticos_dir1_match_cypher()
         # The required multi-valued step that multiplies rows:
         assert "MATCH (candidate:Facility)-[:PROCESSES]->(polymer:PolymerFamily)" in cypher
-        collapse = "WITH candidate, head(collect({score: score, dimension_scores: dimension_scores})) AS best\n"
+        collapse = (
+            "WITH candidate, head(collect({score: score, dimension_scores: dimension_scores, "
+            "absent_sources: absent_sources})) AS best\n"
+        )
         assert collapse in cypher
-        tail = "RETURN candidate, best.score AS score, best.dimension_scores AS dimension_scores\nORDER BY score DESC\nLIMIT $top_n"
+        tail = (
+            "RETURN candidate, best.score AS score, best.dimension_scores AS dimension_scores, "
+            "best.absent_sources AS absent_sources\nORDER BY score DESC\nLIMIT $top_n"
+        )
         assert cypher.endswith(tail)
         # Rows are ordered by score before the per-candidate collect keeps the best.
-        assert cypher.index("AS dimension_scores\nORDER BY score DESC\nWITH candidate, head(collect(") > 0
+        assert cypher.index("AS absent_sources\nORDER BY score DESC\nWITH candidate, head(collect(") > 0
         assert cypher.index(collapse) < cypher.index("LIMIT $top_n")
 
     async def test_collapse_without_dimension_projection(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -975,9 +981,9 @@ class TestMatchCollapsesTraversalRows:
         cypher = await _plasticos_dir1_match_cypher()
         assert "collect(" not in cypher
         assert "best" not in cypher
-        assert cypher.endswith(
+        assert (
             "AS score\nRETURN candidate, score, {geo_proximity: geo_proximity, credit_score: credit_score, "
             "contamination_tolerance_score: contamination_tolerance_score, community_match: community_match, "
-            "rate_score: rate_score, price_alignment: price_alignment, recency: recency} AS dimension_scores\n"
-            "ORDER BY score DESC\nLIMIT $top_n"
-        )
+            "rate_score: rate_score, price_alignment: price_alignment, recency: recency} AS dimension_scores, "
+        ) in cypher
+        assert cypher.endswith(" AS absent_sources\nORDER BY score DESC\nLIMIT $top_n")

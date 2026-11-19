@@ -305,7 +305,8 @@ class TestIntakeCompiler:
 
         for gated in ("min_density", "max_density", "contamination_tolerance", "food_grade_certified"):
             assert gated not in proposed_gates, gated
-        assert "capacity_tons_month" not in proposed_gates
+        assert "capacity_tons_month" in proposed_gates
+        assert all(gate.name != "capacity_check" for gate in spec.gates)
         for scored in ("lat", "credit_score", "rate_per_ton"):
             assert scored not in proposed_scoring, scored
         # provenance labels unchanged; genuinely ungated/unscored fields still proposed

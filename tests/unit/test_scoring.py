@@ -520,11 +520,12 @@ class TestPlasticosMatchScoringProof:
 
         spec = _plasticos()
         where = GateCompiler(spec).compile_all_gates(BUYER)
-        assert "candidate.contamination_tolerance IS NOT NULL" in where
-        assert "$contamination_pct IS NOT NULL" in where
+        assert "candidate.contamination_tolerance IS NULL" in where
+        assert "candidate.contamination_tolerance >= $contamination_pct" in where
+        assert "candidate.contamination_tolerance IS NOT NULL" not in where
         assert "rel.direction = $gate_polymer_capability_gate_edge0" in where
         assert "rel.form IS NOT NULL AND rel.form <> $gate_polymer_capability_gate_edge1blank" in where
-        assert "candidate.capacity_tons_month IS NULL OR $volume_tons IS NULL" in where
+        assert "candidate.capacity_tons_month" not in where
         assert "material_grade" not in where
         assert "color" not in where
         assert "PALLETS" not in where
@@ -547,7 +548,7 @@ class TestPlasticosMatchScoringProof:
         assert "quantity_per_load_lbs" not in cypher
         assert match_calls[0]["parameters"]["volume_tons"] == MATCH_QUANTITY_TONS
         assert match_calls[0]["parameters"]["quantity_per_load_lbs"] == LOAD_LBS
-        assert "capacity_tons_month" in cypher
+        assert "capacity_tons_month" not in cypher
         assert "rate_per_ton" in cypher
 
         endpoint = next(item for item in spec.sync.endpoints if item.path == "/v1/sync/supply-opportunities")
@@ -708,6 +709,7 @@ class TestPlasticosMatchScoringProof:
         assert singleton["candidates"][0]["score"] == pytest.approx(1.0)
         assert singleton["candidates"][0]["rank"] == 1
         assert singleton["scoring_meta"]["raw_max"] == pytest.approx(0.4)
+        assert singleton["scoring_meta"]["normalization_applied"] is True
 
         tied, _driver = _match(
             payload,
@@ -717,6 +719,38 @@ class TestPlasticosMatchScoringProof:
             ],
         )
         assert [row["score"] for row in tied["candidates"]] == [pytest.approx(0.5), pytest.approx(0.5)]
+        assert tied["scoring_meta"]["normalization_applied"] is False
+
+        unchanged, _driver = _match(
+            payload,
+            [
+                {"candidate": {"facility_id": "facility:a"}, "score": 5.0, "dimension_scores": dict(dims)},
+                {"candidate": {"facility_id": "facility:b"}, "score": 5.0, "dimension_scores": dict(dims)},
+            ],
+        )
+        assert [row["score"] for row in unchanged["candidates"]] == [pytest.approx(5.0), pytest.approx(5.0)]
+        assert unchanged["scoring_meta"]["normalization_applied"] is False
+        assert unchanged["candidates"][0]["score_scale"] == "unnormalized_declared"
+
+        gap_dims = dict(dims)
+        gap_dims["contamination_tolerance_score"] = 0.0
+        gapped, _driver = _match(
+            payload,
+            [
+                {
+                    "candidate": {"facility_id": "facility:gap", "capacity_tons_month": 10.0},
+                    "score": 0.4,
+                    "dimension_scores": gap_dims,
+                    "absent_sources": ["contamination_tolerance_score"],
+                }
+            ],
+        )
+        gap = gapped["candidates"][0]
+        assert "contamination_tolerance_score" in gap["missing_evidence"]
+        assert all(item["feature_id"] != "contamination_tolerance_score" for item in gap["feature_contributions"])
+        assert gap["capacity_evidence"]["capacity_tons_month"] == pytest.approx(10.0)
+        assert gap["capacity_evidence"]["volume_tons"] == pytest.approx(MATCH_QUANTITY_TONS)
+        assert gap["capacity_evidence"]["shortfall_tons"] == pytest.approx(MATCH_QUANTITY_TONS - 10.0)
 
         again, _driver = _match(
             payload,

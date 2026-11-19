@@ -17,9 +17,7 @@ schema is not promoted.
 from __future__ import annotations
 
 import copy
-import sys
 from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -27,15 +25,10 @@ import pytest
 from engine.handlers import handle_match, init_dependencies
 from engine.state import get_state
 from tests.fixtures.domain_contracts import synthetic_loader
+from tests.fixtures.match_response_contract import map_match_if_sibling, partner_id
 from tests.fixtures.orbital_match import DIRECTION, ORBITAL
 
 pytestmark = pytest.mark.unit
-
-_ODOO = Path(__file__).resolve().parents[3] / "odoo"
-if str(_ODOO) not in sys.path:
-    sys.path.insert(0, str(_ODOO))
-
-from plasticos_gate.services.gate_mappers import map_match_response  # noqa: E402
 
 
 class RecordingDriver:
@@ -93,7 +86,14 @@ async def test_handle_match_is_selectable_by_the_unmodified_odoo_mapper() -> Non
     assert "contract_version" not in result
     assert "quantity_per_load_lbs" not in result
 
-    mapped = map_match_response(result)
+    selected_row = next(row for row in result["candidates"] if row.get("entity_ref") == "res.partner:102")
+    assert partner_id(selected_row["entity_ref"]) == 102
+    bare = next(row for row in result["candidates"] if row["candidate"]["depot_id"] == "bare")
+    assert "entity_ref" not in bare
+
+    mapped = map_match_if_sibling(result)
+    if mapped is None:
+        return
     assert [item.buyer_partner_id for item in mapped.results] == [102]
     selected = mapped.results[0]
     assert selected.entity_ref == "res.partner:102"

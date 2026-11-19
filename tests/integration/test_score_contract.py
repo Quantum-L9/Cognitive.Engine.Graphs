@@ -17,26 +17,20 @@ approved supply-opportunity target.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
 
 from tests.fixtures.match_response_contract import (
     UNPUBLISHED_REQUIRED,
+    diagnostic_request_quantity_lbs,
     frozen_opportunity_quantity,
+    map_match_if_sibling,
+    partner_id,
     schema_messages,
     schema_text,
 )
 from tests.fixtures.orbital_match import DIRECTION, ORBITAL, depot
 
 pytestmark = pytest.mark.integration
-
-_ODOO = Path(__file__).resolve().parents[3] / "odoo"
-if str(_ODOO) not in sys.path:
-    sys.path.insert(0, str(_ODOO))
-
-from plasticos_gate.services.gate_mappers import map_match_response  # noqa: E402
 
 SEED_CYPHER = """
 UNWIND $batch AS row
@@ -48,7 +42,11 @@ SET n.synced_at = datetime()
 
 @pytest.mark.asyncio
 async def test_neo4j_match_payload_against_draft_schema_and_odoo_mapper(engine_deps, graph_driver, clean_db):
-    quantity = frozen_opportunity_quantity()
+    quantity_lbs = diagnostic_request_quantity_lbs()
+    frozen = frozen_opportunity_quantity()
+    if frozen is not None:
+        assert frozen["unit"] == "lb"
+        assert frozen["target"] == quantity_lbs
     await graph_driver.execute_write(
         cypher=SEED_CYPHER,
         parameters={
@@ -64,7 +62,7 @@ async def test_neo4j_match_payload_against_draft_schema_and_odoo_mapper(engine_d
     result = await handle_match(
         ORBITAL,
         {
-            "query": {"min_ports": 1, "quantity_lbs": quantity["target"]},
+            "query": {"min_ports": 1, "quantity_lbs": quantity_lbs},
             "match_direction": DIRECTION,
             "top_n": 10,
         },
@@ -80,7 +78,11 @@ async def test_neo4j_match_payload_against_draft_schema_and_odoo_mapper(engine_d
     assert "'failed_gates' is a required property" not in messages
     assert schema_text().split("x-publication-status:", 1)[1].splitlines()[0].strip() == "draft-unpublished"
 
-    mapped = map_match_response(result)
+    selected_row = next(row for row in result["candidates"] if row.get("entity_ref") == "res.partner:102")
+    assert partner_id(selected_row["entity_ref"]) == 102
+    mapped = map_match_if_sibling(result)
+    if mapped is None:
+        return
     assert mapped.match_direction == DIRECTION
     assert mapped.contract_version is None
     assert [item.entity_ref for item in mapped.results] == ["res.partner:102"]

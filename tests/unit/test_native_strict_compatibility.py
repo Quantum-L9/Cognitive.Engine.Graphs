@@ -180,7 +180,7 @@ def test_actual_fixture_cli_matches_pinned_default_and_strict_verdicts(
 
 def test_runtime_per_direction_api_remains_unchanged() -> None:
     path = DESIGN_PACKS_ROOT / "plasticos/spec.yaml"
-    assert owner.validate_native_file(path, "plasticos").domain.version == "1.5.0"
+    assert owner.validate_native_file(path, "plasticos").domain.version == "1.6.0"
     assert validate_spec(path)[1] == 0
     assert validate_spec(path, complete=True)[1] == 0
 

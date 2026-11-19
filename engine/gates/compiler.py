@@ -878,6 +878,11 @@ class GateCompiler:
 
     def _edge_predicate_filter(self, gate: GateSpec) -> str:
         """AND of the relationship predicates, values bound as parameters."""
+        from engine.config.schema import missing_edge_property_reason
+
+        message = missing_edge_property_reason(self.domain_spec, gate)
+        if message is not None:
+            raise ValueError(message)
         clauses: list[str] = []
         for index, predicate in enumerate(gate.edgepredicates or []):
             prop = sanitize_label(predicate.property)

@@ -33,7 +33,7 @@
     "plasticos": {
       "path": "domains/plasticos/spec.yaml",
       "git_blob_sha1": "39f2807b992c2c5761e5dff5927a3a06067e37ac",
-      "sha256": "f9b74c127a5004506dec3746153262c9cbf5e9509076b24210dc8ecbecadc4e7",
+      "sha256": "82d6859324301eb79aaea0c06be00435b9c3db9195537490099753042abf5719",
       "verdicts": {
         "default": {
           "flags": [],

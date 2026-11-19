@@ -34,13 +34,17 @@ def _normalize_scores(candidates: list[dict], normalize: bool) -> tuple[list[dic
         raw_max = scoring_meta["raw_max"]
         raw_min = scoring_meta["raw_min"]
         score_range = raw_max - raw_min
+        changed = False
         if score_range > 0:
             for c in candidates:
                 if "score" in c:
-                    c["score"] = round((c["score"] - raw_min) / score_range, 6)
-        elif len(candidates) == 1:
+                    scaled = round((c["score"] - raw_min) / score_range, 6)
+                    changed = changed or scaled != c["score"]
+                    c["score"] = scaled
+        elif len(candidates) == 1 and candidates[0]["score"] != 1.0:
             candidates[0]["score"] = 1.0
-        scoring_meta["normalization_applied"] = True
+            changed = True
+        scoring_meta["normalization_applied"] = changed
 
     return candidates, scoring_meta
 
@@ -75,9 +79,9 @@ class TestNormalizationMath:
         candidates = [{"score": 0.5}, {"score": 0.5}, {"score": 0.5}]
         result, meta = _normalize_scores(candidates, normalize=True)
 
-        # Range is 0, scores unchanged (no division by zero)
+        # Range is 0, scores unchanged (no division by zero), so they stay raw.
         assert all(c["score"] == 0.5 for c in result)
-        assert meta["normalization_applied"] is True
+        assert meta["normalization_applied"] is False
 
     def test_zero_scores(self):
         candidates = [{"score": 0.0}, {"score": 0.0}]

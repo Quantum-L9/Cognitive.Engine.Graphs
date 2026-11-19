@@ -89,6 +89,7 @@ SHAPES: dict[str, list[dict[str, Any]]] = {
             "processed_polymers": [{"code": "HDPE", "line_id": "in-1"}],
             "contamination_tolerance": 5.0,
             "capacity_tons_month": 40.0,
+            "entity_ref": "res.partner:102",
         }
     ],
     "two_lines_same_polymer": [
@@ -141,6 +142,8 @@ def test_five_buyer_lines_stay_distinct_and_only_stored_in_is_eligible() -> None
         assert "line_id" not in dropped
         assert "quantity_per_load_lbs" not in dropped
         kept[name] = _lines(rows)
+        if name == "in_only_buyer":
+            assert rows[0]["node"]["entity_ref"] == "res.partner:102"
 
     assert kept["out_only_supplier"] == [("site-out", "out-1", "out", "REGRIND", "HDPE")]
     assert [_is_buyer_line(line) for line in kept["out_only_supplier"]] == [False]
@@ -184,8 +187,8 @@ def test_five_buyer_lines_stay_distinct_and_only_stored_in_is_eligible() -> None
     assert "rel.form IS NOT NULL AND rel.form <> $gate_polymer_capability_gate_edge1blank" in exists
     assert compiler.last_query_params["gate_polymer_capability_gate_edge0"] == "in"
     assert compiler.last_query_params["gate_polymer_capability_gate_edge1blank"] == ""
-    assert "capacity_tons_month" in where
-    assert "$volume_tons" in where
+    assert "capacity_tons_month" not in where
+    assert "$volume_tons" not in where
     assert "quantity_per_load_lbs" not in where
 
 
@@ -246,7 +249,7 @@ def test_quantity_per_load_stays_on_the_query_and_off_the_graph() -> None:
     assert match_calls[0]["parameters"]["quantity_per_load_lbs"] == 40000
     assert match_calls[0]["parameters"]["volume_tons"] == 18.0
     assert "rel.direction = " in cypher
-    assert "capacity_tons_month" in cypher
+    assert "capacity_tons_month" not in cypher
 
 
 def test_line_identity_off_restores_the_unkeyed_polymer_edge(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -266,3 +269,25 @@ def test_line_identity_off_restores_the_unkeyed_polymer_edge(monkeypatch: pytest
     where = GateCompiler(spec).compile_all_gates(DIRECTION)
     assert "[rel:PROCESSES]" not in where
     assert "rel.direction" not in where
+
+
+def test_undeclared_edge_predicate_property_is_rejected() -> None:
+    from pydantic import ValidationError
+
+    from engine.config.schema import EdgePredicateSpec
+
+    spec = _spec()
+    dumped = spec.model_dump()
+    for gate in dumped["gates"]:
+        if gate["name"] == "polymer_capability_gate":
+            gate["edgepredicates"].append({"property": "color_code", "equals": "NATURAL"})
+    with pytest.raises(ValidationError, match="not declared on edge"):
+        type(spec).model_validate(dumped)
+
+    gate = next(item for item in spec.gates if item.name == "polymer_capability_gate")
+    gate.edgepredicates = [
+        *(gate.edgepredicates or []),
+        EdgePredicateSpec(property="color_code", equals="NATURAL"),
+    ]
+    with pytest.raises(ValueError, match="not declared on edge"):
+        GateCompiler(spec).compile_all_gates(DIRECTION)

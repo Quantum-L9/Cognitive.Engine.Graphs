@@ -130,7 +130,7 @@ SEED_FACILITY_CYPHER = """
 UNWIND $batch AS row
 MERGE (n:Facility {entity_id: row.entity_id})
 SET n += row
-WITH n
+WITH n, row
 MERGE (p:PolymerFamily {code: 'PET'})
 MERGE (n)-[rel:PROCESSES {line_id: row.entity_id}]->(p)
 SET rel.direction = 'in', rel.form = 'PELLET', rel.line_id = row.entity_id
@@ -522,7 +522,7 @@ async def test_plasticos_buyer_scores_match_independent_dimensions(design_pack_d
         {
             "facility_id": "facility:fit",
             "stamp_now": True,
-            "props": _props(),
+            "props": _props(entity_ref="res.partner:101"),
             "lines": [_line("facility:fit", "in", "PALLETS")],
         },
         {
@@ -585,6 +585,18 @@ async def test_plasticos_buyer_scores_match_independent_dimensions(design_pack_d
             "props": _props(),
             "lines": [_line("facility:wrong-polymer", "in", "PALLETS", code="PP")],
         },
+        {
+            "facility_id": "facility:pvc-only",
+            "stamp_now": True,
+            "props": _props(),
+            "lines": [_line("facility:pvc-only", "in", "PALLETS", code="PVC")],
+        },
+        {
+            "facility_id": "facility:intolerant",
+            "stamp_now": True,
+            "props": _props(contamination_tolerance=-1.0),
+            "lines": [_line("facility:intolerant", "in", "PALLETS")],
+        },
     ]
     batch[2]["props"].pop("capacity_tons_month")
     batch[5]["props"].pop("contamination_tolerance")
@@ -618,6 +630,12 @@ async def test_plasticos_buyer_scores_match_independent_dimensions(design_pack_d
         "facility:null-capacity": _buyer_dims(
             lat=40.0, credit=100.0, contamination=0.0, community=7, rate=1000.0, dated=True
         ),
+        "facility:low-capacity": _buyer_dims(
+            lat=40.0, credit=100.0, contamination=0.0, community=7, rate=1000.0, dated=True
+        ),
+        "facility:null-contamination": _buyer_dims(
+            lat=40.0, credit=100.0, contamination=100.0, community=7, rate=1000.0, dated=True
+        ),
         "facility:outlier": _buyer_dims(
             lat=40.0, credit=-5.0, contamination=0.0, community=3, rate=1_000_000.0, dated=False
         ),
@@ -643,8 +661,25 @@ async def test_plasticos_buyer_scores_match_independent_dimensions(design_pack_d
         assert 0.0 <= row["score"] <= 1.0
         assert row["eligible"] is True
         assert row["score_scale"] == "0_to_1"
-        assert row["entity_ref"] == facility_id
+        if facility_id == "facility:fit":
+            assert row["entity_ref"] == "res.partner:101"
+        else:
+            assert "entity_ref" not in row
         assert row.get("confidence_flag") != "monoculture"
+    assert "facility:pvc-only" not in got
+    assert "facility:blank-form" not in got
+    assert "facility:no-form" not in got
+    assert "facility:intolerant" not in got
+    short = got["facility:low-capacity"]["capacity_evidence"]
+    assert short["capacity_tons_month"] == pytest.approx(10.0)
+    assert short["volume_tons"] == pytest.approx(_MATCH_TONS)
+    assert short["shortfall_tons"] == pytest.approx(_MATCH_TONS - 10.0)
+    unknown_capacity = got["facility:null-capacity"]["capacity_evidence"]
+    assert unknown_capacity["capacity_tons_month"] is None
+    assert unknown_capacity["shortfall_tons"] is None
+    missing = got["facility:null-contamination"]
+    assert "contamination_tolerance_score" in missing["missing_evidence"]
+    assert all(item["feature_id"] != "contamination_tolerance_score" for item in missing["feature_contributions"])
     assert first["scoring_meta"]["normalization_applied"] is False
     assert scored(second)["facility:fit"]["score"] == pytest.approx(got["facility:fit"]["score"])
     assert scored(second)["facility:offset"]["dimension_scores"] == pytest.approx(

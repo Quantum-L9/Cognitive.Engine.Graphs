@@ -107,13 +107,53 @@ async def test_synced_facility_matches_on_its_processed_polymer(design_pack_deps
                     "facility_id": "sync-pet",
                     "name": "Synced PET Facility",
                     "contamination_tolerance": 0.10,
-                    "processed_polymers": [{"code": "PET"}],
+                    "direction": "in",
+                    "form": "PELLET",
+                    "processed_polymers": [{"code": "PET", "line_id": "pet-1"}],
                 },
                 {
                     "facility_id": "sync-pp",
                     "name": "Synced PP Facility",
                     "contamination_tolerance": 0.10,
-                    "processed_polymers": [{"code": "PP"}],
+                    "direction": "in",
+                    "form": "PELLET",
+                    "processed_polymers": [{"code": "PP", "line_id": "pp-1"}],
+                },
+                {
+                    "facility_id": "site-in",
+                    "name": "HDPE buyer",
+                    "entity_ref": "res.partner:102",
+                    "direction": "in",
+                    "form": "PELLET",
+                    "processed_polymers": [{"code": "HDPE", "line_id": "hdpe-1"}],
+                },
+                {
+                    "facility_id": "site-short",
+                    "name": "Short HDPE buyer",
+                    "entity_ref": "res.partner:103",
+                    "capacity_tons_month": 5.0,
+                    "contamination_tolerance": 0.10,
+                    "direction": "in",
+                    "form": "PELLET",
+                    "processed_polymers": [{"code": "HDPE", "line_id": "hdpe-short"}],
+                },
+                {
+                    "facility_id": "site-pvc",
+                    "name": "PVC only",
+                    "entity_ref": "res.partner:104",
+                    "capacity_tons_month": 100.0,
+                    "contamination_tolerance": 0.10,
+                    "direction": "in",
+                    "form": "PELLET",
+                    "processed_polymers": [{"code": "PVC", "line_id": "pvc-1"}],
+                },
+                {
+                    "facility_id": "site-dirty",
+                    "name": "Known incompatible HDPE buyer",
+                    "contamination_tolerance": 0.01,
+                    "direction": "in",
+                    "form": "PELLET",
+                    "processed_polymers": [{"code": "HDPE", "line_id": "hdpe-dirty"}],
                 },
             ],
         },
@@ -130,3 +170,27 @@ async def test_synced_facility_matches_on_its_processed_polymer(design_pack_deps
     )
     ids = [c["candidate"]["facility_id"] for c in result.get("candidates", [])]
     assert ids == ["sync-pet"]
+
+    hdpe = await handle_match(
+        "plasticos",
+        {
+            "query": {
+                "polymer_type": "HDPE",
+                "contamination_pct": 0.04,
+                "volume_tons": 18.0,
+                "color": "NATURAL",
+                "material_grade": "A",
+                "form": "REGRIND",
+            },
+            "match_direction": "supply_opportunity_to_buyer_facility",
+            "top_n": 10,
+        },
+    )
+    by_id = {row["candidate"]["facility_id"]: row for row in hdpe.get("candidates", [])}
+    assert set(by_id) == {"site-in", "site-short"}
+    assert by_id["site-in"]["entity_ref"] == "res.partner:102"
+    assert "contamination_tolerance_score" in by_id["site-in"]["missing_evidence"]
+    assert by_id["site-in"]["capacity_evidence"]["capacity_tons_month"] is None
+    assert by_id["site-in"]["capacity_evidence"]["shortfall_tons"] is None
+    assert by_id["site-short"]["entity_ref"] == "res.partner:103"
+    assert by_id["site-short"]["capacity_evidence"]["shortfall_tons"] == 13.0

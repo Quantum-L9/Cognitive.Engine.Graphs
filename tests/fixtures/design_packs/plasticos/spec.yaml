@@ -20,7 +20,7 @@
 domain:
   id: plasticos
   name: PlasticOS Recycling Marketplace
-  version: 1.5.0
+  version: 1.6.0
   description: 'Domain specification for matching material intake requests (RFQs)
     from buyers to recycling facilities (suppliers) based on polymer compatibility,
     geographic proximity, capacity, certifications, and historical transaction success.
@@ -38,6 +38,12 @@ ontology:
       type: string
       required: true
       description: Unique facility identifier
+    - name: entity_ref
+      type: string
+      required: false
+      description: >
+        Stored buyer identity. Match returns it only when it is res.partner:<integer>.
+        A bare facility id is not rewritten into one.
     - name: name
       type: string
       required: true
@@ -352,10 +358,13 @@ gates:
   candidateprop: contamination_tolerance
   queryparam: contamination_pct
   operator: '>='
-  nullbehavior: fail
+  nullbehavior: pass
   matchdirections:
   - supply_opportunity_to_buyer_facility
-  description: Facility must tolerate the material's contamination level
+  description: >
+    A missing contamination tolerance stays eligible so it can be enriched.
+    When both the tolerance and the load contamination are known, a failed
+    comparison still excludes the buyer.
 - name: food_grade_check
   # An implication, not an equality (CEG-COR-005): Cypher orders false < true,
   # so `certified >= required` admits every facility when certification is not
@@ -368,15 +377,6 @@ gates:
   matchdirections:
   - supply_opportunity_to_buyer_facility
   description: If food-grade required, facility must be certified
-- name: capacity_check
-  type: threshold
-  candidateprop: capacity_tons_month
-  queryparam: volume_tons
-  operator: '>='
-  nullbehavior: pass
-  matchdirections:
-  - supply_opportunity_to_buyer_facility
-  description: Facility must have capacity for requested volume
 - name: exclusion_check
   type: exclusion
   edgetype: EXCLUDED_FROM

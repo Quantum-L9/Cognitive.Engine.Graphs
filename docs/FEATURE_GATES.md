@@ -2341,7 +2341,7 @@ so polymer, direction and form are one line. Labels pass `sanitize_label()`;
 literal operands are compiler parameters.
 
 Off: the relationship is unkeyed, `fromrow` keys are undeclared, and
-`edgepredicates` are not compiled. PlasticOS 1.5.0 declares this on
+`edgepredicates` are not compiled. PlasticOS 1.6.0 declares this on
 `PROCESSES` for `supply_opportunity_to_buyer_facility`: direction `in` and a
 non-empty form, on the same relationship as the polymer.
 

@@ -15,20 +15,12 @@ orbital pack; its payload is decoded by the unmodified Odoo mapper.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
 
+from tests.fixtures.match_response_contract import map_match_if_sibling, partner_id
 from tests.fixtures.orbital_match import DIRECTION, ORBITAL, depot
 
 pytestmark = pytest.mark.integration
-
-_ODOO = Path(__file__).resolve().parents[3] / "odoo"
-if str(_ODOO) not in sys.path:
-    sys.path.insert(0, str(_ODOO))
-
-from plasticos_gate.services.gate_mappers import map_match_response  # noqa: E402
 
 SEED_CYPHER = """
 UNWIND $batch AS row
@@ -59,7 +51,14 @@ async def test_neo4j_match_is_selectable_by_the_unmodified_odoo_mapper(engine_de
     assert "contract_version" not in result
     assert "quantity_per_load_lbs" not in result
 
-    mapped = map_match_response(result)
+    selected_row = next(row for row in result["candidates"] if row.get("entity_ref") == "res.partner:102")
+    assert partner_id(selected_row["entity_ref"]) == 102
+    bare = next(row for row in result["candidates"] if row["candidate"]["depot_id"] == "bare")
+    assert "entity_ref" not in bare
+
+    mapped = map_match_if_sibling(result)
+    if mapped is None:
+        return
     assert [item.entity_ref for item in mapped.results] == ["res.partner:102"]
     selected = mapped.results[0]
     assert selected.buyer_partner_id == 102

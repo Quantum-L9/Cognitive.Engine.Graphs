@@ -440,7 +440,7 @@ async def test_match_null_score_stays_null_under_normalization(monkeypatch) -> N
     assert result["candidates"][1]["eligible"] is True
     assert result["scoring_meta"]["raw_min"] == 0.4
     assert result["scoring_meta"]["raw_max"] == 0.4
-    assert result["scoring_meta"]["normalization_applied"] is True
+    assert result["scoring_meta"]["normalization_applied"] is False
 
 
 @pytest.mark.asyncio

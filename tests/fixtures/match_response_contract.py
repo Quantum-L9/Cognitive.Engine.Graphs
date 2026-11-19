@@ -45,14 +45,46 @@ def schema_text() -> str:
     return _SCHEMA.read_text(encoding="utf-8")
 
 
-def frozen_opportunity_quantity() -> dict[str, Any]:
-    """The approved supply-opportunity example. Odoo owns this file; it is read only."""
+def frozen_opportunity_quantity() -> dict[str, Any] | None:
+    """The approved supply-opportunity example when the sibling checkout is present.
+
+    That file is owned outside this repository. A checkout without it uses the
+    in-repo match-request quantity instead of failing collection.
+    """
+    if not _OPPORTUNITY.is_file():
+        return None
     payload = json.loads(_OPPORTUNITY.read_text(encoding="utf-8"))
     quantity = payload["quantity"]
     if not isinstance(quantity, dict):
         msg = "frozen supply opportunity has no quantity object"
         raise TypeError(msg)
     return quantity
+
+
+def partner_id(entity_ref: object) -> int | None:
+    """Integer id from a stored ``res.partner:<integer>`` ref."""
+    if not isinstance(entity_ref, str):
+        return None
+    prefix = "res.partner:"
+    suffix = entity_ref.removeprefix(prefix)
+    if suffix == entity_ref or not suffix.isdigit():
+        return None
+    return int(suffix)
+
+
+def map_match_if_sibling(result: dict[str, Any]) -> Any | None:
+    """The unmodified sibling mapper when that checkout is present, else None."""
+    mapper = _CEG.parent / "odoo" / "plasticos_gate" / "services" / "gate_mappers.py"
+    if not mapper.is_file():
+        return None
+    import sys
+
+    root = str(mapper.parents[2])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from plasticos_gate.services.gate_mappers import map_match_response
+
+    return map_match_response(result)
 
 
 def diagnostic_request_quantity_lbs() -> float:

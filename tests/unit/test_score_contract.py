@@ -22,9 +22,7 @@ from __future__ import annotations
 
 import copy
 import math
-import sys
 from collections.abc import Iterator, Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -45,18 +43,14 @@ from tests.fixtures.match_response_contract import (
     diagnostic_request_quantity_lbs,
     example_response_matches_draft_schema,
     frozen_opportunity_quantity,
+    map_match_if_sibling,
+    partner_id,
     schema_messages,
     schema_text,
 )
 from tests.fixtures.orbital_match import DIRECTION, ORBITAL
 
 pytestmark = pytest.mark.unit
-
-_ODOO = Path(__file__).resolve().parents[3] / "odoo"
-if str(_ODOO) not in sys.path:
-    sys.path.insert(0, str(_ODOO))
-
-from plasticos_gate.services.gate_mappers import map_match_response  # noqa: E402
 
 _REL = "SYNTHETIC_POSITIVE_REL"
 _SCORED_REF = "hubspot.company:101"
@@ -158,10 +152,12 @@ def _assert_draft_stays_unpublished(messages: list[str]) -> None:
 
 @pytest.mark.asyncio
 async def test_handle_match_payload_against_draft_schema_and_odoo_mapper() -> None:
-    quantity = frozen_opportunity_quantity()
-    assert quantity["unit"] == "lb"
-    assert quantity["target"] == diagnostic_request_quantity_lbs()
-    query = {"min_ports": 1, "quantity_lbs": quantity["target"]}
+    quantity_lbs = diagnostic_request_quantity_lbs()
+    frozen = frozen_opportunity_quantity()
+    if frozen is not None:
+        assert frozen["unit"] == "lb"
+        assert frozen["target"] == quantity_lbs
+    query = {"min_ports": 1, "quantity_lbs": quantity_lbs}
     assert "volume_tons" not in query
     assert "capacity_tons_month" not in query
     assert "quantity_per_load_lbs" not in query
@@ -176,7 +172,7 @@ async def test_handle_match_payload_against_draft_schema_and_odoo_mapper() -> No
     result = await handle_match(ORBITAL, {"query": query, "match_direction": DIRECTION, "top_n": 10})
 
     assert driver.calls == [ORBITAL]
-    assert driver.parameters["quantity_lbs"] == quantity["target"]
+    assert driver.parameters["quantity_lbs"] == quantity_lbs
     assert result["status"] == "success"
     assert result["match_direction"] == DIRECTION
     assert result["direction"] == DIRECTION
@@ -198,7 +194,10 @@ async def test_handle_match_payload_against_draft_schema_and_odoo_mapper() -> No
         assert score is None or (isinstance(score, float) and math.isfinite(score))
 
     _assert_draft_stays_unpublished(schema_messages(result))
-    mapped = map_match_response(result)
+    assert partner_id(by_ref["res.partner:102"]["entity_ref"]) == 102
+    mapped = map_match_if_sibling(result)
+    if mapped is None:
+        return
     assert mapped.match_direction == DIRECTION
     assert mapped.contract_version is None
     assert mapped.domain is None
