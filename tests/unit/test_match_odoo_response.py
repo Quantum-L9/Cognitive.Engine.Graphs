@@ -17,9 +17,7 @@ schema is not promoted.
 from __future__ import annotations
 
 import copy
-import sys
 from collections.abc import Iterator
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -27,22 +25,10 @@ import pytest
 from engine.handlers import handle_match, init_dependencies
 from engine.state import get_state
 from tests.fixtures.domain_contracts import synthetic_loader
+from tests.fixtures.match_response_contract import map_match_if_sibling
 from tests.fixtures.orbital_match import DIRECTION, ORBITAL
 
 pytestmark = pytest.mark.unit
-
-
-def _map_match_if_sibling(result: dict[str, Any]) -> Any | None:
-    """The sibling mapper when that checkout is present. CI has no sibling."""
-    mapper = Path(__file__).resolve().parents[3] / "odoo" / "plasticos_gate" / "services" / "gate_mappers.py"
-    if not mapper.is_file():
-        return None
-    root = str(mapper.parents[2])
-    if root not in sys.path:
-        sys.path.insert(0, root)
-    from plasticos_gate.services.gate_mappers import map_match_response
-
-    return map_match_response(result)
 
 
 class RecordingDriver:
@@ -100,7 +86,7 @@ async def test_handle_match_is_selectable_by_the_unmodified_odoo_mapper() -> Non
     assert "contract_version" not in result
     assert "quantity_per_load_lbs" not in result
 
-    mapped = _map_match_if_sibling(result)
+    mapped = map_match_if_sibling(result)
     if mapped is None:
         return
     assert [item.buyer_partner_id for item in mapped.results] == [102]
