@@ -21,6 +21,7 @@ import pytest
 
 from tests.fixtures.match_response_contract import (
     UNPUBLISHED_REQUIRED,
+    diagnostic_request_quantity_lbs,
     frozen_opportunity_quantity,
     map_match_if_sibling,
     schema_messages,
@@ -40,7 +41,11 @@ SET n.synced_at = datetime()
 
 @pytest.mark.asyncio
 async def test_neo4j_match_payload_against_draft_schema_and_odoo_mapper(engine_deps, graph_driver, clean_db):
-    quantity = frozen_opportunity_quantity()
+    quantity_lbs = diagnostic_request_quantity_lbs()
+    frozen = frozen_opportunity_quantity()
+    if frozen is not None:
+        assert frozen["unit"] == "lb"
+        assert frozen["target"] == quantity_lbs
     await graph_driver.execute_write(
         cypher=SEED_CYPHER,
         parameters={
@@ -56,7 +61,7 @@ async def test_neo4j_match_payload_against_draft_schema_and_odoo_mapper(engine_d
     result = await handle_match(
         ORBITAL,
         {
-            "query": {"min_ports": 1, "quantity_lbs": quantity["target"]},
+            "query": {"min_ports": 1, "quantity_lbs": quantity_lbs},
             "match_direction": DIRECTION,
             "top_n": 10,
         },
