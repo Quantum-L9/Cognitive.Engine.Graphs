@@ -622,7 +622,7 @@ def _attach_match_consumer_fields(
     active_dimensions: list[str],
     normalized: bool,
 ) -> None:
-    """Lift the fields the Odoo match mapper reads onto each returned row.
+    """Lift the fields a match consumer reads onto each returned row.
 
     The namespaced ref is whatever the node already stores. A non-finite score
     is not eligible and receives no rank. Finite dimension projections are the
