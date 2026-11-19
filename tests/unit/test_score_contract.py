@@ -151,10 +151,12 @@ def _assert_draft_stays_unpublished(messages: list[str]) -> None:
 
 @pytest.mark.asyncio
 async def test_handle_match_payload_against_draft_schema_and_odoo_mapper() -> None:
-    quantity = frozen_opportunity_quantity()
-    assert quantity["unit"] == "lb"
-    assert quantity["target"] == diagnostic_request_quantity_lbs()
-    query = {"min_ports": 1, "quantity_lbs": quantity["target"]}
+    quantity_lbs = diagnostic_request_quantity_lbs()
+    frozen = frozen_opportunity_quantity()
+    if frozen is not None:
+        assert frozen["unit"] == "lb"
+        assert frozen["target"] == quantity_lbs
+    query = {"min_ports": 1, "quantity_lbs": quantity_lbs}
     assert "volume_tons" not in query
     assert "capacity_tons_month" not in query
     assert "quantity_per_load_lbs" not in query
@@ -169,7 +171,7 @@ async def test_handle_match_payload_against_draft_schema_and_odoo_mapper() -> No
     result = await handle_match(ORBITAL, {"query": query, "match_direction": DIRECTION, "top_n": 10})
 
     assert driver.calls == [ORBITAL]
-    assert driver.parameters["quantity_lbs"] == quantity["target"]
+    assert driver.parameters["quantity_lbs"] == quantity_lbs
     assert result["status"] == "success"
     assert result["match_direction"] == DIRECTION
     assert result["direction"] == DIRECTION

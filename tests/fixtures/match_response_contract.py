@@ -45,8 +45,14 @@ def schema_text() -> str:
     return _SCHEMA.read_text(encoding="utf-8")
 
 
-def frozen_opportunity_quantity() -> dict[str, Any]:
-    """The approved supply-opportunity example. Odoo owns this file; it is read only."""
+def frozen_opportunity_quantity() -> dict[str, Any] | None:
+    """The approved supply-opportunity example when the sibling checkout is present.
+
+    That file is owned outside this repository. A checkout without it uses the
+    in-repo match-request quantity instead of failing collection.
+    """
+    if not _OPPORTUNITY.is_file():
+        return None
     payload = json.loads(_OPPORTUNITY.read_text(encoding="utf-8"))
     quantity = payload["quantity"]
     if not isinstance(quantity, dict):
