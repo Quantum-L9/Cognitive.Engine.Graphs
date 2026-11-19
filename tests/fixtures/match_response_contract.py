@@ -55,6 +55,21 @@ def frozen_opportunity_quantity() -> dict[str, Any]:
     return quantity
 
 
+def map_match_if_sibling(result: dict[str, Any]) -> Any | None:
+    """The unmodified sibling mapper when that checkout is present, else None."""
+    mapper = _CEG.parent / "odoo" / "plasticos_gate" / "services" / "gate_mappers.py"
+    if not mapper.is_file():
+        return None
+    import sys
+
+    root = str(mapper.parents[2])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    from plasticos_gate.services.gate_mappers import map_match_response
+
+    return map_match_response(result)
+
+
 def diagnostic_request_quantity_lbs() -> float:
     """The draft match-request fixture's quantity, used only to compare with the frozen payload."""
     payload = json.loads(_REQUEST_FIXTURE.read_text(encoding="utf-8"))
