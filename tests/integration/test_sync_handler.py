@@ -194,3 +194,49 @@ async def test_synced_facility_matches_on_its_processed_polymer(design_pack_deps
     assert by_id["site-in"]["capacity_evidence"]["shortfall_tons"] is None
     assert by_id["site-short"]["entity_ref"] == "res.partner:103"
     assert by_id["site-short"]["capacity_evidence"]["shortfall_tons"] == 13.0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_changing_a_capability_line_polymer_drops_the_old_match(design_pack_deps):
+    """A line that keeps its line_id and changes polymer must not keep the old match."""
+    from engine.handlers import handle_match, handle_sync
+
+    facility_id = "rebind-line"
+    line_id = "line-rebind"
+    payload = {
+        "entity_type": "facilities",
+        "batch": [
+            {
+                "facility_id": facility_id,
+                "name": "Rebinding buyer",
+                "contamination_tolerance": 0.10,
+                "direction": "in",
+                "form": "PELLET",
+                "processed_polymers": [{"code": "HDPE", "line_id": line_id, "direction": "in", "form": "PELLET"}],
+            }
+        ],
+    }
+    first = await handle_sync("plasticos", payload)
+    assert first.get("status") in ("ok", "success")
+
+    async def match_ids(polymer: str) -> list[str]:
+        result = await handle_match(
+            "plasticos",
+            {
+                "query": {"polymer_type": polymer, "contamination_pct": 0.04},
+                "match_direction": "supply_opportunity_to_buyer_facility",
+                "top_n": 10,
+            },
+        )
+        return [row["candidate"]["facility_id"] for row in result.get("candidates", [])]
+
+    assert facility_id in await match_ids("HDPE")
+
+    payload["batch"][0]["processed_polymers"] = [
+        {"code": "PP", "line_id": line_id, "direction": "in", "form": "PELLET"}
+    ]
+    second = await handle_sync("plasticos", payload)
+    assert second.get("status") in ("ok", "success")
+    assert facility_id not in await match_ids("HDPE")
+    assert facility_id in await match_ids("PP")

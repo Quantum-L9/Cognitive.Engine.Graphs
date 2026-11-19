@@ -776,6 +776,53 @@ class TestPlasticosMatchScoringProof:
         assert gap["capacity_evidence"]["volume_tons"] == pytest.approx(MATCH_QUANTITY_TONS)
         assert gap["capacity_evidence"]["shortfall_tons"] == pytest.approx(MATCH_QUANTITY_TONS - 10.0)
 
+    def test_one_finite_score_normalizes_beside_a_null_and_flags_roll_back(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from engine.config.settings import settings
+
+        dims = {
+            "geo_proximity": 1.0,
+            "credit_score": 0.0,
+            "contamination_tolerance_score": 0.0,
+            "community_match": 0.0,
+            "rate_score": 0.0,
+            "price_alignment": 0.0,
+            "recency": 0.0,
+        }
+        payload = {"query": _buyer_query(), "match_direction": BUYER, "top_n": 5}
+
+        def rows() -> list[dict[str, Any]]:
+            return [
+                {"candidate": {"facility_id": "facility:finite"}, "score": 0.4, "dimension_scores": dict(dims)},
+                {"candidate": {"facility_id": "facility:none"}, "score": None, "dimension_scores": {}},
+            ]
+
+        monkeypatch.setattr(settings, "score_normalize", True)
+        monkeypatch.setattr(settings, "null_score_ineligible_enabled", True)
+        monkeypatch.setattr(settings, "match_consumer_contract_enabled", True)
+
+        kept, _driver = _match(payload, rows())
+        by_id = {row["candidate"]["facility_id"]: row for row in kept["candidates"]}
+        assert by_id["facility:finite"]["score"] == pytest.approx(1.0)
+        assert kept["scoring_meta"]["normalization_applied"] is True
+        assert by_id["facility:none"]["score"] is None
+        assert by_id["facility:none"]["eligible"] is False
+
+        monkeypatch.setattr(settings, "null_score_ineligible_enabled", False)
+        rolled, _driver = _match(payload, rows())
+        rolled_ids = {row["candidate"]["facility_id"]: row for row in rolled["candidates"]}
+        assert rolled_ids["facility:finite"]["score"] == pytest.approx(1.0)
+        assert rolled_ids["facility:none"]["score"] == pytest.approx(0.0)
+
+        monkeypatch.setattr(settings, "null_score_ineligible_enabled", True)
+        monkeypatch.setattr(settings, "match_consumer_contract_enabled", False)
+        bare, _driver = _match(payload, rows())
+        bare_row = bare["candidates"][0]
+        assert "eligible" not in bare_row
+        assert "score_scale" not in bare_row
+        assert "missing_evidence" not in bare_row
+
 
 @pytest.mark.unit
 def test_same_score_uses_identity_tolerance() -> None:
