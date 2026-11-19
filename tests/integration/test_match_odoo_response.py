@@ -25,6 +25,7 @@ from tests.fixtures.orbital_match import DIRECTION, ORBITAL, depot
 
 pytestmark = pytest.mark.integration
 
+
 def _map_match_if_sibling(result: dict[str, Any]) -> Any | None:
     """The sibling mapper when that checkout is present. CI has no sibling."""
     mapper = Path(__file__).resolve().parents[3] / "odoo" / "plasticos_gate" / "services" / "gate_mappers.py"
@@ -36,6 +37,7 @@ def _map_match_if_sibling(result: dict[str, Any]) -> Any | None:
     from plasticos_gate.services.gate_mappers import map_match_response
 
     return map_match_response(result)
+
 
 SEED_CYPHER = """
 UNWIND $batch AS row
