@@ -168,12 +168,17 @@ class SyncGenerator:
         absent = f"child_row.{identity_name} IS NULL OR child_row.{identity_name} = ''"
         lines_expr = f"coalesce(row.children.{child_field}, [])"
         keyed_lines = f"[line IN {lines_expr} WHERE line.{identity_name} IS NOT NULL AND line.{identity_name} <> '']"
+        if child.edgedirection == "parenttochild":
+            stale_match = f"(n)-[stale:{child_edge}]->(stale_target)"
+        else:
+            stale_match = f"(n)<-[stale:{child_edge}]-(stale_target)"
+        supplied = f"row.children.{child_field} IS NOT NULL"
         return [
             "WITH n, row",
             f"WITH n, row, {keyed_lines} AS keyed_lines",
-            f"OPTIONAL MATCH (n)-[stale:{child_edge}]->(stale_target)",
-            f"WHERE stale.{identity_name} IS NOT NULL",
-            f"  AND stale.{identity_name} IN [line IN keyed_lines | line.{identity_name}]",
+            f"OPTIONAL MATCH {stale_match}",
+            f"WHERE {supplied}",
+            f"  AND stale.{identity_name} IS NOT NULL",
             (
                 f"  AND NOT any(line IN keyed_lines WHERE line.{identity_name} = stale.{identity_name} "
                 f"AND stale_target.{child_id} = line.{child_id})"

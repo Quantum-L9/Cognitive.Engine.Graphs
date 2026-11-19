@@ -666,14 +666,18 @@ class SyncRowContract:
         ``node`` keeps only declared, storable properties present in the row
         (absent stays absent, so ``SET n += row.node`` leaves them unchanged;
         an explicit null still removes one). ``children`` keeps, per childsync
-        field, each item's properties the child node declares.
+        field, each item's properties the child node declares. An omitted child
+        field is null and does not replace keyed relationships; a present list does.
         """
         dropped = self._walk(batch, refuse_undeclared=False).undeclared
         stored = self.stored
         rows = [
             {
                 "node": {key: value for key, value in row.items() if key in stored},
-                "children": {child.field: child.project(row.get(child.field), row) for child in self.children},
+                "children": {
+                    child.field: None if child.field not in row else child.project(row[child.field], row)
+                    for child in self.children
+                },
             }
             for row in batch
         ]

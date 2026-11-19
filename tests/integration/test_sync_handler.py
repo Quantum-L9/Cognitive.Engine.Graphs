@@ -240,3 +240,68 @@ async def test_changing_a_capability_line_polymer_drops_the_old_match(design_pac
     assert second.get("status") in ("ok", "success")
     assert facility_id not in await match_ids("HDPE")
     assert facility_id in await match_ids("PP")
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_keyed_lines_create_update_replace_and_incoming_reassignment(design_pack_deps, graph_driver):
+    """Present lists replace keyed lines. Omission does not. Incoming reassignment drops the old target."""
+    from engine.config.loader import DomainPackLoader
+    from engine.handlers import handle_sync
+    from engine.sync.generator import SyncGenerator
+    from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
+
+    def line(code: str, form: str, line_id: str = "keep") -> dict[str, str]:
+        return {"code": code, "line_id": line_id, "direction": "in", "form": form}
+
+    async def sync(polymers: list[dict[str, str]] | None) -> None:
+        row: dict[str, object] = {"facility_id": "line-set", "name": "Line set", "contamination_tolerance": 0.10}
+        if polymers is not None:
+            row["processed_polymers"] = polymers
+        status = (await handle_sync("plasticos", {"entity_type": "facilities", "batch": [row]})).get("status")
+        assert status in ("ok", "success")
+
+    async def outgoing() -> list[tuple[object, object, object]]:
+        found = await graph_driver.execute_query(
+            "MATCH (n:Facility {facility_id: 'line-set'})-[r:PROCESSES]->(c) "
+            "RETURN r.line_id AS line_id, c.code AS code, r.form AS form ORDER BY line_id",
+            {},
+            "plasticos",
+        )
+        return [(row["line_id"], row["code"], row["form"]) for row in found]
+
+    await sync([line("HDPE", "PELLET")])
+    await sync([line("HDPE", "BALE"), line("PP", "PELLET", "drop")])
+    await sync([line("HDPE", "BALE")])
+    assert await outgoing() == [("keep", "HDPE", "BALE")]
+    await sync(None)
+    assert await outgoing() == [("keep", "HDPE", "BALE")]
+    await sync([])
+    assert await outgoing() == []
+    spec = DomainPackLoader(str(DESIGN_PACKS_ROOT)).load_domain("plasticos")
+    endpoint = next(item for item in spec.sync.endpoints if item.path == "/v1/sync/facilities")
+    child = endpoint.childsync[0].model_copy(update={"edgedirection": "childtoparent"})
+    generator = SyncGenerator(spec)
+    clauses = generator._declared_child_clauses(endpoint.path, child, generator.row_contract(endpoint).children[0])
+    cypher = (
+        "UNWIND $batch AS row MERGE (n:Facility {facility_id: row.node.facility_id}) SET n += row.node, n._tenant = $tenant "
+        + " ".join(clauses)
+    )
+    for code in ("HDPE", "PP"):
+        projected, _dropped = generator.project_batch(
+            endpoint,
+            [
+                {
+                    "facility_id": "incoming-buyer",
+                    "name": "Incoming",
+                    "processed_polymers": [line(code, "PELLET", "in-line")],
+                }
+            ],
+        )
+        await graph_driver.execute_query(
+            cypher=cypher, parameters={"batch": projected, "tenant": "plasticos"}, database="plasticos"
+        )
+    incoming = await graph_driver.execute_query(
+        "MATCH (n:Facility {facility_id: 'incoming-buyer'})<-[r:PROCESSES]-(c) RETURN c.code AS code", {}, "plasticos"
+    )
+    assert [row["code"] for row in incoming] == ["PP"]
