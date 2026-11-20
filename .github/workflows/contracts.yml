@@ -21,7 +21,7 @@ jobs:
     name: Validate Action References
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       # Guard against malformed `@<sha>v<version>` "Frankenrefs" that make
       # every job in an affected workflow unrunnable, and reject every
       # non-local action reference that is not SHA-pinned.
@@ -31,7 +31,7 @@ jobs:
     name: Verify Contract Files Exist
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
@@ -42,7 +42,7 @@ jobs:
     name: Scan for Contract Violations
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
@@ -55,7 +55,7 @@ jobs:
     steps:
       # fetch-depth is irrelevant here, but the checkout must be a real git repo:
       # discovery enumerates via `git ls-files -z`, not a filesystem walk.
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
@@ -67,7 +67,7 @@ jobs:
     name: Lint + Type Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
@@ -81,9 +81,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: [contract-files, contract-scan, meta-headers, lint]
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
       - name: Checkout pinned Odoo consumer
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           repository: cryptoxdog/IB-Odoo_19
           ref: 3d7212355cfa7db838807c2f39181cf95473ca76
