@@ -1,0 +1,26 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: engine-specific
+# engine: graph
+# layer: [test, ci]
+# tags: [fixture, quality-gate, secrets-scan]
+# owner: engine-team
+# status: active
+# --- /L9_META ---
+# Quality Gate aggregate cases. `secrets` and `lint` are job conclusions,
+# `native` is the scanner's own outcome, `counted` is the bucket the secrets
+# job must land in. A conclusion of success is counted as an executed control
+# only when the native outcome says the scan ran clean.
+cases:
+  - {name: scanned_clean, secrets: success, lint: success, native: "SCANNED_CLEAN", passed: true, counted: executed}
+  - {name: key_absent, secrets: success, lint: success, native: "KEY_ABSENT", passed: true, counted: not_executed}
+  - {name: token_no_scope, secrets: success, lint: success, native: "TOKEN_LACKS_SCOPE", passed: true, counted: not_executed}
+  - {name: container_no_start, secrets: success, lint: success, native: "CONTAINER_FAILED_TO_START", passed: true, counted: not_executed}
+  - {name: no_native_outcome, secrets: success, lint: success, native: "", passed: false, counted: failed}
+  - {name: unknown_native_outcome, secrets: success, lint: success, native: "PASSED", passed: false, counted: failed}
+  - {name: success_but_scan_failed, secrets: success, lint: success, native: "SCANNER_FAILED", passed: false, counted: failed}
+  - {name: success_but_secret, secrets: success, lint: success, native: "SECRET_DETECTED", passed: false, counted: failed}
+  - {name: secret_detected, secrets: failure, lint: success, native: "SECRET_DETECTED", passed: false, counted: failed}
+  - {name: secrets_job_skipped, secrets: skipped, lint: success, native: "", passed: false, counted: failed}
+  - {name: secrets_job_cancelled, secrets: cancelled, lint: success, native: "", passed: false, counted: failed}
+  - {name: other_job_failure, secrets: success, lint: failure, native: "SCANNED_CLEAN", passed: false, counted: executed}

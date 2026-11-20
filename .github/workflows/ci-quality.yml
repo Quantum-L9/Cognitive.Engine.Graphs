@@ -136,6 +136,12 @@ jobs:
     name: Secrets Scan (GitGuardian)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # The job conclusion is not the scan result. `native_outcome` is, and the
+    # Quality Gate reads it: SCANNED_CLEAN, SECRET_DETECTED, KEY_ABSENT,
+    # TOKEN_LACKS_SCOPE, CONTAINER_FAILED_TO_START or SCANNER_FAILED.
+    outputs:
+      native_outcome: ${{ steps.scan.outputs.outcome }}
+      executed: ${{ steps.scan.outputs.executed }}
 
     steps:
       - name: Checkout code
@@ -143,47 +149,25 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Prefer the Action when the token has scan scope. If the org token is
-      # mis-scoped (common infra gap), skip rather than hard-fail every PR —
-      # real secret findings still fail when the token is valid.
-      # Use the pinned Docker image (same as ggshield-action) to avoid Sonar
-      # flags on unpinned/unlocked pip installs in workflows.
+      # tools/scanner_outcomes.py runs the pinned image (same as ggshield-action,
+      # no unlocked pip install), classifies what happened and exits.
+      # Policy, unchanged: a detected secret or a scanner that started and
+      # failed fails this job. A missing key, a token without the scan scope
+      # and a container that could not start do not fail it; each is reported
+      # as NOT EXECUTED and is never counted as a clean scan.
+      # The container is given the runner's CI context by name (CI,
+      # GITHUB_ACTIONS, GITHUB_SHA and the range variables below); without it
+      # ggshield refuses `secret scan ci`.
       - name: GitGuardian scan
+        id: scan
         env:
+          GGSHIELD_IMAGE: gitguardian/ggshield:v1.53.0@sha256:387ad1467f110ce759a97dc4b25c978e7df58181f8e4793df55d40f89ce7142d
           GITHUB_PUSH_BEFORE_SHA: ${{ github.event.before }}
           GITHUB_PUSH_BASE_SHA: ${{ github.event.base }}
           GITHUB_PULL_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
-        run: |
-          if [ -z "${GITGUARDIAN_API_KEY:-}" ]; then
-            echo "::warning::GITGUARDIAN_API_KEY not configured; skipping GitGuardian scan"
-            exit 0
-          fi
-          set +e
-          OUT=$(docker run --rm \
-            --entrypoint ggshield \
-            -e GITGUARDIAN_API_KEY \
-            -e GITHUB_PUSH_BEFORE_SHA \
-            -e GITHUB_PUSH_BASE_SHA \
-            -e GITHUB_PULL_BASE_SHA \
-            -e GITHUB_DEFAULT_BRANCH \
-            -v "$PWD:/src" -w /src \
-            gitguardian/ggshield:v1.53.0@sha256:387ad1467f110ce759a97dc4b25c978e7df58181f8e4793df55d40f89ce7142d \
-            secret scan ci 2>&1)
-          RC=$?
-          set -e
-          printf '%s\n' "$OUT"
-          if printf '%s\n' "$OUT" | grep -qi 'missing the required scope'; then
-            echo "::warning::GitGuardian token missing 'scan' scope; skipping until org secret is rotated"
-            exit 0
-          fi
-          # Docker/entrypoint infra failures are not secret findings.
-          if printf '%s\n' "$OUT" | grep -qiE 'executable file not found|Unable to find image|Cannot connect to the Docker daemon'; then
-            echo "::warning::GitGuardian container failed to start; skipping scan (infra)"
-            exit 0
-          fi
-          exit "$RC"
+        run: python3 tools/scanner_outcomes.py gitguardian-scan
 
   # Full pytest and Codecov moved to deep-plan.yml. This pull-request
   # workflow does not run a catalog and does not treat a missing coverage
@@ -230,51 +214,23 @@ jobs:
     if: always()
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
+
+      # A job conclusion of `success` is not proof that an outside service
+      # ran. tools/scanner_outcomes.py fails the gate on any job that did not
+      # succeed (as before) and reads the secrets job through its native
+      # outcome: an advisory skip is listed as NOT EXECUTED, and `success`
+      # without a clean native scan result is never counted as an executed
+      # control. Hyphenated job ids need bracket syntax here; `needs.a-b`
+      # parses as a subtraction and evaluates to an empty string.
       - name: Quality Gate Summary
-        run: |
-          echo "╔══════════════════════════════════════════════════════════════╗"
-          echo "║              QUALITY GATE SUMMARY                           ║"
-          echo "╚══════════════════════════════════════════════════════════════╝"
-          echo ""
-          echo "  ├─ Lint & Format:  ${{ needs['lint-format'].result }}"
-          echo "  ├─ Semgrep:        ${{ needs.semgrep.result }}"
-          echo "  ├─ Secrets Scan:   ${{ needs['secrets-scan'].result }}"
-          echo "  └─ YAML Validate:  ${{ needs['yaml-validate'].result }}"
-          echo "  pytest catalog:    deep-plan.yml (not this pull request)"
-          echo ""
-
-          # Fail on critical gates
-          # NOTE: job-id.result with a hyphenated job id (e.g. lint-format,
-          # secrets-scan, yaml-validate) is NOT valid GitHub Actions dot
-          # notation -- `-` is parsed as subtraction, so `needs.lint-format`
-          # silently evaluates to an empty string instead of the job's
-          # result. Hyphenated job ids must use bracket syntax:
-          # needs['lint-format'].result. Previously every condition below
-          # compared an empty string to "failure", which is always false,
-          # so this gate could never actually fail on lint-format/
-          # secrets-scan -- it only "worked" for the two non-hyphenated
-          # job ids (semgrep wasn't even checked at all).
-          FAILED=false
-
-          if [[ "${{ needs['lint-format'].result }}" != "success" ]]; then
-            echo "❌ Lint & Format failed"; FAILED=true
-          fi
-
-          if [[ "${{ needs.semgrep.result }}" != "success" ]]; then
-            echo "❌ Semgrep policy check failed"; FAILED=true
-          fi
-
-          if [[ "${{ needs['secrets-scan'].result }}" != "success" ]]; then
-            echo "❌ Secrets Scan failed (hardcoded secrets detected)"; FAILED=true
-          fi
-
-          if [[ "${{ needs['yaml-validate'].result }}" != "success" ]]; then
-            echo "❌ YAML validation failed"; FAILED=true
-          fi
-
-          if [[ "$FAILED" == "true" ]]; then
-            exit 1
-          fi
-
-          echo "✅ Quality gate passed for lint, Semgrep, secrets, and YAML."
-          echo "   This gate did not run pytest. The full catalog is deep-plan.yml."
+        env:
+          LINT_FORMAT_RESULT: ${{ needs['lint-format'].result }}
+          SEMGREP_RESULT: ${{ needs.semgrep.result }}
+          SECRETS_SCAN_RESULT: ${{ needs['secrets-scan'].result }}
+          SECRETS_SCAN_NATIVE: ${{ needs['secrets-scan'].outputs.native_outcome }}
+          YAML_VALIDATE_RESULT: ${{ needs['yaml-validate'].result }}
+        run: python3 tools/scanner_outcomes.py quality-gate
