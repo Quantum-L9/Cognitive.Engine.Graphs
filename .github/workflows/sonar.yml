@@ -17,11 +17,14 @@
 # required Analyze (central Core) job, which neither writes nor exports
 # coverage.xml. The only run that writes coverage.xml is the deep plan
 # (deep-plan.yml, main only), which uploads it as `ceg-deep-coverage`. So:
-#   * `sonar` (pull_request, push to main): issues and duplication, no
-#     coverage.
-#   * `sonar-coverage` (after a successful Deep plan run on main): the same
-#     analysis on that exact commit with the deep plan's coverage.xml. It fails
-#     closed when the report is missing.
+#   * `sonar` (pull_request only): issues and duplication, no coverage.
+#   * `sonar-coverage` (after a successful Deep plan run on main): the only
+#     analysis of main, on the current main HEAD, with the deep plan's
+#     coverage.xml. It fails closed when the report is missing or when main
+#     has moved past the commit the deep plan measured.
+# Main gets no reportless analysis: Sonar analyses of one branch replace each
+# other, so a push-to-main scan without coverage would erase the imported
+# coverage. Main's Sonar state therefore advances with each deep plan run.
 # A Core step exporting `make test` coverage would let pull requests carry
 # coverage too; that is Core-lane work.
 #
@@ -32,8 +35,6 @@ name: Sonar
 
 on:
   pull_request:
-  push:
-    branches: [main]
   workflow_run:
     workflows: ["Deep plan"]
     types: [completed]
@@ -42,7 +43,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: sonar-${{ github.event_name }}-${{ github.ref }}-${{ github.event.workflow_run.id || github.run_id }}
+  # One group per pull request, and one for main's coverage analysis: a newer
+  # run supersedes an older one for the same destination.
+  group: sonar-${{ github.event_name }}-${{ github.event.pull_request.number || 'main' }}
   cancel-in-progress: true
 
 jobs:
@@ -51,10 +54,9 @@ jobs:
     # Skipped, visibly, for fork and Dependabot pull requests: GitHub withholds
     # Actions secrets from both, so the token step could only fail there.
     if: >-
-      github.event_name == 'push' ||
-      (github.event_name == 'pull_request' &&
-       github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.user.login != 'dependabot[bot]')
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -99,12 +101,26 @@ jobs:
       contents: read
       actions: read
     steps:
-      - name: Checkout the deep plan's exact commit
+      # The trusted default branch, never a ref taken from the triggering run.
+      - name: Checkout the default branch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.repository.default_branch }}
           fetch-depth: 0
           persist-credentials: false
+
+      # Coverage applies only to the commit the deep plan measured. If main has
+      # moved since, importing it would attach stale coverage to newer code:
+      # fail, and re-run the deep plan on the current main.
+      - name: Require main to be the measured commit
+        env:
+          MEASURED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          head_sha="$(git rev-parse HEAD)"
+          if [ "${head_sha}" != "${MEASURED_SHA}" ]; then
+            echo "::error::main is at ${head_sha} but the deep plan measured ${MEASURED_SHA}; re-run the deep plan on current main"
+            exit 1
+          fi
 
       - name: Require the Sonar token
         env:
