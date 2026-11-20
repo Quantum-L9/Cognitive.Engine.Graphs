@@ -10,8 +10,7 @@ status: active
 --- /L9_META ---
 
 Generic regression for a namespaced ref on the orbital pack. PlasticOS buyer
-selection is ``tests/integration/test_plasticos_buyer_identity.py``. The mapper
-is not copied.
+selection is ``tests/integration/test_plasticos_buyer_identity.py``. The mapper is not copied.
 """
 
 from __future__ import annotations
