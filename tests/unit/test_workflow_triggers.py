@@ -98,6 +98,8 @@ def test_path_filter_matcher_follows_github_semantics() -> None:
     assert not _selected(["docs/*"], "docs/a/b.md"), "a single * does not cross /"
     assert _selected(["**/*.py"], "engine/x.py")
     assert _selected(["**/*.py"], "x.py")
+    assert _selected(["**.py"], "x.py"), "**.py is accepted by GitHub and matches at any depth"
+    assert _selected(["**.py"], "engine/x.py")
     assert not _selected(["docs/**", "!docs/**"], "docs/a.md"), "a later negation excludes"
     assert _selected(["docs/**", "!docs/**", "docs/a.md"], "docs/a.md"), "a later pattern re-includes"
     assert _selected(["tests/[u]nit/**"], "tests/unit/x.py"), "[...] is a character class"
