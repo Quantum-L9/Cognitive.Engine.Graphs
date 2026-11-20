@@ -226,7 +226,7 @@ and adding the missing `semgrep` failure check.
 Three controls call an outside service. Each one reports what the service
 actually did, through `tools/scanner_outcomes.py`, in the step summary and as a
 job output. The witnesses are `tests/unit/test_scanner_outcomes.py` and the
-fixture `tests/fixtures/ci/quality_gate_cases.json`.
+fixture `tests/fixtures/ci/quality_gate_cases.yaml`.
 
 **GitGuardian (`ci-quality.yml`, `secrets-scan`).** Output `native_outcome`:
 

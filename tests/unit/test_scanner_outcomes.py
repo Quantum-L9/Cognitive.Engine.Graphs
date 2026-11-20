@@ -20,7 +20,6 @@ on PATH. No scan is sent to the vendor.
 
 from __future__ import annotations
 
-import json
 import os
 import stat
 import subprocess
@@ -28,13 +27,14 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 from tools import scanner_outcomes as so
 
 ROOT = Path(__file__).resolve().parents[2]
 TOOL = ROOT / "tools" / "scanner_outcomes.py"
 WORKFLOWS = ROOT / ".github" / "workflows"
-GATE_CASES = json.loads((ROOT / "tests" / "fixtures" / "ci" / "quality_gate_cases.json").read_text())["cases"]
+GATE_CASES = yaml.safe_load((ROOT / "tests" / "fixtures" / "ci" / "quality_gate_cases.yaml").read_text())["cases"]
 IMAGE = "gitguardian/ggshield:v0.0.0@sha256:" + "0" * 64
 
 pytestmark = pytest.mark.unit
@@ -238,19 +238,19 @@ def test_every_gitguardian_outcome_has_exactly_one_policy() -> None:
 @pytest.mark.parametrize("case", GATE_CASES, ids=[case["name"] for case in GATE_CASES])
 def test_quality_gate_fixture(case: dict[str, object]) -> None:
     jobs = dict.fromkeys(so.QUALITY_GATE_JOBS, "success")
-    jobs |= {so.SECRETS_JOB: str(case["secrets_job"]), "lint-format": str(case["lint_job"])}
-    verdict = so.quality_gate_verdict(jobs, str(case["secrets_native"]))
-    assert verdict.passed is case["passed"], case["why"]
+    jobs |= {so.SECRETS_JOB: str(case["secrets"]), "lint-format": str(case["lint"])}
+    verdict = so.quality_gate_verdict(jobs, str(case["native"]))
+    assert verdict.passed is case["passed"]
     counted = {"executed": verdict.executed, "not_executed": verdict.not_executed, "failed": verdict.failed}
     for bucket, members in counted.items():
-        assert (so.SECRETS_JOB in members) is (bucket == case["secrets_counted_as"]), case["why"]
+        assert (so.SECRETS_JOB in members) is (bucket == case["counted"])
     assert set(verdict.executed) | set(verdict.not_executed) | set(verdict.failed) == set(so.QUALITY_GATE_JOBS)
 
 
 def test_quality_gate_fixture_covers_every_native_outcome() -> None:
-    succeeded = [case for case in GATE_CASES if case["secrets_job"] == "success"]
-    assert {outcome.value for outcome in GG} <= {case["secrets_native"] for case in succeeded}
-    executed = {case["secrets_native"] for case in succeeded if case["secrets_counted_as"] == "executed"}
+    succeeded = [case for case in GATE_CASES if case["secrets"] == "success"]
+    assert {outcome.value for outcome in GG} <= {case["native"] for case in succeeded}
+    executed = {case["native"] for case in succeeded if case["counted"] == "executed"}
     assert executed == {"SCANNED_CLEAN"}, "only a clean scan may count the secrets job as executed"
 
 
