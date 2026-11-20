@@ -166,7 +166,13 @@ jobs:
           # - yamllint: GPL-3.0, a CI-only linter (tools profile), never shipped
           #   in an image.
           # - structlog, prometheus-client: existing exemptions.
+          # - SonarSource/sonarqube-scan-action: LGPL-3.0, a CI-only scanner
+          #   (sonar.yml, pinned 59202af3 / v8.5.0), never linked into or shipped
+          #   with CEG. Accepted by the CTO 2026-11-20 (PR #521), the same pin as
+          #   Core self-sonar.yml and EIE sonarcloud.yml. Exempt by exact name;
+          #   the action matches purls by type and name, ignoring version.
           allow-dependencies-licenses: >-
+            pkg:githubactions/SonarSource/sonarqube-scan-action,
             pkg:pypi/structlog, pkg:pypi/prometheus-client, pkg:pypi/mypy,
             pkg:pypi/colorama, pkg:pypi/httpcore, pkg:pypi/nodeenv,
             pkg:pypi/sniffio, pkg:pypi/types-pyyaml, pkg:pypi/pip-requirements-parser,
