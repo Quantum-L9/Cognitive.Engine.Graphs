@@ -15,6 +15,8 @@ Witnesses that a workflow does not run twice for one commit under review.
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -41,43 +43,43 @@ def test_contracts_push_runs_only_on_main() -> None:
     assert triggers["push"] == {"branches": ["main"]}
 
 
-# Directories that are never repository content: VCS metadata, the environment
-# `make setup` creates, and Core's runtime scaffolding.
-_NOT_REPOSITORY = {".git", ".venv", "node_modules", "__pycache__"}
-
-
 def _repository_files() -> list[str]:
-    files = []
-    for path in ROOT.rglob("*"):
-        relative = path.relative_to(ROOT)
-        if _NOT_REPOSITORY & set(relative.parts) or relative.parts[:2] == (".l9", "runtime"):
-            continue
-        if path.is_file():
-            files.append(relative.as_posix())
-    return files
+    """Tracked files only: an untracked local file must not satisfy a filter that a clean checkout fails."""
+    git = shutil.which("git")
+    assert git, "git is required to list tracked files"
+    listing = subprocess.run([git, "ls-files", "-z"], cwd=ROOT, check=True, capture_output=True)  # noqa: S603
+    return [name for name in listing.stdout.decode().split("\0") if name]
 
 
 def _glob_regex(pattern: str) -> re.Pattern[str]:
-    """GitHub filter glob: `**` crosses `/`, `*` and `?` do not, and a pattern matches whole file paths."""
-    out = []
+    """GitHub filter glob, matched against whole file paths.
+
+    `**` crosses `/`; `*` does not. `?` and `+` apply to the preceding character
+    (zero or one, one or more). `[...]` is a character class.
+    """
+    tokens: list[str] = []
     i = 0
     while i < len(pattern):
         if pattern.startswith("**/", i):
-            out.append("(?:.*/)?")
+            tokens.append("(?:.*/)?")
             i += 3
         elif pattern.startswith("**", i):
-            out.append(".*")
+            tokens.append(".*")
             i += 2
         elif pattern[i] == "*":
-            out.append("[^/]*")
+            tokens.append("[^/]*")
             i += 1
-        elif pattern[i] == "?":
-            out.append("[^/]")
+        elif pattern[i] in "?+" and tokens:
+            tokens[-1] = f"(?:{tokens[-1]}){pattern[i]}"
             i += 1
+        elif pattern[i] == "[" and "]" in pattern[i + 1 :]:
+            end = pattern.index("]", i + 1)
+            tokens.append(pattern[i : end + 1])
+            i = end + 1
         else:
-            out.append(re.escape(pattern[i]))
+            tokens.append(re.escape(pattern[i]))
             i += 1
-    return re.compile("".join(out) + r"\Z")
+    return re.compile("".join(tokens) + r"\Z")
 
 
 def _selected(patterns: list[str], file: str) -> bool:
@@ -98,6 +100,11 @@ def test_path_filter_matcher_follows_github_semantics() -> None:
     assert _selected(["**/*.py"], "x.py")
     assert not _selected(["docs/**", "!docs/**"], "docs/a.md"), "a later negation excludes"
     assert _selected(["docs/**", "!docs/**", "docs/a.md"], "docs/a.md"), "a later pattern re-includes"
+    assert _selected(["tests/[u]nit/**"], "tests/unit/x.py"), "[...] is a character class"
+    assert _selected(["tests/uni?t/**"], "tests/unit/x.py"), "? makes the preceding character optional"
+    assert _selected(["tests/uni?t/**"], "tests/unt/x.py")
+    assert _selected(["tests/unit+/**"], "tests/unittt/x.py"), "+ repeats the preceding character"
+    assert not _selected(["tests/unit+/**"], "tests/uni/x.py")
 
 
 def test_no_workflow_has_a_path_filter_that_can_never_match() -> None:
