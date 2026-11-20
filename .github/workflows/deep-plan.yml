@@ -1,3 +1,12 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: engine-specific
+# engine: graph
+# layer: [ci]
+# tags: [ci, deep-plan]
+# owner: platform
+# status: active
+# --- /L9_META ---
 # One deep execution plan for Cognitive.Engine.Graphs.
 #
 # Pull-request pytest stays on Core `make test` (`repo-test`, `pytest -m unit`).
