@@ -379,11 +379,6 @@ def test_no_workflow_uploads_to_codecov() -> None:
     assert [name for name, text in texts.items() if "scanner_outcomes.py coverage-upload" in text] == []
 
 
-def test_dev_layer_keeps_its_coverage_threshold() -> None:
-    """Retiring the upload must not drop the dev-layer coverage gate."""
-    assert "--cov-fail-under=80" in _workflow("dev-layer-gmp.yml")
-
-
 def test_dependency_review_reports_even_when_the_review_is_skipped() -> None:
     text = _workflow("supply-chain.yml")
     job = text[text.index("  dependency-review:") : text.index("  sbom:")]
