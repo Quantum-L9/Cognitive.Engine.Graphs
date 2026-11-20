@@ -10,6 +10,7 @@ excludes = [
     "pytest",
     "ruff",
     "semgrep",
+    "uv",
 ]
 
 [[package]]
