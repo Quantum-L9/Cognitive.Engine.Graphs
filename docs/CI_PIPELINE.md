@@ -257,11 +257,14 @@ enabled or not readable), and `UNKNOWN` when the check itself fails, for
 example on a 502. A graph that is not `AVAILABLE` still does not fail the job;
 the summary states that no dependency was reviewed.
 
-**Codecov (retired, T42).** No workflow uploads to Codecov. The last upload,
-in `dev-layer-gmp.yml`, last ran on 2026-03-11 and failed on every run; it is
-removed. `dev-layer-gmp.yml` keeps its `--cov-fail-under=80` threshold. The
-deep plan keeps `coverage.xml` as an artifact. Coverage reporting moves to
-SonarQube Cloud, which this change does not wire.
+**Codecov (retired, T42).** No workflow uploads to Codecov. The last upload
+was in `dev-layer-gmp.yml`, which is itself retired: it tested `dev_layer/` and
+`tests/dev_layer/`, which have never existed in this repository, and all 47 of
+its recorded runs (2026-03-02 to 2026-03-11) failed without starting a job. Its
+`--cov-fail-under=80` threshold therefore never measured anything.
+`tests/unit/test_workflow_triggers.py` refuses a workflow whose path filter
+matches no tracked file. The deep plan keeps `coverage.xml` as an artifact.
+Coverage reporting moves to SonarQube Cloud, which this change does not wire.
 
 ---
 
