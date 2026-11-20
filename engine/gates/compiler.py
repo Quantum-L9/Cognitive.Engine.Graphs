@@ -858,14 +858,39 @@ class GateCompiler:
             param = self._operand(gate)
             target_filter = f" WHERE t.{prop} = {param}"
 
+        rel = ""
+        edgepredicates = getattr(gate, "edgepredicates", None)
+        if settings.buyer_line_identity_enabled and isinstance(edgepredicates, list) and edgepredicates:
+            rel = "rel"
+            edge_filter = self._edge_predicate_filter(gate)
+            target_filter = f"{target_filter} AND {edge_filter}" if target_filter else f" WHERE {edge_filter}"
+
+        hop = f"-[{rel}:{edge_type}]->" if rel else f"-[:{edge_type}]->"
         # Concatenated like the exclusion gate above: edge_type / target_label /
         # prop are sanitize_label()-validated and values only ever flow through
         # $ parameters (C-009; tools/contract_scanner.py SEC-001).
         # candidateprop is the target node's property: only the parameter is null-checked.
+        # Edge-predicate literals are bound by _bind and are not null operands.
         return _Predicate(
-            "EXISTS { MATCH (candidate)-[:" + edge_type + "]->(t" + label_clause + ")" + target_filter + " }",
-            self._param_operands(gate) if target_filter else [],
+            "EXISTS { MATCH (candidate)" + hop + "(t" + label_clause + ")" + target_filter + " }",
+            self._param_operands(gate) if gate.candidateprop and gate.queryparam is not None else [],
         )
+
+    def _edge_predicate_filter(self, gate: GateSpec) -> str:
+        """AND of the relationship predicates, values bound as parameters."""
+        clauses: list[str] = []
+        for index, predicate in enumerate(gate.edgepredicates or []):
+            prop = sanitize_label(predicate.property)
+            if predicate.present:
+                blank = self._bind(gate, f"edge{index}blank", "")
+                clauses.append(f"rel.{prop} IS NOT NULL AND rel.{prop} <> {blank}")
+            elif predicate.equals is not None:
+                param = self._bind(gate, f"edge{index}", predicate.equals)
+                clauses.append(f"rel.{prop} = {param}")
+            else:
+                msg = f"Gate '{gate.name}': edge predicate {predicate.property!r} needs equals or present"
+                raise ValueError(msg)
+        return " AND ".join(clauses)
 
     # ── Null Semantics ─────────────────────────────────────
 

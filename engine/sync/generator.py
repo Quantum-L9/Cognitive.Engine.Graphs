@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any
 
 from engine.config.schema import (
+    ChildSyncSpec,
     DomainSpec,
     EdgeDirection,
     ManagedByType,
@@ -30,7 +31,7 @@ from engine.config.schema import (
     SyncStrategy,
 )
 from engine.config.tenant_mapping import declared_ref_namespace
-from engine.sync.row_contract import SyncRowContract
+from engine.sync.row_contract import ChildProjection, SyncRowContract
 from engine.utils.security import sanitize_label
 
 logger = logging.getLogger(__name__)
@@ -113,32 +114,67 @@ class SyncGenerator:
                     ]
                 )
         for child, projection in zip(spec.childsync or [], contract.children, strict=True):
-            child_label = sanitize_label(child.targetnode)
-            child_edge = sanitize_label(child.edgetype)
-            child_field = sanitize_label(projection.field)
-            child_id = sanitize_label(projection.targetid)
-            if child.edgedirection == "parenttochild":
-                edge_pattern = f"(n)-[:{child_edge}]->(c)"
-            elif child.edgedirection == "childtoparent":
-                edge_pattern = f"(n)<-[:{child_edge}]-(c)"
-            else:
-                msg = (
-                    f"Endpoint '{spec.path}': childsync '{child.field}' edgedirection must be "
-                    f"'parenttochild' or 'childtoparent', got {child.edgedirection!r}"
-                )
-                raise ValueError(msg)
-            write = "ON CREATE SET" if projection.static else "SET"
-            cypher_parts.extend(
-                [
-                    "WITH n, row",
-                    f"FOREACH (child_row IN coalesce(row.children.{child_field}, []) |",
-                    f"  MERGE (c:{child_label} {{{child_id}: child_row.{child_id}}})",
-                    f"  {write} c += child_row, c._tenant = $tenant",
-                    f"  MERGE {edge_pattern}",
-                    ")",
-                ]
-            )
+            cypher_parts.extend(self._declared_child_clauses(spec.path, child, projection))
         return "\n".join(cypher_parts)
+
+    def _declared_child_clauses(
+        self, endpoint_path: str, child: ChildSyncSpec, projection: ChildProjection
+    ) -> list[str]:
+        """One childsync block. A declared line identity MERGEs the relationship by that key."""
+        from engine.config.settings import settings
+
+        child_label = sanitize_label(child.targetnode)
+        child_edge = sanitize_label(child.edgetype)
+        child_field = sanitize_label(projection.field)
+        child_id = sanitize_label(projection.targetid)
+        if child.edgedirection == "parenttochild":
+            plain = f"(n)-[:{child_edge}]->(c)"
+            keyed_open = f"(n)-[rel:{child_edge} {{"
+            keyed_close = "}]->(c)"
+        elif child.edgedirection == "childtoparent":
+            plain = f"(n)<-[:{child_edge}]-(c)"
+            keyed_open = f"(n)<-[rel:{child_edge} {{"
+            keyed_close = "}]-(c)"
+        else:
+            msg = (
+                f"Endpoint '{endpoint_path}': childsync '{child.field}' edgedirection must be "
+                f"'parenttochild' or 'childtoparent', got {child.edgedirection!r}"
+            )
+            raise ValueError(msg)
+        identity = child.edgeidentity
+        use_lines = settings.buyer_line_identity_enabled and identity is not None and bool(projection.edge_keys)
+        write = "ON CREATE SET" if projection.static else "SET"
+        merge_node = f"  MERGE (c:{child_label} {{{child_id}: child_row.{child_id}}})"
+        header = [
+            "WITH n, row",
+            f"FOREACH (child_row IN coalesce(row.children.{child_field}, []) |",
+            merge_node,
+        ]
+        if not use_lines or identity is None:
+            return [
+                *header,
+                f"  {write} c += child_row, c._tenant = $tenant",
+                f"  MERGE {plain}",
+                ")",
+            ]
+        names = [sanitize_label(name) for name in (child.edgeproperties or []) if name in projection.edge_keys]
+        identity_name = sanitize_label(identity)
+        overrides = ", ".join(f"{name}: null" for name in names)
+        rel_set = ", ".join(f"rel.{name} = child_row.{name}" for name in names)
+        keyed = f"{keyed_open}{identity_name}: child_row.{identity_name}{keyed_close}"
+        absent = f"child_row.{identity_name} IS NULL OR child_row.{identity_name} = ''"
+        return [
+            *header,
+            f"  {write} c += child_row{{.*, {overrides}}}, c._tenant = $tenant",
+            f"  FOREACH (missing IN CASE WHEN {absent} THEN [1] ELSE [] END |",
+            f"    MERGE {plain}",
+            "  )",
+            f"  FOREACH (present IN CASE WHEN {absent} THEN [] ELSE [1] END |",
+            f"    MERGE {keyed}",
+            f"    SET {rel_set}, rel._tenant = $tenant",
+            "  )",
+            ")",
+        ]
 
     def _generate_unwind_merge(self, spec: SyncEndpointSpec) -> str:
         if not spec.targetnode:

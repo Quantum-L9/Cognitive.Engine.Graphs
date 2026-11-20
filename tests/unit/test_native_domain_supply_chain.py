@@ -91,7 +91,7 @@ def test_cli_loader_same_withholding_reason(tmp_path: Path) -> None:
 def test_cli_uses_per_direction_weight_semantics(tmp_path: Path) -> None:
     # PlasticOS is a multi-direction fixture; summing all directions is incorrect.
     path = DESIGN_PACKS_ROOT / "plasticos" / "spec.yaml"
-    assert owner.DomainPackLoader(str(DESIGN_PACKS_ROOT)).load_domain("plasticos").domain.version == "1.4.0"
+    assert owner.DomainPackLoader(str(DESIGN_PACKS_ROOT)).load_domain("plasticos").domain.version == "1.5.0"
     assert validate_spec(path)[1] == 0
 
 

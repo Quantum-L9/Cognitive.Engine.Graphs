@@ -49,9 +49,10 @@ def test_traversal_assembler_accepts_first_direction() -> None:
     spec = loader.load_domain("plasticos")
     clauses = TraversalAssembler(spec).assemble_traversal(DIRECTION)
     assert clauses == []
-    assert "MATCH (candidate)-[:PROCESSES]->(t:PolymerFamily) WHERE t.code = $polymer_type" in (
-        GateCompiler(spec).compile_all_gates(DIRECTION)
-    )
+    where = GateCompiler(spec).compile_all_gates(DIRECTION)
+    assert "MATCH (candidate)-[rel:PROCESSES]->(t:PolymerFamily) WHERE t.code = $polymer_type" in where
+    assert "rel.direction = " in where
+    assert "rel.form IS NOT NULL AND rel.form <> " in where
 
 
 def test_legacy_direction_not_in_executable_contract() -> None:

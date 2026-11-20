@@ -379,8 +379,12 @@ def test_plasticos_polymer_constraint_is_an_exists_gate(direction: str, edge: st
 
     spec = _admitted_spec("plasticos")
     where = GateCompiler(spec).compile_all_gates(direction)
-    exists = f"EXISTS {{ MATCH (candidate)-[:{edge}]->(t:PolymerFamily) WHERE t.code = $polymer_type }}"
-    assert f"($polymer_type IS NOT NULL AND ({exists}))" in where
+    hop = f"[rel:{edge}]" if direction == _DIR1 else f"[:{edge}]"
+    exists = f"EXISTS {{ MATCH (candidate)-{hop}->(t:PolymerFamily) WHERE t.code = $polymer_type"
+    assert f"($polymer_type IS NOT NULL AND ({exists}" in where
+    if direction == _DIR1:
+        assert "rel.direction = " in where
+        assert "rel.form IS NOT NULL AND rel.form <> " in where
     traversal = "\n".join(TraversalAssembler(spec).assemble_traversal(direction))
     assert f"MATCH (candidate:{label})-[:{edge}]" not in traversal
     assert f"[:{edge}]" not in traversal
