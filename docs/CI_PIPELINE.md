@@ -68,8 +68,9 @@ status: active
 - **Advisory**: security, sbom, scorecard (failures logged, not blocking)
 
 > `ci-quality.yml` (a separate workflow, not part of `ci.yml`'s fan-in) has
-> its own `quality-gate` job that similarly aggregates `lint-format`,
-> `semgrep`, `secrets-scan`, and `yaml-validate`. Both `ci-gate` and
+> its own `quality-gate` job that similarly aggregates `semgrep`,
+> `secrets-scan`, and `yaml-validate` (`lint-format` moved to its one owner,
+> see "One owner per check"). Both `ci-gate` and
 > `quality-gate` should be configured as **required status checks** in
 > branch protection for either to actually block a merge — a workflow job
 > failing does not, by itself, prevent merging unless GitHub is configured
@@ -261,6 +262,31 @@ in `dev-layer-gmp.yml`, last ran on 2026-03-11 and failed on every run; it is
 removed. `dev-layer-gmp.yml` keeps its `--cov-fail-under=80` threshold. The
 deep plan keeps `coverage.xml` as an artifact. Coverage reporting moves to
 SonarQube Cloud, which this change does not wire.
+
+---
+
+## One owner per check (consolidation)
+
+Each local check runs in one workflow. On every pull request the required
+Analyze (central Core) job runs the same `Repo.mk` leaves again (`make
+validate`, `make check`), with tools installed from Core's v2 pins by the same
+`tools/deps/install_locked.sh` the local jobs use. Central Core does not run on
+push to `main`, so the local owner is what checks `main`.
+
+| Check | Local owner (PR + push to main) | Central (PR) | Removed copies |
+|---|---|---|---|
+| `ruff check .` | `l9-lint-test.yml` (org-distributed) | `make check` | `ci.yml` lint, `ci-quality.yml` lint-format, `contracts.yml` lint, `compliance.yml`, pre-commit `ruff` in CI |
+| `ruff format --check .` | `l9-lint-test.yml` | `make check` | `ci.yml` lint, `ci-quality.yml` lint-format, `contracts.yml` lint, pre-commit `ruff-format` in CI |
+| `mypy engine/` | `l9-lint-test.yml` | `make check` | `ci.yml` lint, `ci-quality.yml` lint-format, `contracts.yml` lint, `compliance.yml`, pre-commit `mypy` in CI |
+| `tools/contract_scanner.py` | `contracts.yml` | `make validate` | `compliance.yml`, pre-commit `l9-contract-scan` in CI |
+| `tools/verify_contracts.py` | `contracts.yml` | `make validate` | pre-commit `l9-contract-files-exist` in CI |
+| `tools/l9_meta_injector.py` | `contracts.yml` | `make validate` | pre-commit `l9-meta-check` in CI |
+| `tools/check_action_refs.py` | `contracts.yml` | `make validate` | none |
+
+Local pre-commit still runs every hook; only the CI pre-commit pass skips the
+copies above. `lint-autofix.yml` (rewrites `main`, opens a fix PR) and
+`refactoring-validation.yml` (`refactor/*` only) are not check owners.
+`tests/unit/test_workflow_triggers.py` fails on a second owner.
 
 ---
 

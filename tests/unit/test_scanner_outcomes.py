@@ -238,7 +238,7 @@ def test_every_gitguardian_outcome_has_exactly_one_policy() -> None:
 @pytest.mark.parametrize("case", GATE_CASES, ids=[case["name"] for case in GATE_CASES])
 def test_quality_gate_fixture(case: dict[str, object]) -> None:
     jobs = dict.fromkeys(so.QUALITY_GATE_JOBS, "success")
-    jobs |= {so.SECRETS_JOB: str(case["secrets"]), "lint-format": str(case["lint"])}
+    jobs |= {so.SECRETS_JOB: str(case["secrets"]), "semgrep": str(case["other"])}
     verdict = so.quality_gate_verdict(jobs, str(case["native"]))
     assert verdict.passed is case["passed"]
     counted = {"executed": verdict.executed, "not_executed": verdict.not_executed, "failed": verdict.failed}
@@ -268,7 +268,6 @@ def _run_tool(command: str, tmp_path: Path, **env: str) -> tuple[int, dict[str, 
 
 def _gate_env(native: str, secrets: str = "success") -> dict[str, str]:
     return {
-        "LINT_FORMAT_RESULT": "success",
         "SEMGREP_RESULT": "success",
         "SECRETS_SCAN_RESULT": secrets,
         "SECRETS_SCAN_NATIVE": native,
@@ -281,7 +280,7 @@ def test_quality_gate_command_reports_a_skipped_scan_as_not_executed(tmp_path: P
     assert rc == 0, "requiredness is unchanged: an advisory skip does not fail the gate"
     assert outputs["not_executed"] == "secrets-scan"
     assert "secrets-scan" not in outputs["executed"]
-    assert "3 of 4 controls executed, 1 not executed, 0 failed" in summary
+    assert "2 of 3 controls executed, 1 not executed, 0 failed" in summary
     assert "NOT EXECUTED  secrets-scan: KEY_ABSENT" in stdout
     assert "::warning::secrets-scan was NOT EXECUTED and is not counted as a passed control" in stdout
 
