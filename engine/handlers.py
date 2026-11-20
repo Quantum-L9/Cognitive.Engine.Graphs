@@ -1224,12 +1224,12 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 for cand in candidates_out:
                     if isinstance(cand, dict) and isinstance(cand.get("score"), (int, float)):
                         scaled = round((cand["score"] - raw_min) / score_range, 6)
-                        changed = changed or not _same_score(float(scaled), float(cand["score"]))
+                        changed = changed or not _same_score(cast("float", scaled), cast("float", cand["score"]))
                         cand["score"] = scaled
             elif len(finite_scores) == 1:
                 for cand in candidates_out:
                     if isinstance(cand, dict) and isinstance(cand.get("score"), (int, float)):
-                        if not _same_score(float(cand["score"]), 1.0):
+                        if not _same_score(cast("float", cand["score"]), 1.0):
                             cand["score"] = 1.0
                             changed = True
             # A tied range leaves every finite score unchanged. Do not label it normalized.
