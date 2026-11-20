@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -145,3 +146,76 @@ def test_core_ref_matches_the_installers_fallback(monkeypatch: pytest.MonkeyPatc
 def test_unknown_core_schema_fails_closed() -> None:
     errors = _mod.check_repository(_ROOT, {"schema": "other", "tools": []}, {}, _resolve)
     assert errors == ["Core tool list schema 'other' is not l9.core-owned-tools/v1"]
+
+
+def test_optional_dependency_declaring_core_tool_fails() -> None:
+    pyproject = _clean_pyproject()
+    pyproject["project"] = {"optional-dependencies": {"audit": ["ruff==0.15.0"]}}
+    errors = _mod.check_pyproject(pyproject, {"package": []}, _mod.python_tools(CORE_TOOLS))
+    assert errors == ["pyproject.toml project.optional-dependencies.audit declares Core-owned ruff==0.15.0"]
+
+
+def test_equivalent_repository_urls_still_match() -> None:
+    for spelling in (RUFF_HOOKS + ".git", RUFF_HOOKS + "/", RUFF_HOOKS.upper()):
+        config = {"repos": [{"repo": spelling, "rev": "v0.16.1"}, LOCAL_HOOKS]}
+        assert _mod.check_pre_commit(config, CORE_TOOLS, LOCK, _resolve), spelling
+    assert not _mod.same_repository(RUFF_HOOKS, GITLEAKS)
+
+
+def test_partial_dependabot_ignore_does_not_count() -> None:
+    ignore = [{"dependency-name": name} for name in ("bandit", "pip-audit", "uv")]
+    ignore.append({"dependency-name": "ruff", "update-types": ["version-update:semver-major"]})
+    config = {"updates": [{"package-ecosystem": "uv", "ignore": ignore}]}
+    assert _mod.check_dependabot(config, _mod.python_tools(CORE_TOOLS)) == [
+        ".github/dependabot.yml does not ignore Core-owned ruff"
+    ]
+
+
+def _ls_remote(monkeypatch: pytest.MonkeyPatch, stdout: str) -> list[list[str]]:
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **_: object) -> SimpleNamespace:
+        calls.append(args)
+        return SimpleNamespace(stdout=stdout)
+
+    monkeypatch.setattr(_mod.subprocess, "run", run)
+    return calls
+
+
+def test_resolver_takes_a_lightweight_tags_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _ls_remote(monkeypatch, f"{'a' * 40}\trefs/tags/v8.24.3\n")
+    assert _mod.resolve_remote_tag(GITLEAKS, "8.24.3") == "a" * 40
+    assert calls[0][1:3] == ["ls-remote", "--"]
+
+
+def test_resolver_peels_an_annotated_tag_to_its_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+    _ls_remote(monkeypatch, f"{'b' * 40}\trefs/tags/v8.24.3\n{'c' * 40}\trefs/tags/v8.24.3^{{}}\n")
+    assert _mod.resolve_remote_tag(GITLEAKS, "8.24.3") == "c" * 40
+
+
+def test_resolver_fails_on_a_missing_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+    _ls_remote(monkeypatch, "")
+    with pytest.raises(RuntimeError, match="has no tag v9.9.9"):
+        _mod.resolve_remote_tag(GITLEAKS, "9.9.9")
+
+
+def test_resolver_refuses_a_non_https_repository() -> None:
+    with pytest.raises(ValueError, match="non-https"):
+        _mod.resolve_remote_tag("file:///tmp/repo", "1.0.0")
+
+
+def test_main_fails_closed_when_core_is_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unreachable(ref: str, path: str) -> dict:
+        raise OSError(f"cannot reach Core at {ref}")
+
+    monkeypatch.setattr(_mod, "fetch_core", unreachable)
+    assert _mod.main(["--ref", "v2"]) == 2
+
+
+def test_main_fails_on_drift_and_passes_when_clean(monkeypatch: pytest.MonkeyPatch) -> None:
+    metadata = {_mod.CORE_TOOLS_PATH: CORE_TOOLS, CORE_TOOLS["lock"]: LOCK}
+    monkeypatch.setattr(_mod, "fetch_core", lambda ref, path: metadata[path])
+    monkeypatch.setattr(_mod, "check_repository", lambda root, tools, lock, resolve: ["drift"])
+    assert _mod.main(["--ref", "v2"]) == 1
+    monkeypatch.setattr(_mod, "check_repository", lambda root, tools, lock, resolve: [])
+    assert _mod.main(["--ref", "v2"]) == 0

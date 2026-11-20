@@ -83,7 +83,14 @@ def python_tools(core_tools: dict[str, Any]) -> set[str]:
 
 def check_pyproject(pyproject: dict[str, Any], uv_lock: dict[str, Any], core: set[str]) -> list[str]:
     errors: list[str] = []
-    sections = {"project.dependencies": pyproject.get("project", {}).get("dependencies", [])}
+    project = pyproject.get("project", {})
+    sections = {"project.dependencies": project.get("dependencies", [])}
+    sections.update(
+        {
+            f"project.optional-dependencies.{name}": specs
+            for name, specs in project.get("optional-dependencies", {}).items()
+        }
+    )
     sections.update(
         {f"dependency-groups.{name}": specs for name, specs in pyproject.get("dependency-groups", {}).items()}
     )
@@ -104,6 +111,16 @@ def check_pyproject(pyproject: dict[str, Any], uv_lock: dict[str, Any], core: se
     return errors
 
 
+def same_repository(left: str, right: str) -> bool:
+    """Whether two repository URLs name one repository (case, trailing / and .git ignored)."""
+
+    def key(url: str) -> str:
+        url = url.strip().lower().rstrip("/")
+        return url.removesuffix(".git")
+
+    return key(left) == key(right)
+
+
 def check_pre_commit(
     config: dict[str, Any], core_tools: dict[str, Any], lock: dict[str, str], resolve_tag: TagResolver
 ) -> list[str]:
@@ -111,7 +128,7 @@ def check_pre_commit(
     repos = config.get("repos", [])
     for tool in core_tools["tools"]:
         for url in tool["ecosystems"].get("pre-commit", []):
-            for repo in (r for r in repos if r.get("repo") == url):
+            for repo in (r for r in repos if same_repository(r.get("repo", ""), url)):
                 if tool["ecosystems"].get("uv"):
                     # On PyPI too: run the installed Core tool, not a second pinned copy.
                     errors.append(f".pre-commit-config.yaml pins {url}; run {tool['name']} as a local system hook")
@@ -143,7 +160,13 @@ def check_dependabot(config: dict[str, Any], core: set[str]) -> list[str]:
     python = next((u for u in config.get("updates", []) if u.get("package-ecosystem") == "uv"), None)
     if python is None:
         return [".github/dependabot.yml has no uv update block"]
-    ignored = {canonical(e["dependency-name"]) for e in python.get("ignore", []) if "versions" not in e}
+    # Only an unconditional ignore stops every proposal: `versions` or
+    # `update-types` narrow it to some updates.
+    ignored = {
+        canonical(e["dependency-name"])
+        for e in python.get("ignore", [])
+        if "versions" not in e and "update-types" not in e
+    }
     # pip is excluded from uv.lock, so Dependabot has no pip to propose.
     return [f".github/dependabot.yml does not ignore Core-owned {name}" for name in sorted(core - {"pip"} - ignored)]
 
