@@ -22,7 +22,9 @@
 #                                 contract compiler, C-18 L9_META headers
 #   make check     repo-check     ruff check, ruff format --check, mypy engine/,
 #                                 C-009 cypher-lint (non-mutating)
-#   make test      repo-test      unit suite: pytest -m unit (no Docker, no Neo4j)
+#   make test      repo-test      PR pytest owner: pytest -m unit (no Docker, no Neo4j)
+#   make test-deep                one full plan, not a make-v1 phase. Missing
+#                                 pinned Odoo mapper is NOT_RUN.
 #
 # Core runs setup -> validate -> check -> test in that order on a plain runner,
 # so none of the four leaves may need Docker or Neo4j. The pre-V2 meanings of
@@ -47,7 +49,7 @@ PAYLOAD_COMPILER_ARGS := --stdout-only --domains-root tests/fixtures/domains \
 
 .PHONY: repo-setup repo-validate repo-check repo-test
 .PHONY: dev dev-build dev-down dev-logs dev-restart health
-.PHONY: test-docker test-unit test-integration seed shell neo4j-shell cypher-lint
+.PHONY: test-docker test-unit test-integration test-deep seed shell neo4j-shell cypher-lint
 .PHONY: local-dbs local-api local-api-legacy local-api-sdk
 
 # ── Core Repository Execution V2 phases (make-v1 ABI) ──────
@@ -78,6 +80,10 @@ repo-check:	## Non-mutating static gate: ruff check, ruff format --check, mypy e
 	@echo "── Cypher lint (C-009) ──"
 	@$(REPO_PY) tools/cypher_lint.py
 
+# Single pull-request pytest owner. Bounded nonempty `-m unit` selection,
+# which includes the unit scoring, match, identity, API, and Gate modules.
+# An empty collection is pytest exit 5 and fails this leaf. Integration,
+# performance, and the pinned-Odoo proof run only under test-deep.
 repo-test:	## Unit suite (pytest -m unit): no Docker, no Neo4j
 	@PYTHONPATH="$${PYTHONPATH:-}:." $(REPO_PY) -m pytest tests/ -m unit --tb=short -q
 
@@ -124,6 +130,19 @@ test-unit:	## Unit tests only (no Neo4j needed)
 
 test-integration:	## Integration tests (needs Neo4j)
 	docker compose exec api python -m pytest tests/integration/ -v --tb=short
+
+# One deep plan. Not a make-v1 phase and not a pull-request path.
+# The deep workflow provides Neo4j, Postgres, and L9_ODOO_CONSUMER.
+# A missing pinned Odoo mapper fails here as NOT_RUN before pytest.
+# coverage.xml is the artifact. Codecov upload is deferred.
+test-deep:	## Full plan once; missing Odoo mapper is NOT_RUN
+	@root="$${L9_ODOO_CONSUMER:-}"; \
+	if [ -z "$$root" ] || [ ! -f "$$root/plasticos_gate/services/gate_mappers.py" ]; then \
+		echo "NOT_RUN: pinned Odoo mapper checkout is absent" >&2; \
+		exit 1; \
+	fi
+	@echo "deep plan: one pytest catalog; Codecov upload is deferred"
+	@PYTHONPATH="$${PYTHONPATH:-}:." CEG_REQUIRE_INTEGRATION=1 $(REPO_PY) -m pytest tests/ -p no:xdist --cov=engine --cov-report=xml:coverage.xml --cov-report=term-missing --timeout=300 --tb=short -v
 
 # ── Data Seeding ───────────────────────────────────────────
 

@@ -1,0 +1,318 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: engine-specific
+# engine: graph
+# layer: [ci]
+# tags: [ci, deep-plan]
+# owner: platform
+# status: active
+# --- /L9_META ---
+# One deep execution plan for Cognitive.Engine.Graphs.
+#
+# Pull-request pytest stays on Core `make test` (`repo-test`, `pytest -m unit`).
+# This workflow is not a pull_request or default-branch push trigger.
+# Heavy steps run only for mode=apply, after repository identity, default
+# ref, UTC slot, and exact SHA checks, and before dependency install.
+#
+# Inputs are only expected_sha, utc_slot, deep_contract, dispatch_key, and mode.
+# Accepted deep_contract is ceg-deep/v1. utc_slot is the current UTC day
+# (YYYY-MM-DD). mode is plan or apply. plan runs zero heavy jobs and is not
+# a deep-test receipt.
+#
+# A missing pinned Odoo mapper is NOT_RUN (exit 1), never a green skip.
+# Codecov upload is deferred and is not a result of this plan. coverage.xml
+# is the one coverage artifact.
+
+name: Deep plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact default-branch commit (40 lowercase hex digits)
+        required: true
+        type: string
+      utc_slot:
+        description: UTC day slot YYYY-MM-DD
+        required: true
+        type: string
+      deep_contract:
+        description: Deep contract id (only ceg-deep/v1 is admitted)
+        required: true
+        type: string
+      dispatch_key:
+        description: Dispatch idempotency key
+        required: true
+        type: string
+      mode:
+        description: plan runs zero heavy jobs; apply runs the one deep plan
+        required: true
+        type: string
+
+run-name: deep ${{ inputs.mode }} ${{ inputs.utc_slot }} ${{ inputs.deep_contract }} ${{ inputs.dispatch_key }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ceg-deep-${{ github.repository }}-${{ inputs.utc_slot }}-${{ inputs.deep_contract }}
+  cancel-in-progress: false
+
+jobs:
+  admit:
+    name: Admit deep dispatch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      mode: ${{ steps.decision.outputs.mode }}
+    steps:
+      - name: Validate identity, slot, and exact SHA
+        id: decision
+        env:
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RUN_ID: ${{ github.run_id }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          UTC_SLOT: ${{ inputs.utc_slot }}
+          DEEP_CONTRACT: ${{ inputs.deep_contract }}
+          DISPATCH_KEY: ${{ inputs.dispatch_key }}
+          MODE: ${{ inputs.mode }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          refuse() { echo "REFUSED: $*" >&2; exit 1; }
+          [[ "${EVENT_NAME}" == "workflow_dispatch" ]] || refuse "event ${EVENT_NAME}"
+          [[ "${REPOSITORY}" == "Quantum-L9/Cognitive.Engine.Graphs" ]] || refuse "repository ${REPOSITORY}"
+          [[ -n "${DEFAULT_BRANCH}" ]] || refuse "default branch is unknown"
+          [[ "${REF}" == "refs/heads/${DEFAULT_BRANCH}" ]] || refuse "ref ${REF} is not the default branch"
+          [[ "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]] || refuse "expected_sha is not 40 lowercase hex"
+          [[ "${SHA}" == "${EXPECTED_SHA}" ]] || refuse "github.sha does not match expected_sha"
+          [[ "${DEEP_CONTRACT}" == "ceg-deep/v1" ]] || refuse "deep_contract is not ceg-deep/v1"
+          [[ "${DISPATCH_KEY}" =~ ^[A-Za-z0-9._:-]{1,200}$ ]] || refuse "dispatch_key is empty or unsafe"
+          [[ "${MODE}" == "plan" || "${MODE}" == "apply" ]] || refuse "mode ${MODE}"
+          [[ "${UTC_SLOT}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || refuse "utc_slot is not YYYY-MM-DD"
+          today="$(date -u +%Y-%m-%d)"
+          [[ "${UTC_SLOT}" == "${today}" ]] || refuse "utc_slot ${UTC_SLOT} is not the current UTC day ${today}"
+          api_sha="$(gh api "repos/${REPOSITORY}/commits/${DEFAULT_BRANCH}" --jq .sha)"
+          [[ "${api_sha}" =~ ^[0-9a-f]{40}$ ]] || refuse "default-branch SHA is unknown"
+          [[ "${api_sha}" == "${EXPECTED_SHA}" ]] || refuse "default branch is ${api_sha}, not expected_sha"
+          if [[ "${MODE}" == "apply" ]]; then
+            python3 - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.request
+
+          repository = os.environ["REPOSITORY"]
+          run_id = int(os.environ["RUN_ID"])
+          slot = os.environ["UTC_SLOT"]
+          contract = os.environ["DEEP_CONTRACT"]
+          key = os.environ["DISPATCH_KEY"]
+          mode = os.environ["MODE"]
+          token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
+          if not token:
+              print("REFUSED: no token to read prior deep runs", file=sys.stderr)
+              sys.exit(1)
+          expected_name = f"deep {mode} {slot} {contract} {key}"
+
+          def get(url: str) -> tuple[dict, str]:
+              request = urllib.request.Request(
+                  url,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "User-Agent": "ceg-deep-plan",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=60) as response:
+                  payload = json.loads(response.read().decode())
+                  return payload, response.headers.get("Link", "")
+
+          self_url = f"https://api.github.com/repos/{repository}/actions/runs/{run_id}"
+          try:
+              self_run, _link = get(self_url)
+          except Exception as exc:
+              print(f"REFUSED: could not read this run ({exc})", file=sys.stderr)
+              sys.exit(1)
+          self_titles = {self_run.get("display_title") or "", self_run.get("name") or ""}
+          if expected_name not in self_titles:
+              print(
+                  "REFUSED: run name does not bind the dispatch inputs: "
+                  + repr(sorted(self_titles)),
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          page = 1
+          seen = 0
+          while page <= 50:
+              url = (
+                  f"https://api.github.com/repos/{repository}/actions/workflows/"
+                  f"deep-plan.yml/runs?per_page=100&page={page}"
+              )
+              try:
+                  data, link = get(url)
+              except Exception as exc:
+                  print(f"REFUSED: could not list deep runs ({exc})", file=sys.stderr)
+                  sys.exit(1)
+              runs = data.get("workflow_runs")
+              if not isinstance(runs, list):
+                  print("REFUSED: workflow run list is unreadable", file=sys.stderr)
+                  sys.exit(1)
+              seen += len(runs)
+              for run in runs:
+                  if int(run.get("id") or 0) == run_id:
+                      continue
+                  titles = {run.get("name") or "", run.get("display_title") or ""}
+                  for title in titles:
+                      parts = title.split(" ")
+                      if len(parts) < 5 or parts[0] != "deep" or parts[1] != "apply":
+                          continue
+                      run_slot, run_contract = parts[2], parts[3]
+                      run_key = " ".join(parts[4:])
+                      same_slot = run_slot == slot and run_contract == contract
+                      if same_slot or run_key == key:
+                          print(
+                              f"REFUSED: duplicate apply run {run.get('id')} name={title}",
+                              file=sys.stderr,
+                          )
+                          sys.exit(1)
+              if len(runs) < 100:
+                  print(f"duplicate scan complete pages={page} runs={seen}")
+                  break
+              if 'rel="next"' not in link:
+                  print("REFUSED: truncated pagination", file=sys.stderr)
+                  sys.exit(1)
+              page += 1
+          else:
+              print("REFUSED: truncated pagination", file=sys.stderr)
+              sys.exit(1)
+          PY
+          fi
+          echo "mode=${MODE}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "### Deep dispatch admission"
+            echo ""
+            echo "- repository: \`${REPOSITORY}\`"
+            echo "- mode: \`${MODE}\`"
+            echo "- utc_slot: \`${UTC_SLOT}\`"
+            echo "- deep_contract: \`${DEEP_CONTRACT}\`"
+            echo "- expected_sha: \`${EXPECTED_SHA}\`"
+            if [[ "${MODE}" == "plan" ]]; then
+              echo "- heavy jobs: 0"
+              echo ""
+              echo "This green plan is not a deep-test receipt and not a live schedule receipt."
+            else
+              echo "- heavy jobs: the one deep plan, after this admission"
+            fi
+            echo ""
+            echo "Codecov upload is deferred and is not a result of this workflow."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  deep:
+    name: Deep plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: admit
+    if: needs.admit.result == 'success' && needs.admit.outputs.mode == 'apply'
+    permissions:
+      contents: read
+    services:
+      neo4j:
+        image: neo4j:5.18-enterprise@sha256:745cfda6713a7fa14f763d0730f464fd5b16afaccf5328ff9b4c5785c87b5f37
+        env:
+          NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+          NEO4J_AUTH: neo4j/l9-test-password
+          NEO4J_PLUGINS: '["graph-data-science"]'
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p l9-test-password 'RETURN 1'"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 30
+          --health-start-period 20s
+      postgres:
+        image: postgres:16@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
+        env:
+          POSTGRES_USER: ceg_test
+          POSTGRES_PASSWORD: ceg_test_password
+          POSTGRES_DB: ceg_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ceg_test -d ceg_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout expected SHA
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          ref: ${{ inputs.expected_sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Prove the checkout is the admitted SHA
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          [[ "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${head}" == "${EXPECTED_SHA}" ]]
+
+      - name: Checkout pinned Odoo consumer
+        uses: Quantum-L9/l9-ci-core/.github/actions/checkout-external@043f50ac41af17bf814f811076c5b48a640d9a2e
+        with:
+          token: ${{ secrets.L9_GITHUB_READ_TOKEN }}
+
+      - name: Fail closed when the pinned Odoo mapper is absent
+        run: |
+          set -euo pipefail
+          root="${L9_ODOO_CONSUMER:-}"
+          mapper="${root}/plasticos_gate/services/gate_mappers.py"
+          if [[ -z "${root}" || ! -f "${mapper}" ]]; then
+            echo "NOT_RUN: pinned Odoo mapper checkout is absent" >&2
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: bash tools/deps/install_locked.sh full
+
+      - name: Run the one deep plan
+        env:
+          NEO4J_TEST_URI: bolt://localhost:7687
+          NEO4J_TEST_USER: neo4j
+          NEO4J_TEST_PASSWORD: l9-test-password
+          PACKET_STORE_TEST_DSN: postgresql://ceg_test:ceg_test_password@localhost:5432/ceg_test
+          CEG_REQUIRE_INTEGRATION: "1"
+        run: make test-deep
+
+      - name: Upload the coverage artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: ceg-deep-coverage
+          path: coverage.xml
+          if-no-files-found: error
+
+      - name: Record deferred Codecov
+        run: |
+          {
+            echo "### Deep plan result"
+            echo ""
+            echo "One pytest catalog ran via \`make test-deep\`."
+            echo "Codecov upload is deferred and did not decide this result."
+          } >> "${GITHUB_STEP_SUMMARY}"
