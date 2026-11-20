@@ -10,23 +10,39 @@
 #
 # SonarQube Cloud CI-based analysis. Automatic Analysis is off for project
 # Quantum-L9_Cognitive.Engine.Graphs, because it cannot import coverage; this
-# job replaces it. It runs no tests: coverage comes only from the existing
-# unit run's coverage.xml, read from coverage-reports/ when present (see
-# sonar-project.properties). A missing token fails the job: no analysis is
-# never reported as a pass. Fork and Dependabot pull requests are skipped,
-# since GitHub withholds the token from both.
+# workflow replaces it. It runs no tests.
+#
+# Coverage source. CEG has no test job of its own on pull requests or push to
+# main: the only pull-request unit run is Core's `make test` inside the
+# required Analyze (central Core) job, which neither writes nor exports
+# coverage.xml. The only run that writes coverage.xml is the deep plan
+# (deep-plan.yml, main only), which uploads it as `ceg-deep-coverage`. So:
+#   * `sonar` (pull_request, push to main): issues and duplication, no
+#     coverage.
+#   * `sonar-coverage` (after a successful Deep plan run on main): the same
+#     analysis on that exact commit with the deep plan's coverage.xml. It fails
+#     closed when the report is missing.
+# A Core step exporting `make test` coverage would let pull requests carry
+# coverage too; that is Core-lane work.
+#
+# A missing token fails the job: no analysis is never reported as a pass.
+# Fork and Dependabot pull requests are skipped, since GitHub withholds the
+# token from both.
 name: Sonar
 
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_run:
+    workflows: ["Deep plan"]
+    types: [completed]
 
 permissions:
   contents: read
 
 concurrency:
-  group: sonar-${{ github.ref }}
+  group: sonar-${{ github.event_name }}-${{ github.ref }}-${{ github.event.workflow_run.id || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -35,8 +51,9 @@ jobs:
     # Skipped, visibly, for fork and Dependabot pull requests: GitHub withholds
     # Actions secrets from both, so the token step could only fail there.
     if: >-
-      github.event_name != 'pull_request' ||
-      (github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
        github.event.pull_request.user.login != 'dependabot[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -63,5 +80,65 @@ jobs:
           # The action default at this pin, stated so an action bump cannot
           # float the scanner.
           scannerVersion: 8.4.0.16527
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  sonar-coverage:
+    name: SonarQube Cloud (deep-plan coverage, main)
+    # Only a successful deep plan on main, which is the only run that writes
+    # coverage.xml. A plan-mode deep run uploads no artifact and fails the
+    # download step below, so it is never reported as covered.
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout the deep plan's exact commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require the Sonar token
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -z "${SONAR_TOKEN}" ]; then
+            echo "::error::secrets.SONAR_TOKEN is not available to this repository; no Sonar analysis ran"
+            exit 1
+          fi
+
+      # The report is data the scanner parses, as it parses the source tree;
+      # this job runs no code from the artifact.
+      - name: Download the deep plan's coverage.xml
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: ceg-deep-coverage
+          path: coverage-reports
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Require the coverage report
+        run: |
+          if [ ! -s coverage-reports/coverage.xml ]; then
+            echo "::error::coverage-reports/coverage.xml is missing or empty; no coverage was analysed"
+            exit 1
+          fi
+
+      - name: SonarQube Cloud scan with coverage
+        uses: SonarSource/sonarqube-scan-action@59202af334b4ba7b5db01b701b8e79f8b3bef0f4  # v8.5.0
+        with:
+          scannerVersion: 8.4.0.16527
+          args: >-
+            -Dsonar.python.coverage.reportPaths=coverage-reports/coverage.xml
+            -Dsonar.branch.name=${{ github.event.repository.default_branch }}
+            -Dsonar.scm.revision=${{ github.event.workflow_run.head_sha }}
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
