@@ -101,6 +101,10 @@ exclude_lines = [
 [tool.ruff]
 target-version = "py312"
 line-length = 120
+# The pinned Odoo consumer (.l9/external-checkout.json) is checked out into
+# odoo-consumer/ for the mapper proofs. It is another repository with its own
+# ruff config, so this repository's lint and format gates do not walk it.
+extend-exclude = ["odoo-consumer"]
 
 [tool.ruff.lint]
 select = [
