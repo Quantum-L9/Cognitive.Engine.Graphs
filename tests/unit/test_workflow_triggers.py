@@ -33,5 +33,7 @@ def _triggers(name: str) -> dict:
 def test_contracts_push_runs_only_on_main() -> None:
     """An unfiltered push trigger ran every contracts job twice per commit on a PR branch."""
     triggers = _triggers("contracts.yml")
+    # No branch or path filter: every PR, whatever its base, still runs the contract jobs.
     assert "pull_request" in triggers
+    assert not triggers["pull_request"]
     assert triggers["push"] == {"branches": ["main"]}
