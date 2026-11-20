@@ -1,0 +1,18 @@
+{
+  "_l9_meta": {"l9_schema": 1, "origin": "engine-specific", "engine": "graph", "layer": ["test", "ci"], "tags": ["fixture", "quality-gate", "secrets-scan"], "owner": "engine-team", "status": "active"},
+  "description": "Quality Gate aggregate cases: a job conclusion of success is counted as an executed control only when the native scanner outcome says the scan ran clean.",
+  "cases": [
+    {"name": "scanned_clean", "secrets_job": "success", "lint_job": "success", "secrets_native": "SCANNED_CLEAN", "passed": true, "secrets_counted_as": "executed", "why": "The scan ran clean: four executed controls."},
+    {"name": "key_absent_is_not_an_executed_control", "secrets_job": "success", "lint_job": "success", "secrets_native": "KEY_ABSENT", "passed": true, "secrets_counted_as": "not_executed", "why": "Advisory skip under the existing policy: the gate passes and the scan is not counted."},
+    {"name": "token_lacks_scope_is_not_an_executed_control", "secrets_job": "success", "lint_job": "success", "secrets_native": "TOKEN_LACKS_SCOPE", "passed": true, "secrets_counted_as": "not_executed", "why": "The vendor rejected the token: not executed, not counted."},
+    {"name": "container_failed_to_start_is_not_an_executed_control", "secrets_job": "success", "lint_job": "success", "secrets_native": "CONTAINER_FAILED_TO_START", "passed": true, "secrets_counted_as": "not_executed", "why": "The scanner never started: not executed, not counted."},
+    {"name": "success_without_native_outcome_fails", "secrets_job": "success", "lint_job": "success", "secrets_native": "", "passed": false, "secrets_counted_as": "failed", "why": "A job conclusion alone cannot stand in for a scan result."},
+    {"name": "success_with_unknown_native_outcome_fails", "secrets_job": "success", "lint_job": "success", "secrets_native": "PASSED", "passed": false, "secrets_counted_as": "failed", "why": "An outcome this gate does not know is not an executed scan."},
+    {"name": "success_with_scanner_failed_fails", "secrets_job": "success", "lint_job": "success", "secrets_native": "SCANNER_FAILED", "passed": false, "secrets_counted_as": "failed", "why": "Contradiction: the scanner failed, so a success conclusion is not a scan."},
+    {"name": "success_with_secret_detected_fails", "secrets_job": "success", "lint_job": "success", "secrets_native": "SECRET_DETECTED", "passed": false, "secrets_counted_as": "failed", "why": "Contradiction: a detected secret cannot pass."},
+    {"name": "secret_detected_job_failure_fails", "secrets_job": "failure", "lint_job": "success", "secrets_native": "SECRET_DETECTED", "passed": false, "secrets_counted_as": "failed", "why": "The normal blocking path."},
+    {"name": "secrets_job_skipped_fails", "secrets_job": "skipped", "lint_job": "success", "secrets_native": "", "passed": false, "secrets_counted_as": "failed", "why": "A skipped job is not success, as before."},
+    {"name": "secrets_job_cancelled_fails", "secrets_job": "cancelled", "lint_job": "success", "secrets_native": "", "passed": false, "secrets_counted_as": "failed", "why": "A cancelled job is not success, as before."},
+    {"name": "other_job_failure_fails", "secrets_job": "success", "lint_job": "failure", "secrets_native": "SCANNED_CLEAN", "passed": false, "secrets_counted_as": "executed", "why": "Existing behaviour for the other jobs is unchanged."}
+  ]
+}

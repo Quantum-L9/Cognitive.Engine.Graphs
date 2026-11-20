@@ -101,6 +101,13 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+    # Two separate facts. `graph` is whether the dependency graph could be
+    # read (AVAILABLE, UNAVAILABLE, or UNKNOWN when the check itself failed);
+    # `review` is whether the review ran. A skipped review is NOT_EXECUTED,
+    # never a clean result.
+    outputs:
+      graph: ${{ steps.report.outputs.graph }}
+      review: ${{ steps.report.outputs.review }}
 
     steps:
       - name: Checkout Repository
@@ -118,12 +125,18 @@ jobs:
           if [ "$RC" -eq 0 ]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
+            # gh ends a failed call with "(HTTP NNN)". A 404 or 403 means the
+            # graph is not readable here; anything else (a 502, say) means the
+            # check itself failed and the graph state is not known.
+            STATUS=$(printf '%s\n' "$OUT" | sed -nE 's/.*\(HTTP ([0-9]{3})\).*/\1/p' | tail -n 1)
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Dependency graph unavailable (enable Dependency graph in repo Security settings). Skipping Dependency Review."
+            echo "status=${STATUS}" >> "$GITHUB_OUTPUT"
+            echo "::warning::Dependency graph compare failed (HTTP ${STATUS:-unknown}). Dependency Review will NOT be executed."
             echo "$OUT"
           fi
 
       - name: Review Dependencies
+        id: review
         if: steps.depgraph.outputs.available == 'true'
         uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
         with:
@@ -161,6 +174,17 @@ jobs:
             pkg:pypi/wcwidth, pkg:pypi/numpy, pkg:pypi/typing-extensions,
             pkg:pypi/yamllint
           comment-summary-in-pr: on-failure
+
+      # Requiredness is unchanged: an unavailable graph still does not fail
+      # this job. The report states that no dependency was reviewed.
+      - name: Report dependency review outcome
+        id: report
+        if: always()
+        env:
+          GRAPH_AVAILABLE: ${{ steps.depgraph.outputs.available }}
+          GRAPH_HTTP_STATUS: ${{ steps.depgraph.outputs.status }}
+          REVIEW_STEP_OUTCOME: ${{ steps.review.outcome }}
+        run: python3 tools/scanner_outcomes.py dependency-review
 
 # ────────────────────────────────────────────────────────────────────────
 # SBOM Generation — Software Bill of Materials
