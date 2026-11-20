@@ -69,7 +69,7 @@ status: active
 
 > `ci-quality.yml` (a separate workflow, not part of `ci.yml`'s fan-in) has
 > its own `quality-gate` job that similarly aggregates `lint-format`,
-> `semgrep`, `secrets-scan`, and `coverage`. Both `ci-gate` and
+> `semgrep`, `secrets-scan`, and `yaml-validate`. Both `ci-gate` and
 > `quality-gate` should be configured as **required status checks** in
 > branch protection for either to actually block a merge — a workflow job
 > failing does not, by itself, prevent merging unless GitHub is configured
@@ -218,6 +218,49 @@ be true, meaning `quality-gate` could report ✅ even when `lint-format` or
 `secrets-scan` failed. `semgrep`'s result also wasn't checked at all.
 Fixed by switching to bracket syntax (`needs['lint-format'].result`, etc.)
 and adding the missing `semgrep` failure check.
+
+---
+
+## Native outcomes: a job conclusion is not a scan result
+
+Three controls call an outside service. Each one reports what the service
+actually did, through `tools/scanner_outcomes.py`, in the step summary and as a
+job output. The witnesses are `tests/unit/test_scanner_outcomes.py` and the
+fixture `tests/fixtures/ci/quality_gate_cases.json`.
+
+**GitGuardian (`ci-quality.yml`, `secrets-scan`).** Output `native_outcome`:
+
+| Outcome | Scan executed | Job | Counted by `quality-gate` |
+| --- | --- | --- | --- |
+| `SCANNED_CLEAN` | yes | passes | executed |
+| `SECRET_DETECTED` | yes | fails | failed |
+| `SCANNER_FAILED` (the container started and ggshield failed, including a missing CI context) | no | fails | failed |
+| `KEY_ABSENT` | no | passes (advisory skip) | not executed |
+| `TOKEN_LACKS_SCOPE` | no | passes (advisory skip) | not executed |
+| `CONTAINER_FAILED_TO_START` | no | passes (advisory skip) | not executed |
+
+Which outcomes fail the job is the policy the workflow already had. The
+container is given the runner's `CI` and `GITHUB_ACTIONS` variables, which
+ggshield requires, and a container failure is read from the `docker run` exit
+code, never from the text `Unable to find image` that precedes every cold pull.
+
+`quality-gate` fails when any job does not conclude `success`, as before. An
+advisory skip is listed as `NOT EXECUTED` and is not counted, and `success`
+without a recognised native outcome fails. Its headline reads "N of 4 controls
+executed".
+
+**Dependency review (`supply-chain.yml`, `dependency-review`).** Outputs `graph`
+and `review` (`EXECUTED_PASSED`, `EXECUTED_FAILED`, `NOT_EXECUTED`). `graph` is
+`AVAILABLE` when the compare API answers, `UNAVAILABLE` on HTTP 404 or 403 (not
+enabled or not readable), and `UNKNOWN` when the check itself fails, for
+example on a 502. A graph that is not `AVAILABLE` still does not fail the job;
+the summary states that no dependency was reviewed.
+
+**Codecov.** `ci-quality.yml` and `deep-plan.yml` upload nothing; the deep plan
+keeps `coverage.xml` as an artifact. The one remaining upload step is in
+`dev-layer-gmp.yml`. It stays advisory (`continue-on-error`) and now reports
+`UPLOADER_EXITED_ZERO`, `UPLOAD_FAILED` or `NOT_ATTEMPTED`. None of these means
+Codecov accepted or processed coverage; that is only visible in Codecov.
 
 ---
 
