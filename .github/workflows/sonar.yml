@@ -13,8 +13,8 @@
 # job replaces it. It runs no tests: coverage comes only from the existing
 # unit run's coverage.xml, read from coverage-reports/ when present (see
 # sonar-project.properties). A missing token fails the job: no analysis is
-# never reported as a pass. Fork pull requests are skipped, since the token
-# is not available to them.
+# never reported as a pass. Fork and Dependabot pull requests are skipped,
+# since GitHub withholds the token from both.
 name: Sonar
 
 on:
@@ -32,9 +32,12 @@ concurrency:
 jobs:
   sonar:
     name: SonarQube Cloud
+    # Skipped, visibly, for fork and Dependabot pull requests: GitHub withholds
+    # Actions secrets from both, so the token step could only fail there.
     if: >-
       github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.user.login != 'dependabot[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
