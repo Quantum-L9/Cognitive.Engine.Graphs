@@ -26,8 +26,14 @@ tools are ignored, and every github/codeql-action step runs one version.
 
 from __future__ import annotations
 
+import functools
+import json
+import os
 import re
+import shutil
+import subprocess
 import tomllib
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -39,19 +45,47 @@ ROOT = Path(__file__).resolve().parents[2]
 
 pytestmark = pytest.mark.unit
 
-# Core-owned tools a Python consumer could take from PyPI (l9-ci-core
-# core-owned-tools.json; biome is npm, python is the interpreter).
-CORE_TOOLS = ("pip", "pre-commit", "ruff", "mypy", "pytest", "semgrep")
-
-_CORE_PRECOMMIT_REPOS = (
-    "https://github.com/astral-sh/ruff-pre-commit",
-    "https://github.com/pre-commit/mirrors-mypy",
-)
+# The Core contract tools/deps/install_locked.sh installs from: the same
+# repository, ref (L9_CI_CORE_REF, default v2) and directory.
+CORE_REF = os.environ.get("L9_CI_CORE_REF", "v2")
+_CORE_BASE = f"https://raw.githubusercontent.com/Quantum-L9/l9-ci-core/{CORE_REF}/"
+_CORE_TOOLS_PATH = ".github/actions/install-consumer-ci/core-owned-tools.json"
 
 _INSTALLER_PINS = (
     "https://raw.githubusercontent.com/Quantum-L9/l9-ci-core/${CORE_REF}/"
     ".github/actions/install-consumer-ci/requirements-consumer-ci.txt"
 )
+
+
+def _fetch_core(path: str) -> dict:
+    # Fixed https URL to Core's contract. Unreachable fails the test rather
+    # than falling back to a local copy that could go stale.
+    with urllib.request.urlopen(_CORE_BASE + path, timeout=60) as response:  # noqa: S310
+        return json.loads(response.read().decode("utf-8"))
+
+
+@functools.cache
+def _core_owned_tools() -> dict:
+    data = _fetch_core(_CORE_TOOLS_PATH)
+    assert data.get("schema") == "l9.core-owned-tools/v1", data.get("schema")
+    return data
+
+
+@functools.cache
+def _core_lock() -> dict:
+    return _fetch_core(_core_owned_tools()["lock"])
+
+
+def _core_python_tools() -> set[str]:
+    """Core-owned tools a Python consumer could take from PyPI (the uv ecosystem)."""
+    return {
+        canonicalize_name(name) for tool in _core_owned_tools()["tools"] for name in tool["ecosystems"].get("uv", [])
+    }
+
+
+def test_core_tool_list_is_read_from_core() -> None:
+    # Guards the reader: the six tools Core has owned since v2 was cut.
+    assert {"mypy", "pip", "pre-commit", "pytest", "ruff", "semgrep"} <= _core_python_tools()
 
 
 def _pyproject() -> dict:
@@ -68,31 +102,61 @@ def test_pyproject_declares_no_core_owned_tool() -> None:
         f"{section}: {spec}"
         for section, specs in sections.items()
         for spec in specs
-        if isinstance(spec, str) and canonicalize_name(Requirement(spec).name) in CORE_TOOLS
+        if isinstance(spec, str) and canonicalize_name(Requirement(spec).name) in _core_python_tools()
     )
     assert not declared, f"Core-owned tools come from Core's installer, not pyproject.toml: {declared}"
 
 
 def test_uv_lock_excludes_every_core_owned_tool() -> None:
+    core = _core_python_tools()
     excluded = {canonicalize_name(name) for name in _pyproject()["tool"]["uv"].get("exclude-dependencies", [])}
-    assert set(CORE_TOOLS) <= excluded, f"[tool.uv] exclude-dependencies is missing {set(CORE_TOOLS) - excluded}"
+    assert core <= excluded, f"[tool.uv] exclude-dependencies is missing {core - excluded}"
     lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
     locked = sorted(
         f"{package['name']}=={package.get('version')}"
         for package in lock.get("package", [])
-        if canonicalize_name(package["name"]) in CORE_TOOLS
+        if canonicalize_name(package["name"]) in core
     )
     assert not locked, f"uv.lock holds a Core-owned tool; re-run `uv lock`: {locked}"
 
 
-def test_pre_commit_names_no_core_tool_revision() -> None:
+def _peeled_tag(repo: str, version: str) -> str:
+    git = shutil.which("git")
+    assert git, "git is required to resolve a Core tool's tag"
+    tag = f"refs/tags/v{version}"
+    out = subprocess.run(  # noqa: S603 - fixed git binary, fixed arguments
+        [git, "ls-remote", repo, tag, f"{tag}^{{}}"], check=True, capture_output=True, text=True, timeout=60
+    ).stdout
+    refs = {ref: sha for sha, ref in (line.split("\t", 1) for line in out.splitlines() if line)}
+    assert refs, f"{repo} has no tag v{version}"
+    return refs.get(f"{tag}^{{}}", refs.get(tag, ""))
+
+
+def test_pre_commit_runs_core_tools_at_cores_version() -> None:
     config = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
-    repos = [repo.get("repo") for repo in config.get("repos", [])]
-    pinned = sorted(set(repos) & set(_CORE_PRECOMMIT_REPOS))
-    assert not pinned, f"ruff/mypy hooks run the installed Core tools (repo: local, language: system): {pinned}"
+    lock = _core_lock()
+    for tool in _core_owned_tools()["tools"]:
+        for url in tool["ecosystems"].get("pre-commit", []):
+            for repo in (r for r in config.get("repos", []) if r.get("repo") == url):
+                # A tool Core also ships on PyPI runs as the installed Core tool
+                # (repo: local, language: system), never a second pinned copy.
+                assert not tool["ecosystems"].get("uv"), f"{tool['name']}: use a local system hook, not {url}"
+                assert tool["name"] in lock, f"{tool['name']}: Core's lock names no version"
+                assert repo["rev"] == _peeled_tag(url, lock[tool["name"]]), (
+                    f"{url} must run Core's {tool['name']} {lock[tool['name']]}, not {repo['rev']}"
+                )
     entries = {hook["id"]: hook for repo in config["repos"] if repo["repo"] == "local" for hook in repo["hooks"]}
     for hook_id in ("ruff", "ruff-format", "mypy"):
         assert entries[hook_id]["language"] == "system", hook_id
+
+
+def test_uv_bootstrap_installs_cores_uv() -> None:
+    version = _core_lock().get("uv")
+    if version is None:
+        # Removal trigger: Core's lock at CORE_REF names uv (it does on Core main).
+        pytest.skip(f"Core's lock at {CORE_REF} names no uv version yet")
+    text = (ROOT / "tools" / "deps" / "uv-bootstrap.txt").read_text(encoding="utf-8")
+    assert re.search(rf"^uv=={re.escape(version)} ", text, re.M), f"uv-bootstrap.txt must pin Core's uv {version}"
 
 
 def test_install_script_takes_core_tools_from_core() -> None:
@@ -138,7 +202,7 @@ def test_dependabot_ignores_core_owned_tools() -> None:
     ignored = {entry["dependency-name"].lower() for entry in python.get("ignore", []) if "versions" not in entry}
     # pip joined Core's list after this render was seeded; it is excluded from
     # uv.lock, so Dependabot has no pip to propose in the meantime.
-    expected = set(CORE_TOOLS) - {"pip"}
+    expected = _core_python_tools() - {"pip"}
     assert expected <= ignored, f"Dependabot must not propose Core-owned tools: missing {expected - ignored}"
 
 

@@ -33,7 +33,7 @@ repos:
 
   # Secrets scanning (harvested concept from L9 Kernel — fresh config)
   - repo: https://github.com/gitleaks/gitleaks
-    rev: 83d9cd684c87d95d656c1458ef04895a7f1cbd8e  # v8.30.1
+    rev: 107a41827bb6698dbbff756b2300537774a1d84c  # v8.24.3 (Core toolchain-lock.json)
     hooks:
       - id: gitleaks
         args: ["protect", "--staged", "--config=.gitleaks.toml"]

@@ -78,7 +78,7 @@ package = false
 # moves. tools/deps/install_locked.sh installs them from Core's installer pins.
 # Names only, never versions. Core list: l9-ci-core
 # .github/actions/install-consumer-ci/core-owned-tools.json.
-exclude-dependencies = ["mypy", "pip", "pre-commit", "pytest", "ruff", "semgrep"]
+exclude-dependencies = ["mypy", "pip", "pre-commit", "pytest", "ruff", "semgrep", "uv"]
 
 [tool.uv.sources]
 # Policy (CEG#266): the manifest names Gate_SDK's moving major tag; uv.lock records
