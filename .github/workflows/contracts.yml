@@ -13,7 +13,10 @@
 name: Contract Enforcement
 
 on:
+  # Pull requests cover every branch under review. A push runs only on main,
+  # so a branch with an open PR is not scanned twice per commit.
   push:
+    branches: [main]
   pull_request:
 
 jobs:
