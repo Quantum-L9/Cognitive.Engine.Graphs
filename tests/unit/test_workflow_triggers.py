@@ -21,7 +21,8 @@ import yaml
 
 pytestmark = pytest.mark.unit
 
-WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+ROOT = Path(__file__).resolve().parents[2]
+WORKFLOWS = ROOT / ".github" / "workflows"
 
 
 def _triggers(name: str) -> dict:
@@ -37,3 +38,21 @@ def test_contracts_push_runs_only_on_main() -> None:
     assert "pull_request" in triggers
     assert not triggers["pull_request"]
     assert triggers["push"] == {"branches": ["main"]}
+
+
+def _matches(pattern: str) -> bool:
+    return next(ROOT.glob(pattern), None) is not None
+
+
+def test_no_workflow_has_a_path_filter_that_can_never_match() -> None:
+    """dev-layer-gmp.yml filtered on two paths that never existed, so it never ran a test."""
+    dead = []
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        triggers = _triggers(path.name) or {}
+        if not isinstance(triggers, dict):
+            continue
+        for event, config in triggers.items():
+            patterns = config.get("paths") if isinstance(config, dict) else None
+            if patterns and not any(_matches(pattern) for pattern in patterns):
+                dead.append(f"{path.name}:{event}")
+    assert dead == []

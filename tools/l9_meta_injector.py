@@ -106,9 +106,6 @@ FILE_REGISTRY: list[FileMeta] = [
         ["L9_TEMPLATE", "ci", "refactoring"],
         "platform",
     ),
-    FileMeta(
-        ".github/workflows/dev-layer-gmp.yml", "l9-template", ["ci"], ["L9_TEMPLATE", "ci", "dev-layer"], "platform"
-    ),
     # --- Governance ---
     FileMeta(
         ".github/pr_review_config.yaml",
