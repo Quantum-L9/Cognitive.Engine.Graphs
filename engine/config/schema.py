@@ -1514,6 +1514,51 @@ class DomainMetadata(BaseModel):
         return v
 
 
+def missing_edge_property_reason(spec: DomainSpec, gate: GateSpec) -> str | None:
+    """Reject a traversal predicate property the declared edge does not define.
+
+    Sanitizing the name and compiling the comparison admits the pack, then Neo4j
+    evaluates the missing relationship property as null and drops every candidate.
+    """
+    predicates = gate.edgepredicates or []
+    if not predicates:
+        return None
+    edge_type = gate.edgetype or ""
+    matched = [
+        edge
+        for edge in spec.ontology.edges
+        if edge.type == edge_type
+        and (gate.fromnode is None or edge.from_ == gate.fromnode)
+        and (gate.tonode is None or edge.to == gate.tonode)
+    ]
+    if not matched:
+        return "Gate " + gate.name + " edge predicate references unknown edge type " + edge_type
+    if len(matched) > 1:
+        return "Gate " + gate.name + " edge predicate matches more than one " + edge_type + " edge"
+    declared = {prop.name: prop for prop in matched[0].properties}
+    for predicate in predicates:
+        prop = declared.get(predicate.property)
+        if prop is None:
+            return (
+                "Gate "
+                + gate.name
+                + " edge predicate property "
+                + predicate.property
+                + " is not declared on edge "
+                + edge_type
+            )
+        if predicate.present and prop.type is not PropertyType.STRING:
+            return (
+                "Gate "
+                + gate.name
+                + " edge predicate present on "
+                + predicate.property
+                + " requires a string property of edge "
+                + edge_type
+            )
+    return None
+
+
 class DomainSpec(BaseModel):
     """Complete domain pack specification."""
 
@@ -1605,6 +1650,9 @@ class DomainSpec(BaseModel):
 
         # Validate gate property references
         for gate in self.gates:
+            predicate_message = missing_edge_property_reason(self, gate)
+            if predicate_message is not None:
+                raise ValueError(predicate_message)
             if gate.candidateprop and "." not in gate.candidateprop:
                 # Check if any candidate node has this property
                 found = False

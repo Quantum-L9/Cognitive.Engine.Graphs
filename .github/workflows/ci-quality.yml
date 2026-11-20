@@ -214,6 +214,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
+      - name: Checkout pinned Odoo consumer
+        uses: Quantum-L9/l9-ci-core/.github/actions/checkout-external@043f50ac41af17bf814f811076c5b48a640d9a2e
+        with:
+          token: ${{ secrets.L9_GITHUB_READ_TOKEN }}
+
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:

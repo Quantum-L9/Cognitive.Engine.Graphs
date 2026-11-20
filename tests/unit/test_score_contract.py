@@ -44,6 +44,7 @@ from tests.fixtures.match_response_contract import (
     example_response_matches_draft_schema,
     frozen_opportunity_quantity,
     map_match_if_sibling,
+    partner_id,
     schema_messages,
     schema_text,
 )
@@ -193,6 +194,7 @@ async def test_handle_match_payload_against_draft_schema_and_odoo_mapper() -> No
         assert score is None or (isinstance(score, float) and math.isfinite(score))
 
     _assert_draft_stays_unpublished(schema_messages(result))
+    assert partner_id(by_ref["res.partner:102"]["entity_ref"]) == 102
     mapped = map_match_if_sibling(result)
     if mapped is None:
         return

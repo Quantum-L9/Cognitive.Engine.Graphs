@@ -100,9 +100,9 @@ class TestDimensionProjection:
         cypher = driver.calls[0]["cypher"]
         assert (
             "RETURN candidate, score, {depot_reliability: depot_reliability, "
-            "port_capacity: port_capacity} AS dimension_scores\n" in cypher
+            "port_capacity: port_capacity} AS dimension_scores, " in cypher
         )
-        assert cypher.endswith("ORDER BY score DESC\nLIMIT $top_n")
+        assert cypher.endswith("AS absent_sources\nORDER BY score DESC\nLIMIT $top_n")
 
     async def test_pareto_front_excludes_dominated_rows(self) -> None:
         _wire(_spec())
@@ -147,11 +147,11 @@ class TestDimensionProjection:
         cypher = driver.calls[0]["cypher"]
         assert (
             "WITH candidate, score, {depot_reliability: depot_reliability, "
-            "port_capacity: port_capacity} AS dimension_scores\n" in cypher
+            "port_capacity: port_capacity} AS dimension_scores, " in cypher
         )
         assert cypher.endswith(
-            "RETURN candidate, best.score AS score, best.dimension_scores AS dimension_scores\n"
-            "ORDER BY score DESC\nLIMIT $top_n"
+            "RETURN candidate, best.score AS score, best.dimension_scores AS dimension_scores, "
+            "best.absent_sources AS absent_sources\nORDER BY score DESC\nLIMIT $top_n"
         )
 
     async def test_zero_active_dimensions_emit_an_empty_map(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -160,7 +160,7 @@ class TestDimensionProjection:
         spec = spec.model_copy(update={"scoring": spec.scoring.model_copy(update={"dimensions": []})})
         driver = _wire(spec)
         await _match()
-        assert "RETURN candidate, score, {} AS dimension_scores\n" in driver.calls[0]["cypher"]
+        assert "RETURN candidate, score, {} AS dimension_scores, [] AS absent_sources\n" in driver.calls[0]["cypher"]
 
     async def test_flag_off_restores_the_previous_return_line(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings, "match_dimension_projection", False)

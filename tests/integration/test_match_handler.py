@@ -585,6 +585,18 @@ async def test_plasticos_buyer_scores_match_independent_dimensions(design_pack_d
             "props": _props(),
             "lines": [_line("facility:wrong-polymer", "in", "PALLETS", code="PP")],
         },
+        {
+            "facility_id": "facility:pvc-only",
+            "stamp_now": True,
+            "props": _props(),
+            "lines": [_line("facility:pvc-only", "in", "PALLETS", code="PVC")],
+        },
+        {
+            "facility_id": "facility:intolerant",
+            "stamp_now": True,
+            "props": _props(contamination_tolerance=-1.0),
+            "lines": [_line("facility:intolerant", "in", "PALLETS")],
+        },
     ]
     batch[2]["props"].pop("capacity_tons_month")
     batch[5]["props"].pop("contamination_tolerance")
@@ -618,6 +630,12 @@ async def test_plasticos_buyer_scores_match_independent_dimensions(design_pack_d
         "facility:null-capacity": _buyer_dims(
             lat=40.0, credit=100.0, contamination=0.0, community=7, rate=1000.0, dated=True
         ),
+        "facility:low-capacity": _buyer_dims(
+            lat=40.0, credit=100.0, contamination=0.0, community=7, rate=1000.0, dated=True
+        ),
+        "facility:null-contamination": _buyer_dims(
+            lat=40.0, credit=100.0, contamination=100.0, community=7, rate=1000.0, dated=True
+        ),
         "facility:outlier": _buyer_dims(
             lat=40.0, credit=-5.0, contamination=0.0, community=3, rate=1_000_000.0, dated=False
         ),
@@ -644,7 +662,24 @@ async def test_plasticos_buyer_scores_match_independent_dimensions(design_pack_d
         assert row["eligible"] is True
         assert row["score_scale"] == "0_to_1"
         assert row["entity_ref"] == facility_id
-        assert row.get("confidence_flag") != "monoculture"
+        flags = row.get("confidence_flag")
+        if isinstance(flags, str):
+            flags = [flags]
+        assert "monoculture" not in list(flags or [])
+    assert "facility:pvc-only" not in got
+    assert "facility:blank-form" not in got
+    assert "facility:no-form" not in got
+    assert "facility:intolerant" not in got
+    short = got["facility:low-capacity"]["capacity_evidence"]
+    assert short["capacity_tons_month"] == pytest.approx(10.0)
+    assert short["volume_tons"] == pytest.approx(_MATCH_TONS)
+    assert short["shortfall_tons"] == pytest.approx(_MATCH_TONS - 10.0)
+    unknown_capacity = got["facility:null-capacity"]["capacity_evidence"]
+    assert unknown_capacity["capacity_tons_month"] is None
+    assert unknown_capacity["shortfall_tons"] is None
+    missing = got["facility:null-contamination"]
+    assert "contamination_tolerance_score" in missing["missing_evidence"]
+    assert all(item["feature_id"] != "contamination_tolerance_score" for item in missing["feature_contributions"])
     assert first["scoring_meta"]["normalization_applied"] is False
     assert scored(second)["facility:fit"]["score"] == pytest.approx(got["facility:fit"]["score"])
     assert scored(second)["facility:offset"]["dimension_scores"] == pytest.approx(
@@ -798,3 +833,56 @@ async def test_supply_match_quantity_is_the_opportunity_payload(design_pack_deps
     )
     assert stored[0]["tons"] == _OPPORTUNITY_TONS
     assert stored[0]["load"] is None
+
+
+@pytest.mark.asyncio
+async def test_plasticos_source_identity_is_selectable_only_for_a_partner(design_pack_deps, graph_driver):
+    """One source partner id, one bare id, and one foreign namespace."""
+    from tests.fixtures.match_response_contract import require_unmodified_odoo_mapper
+
+    selectable = "res.partner:102"
+    missing = "site-missing"
+    foreign = "facility:foreign"
+    batch = [
+        {
+            "facility_id": facility_id,
+            "stamp_now": True,
+            "props": _props(name=facility_id),
+            "lines": [_line(facility_id, "in", "PALLETS")],
+        }
+        for facility_id in (selectable, missing, foreign)
+    ]
+    await graph_driver.execute_write(cypher=_FACILITY_SEED, parameters={"batch": batch}, database=PLASTICOS)
+    from engine.handlers import handle_match
+
+    result = await handle_match(
+        PLASTICOS,
+        {
+            "query": {
+                "polymer_type": "HDPE",
+                "density": 0.95,
+                "mfi": 8.0,
+                "contamination_pct": 0.0,
+                "requires_food_grade": False,
+                "volume_tons": _MATCH_TONS,
+                "lat": 40.0,
+                "lon": -75.0,
+                "target_price": 1000.0,
+                "community_id": 7,
+                "form": "PALLETS",
+                "color": "NATURAL",
+                "material_grade": "A",
+                "quantity_per_load_lbs": _LOAD_LBS,
+            },
+            "match_direction": _BUYER,
+            "top_n": 10,
+        },
+    )
+    by_id = {row["candidate"]["facility_id"]: row for row in result["candidates"]}
+    assert set(by_id) == {selectable, missing, foreign}
+    assert by_id[selectable]["entity_ref"] == selectable
+    assert "entity_ref" not in by_id[missing]
+    assert by_id[foreign]["entity_ref"] == foreign
+    mapped = require_unmodified_odoo_mapper(result)
+    assert [item.buyer_partner_id for item in mapped.results] == [102]
+    assert {row["entity_ref"] for row in mapped.unresolved} == {None, foreign}

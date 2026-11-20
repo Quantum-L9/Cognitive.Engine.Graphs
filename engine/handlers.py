@@ -589,17 +589,23 @@ def _candidate_id_property(domain_spec: DomainSpec, label: str) -> str:
     return _FALLBACK_CANDIDATE_ID_PROPERTY
 
 
-_NAMESPACED_ENTITY_REF = re.compile(r"^[a-z0-9_.-]+:\S+$")
-
-
 def _namespaced_entity_ref(value: Any) -> str | None:
-    """A stored ``<model>:<id>`` ref, or None. Bare ids are not given a model."""
+    """A stored ``namespace:id`` identity, or None.
+
+    The pattern is the contract ``ENTITY_REF_PATTERN``. A bare id is not given
+    a namespace, and a namespaced id is returned unchanged.
+    """
+    from engine.models.payloads import ENTITY_REF_PATTERN
+
     if not isinstance(value, str):
         return None
     text = value.strip()
-    if _NAMESPACED_ENTITY_REF.fullmatch(text) is None:
+    if re.fullmatch(ENTITY_REF_PATTERN, text) is None:
         return None
     return text
+
+
+_SCORE_IDENTITY_ABS_TOL = 1e-12
 
 
 def _finite_match_score(value: Any) -> float | None:
@@ -609,10 +615,45 @@ def _finite_match_score(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
+def _same_score(left: float, right: float) -> bool:
+    """True when two scores are identical at the normalization tolerance."""
+    return math.isclose(left, right, rel_tol=0.0, abs_tol=_SCORE_IDENTITY_ABS_TOL)
+
+
 def _match_score_scale(score: float | None, *, normalized: bool) -> str:
     if score is not None and (normalized or 0.0 <= score <= 1.0):
         return "0_to_1"
     return "unnormalized_declared"
+
+
+def _label_declares(domain_spec: DomainSpec, label: str, prop: str) -> bool:
+    for node in domain_spec.ontology.nodes:
+        if node.label == label and any(item.name == prop for item in node.properties):
+            return True
+    return False
+
+
+def _capacity_evidence(
+    domain_spec: DomainSpec,
+    label: str,
+    node: dict[str, Any],
+    query: dict[str, Any],
+) -> dict[str, float | None] | None:
+    """Actual capacity, requested volume, and the shortfall when both are known.
+
+    Unknown capacity stays unknown. A shortfall is the positive gap; it is not
+    rewritten into a claim that the capacity covers the request.
+    """
+    if not _label_declares(domain_spec, label, "capacity_tons_month"):
+        return None
+    if not any(field.name == "volume_tons" for field in domain_spec.queryschema.fields):
+        return None
+    capacity = _finite_match_score(node.get("capacity_tons_month"))
+    volume = _finite_match_score(query.get("volume_tons"))
+    shortfall: float | None = None
+    if capacity is not None and volume is not None:
+        shortfall = volume - capacity if volume > capacity else 0.0
+    return {"capacity_tons_month": capacity, "volume_tons": volume, "shortfall_tons": shortfall}
 
 
 def _attach_match_consumer_fields(
@@ -621,13 +662,17 @@ def _attach_match_consumer_fields(
     id_property: str,
     active_dimensions: list[str],
     normalized: bool,
+    domain_spec: DomainSpec,
+    query: dict[str, Any],
+    candidate_label: str,
 ) -> None:
     """Lift the fields a match consumer reads onto each returned row.
 
-    The namespaced ref is whatever the node already stores. A non-finite score
-    is not eligible and receives no rank. Finite dimension projections are the
-    evidence contributions; an active dimension with no finite projection is
-    missing evidence. The draft MatchResponse model is not emitted.
+    The candidate identity is a stored namespaced ref, or the domain id when
+    that id is already namespaced. A bare id is omitted. A non-finite
+    score is not eligible and receives no rank. A finite dimension projection is
+    evidence only when its source was stored; a clamped zero from an absent
+    source stays missing evidence. The draft MatchResponse model is not emitted.
     """
     next_rank = 1
     for row in candidates:
@@ -642,9 +687,11 @@ def _attach_match_consumer_fields(
         )
         if entity_ref is not None:
             row["entity_ref"] = entity_ref
+        elif "entity_ref" in row:
+            row.pop("entity_ref")
         score = _finite_match_score(row.get("score"))
         # A null or non-finite score is not a zero and is not eligible. Writing
-        # it back stops NaN from leaving the row as a number the mapper can rank.
+        # it back stops NaN from leaving the row as a number a consumer can rank.
         row["score"] = score
         eligible = score is not None
         row["eligible"] = eligible
@@ -658,10 +705,12 @@ def _attach_match_consumer_fields(
         row["failed_gates"] = list(raw_failed) if isinstance(raw_failed, list) else []
         raw_dims = row.get("dimension_scores")
         dims = raw_dims if isinstance(raw_dims, dict) else {}
+        raw_absent = row.get("absent_sources")
+        absent = {str(name) for name in raw_absent} if isinstance(raw_absent, list) else set()
         contributions: list[dict[str, Any]] = []
         present: set[str] = set()
         for name, raw in dims.items():
-            if name in {"candidate", "score"}:
+            if name in {"candidate", "score"} or str(name) in absent:
                 continue
             number = _finite_match_score(raw)
             if number is None:
@@ -670,6 +719,9 @@ def _attach_match_consumer_fields(
             contributions.append({"feature_id": str(name), "contribution": number, "evidence_refs": []})
         row["feature_contributions"] = contributions
         row["missing_evidence"] = [name for name in active_dimensions if name not in present]
+        capacity = _capacity_evidence(domain_spec, candidate_label, node, query)
+        if capacity is not None:
+            row["capacity_evidence"] = capacity
 
 
 def _candidate_id(candidate: Any, id_property: str, fallback: Any) -> str:
@@ -956,6 +1008,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     # sanitized names the scoring WITH binds; zero active dimensions -> `{}`.
     project_dimensions = bool(_match_settings.match_dimension_projection)
     dim_projection = ""
+    absent_expr = scoring_assembler.absent_sources_expr()
     if project_dimensions:
         dim_aliases = [sanitize_label(name) for name in scoring_assembler.last_active_dimension_names]
         dim_map = ", ".join(f"{alias}: {alias}" for alias in dim_aliases)
@@ -964,9 +1017,12 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     # ORDER BY / LIMIT, so top_n counts distinct candidates (R2-DEC-05 option A).
     if _match_settings.match_collapse_traversal_rows:
         if project_dimensions:
-            row_projection = f"WITH candidate, score, {dim_projection}\n"
-            best_row = "{score: score, dimension_scores: dimension_scores}"
-            return_line = "RETURN candidate, best.score AS score, best.dimension_scores AS dimension_scores\n"
+            row_projection = f"WITH candidate, score, {dim_projection}, {absent_expr} AS absent_sources\n"
+            best_row = "{score: score, dimension_scores: dimension_scores, absent_sources: absent_sources}"
+            return_line = (
+                "RETURN candidate, best.score AS score, best.dimension_scores AS dimension_scores, "
+                "best.absent_sources AS absent_sources\n"
+            )
         else:
             row_projection = "WITH candidate, score\n"
             best_row = "{score: score}"
@@ -978,7 +1034,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             + return_line
         )
     elif project_dimensions:
-        return_line = f"RETURN candidate, score, {dim_projection}\n"
+        return_line = f"RETURN candidate, score, {dim_projection}, {absent_expr} AS absent_sources\n"
     else:
         return_line = "RETURN candidate, score\n"
     # RU-011 / CEG-COR-033: a WHERE directly after OPTIONAL MATCH belongs to it
@@ -1163,13 +1219,25 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             raw_max = scoring_meta["raw_max"]
             raw_min = scoring_meta["raw_min"]
             score_range = raw_max - raw_min
+            changed = False
             if score_range > 0:
                 for cand in candidates_out:
                     if isinstance(cand, dict) and isinstance(cand.get("score"), (int, float)):
-                        cand["score"] = round((cand["score"] - raw_min) / score_range, 6)
-            elif len(finite_scores) == 1 and len(candidates_out) == 1 and isinstance(candidates_out[0], dict):
-                candidates_out[0]["score"] = 1.0
-            scoring_meta["normalization_applied"] = True
+                        scaled = round((cand["score"] - raw_min) / score_range, 6)
+                        changed = changed or not _same_score(cast("float", scaled), cast("float", cand["score"]))
+                        cand["score"] = scaled
+            elif len(finite_scores) == 1:
+                for cand in candidates_out:
+                    if isinstance(cand, dict) and isinstance(cand.get("score"), (int, float)):
+                        if not _same_score(cast("float", cand["score"]), 1.0):
+                            cand["score"] = 1.0
+                            changed = True
+            # A tied range leaves every finite score unchanged. Do not label it normalized.
+            scoring_meta["normalization_applied"] = changed
+        if not _w2_settings.null_score_ineligible_enabled:
+            for cand in candidates_out:
+                if isinstance(cand, dict) and cand.get("score") is None:
+                    cand["score"] = 0.0
     else:
         scoring_meta["raw_max"] = 0.0
         scoring_meta["raw_min"] = 0.0
@@ -1218,12 +1286,15 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                     )
                     c["match_explanation"] = explanation
 
-    if candidates_out:
+    if candidates_out and _w2_settings.match_consumer_contract_enabled:
         _attach_match_consumer_fields(
             candidates_out,
             id_property=_candidate_id_property(domain_spec, candidate_labels[0]),
             active_dimensions=list(scoring_assembler.last_active_dimension_names),
             normalized=bool(scoring_meta["normalization_applied"]),
+            domain_spec=domain_spec,
+            query=resolved_query,
+            candidate_label=candidate_labels[0],
         )
 
     response = {
@@ -1231,6 +1302,8 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         "candidates": candidates_out,
         "query_id": f"q_{uuid.uuid4().hex[:12]}",
         "match_direction": match_direction,
+        # Consumers read `direction`. The runtime contract keeps
+        # `match_direction`. This is not the unpublished MatchResponse envelope.
         "direction": match_direction,
         "total_candidates": len(candidates_out),
         "execution_time_ms": round(execution_time_ms, 2),

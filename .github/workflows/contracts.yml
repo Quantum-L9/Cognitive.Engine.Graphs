@@ -82,8 +82,15 @@ jobs:
     needs: [contract-files, contract-scan, meta-headers, lint]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - name: Checkout pinned Odoo consumer
+        uses: Quantum-L9/l9-ci-core/.github/actions/checkout-external@043f50ac41af17bf814f811076c5b48a640d9a2e
+        with:
+          token: ${{ secrets.L9_GITHUB_READ_TOKEN }}
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
         with:
           python-version: "3.12"
       - run: bash tools/deps/install_locked.sh full
-      - run: PYTHONPATH=. pytest tests/ -v --tb=short
+      - name: Test Suite
+        env:
+          L9_ODOO_CONSUMER: ${{ github.workspace }}/odoo-consumer
+        run: PYTHONPATH=. pytest tests/ -v --tb=short

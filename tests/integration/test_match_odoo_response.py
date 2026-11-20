@@ -9,15 +9,15 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
-G01-CEG-ODOO-RESPONSE against Neo4j. ``handle_match`` runs on the synthetic
-orbital pack; its payload is decoded by the unmodified Odoo mapper.
+Generic Neo4j regression for a namespaced ref on the orbital pack. PlasticOS
+buyer selection is the plasticos identity test. The mapper is not copied.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from tests.fixtures.match_response_contract import map_match_if_sibling
+from tests.fixtures.match_response_contract import map_match_if_sibling, partner_id
 from tests.fixtures.orbital_match import DIRECTION, ORBITAL, depot
 
 pytestmark = pytest.mark.integration
@@ -50,6 +50,11 @@ async def test_neo4j_match_is_selectable_by_the_unmodified_odoo_mapper(engine_de
     )
     assert "contract_version" not in result
     assert "quantity_per_load_lbs" not in result
+
+    selected_row = next(row for row in result["candidates"] if row.get("entity_ref") == "res.partner:102")
+    assert partner_id(selected_row["entity_ref"]) == 102
+    bare = next(row for row in result["candidates"] if row["candidate"]["depot_id"] == "bare")
+    assert "entity_ref" not in bare
 
     mapped = map_match_if_sibling(result)
     if mapped is None:

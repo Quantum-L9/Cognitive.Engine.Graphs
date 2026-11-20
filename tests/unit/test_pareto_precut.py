@@ -143,8 +143,8 @@ MAIN_FLAG_OFF_RESPONSE: dict[str, Any] = {
             "score_scale": "0_to_1",
         },
     ],
-    "match_direction": "window_to_depot",
     "direction": "window_to_depot",
+    "match_direction": "window_to_depot",
     "pareto": {
         "arbitration": {"frontsize": 1, "nondominated_ids": ["a"], "pruned_pct": 50.0, "trimmed_ids": []},
         "dimension_names": ["depot_reliability", "port_capacity"],
@@ -164,10 +164,14 @@ MAIN_FLAG_OFF_CYPHER = (
     "WHERE ((candidate.accepts_hazmat IS NOT NULL AND (candidate.accepts_hazmat = true))) AND ((candidate.docking_ports IS NOT NULL AND $min_ports IS NOT NULL AND (candidate.docking_ports >= $min_ports)))\n"
     "WITH candidate, CASE WHEN (coalesce(candidate.reliability, 0.0)) IS NULL THEN 0.0 WHEN isNaN((coalesce(candidate.reliability, 0.0))) THEN 0.0 WHEN (coalesce(candidate.reliability, 0.0)) < 0.0 THEN 0.0 WHEN (coalesce(candidate.reliability, 0.0)) > 1.0 THEN 1.0 ELSE (coalesce(candidate.reliability, 0.0)) END AS depot_reliability, CASE WHEN (log(1 + coalesce(candidate.docking_ports, 0)) / log(1 + 1000.0)) IS NULL THEN 0.0 WHEN isNaN((log(1 + coalesce(candidate.docking_ports, 0)) / log(1 + 1000.0))) THEN 0.0 WHEN (log(1 + coalesce(candidate.docking_ports, 0)) / log(1 + 1000.0)) < 0.0 THEN 0.0 WHEN (log(1 + coalesce(candidate.docking_ports, 0)) / log(1 + 1000.0)) > 1.0 THEN 1.0 ELSE (log(1 + coalesce(candidate.docking_ports, 0)) / log(1 + 1000.0)) END AS port_capacity\n"
     "WITH candidate, depot_reliability, port_capacity, (0.6 * depot_reliability) + (0.3 * port_capacity) AS score\n"
-    "WITH candidate, score, {depot_reliability: depot_reliability, port_capacity: port_capacity} AS dimension_scores\n"
+    "WITH candidate, score, {depot_reliability: depot_reliability, port_capacity: port_capacity} AS dimension_scores, "
+    "[x IN [CASE WHEN candidate.reliability IS NULL THEN $absent_src_depot_reliability ELSE NULL END, "
+    "CASE WHEN candidate.docking_ports IS NULL THEN $absent_src_port_capacity ELSE NULL END] WHERE x IS NOT NULL | x] "
+    "AS absent_sources\n"
     "ORDER BY score DESC\n"
-    "WITH candidate, head(collect({score: score, dimension_scores: dimension_scores})) AS best\n"
-    "RETURN candidate, best.score AS score, best.dimension_scores AS dimension_scores\n"
+    "WITH candidate, head(collect({score: score, dimension_scores: dimension_scores, absent_sources: absent_sources})) AS best\n"
+    "RETURN candidate, best.score AS score, best.dimension_scores AS dimension_scores, "
+    "best.absent_sources AS absent_sources\n"
     "ORDER BY score DESC\n"
     "LIMIT $top_n"
 )

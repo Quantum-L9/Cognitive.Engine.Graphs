@@ -101,6 +101,7 @@ exclude_lines = [
 [tool.ruff]
 target-version = "py312"
 line-length = 120
+extend-exclude = ["odoo-consumer"]  # pinned consumer checkout (.l9/external-checkout.json)
 
 [tool.ruff.lint]
 select = [

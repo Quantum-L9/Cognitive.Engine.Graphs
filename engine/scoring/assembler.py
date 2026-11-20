@@ -260,6 +260,43 @@ class ScoringAssembler:
         """Return dimension names from the most recent assemble_scoring_clause call."""
         return list(self._last_active_dims)
 
+    def absent_sources_expr(self) -> str:
+        """Cypher list of active dimensions whose stored source is null.
+
+        The clamped score may still be 0.0. That zero is not observed evidence;
+        callers project this list beside the numeric map.
+        """
+        active = set(getattr(self, "_last_active_dims", []) or [])
+        cases = [
+            case
+            for dim in self.scoring_spec.dimensions
+            if dim.name in active and (case := self._absent_source_case(dim)) is not None
+        ]
+        if not cases:
+            return "[]"
+        inner = ", ".join(cases)
+        return f"[x IN [{inner}] WHERE x IS NOT NULL | x]"
+
+    def _absent_source_case(self, dim: ScoringDimensionSpec) -> str | None:
+        """One list element: the dimension name when its stored source is null."""
+        prop = dim.candidateprop
+        name = dim.name
+        if not isinstance(prop, str) or not prop or not isinstance(name, str):
+            return None
+        safe = sanitize_label(prop)
+        if sanitize_label(name) != name:
+            return None
+        if dim.computation == ComputationType.GEODECAY:
+            from engine.config.settings import settings
+
+            lon = dim.candidateprop_lon if settings.geodecay_declared_longitude and dim.candidateprop_lon else "lon"
+            lon_safe = sanitize_label(lon)
+            predicate = f"candidate.{safe} IS NULL OR candidate.{lon_safe} IS NULL"
+        else:
+            predicate = f"candidate.{safe} IS NULL"
+        self._query_params["absent_src_" + sanitize_label(name)] = name
+        return f"CASE WHEN {predicate} THEN $absent_src_{sanitize_label(name)} ELSE NULL END"
+
     @staticmethod
     def _renormalize_learned(weight_entries: list[tuple[float, str]], rescalable: dict[int, float]) -> None:
         """RU-023 / CEG-COR-083 (C-22): rescale the non-penalised coefficients in place.

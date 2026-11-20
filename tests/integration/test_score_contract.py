@@ -24,6 +24,7 @@ from tests.fixtures.match_response_contract import (
     diagnostic_request_quantity_lbs,
     frozen_opportunity_quantity,
     map_match_if_sibling,
+    partner_id,
     schema_messages,
     schema_text,
 )
@@ -77,6 +78,8 @@ async def test_neo4j_match_payload_against_draft_schema_and_odoo_mapper(engine_d
     assert "'failed_gates' is a required property" not in messages
     assert schema_text().split("x-publication-status:", 1)[1].splitlines()[0].strip() == "draft-unpublished"
 
+    selected_row = next(row for row in result["candidates"] if row.get("entity_ref") == "res.partner:102")
+    assert partner_id(selected_row["entity_ref"]) == 102
     mapped = map_match_if_sibling(result)
     if mapped is None:
         return

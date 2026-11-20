@@ -119,6 +119,42 @@ async def test_synced_facility_matches_on_its_processed_polymer(design_pack_deps
                     "form": "PELLET",
                     "processed_polymers": [{"code": "PP", "line_id": "pp-1"}],
                 },
+                {
+                    "facility_id": "site-in",
+                    "name": "HDPE buyer",
+                    "entity_ref": "res.partner:102",
+                    "direction": "in",
+                    "form": "PELLET",
+                    "processed_polymers": [{"code": "HDPE", "line_id": "hdpe-1"}],
+                },
+                {
+                    "facility_id": "site-short",
+                    "name": "Short HDPE buyer",
+                    "entity_ref": "res.partner:103",
+                    "capacity_tons_month": 5.0,
+                    "contamination_tolerance": 0.10,
+                    "direction": "in",
+                    "form": "PELLET",
+                    "processed_polymers": [{"code": "HDPE", "line_id": "hdpe-short"}],
+                },
+                {
+                    "facility_id": "site-pvc",
+                    "name": "PVC only",
+                    "entity_ref": "res.partner:104",
+                    "capacity_tons_month": 100.0,
+                    "contamination_tolerance": 0.10,
+                    "direction": "in",
+                    "form": "PELLET",
+                    "processed_polymers": [{"code": "PVC", "line_id": "pvc-1"}],
+                },
+                {
+                    "facility_id": "site-dirty",
+                    "name": "Known incompatible HDPE buyer",
+                    "contamination_tolerance": 0.01,
+                    "direction": "in",
+                    "form": "PELLET",
+                    "processed_polymers": [{"code": "HDPE", "line_id": "hdpe-dirty"}],
+                },
             ],
         },
     )
@@ -134,3 +170,138 @@ async def test_synced_facility_matches_on_its_processed_polymer(design_pack_deps
     )
     ids = [c["candidate"]["facility_id"] for c in result.get("candidates", [])]
     assert ids == ["sync-pet"]
+
+    hdpe = await handle_match(
+        "plasticos",
+        {
+            "query": {
+                "polymer_type": "HDPE",
+                "contamination_pct": 0.04,
+                "volume_tons": 18.0,
+                "color": "NATURAL",
+                "material_grade": "A",
+                "form": "REGRIND",
+            },
+            "match_direction": "supply_opportunity_to_buyer_facility",
+            "top_n": 10,
+        },
+    )
+    by_id = {row["candidate"]["facility_id"]: row for row in hdpe.get("candidates", [])}
+    assert set(by_id) == {"site-in", "site-short"}
+    assert by_id["site-in"]["entity_ref"] == "res.partner:102"
+    assert "contamination_tolerance_score" in by_id["site-in"]["missing_evidence"]
+    assert by_id["site-in"]["capacity_evidence"]["capacity_tons_month"] is None
+    assert by_id["site-in"]["capacity_evidence"]["shortfall_tons"] is None
+    assert by_id["site-short"]["entity_ref"] == "res.partner:103"
+    assert by_id["site-short"]["capacity_evidence"]["shortfall_tons"] == 13.0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_changing_a_capability_line_polymer_drops_the_old_match(design_pack_deps):
+    """A line that keeps its line_id and changes polymer must not keep the old match."""
+    from engine.handlers import handle_match, handle_sync
+
+    facility_id = "rebind-line"
+    line_id = "line-rebind"
+    payload = {
+        "entity_type": "facilities",
+        "batch": [
+            {
+                "facility_id": facility_id,
+                "name": "Rebinding buyer",
+                "contamination_tolerance": 0.10,
+                "direction": "in",
+                "form": "PELLET",
+                "processed_polymers": [{"code": "HDPE", "line_id": line_id, "direction": "in", "form": "PELLET"}],
+            }
+        ],
+    }
+    first = await handle_sync("plasticos", payload)
+    assert first.get("status") in ("ok", "success")
+
+    async def match_ids(polymer: str) -> list[str]:
+        result = await handle_match(
+            "plasticos",
+            {
+                "query": {"polymer_type": polymer, "contamination_pct": 0.04},
+                "match_direction": "supply_opportunity_to_buyer_facility",
+                "top_n": 10,
+            },
+        )
+        return [row["candidate"]["facility_id"] for row in result.get("candidates", [])]
+
+    assert facility_id in await match_ids("HDPE")
+
+    payload["batch"][0]["processed_polymers"] = [
+        {"code": "PP", "line_id": line_id, "direction": "in", "form": "PELLET"}
+    ]
+    second = await handle_sync("plasticos", payload)
+    assert second.get("status") in ("ok", "success")
+    assert facility_id not in await match_ids("HDPE")
+    assert facility_id in await match_ids("PP")
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_keyed_lines_create_update_replace_and_incoming_reassignment(design_pack_deps, graph_driver):
+    """Present lists replace keyed lines. Omission does not. Incoming reassignment drops the old target."""
+    from engine.config.loader import DomainPackLoader
+    from engine.handlers import handle_sync
+    from engine.sync.generator import SyncGenerator
+    from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
+
+    def line(code: str, form: str, line_id: str = "keep") -> dict[str, str]:
+        return {"code": code, "line_id": line_id, "direction": "in", "form": form}
+
+    async def sync(polymers: list[dict[str, str]] | None) -> None:
+        row: dict[str, object] = {"facility_id": "line-set", "name": "Line set", "contamination_tolerance": 0.10}
+        if polymers is not None:
+            row["processed_polymers"] = polymers
+        status = (await handle_sync("plasticos", {"entity_type": "facilities", "batch": [row]})).get("status")
+        assert status in ("ok", "success")
+
+    async def outgoing() -> list[tuple[object, object, object]]:
+        found = await graph_driver.execute_query(
+            "MATCH (n:Facility {facility_id: 'line-set'})-[r:PROCESSES]->(c) "
+            "RETURN r.line_id AS line_id, c.code AS code, r.form AS form ORDER BY line_id",
+            {},
+            "plasticos",
+        )
+        return [(row["line_id"], row["code"], row["form"]) for row in found]
+
+    await sync([line("HDPE", "PELLET")])
+    await sync([line("HDPE", "BALE"), line("PP", "PELLET", "drop")])
+    await sync([line("HDPE", "BALE")])
+    assert await outgoing() == [("keep", "HDPE", "BALE")]
+    await sync(None)
+    assert await outgoing() == [("keep", "HDPE", "BALE")]
+    await sync([])
+    assert await outgoing() == []
+    spec = DomainPackLoader(str(DESIGN_PACKS_ROOT)).load_domain("plasticos")
+    endpoint = next(item for item in spec.sync.endpoints if item.path == "/v1/sync/facilities")
+    child = endpoint.childsync[0].model_copy(update={"edgedirection": "childtoparent"})
+    generator = SyncGenerator(spec)
+    clauses = generator._declared_child_clauses(endpoint.path, child, generator.row_contract(endpoint).children[0])
+    cypher = (
+        "UNWIND $batch AS row MERGE (n:Facility {facility_id: row.node.facility_id}) SET n += row.node, n._tenant = $tenant "
+        + " ".join(clauses)
+    )
+    for code in ("HDPE", "PP"):
+        projected, _dropped = generator.project_batch(
+            endpoint,
+            [
+                {
+                    "facility_id": "incoming-buyer",
+                    "name": "Incoming",
+                    "processed_polymers": [line(code, "PELLET", "in-line")],
+                }
+            ],
+        )
+        await graph_driver.execute_query(
+            cypher=cypher, parameters={"batch": projected, "tenant": "plasticos"}, database="plasticos"
+        )
+    incoming = await graph_driver.execute_query(
+        "MATCH (n:Facility {facility_id: 'incoming-buyer'})<-[r:PROCESSES]-(c) RETURN c.code AS code", {}, "plasticos"
+    )
+    assert [row["code"] for row in incoming] == ["PP"]

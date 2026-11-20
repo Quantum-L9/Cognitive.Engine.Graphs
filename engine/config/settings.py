@@ -338,6 +338,12 @@ class Settings(BaseSettings):
     # line with a form, and that two lines are not one directionless edge.
     # Off: the relationship is unkeyed and edgepredicates are not compiled.
     buyer_line_identity_enabled: bool = True
+    # Null and non-finite match scores stay ineligible. Off restores the previous
+    # wire, where a missing score was sent as 0.0 and could be ranked.
+    null_score_ineligible_enabled: bool = True
+    # The match consumer contract (entity_ref, eligible, rank, score_scale,
+    # contributions, missing evidence). Off leaves the pre-contract row shape.
+    match_consumer_contract_enabled: bool = True
     # Sync ingress validation: every node-endpoint row is checked against the
     # tenant spec's declared types (SyncRowContract) before compliance logs the
     # request or any Cypher runs; any defect refuses the whole batch, listing

@@ -230,8 +230,25 @@ def _line_identity_defects(scope: _EndpointScope, child: ChildSyncSpec, declared
     defects: list[str] = []
     if child.edgeidentity is None or child.edgeidentity not in names:
         defects.append(f"{scope.where}: childsync {child.field!r} edgeidentity must be one of its edgeproperties")
+    if child.targetid in names or child.edgeidentity == child.targetid:
+        defects.append(
+            f"{scope.where}: childsync {child.field!r} must not use targetid {child.targetid!r} as an edge property"
+        )
     item_props = {prop.name: prop for prop in _item_properties(declared)}
-    edge = next((item for item in scope.domain_spec.ontology.edges if item.type == child.edgetype), None)
+    if child.edgedirection == "childtoparent":
+        source_label, target_label = child.targetnode, scope.target.label
+    else:
+        source_label, target_label = scope.target.label, child.targetnode
+    matched = [
+        item
+        for item in scope.domain_spec.ontology.edges
+        if item.type == child.edgetype and item.from_ == source_label and item.to == target_label
+    ]
+    edge = matched[0] if len(matched) == 1 else None
+    if len(matched) > 1:
+        defects.append(
+            f"{scope.where}: childsync edgetype {child.edgetype!r} matches more than one {source_label}->{target_label} edge"
+        )
     edge_props = {prop.name: prop for prop in edge.properties} if edge is not None else {}
     if edge is None:
         defects.append(f"{scope.where}: childsync edgetype {child.edgetype!r} is not declared in ontology.edges")
@@ -649,14 +666,18 @@ class SyncRowContract:
         ``node`` keeps only declared, storable properties present in the row
         (absent stays absent, so ``SET n += row.node`` leaves them unchanged;
         an explicit null still removes one). ``children`` keeps, per childsync
-        field, each item's properties the child node declares.
+        field, each item's properties the child node declares. An omitted child
+        field is null and does not replace keyed relationships; a present list does.
         """
         dropped = self._walk(batch, refuse_undeclared=False).undeclared
         stored = self.stored
         rows = [
             {
                 "node": {key: value for key, value in row.items() if key in stored},
-                "children": {child.field: child.project(row.get(child.field), row) for child in self.children},
+                "children": {
+                    child.field: None if child.field not in row else child.project(row[child.field], row)
+                    for child in self.children
+                },
             }
             for row in batch
         ]

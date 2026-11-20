@@ -9,9 +9,8 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
-G01-CEG-ODOO-RESPONSE. The real ``handle_match`` payload is passed through the
-unmodified Odoo mapper. The mapper is not copied and the draft MatchResponse
-schema is not promoted.
+Generic regression for a namespaced ref on the orbital pack. PlasticOS buyer
+selection is ``tests/integration/test_plasticos_buyer_identity.py``. The mapper is not copied.
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ import pytest
 from engine.handlers import handle_match, init_dependencies
 from engine.state import get_state
 from tests.fixtures.domain_contracts import synthetic_loader
-from tests.fixtures.match_response_contract import map_match_if_sibling
+from tests.fixtures.match_response_contract import map_match_if_sibling, partner_id
 from tests.fixtures.orbital_match import DIRECTION, ORBITAL
 
 pytestmark = pytest.mark.unit
@@ -85,6 +84,11 @@ async def test_handle_match_is_selectable_by_the_unmodified_odoo_mapper() -> Non
     assert driver.calls == [ORBITAL]
     assert "contract_version" not in result
     assert "quantity_per_load_lbs" not in result
+
+    selected_row = next(row for row in result["candidates"] if row.get("entity_ref") == "res.partner:102")
+    assert partner_id(selected_row["entity_ref"]) == 102
+    bare = next(row for row in result["candidates"] if row["candidate"]["depot_id"] == "bare")
+    assert "entity_ref" not in bare
 
     mapped = map_match_if_sibling(result)
     if mapped is None:

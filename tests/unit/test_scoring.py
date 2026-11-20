@@ -520,11 +520,12 @@ class TestPlasticosMatchScoringProof:
 
         spec = _plasticos()
         where = GateCompiler(spec).compile_all_gates(BUYER)
-        assert "candidate.contamination_tolerance IS NOT NULL" in where
-        assert "$contamination_pct IS NOT NULL" in where
+        assert "candidate.contamination_tolerance IS NULL" in where
+        assert "candidate.contamination_tolerance >= $contamination_pct" in where
+        assert "candidate.contamination_tolerance IS NOT NULL" not in where
         assert "rel.direction = $gate_polymer_capability_gate_edge0" in where
         assert "rel.form IS NOT NULL AND rel.form <> $gate_polymer_capability_gate_edge1blank" in where
-        assert "candidate.capacity_tons_month IS NULL OR $volume_tons IS NULL" in where
+        assert "candidate.capacity_tons_month" not in where
         assert "material_grade" not in where
         assert "color" not in where
         assert "PALLETS" not in where
@@ -547,7 +548,7 @@ class TestPlasticosMatchScoringProof:
         assert "quantity_per_load_lbs" not in cypher
         assert match_calls[0]["parameters"]["volume_tons"] == MATCH_QUANTITY_TONS
         assert match_calls[0]["parameters"]["quantity_per_load_lbs"] == LOAD_LBS
-        assert "capacity_tons_month" in cypher
+        assert "capacity_tons_month" not in cypher
         assert "rate_per_ton" in cypher
 
         endpoint = next(item for item in spec.sync.endpoints if item.path == "/v1/sync/supply-opportunities")
@@ -708,6 +709,31 @@ class TestPlasticosMatchScoringProof:
         assert singleton["candidates"][0]["score"] == pytest.approx(1.0)
         assert singleton["candidates"][0]["rank"] == 1
         assert singleton["scoring_meta"]["raw_max"] == pytest.approx(0.4)
+        assert singleton["scoring_meta"]["normalization_applied"] is True
+
+        again, _driver = _match(
+            payload,
+            [{"candidate": {"facility_id": "facility:only"}, "score": 0.4, "dimension_scores": dict(dims)}],
+        )
+        assert again["candidates"][0]["score"] == singleton["candidates"][0]["score"]
+        assert again["candidates"][0]["score_scale"] == singleton["candidates"][0]["score_scale"]
+
+    def test_tied_raw_scores_stay_unnormalized_and_absent_sources_stay_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from engine.config.settings import settings
+
+        dims = {
+            "geo_proximity": 1.0,
+            "credit_score": 0.0,
+            "contamination_tolerance_score": 0.0,
+            "community_match": 0.0,
+            "rate_score": 0.0,
+            "price_alignment": 0.0,
+            "recency": 0.0,
+        }
+        payload = {"query": _buyer_query(), "match_direction": BUYER, "top_n": 5}
+        monkeypatch.setattr(settings, "score_normalize", True)
 
         tied, _driver = _match(
             payload,
@@ -717,10 +743,92 @@ class TestPlasticosMatchScoringProof:
             ],
         )
         assert [row["score"] for row in tied["candidates"]] == [pytest.approx(0.5), pytest.approx(0.5)]
+        assert tied["scoring_meta"]["normalization_applied"] is False
 
-        again, _driver = _match(
+        unchanged, _driver = _match(
             payload,
-            [{"candidate": {"facility_id": "facility:only"}, "score": 0.4, "dimension_scores": dict(dims)}],
+            [
+                {"candidate": {"facility_id": "facility:a"}, "score": 5.0, "dimension_scores": dict(dims)},
+                {"candidate": {"facility_id": "facility:b"}, "score": 5.0, "dimension_scores": dict(dims)},
+            ],
         )
-        assert again["candidates"][0]["score"] == singleton["candidates"][0]["score"]
-        assert again["candidates"][0]["score_scale"] == singleton["candidates"][0]["score_scale"]
+        assert [row["score"] for row in unchanged["candidates"]] == [pytest.approx(5.0), pytest.approx(5.0)]
+        assert unchanged["scoring_meta"]["normalization_applied"] is False
+        assert unchanged["candidates"][0]["score_scale"] == "unnormalized_declared"
+
+        gap_dims = dict(dims)
+        gap_dims["contamination_tolerance_score"] = 0.0
+        gapped, _driver = _match(
+            payload,
+            [
+                {
+                    "candidate": {"facility_id": "facility:gap", "capacity_tons_month": 10.0},
+                    "score": 0.4,
+                    "dimension_scores": gap_dims,
+                    "absent_sources": ["contamination_tolerance_score"],
+                }
+            ],
+        )
+        gap = gapped["candidates"][0]
+        assert "contamination_tolerance_score" in gap["missing_evidence"]
+        assert all(item["feature_id"] != "contamination_tolerance_score" for item in gap["feature_contributions"])
+        assert gap["capacity_evidence"]["capacity_tons_month"] == pytest.approx(10.0)
+        assert gap["capacity_evidence"]["volume_tons"] == pytest.approx(MATCH_QUANTITY_TONS)
+        assert gap["capacity_evidence"]["shortfall_tons"] == pytest.approx(MATCH_QUANTITY_TONS - 10.0)
+
+    def test_one_finite_score_normalizes_beside_a_null_and_flags_roll_back(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from engine.config.settings import settings
+
+        dims = {
+            "geo_proximity": 1.0,
+            "credit_score": 0.0,
+            "contamination_tolerance_score": 0.0,
+            "community_match": 0.0,
+            "rate_score": 0.0,
+            "price_alignment": 0.0,
+            "recency": 0.0,
+        }
+        payload = {"query": _buyer_query(), "match_direction": BUYER, "top_n": 5}
+
+        def rows() -> list[dict[str, Any]]:
+            return [
+                {"candidate": {"facility_id": "facility:finite"}, "score": 0.4, "dimension_scores": dict(dims)},
+                {"candidate": {"facility_id": "facility:none"}, "score": None, "dimension_scores": {}},
+            ]
+
+        monkeypatch.setattr(settings, "score_normalize", True)
+        monkeypatch.setattr(settings, "null_score_ineligible_enabled", True)
+        monkeypatch.setattr(settings, "match_consumer_contract_enabled", True)
+
+        kept, _driver = _match(payload, rows())
+        by_id = {row["candidate"]["facility_id"]: row for row in kept["candidates"]}
+        assert by_id["facility:finite"]["score"] == pytest.approx(1.0)
+        assert kept["scoring_meta"]["normalization_applied"] is True
+        assert by_id["facility:none"]["score"] is None
+        assert by_id["facility:none"]["eligible"] is False
+
+        monkeypatch.setattr(settings, "null_score_ineligible_enabled", False)
+        rolled, _driver = _match(payload, rows())
+        rolled_ids = {row["candidate"]["facility_id"]: row for row in rolled["candidates"]}
+        assert rolled_ids["facility:finite"]["score"] == pytest.approx(1.0)
+        assert rolled_ids["facility:none"]["score"] == pytest.approx(0.0)
+
+        monkeypatch.setattr(settings, "null_score_ineligible_enabled", True)
+        monkeypatch.setattr(settings, "match_consumer_contract_enabled", False)
+        bare, _driver = _match(payload, rows())
+        bare_row = bare["candidates"][0]
+        assert "eligible" not in bare_row
+        assert "score_scale" not in bare_row
+        assert "missing_evidence" not in bare_row
+
+
+@pytest.mark.unit
+def test_same_score_uses_identity_tolerance() -> None:
+    from engine.handlers import _same_score
+
+    assert _same_score(1.0, 1.0)
+    assert _same_score(1.0, 1.0 + 1e-13)
+    assert not _same_score(1.0, 1.000001)
+    assert not _same_score(0.2, 1.0)

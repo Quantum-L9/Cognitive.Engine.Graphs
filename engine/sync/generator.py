@@ -159,12 +159,34 @@ class SyncGenerator:
             ]
         names = [sanitize_label(name) for name in (child.edgeproperties or []) if name in projection.edge_keys]
         identity_name = sanitize_label(identity)
-        overrides = ", ".join(f"{name}: null" for name in names)
+        # The child node's own id is not an edge override. Nulling it deletes the
+        # identity the MERGE just bound and the next sync creates a second node.
+        node_names = [name for name in names if name != sanitize_label(projection.targetid)]
+        overrides = ", ".join(f"{name}: null" for name in node_names)
         rel_set = ", ".join(f"rel.{name} = child_row.{name}" for name in names)
         keyed = f"{keyed_open}{identity_name}: child_row.{identity_name}{keyed_close}"
         absent = f"child_row.{identity_name} IS NULL OR child_row.{identity_name} = ''"
+        lines_expr = f"coalesce(row.children.{child_field}, [])"
+        keyed_lines = f"[line IN {lines_expr} WHERE line.{identity_name} IS NOT NULL AND line.{identity_name} <> '']"
+        if child.edgedirection == "parenttochild":
+            stale_match = f"(n)-[stale:{child_edge}]->(stale_target)"
+        else:
+            stale_match = f"(n)<-[stale:{child_edge}]-(stale_target)"
+        supplied = f"row.children.{child_field} IS NOT NULL"
         return [
-            *header,
+            "WITH n, row",
+            f"WITH n, row, {keyed_lines} AS keyed_lines",
+            f"OPTIONAL MATCH {stale_match}",
+            f"WHERE {supplied}",
+            f"  AND stale.{identity_name} IS NOT NULL",
+            (
+                f"  AND NOT any(line IN keyed_lines WHERE line.{identity_name} = stale.{identity_name} "
+                f"AND stale_target.{child_id} = line.{child_id})"
+            ),
+            "DELETE stale",
+            "WITH DISTINCT n, row",
+            f"FOREACH (child_row IN {lines_expr} |",
+            merge_node,
             f"  {write} c += child_row{{.*, {overrides}}}, c._tenant = $tenant",
             f"  FOREACH (missing IN CASE WHEN {absent} THEN [1] ELSE [] END |",
             f"    MERGE {plain}",
