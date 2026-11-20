@@ -97,10 +97,13 @@ jobs:
       github.event.workflow_run.head_repository.full_name == github.repository &&
       startsWith(github.event.workflow_run.display_title, 'deep apply ')
     # Job-level, so a plan-mode, failed or other-branch Deep run (skipped by
-    # the `if` above) cannot cancel a coverage scan in progress.
+    # the `if` above) never enters the group. No cancellation: apply runs from
+    # different slots can finish out of order, and an older run must not
+    # cancel a newer commit's scan. An arriving run waits; a stale one then
+    # fails the measured-commit check below.
     concurrency:
       group: sonar-main-coverage
-      cancel-in-progress: true
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
