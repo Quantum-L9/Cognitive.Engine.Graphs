@@ -53,7 +53,6 @@ run-name: deep ${{ inputs.mode }} ${{ inputs.utc_slot }} ${{ inputs.deep_contrac
 
 permissions:
   contents: read
-  actions: read
 
 concurrency:
   group: ceg-deep-${{ github.repository }}-${{ inputs.utc_slot }}-${{ inputs.deep_contract }}
@@ -64,6 +63,9 @@ jobs:
     name: Admit deep dispatch
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
     outputs:
       mode: ${{ steps.decision.outputs.mode }}
     steps:
