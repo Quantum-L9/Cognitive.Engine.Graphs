@@ -12,8 +12,7 @@ status: active
 Native outcome classification for the CI controls that call an outside service.
 
 A job conclusion says whether a job's steps exited zero. It does not say that
-GitGuardian scanned, that Codecov accepted an upload, or that GitHub reviewed
-dependencies. This module names what each control actually did, so a workflow
+GitGuardian scanned, or that GitHub reviewed dependencies. This module names what each control actually did, so a workflow
 can report it and the Quality Gate cannot count a control that did not run.
 
 It changes no policy: which outcomes fail a job is what the workflows already
@@ -349,39 +348,6 @@ def run_dependency_review_report() -> int:
 # ── Coverage upload ──────────────────────────────────────────────────────────
 
 
-class CoverageUpload(StrEnum):
-    UPLOADER_EXITED_ZERO = "UPLOADER_EXITED_ZERO"
-    UPLOAD_FAILED = "UPLOAD_FAILED"
-    NOT_ATTEMPTED = "NOT_ATTEMPTED"
-
-
-def classify_coverage_upload(upload_step_outcome: str) -> CoverageUpload:
-    """Name what the uploader step did. No value here means the vendor accepted coverage."""
-    return {"success": CoverageUpload.UPLOADER_EXITED_ZERO, "failure": CoverageUpload.UPLOAD_FAILED}.get(
-        upload_step_outcome, CoverageUpload.NOT_ATTEMPTED
-    )
-
-
-def run_coverage_upload_report() -> int:
-    upload = classify_coverage_upload(os.environ.get("UPLOAD_STEP_OUTCOME", ""))
-    detail = {
-        CoverageUpload.UPLOADER_EXITED_ZERO: (
-            "The uploader exited 0. Vendor processing of the report was not observed by this job."
-        ),
-        CoverageUpload.UPLOAD_FAILED: (
-            "The uploader failed or the vendor rejected the upload. No coverage was accepted for this commit."
-        ),
-        CoverageUpload.NOT_ATTEMPTED: "The upload step did not run. No coverage was sent for this commit.",
-    }[upload]
-    note = "- The test result above comes from pytest and does not depend on this upload."
-    _write_summary(["### Codecov upload (advisory)", "", f"- outcome: `{upload.value}`", f"- {detail}", note])
-    _write_outputs({"outcome": upload.value})
-    if upload is not CoverageUpload.UPLOADER_EXITED_ZERO:
-        _annotate("warning", f"Codecov {upload.value}: {detail}")
-    sys.stdout.write(f"Codecov upload: {upload.value}. {detail}\n")
-    return 0
-
-
 # ── GitHub Actions plumbing ──────────────────────────────────────────────────
 
 
@@ -409,7 +375,6 @@ _COMMANDS = {
     "gitguardian-scan": run_gitguardian_scan,
     "quality-gate": run_quality_gate,
     "dependency-review": run_dependency_review_report,
-    "coverage-upload": run_coverage_upload_report,
 }
 
 
