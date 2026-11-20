@@ -1,0 +1,64 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: engine-specific
+# engine: graph
+# layer: [ci]
+# tags: [ci, sonar, quality]
+# owner: platform
+# status: active
+# --- /L9_META ---
+#
+# SonarQube Cloud CI-based analysis. Automatic Analysis is off for project
+# Quantum-L9_Cognitive.Engine.Graphs, because it cannot import coverage; this
+# job replaces it. It runs no tests: coverage comes only from the existing
+# unit run's coverage.xml, read from coverage-reports/ when present (see
+# sonar-project.properties). A missing token fails the job: no analysis is
+# never reported as a pass. Fork pull requests are skipped, since the token
+# is not available to them.
+name: Sonar
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sonar-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sonar:
+    name: SonarQube Cloud
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout event revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          # Full history: Sonar computes new code and blame from it.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require the Sonar token
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -z "${SONAR_TOKEN}" ]; then
+            echo "::error::secrets.SONAR_TOKEN is not available to this repository; no Sonar analysis ran"
+            exit 1
+          fi
+
+      - name: SonarQube Cloud scan
+        uses: SonarSource/sonarqube-scan-action@59202af334b4ba7b5db01b701b8e79f8b3bef0f4  # v8.5.0
+        with:
+          # The action default at this pin, stated so an action bump cannot
+          # float the scanner.
+          scannerVersion: 8.4.0.16527
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
