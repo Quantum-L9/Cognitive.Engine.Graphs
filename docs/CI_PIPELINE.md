@@ -284,17 +284,20 @@ push to `main`, so the local owner is what checks `main`.
 
 | Check | Local owner (PR + push to main) | Central (PR) | Removed copies |
 |---|---|---|---|
-| `ruff check .` | `l9-lint-test.yml` (org-distributed) | `make check` | `ci.yml` lint, `ci-quality.yml` lint-format, `contracts.yml` lint, `compliance.yml`, pre-commit `ruff` in CI |
-| `ruff format --check .` | `l9-lint-test.yml` | `make check` | `ci.yml` lint, `ci-quality.yml` lint-format, `contracts.yml` lint, pre-commit `ruff-format` in CI |
-| `mypy engine/` | `l9-lint-test.yml` | `make check` | `ci.yml` lint, `ci-quality.yml` lint-format, `contracts.yml` lint, `compliance.yml`, pre-commit `mypy` in CI |
+| `ruff check .` | `l9-lint-test.yml` (org-distributed) | `make check` | `ci.yml` lint, `ci-quality.yml` lint-format, `contracts.yml` lint, `compliance.yml`, pre-commit `ruff` in CI, `refactoring-validation.yml` (retired) |
+| `ruff format --check .` | `l9-lint-test.yml` | `make check` | `ci.yml` lint, `ci-quality.yml` lint-format, `contracts.yml` lint, pre-commit `ruff-format` in CI, `refactoring-validation.yml` (retired) |
+| `mypy engine/` | `l9-lint-test.yml` | `make check` | `ci.yml` lint, `ci-quality.yml` lint-format, `contracts.yml` lint, `compliance.yml`, pre-commit `mypy` in CI, `refactoring-validation.yml` (retired) |
 | `tools/contract_scanner.py` | `contracts.yml` | `make validate` | `compliance.yml`, pre-commit `l9-contract-scan` in CI |
 | `tools/verify_contracts.py` | `contracts.yml` | `make validate` | pre-commit `l9-contract-files-exist` in CI |
 | `tools/l9_meta_injector.py` | `contracts.yml` | `make validate` | pre-commit `l9-meta-check` in CI |
 | `tools/check_action_refs.py` | `contracts.yml` | `make validate` | none |
 
 Local pre-commit still runs every hook; only the CI pre-commit pass skips the
-copies above. `lint-autofix.yml` (rewrites `main`, opens a fix PR) and
-`refactoring-validation.yml` (`refactor/*` only) are not check owners.
+copies above. `lint-autofix.yml` (rewrites `main`, opens a fix PR) is not a
+check owner. `refactoring-validation.yml` is retired: its only job ran
+`ruff check .`, `ruff format --check .` and `mypy engine/` with the same flags
+as `l9-lint-test.yml`, which already runs on every pull request (including
+`refactor/*`) and on `workflow_dispatch`.
 `tests/unit/test_workflow_triggers.py` fails on a second owner.
 
 ---

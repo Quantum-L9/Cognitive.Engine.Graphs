@@ -138,9 +138,8 @@ LOCAL_OWNERS = {
 }
 
 
-# Not a second owner: lint-autofix.yml rewrites main and opens a fix PR;
-# refactoring-validation.yml runs only on refactor/* branches.
-NOT_CHECK_OWNERS = {"lint-autofix.yml", "refactoring-validation.yml"}
+# Not a second owner: lint-autofix.yml rewrites main and opens a fix PR.
+NOT_CHECK_OWNERS = {"lint-autofix.yml"}
 
 
 def _run_commands(document: object) -> list[str]:
