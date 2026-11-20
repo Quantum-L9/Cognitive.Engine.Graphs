@@ -53,8 +53,10 @@ repos:
         args: [--ignore-missing-imports, --follow-imports=silent]
         exclude: ^(tests/|tools/|current work/|harvest_staging/|docs/|engine/security/|engine/auth/)
 
-  # Unit tests covering staged Python only. Full catalog: make test / CI pytest.
-  # pre-commit run --all-files (≥40 .py files) keeps the historical unit subset.
+  # Unit tests covering staged Python only. Pull-request pytest is
+  # `make test` (repo-test). The full catalog is `make test-deep`.
+  # Local pre-commit run --all-files (≥40 .py files) keeps the historical
+  # unit subset. The CI pre-commit job skips this hook.
   - repo: local
     hooks:
       - id: pytest-unit

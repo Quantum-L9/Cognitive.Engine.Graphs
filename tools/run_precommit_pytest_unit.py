@@ -12,9 +12,11 @@ status: active
 
 Select unit tests for the local pytest-unit pre-commit hook.
 
-Commits receive only tests that cover the staged Python files. The full
-catalog stays on `make test` / CI pytest. `pre-commit run --all-files`
-(CI hook job) still runs the historical unit subset when many files arrive.
+Commits receive only tests that cover the staged Python files. The
+pull-request catalog is `make test` (`repo-test`). The full catalog is
+`make test-deep`. A local `pre-commit run --all-files` still runs the
+historical unit subset. On GitHub Actions that all-files path does not
+start a second catalog; the CI pre-commit job also skips this hook.
 """
 
 from __future__ import annotations
@@ -134,7 +136,10 @@ def main(argv: list[str] | None = None) -> int:
         print("OK: no Python files staged; skip pytest-unit (full catalog is make test)")
         return 0
     if len(py_files) >= ALL_FILES_THRESHOLD:
-        print("OK: many files — historical unit subset (CI --all-files)")
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print("PR pytest owner is repo-test; refusing the all-files catalog on GitHub Actions")
+            return 0
+        print("OK: many files — historical unit subset (local --all-files)")
         return _run_pytest(["tests/", *LEGACY_ARGV])
     selected = select_unit_tests(py_files, REPO_ROOT)
     if not selected:

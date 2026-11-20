@@ -73,19 +73,10 @@ jobs:
           mypy engine/ --config-file=pyproject.toml --ignore-missing-imports --exclude chassis
 # REMOVED: continue-on-error: true
 
-      - name: Run Full Test Suite (BLOCKING)
-        run: |
-          PYTHONPATH=. pytest -n auto \
-            --cov=. \
-            --cov-report=term-missing \
-            --cov-fail-under=60 \
-            -v
-# REMOVED: continue-on-error: true
-
       - name: Refactoring Gate Passed
         run: |
-          echo "✅ All refactoring safety checks passed"
-          echo "🚀 Safe to merge"
+          echo "Lint and types passed."
+          echo "The full pytest catalog is deep-plan.yml, not this pull request."
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # DORA META END

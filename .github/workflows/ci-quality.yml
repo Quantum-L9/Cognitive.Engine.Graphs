@@ -15,7 +15,7 @@
 #
 # Required GitHub Secrets:
 #   GITGUARDIAN_API_KEY  — GitGuardian API key
-#   CODECOV_TOKEN        — Codecov upload token
+# Codecov upload is deferred. This workflow does not run pytest or upload coverage.
 #
 # Required GitHub Variables (Settings → Variables):
 #   PYTHON_VERSION       — Python version (e.g. "3.12")
@@ -185,63 +185,9 @@ jobs:
           fi
           exit "$RC"
 
-  # ===========================================================================
-  # COVERAGE — Codecov with DB services
-  # ===========================================================================
-  coverage:
-    name: Coverage (Codecov)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    services:
-      postgres:
-        image: postgres:16@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
-        env:
-          POSTGRES_USER: ${{ vars.TEST_DB_USER || 'test' }}
-          POSTGRES_PASSWORD: ${{ vars.TEST_DB_PASSWORD || 'test' }}
-          POSTGRES_DB: ${{ vars.TEST_DB_NAME || 'test_db' }}
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      # CEG-007: redis service container removed with the dependency.
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
-
-      - name: Checkout pinned Odoo consumer
-        uses: Quantum-L9/l9-ci-core/.github/actions/checkout-external@043f50ac41af17bf814f811076c5b48a640d9a2e
-        with:
-          token: ${{ secrets.L9_GITHUB_READ_TOKEN }}
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-
-      - name: Install dependencies
-        run: bash tools/deps/install_locked.sh full
-
-      - name: Run tests with coverage
-        env:
-          DATABASE_URL: postgresql://${{ vars.TEST_DB_USER || 'test' }}:${{ vars.TEST_DB_PASSWORD || 'test' }}@localhost:5432/${{ vars.TEST_DB_NAME || 'test_db' }}
-          TESTING: "true"
-        run: PYTHONPATH=. pytest tests/ -v --cov=engine --cov-report=xml --cov-report=term --ignore=tests/e2e
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.xml
-          flags: unittests
-          name: codecov-umbrella
-          fail_ci_if_error: false
+  # Full pytest and Codecov moved to deep-plan.yml. This pull-request
+  # workflow does not run a catalog and does not treat a missing coverage
+  # job as a passing test result.
 
   # ===========================================================================
   # YAML-VALIDATE — YAML Linting
@@ -280,7 +226,6 @@ jobs:
       - lint-format
       - semgrep
       - secrets-scan
-      - coverage
       - yaml-validate
     if: always()
 
@@ -294,8 +239,8 @@ jobs:
           echo "  ├─ Lint & Format:  ${{ needs['lint-format'].result }}"
           echo "  ├─ Semgrep:        ${{ needs.semgrep.result }}"
           echo "  ├─ Secrets Scan:   ${{ needs['secrets-scan'].result }}"
-          echo "  ├─ Coverage:       ${{ needs.coverage.result }}"
           echo "  └─ YAML Validate:  ${{ needs['yaml-validate'].result }}"
+          echo "  pytest catalog:    deep-plan.yml (not this pull request)"
           echo ""
 
           # Fail on critical gates
@@ -311,24 +256,25 @@ jobs:
           # job ids (semgrep wasn't even checked at all).
           FAILED=false
 
-          if [[ "${{ needs['lint-format'].result }}" == "failure" ]]; then
+          if [[ "${{ needs['lint-format'].result }}" != "success" ]]; then
             echo "❌ Lint & Format failed"; FAILED=true
           fi
 
-          if [[ "${{ needs.semgrep.result }}" == "failure" ]]; then
+          if [[ "${{ needs.semgrep.result }}" != "success" ]]; then
             echo "❌ Semgrep policy check failed"; FAILED=true
           fi
 
-          if [[ "${{ needs['secrets-scan'].result }}" == "failure" ]]; then
+          if [[ "${{ needs['secrets-scan'].result }}" != "success" ]]; then
             echo "❌ Secrets Scan failed (hardcoded secrets detected)"; FAILED=true
           fi
 
-          if [[ "${{ needs.coverage.result }}" == "failure" ]]; then
-            echo "❌ Coverage below threshold"; FAILED=true
+          if [[ "${{ needs['yaml-validate'].result }}" != "success" ]]; then
+            echo "❌ YAML validation failed"; FAILED=true
           fi
 
           if [[ "$FAILED" == "true" ]]; then
             exit 1
           fi
 
-          echo "✅ All quality gates passed"
+          echo "✅ Quality gate passed for lint, Semgrep, secrets, and YAML."
+          echo "   This gate did not run pytest. The full catalog is deep-plan.yml."

@@ -1,7 +1,8 @@
 # L9 Consumer Lint + Test — Python Preset (LOCKED STRUCTURE)
 #
-# DO NOT EDIT workflow structure — only the env: block is consumer-configurable.
-# Managed by l9-ci-core presets/python.
+# Lint stays in this workflow. The pytest catalog moved to deep-plan.yml.
+# Pull-request pytest is Core `make test` / repo-test. Do not put a second
+# catalog back on pull_request or default-branch push.
 #
 # Conventions:
 #   - Immutable event-revision checkout (no floating action ref)
@@ -18,9 +19,6 @@ on:
 env:
   PYTHON_VERSION: "3.12"
   SOURCE_DIR: "."
-  TEST_DIR: "tests/"
-  COVERAGE_THRESHOLD: "0"
-  PYTEST_PARALLEL: "false"
   MYPY_EXCLUDE: ""
 
 permissions:
@@ -79,53 +77,5 @@ jobs:
             --exclude chassis \
             --show-error-codes --pretty
 
-  test:
-    name: Test Suite
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout immutable event revision
-        env:
-          REPOSITORY: ${{ github.repository }}
-          REVISION: ${{ github.sha }}
-          TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git init .
-          git remote add origin \
-            "https://x-access-token:${TOKEN}@github.com/${REPOSITORY}.git"
-          git -c protocol.version=2 fetch --depth=1 origin "${REVISION}"
-          git checkout --detach FETCH_HEAD
-          git remote set-url origin "https://github.com/${REPOSITORY}.git"
-
-      - name: Checkout pinned Odoo consumer
-        uses: Quantum-L9/l9-ci-core/.github/actions/checkout-external@043f50ac41af17bf814f811076c5b48a640d9a2e
-        with:
-          token: ${{ secrets.L9_GITHUB_READ_TOKEN }}
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install test tools
-        run: bash tools/deps/install_locked.sh full
-
-      - name: pytest with coverage
-        env:
-          TESTING: "true"
-          L9_ODOO_CONSUMER: ${{ github.workspace }}/odoo-consumer
-        run: |
-          set -euo pipefail
-          XDIST_ARGS=()
-          if [ "${PYTEST_PARALLEL}" = "true" ]; then
-            XDIST_ARGS=(-n auto)
-          fi
-          PYTHONPATH=. pytest "${TEST_DIR}" \
-            "${XDIST_ARGS[@]}" \
-            --cov="${SOURCE_DIR}" \
-            --cov-report=xml --cov-report=term-missing \
-            --cov-fail-under="${COVERAGE_THRESHOLD}" \
-            --timeout=300 --tb=short -v
+# The pytest catalog that used to live in this file moved to deep-plan.yml.
+# Pull-request pytest is Core `make test` / repo-test. Lint stays here.
