@@ -65,16 +65,3 @@ jobs:
       # Default mode is dry-run verification (same as `check`); exits 1 when any
       # eligible file is PENDING, MISSING, NOHEADER, INVALID or ERROR. Stdlib only.
       - run: python tools/l9_meta_injector.py
-
-  lint:
-    name: Lint + Type Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
-        with:
-          python-version: "3.12"
-      - run: bash tools/deps/install_locked.sh ci
-      - run: ruff check . && ruff format --check .
-      # Keep type enforcement aligned with ci.yml, ci-quality.yml, and pyproject.toml.
-      - run: mypy engine/ --config-file=pyproject.toml --ignore-missing-imports --exclude chassis

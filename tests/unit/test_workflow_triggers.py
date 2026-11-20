@@ -123,3 +123,67 @@ def test_no_workflow_has_a_path_filter_that_can_never_match() -> None:
             if patterns and not any(_selected(patterns, file) for file in files):
                 dead.append(f"{path.name}:{event}")
     assert dead == []
+
+
+# One local owner per check. The required Analyze (central Core) job runs the
+# same Repo.mk leaves (`make validate`, `make check`) on every pull request.
+LOCAL_OWNERS = {
+    "ruff check": "l9-lint-test.yml",
+    "ruff format --check": "l9-lint-test.yml",
+    "mypy engine/": "l9-lint-test.yml",
+    "tools/contract_scanner.py": "contracts.yml",
+    "tools/verify_contracts.py": "contracts.yml",
+    "tools/l9_meta_injector.py": "contracts.yml",
+    "tools/check_action_refs.py": "contracts.yml",
+}
+
+
+# Not a second owner: lint-autofix.yml rewrites main and opens a fix PR.
+NOT_CHECK_OWNERS = {"lint-autofix.yml"}
+
+
+def _run_commands(document: object) -> list[str]:
+    """Every step's `run` script, comment lines dropped and whitespace collapsed.
+
+    Step names, `uses:` and comments are not commands, so they never count.
+    """
+    commands: list[str] = []
+    jobs = document.get("jobs") if isinstance(document, dict) else None
+    for job in (jobs or {}).values():
+        for step in (job or {}).get("steps") or []:
+            run = step.get("run") if isinstance(step, dict) else None
+            if not isinstance(run, str):
+                continue
+            lines = (line for line in run.splitlines() if not line.lstrip().startswith("#"))
+            commands.append(" ".join(" ".join(lines).split()))
+    return commands
+
+
+def _runs(document: object, command: str) -> bool:
+    """True when a `run` script invokes `command` as whole tokens."""
+    wanted = " ".join(command.split())
+    return any(f" {wanted} " in f" {script} " for script in _run_commands(document))
+
+
+def test_owner_detection_reads_run_commands_only() -> None:
+    def workflow(step: dict) -> dict:
+        return {"jobs": {"j": {"steps": [step]}}}
+
+    assert _runs(workflow({"run": "ruff  check ."}), "ruff check"), "extra whitespace is still ruff check"
+    assert _runs(workflow({"run": "set -e\nruff check .\n"}), "ruff check")
+    assert not _runs(workflow({"name": "ruff check", "run": "echo hi"}), "ruff check"), "a step name is not a command"
+    assert not _runs(workflow({"run": "# ruff check\necho hi"}), "ruff check"), "a comment is not a command"
+    assert not _runs(workflow({"run": "ruff checkout"}), "ruff check"), "tokens match whole"
+
+
+def test_each_local_check_has_one_workflow_owner() -> None:
+    """ruff and mypy once ran in seven places per PR; each local check now has one owner."""
+    workflows = [
+        path
+        for path in sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")])
+        if path.name not in NOT_CHECK_OWNERS
+    ]
+    documents = {path.name: yaml.safe_load(path.read_text()) for path in workflows}
+    for command, owner in LOCAL_OWNERS.items():
+        runners = [name for name, document in documents.items() if _runs(document, command)]
+        assert runners == [owner], f"{command}: {runners}"

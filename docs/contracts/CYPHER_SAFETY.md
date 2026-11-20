@@ -98,6 +98,6 @@ declared = {f.name for f in spec.queryschema.fields} | {p.name for p in spec.der
 - `tools/audit_engine.py` regex rule `SEC_LABEL_SANITIZATION_REQUIRED`
 - `tools/audit_engine.py` pattern rule for `eval(`, `exec(`, `compile(`
 - Pre-commit hook scans for unsafe patterns
-- CI compliance.yml blocks PRs with violations
+- CI: `tools/contract_scanner.py` blocks PRs with violations, in `contracts.yml` and in the required Analyze (central Core) job (`make validate`)
 
 ```

@@ -47,39 +47,8 @@ env:
 
 jobs:
 
-  # ===========================================================================
-  # LINT-FORMAT — Ruff + MyPy
-  # ===========================================================================
-  lint-format:
-    name: Lint & Format (Ruff + MyPy)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
-        with:
-          fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: "pip"
-
-      - name: Install linters
-        run: bash tools/deps/install_locked.sh ci
-
-      - name: Ruff (lint)
-        run: ruff check . --output-format=github
-
-      - name: Ruff (format)
-        run: ruff format --check .
-
-      - name: MyPy (type check)
-        run: mypy engine/ --config-file=pyproject.toml --ignore-missing-imports --exclude chassis
-        continue-on-error: false
-
+  # Ruff and mypy are not run here: l9-lint-test.yml owns them locally and
+  # the required Analyze (central Core) job runs them again (`make check`).
   # ===========================================================================
   # SEMGREP — Custom Policy Rules
   # ===========================================================================
@@ -207,7 +176,6 @@ jobs:
     name: Quality Gate
     runs-on: ubuntu-latest
     needs:
-      - lint-format
       - semgrep
       - secrets-scan
       - yaml-validate
@@ -228,7 +196,6 @@ jobs:
       # parses as a subtraction and evaluates to an empty string.
       - name: Quality Gate Summary
         env:
-          LINT_FORMAT_RESULT: ${{ needs['lint-format'].result }}
           SEMGREP_RESULT: ${{ needs.semgrep.result }}
           SECRETS_SCAN_RESULT: ${{ needs['secrets-scan'].result }}
           SECRETS_SCAN_NATIVE: ${{ needs['secrets-scan'].outputs.native_outcome }}

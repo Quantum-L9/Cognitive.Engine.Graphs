@@ -168,52 +168,12 @@ jobs:
         run: python -m uv lock --check
 
 # ────────────────────────────────────────────────────────────────────────
-# PHASE 2: LINT & TYPE CHECK
+# PHASE 2: LINT & TYPE CHECK — not here
 # ────────────────────────────────────────────────────────────────────────
-  lint:
-    name: Lint & Type Check
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: validate
-    permissions:
-      contents: read
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
-
-      - name: Set up Python
-        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-
-      - name: Install Linting Tools
-        run: bash tools/deps/install_locked.sh ci
-
-      - name: Run Ruff Linter
-        run: |
-          echo "Running Ruff linter..."
-          ruff check . --output-format=github
-          echo "✅ Ruff checks passed"
-
-      - name: Run Ruff Formatter Check
-        run: |
-          echo "Checking code formatting..."
-          ruff format --check .
-          echo "✅ Code formatting is consistent"
-
-      - name: Run Mypy Type Checker
-        run: |
-          echo "Running type checks..."
-          # Scoped to engine/ (same invocation as `make lint` and
-          # ci-quality.yml) -- mypy against the whole repo ('.') fails
-          # immediately with "Source file found twice under different
-          # module names" (tools/auditors/base.py vs auditors/base.py),
-          # which is why this used to be silenced with `|| echo`. Fixed
-          # scope + no more silencing: real type errors now fail the job.
-          mypy engine/ --config-file=pyproject.toml --ignore-missing-imports --exclude chassis
-          echo "✅ Mypy type checks passed"
+# ruff check, ruff format --check and mypy engine/ have one local owner,
+# l9-lint-test.yml (org-distributed, pull_request + push to main), and run
+# again in the required Analyze (central Core) job (`make check`) on every
+# pull request. This workflow does not run a third copy.
 
 # ────────────────────────────────────────────────────────────────────────
 # PHASE 2.5: PRE-COMMIT HOOKS
@@ -273,7 +233,13 @@ jobs:
           # permitted (see docs/contracts/SHARED_MODELS.md and
           # TRANSPORT_PACKET_SPEC — PacketEnvelope is superseded by
           # TransportPacket).
-          SKIP: gitleaks,pytest-unit
+          #
+          # ruff, ruff-format, mypy: owned by l9-lint-test.yml and Core
+          # `make check`. l9-contract-scan, l9-contract-files-exist,
+          # l9-meta-check: owned by contracts.yml and Core `make validate`.
+          # Skipped here so CI runs each once per owner, not again in this
+          # hook pass. Locally, pre-commit still runs all of them.
+          SKIP: gitleaks,pytest-unit,ruff,ruff-format,mypy,l9-contract-scan,l9-contract-files-exist,l9-meta-check
 
 # ────────────────────────────────────────────────────────────────────────
 # Pytest catalogs moved to deep-plan.yml (workflow_dispatch only).
@@ -455,7 +421,6 @@ jobs:
     needs:
       - validate
       - sdk-channel
-      - lint
       - precommit
       - security
       - sbom
@@ -473,7 +438,6 @@ jobs:
           echo "Job Results:"
           echo "  validate:   ${{ needs.validate.result }}"
           echo "  sdk-channel: ${{ needs.sdk-channel.result }}"
-          echo "  lint:       ${{ needs.lint.result }}"
           echo "  precommit:  ${{ needs.precommit.result }}"
           echo "  security:   ${{ needs.security.result }}"
           echo "  sbom:       ${{ needs.sbom.result }}"
@@ -488,14 +452,12 @@ jobs:
           # as a successful test run.
           if [[ "${{ needs.validate.result }}" != "success" ]] || \
              [[ "${{ needs.sdk-channel.result }}" != "success" ]] || \
-             [[ "${{ needs.lint.result }}" != "success" ]] || \
              [[ "${{ needs.precommit.result }}" != "success" ]]; then
             echo "❌ CI GATE FAILED — Critical job(s) failed"
             echo ""
             echo "Required jobs must pass:"
             echo "  • validate: syntax and structure checks"
             echo "  • sdk-channel: uv.lock matches Gate_SDK@v1 and pyproject.toml"
-            echo "  • lint: code quality and formatting"
             echo "  • precommit: hooks other than the pytest catalog"
             exit 1
           fi
