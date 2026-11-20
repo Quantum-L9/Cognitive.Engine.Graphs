@@ -256,11 +256,11 @@ enabled or not readable), and `UNKNOWN` when the check itself fails, for
 example on a 502. A graph that is not `AVAILABLE` still does not fail the job;
 the summary states that no dependency was reviewed.
 
-**Codecov.** `ci-quality.yml` and `deep-plan.yml` upload nothing; the deep plan
-keeps `coverage.xml` as an artifact. The one remaining upload step is in
-`dev-layer-gmp.yml`. It stays advisory (`continue-on-error`) and now reports
-`UPLOADER_EXITED_ZERO`, `UPLOAD_FAILED` or `NOT_ATTEMPTED`. None of these means
-Codecov accepted or processed coverage; that is only visible in Codecov.
+**Codecov (retired, T42).** No workflow uploads to Codecov. The last upload,
+in `dev-layer-gmp.yml`, last ran on 2026-03-11 and failed on every run; it is
+removed. `dev-layer-gmp.yml` keeps its `--cov-fail-under=80` threshold. The
+deep plan keeps `coverage.xml` as an artifact. Coverage reporting moves to
+SonarQube Cloud, which this change does not wire.
 
 ---
 

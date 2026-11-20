@@ -337,28 +337,6 @@ def test_dependency_graph_check_does_not_blame_settings_for_a_server_error() -> 
     assert 'echo "status=${STATUS}" >> "$GITHUB_OUTPUT"' in text
 
 
-# ── T02 / T14: a rejected upload is never accepted coverage ──────────────────
-
-
-@pytest.mark.parametrize(
-    ("step_outcome", "outcome", "warns"),
-    [
-        ("success", "UPLOADER_EXITED_ZERO", False),
-        ("failure", "UPLOAD_FAILED", True),
-        ("skipped", "NOT_ATTEMPTED", True),
-        ("", "NOT_ATTEMPTED", True),
-    ],
-)
-def test_coverage_upload_report(tmp_path: Path, step_outcome: str, outcome: str, warns: bool) -> None:
-    rc, outputs, summary, stdout = _run_tool("coverage-upload", tmp_path, UPLOAD_STEP_OUTCOME=step_outcome)
-    assert rc == 0, "requiredness is unchanged: the upload stays advisory"
-    assert outputs == {"outcome": outcome}
-    assert f"outcome: `{outcome}`" in summary
-    assert (f"::warning::Codecov {outcome}" in stdout) is warns
-    if outcome != "UPLOAD_FAILED":
-        assert "accepted" not in summary.lower(), "only the failure text may use the word, to deny it"
-
-
 # ── The workflows are bound to the classifier ────────────────────────────────
 
 
@@ -394,17 +372,16 @@ def test_ci_quality_has_no_coverage_upload() -> None:
     assert "codecov/codecov-action" not in _workflow("deep-plan.yml")
 
 
-def test_every_coverage_upload_step_reports_its_outcome() -> None:
-    """Any workflow that uploads coverage must surface a failed upload and label the result."""
-    uploaders = [path for path in sorted(WORKFLOWS.glob("*.yml")) if "codecov/codecov-action" in path.read_text()]
-    assert [path.name for path in uploaders] == ["dev-layer-gmp.yml"]
-    for path in uploaders:
-        text = path.read_text()
-        assert "fail_ci_if_error: false" not in text, f"{path.name}: a rejected upload would report success"
-        assert "continue-on-error: true" in text, f"{path.name}: the upload is advisory and must stay so"
-        assert "UPLOAD_STEP_OUTCOME: ${{ steps.codecov.outcome }}" in text
-        assert "python3 tools/scanner_outcomes.py coverage-upload" in text
-        assert "CODECOV_TOKEN" not in text, "this change does not alter how the upload authenticates"
+def test_no_workflow_uploads_to_codecov() -> None:
+    """T42: Codecov is retired. No workflow uploads to it, and none reports an upload outcome."""
+    texts = {path.name: path.read_text() for path in sorted(WORKFLOWS.glob("*.yml"))}
+    assert [name for name, text in texts.items() if "codecov/codecov-action" in text] == []
+    assert [name for name, text in texts.items() if "scanner_outcomes.py coverage-upload" in text] == []
+
+
+def test_dev_layer_keeps_its_coverage_threshold() -> None:
+    """Retiring the upload must not drop the dev-layer coverage gate."""
+    assert "--cov-fail-under=80" in _workflow("dev-layer-gmp.yml")
 
 
 def test_dependency_review_reports_even_when_the_review_is_skipped() -> None:

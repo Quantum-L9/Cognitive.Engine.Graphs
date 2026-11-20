@@ -58,29 +58,9 @@ jobs:
         run: |
           pytest tests/dev_layer/ \
             --cov=dev_layer \
-            --cov-report=xml \
             --cov-report=term-missing \
             --cov-fail-under=80 \
             -v
-
-      # Advisory, as before: a failed upload does not fail this job
-      # (continue-on-error). What changed is that the failure is now visible.
-      # With that input set to false the action reported success when
-      # Codecov rejected the upload, so a rejected upload read as accepted.
-      - name: Upload Coverage to Codecov
-        id: codecov
-        continue-on-error: true
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
-        with:
-          files: ./coverage.xml
-          flags: dev-layer
-          fail_ci_if_error: true
-
-      - name: Report Codecov upload outcome
-        if: always()
-        env:
-          UPLOAD_STEP_OUTCOME: ${{ steps.codecov.outcome }}
-        run: python3 tools/scanner_outcomes.py coverage-upload
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # DORA META END
