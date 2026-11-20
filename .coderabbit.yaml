@@ -10,6 +10,12 @@
 #
 # CodeRabbit — L9 contract-aware review
 # Contract files: docs/contracts/
+#
+# inheritance: true merges this file over the organization review policy
+# (https://docs.coderabbit.ai/configuration/configuration-inheritance).
+# Without it CodeRabbit used its own defaults here, not the organization's.
+
+inheritance: true
 
 reviews:
   instructions: |
