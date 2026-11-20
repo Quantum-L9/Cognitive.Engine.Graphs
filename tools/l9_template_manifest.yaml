@@ -86,9 +86,6 @@ files:
   - path: ".github/workflows/refactoring-validation.yml"
     required: false
     tags: ["L9_TEMPLATE", "ci", "refactoring"]
-  - path: ".github/workflows/dev-layer-gmp.yml"
-    required: false
-    tags: ["L9_TEMPLATE", "ci", "dev-layer"]
   - path: ".github/workflows/auto-fix-adr.yml"
     required: false
     tags: ["L9_TEMPLATE", "ci", "adr"]
