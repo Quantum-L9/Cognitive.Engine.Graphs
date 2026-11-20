@@ -416,9 +416,9 @@ def _loaded_spec_for_results() -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_match_null_scores_are_coerced_before_normalization(monkeypatch) -> None:
-    """A null `score` (clamp off, unscored property) is stored as 0.0, so normalization
-    neither subtracts from None nor promotes a lone null to 1.0."""
+async def test_match_null_score_stays_null_under_normalization(monkeypatch) -> None:
+    """A null score stays null. Normalization uses only finite scores and does not
+    turn the missing one into the floor of the range."""
     from engine.config.settings import settings
     from engine.state import get_state
 
@@ -434,14 +434,17 @@ async def test_match_null_scores_are_coerced_before_normalization(monkeypatch) -
     result = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
 
     scores = [c["score"] for c in result["candidates"]]
-    assert scores == [0.0, 1.0]
-    assert result["scoring_meta"]["raw_min"] == 0.0
+    assert scores[0] is None
+    assert scores[1] == pytest.approx(0.4)
+    assert result["candidates"][0]["eligible"] is False
+    assert result["candidates"][1]["eligible"] is True
+    assert result["scoring_meta"]["raw_min"] == 0.4
     assert result["scoring_meta"]["raw_max"] == 0.4
     assert result["scoring_meta"]["normalization_applied"] is True
 
 
 @pytest.mark.asyncio
-async def test_match_lone_null_score_normalizes_to_zero(monkeypatch) -> None:
+async def test_match_lone_null_score_is_not_promoted(monkeypatch) -> None:
     from engine.config.settings import settings
     from engine.state import get_state
 
@@ -453,8 +456,11 @@ async def test_match_lone_null_score_normalizes_to_zero(monkeypatch) -> None:
 
     result = await handle_match("t", {"query": {"polymer": "HDPE"}, "match_direction": "buyer_to_seller"})
 
-    # Range is zero, so the singleton branch runs — on a real 0.0, not on None.
-    assert result["candidates"][0]["score"] == 1.0
+    # A missing score is not a finite singleton, so it is not promoted to 1.0.
+    assert result["candidates"][0]["score"] is None
+    assert result["candidates"][0]["eligible"] is False
+    assert result["candidates"][0]["rank"] is None
+    assert result["scoring_meta"]["normalization_applied"] is False
     assert result["scoring_meta"]["raw_max"] == 0.0
 
 
