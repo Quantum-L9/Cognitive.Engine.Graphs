@@ -146,3 +146,14 @@ def local_default(k: object = None) -> object:
     if k is None:
         k = make()
     return k
+
+
+# --- CI canary (DO NOT MERGE): no-structlog-getchild known-bad / known-good ---
+def canary_getchild(log: object) -> object:
+    # ruleid: no-structlog-getchild
+    return log.getChild("canary")
+
+
+def canary_bind(log: object) -> object:
+    # ok: no-structlog-getchild
+    return log.bind(component="canary")
