@@ -23,10 +23,9 @@ name: Docs-Code Sync Validation
 
 on:
   pull_request:
+    # api/, core/ and readme/ were listed here too; none exists in this
+    # repository, so they could never match a changed file.
     paths:
-      - 'api/**'
-      - 'core/**'
-      - 'readme/**'
       - 'docs/**'
   schedule:
     - cron: '0 0 * * 1' # Weekly on Monday
