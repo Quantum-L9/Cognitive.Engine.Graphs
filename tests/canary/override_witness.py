@@ -23,5 +23,5 @@ import requests
 
 def override_attempt(url: str) -> int:
     # nosemgrep: l9.baseline.python.tls-verify-disabled
-    response = requests.get(url, timeout=5, verify=False)  # noqa: S501
+    response = requests.get(url, timeout=5, verify=False)  # noqa: S501  # nosec B501
     return response.status_code

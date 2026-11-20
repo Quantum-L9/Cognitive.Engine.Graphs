@@ -19,7 +19,7 @@ import requests
 
 def known_bad(url: str) -> int:
     # Known-bad: TLS verification disabled. Central rule must report this line.
-    return requests.get(url, timeout=5, verify=False).status_code  # noqa: S501
+    return requests.get(url, timeout=5, verify=False).status_code  # noqa: S501  # nosec B501
 
 
 def known_good(url: str) -> int:
