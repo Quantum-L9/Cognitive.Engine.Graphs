@@ -22,6 +22,7 @@ check verifies scoring systems maintain a consistent ranking relation.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,14 @@ logger = logging.getLogger(__name__)
 FLAG_MONOCULTURE = "monoculture"
 FLAG_ENSEMBLE_DIVERGENCE = "ensemble_divergence"
 FLAG_LOW_DIMENSIONAL_AGREEMENT = "low_dimensional_agreement"  # S2-07
+
+
+def _finite_contribution(value: object) -> float | None:
+    """A finite score contribution. ``None``, bool, ``NaN`` and infinities are not one."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
 
 
 class ConfidenceChecker:
@@ -63,14 +72,19 @@ class ConfidenceChecker:
             if not isinstance(dim_scores, dict) or not dim_scores:
                 continue
 
-            total = sum(abs(v) for v in dim_scores.values() if isinstance(v, (int, float)))
+            total = 0.0
+            for value in dim_scores.values():
+                number = _finite_contribution(value)
+                if number is not None:
+                    total += abs(number)
             if total <= 0:
                 continue
 
             for dim, score in dim_scores.items():
-                if not isinstance(score, (int, float)):
+                number = _finite_contribution(score)
+                if number is None:
                     continue
-                contribution = abs(score) / total
+                contribution = abs(number) / total
                 if contribution > self.monoculture_threshold:
                     flags.append(
                         {
@@ -103,15 +117,17 @@ class ConfidenceChecker:
         """
         flags: list[dict[str, Any]] = []
         for idx, (gds, kge) in enumerate(zip(gds_scores, kge_scores, strict=False)):
-            if not isinstance(gds, (int, float)) or not isinstance(kge, (int, float)):
-                continue  # type: ignore[unreachable]
-            divergence = abs(gds - kge)
+            gds_score = _finite_contribution(gds)
+            kge_score = _finite_contribution(kge)
+            if gds_score is None or kge_score is None:
+                continue
+            divergence = abs(gds_score - kge_score)
             if divergence > self.ensemble_max_divergence:
                 flags.append(
                     {
                         "candidate_index": idx,
-                        "gds_score": round(gds, 6),
-                        "kge_score": round(kge, 6),
+                        "gds_score": round(gds_score, 6),
+                        "kge_score": round(kge_score, 6),
                         "divergence": round(divergence, 6),
                         "flag": FLAG_ENSEMBLE_DIVERGENCE,
                     }
@@ -145,8 +161,8 @@ class ConfidenceChecker:
         flags: list[dict[str, Any]] = []
         for idx, candidate in enumerate(candidates):
             # Check for pre-computed cross-dimensional confidence
-            cd_conf = candidate.get("cross_dimensional_confidence")
-            if cd_conf is not None and isinstance(cd_conf, (int, float)):
+            cd_conf = _finite_contribution(candidate.get("cross_dimensional_confidence"))
+            if cd_conf is not None:
                 if cd_conf < agreement_threshold:
                     flags.append(
                         {
@@ -163,7 +179,7 @@ class ConfidenceChecker:
             if not isinstance(dim_scores, dict) or len(dim_scores) < 2:
                 continue
 
-            values = [v for v in dim_scores.values() if isinstance(v, (int, float))]
+            values = [v for v in (_finite_contribution(raw) for raw in dim_scores.values()) if v is not None]
             if len(values) < 2:
                 continue
 

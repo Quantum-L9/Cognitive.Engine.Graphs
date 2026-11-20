@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import math
 import re
 import time
 import uuid
@@ -547,10 +548,14 @@ def _validate_match_weights(
     weight_sum = 0.0
     for key, val in source.items():
         try:
-            weight_sum += float(val)
+            number = float(val)
         except (TypeError, ValueError) as exc:
             msg = f"Weight '{key}' is not a valid number"
             raise ValidationError(msg, action="match", tenant=tenant) from exc
+        if not math.isfinite(number):
+            msg = f"Weight '{key}' is not a finite number"
+            raise ValidationError(msg, action="match", tenant=tenant)
+        weight_sum += number
     if weight_sum > _WEIGHT_CEILING + _WEIGHT_SUM_TOLERANCE:
         msg = f"Weights sum to {weight_sum:.4f}, exceeding {_WEIGHT_CEILING}"
         raise ValidationError(msg, action="match", tenant=tenant)
@@ -582,6 +587,84 @@ def _candidate_id_property(domain_spec: DomainSpec, label: str) -> str:
                 if prop.required:
                     return prop.name
     return _FALLBACK_CANDIDATE_ID_PROPERTY
+
+
+_NAMESPACED_ENTITY_REF = re.compile(r"^[a-z0-9_.-]+:\S+$")
+
+
+def _namespaced_entity_ref(value: Any) -> str | None:
+    """A stored ``<model>:<id>`` ref, or None. Bare ids are not given a model."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if _NAMESPACED_ENTITY_REF.fullmatch(text) is None:
+        return None
+    return text
+
+
+def _finite_match_score(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def _match_score_scale(score: float | None, *, normalized: bool) -> str:
+    if score is not None and (normalized or 0.0 <= score <= 1.0):
+        return "0_to_1"
+    return "unnormalized_declared"
+
+
+def _attach_match_consumer_fields(
+    candidates: list[Any],
+    *,
+    id_property: str,
+    active_dimensions: list[str],
+    normalized: bool,
+) -> None:
+    """Lift the fields a match consumer reads onto each returned row.
+
+    The namespaced ref is whatever the node already stores. A non-finite score
+    is not eligible and receives no rank. Finite dimension projections are the
+    evidence contributions; an active dimension with no finite projection is
+    missing evidence. The draft MatchResponse model is not emitted.
+    """
+    next_rank = 1
+    for row in candidates:
+        if not isinstance(row, dict):
+            continue
+        node = row.get("candidate")
+        node = node if isinstance(node, dict) else {}
+        entity_ref = (
+            _namespaced_entity_ref(row.get("entity_ref"))
+            or _namespaced_entity_ref(node.get("entity_ref"))
+            or _namespaced_entity_ref(node.get(id_property))
+        )
+        if entity_ref is not None:
+            row["entity_ref"] = entity_ref
+        score = _finite_match_score(row.get("score"))
+        eligible = score is not None
+        row["eligible"] = eligible
+        if eligible:
+            row["rank"] = next_rank
+            next_rank += 1
+        else:
+            row["rank"] = None
+        row["score_scale"] = _match_score_scale(score, normalized=normalized)
+        raw_dims = row.get("dimension_scores")
+        dims = raw_dims if isinstance(raw_dims, dict) else {}
+        contributions: list[dict[str, Any]] = []
+        present: set[str] = set()
+        for name, raw in dims.items():
+            if name in {"candidate", "score"}:
+                continue
+            number = _finite_match_score(raw)
+            if number is None:
+                continue
+            present.add(str(name))
+            contributions.append({"feature_id": str(name), "contribution": number, "evidence_refs": []})
+        row["feature_contributions"] = contributions
+        row["missing_evidence"] = [name for name in active_dimensions if name not in present]
 
 
 def _candidate_id(candidate: Any, id_property: str, fallback: Any) -> str:
@@ -1120,6 +1203,14 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                         id_property=id_property,
                     )
                     c["match_explanation"] = explanation
+
+    if candidates_out:
+        _attach_match_consumer_fields(
+            candidates_out,
+            id_property=_candidate_id_property(domain_spec, candidate_labels[0]),
+            active_dimensions=list(scoring_assembler.last_active_dimension_names),
+            normalized=bool(scoring_meta["normalization_applied"]),
+        )
 
     response = {
         "status": "success",  # RU-014 / CEG-COR-075 (RETURN_VALUES.md)

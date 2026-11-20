@@ -75,6 +75,22 @@ class WeightVector:
 _MINIMIZE = "minimize"
 
 
+def _finite_score(value: object) -> float | None:
+    """A comparable score, or None when the value is missing or not finite.
+
+    ``NaN`` and infinities compare false in both directions, so a candidate
+    whose only "advantage" is ``NaN`` used to share the front with a strictly
+    better finite candidate. A non-finite value is not a score. A bool is a
+    0/1 magnitude, matching the previous numeric comparison.
+    """
+    if isinstance(value, bool):
+        value = float(value)
+    if not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
 def _dominates(
     a: dict[str, float],
     b: dict[str, float],
@@ -88,13 +104,27 @@ def _dominates(
     ``"maximize"``. A minimised dimension is compared on negated values; any
     dimension not mapped to ``"minimize"`` (including ``directions=None``) is
     maximised, so existing callers are unchanged.
+
+    A non-finite component loses to a finite one and never counts as a win.
+    Two non-finite components on the same dimension are a tie on that dimension.
+    A missing key stays ``0.0``, the historical fill.
     """
     at_least_one_strict = False
     for d in dims:
-        va = a.get(d, 0.0)
-        vb = b.get(d, 0.0)
+        va = _finite_score(a.get(d, 0.0))
+        vb = _finite_score(b.get(d, 0.0))
         if directions is not None and directions.get(d) == _MINIMIZE:
-            va, vb = -va, -vb
+            if va is not None:
+                va = -va
+            if vb is not None:
+                vb = -vb
+        if va is None and vb is None:
+            continue
+        if va is None:
+            return False
+        if vb is None:
+            at_least_one_strict = True
+            continue
         if va < vb:
             return False
         if va > vb:
@@ -298,9 +328,15 @@ def _evaluate_weight_vector(
 
     ranked: list[tuple[float, float]] = []  # (scalarised score, relevance label)
     for outcome in outcome_history:
-        dim_scores: dict[str, float] = outcome.get("dimension_scores", {})
+        raw_scores = outcome.get("dimension_scores", {})
+        dim_scores = raw_scores if isinstance(raw_scores, dict) else {}
         was_selected: bool = outcome.get("was_selected", False)
-        scalarised = sum(w.get(d, 0.0) * s for d, s in dim_scores.items())
+        scalarised = 0.0
+        for dim, raw in dim_scores.items():
+            number = _finite_score(raw)
+            if number is None:
+                continue
+            scalarised += w.get(dim, 0.0) * number
         ranked.append((scalarised, 1.0 if was_selected else 0.0))
 
     ranked.sort(key=lambda pair: pair[0], reverse=True)  # stable for ties

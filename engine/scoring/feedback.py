@@ -23,6 +23,7 @@ are allowed to move.
 from __future__ import annotations
 
 import logging
+import math
 import statistics
 from collections import defaultdict
 from typing import Any
@@ -96,13 +97,15 @@ class OutcomeFeedback:
                 continue
 
             for dim, score in dim_scores.items():
-                if not isinstance(score, (int, float)):
+                if isinstance(score, bool) or not isinstance(score, (int, float)):
                     continue
-                # ``score`` is int | float (isinstance guard above): float() cannot raise.
+                number = float(score)
+                if not math.isfinite(number):
+                    continue
                 if outcome_type == positive_class:
-                    positive_dims[dim].append(float(score))
+                    positive_dims[dim].append(number)
                 elif outcome_type == negative_class:
-                    negative_dims[dim].append(float(score))
+                    negative_dims[dim].append(number)
 
         all_dims = set(positive_dims.keys()) | set(negative_dims.keys())
         dimension_analysis: dict[str, dict[str, Any]] = {}

@@ -116,6 +116,18 @@ class ScoreDriftSignal:
     ks_threshold: float
 
 
+def _finite_samples(values: list[float]) -> list[float]:
+    """Drop nulls, bools and non-finite numbers. They are not a distribution."""
+    finite: list[float] = []
+    for value in values:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        number = float(value)
+        if math.isfinite(number):
+            finite.append(number)
+    return finite
+
+
 def score_distribution_drift(
     baseline_scores: list[float],
     current_scores: list[float],
@@ -130,6 +142,8 @@ def score_distribution_drift(
     dimensions outcomes used is a different claim
     (``engine.feedback.drift_detector.DriftDetector``).
     """
+    baseline_scores = _finite_samples(baseline_scores)
+    current_scores = _finite_samples(current_scores)
     if not baseline_scores or not current_scores:
         return ScoreDriftSignal(
             signal=SIGNAL_SCORE_DISTRIBUTION,
