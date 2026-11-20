@@ -4,7 +4,7 @@ l9_schema: 1
 origin: engine-specific
 engine: graph
 layer: [test]
-tags: [test, unit, match, identity]
+tags: [test, integration, match, identity]
 owner: engine-team
 status: active
 --- /L9_META ---
@@ -28,7 +28,7 @@ from engine.state import get_state
 from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 from tests.fixtures.match_response_contract import require_unmodified_odoo_mapper
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.integration
 
 SELECTABLE = "res.partner:102"
 MISSING = "site-missing"
