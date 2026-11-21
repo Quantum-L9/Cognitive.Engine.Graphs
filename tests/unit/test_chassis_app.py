@@ -353,3 +353,25 @@ class TestChassisSettings:
         assert settings.api_title == "Graph Engine"
         assert settings.cors_origins == ["http://localhost:3000"]
         assert settings.l9_lifecycle_hook == "engine.boot:GraphLifecycle"
+
+
+class NotALifecycleHook:
+    """Importable class that is not a LifecycleHook."""
+
+
+@pytest.mark.unit
+class TestResolveHookFromEnvironment:
+    """L9_LIFECYCLE_HOOK resolution accepts only a LifecycleHook."""
+
+    def test_resolves_a_lifecycle_hook(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from chassis import chassis_app
+
+        monkeypatch.setattr(chassis_app._chassis_settings, "l9_lifecycle_hook", f"{__name__}:MockLifecycleHook")
+        assert isinstance(chassis_app._resolve_hook(None), MockLifecycleHook)
+
+    def test_refuses_an_object_that_is_not_a_lifecycle_hook(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from chassis import chassis_app
+
+        monkeypatch.setattr(chassis_app._chassis_settings, "l9_lifecycle_hook", f"{__name__}:NotALifecycleHook")
+        with pytest.raises(TypeError, match="is not a LifecycleHook"):
+            chassis_app._resolve_hook(None)

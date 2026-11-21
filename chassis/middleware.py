@@ -26,12 +26,12 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from starlette.middleware.base import BaseHTTPMiddleware
 
 if TYPE_CHECKING:
+    from starlette.middleware.base import RequestResponseEndpoint
     from starlette.requests import Request
     from starlette.responses import Response
 
@@ -47,7 +47,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
     Propagates inbound trace headers (W3C traceparent) if present.
     """
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         # Propagate or generate
         request_id = request.headers.get("x-request-id", uuid.uuid4().hex)
         trace_id = request.headers.get("x-trace-id") or request.headers.get(
@@ -79,7 +79,7 @@ class TimingMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.slow_threshold_ms = slow_threshold_ms
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         start = time.perf_counter()
         response = await call_next(request)
         elapsed_ms = (time.perf_counter() - start) * 1000
@@ -107,7 +107,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     OWASP baseline for API services.
     """
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
@@ -126,7 +126,7 @@ class StructuredLogMiddleware(BaseHTTPMiddleware):
     Compatible with Datadog, Splunk, ELK, CloudWatch.
     """
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         start = time.perf_counter()
         response = await call_next(request)
         elapsed_ms = (time.perf_counter() - start) * 1000
