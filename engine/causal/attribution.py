@@ -28,8 +28,6 @@ from engine.graph.driver import GraphDriver
 from engine.utils.security import sanitize_label
 
 logger = logging.getLogger(__name__)
-# CANARY, DO NOT MERGE: witness for l9.no-structlog-getchild (CEG consumer rulepack).
-_canary_logger = logger.getChild("canary")
 
 # Valid attribution model names
 VALID_MODELS = frozenset({"first_touch", "last_touch", "linear", "position_based"})
@@ -371,3 +369,41 @@ class AttributionCalculator:
         if total <= 0:
             return weights
         return {tp_id: round(value / total, 6) for tp_id, value in decayed.items()}
+
+
+# ── CANARY, DO NOT MERGE ──────────────────────────────────────────────────────
+# Witness for the CEG consumer Semgrep rulepack (.semgrep/ceg-consumer-rules.yaml):
+# one true positive per rule, so Analyze (central Core) must block on all four.
+import os  # noqa: E402
+import threading  # noqa: E402
+
+import httpx  # noqa: E402
+import structlog  # noqa: E402
+
+_canary_structlog = structlog.get_logger(__name__)
+_canary_instance: object | None = None
+_canary_lock = threading.Lock()
+
+
+def _canary_child_logger() -> object:
+    # l9.no-structlog-getchild
+    return _canary_structlog.getChild("canary")
+
+
+def _canary_singleton() -> object:
+    # l9.singleton-requires-lock
+    global _canary_instance
+    if _canary_instance is None:
+        _canary_instance = object()
+    return _canary_instance
+
+
+def _canary_env_float() -> float:
+    # l9.float-requires-try-except
+    return float(os.environ["CEG_CANARY_THRESHOLD"])
+
+
+async def _canary_leaked_client() -> None:
+    # l9.httpx-async-context-required
+    client = httpx.AsyncClient()
+    await client.aclose()
