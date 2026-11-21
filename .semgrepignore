@@ -16,6 +16,6 @@ tests/
 .semgrep
 .semgrep_logs/
 
-# semgrep --test fixtures for .semgrep/semgrep-rules.yaml: deliberate
+# semgrep --test fixtures for .semgrep/ceg-consumer-rules.yaml: deliberate
 # true positives, run by the Semgrep Policy Check job, never scanned.
 .semgrep/fixtures/
