@@ -20,6 +20,7 @@ import math
 import os
 import sys
 import threading
+from typing import Any
 
 import numpy as np
 
@@ -146,3 +147,14 @@ def local_default(k: object = None) -> object:
     if k is None:
         k = make()
     return k
+
+
+# --- CI canary (DO NOT MERGE): no-structlog-getchild known-bad / known-good ---
+def canary_getchild(log: Any) -> object:
+    # ruleid: no-structlog-getchild
+    return log.getChild("canary")
+
+
+def canary_bind(log: Any) -> object:
+    # ok: no-structlog-getchild
+    return log.bind(component="canary")
