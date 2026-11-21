@@ -296,6 +296,9 @@ push to `main`, so the local owner is what checks `main`.
 | `tools/verify_contracts.py` | `contracts.yml` | `make validate` | pre-commit `l9-contract-files-exist` in CI |
 | `tools/l9_meta_injector.py` | `contracts.yml` | `make validate` | pre-commit `l9-meta-check` in CI |
 | `tools/check_action_refs.py` | `contracts.yml` | `make validate` | none |
+| `tools/check_compliance_layout.py` (banned engine files, design-pack DomainSpecs) | `compliance.yml` | `make validate` | the inline compliance.yml steps it replaces |
+| `tools/packet_envelope_gate.py` (own SDK runtime, `.l9/runtime/packet-envelope-sdk`) | `ci.yml` pre-commit (`packet-envelope-prohibited`) | `make validate` | none |
+| `uv lock --check` | `ci.yml` `sdk-channel` | `make validate` | none |
 
 Local pre-commit still runs every hook; only the CI pre-commit pass skips the
 copies above. `lint-autofix.yml` (rewrites `main`, opens a fix PR) is not a

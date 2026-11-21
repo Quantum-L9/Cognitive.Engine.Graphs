@@ -40,7 +40,10 @@ from pathlib import Path
 
 SDK_REPOSITORY = "https://github.com/Quantum-L9/l9-ci-sdk.git"
 SDK_REVISION = "0779fca8238011f8abea551895f96584676e9d17"
-SDK_RUNTIME_DIR = Path(".l9/runtime/sdk")
+# Not .l9/runtime/sdk: Analyze (central Core) provisions its own SDK runtime
+# there before `make validate` runs this gate, and a checkout at another
+# revision is deleted and re-cloned below.
+SDK_RUNTIME_DIR = Path(".l9/runtime/packet-envelope-sdk")
 LEDGER_PATH = Path(".l9/baselines/packet-envelope.yml")
 DECLARATION_PATHS = (
     "engine/packet/packet_envelope.py",
