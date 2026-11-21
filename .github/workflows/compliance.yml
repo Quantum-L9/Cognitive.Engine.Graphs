@@ -45,4 +45,3 @@ jobs:
             echo "$violations"
             exit 1
           fi
-
