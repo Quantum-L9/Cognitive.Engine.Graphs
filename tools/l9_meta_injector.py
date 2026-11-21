@@ -99,13 +99,6 @@ FILE_REGISTRY: list[FileMeta] = [
     FileMeta(
         ".github/workflows/docs-code-sync.yml", "l9-template", ["ci"], ["L9_TEMPLATE", "ci", "docs-sync"], "platform"
     ),
-    FileMeta(
-        ".github/workflows/refactoring-validation.yml",
-        "l9-template",
-        ["ci"],
-        ["L9_TEMPLATE", "ci", "refactoring"],
-        "platform",
-    ),
     # --- Governance ---
     FileMeta(
         ".github/pr_review_config.yaml",

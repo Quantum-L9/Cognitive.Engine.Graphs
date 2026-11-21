@@ -28,18 +28,21 @@ status: active
   when a dependency changed without `uv lock` (or a pinned release was yanked). It never moves a
   locked version; `uv lock --upgrade-package <name>` (or Dependabot's uv PR) does.
 
-### Phase 2: Lint & Type Check
-- Ruff linter (`ruff check`)
-- Ruff formatter (`ruff format --check`)
-- Mypy type checker, scoped to `engine/` (BLOCKING — see note below)
+### Phase 2: Lint & Type Check (not in `ci.yml`)
+- Ruff linter (`ruff check`), Ruff formatter (`ruff format --check`) and mypy
+  scoped to `engine/` run once, in their owners `l9-lint-test.yml` and the
+  required `Analyze (central Core)` check (`make check`). `ci.yml` no longer
+  has a `lint` job; see "One owner per check".
 
 ### Phase 2.5: Pre-commit Hooks
-- `pre-commit run --all-files` — runs every hook in `.pre-commit-config.yaml`
+- `pre-commit run --all-files` — runs the hooks in `.pre-commit-config.yaml`, less the SKIP list below,
   in CI, so hooks are enforced even if a contributor (human or agent) never
   ran `pre-commit install` locally, or bypassed hooks with `git commit -n`
-- `SKIP=gitleaks` (see "Pre-Commit Hooks" below for why gitleaks is skipped
-  here specifically; `packet-envelope-prohibited` is deliberately NOT
-  skipped — see below)
+- `SKIP=gitleaks,pytest-unit,ruff,ruff-format,mypy,l9-contract-scan,l9-contract-files-exist,l9-meta-check`:
+  gitleaks for the reason under "Pre-Commit Hooks" below, the rest because
+  each already runs in its one owner (see "One owner per check"), so the CI
+  pass runs every other hook. `packet-envelope-prohibited` is deliberately
+  NOT skipped — see below
 - `pre-commit run --all-files` does not stop at the first failing hook —
   every hook's result is reported in one run
 
@@ -64,12 +67,15 @@ status: active
 - Security posture scoring
 
 ### Phase 7: CI Gate (Fan-In)
-- **Blocking**: validate, lint, precommit, test (must pass)
+- **Blocking**: validate, precommit, test (must pass). Lint and type
+  checking are not part of this fan-in: a green `CI Gate` is no evidence of
+  them; `l9-lint-test.yml` and `Analyze (central Core)` are.
 - **Advisory**: security, sbom, scorecard (failures logged, not blocking)
 
 > `ci-quality.yml` (a separate workflow, not part of `ci.yml`'s fan-in) has
-> its own `quality-gate` job that similarly aggregates `lint-format`,
-> `semgrep`, `secrets-scan`, and `yaml-validate`. Both `ci-gate` and
+> its own `quality-gate` job that similarly aggregates `semgrep`,
+> `secrets-scan`, and `yaml-validate` (`lint-format` moved to its one owner,
+> see "One owner per check"). Both `ci-gate` and
 > `quality-gate` should be configured as **required status checks** in
 > branch protection for either to actually block a merge — a workflow job
 > failing does not, by itself, prevent merging unless GitHub is configured
@@ -89,19 +95,20 @@ status: active
 
 ```
 Phase 1: Validation      → BLOCKING
-Phase 2: Lint & Type     → BLOCKING (mypy included — see note below)
+Phase 2: Lint & Type     → BLOCKING, outside ci.yml (l9-lint-test.yml, Analyze (central Core))
 Phase 2.5: Pre-commit    → BLOCKING
 Phase 3: Test Suite      → BLOCKING
 Phase 4: Security        → ADVISORY (non-blocking)
 Phase 5: SBOM            → ADVISORY
 Phase 6: Scorecard       → ADVISORY
-Phase 7: CI Gate (Fan-In)→ BLOCKING (checks Phases 1-3 + 2.5)
+Phase 7: CI Gate (Fan-In)→ BLOCKING (checks Phases 1, 2.5, 3)
 ```
 
-**Merge-Blocking Gates**: validate, lint, precommit, test (4 jobs)
+**Merge-Blocking Gates in `ci.yml`**: validate, precommit, test (3 jobs)
 **Non-Blocking Jobs**: security, sbom, scorecard (3 jobs)
 
-**Mypy is now blocking in `ci.yml`.** It previously ran `mypy .`
+**Mypy history.** `ci.yml`'s mypy step was made blocking before it moved to
+its one owner (see "One owner per check"). It previously ran `mypy .`
 (whole-repo) piped through `|| echo "non-blocking"`, which silenced every
 result — and `mypy .` itself failed immediately with `Source file found
 twice under different module names` (`tools/auditors/base.py` vs
@@ -264,6 +271,34 @@ its recorded runs (2026-03-02 to 2026-03-11) failed without starting a job. Its
 `tests/unit/test_workflow_triggers.py` refuses a workflow whose path filter
 matches no tracked file. The deep plan keeps `coverage.xml` as an artifact.
 Coverage reporting moves to SonarQube Cloud, which this change does not wire.
+
+---
+
+## One owner per check (consolidation)
+
+Each local check runs in one workflow. On every pull request the required
+Analyze (central Core) job runs the same `Repo.mk` leaves again (`make
+validate`, `make check`), with tools installed from Core's v2 pins by the same
+`tools/deps/install_locked.sh` the local jobs use. Central Core does not run on
+push to `main`, so the local owner is what checks `main`.
+
+| Check | Local owner (PR + push to main) | Central (PR) | Removed copies |
+|---|---|---|---|
+| `ruff check .` | `l9-lint-test.yml` (org-distributed) | `make check` | `ci.yml` lint, `ci-quality.yml` lint-format, `contracts.yml` lint, `compliance.yml`, pre-commit `ruff` in CI, `refactoring-validation.yml` (retired) |
+| `ruff format --check .` | `l9-lint-test.yml` | `make check` | `ci.yml` lint, `ci-quality.yml` lint-format, `contracts.yml` lint, pre-commit `ruff-format` in CI, `refactoring-validation.yml` (retired) |
+| `mypy engine/` | `l9-lint-test.yml` | `make check` | `ci.yml` lint, `ci-quality.yml` lint-format, `contracts.yml` lint, `compliance.yml`, pre-commit `mypy` in CI, `refactoring-validation.yml` (retired) |
+| `tools/contract_scanner.py` | `contracts.yml` | `make validate` | `compliance.yml`, pre-commit `l9-contract-scan` in CI |
+| `tools/verify_contracts.py` | `contracts.yml` | `make validate` | pre-commit `l9-contract-files-exist` in CI |
+| `tools/l9_meta_injector.py` | `contracts.yml` | `make validate` | pre-commit `l9-meta-check` in CI |
+| `tools/check_action_refs.py` | `contracts.yml` | `make validate` | none |
+
+Local pre-commit still runs every hook; only the CI pre-commit pass skips the
+copies above. `lint-autofix.yml` (rewrites `main`, opens a fix PR) is not a
+check owner. `refactoring-validation.yml` is retired: its only job ran
+`ruff check .`, `ruff format --check .` and `mypy engine/` with the same flags
+as `l9-lint-test.yml`, which already runs on every pull request (including
+`refactor/*`) and on `workflow_dispatch`.
+`tests/unit/test_workflow_triggers.py` fails on a second owner.
 
 ---
 

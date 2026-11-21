@@ -54,17 +54,6 @@ jobs:
             exit 1
           fi
 
-      - name: Check for Cypher injection patterns
-        run: |
-          # Delegate to the repository's canonical scanner; do not maintain a second regex.
-          python tools/contract_scanner.py
-
-      - name: Run ruff linter
-        run: ruff check .
-
-      - name: Run mypy type checker
-        run: mypy engine/ --config-file=pyproject.toml --ignore-missing-imports --exclude chassis
-
       - name: Validate domain specs
         run: |
           # Every pack under tests/fixtures/design_packs/<id>/spec.yaml must load as a DomainSpec.

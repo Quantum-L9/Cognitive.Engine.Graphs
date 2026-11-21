@@ -200,7 +200,7 @@ def run_gitguardian_scan() -> int:
 # ── Quality Gate aggregate ───────────────────────────────────────────────────
 
 SECRETS_JOB = "secrets-scan"
-QUALITY_GATE_JOBS = ("lint-format", "semgrep", SECRETS_JOB, "yaml-validate")
+QUALITY_GATE_JOBS = ("semgrep", SECRETS_JOB, "yaml-validate")
 
 
 @dataclass(frozen=True)
@@ -260,7 +260,7 @@ def quality_gate_verdict(job_results: dict[str, str], secrets_native: str) -> Ga
 
 
 def run_quality_gate() -> int:
-    # lint-format -> LINT_FORMAT_RESULT, and so on: one variable per job the gate needs.
+    # yaml-validate -> YAML_VALIDATE_RESULT, and so on: one variable per job the gate needs.
     job_results = {job: os.environ.get(f"{job.upper().replace('-', '_')}_RESULT", "") for job in QUALITY_GATE_JOBS}
     verdict = quality_gate_verdict(job_results, os.environ.get("SECRETS_SCAN_NATIVE", ""))
     total = len(QUALITY_GATE_JOBS)
