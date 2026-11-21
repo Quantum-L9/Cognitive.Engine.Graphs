@@ -345,3 +345,18 @@ def test_err002_engine_tree_is_clean() -> None:
         source = path.read_text(encoding="utf-8")
         hits += [(v.file, v.line) for v in cs.scan_file(path, source, REPO) if v.rule_id == "ERR-002"]
     assert hits == []
+
+
+# ── SEC-001 scope ───────────────────────────────────────────────────────────
+
+CYPHER_LABEL_FSTRING = 'query = f"MATCH (n:{label}) RETURN n"\n'
+
+
+@pytest.mark.parametrize("path", ["engine/x.py", "chassis/x.py", "tools/x.py", "scripts/x.py"])
+def test_sec001_flags_label_interpolation_wherever_cypher_is_built(path: str) -> None:
+    assert _rule_lines(CYPHER_LABEL_FSTRING, "SEC-001", path=path) == [1]
+
+
+def test_sec001_ignores_parameterized_values_and_tests() -> None:
+    assert _rule_lines('query = f"MATCH (n:Node) WHERE n.id = $param"\n', "SEC-001", path="chassis/x.py") == []
+    assert _rule_lines(CYPHER_LABEL_FSTRING, "SEC-001", path="tests/unit/x.py") == []
