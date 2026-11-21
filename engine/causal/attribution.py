@@ -28,6 +28,8 @@ from engine.graph.driver import GraphDriver
 from engine.utils.security import sanitize_label
 
 logger = logging.getLogger(__name__)
+# CANARY, DO NOT MERGE: witness for l9.no-structlog-getchild (CEG consumer rulepack).
+_canary_logger = logger.getChild("canary")
 
 # Valid attribution model names
 VALID_MODELS = frozenset({"first_touch", "last_touch", "linear", "position_based"})
