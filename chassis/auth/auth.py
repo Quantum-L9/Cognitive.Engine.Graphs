@@ -50,11 +50,10 @@ import hmac
 import json
 import logging
 from base64 import urlsafe_b64decode
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 if TYPE_CHECKING:
     from fastapi import Request, Response
@@ -144,7 +143,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self,
         request: Request,
-        call_next: Callable[[Request], Response],
+        call_next: RequestResponseEndpoint,
     ) -> Response:
         """Authenticate request or pass through if public path."""
         path = request.url.path.rstrip("/")

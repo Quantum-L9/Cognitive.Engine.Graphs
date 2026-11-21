@@ -20,7 +20,8 @@
 #   make setup     repo-setup     $(VENV) with runtime + dev + CI requirements
 #   make validate  repo-validate  action refs, contract wiring + scan, payload
 #                                 contract compiler, C-18 L9_META headers
-#   make check     repo-check     ruff check, ruff format --check, mypy engine/,
+#   make check     repo-check     ruff check, ruff format --check,
+#                                 mypy engine/ chassis/ scripts/,
 #                                 C-009 cypher-lint (non-mutating)
 #   make test      repo-test      PR pytest owner: pytest -m unit (no Docker, no Neo4j)
 #   make test-deep                one full plan, not a make-v1 phase. Missing
@@ -70,13 +71,13 @@ repo-validate:	## Action refs, contract files + scan, payload contract compiler,
 	@echo "── L9_META headers (C-18) ──"
 	@$(REPO_PY) tools/l9_meta_injector.py check
 
-repo-check:	## Non-mutating static gate: ruff check, ruff format --check, mypy engine/, cypher-lint (C-009)
+repo-check:	## Non-mutating static gate: ruff check, ruff format --check, mypy engine/ chassis/ scripts/, cypher-lint (C-009)
 	@echo "── Ruff lint ──"
 	@$(REPO_PY) -m ruff check .
 	@echo "── Ruff format (check only) ──"
 	@$(REPO_PY) -m ruff format --check .
 	@echo "── Type check ──"
-	@$(REPO_PY) -m mypy engine/
+	@$(REPO_PY) -m mypy engine/ chassis/ scripts/
 	@echo "── Cypher lint (C-009) ──"
 	@$(REPO_PY) tools/cypher_lint.py
 
