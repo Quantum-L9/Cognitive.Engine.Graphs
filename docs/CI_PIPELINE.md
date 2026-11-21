@@ -27,6 +27,11 @@ status: active
   `uv lock --check`, which resolves `pyproject.toml` with `uv.lock` as the preference and fails
   when a dependency changed without `uv lock` (or a pinned release was yanked). It never moves a
   locked version; `uv lock --upgrade-package <name>` (or Dependabot's uv PR) does.
+- `core-toolchain` (networked, advisory, not needed by `ci-gate`): `scripts/check_core_toolchain.py`
+  reads Core's `core-owned-tools.json` and lock at Core main (`L9_CORE_TOOLCHAIN_REF` overrides
+  it) and reports when CEG declares, locks or pins a Core-owned tool off Core's version, or when
+  Core cannot be read. Advisory by operator decision: drift raises a warning annotation, the job
+  is `continue-on-error`, and no setup failure or timeout in it can fail the gate.
 
 ### Phase 2: Lint & Type Check (not in `ci.yml`)
 - Ruff linter (`ruff check`), Ruff formatter (`ruff format --check`) and mypy

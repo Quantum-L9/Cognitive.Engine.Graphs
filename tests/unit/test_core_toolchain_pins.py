@@ -22,77 +22,29 @@ pin-file PR plus the v2 move is the whole bump.
 
 They also keep the two Dependabot rules that stop drift recurring: Core-owned
 tools are ignored, and every github/codeql-action step runs one version.
+
+Which tools Core owns, and at which versions, is read from Core itself by
+scripts/check_core_toolchain.py (networked, ci.yml Core Toolchain job), never
+from a list kept here; tests/unit/test_check_core_toolchain.py tests its rules
+offline. This file keeps the checks that need no Core metadata.
 """
 
 from __future__ import annotations
 
 import re
-import tomllib
 from pathlib import Path
 
 import pytest
 import yaml
-from packaging.requirements import Requirement
-from packaging.utils import canonicalize_name
 
 ROOT = Path(__file__).resolve().parents[2]
 
 pytestmark = pytest.mark.unit
 
-# Core-owned tools a Python consumer could take from PyPI (l9-ci-core
-# core-owned-tools.json; biome is npm, python is the interpreter).
-CORE_TOOLS = ("pip", "pre-commit", "ruff", "mypy", "pytest", "semgrep")
-
-_CORE_PRECOMMIT_REPOS = (
-    "https://github.com/astral-sh/ruff-pre-commit",
-    "https://github.com/pre-commit/mirrors-mypy",
-)
-
 _INSTALLER_PINS = (
     "https://raw.githubusercontent.com/Quantum-L9/l9-ci-core/${CORE_REF}/"
     ".github/actions/install-consumer-ci/requirements-consumer-ci.txt"
 )
-
-
-def _pyproject() -> dict:
-    return tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-
-
-def test_pyproject_declares_no_core_owned_tool() -> None:
-    pyproject = _pyproject()
-    sections = {"project.dependencies": pyproject.get("project", {}).get("dependencies", [])}
-    sections.update(
-        {f"dependency-groups.{name}": specs for name, specs in pyproject.get("dependency-groups", {}).items()}
-    )
-    declared = sorted(
-        f"{section}: {spec}"
-        for section, specs in sections.items()
-        for spec in specs
-        if isinstance(spec, str) and canonicalize_name(Requirement(spec).name) in CORE_TOOLS
-    )
-    assert not declared, f"Core-owned tools come from Core's installer, not pyproject.toml: {declared}"
-
-
-def test_uv_lock_excludes_every_core_owned_tool() -> None:
-    excluded = {canonicalize_name(name) for name in _pyproject()["tool"]["uv"].get("exclude-dependencies", [])}
-    assert set(CORE_TOOLS) <= excluded, f"[tool.uv] exclude-dependencies is missing {set(CORE_TOOLS) - excluded}"
-    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
-    locked = sorted(
-        f"{package['name']}=={package.get('version')}"
-        for package in lock.get("package", [])
-        if canonicalize_name(package["name"]) in CORE_TOOLS
-    )
-    assert not locked, f"uv.lock holds a Core-owned tool; re-run `uv lock`: {locked}"
-
-
-def test_pre_commit_names_no_core_tool_revision() -> None:
-    config = yaml.safe_load((ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
-    repos = [repo.get("repo") for repo in config.get("repos", [])]
-    pinned = sorted(set(repos) & set(_CORE_PRECOMMIT_REPOS))
-    assert not pinned, f"ruff/mypy hooks run the installed Core tools (repo: local, language: system): {pinned}"
-    entries = {hook["id"]: hook for repo in config["repos"] if repo["repo"] == "local" for hook in repo["hooks"]}
-    for hook_id in ("ruff", "ruff-format", "mypy"):
-        assert entries[hook_id]["language"] == "system", hook_id
 
 
 def test_install_script_takes_core_tools_from_core() -> None:
@@ -104,6 +56,11 @@ def test_install_script_takes_core_tools_from_core() -> None:
     assert "uv pip install --no-config" in script
     # The CI and Repo.mk profiles that run ruff, mypy, pytest and pre-commit.
     assert re.search(r"^\s*ci\|full\) ;;$", script, re.M), "ci and full must install the Core tools"
+    # bandit and pip-audit are Core-owned but not yet in Core's installer pins:
+    # their versions come from Core's lock at main, and a missing one fails.
+    assert 'CORE_LOCK_REF="${L9_CI_CORE_LOCK_REF:-main}"' in script
+    assert '"$CORE_LOCK_URL" bandit pip-audit' in script
+    assert "names no {tool}" in script
 
 
 def test_no_workflow_chooses_a_core_tool_version() -> None:
@@ -129,17 +86,6 @@ def test_semgrep_comes_only_from_cores_installer() -> None:
     assert not forbidden, f"Semgrep must come from install-consumer-ci@v2: {forbidden}"
     if "semgrep" in text:
         assert "Quantum-L9/l9-ci-core/.github/actions/install-consumer-ci@v2" in text
-
-
-def test_dependabot_ignores_core_owned_tools() -> None:
-    config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8"))
-    # uv when uv.lock exists (the org render's rule), which is the case here.
-    python = next(u for u in config["updates"] if u["package-ecosystem"] == "uv")
-    ignored = {entry["dependency-name"].lower() for entry in python.get("ignore", []) if "versions" not in entry}
-    # pip joined Core's list after this render was seeded; it is excluded from
-    # uv.lock, so Dependabot has no pip to propose in the meantime.
-    expected = set(CORE_TOOLS) - {"pip"}
-    assert expected <= ignored, f"Dependabot must not propose Core-owned tools: missing {expected - ignored}"
 
 
 def test_dependabot_is_the_org_render() -> None:

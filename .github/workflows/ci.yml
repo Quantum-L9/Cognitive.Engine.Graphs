@@ -168,6 +168,50 @@ jobs:
         run: python -m uv lock --check
 
 # ────────────────────────────────────────────────────────────────────────
+# PHASE 1c: CORE TOOLCHAIN (networked, advisory)
+# ────────────────────────────────────────────────────────────────────────
+  core-toolchain:
+    # Toolchain alignment is housekeeping: operator decision, advisory and
+    # never blocking. Its own job, which ci-gate does not need, so neither a
+    # failed setup step nor a timeout here can fail the gate.
+    name: Core Toolchain (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install YAML reader (hash-locked tools profile)
+        run: bash tools/deps/install_locked.sh tools
+
+      - name: CEG runs Core's toolchain (networked)
+        # Reads which tools Core owns, and their versions, from l9-ci-core main
+        # (the ref the org's required workflow runs) and resolves pinned
+        # pre-commit tags. Drift or an unreadable Core is reported as a warning
+        # annotation, never hidden. Networked, hence here and not in the unit
+        # suite.
+        run: |
+          python scripts/check_core_toolchain.py \
+            || echo "::warning title=Core toolchain drift::CEG's tool pins differ from Core main or Core could not be read; see this step's log"
+
+      - name: Report a setup failure
+        # A failed earlier step skips the check, so it would raise no
+        # annotation: say so here rather than leave the job silently red.
+        if: failure()
+        run: echo "::warning title=Core toolchain not checked::A setup step failed before the Core toolchain check ran; see this job's log"
+
+# ────────────────────────────────────────────────────────────────────────
 # PHASE 2: LINT & TYPE CHECK — not here
 # ────────────────────────────────────────────────────────────────────────
 # ruff check, ruff format --check and mypy engine/ have one local owner,
