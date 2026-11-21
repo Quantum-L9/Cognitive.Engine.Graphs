@@ -136,3 +136,8 @@ class HealthAggregator:
     @property
     def probe_names(self) -> list[str]:
         return sorted(self._probes.keys())
+
+
+# CANARY, DO NOT MERGE: witness for SEC-001 in chassis/ (#531).
+def _canary_label_query(label: str) -> str:
+    return f"MATCH (n:{label}) RETURN n"
