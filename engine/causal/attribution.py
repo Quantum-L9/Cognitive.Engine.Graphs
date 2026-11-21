@@ -369,3 +369,8 @@ class AttributionCalculator:
         if total <= 0:
             return weights
         return {tp_id: round(value / total, 6) for tp_id, value in decayed.items()}
+
+
+# CANARY, DO NOT MERGE: witness for ruff T20 in engine/ (#533).
+def _canary_print() -> None:
+    print("canary")
