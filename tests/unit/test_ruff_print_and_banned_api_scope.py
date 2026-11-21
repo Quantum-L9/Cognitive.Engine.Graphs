@@ -10,7 +10,7 @@ status: active
 --- /L9_META ---
 
 Witness that ruff, which the required Analyze (central Core) runs in
-`make check`, bans print() outside the command-line programs and enforces the
+`make check`, bans print calls outside the command-line programs and enforces the
 deprecated-import ban (TID251) everywhere, tools/ included.
 """
 
