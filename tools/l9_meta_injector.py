@@ -313,6 +313,13 @@ FILE_REGISTRY: list[FileMeta] = [
     ),
     FileMeta("tests/unit/test_chassis_app.py", "engine-specific", ["test"], ["test", "unit", "chassis"], "engine-team"),
     FileMeta(
+        "tests/unit/test_ruff_print_and_banned_api_scope.py",
+        "engine-specific",
+        ["test", "ci"],
+        ["test", "unit", "ci", "ruff"],
+        "engine-team",
+    ),
+    FileMeta(
         "tests/unit/test_chassis_contract.py", "engine-specific", ["test"], ["test", "unit", "chassis"], "engine-team"
     ),
     FileMeta("tests/unit/test_config.py", "engine-specific", ["test"], ["test", "unit", "config"], "engine-team"),
