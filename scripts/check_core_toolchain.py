@@ -194,7 +194,11 @@ def check_repository(
 def fetch_core(ref: str, path: str) -> dict[str, Any]:
     url = f"{CORE_REPOSITORY}/{ref}/{path}"
     with urllib.request.urlopen(url, timeout=60) as response:  # noqa: S310 - fixed https host
-        return json.loads(response.read().decode("utf-8"))
+        document = json.loads(response.read().decode("utf-8"))
+    if not isinstance(document, dict):
+        msg = f"{url} is not a JSON object"
+        raise ValueError(msg)
+    return document
 
 
 def resolve_remote_tag(repo: str, version: str) -> str:

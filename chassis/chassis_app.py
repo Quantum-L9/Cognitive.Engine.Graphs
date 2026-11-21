@@ -223,6 +223,9 @@ def _resolve_hook(hook: LifecycleHook | None) -> LifecycleHook:
             module = importlib.import_module(module_path)
             cls = getattr(module, class_name)
             instance = cls()
+            if not isinstance(instance, LifecycleHook):
+                msg = f"L9_LIFECYCLE_HOOK={dotted} is not a LifecycleHook"
+                raise TypeError(msg)
             logger.info("Resolved LifecycleHook from %s → %s", dotted, type(instance).__name__)
             return instance
         except Exception:
