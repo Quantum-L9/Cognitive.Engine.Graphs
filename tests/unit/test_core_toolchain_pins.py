@@ -24,7 +24,7 @@ They also keep the two Dependabot rules that stop drift recurring: Core-owned
 tools are ignored, and every github/codeql-action step runs one version.
 
 Which tools Core owns, and at which versions, is read from Core itself by
-scripts/check_core_toolchain.py (networked, ci.yml Gate_SDK Channel), never
+scripts/check_core_toolchain.py (networked, ci.yml Core Toolchain job), never
 from a list kept here; tests/unit/test_check_core_toolchain.py tests its rules
 offline. This file keeps the checks that need no Core metadata.
 """

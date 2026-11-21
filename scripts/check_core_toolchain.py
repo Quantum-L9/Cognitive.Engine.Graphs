@@ -32,8 +32,8 @@ Rules, per Core-owned tool:
 
 The checks are pure functions over the repository files and Core's metadata
 (tests/unit/test_check_core_toolchain.py). ``main`` fetches the metadata and
-resolves tags over the network, so CI runs it in the networked
-``Gate_SDK Channel`` job (ci.yml), never in the unit suite. An unreachable Core
+resolves tags over the network, so CI runs it in the networked, advisory
+``Core Toolchain`` job (ci.yml), never in the unit suite. An unreachable Core
 contract or tag fails closed: a toolchain that cannot be checked has not been.
 """
 
