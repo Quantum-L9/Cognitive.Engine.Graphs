@@ -205,6 +205,12 @@ jobs:
           python scripts/check_core_toolchain.py \
             || echo "::warning title=Core toolchain drift::CEG's tool pins differ from Core main or Core could not be read; see this step's log"
 
+      - name: Report a setup failure
+        # A failed earlier step skips the check, so it would raise no
+        # annotation: say so here rather than leave the job silently red.
+        if: failure()
+        run: echo "::warning title=Core toolchain not checked::A setup step failed before the Core toolchain check ran; see this job's log"
+
 # ────────────────────────────────────────────────────────────────────────
 # PHASE 2: LINT & TYPE CHECK — not here
 # ────────────────────────────────────────────────────────────────────────
