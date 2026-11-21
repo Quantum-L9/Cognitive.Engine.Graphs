@@ -1,3 +1,12 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: l9-template
+# engine: graph
+# layer: [ci]
+# tags: [L9_TEMPLATE, ci, canary]
+# owner: platform
+# status: active
+# --- /L9_META ---
 # TEMPORARY canary — not for merge. Shows what Quantum-L9/l9-ci-core#308
 # (org-ci.yml Core pins at eba72ac3, SDK fallback fbe14fec) does to
 # `Analyze (central Core)` on this repository before #308 merges. The pull
