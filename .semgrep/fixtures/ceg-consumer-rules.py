@@ -16,6 +16,7 @@ Excluded from the policy scan by .semgrepignore; not collected by pytest.
 """
 
 import json
+import logging
 import math
 import os
 import sys
@@ -178,3 +179,21 @@ def child_logger() -> object:
 def bound_logger() -> object:
     # ok: l9.no-structlog-getchild
     return log.bind(component="canary")
+
+
+def inline_child() -> object:
+    # ruleid: l9.no-structlog-getchild
+    return structlog.get_logger(__name__).getChild("canary")
+
+
+stdlib_log = logging.getLogger(__name__)
+
+
+def stdlib_child() -> object:
+    # ok: l9.no-structlog-getchild
+    return stdlib_log.getChild("canary")
+
+
+def stdlib_inline_child() -> object:
+    # ok: l9.no-structlog-getchild
+    return logging.getLogger(__name__).getChild("canary")
