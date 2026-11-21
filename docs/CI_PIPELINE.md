@@ -86,10 +86,11 @@ status: active
 > failing does not, by itself, prevent merging unless GitHub is configured
 > to require it.
 
-> `ci-quality.yml`'s `semgrep` job runs the policy scan (`semgrep ci` with
-> `.semgrep/` rules, inside `returntocorp/semgrep-agent:v1`, semgrep 1.36.0),
-> then `semgrep --test` on `.semgrep/fixtures/ceg-consumer-rules.py` in the same
-> image. The four rules in `.semgrep/ceg-consumer-rules.yaml`
+> `ci-quality.yml`'s `semgrep` job runs the policy scan (`semgrep scan
+> --config .semgrep/ --error`) with the Semgrep executable Core's
+> `install-consumer-ci@v2` installs at Core's locked version, then
+> `semgrep --test` on `.semgrep/fixtures/ceg-consumer-rules.py` with the same
+> executable. The four rules in `.semgrep/ceg-consumer-rules.yaml`
 > (`l9.httpx-async-context-required`, `l9.singleton-requires-lock`,
 > `l9.float-requires-try-except`, `l9.no-structlog-getchild`) have no central
 > equivalent, so `.l9/semgrep-consumer-rules.yaml` declares them as CEG's
