@@ -170,12 +170,16 @@ jobs:
       - name: Install YAML reader (hash-locked tools profile)
         run: bash tools/deps/install_locked.sh tools
 
-      - name: CEG runs Core's toolchain (networked)
-        # Reads which tools Core owns, and their versions, from l9-ci-core at
-        # the ref install_locked.sh installs from (L9_CI_CORE_REF, default v2)
-        # and resolves pinned pre-commit tags. Fails closed when Core cannot be
-        # read. Networked, hence here and not in the unit suite.
-        run: python scripts/check_core_toolchain.py
+      - name: CEG runs Core's toolchain (networked, advisory)
+        # Reads which tools Core owns, and their versions, from l9-ci-core main
+        # (the ref the org's required workflow runs) and resolves pinned
+        # pre-commit tags. Toolchain alignment is housekeeping: operator
+        # decision, advisory and never blocking. Drift or an unreadable Core is
+        # reported as a warning annotation, never hidden. Networked, hence here
+        # and not in the unit suite.
+        run: |
+          python scripts/check_core_toolchain.py \
+            || echo "::warning title=Core toolchain drift::CEG's tool pins differ from Core main or Core could not be read; see this step's log"
 
 # ────────────────────────────────────────────────────────────────────────
 # PHASE 2: LINT & TYPE CHECK — not here

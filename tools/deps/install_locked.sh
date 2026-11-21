@@ -32,6 +32,11 @@
 # same file install-consumer-ci@v2 installs, so a Core bump reaches this
 # repository with no edit here. Every line must be an exact name==version pin.
 #
+# bandit and pip-audit (the security job's scanners) are Core-owned too, but
+# Core's installer pins do not list them yet. Their versions come from Core's
+# toolchain-lock.json at Core main (L9_CI_CORE_LOCK_REF), the reference the
+# org's required workflow runs; a tool missing from that lock fails the install.
+#
 # Target environment: UV_PROJECT_ENVIRONMENT when set (Repo.mk: .venv; Docker:
 # /opt/venv), otherwise the environment of $PYTHON (default: python on PATH),
 # so a CI step's later `python -m pytest` sees what was installed.
@@ -71,15 +76,18 @@ esac
 
 CORE_REF="${L9_CI_CORE_REF:-v2}"
 CORE_PINS_URL="https://raw.githubusercontent.com/Quantum-L9/l9-ci-core/${CORE_REF}/.github/actions/install-consumer-ci/requirements-consumer-ci.txt"
+CORE_LOCK_REF="${L9_CI_CORE_LOCK_REF:-main}"
+CORE_LOCK_URL="https://raw.githubusercontent.com/Quantum-L9/l9-ci-core/${CORE_LOCK_REF}/.github/actions/install-consumer-ci/toolchain-lock.json"
 pins="$(mktemp)"
 trap 'rm -f "$pins"' EXIT
 # Python, not curl: the slim Docker base images carry no curl.
-"$PYTHON" - "$CORE_PINS_URL" "$pins" <<'PY'
+"$PYTHON" - "$CORE_PINS_URL" "$pins" "$CORE_LOCK_URL" bandit pip-audit <<'PY'
+import json
 import re
 import sys
 import urllib.request
 
-url, dest = sys.argv[1], sys.argv[2]
+url, dest, lock_url, *lock_tools = sys.argv[1:]
 with urllib.request.urlopen(url, timeout=60) as response:  # noqa: S310 - fixed https URL
     text = response.read().decode("utf-8")
 pins = []
@@ -92,6 +100,15 @@ for raw in text.splitlines():
     pins.append(line)
 if not pins:
     sys.exit(f"install_locked: no Core pins at {url}")
+with urllib.request.urlopen(lock_url, timeout=60) as response:  # noqa: S310 - fixed https URL
+    lock = json.loads(response.read().decode("utf-8"))
+pinned = {line.split("==", 1)[0].lower() for line in pins}
+for tool in lock_tools:
+    if tool in pinned:
+        continue
+    if tool not in lock:
+        sys.exit(f"install_locked: Core's lock at {lock_url} names no {tool}")
+    pins.append(f"{tool}=={lock[tool]}")
 with open(dest, "w", encoding="utf-8") as stream:
     stream.write("\n".join(pins) + "\n")
 print("install_locked: Core tools " + " ".join(pins))

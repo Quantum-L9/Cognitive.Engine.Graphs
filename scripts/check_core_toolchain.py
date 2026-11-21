@@ -16,8 +16,9 @@ Quantum-L9/l9-ci-core owns the shared tools: which ones
 (.github/actions/install-consumer-ci/core-owned-tools.json) and their versions
 (the lock that file names, toolchain-lock.json). Version drift from Core is
 prohibited org-wide, so this script reads both from Core instead of keeping a
-copy that could go stale, at the ref tools/deps/install_locked.sh installs from
-(L9_CI_CORE_REF, default v2).
+copy that could go stale. It compares against Core main (L9_CORE_TOOLCHAIN_REF
+overrides it), the ref the org's required workflow runs: Core's lock there is
+the reference, not the v2 installer tag.
 
 Rules, per Core-owned tool:
 
@@ -72,8 +73,8 @@ def requirement_name(spec: str) -> str:
 
 
 def core_ref() -> str:
-    # Same fallback as install_locked.sh's ${L9_CI_CORE_REF:-v2}: unset or empty.
-    return os.environ.get("L9_CI_CORE_REF") or "v2"
+    # Unset or empty both mean Core main.
+    return os.environ.get("L9_CORE_TOOLCHAIN_REF") or "main"
 
 
 def python_tools(core_tools: dict[str, Any]) -> set[str]:
@@ -223,7 +224,7 @@ def resolve_remote_tag(repo: str, version: str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Fail closed unless CEG runs Core's toolchain.")
-    parser.add_argument("--ref", default=core_ref(), help="l9-ci-core ref (default: L9_CI_CORE_REF or v2)")
+    parser.add_argument("--ref", default=core_ref(), help="l9-ci-core ref (default: L9_CORE_TOOLCHAIN_REF or main)")
     args = parser.parse_args(argv)
     try:
         core_tools = fetch_core(args.ref, CORE_TOOLS_PATH)

@@ -134,13 +134,13 @@ def test_dependabot_must_ignore_core_tools_but_pip() -> None:
     ]
 
 
-def test_core_ref_matches_the_installers_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("L9_CI_CORE_REF", raising=False)
-    assert _mod.core_ref() == "v2"
-    monkeypatch.setenv("L9_CI_CORE_REF", "")
-    assert _mod.core_ref() == "v2"
-    monkeypatch.setenv("L9_CI_CORE_REF", "main")
+def test_core_ref_defaults_to_core_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("L9_CORE_TOOLCHAIN_REF", raising=False)
     assert _mod.core_ref() == "main"
+    monkeypatch.setenv("L9_CORE_TOOLCHAIN_REF", "")
+    assert _mod.core_ref() == "main"
+    monkeypatch.setenv("L9_CORE_TOOLCHAIN_REF", "v2")
+    assert _mod.core_ref() == "v2"
 
 
 def test_unknown_core_schema_fails_closed() -> None:

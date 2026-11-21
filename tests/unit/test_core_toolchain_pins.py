@@ -56,6 +56,11 @@ def test_install_script_takes_core_tools_from_core() -> None:
     assert "uv pip install --no-config" in script
     # The CI and Repo.mk profiles that run ruff, mypy, pytest and pre-commit.
     assert re.search(r"^\s*ci\|full\) ;;$", script, re.M), "ci and full must install the Core tools"
+    # bandit and pip-audit are Core-owned but not yet in Core's installer pins:
+    # their versions come from Core's lock at main, and a missing one fails.
+    assert 'CORE_LOCK_REF="${L9_CI_CORE_LOCK_REF:-main}"' in script
+    assert '"$CORE_LOCK_URL" bandit pip-audit' in script
+    assert "names no {tool}" in script
 
 
 def test_no_workflow_chooses_a_core_tool_version() -> None:
