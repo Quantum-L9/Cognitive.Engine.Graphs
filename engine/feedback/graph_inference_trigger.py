@@ -13,20 +13,15 @@ engine/feedback/graph_inference_trigger.py — graph-derived inference read from
 the graph (never a caller ``entity``), recorded as a durable obligation and
 delivered to EIE after the write (A3). Full contract: docs/FEATURE_GATES.md §13.
 
-1. **evaluate** — tenant-scoped node read; ``evidence_revision`` digests its
-   first-party properties, ``rule_revision`` the authorized rules, their
-   parameters and the spec version; only those rules run.
-2. **decide** — against the entity's ``CegInferenceObligation``: unchanged
-   revisions, a value the graph already holds (EIE echo) and a finding set equal
-   to the last accepted one send nothing; only a changed set becomes ``pending``.
-3. **deliver** — after the source write, one ``graph-inference-result`` via
-   ``engine.gate_egress``; ``accepted`` only on EIE's complete intake ack, which
-   is an intake ack, not consumption.
+1. **evaluate** — tenant-scoped node read; ``evidence_revision`` digests its first-party
+   properties, ``rule_revision`` the authorized rules, their parameters and the spec version.
+2. **decide** — against the entity's ``CegInferenceObligation``: unchanged revisions, a value the
+   graph already holds (EIE echo) or the last accepted finding set send nothing.
+3. **deliver** — after the source write, one ``graph-inference-result`` via ``engine.gate_egress``;
+   ``accepted`` only on EIE's complete intake ack (intake, not consumption).
 
-One obligation node per (tenant, entity_type = node label, entity_id) in the
-tenant database: dedup survives a restart, failures stay retriable, no second
-bus. Active only with ``graph_inference_trigger_enabled``,
-``graph_inference_feedback_enabled`` and a non-empty ``plugins.inference_rules``.
+One obligation node per (tenant, entity_type = node label, entity_id) in the tenant database. Active
+only with ``graph_inference_trigger_enabled``, ``graph_inference_feedback_enabled`` and ``plugins.inference_rules``.
 """
 
 from __future__ import annotations
@@ -90,9 +85,6 @@ def trigger_active(settings: Any, domain_spec: Any) -> bool:
     )
 
 
-# ── Revisions ────────────────────────────────────────────────────────────────
-
-
 def _digest(value: Any) -> str:
     text = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -120,9 +112,6 @@ def rule_revision(domain_spec: Any, rules: Sequence[str]) -> str:
             "spec_version": getattr(domain, "version", None),
         }
     )
-
-
-# ── Evaluation ───────────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -171,12 +160,9 @@ def evaluate_entity(
     props: Mapping[str, Any],
     rules: Sequence[str],
 ) -> Evaluation:
-    """Run the authorized ``rules`` over the node's graph properties.
+    """Run ``rules`` (already a subset of ``authorized_rules``; never widened) over the node's properties.
 
-    ``rules`` must already be a subset of ``authorized_rules(domain_spec)``; the
-    caller enforces that, this function never widens it. A finding whose value
-    the graph already holds is skipped: re-proposing an existing fact (EIE's own
-    writeback, a copied observation) is not new evidence.
+    A finding whose value the graph already holds is skipped: an existing fact (EIE's writeback) is not new evidence.
     """
     plugins = getattr(domain_spec, "plugins", None)
     entity = first_party_properties(props)
@@ -208,9 +194,6 @@ def evaluate_entity(
     return evaluation
 
 
-# ── Change decision ──────────────────────────────────────────────────────────
-
-
 def obligation_key(tenant: str, entity_ref: str, evaluation: Evaluation) -> str:
     """Binds tenant, entity, evidence revision, rule revision and the finding set."""
     digest = _digest(
@@ -232,9 +215,6 @@ def decide(prior: Mapping[str, Any] | None, evaluation: Evaluation) -> str:
     if prior is not None and prior.get("accepted_findings_digest") == evaluation.findings_digest:
         return DECISION_SAME_FINDINGS
     return DECISION_EMIT
-
-
-# ── Graph IO (GraphDriver.execute_query only) ────────────────────────────────
 
 
 def _pattern(var: str, label: str, props: str = "") -> str:
@@ -287,10 +267,8 @@ async def record_evaluations(
 ) -> set[str]:
     """Compare-and-set each evaluation; return the entity ids whose write applied.
 
-    A row applies only while the stored revisions equal the ones its decision
-    read (``prior_*``; node write-locked first), so an older overlapping
-    evaluation cannot replace newer state. ``same_findings`` / ``no_findings``
-    retire superseded pending work; ``accepted_*`` history is kept.
+    A row applies only while the stored revisions equal its ``prior_*`` (node write-locked first), so an older
+    evaluation cannot replace newer state. ``same_findings`` / ``no_findings`` retire pending work; ``accepted_*`` stays.
     """
     if not rows:
         return set()
@@ -327,11 +305,9 @@ async def record_evaluations(
 
 
 async def obligation_constraint_present(driver: Any, domain_spec: Any) -> bool:
-    """Whether the obligation-key uniqueness constraint exists in the tenant database.
+    """Whether the obligation-key uniqueness constraint exists in the tenant database (cached per database).
 
-    Without it concurrent MERGEs may create two obligation nodes for one entity,
-    so the trigger writes nothing until ``init_schema`` has created it. A
-    positive answer is cached per database for the process.
+    Without it concurrent MERGEs may create two obligation nodes, so nothing is written until ``init_schema``.
     """
     from engine.state import get_state
 
@@ -391,9 +367,6 @@ async def record_delivery(
     )
 
 
-# ── Orchestration ────────────────────────────────────────────────────────────
-
-
 @dataclass
 class PendingDelivery:
     entity_id: str
@@ -420,6 +393,57 @@ class TriggerReport:
         }
 
 
+def _evaluation_row(
+    *, tenant: str, ref_prefix: str, entity_id: str, prior: dict[str, Any], evaluation: Evaluation, decision: str
+) -> tuple[dict[str, Any], PendingDelivery | None]:
+    """The compare-and-set row for one decided entity, plus its delivery when it emits."""
+    from engine.gate_egress import build_inference_outputs
+
+    row: dict[str, Any] = {
+        "entity_id": entity_id,
+        "prior_evidence_revision": prior.get("evidence_revision"),
+        "prior_rule_revision": prior.get("rule_revision"),
+        "prior_accepted_findings_digest": prior.get("accepted_findings_digest"),
+        "evidence_revision": evaluation.evidence_revision,
+        "rule_revision": evaluation.rule_revision,
+        "decision": decision,
+        "findings_digest": evaluation.findings_digest,
+        "pending_key": None,
+        "outputs_json": None,
+    }
+    if decision != DECISION_EMIT:
+        return row, None
+    provenance = (
+        f"ceg:graph:{ref_prefix}:{entity_id}@{evaluation.evidence_revision[:16]}/rules@{evaluation.rule_revision[:16]}"
+    )
+    outputs = [
+        {**output, "provenance": provenance} for output in build_inference_outputs(entity_id, evaluation.findings)
+    ]
+    key = obligation_key(tenant, f"{ref_prefix}:{entity_id}", evaluation)
+    row["pending_key"] = key
+    row["outputs_json"] = json.dumps(outputs, sort_keys=True, default=str)
+    return row, PendingDelivery(entity_id=entity_id, pending_key=key, outputs=outputs)
+
+
+def _trigger_inputs(domain_spec: Any, ids: Sequence[Any], rules: Sequence[str] | None) -> tuple[list[str], list[str]]:
+    """Authorized rules to run, and the bounded distinct non-empty entity ids."""
+    allowed = authorized_rules(domain_spec)
+    to_run = list(allowed) if rules is None else [r for r in rules if r in allowed]
+    unique_ids = list(dict.fromkeys(str(i) for i in ids if i is not None and str(i) != ""))[:MAX_TRIGGER_ENTITIES]
+    return to_run, unique_ids
+
+
+def _reconcile_written(report: TriggerReport, rows: list[dict[str, Any]], written: set[str]) -> TriggerReport:
+    """Rows the compare-and-set did not write lost to a concurrent evaluation."""
+    for row in rows:
+        if row["entity_id"] not in written:
+            report.decisions[row["decision"]] -= 1
+            report.count(DECISION_SUPERSEDED)
+    report.decisions = {k: v for k, v in report.decisions.items() if v}
+    report.pending = [p for p in report.pending if p.entity_id in written]
+    return report
+
+
 async def evaluate_and_record(
     driver: Any,
     domain_spec: Any,
@@ -435,12 +459,8 @@ async def evaluate_and_record(
     ``rules`` None means every rule the domain authorizes; an explicit list must
     be a subset (the caller validates) and ``[]`` runs none.
     """
-    from engine.gate_egress import build_inference_outputs
-
-    allowed = authorized_rules(domain_spec)
-    to_run = list(allowed) if rules is None else [r for r in rules if r in allowed]
+    to_run, unique_ids = _trigger_inputs(domain_spec, ids, rules)
     report = TriggerReport()
-    unique_ids = list(dict.fromkeys(str(i) for i in ids if i is not None and str(i) != ""))[:MAX_TRIGGER_ENTITIES]
     if not unique_ids or not to_run:
         return report
     if not await obligation_constraint_present(driver, domain_spec):
@@ -469,39 +489,19 @@ async def evaluate_and_record(
         report.count(decision)
         if decision == DECISION_UNCHANGED:
             continue
-        prior = priors.get(entity_id) or {}
-        row: dict[str, Any] = {
-            "entity_id": entity_id,
-            "prior_evidence_revision": prior.get("evidence_revision"),
-            "prior_rule_revision": prior.get("rule_revision"),
-            "prior_accepted_findings_digest": prior.get("accepted_findings_digest"),
-            "evidence_revision": evaluation.evidence_revision,
-            "rule_revision": evaluation.rule_revision,
-            "decision": decision,
-            "findings_digest": evaluation.findings_digest,
-            "pending_key": None,
-            "outputs_json": None,
-        }
-        if decision == DECISION_EMIT:
-            outputs = build_inference_outputs(entity_id, evaluation.findings)
-            for output in outputs:
-                output["provenance"] = (
-                    f"ceg:graph:{entity_ref_prefix}:{entity_id}@{evaluation.evidence_revision[:16]}"
-                    f"/rules@{evaluation.rule_revision[:16]}"
-                )
-            key = obligation_key(tenant, f"{entity_ref_prefix}:{entity_id}", evaluation)
-            row["pending_key"] = key
-            row["outputs_json"] = json.dumps(outputs, sort_keys=True, default=str)
-            report.pending.append(PendingDelivery(entity_id=entity_id, pending_key=key, outputs=outputs))
+        row, pending = _evaluation_row(
+            tenant=tenant,
+            ref_prefix=entity_ref_prefix,
+            entity_id=entity_id,
+            prior=priors.get(entity_id) or {},
+            evaluation=evaluation,
+            decision=decision,
+        )
+        if pending is not None:
+            report.pending.append(pending)
         rows.append(row)
     written = await record_evaluations(driver, domain_spec, tenant=tenant, label=label, rows=rows)
-    for row in rows:
-        if row["entity_id"] not in written:
-            report.decisions[row["decision"]] -= 1
-            report.count(DECISION_SUPERSEDED)
-    report.decisions = {k: v for k, v in report.decisions.items() if v}
-    report.pending = [p for p in report.pending if p.entity_id in written]
-    return report
+    return _reconcile_written(report, rows, written)
 
 
 async def deliver(
