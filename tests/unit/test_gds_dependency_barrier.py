@@ -480,3 +480,30 @@ async def test_refused_cron_provider_is_not_waited_for() -> None:
     assert result["status"] == "blocked"
     assert result["unsatisfied"] == ["mystery: never run"]
     assert not rec.started("b")
+
+
+@pytest.mark.asyncio
+async def test_cancel_before_effect_keeps_success_but_records_cancelled_history() -> None:
+    """CTO ruling on #543: a pre-effect cancellation leaves the earlier success standing,
+    and is recorded in history as ``cancelled`` so health never reads it as a success."""
+    a = _job("a", "louvain")
+    b = _job("b", "cooccurrence", ["louvain"])
+    c = _job("c", "reinforcement", ["cooccurrence"])
+    scheduler, rec = _scheduler([a, b, c])
+    scheduler.dependency_wait_timeout_sec = 5.0
+    await scheduler.execute_job(a)
+    await scheduler.execute_job(b)
+    rec.gates["a"] = asyncio.Event()
+    a_task = asyncio.create_task(scheduler.execute_job(a))
+    await asyncio.sleep(0.02)
+    b_retry = asyncio.create_task(scheduler.execute_job(b))  # waits on A, writes nothing
+    await asyncio.sleep(0.02)
+    b_retry.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await b_retry
+    assert scheduler.job_history[-1]["job"] == "b"
+    assert scheduler.job_history[-1]["status"] == "cancelled"
+    assert rec.events.count(("start", "b")) == 1  # the retry never started its effect
+    assert (await scheduler.execute_job(c))["status"] == "success"  # B's earlier success stands
+    rec.gates["a"].set()
+    await a_task

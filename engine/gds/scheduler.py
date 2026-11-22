@@ -565,18 +565,23 @@ class GDSScheduler:
             effect_started = True
             return await self._execute_effect(job_spec, resolved_agg, _now, seq)
         except asyncio.CancelledError:
+            # Every cancelled attempt is in the history as ``cancelled``, so health
+            # never reads it as a success.
+            self._job_history.append(
+                {
+                    "job": name,
+                    "algorithm": job_spec.algorithm,
+                    "timestamp": _now().isoformat(),
+                    "status": "cancelled",
+                    "effect_started": effect_started,
+                }
+            )
             if effect_started and seq >= self._status_seq.get(name, 0):
                 # The effect may be half-written: the previous success no longer stands.
+                # Cancelled before the effect started, nothing was written and the
+                # provider's earlier success keeps satisfying its dependents.
                 self._status_seq[name] = seq
                 self._last_attempt_status[name] = "cancelled"
-                self._job_history.append(
-                    {
-                        "job": name,
-                        "algorithm": job_spec.algorithm,
-                        "timestamp": _now().isoformat(),
-                        "status": "cancelled",
-                    }
-                )
             raise
         finally:
             self._in_flight[name] -= 1
