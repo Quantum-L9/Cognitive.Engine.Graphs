@@ -456,7 +456,8 @@ async def test_zero_intake_stays_retryable(flags, gate: FakeGate) -> None:
     gate.queued = None
     await trigger.retry_pending(graph, spec, tenant=TENANT, label=LABEL, entity_id="c1")
     assert graph.obligations[(TENANT, LABEL, "c1")]["status"] == "accepted"
-    assert gate.sent[0]["idempotency_key"] == gate.sent[1]["idempotency_key"]
+    # Gate cached the zero-intake success under the first key; the retry uses a derived one.
+    assert gate.sent[1]["idempotency_key"] == gate.sent[0]["idempotency_key"] + ":zero-intake-retry:1"
 
 
 @pytest.mark.asyncio
