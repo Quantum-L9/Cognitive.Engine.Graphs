@@ -337,7 +337,12 @@ class _FakeScorer:
         return "entity_id"
 
     async def find_candidates(
-        self, entity_id: str, entity_label: str, threshold: float | None = None, limit: int | None = None
+        self,
+        entity_id: str,
+        entity_label: str,
+        threshold: float | None = None,
+        limit: int | None = None,
+        exclude_resolved: bool = False,
     ) -> list[dict[str, Any]]:
         self.find_thresholds.append(threshold)
         effective = threshold if threshold is not None else self._default
@@ -809,3 +814,55 @@ class TestDeclaredIdentityAndOutcome:
         for cypher in writes:
             assert "{supplier_id: " in cypher
             assert "entity_id:" not in cypher
+
+
+@pytest.mark.unit
+class TestPrefilterRecallFlag:
+    @pytest.mark.asyncio
+    async def test_verified_resolution_excludes_resolved_nodes_before_the_cap(self) -> None:
+        """The resolver's candidate read leaves out already-resolved nodes before LIMIT."""
+        driver = _mock_driver()
+        driver.execute_query.side_effect = [[]]
+        resolver = EntityResolver(_make_spec(), driver, "test_domain", domain_spec=_supplier_domain())
+        await resolver.resolve_entity("s1", "Supplier")
+        cypher = str(driver.execute_query.call_args_list[0].kwargs["cypher"])
+        assert cypher.index("NOT EXISTS { (candidate)-[:RESOLVED_FROM]->() }") < cypher.index("LIMIT $limit")
+
+    @pytest.mark.asyncio
+    async def test_scorer_alone_keeps_resolved_nodes(self) -> None:
+        driver = _mock_driver()
+        driver.execute_query.side_effect = [[]]
+        await _declared_scorer(driver).find_candidates("s1", "Supplier")
+        assert "RESOLVED_FROM" not in str(driver.execute_query.call_args_list[0].kwargs["cypher"])
+
+    @pytest.mark.asyncio
+    async def test_flag_off_restores_the_first_property_prefilter(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "resolution_prefilter_recall_enabled", False)
+        driver = _mock_driver()
+        driver.execute_query.side_effect = [[{"entity_id": "s2"}], [], [], []]
+        await _declared_scorer(driver, _make_spec(threshold=0.99)).find_candidates(
+            "s1", "Supplier", exclude_resolved=True
+        )
+        cypher = str(driver.execute_query.call_args_list[0].kwargs["cypher"])
+        assert "candidate.name = source.name" in cypher
+        assert "region" not in cypher
+        assert " OR " not in cypher
+        assert "RESOLVED_FROM" not in cypher
+        assert "ORDER BY" not in cypher
+        assert "{supplier_id: $entity_id}" in cypher
+
+    def test_flag_default_on(self) -> None:
+        from engine.config.settings import Settings
+
+        assert Settings().resolution_prefilter_recall_enabled is True
+
+    @pytest.mark.asyncio
+    async def test_integer_declared_ids_keep_their_type(self) -> None:
+        """Canonical and already-resolved ids are returned as stored, never stringified."""
+        driver = _mock_driver()
+        resolver = EntityResolver(_make_spec(), driver, "test_domain", domain_spec=_supplier_domain())
+        driver.execute_query.side_effect = [[{"entity_id": 10}], [{"resolved_id": 20}]]
+        assert await resolver._find_canonical([10, 20], "Supplier") == 10
+        assert await resolver._already_resolved([10, 20], "Supplier") == {20}

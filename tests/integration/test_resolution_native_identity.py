@@ -407,3 +407,62 @@ async def test_x05_resolved_duplicate_remains_a_match_candidate(
     assert len(await _links(graph_driver, db=ORBITAL)) == 2
     assert before_match == after_match == ["d1", "d2", "d3"]
     assert await _snapshot(graph_driver, db=ORBITAL) == before_graph
+
+
+@pytest.mark.asyncio
+async def test_integer_declared_ids_resolve_with_native_types(graph_driver, clean_db, orbital_spec) -> None:
+    """Declared ids stored as integers keep their type through canonical choice and the MERGE."""
+    await _write(
+        graph_driver,
+        """
+        CREATE (h:OrbitalDepot {depot_id: 10, docking_ports: 6}), (a:OrbitalDepot {depot_id: 20, docking_ports: 6})
+        CREATE (b:OrbitalDepot {depot_id: 30, docking_ports: 6})
+        CREATE (h)-[:LINKS]->(:Thing {thing_id: 1})
+        """,
+    )
+    registry = _registry(threshold=0.9, property_weight=1.0, structural_weight=0.0, behavioral_weight=0.0)
+    resolver = EntityResolver(registry, graph_driver, DB, domain_spec=orbital_spec)
+    single = await resolver.resolve_entity(20, LABEL)  # type: ignore[arg-type]
+    batch = await resolver.resolve_batch(LABEL)
+    rows = await _read(
+        graph_driver,
+        "MATCH (a:OrbitalDepot)-[:RESOLVED_FROM]->(b:OrbitalDepot) RETURN a.depot_id AS s, b.depot_id AS t",
+    )
+    assert single["canonical_id"] == 10
+    assert sorted(single["merged_entity_ids"]) == [20, 30]
+    assert single["merged_count"] == 2
+    assert batch["total_merged"] == 0
+    assert sorted((r["s"], r["t"]) for r in rows) == [(20, 10), (30, 10)]
+
+
+@pytest.mark.asyncio
+async def test_resolved_nodes_do_not_fill_the_capped_prefilter(graph_driver, clean_db, orbital_spec) -> None:
+    """An already-resolved node sharing more values must not take the max_candidates slot.
+
+    s and t share docking_ports; r (resolved) shares reliability and lat with s.
+    With max_candidates 1, s must still reach t: 1/3 >= 0.3.
+    """
+    await _write(
+        graph_driver,
+        """
+        CREATE (s:OrbitalDepot {depot_id: 's', docking_ports: 6, reliability: 0.9, lat: 1.0})
+        CREATE (t:OrbitalDepot {depot_id: 't', docking_ports: 6, reliability: 0.5, lat: 2.0})
+        CREATE (r:OrbitalDepot {depot_id: 'r', docking_ports: 7, reliability: 0.9, lat: 1.0})
+        CREATE (h:OrbitalDepot {depot_id: 'h', docking_ports: 99, reliability: 0.0, lat: 9.0})
+        CREATE (r)-[:RESOLVED_FROM {resolution_id: 'pre', domain_id: 'neo4j'}]->(h)
+        """,
+    )
+    registry = _registry(
+        threshold=0.3,
+        property_weight=1.0,
+        structural_weight=0.0,
+        behavioral_weight=0.0,
+        comparison_properties=["docking_ports", "reliability", "lat"],
+        max_candidates=1,
+    )
+    resolver = EntityResolver(registry, graph_driver, DB, domain_spec=orbital_spec)
+    result = await resolver.resolve_entity("s", LABEL)
+    assert result["canonical_id"] in {"s", "t"}
+    assert sorted(result["merged_entity_ids"] + [result["canonical_id"]]) == ["s", "t"]
+    assert result["merged_count"] == 1
+    assert await _links(graph_driver) == sorted([("r", "h"), (result["merged_entity_ids"][0], result["canonical_id"])])

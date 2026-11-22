@@ -242,6 +242,7 @@ class EntityResolver:
             entity_id=entity_id,
             entity_label=entity_label,
             threshold=effective,
+            exclude_resolved=True,
         )
         if not candidates:
             return no_op
@@ -349,8 +350,12 @@ class EntityResolver:
             "resolution_groups": resolution_groups,
         }
 
-    async def _already_resolved(self, entity_ids: list[str], entity_label: str) -> set[str]:
-        """Ids among ``entity_ids`` that already carry an outgoing RESOLVED_FROM."""
+    async def _already_resolved(self, entity_ids: list[Any], entity_label: str) -> set[Any]:
+        """Ids among ``entity_ids`` that already carry an outgoing RESOLVED_FROM.
+
+        Ids keep the type the graph stores them with, so an integer declared id
+        compares equal to the candidate ids it is checked against.
+        """
         label = sanitize_label(entity_label)
         id_prop = sanitize_label(self._scorer.id_property(label))
         cypher = f"""
@@ -364,7 +369,7 @@ class EntityResolver:
             parameters={"entity_ids": entity_ids},
             database=self._db,
         )
-        return {str(r["resolved_id"]) for r in results if r.get("resolved_id") is not None}
+        return {r["resolved_id"] for r in results if r.get("resolved_id") is not None}
 
     async def _merge_resolution(
         self,
@@ -408,13 +413,14 @@ class EntityResolver:
 
     async def _find_canonical(
         self,
-        entity_ids: list[str],
+        entity_ids: list[Any],
         entity_label: str,
-    ) -> str:
+    ) -> Any:
         """Find the entity with the highest degree (most connections).
 
         RU-101: already-resolved entities are excluded, RESOLVED_FROM edges do
-        not count toward degree, and ties break on entity_id ascending.
+        not count toward degree, and ties break on entity_id ascending. The id
+        is returned with its stored type (an integer declared id stays an int).
         """
         label = sanitize_label(entity_label)
         id_prop = sanitize_label(self._scorer.id_property(label))
@@ -436,7 +442,7 @@ class EntityResolver:
                 database=self._db,
             )
             if results:
-                return str(results[0]["entity_id"])
+                return results[0]["entity_id"]
             return entity_ids[0]
         cypher = f"""
         UNWIND $entity_ids AS eid
@@ -453,7 +459,7 @@ class EntityResolver:
             database=self._db,
         )
         if results:
-            return str(results[0]["entity_id"])
+            return results[0]["entity_id"]
         return entity_ids[0]
 
     async def _create_resolution(

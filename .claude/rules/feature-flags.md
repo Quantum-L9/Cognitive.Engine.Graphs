@@ -195,3 +195,8 @@ settings and the boot assertion over them were retired (Stage 2).
 | declared_structural_properties_required_enabled | True | Exclusion edge / target property, community property, geo lat/lon/id properties and the Louvain write property are declarations; a pack using one undeclared is withheld (`undeclared structural property: …`) and the compilers raise `UndeclaredStructuralPropertyError`; off restores `EXCLUDED_FROM` / `entity_id` / `community_id` / `communityId` / `lat` / `lon` |
 | preference_attention_declared_community_enabled | True | `preference_attention` outcome-side community property is `metadata.outcome_community_property`, defaulting to the candidate's declared one; off restores a hardcoded `community_id` |
 | preference_attention_metadata_required_enabled | True | A pack whose `preference_attention` dimension declares no `metadata.success_value` is withheld at admission (`undeclared scoring metadata: …`, reported once); off admits it and the scoring compiler refuses the dimension at match time |
+
+### Resolution prefilter (CEG-NATIVE-CLOSURE-001)
+| Flag | Default | Effect |
+|------|---------|--------|
+| resolution_prefilter_recall_enabled | True | Resolution candidate prefilter admits any shared comparison property value (not only the first) and never a node without the declared id. It orders the capped read by shared count, then id. On the verified resolver path it excludes already-resolved nodes before `LIMIT`. Off restores the first-property prefilter |

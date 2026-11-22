@@ -2348,3 +2348,17 @@ Off: the relationship is unkeyed, `fromrow` keys are undeclared, and
 non-empty form, on the same relationship as the polymer.
 
 Tests: `tests/unit/test_buyer_line_identity.py`.
+
+## Resolution on the declared identity (CEG-NATIVE-CLOSURE-001, A1 / L-RES)
+
+| Flag (env var) | Default | Origin | Behaviour when on | Behaviour when off |
+|---|---|---|---|---|
+| `resolution_prefilter_recall_enabled` (`RESOLUTION_PREFILTER_RECALL_ENABLED`) | `true` | CEG-NATIVE-CLOSURE-001 F03 | `SimilarityScorer._find_property_candidates` admits a candidate sharing **any** declared `semantic_registry.comparison_properties` value (source value non-null), never a node without the label's declared id, and orders the capped read by shared-value count DESC then id ASC, so the `max_candidates` subset and tied results do not depend on insertion order. On the resolver's verified path (`entity_resolution_merge_integrity`) nodes with an outgoing `RESOLVED_FROM` are excluded before `LIMIT`, so they never take a candidate slot. Only reachable when a domain enables `semantic_registry` | The previous prefilter: the first comparison property only, no ordering, no resolved-node exclusion (still on the declared id property) |
+
+The same change also does the following under the existing flags. With
+`spec_declared_candidate_id` on, every scorer and resolver query uses the
+label's declared id property, and ids keep their stored type. With
+`resolution_behavioral_label_scoped` on, behavioral similarity reads the
+domain's `feedbackloop.outcome_node_label`. A domain that declares none
+contributes 0.0 and reads nothing. Tests:
+`tests/unit/test_resolver.py` and `tests/integration/test_resolution_native_identity.py`.

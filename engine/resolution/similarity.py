@@ -118,6 +118,7 @@ class SimilarityScorer:
         entity_label: str,
         threshold: float | None = None,
         limit: int | None = None,
+        exclude_resolved: bool = False,
     ) -> list[dict[str, Any]]:
         """Find entities similar to the given entity.
 
@@ -129,6 +130,9 @@ class SimilarityScorer:
             entity_label: Neo4j label of the entity.
             threshold: Minimum similarity score (defaults to spec threshold).
             limit: Max candidates to return (defaults to spec max_candidates).
+            exclude_resolved: Leave out nodes that already carry an outgoing
+                RESOLVED_FROM before the capped read (the resolver's
+                eligibility rule), so they never take a candidate slot.
 
         Returns:
             List of dicts with entity_id and similarity score.
@@ -138,7 +142,9 @@ class SimilarityScorer:
         label = sanitize_label(entity_label)
 
         # Phase 1: find candidate pairs via property overlap
-        candidate_ids = await self._find_property_candidates(entity_id, label, effective_limit)
+        candidate_ids = await self._find_property_candidates(
+            entity_id, label, effective_limit, exclude_resolved=exclude_resolved
+        )
 
         # Phase 2: compute full similarity for each candidate
         results: list[dict[str, Any]] = []
@@ -310,7 +316,8 @@ class SimilarityScorer:
         entity_id: str,
         label: str,
         limit: int,
-    ) -> list[str]:
+        exclude_resolved: bool = False,
+    ) -> list[Any]:
         """Find candidate entity IDs that share at least one comparison property value.
 
         F03: any declared comparison property qualifies a candidate, not only
@@ -318,18 +325,25 @@ class SimilarityScorer:
         by the prefilter. The read stays capped at ``limit``; candidates
         sharing more comparison values come first, ties by id, so the capped
         subset is deterministic (R14). Nodes without the declared id are never
-        candidates.
+        candidates. ``exclude_resolved`` drops already-resolved nodes before the
+        cap. ``resolution_prefilter_recall_enabled`` off restores the previous
+        first-property prefilter.
         """
+        from engine.config.settings import settings
+
         # Validated again here so this helper is safe on its own, not only via its callers (C-009).
         label = sanitize_label(label)
         id_prop = sanitize_label(self.id_property(label))
         comp_props = self._spec.comparison_properties
+        if not settings.resolution_prefilter_recall_enabled:
+            return await self._find_first_property_candidates(entity_id, label, id_prop, limit)
+        unresolved = " AND NOT EXISTS { (candidate)-[:RESOLVED_FROM]->() }" if exclude_resolved else ""
         if not comp_props:
             # Fallback: return all entities of the same label
             cypher = f"""
-            MATCH (e:{label})
-            WHERE e.{id_prop} IS NOT NULL AND e.{id_prop} <> $entity_id
-            RETURN e.{id_prop} AS entity_id
+            MATCH (candidate:{label})
+            WHERE candidate.{id_prop} IS NOT NULL AND candidate.{id_prop} <> $entity_id{unresolved}
+            RETURN candidate.{id_prop} AS entity_id
             ORDER BY entity_id
             LIMIT $limit
             """
@@ -347,7 +361,7 @@ class SimilarityScorer:
         MATCH (source:{label} {{{id_prop}: $entity_id}})
         MATCH (candidate:{label})
         WHERE candidate.{id_prop} IS NOT NULL
-              AND candidate.{id_prop} <> $entity_id
+              AND candidate.{id_prop} <> $entity_id{unresolved}
               AND ({" OR ".join(shared_terms)})
         WITH candidate.{id_prop} AS entity_id, {shared_count} AS shared
         RETURN entity_id
@@ -360,3 +374,32 @@ class SimilarityScorer:
             database=self._db,
         )
         return [r["entity_id"] for r in results if r.get("entity_id") is not None]
+
+    async def _find_first_property_candidates(self, entity_id: Any, label: str, id_prop: str, limit: int) -> list[Any]:
+        """The previous prefilter (``resolution_prefilter_recall_enabled`` off): first comparison property only."""
+        label = sanitize_label(label)
+        id_prop = sanitize_label(id_prop)
+        comp_props = self._spec.comparison_properties
+        if not comp_props:
+            cypher = f"""
+            MATCH (e:{label})
+            WHERE e.{id_prop} <> $entity_id
+            RETURN e.{id_prop} AS entity_id
+            LIMIT $limit
+            """
+        else:
+            safe_prop = sanitize_label(comp_props[0])
+            cypher = f"""
+            MATCH (source:{label} {{{id_prop}: $entity_id}})
+            MATCH (candidate:{label})
+            WHERE candidate.{id_prop} <> $entity_id
+                  AND candidate.{safe_prop} = source.{safe_prop}
+            RETURN candidate.{id_prop} AS entity_id
+            LIMIT $limit
+            """
+        results = await self._graph_driver.execute_query(
+            cypher=cypher,
+            parameters={"entity_id": entity_id, "limit": limit},
+            database=self._db,
+        )
+        return [r["entity_id"] for r in results if r.get("entity_id")]
