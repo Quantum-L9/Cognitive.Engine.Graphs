@@ -25,7 +25,7 @@
 #   make check     repo-check     ruff check, ruff format --check,
 #                                 mypy engine/ chassis/ scripts/,
 #                                 C-009 cypher-lint (non-mutating)
-#   make test-fast repo-test-fast PR pytest owner: the literal PR_FAST_TESTS lane blocks
+#   make test-fast repo-test-fast PR pytest owner: the literal PR_FAST_TESTS folder list
 #   make test      repo-test      whole unit suite: pytest tests/ -m unit (local, nightly)
 #   make test-deep                one full plan, not a make-v2 phase. Missing
 #                                 pinned Odoo mapper is NOT_RUN.
@@ -100,22 +100,35 @@ repo-test:	## Unit suite (pytest -m unit): no Docker, no Neo4j
 	@PYTHONPATH="$${PYTHONPATH:-}:." $(REPO_PY) -m pytest tests/ -m unit --tb=short -q
 
 # make-v2 pull-request selection (`make test-fast`). Core's expense judge accepts
-# only a literal, bounded list, so every path is written out below, one per line,
-# in one commented block per campaign lane. A lane appends its own block after
-# the last one and edits no other lane's lines. It must list every test that
-# exercises that lane's code. Duplicate paths collapse in pytest's collection;
-# an empty selection or a missing path fails before pytest runs. `repo-test`
-# above stays the whole unit suite (push to main, nightly, dispatch).
-PR_FAST_TESTS :=
+# only a literal, bounded list (folders allowed, never `tests/` itself), so every
+# folder and top-level module that holds `-m unit` tests is written out below.
+# A new test in one of these folders is selected with no edit here; a new test
+# folder or top-level module must be added. tests/e2e, tests/performance and
+# tests/fixtures hold no unit tests and are not listed. An empty selection or a
+# missing path fails before pytest runs. `repo-test` above stays the whole unit
+# suite (push to main, nightly, dispatch).
+PR_FAST_TESTS := \
+	tests/unit \
+	tests/contracts \
+	tests/architecture \
+	tests/compliance \
+	tests/invariants \
+	tests/integration \
+	tests/security \
+	tests/property \
+	tests/gap_fixes \
+	tests/scoring \
+	tests/test_algorithmic_upgrades.py \
+	tests/test_boot_and_registry.py \
+	tests/test_compliance_engine.py \
+	tests/test_config_loader.py \
+	tests/test_enrich.py \
+	tests/test_handlers.py \
+	tests/test_health_check.py \
+	tests/test_pareto_wiring.py \
+	tests/test_scoring_extended.py
 
-# lane: eie-ceg-gate/ceg-w
-PR_FAST_TESTS += tests/unit/test_graph_inference_egress.py
-PR_FAST_TESTS += tests/unit/test_first_match_direction.py
-PR_FAST_TESTS += tests/unit/test_second_match_direction.py
-PR_FAST_TESTS += tests/unit/test_match_gate_row_scope.py
-PR_FAST_TESTS += tests/unit/test_match_dimension_projection.py
-
-repo-test-fast:	## Bounded pull-request selection: the literal PR_FAST_TESTS lane blocks (unit, no Docker, no Neo4j)
+repo-test-fast:	## Bounded pull-request selection: the literal PR_FAST_TESTS folders (unit, no Docker, no Neo4j)
 	@test -n "$(strip $(PR_FAST_TESTS))" || { echo "repo-test-fast: PR_FAST_TESTS selects nothing" >&2; exit 1; }
 	@for path in $(PR_FAST_TESTS); do test -e "$$path" || { echo "repo-test-fast: missing $$path" >&2; exit 1; }; done
 	@PYTHONPATH="$${PYTHONPATH:-}:." $(REPO_PY) -m pytest $(PR_FAST_TESTS) -m unit --tb=short -q
