@@ -670,6 +670,8 @@ class GDSScheduler:
             return f"{provider.name}: running"
         if provider.schedule.type != "cron" or not self.scheduler.running:
             return None
+        if self._refusal(provider) is not None:
+            return None  # never cron-registered, so never due: block on its status instead
         reference = self._last_started.get(provider.name, self._started_at)
         if reference is None:
             return None

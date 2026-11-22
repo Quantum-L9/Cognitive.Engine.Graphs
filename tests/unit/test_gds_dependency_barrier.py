@@ -461,3 +461,22 @@ async def test_latest_started_attempt_decides_when_attempts_overlap() -> None:
     result = await scheduler.execute_job(b)
     assert result["status"] == "blocked"
     assert result["unsatisfied"] == ["a: last attempt failed"]
+
+
+@pytest.mark.asyncio
+async def test_refused_cron_provider_is_not_waited_for() -> None:
+    """CodeRabbit on #543: an unregistered (refused) cron provider is never due; block at once."""
+    mystery = _job("mystery", "pagerank", cron="* * * * *")
+    b = _job("b", "cooccurrence", ["pagerank"])
+    scheduler, rec = _scheduler([mystery, b])
+    scheduler.dependency_wait_timeout_sec = 5.0
+    scheduler.register_jobs()
+    scheduler.start()
+    scheduler._started_at = datetime.now(tz=UTC) - timedelta(minutes=5)
+    try:
+        result = await asyncio.wait_for(scheduler.execute_job(b), 1.0)
+    finally:
+        scheduler.scheduler.shutdown(wait=False)
+    assert result["status"] == "blocked"
+    assert result["unsatisfied"] == ["mystery: never run"]
+    assert not rec.started("b")
