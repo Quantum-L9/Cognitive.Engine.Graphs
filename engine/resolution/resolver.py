@@ -87,7 +87,7 @@ class EntityResolver:
 
     async def resolve_entity(
         self,
-        entity_id: str,
+        entity_id: str | int,
         entity_label: str,
         threshold: float | None = None,
     ) -> dict[str, Any]:
@@ -212,7 +212,7 @@ class EntityResolver:
 
     async def _resolve_entity_verified(
         self,
-        entity_id: str,
+        entity_id: str | int,
         entity_label: str,
         threshold: float | None,
     ) -> dict[str, Any]:
@@ -373,18 +373,35 @@ class EntityResolver:
 
     async def _merge_resolution(
         self,
-        source_id: str,
-        canonical_id: str,
+        source_id: str | int,
+        canonical_id: str | int,
         entity_label: str,
         similarity: float,
     ) -> tuple[str, bool] | None:
-        """MERGE the RESOLVED_FROM edge; return (resolution_id, created) or None if absent."""
+        """MERGE the RESOLVED_FROM edge; return (resolution_id, created) or None if not written.
+
+        Eligibility is re-checked inside the write, after both endpoints are
+        write-locked (in elementId order, so two writers never deadlock on a
+        pair): the source must carry no RESOLVED_FROM to any other node and the
+        canonical none at all. A concurrent resolution that already linked the
+        source elsewhere therefore wins, and this call writes nothing (None),
+        so a source never gets two canonicals. The lock is a property set and
+        removed in the same transaction: nothing is committed on either node.
+        """
         label = sanitize_label(entity_label)
         id_prop = sanitize_label(self._scorer.id_property(label))
         resolution_id = f"res_{uuid.uuid4().hex[:12]}"
         cypher = f"""
         MATCH (source:{label} {{{id_prop}: $source_id}})
         MATCH (canonical:{label} {{{id_prop}: $canonical_id}})
+        WHERE source <> canonical
+        FOREACH (n IN CASE WHEN elementId(source) < elementId(canonical)
+                           THEN [source, canonical] ELSE [canonical, source] END |
+            SET n._ceg_resolution_lock = true
+            REMOVE n._ceg_resolution_lock)
+        WITH source, canonical
+        WHERE NOT EXISTS {{ (canonical)-[:RESOLVED_FROM]->() }}
+          AND NOT EXISTS {{ (source)-[:RESOLVED_FROM]->(other) WHERE other <> canonical }}
         MERGE (source)-[rel:RESOLVED_FROM]->(canonical)
         ON CREATE SET rel.resolution_id = $resolution_id,
                       rel.confidence = $similarity,

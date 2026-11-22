@@ -866,3 +866,30 @@ class TestPrefilterRecallFlag:
         driver.execute_query.side_effect = [[{"entity_id": 10}], [{"resolved_id": 20}]]
         assert await resolver._find_canonical([10, 20], "Supplier") == 10
         assert await resolver._already_resolved([10, 20], "Supplier") == {20}
+
+    @pytest.mark.asyncio
+    async def test_flag_off_keeps_a_zero_valued_candidate_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "resolution_prefilter_recall_enabled", False)
+        driver = _mock_driver()
+        driver.execute_query.side_effect = [[{"entity_id": 0}, {"entity_id": 7}, {"entity_id": "s3"}]]
+        ids = await _declared_scorer(driver)._find_property_candidates("s1", "Supplier", 5)
+        assert ids == [0, 7, "s3"]
+
+    @pytest.mark.asyncio
+    async def test_merge_rechecks_eligibility_after_locking_both_endpoints(self) -> None:
+        """The edge write locks source and canonical, then re-checks eligibility, then MERGEs."""
+        driver = _mock_driver()
+        driver.execute_query.side_effect = [[]]
+        resolver = EntityResolver(_make_spec(), driver, "test_domain", domain_spec=_supplier_domain())
+        assert await resolver._merge_resolution("s2", "s1", "Supplier", 0.9) is None
+        cypher = str(driver.execute_query.call_args_list[0].kwargs["cypher"])
+        lock = cypher.index("SET n._ceg_resolution_lock = true")
+        unlock = cypher.index("REMOVE n._ceg_resolution_lock")
+        recheck = cypher.index("NOT EXISTS { (source)-[:RESOLVED_FROM]->(other) WHERE other <> canonical }")
+        canonical_free = cypher.index("NOT EXISTS { (canonical)-[:RESOLVED_FROM]->() }")
+        assert (
+            lock < unlock < canonical_free < recheck < cypher.index("MERGE (source)-[rel:RESOLVED_FROM]->(canonical)")
+        )
+        assert "elementId(source) < elementId(canonical)" in cypher

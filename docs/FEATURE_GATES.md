@@ -2362,3 +2362,11 @@ label's declared id property, and ids keep their stored type. With
 domain's `feedbackloop.outcome_node_label`. A domain that declares none
 contributes 0.0 and reads nothing. Tests:
 `tests/unit/test_resolver.py` and `tests/integration/test_resolution_native_identity.py`.
+
+The verified path (`entity_resolution_merge_integrity`) also writes the edge
+atomically. `_merge_resolution` write-locks both endpoints in `elementId`
+order, then checks again that the source has no `RESOLVED_FROM` to another
+node and the canonical has none at all. Only then does it `MERGE`. Two
+concurrent resolutions therefore never give one source two canonicals. The
+lock is a property set and removed in the same transaction, so nothing is
+committed (`test_concurrent_resolutions_never_give_a_source_two_canonicals`).

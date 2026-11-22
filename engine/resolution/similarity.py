@@ -85,8 +85,8 @@ class SimilarityScorer:
 
     async def compute_similarity(
         self,
-        entity_a_id: str,
-        entity_b_id: str,
+        entity_a_id: str | int,
+        entity_b_id: str | int,
         entity_label: str,
     ) -> float:
         """Compute weighted multi-signal similarity between two entities.
@@ -114,7 +114,7 @@ class SimilarityScorer:
 
     async def find_candidates(
         self,
-        entity_id: str,
+        entity_id: str | int,
         entity_label: str,
         threshold: float | None = None,
         limit: int | None = None,
@@ -162,8 +162,8 @@ class SimilarityScorer:
 
     async def _property_similarity(
         self,
-        entity_a_id: str,
-        entity_b_id: str,
+        entity_a_id: str | int,
+        entity_b_id: str | int,
         label: str,
     ) -> float:
         """Jaccard similarity over comparison properties."""
@@ -205,8 +205,8 @@ class SimilarityScorer:
 
     async def _structural_similarity(
         self,
-        entity_a_id: str,
-        entity_b_id: str,
+        entity_a_id: str | int,
+        entity_b_id: str | int,
         label: str,
     ) -> float:
         """Shared neighbor overlap (Jaccard on neighbor sets)."""
@@ -250,8 +250,8 @@ class SimilarityScorer:
 
     async def _behavioral_similarity(
         self,
-        entity_a_id: str,
-        entity_b_id: str,
+        entity_a_id: str | int,
+        entity_b_id: str | int,
         label: str | None = None,
     ) -> float:
         """Shared outcome pattern similarity.
@@ -298,7 +298,7 @@ class SimilarityScorer:
         """
         return await self._shared_outcome_ratio(cypher, entity_a_id, entity_b_id)
 
-    async def _shared_outcome_ratio(self, cypher: str, entity_a_id: str, entity_b_id: str) -> float:
+    async def _shared_outcome_ratio(self, cypher: str, entity_a_id: str | int, entity_b_id: str | int) -> float:
         results = await self._graph_driver.execute_query(
             cypher=cypher,
             parameters={"a_id": entity_a_id, "b_id": entity_b_id},
@@ -313,7 +313,7 @@ class SimilarityScorer:
 
     async def _find_property_candidates(
         self,
-        entity_id: str,
+        entity_id: str | int,
         label: str,
         limit: int,
         exclude_resolved: bool = False,
@@ -402,4 +402,4 @@ class SimilarityScorer:
             parameters={"entity_id": entity_id, "limit": limit},
             database=self._db,
         )
-        return [r["entity_id"] for r in results if r.get("entity_id")]
+        return [r["entity_id"] for r in results if r.get("entity_id") is not None]

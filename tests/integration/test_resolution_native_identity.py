@@ -466,3 +466,37 @@ async def test_resolved_nodes_do_not_fill_the_capped_prefilter(graph_driver, cle
     assert sorted(result["merged_entity_ids"] + [result["canonical_id"]]) == ["s", "t"]
     assert result["merged_count"] == 1
     assert await _links(graph_driver) == sorted([("r", "h"), (result["merged_entity_ids"][0], result["canonical_id"])])
+
+
+@pytest.mark.asyncio
+async def test_concurrent_resolutions_never_give_a_source_two_canonicals(graph_driver, clean_db, orbital_spec) -> None:
+    """m is a duplicate of c1 and of c2 (which are not duplicates of each other).
+
+    Resolving c1 and c2 concurrently must leave m with at most one outgoing
+    RESOLVED_FROM, and the reported new-link counts must equal the edges written.
+    """
+    registry = _registry(
+        threshold=0.5,
+        property_weight=1.0,
+        structural_weight=0.0,
+        behavioral_weight=0.0,
+        comparison_properties=["docking_ports", "reliability"],
+    )
+    seed = """
+    CREATE (c1:OrbitalDepot {depot_id: 'c1', docking_ports: 6, reliability: 0.1})
+    CREATE (c2:OrbitalDepot {depot_id: 'c2', docking_ports: 5, reliability: 0.9})
+    CREATE (m:OrbitalDepot {depot_id: 'm', docking_ports: 6, reliability: 0.9})
+    CREATE (c1)-[:LINKS]->(:Thing {thing_id: 1}), (c1)-[:LINKS]->(:Thing {thing_id: 2})
+    CREATE (c2)-[:LINKS]->(:Thing {thing_id: 3}), (c2)-[:LINKS]->(:Thing {thing_id: 4})
+    """
+    for _ in range(20):
+        await _write(graph_driver, "MATCH (n) DETACH DELETE n")
+        await _write(graph_driver, seed)
+        first = EntityResolver(registry, graph_driver, DB, domain_spec=orbital_spec)
+        second = EntityResolver(registry, graph_driver, DB, domain_spec=orbital_spec)
+        results = await asyncio.gather(first.resolve_entity("c1", LABEL), second.resolve_entity("c2", LABEL))
+        rows = await _read(
+            graph_driver, "MATCH (m:OrbitalDepot {depot_id: 'm'})-[r:RESOLVED_FROM]->(c) RETURN c.depot_id AS c"
+        )
+        assert len(rows) == 1, rows
+        assert sum(r["merged_count"] for r in results) == 1
