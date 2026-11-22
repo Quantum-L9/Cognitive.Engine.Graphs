@@ -1,4 +1,13 @@
 {
+  "_l9_meta": {
+    "l9_schema": 1,
+    "origin": "domain-specific",
+    "engine": "graph",
+    "layer": ["config"],
+    "tags": ["domains", "test-only"],
+    "owner": "domain-team",
+    "status": "active"
+  },
   "schema": "l9.proof.test-only-packs/v1",
   "label": "TEST_ONLY",
   "campaign": "EIE-CEG-GATE-COLLAB-2026-11-21",
@@ -7,7 +16,7 @@
   "packs": {
     "plasticos": {
       "ceg_spec": "plasticos/spec.yaml",
-      "ceg_spec_sha256": "1437177929cd1ccd1a6c6f91fa7f28af1231882f1a561177d81f31d57bd20b6b",
+      "ceg_spec_sha256": "e6ec5b013c35ad7c6053a26f79bb7734fd110186247c162fe944fc93a8034448",
       "composed_from": [
         {
           "repo": "Quantum-L9/Cognitive.Engine.Graphs",
@@ -28,15 +37,15 @@
     },
     "synthneutral": {
       "ceg_spec": "synthneutral/spec.yaml",
-      "ceg_spec_sha256": "d50b9ab2aba2addf0c11b5c6ad3636f102f6e6479262f6b38d526d9f545bbb3e",
+      "ceg_spec_sha256": "72aa88c8c237dfa2b61d754aa237e7a3051191668ef3ae93206fe9e52701d519",
       "eie_cartridge": {
         "repo": "Quantum-L9/Enrichment.Inference.Engine",
         "path": "tests/e2e/gate_loop/cartridges/synthneutral/spec.yaml",
-        "sha256": "1a37a607c1d6227a383896d8fda0a8b191b9b40a610dc25aace9870904010bc0"
+        "sha256": "65f68382b5c5143dfe36683daac0f1a582b86f514646d62d1c721e0f59ff805b"
       },
       "composed_from": "synthetic; no PlasticOS literal",
-      "overlay": "appended capabilities: tenant-scoped match:read, sync:write, admin:write (score:read NOT granted)."
+      "overlay": "capabilities: tenant-scoped match:read, sync:write, admin:write (score:read NOT granted); plugins.inference_rules: [infer_geography_from_postal_code] with postal_code and region declared on Station by both CEG pack and EIE cartridge (F-A1-08 changed-fact witness)."
     }
   },
-  "revision_note": "r2: capability grants added because a staging-mode CEG refuses writes without an explicit grant (engine/handlers.py _enforce_capability)."
+  "revision_note": "r3: C-18 L9_META header at the top of each file (plasticos: the design pack's own block moved and retagged test-only); synthneutral witness rule and fields (F-A1-08). r2: capability grants."
 }

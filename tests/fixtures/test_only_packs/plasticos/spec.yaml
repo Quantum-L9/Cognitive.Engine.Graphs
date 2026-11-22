@@ -1,10 +1,20 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: domain-specific
+# engine: graph
+# layer: [config]
+# tags: [domains, plasticos, test-only]
+# owner: domain-team
+# status: active
+# --- /L9_META ---
 # --- TEST_ONLY PACK (EIE-CEG-GATE-COLLAB-2026-11-21, lane PROOF) ---
 # label:    TEST_ONLY — never a deployment pack; no operator-published CEG
 #           runtime pack was reachable (CTO decision, campaign A0).
 # composed: Cognitive.Engine.Graphs tests/fixtures/design_packs/plasticos/spec.yaml
 #           @ 9d17d01b13671c58376f1e659e34958ced445e0c
 #           sha256 825e98d143a60db6eabb84c2a00f12a9fe827f0f58250d3cf35e449147fdd863
-#           (bytes below this header verbatim) + one appended `plugins` block.
+#           (bytes below this header verbatim, except its L9_META block, which C-18
+#           requires at the top of the file and which is retagged test-only) + appended blocks.
 #           EIE cartridge counterpart: Enrichment.Inference.Engine
 #           domains/plasticos/spec.yaml (current.json) sha256
 #           dd09cc9ec8fea4a8766b0f3650cfab83a0b0a894d0e499f9f75405f21ae48cfe, unmodified.
@@ -14,15 +24,6 @@
 #           key is introduced. See TEST_ONLY.json for this file's sha256.
 #           (2) capabilities: tenant-scoped grants (see the appended block).
 # --- end TEST_ONLY header ---
-# --- L9_META ---
-# l9_schema: 1
-# origin: domain-specific
-# engine: graph
-# layer: [config]
-# tags: [domains, plasticos]
-# owner: domain-team
-# status: active
-# --- /L9_META ---
 #
 # PlasticOS Domain Specification — Plastics Recycling Marketplace
 # Primary test domain for the L9 Graph Cognitive Engine
