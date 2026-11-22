@@ -203,8 +203,9 @@ async def test_missing_fingerprint_and_persistence_error_are_not_success(seed, g
                 raise RuntimeError(msg)
             return await self._inner.execute_query(cypher=cypher, parameters=parameters, database=database)
 
+    failing = _generator(_FailingWrites(graph_driver))
     with pytest.raises(RuntimeError, match="scenario write refused"):
-        await _generator(_FailingWrites(graph_driver)).generate_for_outcome(negative)
+        await failing.generate_for_outcome(negative)
     assert await seed.scenarios(negative) == []
 
 
