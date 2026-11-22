@@ -597,3 +597,14 @@ async def test_init_schema_propagates_a_failed_obligation_constraint(monkeypatch
 
     with pytest.raises(RuntimeError, match="cannot create this constraint"):
         await _init_schema(_Refusing(), _spec(["infer_company_size_tier"]))  # type: ignore[arg-type]
+
+
+def test_record_evaluations_statement_carries_every_compare_and_set_predicate() -> None:
+    """The fake graph applies the CAS itself; pin that the production statement does too."""
+    import inspect
+
+    source = inspect.getsource(trigger.record_evaluations)
+    for field in ("evidence_revision", "rule_revision", "accepted_findings_digest"):
+        assert f"coalesce(o.{field}, '') = coalesce(row.prior_{field}, '')" in source
+    evaluate = inspect.getsource(trigger.evaluate_and_record)
+    assert '"prior_accepted_findings_digest": prior.get("accepted_findings_digest")' in evaluate
