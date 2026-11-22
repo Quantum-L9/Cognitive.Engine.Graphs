@@ -27,6 +27,7 @@ missing key; it never falls back to a built-in recipe.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from collections import defaultdict, deque
@@ -43,6 +44,7 @@ from engine.gds.node_similarity import (
     NODE_SIMILARITY_ALGORITHMS,
     build_node_similarity_plan,
 )
+from engine.gds.staleness import next_fire_after
 from engine.graph.driver import GraphDriver
 from engine.utils.security import cypher_number, sanitize_label
 
@@ -64,6 +66,21 @@ logger = logging.getLogger(__name__)
 
 _MAX_HISTORY_SIZE = 1000
 
+# Algorithms execute_job dispatches. A job naming anything else has nothing to run.
+_KNOWN_ALGORITHMS: frozenset[str] = frozenset(
+    {
+        "louvain",
+        "cooccurrence",
+        "reinforcement",
+        "temporalrecency",
+        "geoproximity",
+        "equipmentsync",
+        "feedback_recalculation",
+        "causal_chain_scoring",
+        *NODE_SIMILARITY_ALGORITHMS,
+    }
+)
+
 
 class GDSScheduler:
     """
@@ -82,7 +99,24 @@ class GDSScheduler:
         - nodeSimilarity (alias node_similarity): GDS node similarity over the job's projection,
           written as ``writeedge`` relationships scored in ``writeproperty``
           (gated by ``gds_node_similarity_enabled``; see node_similarity.py)
+
+    Dependencies (``gds_dependency_barrier_enabled``, CEG-NATIVE-CLOSURE-001
+    F04): ``depends_on`` names algorithms; every declared job running one of
+    them is a provider. A dependent job — fired by cron or ``trigger_job`` —
+    starts its graph effect only when every provider has no run in flight, no
+    cron fire due since its last start, and a latest attempt of ``success``.
+    While a provider runs or is due the dependent waits, at most
+    ``dependency_wait_timeout_sec``; otherwise it records ``blocked`` with the
+    unsatisfied providers and writes nothing. A dependency on an undeclared
+    algorithm, a dependency cycle, and any job downstream of either are
+    ``refused``: never cron-registered, and refused on manual trigger.
+    Provider state is this scheduler's own (it starts empty, like the job
+    history), so after a restart a dependent waits for its providers' next
+    successful run.
     """
+
+    # Upper bound on how long a dependent job waits for a running or due provider.
+    dependency_wait_timeout_sec: float = 3600.0
 
     def __init__(self, domain_spec: DomainSpec, graph_driver: GraphDriver):
         self.domain_spec = domain_spec
@@ -90,6 +124,20 @@ class GDSScheduler:
         self.scheduler = AsyncIOScheduler()
         self._job_history: deque[dict[str, Any]] = deque(maxlen=_MAX_HISTORY_SIZE)
         self._history_lock = asyncio.Lock()
+        # F04 run-time barrier state, keyed by job name.
+        self._state_changed = asyncio.Condition()
+        self._running: set[str] = set()
+        self._last_started: dict[str, datetime] = {}
+        self._last_attempt_status: dict[str, str] = {}
+        self._started_at: datetime | None = None
+        self._refused_jobs: dict[str, str] | None = None
+
+    @property
+    def refused_jobs(self) -> dict[str, str]:
+        """F04: declared jobs that can never execute, by name, with the reason (computed once)."""
+        if self._refused_jobs is None:
+            self._refused_jobs = self.dependency_refusals(list(self.domain_spec.gdsjobs))
+        return self._refused_jobs
 
     @staticmethod
     def _get_job_parameter(job_spec: GDSJobSpec, param_name: str, default: float) -> float:
@@ -207,10 +255,19 @@ class GDSScheduler:
         Jobs are topologically sorted by depends_on relationships.
         Jobs without depends_on are placed in wave 0 (backward compatible).
         """
+        from engine.config.settings import settings
+
+        barrier = settings.gds_dependency_barrier_enabled
         waves = self._build_execution_dag(self.domain_spec.gdsjobs)
         registered = 0
         for wave_idx, wave in enumerate(waves):
             for job_spec in wave:
+                if barrier and job_spec.name in self.refused_jobs:
+                    # F04: no fallback wave — an unexecutable job is never scheduled.
+                    logger.error(
+                        "GDS job %s refused, not scheduled: %s", job_spec.name, self.refused_jobs[job_spec.name]
+                    )
+                    continue
                 if job_spec.schedule.type == "cron":
                     self._register_cron_job(job_spec)
                     registered += 1
@@ -356,6 +413,76 @@ class GDSScheduler:
 
         return waves
 
+    @staticmethod
+    def dependency_refusals(jobs: list[GDSJobSpec]) -> dict[str, str]:
+        """F04: jobs whose ``depends_on`` can never be satisfied, with the reason.
+
+        A dependency on an algorithm no declared job runs, membership of a
+        dependency cycle (including a job depending on its own algorithm), and
+        depending on a job refused for either reason. Keyed by job name; an
+        independent job is never listed.
+        """
+        by_algorithm: dict[str, list[str]] = defaultdict(list)
+        for job in jobs:
+            by_algorithm[job.algorithm].append(job.name)
+
+        refused: dict[str, str] = {}
+        providers: dict[str, list[str]] = {}
+        for job in jobs:
+            names: list[str] = []
+            for dep in job.depends_on or []:
+                if dep not in by_algorithm:
+                    refused.setdefault(job.name, f"depends on undeclared algorithm {dep!r}")
+                names.extend(by_algorithm.get(dep, []))
+            providers[job.name] = names
+
+        # Kahn over the provider graph: whatever never reaches in-degree 0 is in,
+        # or downstream of, a cycle.
+        in_degree = {name: len(set(deps)) for name, deps in providers.items()}
+        dependents: dict[str, list[str]] = defaultdict(list)
+        for name, deps in providers.items():
+            for provider in set(deps):
+                dependents[provider].append(name)
+        queue = [name for name, degree in in_degree.items() if degree == 0]
+        placed: set[str] = set()
+        while queue:
+            name = queue.pop()
+            placed.add(name)
+            for dependent in dependents[name]:
+                in_degree[dependent] -= 1
+                if in_degree[dependent] == 0:
+                    queue.append(dependent)
+        unplaced = [name for name in providers if name not in placed]
+
+        # A cycle member is an unplaced job reachable from itself.
+        def _reaches(start: str, target: str) -> bool:
+            seen: set[str] = set()
+            stack = list(dependents[start])
+            while stack:
+                node = stack.pop()
+                if node == target:
+                    return True
+                if node not in seen:
+                    seen.add(node)
+                    stack.extend(dependents[node])
+            return False
+
+        cycle = sorted(name for name in unplaced if _reaches(name, name))
+        for name in cycle:
+            refused.setdefault(name, f"dependency cycle among jobs {cycle}")
+
+        changed = True
+        while changed:
+            changed = False
+            for name, deps in providers.items():
+                if name in refused:
+                    continue
+                blocker = next((p for p in deps if p in refused), None)
+                if blocker is not None:
+                    refused[name] = f"depends on unexecutable job {blocker!r}"
+                    changed = True
+        return refused
+
     def _register_cron_job(self, job_spec: GDSJobSpec) -> None:
         if not job_spec.schedule.cron:
             raise ValueError(f"Job {job_spec.name}: cron expression required")
@@ -387,8 +514,40 @@ class GDSScheduler:
         def _now() -> datetime:
             return datetime.now(tz=UTC) if utc else datetime.now()
 
+        barrier = settings.gds_dependency_barrier_enabled
+        if barrier:
+            refusal = self._refusal(job_spec)
+            if refusal is None:
+                unsatisfied = await self._await_dependencies(job_spec)
+                if unsatisfied:
+                    logger.warning("GDS job %s blocked by dependencies: %s", job_spec.name, unsatisfied)
+                    return await self._record(
+                        job_spec,
+                        {
+                            "status": "blocked",
+                            "reason": "declared dependencies not satisfied",
+                            "unsatisfied": unsatisfied,
+                        },
+                        _now,
+                    )
+            else:
+                logger.error("GDS job %s refused: %s", job_spec.name, refusal)
+                return await self._record(job_spec, {"status": "refused", "reason": refusal}, _now)
+
+        async with self._state_changed:
+            self._running.add(job_spec.name)
+            self._last_started[job_spec.name] = datetime.now(tz=UTC)
+        try:
+            return await self._execute_effect(job_spec, resolved_agg, _now)
+        finally:
+            async with self._state_changed:
+                self._running.discard(job_spec.name)
+                self._state_changed.notify_all()
+
+    async def _execute_effect(self, job_spec: GDSJobSpec, resolved_agg: str, _now: Any) -> dict[str, Any]:
+        """Run the job's algorithm and record the attempt (status from the algorithm)."""
         start = _now()
-        result = {}
+        result: dict[str, Any] = {}
 
         try:
             # S2-15: Multi-run stability averaging
@@ -416,6 +575,7 @@ class GDSScheduler:
                 elif algo in NODE_SIMILARITY_ALGORITHMS:
                     result = await self._run_node_similarity(job_spec)
                 else:
+                    # Barrier off only: with it on, _refusal stopped this job first.
                     logger.warning(f"Unknown algorithm: {algo}")
                     result = {"status": "skipped", "reason": f"unknown algorithm: {algo}"}
 
@@ -429,6 +589,10 @@ class GDSScheduler:
             logger.exception(f"Job {job_spec.name} failed")
             result = {"status": "failed", "error": str(e)}
 
+        return await self._record(job_spec, result, _now)
+
+    async def _record(self, job_spec: GDSJobSpec, result: dict[str, Any], _now: Any) -> dict[str, Any]:
+        """Append one attempt to the history and the barrier's provider state."""
         async with self._history_lock:
             self._job_history.append(
                 {
@@ -438,7 +602,65 @@ class GDSScheduler:
                     **result,
                 }
             )
+        async with self._state_changed:
+            self._last_attempt_status[job_spec.name] = str(result.get("status"))
+            self._state_changed.notify_all()
         return result
+
+    def _refusal(self, job_spec: GDSJobSpec) -> str | None:
+        """F04: why this job can never execute, or None."""
+        if job_spec.name in self.refused_jobs:
+            return self.refused_jobs[job_spec.name]
+        if job_spec.algorithm not in _KNOWN_ALGORITHMS:
+            return f"unknown algorithm: {job_spec.algorithm}"
+        return None
+
+    def _providers(self, job_spec: GDSJobSpec) -> list[GDSJobSpec]:
+        """Every declared job running an algorithm ``job_spec`` depends on (declaration order)."""
+        deps = set(job_spec.depends_on or [])
+        return [job for job in self.domain_spec.gdsjobs if job.algorithm in deps and job.name != job_spec.name]
+
+    def _provider_wait(self, provider: GDSJobSpec, now: datetime) -> str | None:
+        """Why the dependent must keep waiting on ``provider``, or None."""
+        if provider.name in self._running:
+            return f"{provider.name}: running"
+        if provider.schedule.type != "cron" or not self.scheduler.running:
+            return None
+        reference = self._last_started.get(provider.name, self._started_at)
+        if reference is None:
+            return None
+        fire = next_fire_after(provider.schedule.cron, reference)
+        if fire is not None and fire <= now:
+            return f"{provider.name}: due"
+        return None
+
+    def _provider_unsatisfied(self, provider: GDSJobSpec) -> str | None:
+        status = self._last_attempt_status.get(provider.name)
+        if status is None:
+            return f"{provider.name}: never run"
+        if status != "success":
+            return f"{provider.name}: last attempt {status}"
+        return None
+
+    async def _await_dependencies(self, job_spec: GDSJobSpec) -> list[str]:
+        """Wait for running/due providers; return the unsatisfied ones (empty = go)."""
+        providers = self._providers(job_spec)
+        if not providers:
+            return []
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.dependency_wait_timeout_sec
+        async with self._state_changed:
+            while True:
+                now = datetime.now(tz=UTC)
+                waiting = [w for p in providers if (w := self._provider_wait(p, now)) is not None]
+                if not waiting:
+                    return [u for p in providers if (u := self._provider_unsatisfied(p)) is not None]
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    return waiting
+                # Re-check at least every second: a cron fire becomes due without a notification.
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(self._state_changed.wait(), min(remaining, 1.0))
 
     # ── Algorithm Implementations ──────────────────────────────
 
@@ -606,6 +828,16 @@ class GDSScheduler:
             prune_result = await self.graph_driver.execute_query(prune_cypher, database=db)
             pruned = prune_result[0]["pruned_edges"] if prune_result else 0
         except Exception as e:
+            if settings.gds_prune_failure_partial_enabled:
+                # F05: the edges are written but the declared bound is not applied.
+                logger.exception("Co-occurrence prune failed after %s edges were written", edges)
+                return {
+                    "status": "partial",
+                    "edges_created": edges,
+                    "edges_pruned": None,
+                    "pruning_alpha": pruning_alpha,
+                    "prune_error": str(e),
+                }
             logger.warning(f"Power-law pruning skipped: {e}")
             pruned = 0
 
@@ -782,14 +1014,25 @@ class GDSScheduler:
         accepted_result = await self.graph_driver.execute_query(positive_cypher, parameters=params, database=db)
         rejected_result = await self.graph_driver.execute_query(negative_cypher, parameters=params, database=db)
 
+        accepted_count = accepted_result[0]["accepted_edges"] if accepted_result else 0
+        rejected_count = rejected_result[0]["rejected_edges"] if rejected_result else 0
+
+        from engine.config.settings import settings
+
         try:
             await self.graph_driver.execute_query(prune_positive_cypher, parameters=params, database=db)
             await self.graph_driver.execute_query(prune_negative_cypher, parameters=params, database=db)
         except Exception as e:
+            if settings.gds_prune_failure_partial_enabled:
+                # F05: edges are written, the stale-edge prune is not applied.
+                logger.exception("Reinforcement prune failed after edges were written")
+                return {
+                    "status": "partial",
+                    "accepted_edges": accepted_count,
+                    "rejected_edges": rejected_count,
+                    "prune_error": str(e),
+                }
             logger.warning(f"Prune step skipped: {e}")
-
-        accepted_count = accepted_result[0]["accepted_edges"] if accepted_result else 0
-        rejected_count = rejected_result[0]["rejected_edges"] if rejected_result else 0
 
         logger.info(f"Reinforcement: {accepted_count} accepted edges, {rejected_count} rejected edges")
         return {
@@ -1181,6 +1424,7 @@ class GDSScheduler:
         raise ValueError(f"Job '{job_name}' not found in domain spec")
 
     def start(self) -> None:
+        self._started_at = datetime.now(tz=UTC)
         self.scheduler.start()
         logger.info("GDS scheduler started")
 

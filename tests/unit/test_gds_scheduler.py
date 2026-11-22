@@ -236,13 +236,17 @@ class TestAlgorithmDispatch:
 
     @pytest.mark.asyncio
     async def test_cooccurrence_happy_path(self):
-        driver = _mock_driver([{"edges_created": 15}])
+        driver = _mock_driver()
+        # Step 1 MERGE, then the prune (each returns its own column).
+        driver.execute_query = AsyncMock(side_effect=[[{"edges_created": 15}], [{"pruned_edges": 3}]])
         job = _job("test_cooc", "cooccurrence", sourceedge="ACCEPTS_POLYMER", writeedge="CO_PROCESSES")
         spec = _minimal_spec([job])
         scheduler = GDSScheduler(spec, driver)
 
         result = await scheduler.execute_job(job)
         assert result["status"] == "success"
+        assert result["edges_created"] == 15
+        assert result["edges_pruned"] == 3
         # RU-098 / CEG-COR-168: per-node keep sets are ordered by weight (with a
         # deterministic tie-break) before collect; an edge is deleted only when
         # both endpoints prune (degree > 10) and neither keeps it.
@@ -511,7 +515,12 @@ class TestAlgorithmDispatch:
             scheduler._get_candidate_label(job)
 
     @pytest.mark.asyncio
-    async def test_unknown_algorithm_skipped(self):
+    async def test_unknown_algorithm_skipped(self, monkeypatch):
+        # Legacy contract; with gds_dependency_barrier_enabled (default) it is
+        # `refused` — tests/unit/test_gds_dependency_barrier.py.
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gds_dependency_barrier_enabled", False)
         driver = _mock_driver()
         job = _job("test_unknown", "nonexistent_algo")
         spec = _minimal_spec([job])
@@ -708,3 +717,64 @@ class TestStableLouvainContract:
         doc = (GDSScheduler._run_stable_louvain.__doc__ or "").lower()
         assert "majority" not in doc
         assert "last successful run" in doc
+
+
+# ── CEG-NATIVE-CLOSURE-001 F05: prune failure after write is not success ──
+
+
+def _prune_failing_driver(first_result: list) -> AsyncMock:
+    """Every statement succeeds except one whose Cypher deletes (the prune)."""
+
+    async def _execute(cypher, *args, **kwargs):
+        if "DELETE r" in cypher:
+            raise RuntimeError("injected prune failure")
+        return first_result
+
+    driver = AsyncMock()
+    driver.execute_query = AsyncMock(side_effect=_execute)
+    return driver
+
+
+class TestPruneFailureIsPartial:
+    @pytest.mark.asyncio
+    async def test_cooccurrence_prune_failure_is_partial(self):
+        driver = _prune_failing_driver([{"edges_created": 7}])
+        job = _job("co", "cooccurrence", sourceedge="INTERACTED_WITH", writeedge="CO_WITH")
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+
+        result = await scheduler.execute_job(job)
+
+        assert result["status"] == "partial"
+        assert result["edges_created"] == 7
+        assert result["edges_pruned"] is None
+        assert "injected prune failure" in result["prune_error"]
+        assert scheduler.job_history[-1]["status"] == "partial"
+
+    @pytest.mark.asyncio
+    async def test_reinforcement_prune_failure_is_partial(self):
+        driver = _prune_failing_driver([{"accepted_edges": 2, "rejected_edges": 1}])
+        job = _job("rf", "reinforcement", **_REINFORCEMENT_JOB)
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+
+        result = await scheduler.execute_job(job)
+
+        assert result["status"] == "partial"
+        assert result["accepted_edges"] == 2
+        assert result["rejected_edges"] == 1
+        assert "injected prune failure" in result["prune_error"]
+
+    @pytest.mark.asyncio
+    async def test_flag_off_keeps_logged_success(self, monkeypatch):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gds_prune_failure_partial_enabled", False)
+        driver = _prune_failing_driver([{"edges_created": 7}])
+        job = _job("co", "cooccurrence", sourceedge="INTERACTED_WITH", writeedge="CO_WITH")
+        result = await GDSScheduler(_minimal_spec([job]), driver).execute_job(job)
+        assert result["status"] == "success"
+        assert result["edges_pruned"] == 0
+
+    def test_flag_default_on(self):
+        from engine.config.settings import Settings
+
+        assert Settings.model_fields["gds_prune_failure_partial_enabled"].default is True
