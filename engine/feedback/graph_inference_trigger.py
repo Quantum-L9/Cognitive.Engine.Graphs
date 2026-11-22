@@ -79,13 +79,10 @@ MAX_INFLIGHT_DELIVERIES = 64
 # Properties that move on every write and say nothing about the entity.
 _VOLATILE_PROPERTIES = frozenset({"updated_at", "created_at"})
 
-# Obligation statuses.
+# Not-accepted statuses a retry may re-send (gate_egress.classify_intake_ack names them all).
 STATUS_PENDING = "pending"
-STATUS_ACCEPTED = "accepted"
-STATUS_PARTIAL = "partial"
 STATUS_UNCONFIRMED = "unconfirmed"
 STATUS_BLOCKED = "blocked"
-STATUS_NO_FINDINGS = "no_findings"
 
 # Decisions.
 DECISION_UNCHANGED = "unchanged"
