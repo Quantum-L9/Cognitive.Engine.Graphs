@@ -661,13 +661,16 @@ async def test_lost_response_after_a_derived_retry_never_queues_twice(flags, mon
 
 
 @pytest.mark.asyncio
-async def test_new_obligation_does_not_inherit_the_superseded_delivery_state(flags, gate: FakeGate) -> None:
-    """CodeRabbit #540: a new emit clears wire_key and last_detail, so retry sends under its own key."""
+@pytest.mark.parametrize("prior_queued", [0, None], ids=["prior-zero-intake", "prior-accepted"])
+async def test_new_obligation_does_not_inherit_the_superseded_delivery_state(
+    flags, gate: FakeGate, prior_queued: int | None
+) -> None:
+    """CodeRabbit #540: a new unscheduled emit clears wire_key and last_detail; retry sends under its own key."""
     graph = FakeGraph()
     spec = _spec(["infer_company_size_tier"])
     _bind(spec, graph)
-    gate.queued = 0
-    await _sync([{"cave_id": "c1", "employee_count": 40}])  # zero intake: wire_key + last_detail recorded
+    gate.queued = prior_queued
+    await _sync([{"cave_id": "c1", "employee_count": 40}])  # wire_key + last_detail recorded for obligation 1
     graph.nodes[(LABEL, "c1")]["employee_count"] = 120  # new evidence, recorded but not yet sent
     report = await trigger.evaluate_and_record(
         graph, spec, tenant=TENANT, label=LABEL, id_property="cave_id", ids=["c1"]
