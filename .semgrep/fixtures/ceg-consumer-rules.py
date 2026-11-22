@@ -181,6 +181,24 @@ def bound_logger() -> object:
     return log.bind(component="canary")
 
 
+bound_receiver = structlog.get_logger(__name__).bind(tenant="example")
+
+
+def bound_receiver_child() -> object:
+    # ruleid: l9.no-structlog-getchild
+    return bound_receiver.getChild("child")
+
+
+def inline_bound_child() -> object:
+    # ruleid: l9.no-structlog-getchild
+    return structlog.get_logger(__name__).bind(tenant="example").getChild("child")
+
+
+def inline_bound_getlogger_child() -> object:
+    # ruleid: l9.no-structlog-getchild
+    return structlog.getLogger(__name__).bind(tenant="example").getChild("child")
+
+
 def inline_child() -> object:
     # ruleid: l9.no-structlog-getchild
     return structlog.get_logger(__name__).getChild("canary")

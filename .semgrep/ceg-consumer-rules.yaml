@@ -149,6 +149,8 @@ rules:
   - pattern-either:
     - pattern: structlog.get_logger(...).getChild(...)
     - pattern: structlog.getLogger(...).getChild(...)
+    - pattern: structlog.get_logger(...).bind(...).getChild(...)
+    - pattern: structlog.getLogger(...).bind(...).getChild(...)
     - patterns:
       - pattern-either:
         - pattern-inside: |
@@ -156,6 +158,12 @@ rules:
             ...
         - pattern-inside: |
             $LOGGER = structlog.getLogger(...)
+            ...
+        - pattern-inside: |
+            $LOGGER = structlog.get_logger(...).bind(...)
+            ...
+        - pattern-inside: |
+            $LOGGER = structlog.getLogger(...).bind(...)
             ...
       - pattern: $LOGGER.getChild(...)
   message: "structlog doesn't support getChild(). Use bind() instead.\n\nBad:\n  self.logger\
