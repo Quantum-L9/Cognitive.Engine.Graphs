@@ -336,7 +336,9 @@ class SimilarityScorer:
         id_prop = sanitize_label(self.id_property(label))
         comp_props = self._spec.comparison_properties
         if not settings.resolution_prefilter_recall_enabled:
-            return await self._find_first_property_candidates(entity_id, label, id_prop, limit)
+            return await self._find_first_property_candidates(
+                entity_id, label, id_prop, limit, exclude_resolved=exclude_resolved
+            )
         unresolved = " AND NOT EXISTS { (candidate)-[:RESOLVED_FROM]->() }" if exclude_resolved else ""
         if not comp_props:
             # Fallback: return all entities of the same label
@@ -375,15 +377,29 @@ class SimilarityScorer:
         )
         return [r["entity_id"] for r in results if r.get("entity_id") is not None]
 
-    async def _find_first_property_candidates(self, entity_id: Any, label: str, id_prop: str, limit: int) -> list[Any]:
-        """The previous prefilter (``resolution_prefilter_recall_enabled`` off): first comparison property only."""
+    async def _find_first_property_candidates(
+        self, entity_id: Any, label: str, id_prop: str, limit: int, *, exclude_resolved: bool = False
+    ) -> list[Any]:
+        """The previous prefilter (``resolution_prefilter_recall_enabled`` off): first comparison property only.
+
+        ``exclude_resolved`` still applies: the verified resolver's eligibility
+        rule (``entity_resolution_merge_integrity``) is independent of recall,
+        so resolved nodes never take a slot on either path.
+        """
         label = sanitize_label(label)
         id_prop = sanitize_label(id_prop)
         comp_props = self._spec.comparison_properties
+        unresolved = ""
+        if exclude_resolved:
+            unresolved = (
+                " AND NOT EXISTS { (e)-[:RESOLVED_FROM]->() }"
+                if not comp_props
+                else (" AND NOT EXISTS { (candidate)-[:RESOLVED_FROM]->() }")
+            )
         if not comp_props:
             cypher = f"""
             MATCH (e:{label})
-            WHERE e.{id_prop} <> $entity_id
+            WHERE e.{id_prop} <> $entity_id{unresolved}
             RETURN e.{id_prop} AS entity_id
             LIMIT $limit
             """
@@ -392,7 +408,7 @@ class SimilarityScorer:
             cypher = f"""
             MATCH (source:{label} {{{id_prop}: $entity_id}})
             MATCH (candidate:{label})
-            WHERE candidate.{id_prop} <> $entity_id
+            WHERE candidate.{id_prop} <> $entity_id{unresolved}
                   AND candidate.{safe_prop} = source.{safe_prop}
             RETURN candidate.{id_prop} AS entity_id
             LIMIT $limit

@@ -849,8 +849,9 @@ class TestPrefilterRecallFlag:
         assert "candidate.name = source.name" in cypher
         assert "region" not in cypher
         assert " OR " not in cypher
-        assert "RESOLVED_FROM" not in cypher
         assert "ORDER BY" not in cypher
+        # The verified path's eligibility rule is independent of the recall flag.
+        assert cypher.index("NOT EXISTS { (candidate)-[:RESOLVED_FROM]->() }") < cypher.index("LIMIT $limit")
         assert "{supplier_id: $entity_id}" in cypher
 
     def test_flag_default_on(self) -> None:

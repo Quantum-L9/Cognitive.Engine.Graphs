@@ -776,9 +776,9 @@ class Settings(BaseSettings):
     # CEG-NATIVE-CLOSURE-001 F03: the resolution candidate prefilter admits a
     # candidate sharing any declared comparison property value (not only the
     # first), never admits a node without the declared id, orders the capped
-    # read by shared-value count then id, and on the resolver's verified path
-    # excludes already-resolved nodes before LIMIT. Off: the previous
-    # first-property prefilter.
+    # read by shared-value count then id. Off: the previous first-property
+    # prefilter. Either way the verified resolver excludes already-resolved
+    # nodes before LIMIT (entity_resolution_merge_integrity).
     resolution_prefilter_recall_enabled: bool = True
     # Correctness remediation lane G (plan 0d84ec8, RU-108..)
     # RU-108 / CEG-COR-044: readiness coerced an absent field confidence to 0,

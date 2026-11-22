@@ -435,20 +435,45 @@ async def test_integer_declared_ids_resolve_with_native_types(graph_driver, clea
     assert sorted((r["s"], r["t"]) for r in rows) == [(20, 10), (30, 10)]
 
 
+@pytest.mark.parametrize("recall", [True, False])
 @pytest.mark.asyncio
-async def test_resolved_nodes_do_not_fill_the_capped_prefilter(graph_driver, clean_db, orbital_spec) -> None:
+async def test_resolved_nodes_do_not_fill_the_capped_prefilter(
+    graph_driver, clean_db, orbital_spec, monkeypatch: pytest.MonkeyPatch, recall: bool
+) -> None:
     """An already-resolved node sharing more values must not take the max_candidates slot.
 
-    s and t share docking_ports; r (resolved) shares reliability and lat with s.
-    With max_candidates 1, s must still reach t: 1/3 >= 0.3.
+    s and t share docking_ports; r (resolved) shares reliability and lat with s;
+    ten resolved q_i share docking_ports, the first comparison property the
+    rollback prefilter reads. With max_candidates 1, s must still reach t on
+    both prefilter paths: 1/3 >= 0.3.
     """
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "resolution_prefilter_recall_enabled", recall)
     await _write(
         graph_driver,
         """
-        CREATE (s:OrbitalDepot {depot_id: 's', docking_ports: 6, reliability: 0.9, lat: 1.0})
-        CREATE (t:OrbitalDepot {depot_id: 't', docking_ports: 6, reliability: 0.5, lat: 2.0})
+        CREATE (:OrbitalDepot {depot_id: 's', docking_ports: 6, reliability: 0.9, lat: 1.0})
+        CREATE (:OrbitalDepot {depot_id: 'h', docking_ports: 99, reliability: 0.0, lat: 9.0})
+        """,
+    )
+    # Ten already-resolved nodes sharing the first comparison property, created
+    # before t, so a capped read that does not exclude them returns one of them.
+    await _write(
+        graph_driver,
+        """
+        MATCH (h:OrbitalDepot {depot_id: 'h'})
+        UNWIND range(1, 10) AS i
+        CREATE (:OrbitalDepot {depot_id: 'q' + toString(i), docking_ports: 6, reliability: 0.0, lat: 0.0})
+               -[:RESOLVED_FROM {resolution_id: 'pre' + toString(i), domain_id: 'neo4j'}]->(h)
+        """,
+    )
+    await _write(
+        graph_driver,
+        """
+        MATCH (h:OrbitalDepot {depot_id: 'h'})
+        CREATE (:OrbitalDepot {depot_id: 't', docking_ports: 6, reliability: 0.5, lat: 2.0})
         CREATE (r:OrbitalDepot {depot_id: 'r', docking_ports: 7, reliability: 0.9, lat: 1.0})
-        CREATE (h:OrbitalDepot {depot_id: 'h', docking_ports: 99, reliability: 0.0, lat: 9.0})
         CREATE (r)-[:RESOLVED_FROM {resolution_id: 'pre', domain_id: 'neo4j'}]->(h)
         """,
     )
@@ -465,7 +490,9 @@ async def test_resolved_nodes_do_not_fill_the_capped_prefilter(graph_driver, cle
     assert result["canonical_id"] in {"s", "t"}
     assert sorted(result["merged_entity_ids"] + [result["canonical_id"]]) == ["s", "t"]
     assert result["merged_count"] == 1
-    assert await _links(graph_driver) == sorted([("r", "h"), (result["merged_entity_ids"][0], result["canonical_id"])])
+    expected = [("r", "h"), *((f"q{i}", "h") for i in range(1, 11))]
+    expected.append((result["merged_entity_ids"][0], result["canonical_id"]))
+    assert await _links(graph_driver) == sorted(expected)
 
 
 @pytest.mark.asyncio

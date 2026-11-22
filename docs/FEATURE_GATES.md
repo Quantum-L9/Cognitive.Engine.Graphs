@@ -2353,7 +2353,9 @@ Tests: `tests/unit/test_buyer_line_identity.py`.
 
 | Flag (env var) | Default | Origin | Behaviour when on | Behaviour when off |
 |---|---|---|---|---|
-| `resolution_prefilter_recall_enabled` (`RESOLUTION_PREFILTER_RECALL_ENABLED`) | `true` | CEG-NATIVE-CLOSURE-001 F03 | `SimilarityScorer._find_property_candidates` admits a candidate sharing **any** declared `semantic_registry.comparison_properties` value (source value non-null), never a node without the label's declared id, and orders the capped read by shared-value count DESC then id ASC, so the `max_candidates` subset and tied results do not depend on insertion order. On the resolver's verified path (`entity_resolution_merge_integrity`) nodes with an outgoing `RESOLVED_FROM` are excluded before `LIMIT`, so they never take a candidate slot. Only reachable when a domain enables `semantic_registry` | The previous prefilter: the first comparison property only, no ordering, no resolved-node exclusion (still on the declared id property) |
+| `resolution_prefilter_recall_enabled` (`RESOLUTION_PREFILTER_RECALL_ENABLED`) | `true` | CEG-NATIVE-CLOSURE-001 F03 | `SimilarityScorer._find_property_candidates` admits a candidate sharing **any** declared `semantic_registry.comparison_properties` value (source value non-null), never a node without the label's declared id, and orders the capped read by shared-value count DESC then id ASC, so the `max_candidates` subset and tied results do not depend on insertion order. Only reachable when a domain enables `semantic_registry` | The previous prefilter: the first comparison property only, no ordering (still on the declared id property) |
+
+Independent of this flag, on the resolver's verified path (`entity_resolution_merge_integrity`) nodes with an outgoing `RESOLVED_FROM` are excluded before `LIMIT` on both prefilter paths, so an already-resolved node never takes a `max_candidates` slot (`test_resolved_nodes_do_not_fill_the_capped_prefilter`).
 
 The same change also does the following under the existing flags. With
 `spec_declared_candidate_id` on, every scorer and resolver query uses the
