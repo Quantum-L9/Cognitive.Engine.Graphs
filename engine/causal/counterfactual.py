@@ -364,7 +364,7 @@ class CounterfactualGenerator:
                 continue
             # First write wins: a retry over a changed comparison pool returns
             # the evidence actually stored, never the recomputed values.
-            for key in list(scenario):
+            for key in scenario:  # values only change; the key set does not
                 if key in existing:
                     scenario[key] = existing[key]
 
