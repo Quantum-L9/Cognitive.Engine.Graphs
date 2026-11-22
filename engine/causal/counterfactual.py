@@ -316,6 +316,9 @@ class CounterfactualGenerator:
 
     async def _store_scenarios(self, scenarios: list[dict[str, Any]]) -> None:
         """Persist CounterfactualScenario nodes in Neo4j."""
+        if settings.counterfactual_dedupe_and_spec_label:
+            await self._merge_scenarios(scenarios)
+            return
         if settings.counterfactual_support_semantics_enabled:
             await self._store_support_scenarios(scenarios)
             return
@@ -337,6 +340,26 @@ class CounterfactualGenerator:
             parameters={"scenarios": scenarios, "domain_id": self._db},
             database=self._db,
         )
+
+    async def _merge_scenarios(self, scenarios: list[dict[str, Any]]) -> None:
+        """C16 (``counterfactual_dedupe_and_spec_label``): idempotent scenario write.
+
+        A retry for an outcome whose scenarios are already stored adds no
+        duplicate node; each returned scenario carries the id actually stored.
+        """
+        fields = _SUPPORT_FIELDS if settings.counterfactual_support_semantics_enabled else _LEGACY_FIELDS
+        rows = await self._graph_driver.execute_query(
+            cypher=_merge_scenarios_cypher(fields),
+            parameters={"scenarios": scenarios, "domain_id": self._db},
+            database=self._db,
+        )
+        stored = {
+            row["proposed_id"]: row["scenario_id"]
+            for row in rows or []
+            if isinstance(row, dict) and row.get("proposed_id") and row.get("scenario_id")
+        }
+        for scenario in scenarios:
+            scenario["scenario_id"] = stored.get(scenario["scenario_id"], scenario["scenario_id"])
 
     async def _store_support_scenarios(self, scenarios: list[dict[str, Any]]) -> None:
         """SI-26: persist scenarios with their support fields and no confidence property."""
@@ -362,6 +385,37 @@ class CounterfactualGenerator:
             parameters={"scenarios": scenarios, "domain_id": self._db},
             database=self._db,
         )
+
+
+_LEGACY_FIELDS = ("counterfactual_outcome", "confidence")
+_SUPPORT_FIELDS = (
+    "counterfactual_outcome",
+    "support",
+    "support_count",
+    "compared_positives",
+    "support_basis",
+    "claim",
+)
+
+
+def _merge_scenarios_cypher(fields: tuple[str, ...]) -> str:
+    """MERGE one CounterfactualScenario per semantic key; first write wins.
+
+    The key is ``(actual_outcome, intervention_type, key_difference,
+    counterfactual_outcome, domain_id)``: the RU-075 intervention key per
+    outcome, split by the claim mode so a legacy ``success`` scenario and an
+    ``untested`` support scenario never merge into one node. Field names are
+    module constants, never input.
+    """
+    on_create = ", ".join(f"{field}: s.{field}" for field in ("scenario_id", *fields))
+    return (
+        "UNWIND $scenarios AS s\n"
+        "MERGE (cs:CounterfactualScenario {actual_outcome: s.actual_outcome, "
+        "intervention_type: s.intervention_type, key_difference: s.key_difference, "
+        "counterfactual_outcome: s.counterfactual_outcome, domain_id: $domain_id})\n"
+        f"ON CREATE SET cs += {{{on_create}, created_at: datetime()}}\n"
+        "RETURN s.scenario_id AS proposed_id, cs.scenario_id AS scenario_id"
+    )
 
 
 def _by_support(counts: dict[str, int]) -> list[tuple[str, int]]:
