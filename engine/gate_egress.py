@@ -222,10 +222,11 @@ def classify_intake_ack(dispatch: dict[str, Any]) -> tuple[str, str]:
     outputs sent. EIE's handler queues in memory, so even ``accepted`` is an
     intake ack, never consumption. Everything else is not delivered:
 
-    * ``partial``      — accepted with fewer targets queued than outputs sent;
+    * ``partial``      — accepted with some, not all, targets queued (not retried:
+      a resend could duplicate the queued ones);
     * ``unconfirmed``  — a non-failure response without a readable ack;
     * ``blocked``      — Gate is not configured (no direct fallback exists);
-    * ``pending``      — Gate/EIE refused or was unreachable; retriable;
+    * ``pending``      — Gate/EIE refused, was unreachable, or queued nothing; retriable;
     * ``skipped``      — nothing above the floor, nothing sent.
     """
     status = dispatch.get("status")
@@ -241,7 +242,12 @@ def classify_intake_ack(dispatch: dict[str, Any]) -> tuple[str, str]:
     queued = payload.get("targets_queued")
     if isinstance(queued, bool) or not isinstance(queued, int) or queued < 0:
         return "unconfirmed", "targets_queued_unreadable"
+    if queued == 0 and sent > 0:
+        # Nothing was taken in, so resending duplicates nothing: retryable.
+        return "pending", f"targets_queued=0 < sent={sent}"
     if queued < sent:
+        # Some targets were queued; a blind resend could queue them twice.
+        # Terminal until an operator decides (typed, never counted delivered).
         return "partial", f"targets_queued={queued} < sent={sent}"
     if queued > sent:
         return "unconfirmed", f"targets_queued={queued} > sent={sent}"

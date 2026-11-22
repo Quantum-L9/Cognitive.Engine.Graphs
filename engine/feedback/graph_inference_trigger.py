@@ -71,6 +71,7 @@ from engine.utils.security import sanitize_label
 logger = logging.getLogger(__name__)
 
 OBLIGATION_LABEL = "CegInferenceObligation"
+OBLIGATION_CONSTRAINT_NAME = "ceg_inference_obligation_key"
 # Bounded: one trigger evaluates at most this many entities from one sync batch.
 MAX_TRIGGER_ENTITIES = 500
 # Bounded: background deliveries alive at once; beyond it obligations stay pending.
@@ -90,6 +91,8 @@ DECISION_NO_FINDINGS = "no_findings"
 DECISION_SAME_FINDINGS = "same_findings"
 DECISION_EMIT = "emit"
 DECISION_NOT_FOUND = "entity_not_found_for_tenant"
+DECISION_SUPERSEDED = "superseded_by_concurrent_evaluation"
+DECISION_NO_CONSTRAINT = "obligation_constraint_missing"
 
 
 def obligation_constraint_cypher() -> str:
@@ -303,30 +306,70 @@ async def read_obligations(
 
 async def record_evaluations(
     driver: Any, domain_spec: Any, *, tenant: str, label: str, rows: list[dict[str, Any]]
-) -> None:
-    """Persist each evaluation's revisions and, for ``emit``, the pending obligation."""
+) -> set[str]:
+    """Persist each evaluation; return the entity ids whose write applied.
+
+    Compare-and-set: a row applies only while the stored revisions still equal
+    the ones its decision read (``prior_*``), so an overlapping evaluation that
+    read older evidence cannot replace newer state. The node is write-locked
+    (``_ceg_lock`` written and removed: the lock stays for the transaction)
+    before the comparison. ``same_findings`` and
+    ``no_findings`` retire any pending work they supersede; accepted history
+    (``accepted_*``) is kept.
+    """
     if not rows:
-        return
+        return set()
     cypher = (
         "// ceg:inference:record_evaluations\n"
         "UNWIND $rows AS row\n"
-        f"MERGE (o:{sanitize_label(OBLIGATION_LABEL)} {{tenant: $tenant, entity_type: $label, entity_id: row.entity_id}})\n"
+        "MERGE "
+        + _pattern("o", OBLIGATION_LABEL, "{tenant: $tenant, entity_type: $label, entity_id: row.entity_id}")
+        + "\n"
+        "SET o._ceg_lock = true REMOVE o._ceg_lock\n"
+        "WITH o, row\n"
+        "WHERE coalesce(o.evidence_revision, '') = coalesce(row.prior_evidence_revision, '')\n"
+        "  AND coalesce(o.rule_revision, '') = coalesce(row.prior_rule_revision, '')\n"
+        "WITH o, row, row.decision = 'emit' AS emit\n"
         "SET o.evidence_revision = row.evidence_revision, o.rule_revision = row.rule_revision,\n"
         "    o.decision = row.decision, o.evaluated_at = datetime(),\n"
-        "    o.status = CASE WHEN row.decision = 'emit' THEN 'pending'\n"
-        "                    WHEN row.decision = 'no_findings' THEN 'no_findings' ELSE o.status END,\n"
-        "    o.pending_key = CASE WHEN row.decision = 'emit' THEN row.pending_key ELSE o.pending_key END,\n"
-        "    o.pending_findings_digest = CASE WHEN row.decision = 'emit' THEN row.findings_digest\n"
-        "                                     ELSE o.pending_findings_digest END,\n"
-        "    o.pending_outputs_json = CASE WHEN row.decision = 'emit' THEN row.outputs_json\n"
-        "                                  ELSE o.pending_outputs_json END,\n"
-        "    o.attempts = CASE WHEN row.decision = 'emit' THEN 0 ELSE coalesce(o.attempts, 0) END"
+        "    o.status = CASE row.decision WHEN 'emit' THEN 'pending'\n"
+        "                    WHEN 'same_findings' THEN 'accepted' ELSE 'no_findings' END,\n"
+        "    o.pending_key = CASE WHEN emit THEN row.pending_key ELSE null END,\n"
+        "    o.pending_findings_digest = CASE WHEN emit THEN row.findings_digest ELSE null END,\n"
+        "    o.pending_outputs_json = CASE WHEN emit THEN row.outputs_json ELSE null END,\n"
+        "    o.attempts = CASE WHEN emit THEN 0 ELSE coalesce(o.attempts, 0) END\n"
+        "RETURN row.entity_id AS entity_id"
     )
-    await driver.execute_query(
+    written = await driver.execute_query(
         cypher=cypher,
         parameters={"tenant": tenant, "label": label, "rows": rows},
         database=_database(domain_spec),
     )
+    return {str(r["entity_id"]) for r in written or [] if isinstance(r, Mapping)}
+
+
+_VERIFIED_CONSTRAINT_DATABASES: set[str] = set()  # bounded: one entry per tenant database
+
+
+async def obligation_constraint_present(driver: Any, domain_spec: Any) -> bool:
+    """Whether the obligation-key uniqueness constraint exists in the tenant database.
+
+    Without it concurrent MERGEs may create two obligation nodes for one entity,
+    so the trigger writes nothing until ``init_schema`` has created it. A
+    positive answer is cached per database for the process.
+    """
+    database = _database(domain_spec)
+    if database in _VERIFIED_CONSTRAINT_DATABASES:
+        return True
+    rows = await driver.execute_query(
+        cypher="// ceg:inference:constraint_check\nSHOW CONSTRAINTS YIELD name RETURN name",
+        parameters={},
+        database=database,
+    )
+    present = any(isinstance(r, Mapping) and r.get("name") == OBLIGATION_CONSTRAINT_NAME for r in rows or [])
+    if present:
+        _VERIFIED_CONSTRAINT_DATABASES.add(database)
+    return present
 
 
 async def record_delivery(
@@ -423,6 +466,10 @@ async def evaluate_and_record(
     unique_ids = list(dict.fromkeys(str(i) for i in ids if i is not None and str(i) != ""))[:MAX_TRIGGER_ENTITIES]
     if not unique_ids or not to_run:
         return report
+    if not await obligation_constraint_present(driver, domain_spec):
+        logger.warning("graph inference: obligation constraint missing; run admin init_schema")
+        report.decisions[DECISION_NO_CONSTRAINT] = len(unique_ids)
+        return report
 
     entities = await read_entities(
         driver, domain_spec, tenant=tenant, label=label, id_property=id_property, ids=unique_ids
@@ -445,8 +492,11 @@ async def evaluate_and_record(
         report.count(decision)
         if decision == DECISION_UNCHANGED:
             continue
+        prior = priors.get(entity_id) or {}
         row: dict[str, Any] = {
             "entity_id": entity_id,
+            "prior_evidence_revision": prior.get("evidence_revision"),
+            "prior_rule_revision": prior.get("rule_revision"),
             "evidence_revision": evaluation.evidence_revision,
             "rule_revision": evaluation.rule_revision,
             "decision": decision,
@@ -466,7 +516,13 @@ async def evaluate_and_record(
             row["outputs_json"] = json.dumps(outputs, sort_keys=True, default=str)
             report.pending.append(PendingDelivery(entity_id=entity_id, pending_key=key, outputs=outputs))
         rows.append(row)
-    await record_evaluations(driver, domain_spec, tenant=tenant, label=label, rows=rows)
+    written = await record_evaluations(driver, domain_spec, tenant=tenant, label=label, rows=rows)
+    for row in rows:
+        if row["entity_id"] not in written:
+            report.decisions[row["decision"]] -= 1
+            report.count(DECISION_SUPERSEDED)
+    report.decisions = {k: v for k, v in report.decisions.items() if v}
+    report.pending = [p for p in report.pending if p.entity_id in written]
     return report
 
 
@@ -476,6 +532,20 @@ async def deliver(
     """One delivery attempt; the disposition is recorded, never assumed."""
     from engine.gate_egress import classify_intake_ack, emit_graph_inference_result
 
+    current = (await read_obligations(driver, domain_spec, tenant=tenant, label=label, ids=[pending.entity_id])).get(
+        pending.entity_id
+    )
+    if current is None or current.get("pending_key") != pending.pending_key:
+        # A later evaluation superseded or retired this obligation: sending it
+        # would deliver a finding the graph no longer supports.
+        return {
+            "status": "skipped",
+            "error": "superseded",
+            "idempotency_key": pending.pending_key,
+            "sent_outputs": 0,
+            "delivery_status": "superseded",
+            "delivery_detail": "pending_key is no longer the active obligation",
+        }
     dispatch = await emit_graph_inference_result(
         tenant=tenant,
         entity_id=pending.entity_id,
@@ -555,6 +625,7 @@ async def retry_pending(
 __all__ = [
     "MAX_INFLIGHT_DELIVERIES",
     "MAX_TRIGGER_ENTITIES",
+    "OBLIGATION_CONSTRAINT_NAME",
     "OBLIGATION_LABEL",
     "Evaluation",
     "PendingDelivery",
@@ -568,6 +639,7 @@ __all__ = [
     "findings_digest",
     "first_party_properties",
     "obligation_constraint_cypher",
+    "obligation_constraint_present",
     "obligation_key",
     "retry_pending",
     "rule_revision",
