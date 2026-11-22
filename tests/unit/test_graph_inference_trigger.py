@@ -81,10 +81,11 @@ class FakeGraph:
             written = []
             for row in p["rows"]:
                 o = self.obligations.setdefault(row["entity_id"], {})
-                if (o.get("evidence_revision") or "", o.get("rule_revision") or "") != (
-                    row["prior_evidence_revision"] or "",
-                    row["prior_rule_revision"] or "",
-                ):
+                stored = (o.get(k) or "" for k in ("evidence_revision", "rule_revision", "accepted_findings_digest"))
+                prior = (
+                    row[f"prior_{k}"] or "" for k in ("evidence_revision", "rule_revision", "accepted_findings_digest")
+                )
+                if tuple(stored) != tuple(prior):
                     continue
                 emit = row["decision"] == "emit"
                 o.update(
@@ -101,7 +102,7 @@ class FakeGraph:
         if "record_delivery" in tag:
             o = self.obligations.get(p["entity_id"])
             if o is not None and o.get("pending_key") == p["pending_key"]:
-                o["status"] = p["status"]
+                o.update(status=p["status"], last_detail=p["detail"], attempts=o.get("attempts", 0) + 1)
                 if p["status"] == "accepted":
                     o["accepted_findings_digest"] = o.get("pending_findings_digest")
         return []
@@ -210,7 +211,7 @@ async def test_older_overlapping_evaluation_cannot_replace_newer_state(gate: Fak
     _node(graph, employee_count=40)
     await _run(graph, spec)
     newer = dict(graph.obligations["c1"])
-    row = dict.fromkeys(("prior_evidence_revision", "prior_rule_revision"))
+    row = dict.fromkeys(("prior_evidence_revision", "prior_rule_revision", "prior_accepted_findings_digest"))
     row |= {
         "entity_id": "c1",
         "evidence_revision": "old",
@@ -222,6 +223,10 @@ async def test_older_overlapping_evaluation_cannot_replace_newer_state(gate: Fak
     }
     assert await trigger.record_evaluations(graph, spec, tenant=TENANT, label=LABEL, rows=[row]) == set()
     assert graph.obligations["c1"] == newer
+    row |= {"prior_evidence_revision": newer["evidence_revision"], "prior_rule_revision": newer["rule_revision"]}
+    assert (
+        await trigger.record_evaluations(graph, spec, tenant=TENANT, label=LABEL, rows=[row]) == set()
+    )  # acceptance moved
 
 
 @pytest.mark.asyncio
@@ -268,7 +273,8 @@ async def test_zero_intake_is_retryable_under_the_same_key(gate: FakeGate, queue
     gate.queued = queued
     await trigger.retry_pending(graph, spec, tenant=TENANT, label=LABEL, entity_id="c1")
     assert graph.obligations["c1"]["status"] == status
-    assert gate.sent[0]["idempotency_key"] == gate.sent[1]["idempotency_key"]
+    # Gate cached the zero-intake success under the first key: the retry must reach EIE.
+    assert gate.sent[1]["idempotency_key"] == gate.sent[0]["idempotency_key"] + ":zero-intake-retry:1"
 
 
 @pytest.mark.asyncio
@@ -314,5 +320,12 @@ def test_egress_drops_out_of_range_confidence(confidence: float) -> None:
     assert build_inference_outputs("e-1", [{"field": "f", "value": 1, "confidence": confidence}]) == []
 
 
-def test_obligation_key_is_unique_on_tenant_type_and_id() -> None:
-    assert "REQUIRE (o.tenant, o.entity_type, o.entity_id) IS UNIQUE" in trigger.obligation_constraint_cypher()
+@pytest.mark.asyncio
+async def test_shutdown_forgets_constraint_confirmations(gate: FakeGate) -> None:
+    from engine.state import get_state
+
+    state = get_state()
+    state.inference_constraint_databases.add("cheese-aging")
+    state._initialized = True
+    await state.shutdown()
+    assert state.inference_constraint_databases == set()

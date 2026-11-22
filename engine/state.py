@@ -59,9 +59,7 @@ class EngineState:
         self._compliance_engines: dict[str, ComplianceEngine] = {}
         self._tenant_allowlist: set[str] | None = None  # None = all tenants allowed
         self._db_pool: Any | None = None  # optional asyncpg pool for compliance audit flush
-        # A3 graph inference (engine/feedback/graph_inference_trigger.py): scheduled
-        # deliveries still running (bounded by MAX_INFLIGHT_DELIVERIES), and tenant
-        # databases where the obligation-key constraint was confirmed.
+        # graph_inference_trigger: running deliveries (bounded); constraint-confirmed dbs.
         self._inference_deliveries: set[asyncio.Task[Any]] = set()
         self._inference_constraint_databases: set[str] = set()
 
@@ -200,6 +198,7 @@ class EngineState:
             self._domain_loader = None
             self._tenant_allowlist = None
             self._db_pool = None
+            self._inference_constraint_databases.clear()  # confirmations belong to the old driver
             self._shutdown_time = time.time()
             self._initialized = False
             logger.info("EngineState shut down at %.3f", self._shutdown_time)

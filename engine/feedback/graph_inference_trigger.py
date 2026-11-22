@@ -306,6 +306,7 @@ async def record_evaluations(
         "WITH o, row\n"
         "WHERE coalesce(o.evidence_revision, '') = coalesce(row.prior_evidence_revision, '')\n"
         "  AND coalesce(o.rule_revision, '') = coalesce(row.prior_rule_revision, '')\n"
+        "  AND coalesce(o.accepted_findings_digest, '') = coalesce(row.prior_accepted_findings_digest, '')\n"
         "WITH o, row, row.decision = 'emit' AS emit\n"
         "SET o.evidence_revision = row.evidence_revision, o.rule_revision = row.rule_revision,\n"
         "    o.decision = row.decision, o.evaluated_at = datetime(),\n"
@@ -474,6 +475,7 @@ async def evaluate_and_record(
             "entity_id": entity_id,
             "prior_evidence_revision": prior.get("evidence_revision"),
             "prior_rule_revision": prior.get("rule_revision"),
+            "prior_accepted_findings_digest": prior.get("accepted_findings_digest"),
             "evidence_revision": evaluation.evidence_revision,
             "rule_revision": evaluation.rule_revision,
             "decision": decision,
@@ -504,7 +506,13 @@ async def evaluate_and_record(
 
 
 async def deliver(
-    driver: Any, domain_spec: Any, *, tenant: str, label: str, pending: PendingDelivery
+    driver: Any,
+    domain_spec: Any,
+    *,
+    tenant: str,
+    label: str,
+    pending: PendingDelivery,
+    wire_key: str | None = None,
 ) -> dict[str, Any]:
     """One delivery attempt; the disposition is recorded, never assumed."""
     from engine.gate_egress import classify_intake_ack, emit_graph_inference_result
@@ -513,8 +521,7 @@ async def deliver(
         pending.entity_id
     )
     if current is None or current.get("pending_key") != pending.pending_key:
-        # A later evaluation superseded or retired this obligation: sending it
-        # would deliver a finding the graph no longer supports.
+        # Superseded or retired: the graph no longer supports this finding.
         return {
             "status": "skipped",
             "error": "superseded",
@@ -527,7 +534,7 @@ async def deliver(
         tenant=tenant,
         entity_id=pending.entity_id,
         results=pending.outputs,
-        idempotency_key=pending.pending_key,
+        idempotency_key=wire_key or pending.pending_key,
     )
     status, detail = classify_intake_ack(dispatch)
     try:
@@ -542,8 +549,7 @@ async def deliver(
             detail=detail,
         )
     except Exception:
-        # The send happened; the record did not. The obligation stays pending and
-        # a retry reuses the same idempotency key, so Gate/EIE dedup it.
+        # Sent but unrecorded: stays pending; a same-key retry is deduped.
         logger.warning("graph inference: delivery disposition not recorded for %s", pending.pending_key, exc_info=True)
     return {**dispatch, "delivery_status": status, "delivery_detail": detail}
 
@@ -583,7 +589,8 @@ async def drain_inflight() -> None:
 async def retry_pending(
     driver: Any, domain_spec: Any, *, tenant: str, label: str, entity_id: str
 ) -> dict[str, Any] | None:
-    """Re-deliver a recorded, not-accepted obligation under its original key."""
+    """Re-deliver a not-accepted obligation under its key (Gate/EIE dedup it); after a
+    zero-intake ack, which Gate cached as success, a derived key reaches EIE."""
     priors = await read_obligations(driver, domain_spec, tenant=tenant, label=label, ids=[entity_id])
     prior = priors.get(entity_id)
     if prior is None or prior.get("status") not in (STATUS_PENDING, STATUS_BLOCKED, STATUS_UNCONFIRMED):
@@ -593,10 +600,12 @@ async def retry_pending(
     if not key or not outputs_json:
         return None
     outputs = json.loads(outputs_json)
+    zero_intake = str(prior.get("last_detail") or "").startswith("targets_queued=0")
     return await deliver(
         driver,
         domain_spec,
         tenant=tenant,
         label=label,
         pending=PendingDelivery(entity_id=entity_id, pending_key=str(key), outputs=list(outputs)),
+        wire_key=f"{key}:zero-intake-retry:{prior.get('attempts', 0)}" if zero_intake else None,
     )
