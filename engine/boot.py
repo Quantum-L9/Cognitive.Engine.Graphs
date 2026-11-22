@@ -181,6 +181,8 @@ class GraphLifecycle(LifecycleHook):
 
             policy = StalenessPolicy.from_settings()
             now = datetime.now(tz=UTC)
+            if settings.gds_health_last_attempt_enabled:
+                return await self._gds_health_by_last_attempt(policy, now)
             stale_jobs: list[str] = []
             for scheduler in self._registered_schedulers():
                 history = await scheduler.get_job_history()
@@ -211,6 +213,36 @@ class GraphLifecycle(LifecycleHook):
 
         self._gds_health_check = gds_health_check
         logger.info("W6-03: GDS health probe registered")
+
+    async def _gds_health_by_last_attempt(self, policy: Any, now: Any) -> dict[str, Any]:
+        """CEG-NATIVE-CLOSURE-001 F07: every declared job, judged by assess_gds_health.
+
+        A job with no successful run (never run after boot included) or whose
+        latest success is past its deadline is stale; a job whose success is
+        fresh but whose latest attempt is not ``success`` is unhealthy.
+        """
+        from engine.gds.staleness import assess_gds_health
+
+        stale_jobs: list[str] = []
+        unhealthy: list[str] = []
+        for scheduler in self._registered_schedulers():
+            history = await scheduler.get_job_history()
+            jobs = list(scheduler.domain_spec.gdsjobs)
+            # GDS-STALE-01 off keeps the legacy algorithm key in the message.
+            algorithm = {job.name: job.algorithm for job in jobs}
+            for name, verdict in assess_gds_health(jobs, history, now, policy).items():
+                label = name if policy.per_schedule else algorithm.get(name, name)
+                if verdict.stale:
+                    if label not in stale_jobs:
+                        stale_jobs.append(label)
+                elif not verdict.healthy:
+                    unhealthy.append(f"{label} ({verdict.last_attempt_status})")
+        problems = []
+        if stale_jobs:
+            problems.append(f"stale jobs: {', '.join(stale_jobs)}")
+        if unhealthy:
+            problems.append(f"unhealthy jobs: {', '.join(unhealthy)}")
+        return {"gds": f"degraded: {'; '.join(problems)}"} if problems else {"gds": "ok"}
 
     async def shutdown(self) -> None:
         logger.info("GraphLifecycle.shutdown → stopping schedulers and closing Neo4j pool")
