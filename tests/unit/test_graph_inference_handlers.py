@@ -107,6 +107,8 @@ class FakeGraph:
                     pending_findings_digest=row["findings_digest"] if emit else None,
                     pending_outputs_json=row["outputs_json"] if emit else None,
                     attempts=0 if emit else o.get("attempts", 0),
+                    wire_key=None if emit else o.get("wire_key"),
+                    last_detail=None if emit else o.get("last_detail"),
                 )
                 written.append({"entity_id": row["entity_id"]})
             return written
@@ -608,6 +610,8 @@ def test_record_evaluations_statement_carries_every_compare_and_set_predicate() 
     source = inspect.getsource(trigger.record_evaluations)
     for field in ("evidence_revision", "rule_revision", "accepted_findings_digest"):
         assert f"coalesce(o.{field}, '') = coalesce(row.prior_{field}, '')" in source
+    for field in ("wire_key", "last_detail"):
+        assert f"o.{field} = CASE WHEN emit THEN null ELSE o.{field} END" in source
     evaluate = inspect.getsource(trigger.evaluate_and_record)
     assert '"prior_accepted_findings_digest": prior.get("accepted_findings_digest")' in evaluate
 
@@ -653,4 +657,27 @@ async def test_lost_response_after_a_derived_retry_never_queues_twice(flags, mon
     keys = [packet["idempotency_key"] for packet in gate.sent]
     assert keys[1] == keys[2] != keys[0]
     assert len(gate.queued_targets) == 1
+    assert graph.obligations[(TENANT, LABEL, "c1")]["status"] == "accepted"
+
+
+@pytest.mark.asyncio
+async def test_new_obligation_does_not_inherit_the_superseded_delivery_state(flags, gate: FakeGate) -> None:
+    """CodeRabbit #540: a new emit clears wire_key and last_detail, so retry sends under its own key."""
+    graph = FakeGraph()
+    spec = _spec(["infer_company_size_tier"])
+    _bind(spec, graph)
+    gate.queued = 0
+    await _sync([{"cave_id": "c1", "employee_count": 40}])  # zero intake: wire_key + last_detail recorded
+    graph.nodes[(LABEL, "c1")]["employee_count"] = 120  # new evidence, recorded but not yet sent
+    report = await trigger.evaluate_and_record(
+        graph, spec, tenant=TENANT, label=LABEL, id_property="cave_id", ids=["c1"]
+    )
+    new_key = report.pending[0].pending_key
+    obligation = graph.obligations[(TENANT, LABEL, "c1")]
+    assert obligation["pending_key"] == new_key != gate.sent[0]["idempotency_key"]
+    assert obligation["wire_key"] is None
+    assert obligation["last_detail"] is None
+    gate.queued = None
+    await trigger.retry_pending(graph, spec, tenant=TENANT, label=LABEL, entity_id="c1")
+    assert gate.sent[-1]["idempotency_key"] == new_key
     assert graph.obligations[(TENANT, LABEL, "c1")]["status"] == "accepted"
