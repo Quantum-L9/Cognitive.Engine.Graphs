@@ -865,14 +865,8 @@ class GDSScheduler:
             label = sanitize_label(node_label)
             owner = sanitize_label(OWNER_PROPERTY)
             a_node, b_node = f"(a:{label})", f"(b:{label})"
-            # Adopt a pre-flag edge this job wrote (no marker) instead of writing
-            # a marked twin beside it; a marked edge of another job is never adopted.
-            merge = f"""
-        OPTIONAL MATCH (a)-[legacy:{write_edge}]->(b)
-        WHERE legacy.{owner} IS NULL
-        WITH a, b, weight, head(collect(legacy)) AS legacy
-        FOREACH (_ IN CASE WHEN legacy IS NULL THEN [] ELSE [1] END | SET legacy.{owner} = $job_id)
-        MERGE (a)-[r:{write_edge} {{{owner}: $job_id}}]->(b)"""
+            # Never adopt an unmarked edge: it may be another producer's (X06).
+            merge = f"MERGE (a)-[r:{write_edge} {{{owner}: $job_id}}]->(b)"
 
         # Step 1: Build co-occurrence edges
         cypher = f"""

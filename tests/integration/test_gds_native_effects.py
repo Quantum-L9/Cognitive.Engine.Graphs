@@ -729,16 +729,21 @@ async def test_g10_x06_cooccurrence_prune_spares_foreign_edges_and_stays_in_decl
 
 
 @pytest.mark.asyncio
-async def test_g10_upgrade_adopts_legacy_unmarked_edges_without_duplicates(
+async def test_g10_upgrade_never_adopts_legacy_unmarked_edges(
     graph_driver: Any, domain_database: str, clean_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """CodeRabbit on #543: the first owned run must not write a marked twin beside a pre-flag edge."""
+    """CTO ruling (X06 / N4 action 2): unmarked edges are never adopted, re-weighted or pruned.
+
+    The first owned run writes its own marked edges beside the pre-flag ones; the
+    unmarked leftovers are the documented one-time migration cost.
+    """
     await _write(graph_driver, COOCCURRENCE_SEED, {"uses": USES})
     job = _job(
         "co_usage", "cooccurrence", ["USES"], nodelabels=["Site", "Resource"], sourceedge="USES", writeedge="CO_USES"
     )
     monkeypatch.setattr(settings, "gds_cooccurrence_owned_edges_enabled", False)
     assert (await GDSScheduler(_spec([job]), graph_driver).execute_job(job))["status"] == "success"  # pre-flag run
+    legacy_before = await _relationship_fingerprint(graph_driver, DB)
     monkeypatch.setattr(settings, "gds_cooccurrence_owned_edges_enabled", True)
 
     assert (await GDSScheduler(_spec([job]), graph_driver).execute_job(job))["status"] == "success"
@@ -748,7 +753,44 @@ async def test_g10_upgrade_adopts_legacy_unmarked_edges_without_duplicates(
         "MATCH (a:Site)-[r:CO_USES]->(b:Site) RETURN a.sid AS a, b.sid AS b, r.gds_job AS owner, r.weight AS w",
     )
     found = sorted(("".join(sorted((r["a"], r["b"]))), str(r["owner"]), r["w"]) for r in rows)
-    assert found == [("ab", "co_usage", 3), ("ac", "co_usage", 2), ("bc", "co_usage", 2)]
-    monkeypatch.setattr(settings, "gds_cooccurrence_owned_edges_enabled", False)  # rollback: still one edge per pair
-    assert (await GDSScheduler(_spec([job]), graph_driver).execute_job(job))["status"] == "success"
-    assert len(await _rows(graph_driver, "MATCH (:Site)-[r:CO_USES]->(:Site) RETURN r")) == 3
+    assert found == [
+        ("ab", "None", 3),
+        ("ab", "co_usage", 3),
+        ("ac", "None", 2),
+        ("ac", "co_usage", 2),
+        ("bc", "None", 2),
+        ("bc", "co_usage", 2),
+    ]
+    unmarked_after = [e for e in await _relationship_fingerprint(graph_driver, DB) if "gds_job" not in str(e)]
+    assert unmarked_after == [e for e in legacy_before if "gds_job" not in str(e)]  # byte-identical
+
+
+@pytest.mark.asyncio
+async def test_g10_x06_foreign_unmarked_edge_between_cooccurring_pair_is_untouched(
+    graph_driver: Any, domain_database: str, clean_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CTO ruling witness: another producer's unmarked edge of the same type between a pair
+    the job co-occurs on keeps its weight and is neither adopted nor pruned."""
+    monkeypatch.setattr(settings, "gds_cooccurrence_owned_edges_enabled", True)
+    await _write(graph_driver, COOCCURRENCE_SEED, {"uses": USES})
+    await _write(
+        graph_driver,
+        "MATCH (a:Site {sid: 'a'}), (b:Site {sid: 'b'}) CREATE (a)-[:CO_USES {weight: 9, owner: 'foreign'}]->(b)",
+    )
+    job = _job(
+        "co_usage", "cooccurrence", ["USES"], nodelabels=["Site", "Resource"], sourceedge="USES", writeedge="CO_USES"
+    )
+    for _ in range(2):
+        assert (await GDSScheduler(_spec([job]), graph_driver).execute_job(job))["status"] == "success"
+
+    foreign = await _rows(
+        graph_driver,
+        "MATCH (:Site {sid: 'a'})-[r:CO_USES {owner: 'foreign'}]->(:Site {sid: 'b'}) "
+        "RETURN r.weight AS w, r.gds_job AS owner, keys(r) AS k",
+    )
+    assert [{**row, "k": sorted(row["k"])} for row in foreign] == [{"w": 9, "owner": None, "k": ["owner", "weight"]}]
+    owned = await _rows(
+        graph_driver,
+        "MATCH (:Site {sid: 'a'})-[r:CO_USES {gds_job: 'co_usage'}]->(:Site {sid: 'b'}) RETURN r.weight AS w",
+    )
+    assert owned == [{"w": 3}]
