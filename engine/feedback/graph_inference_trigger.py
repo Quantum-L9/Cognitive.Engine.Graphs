@@ -64,8 +64,6 @@ _VOLATILE_PROPERTIES = frozenset({"updated_at", "created_at"})
 STATUS_PENDING = "pending"
 STATUS_UNCONFIRMED = "unconfirmed"
 STATUS_BLOCKED = "blocked"
-
-# Decisions.
 DECISION_UNCHANGED = "unchanged"
 DECISION_NO_FINDINGS = "no_findings"
 DECISION_SAME_FINDINGS = "same_findings"
@@ -315,7 +313,9 @@ async def record_evaluations(
         "    o.pending_key = CASE WHEN emit THEN row.pending_key ELSE null END,\n"
         "    o.pending_findings_digest = CASE WHEN emit THEN row.findings_digest ELSE null END,\n"
         "    o.pending_outputs_json = CASE WHEN emit THEN row.outputs_json ELSE null END,\n"
-        "    o.attempts = CASE WHEN emit THEN 0 ELSE coalesce(o.attempts, 0) END\n"
+        "    o.attempts = CASE WHEN emit THEN 0 ELSE coalesce(o.attempts, 0) END,\n"
+        "    o.wire_key = CASE WHEN emit THEN null ELSE o.wire_key END,\n"
+        "    o.last_detail = CASE WHEN emit THEN null ELSE o.last_detail END\n"
         "RETURN row.entity_id AS entity_id"
     )
     written = await driver.execute_query(
