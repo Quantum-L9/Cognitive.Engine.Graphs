@@ -116,16 +116,22 @@ async def _rows(driver: Any, cypher: str, params: dict[str, Any] | None = None, 
     return await driver.execute_query(cypher, parameters=params or {}, database=db)
 
 
+def _typed(props: dict[str, Any]) -> tuple[tuple[str, str, str], ...]:
+    """Properties with their Python type, so 1 and "1" differ."""
+    return tuple(sorted((k, type(v).__name__, repr(v)) for k, v in props.items()))
+
+
 async def _relationship_fingerprint(driver: Any, db: str) -> list[tuple[Any, ...]]:
-    """Every relationship with its endpoints and properties: a before/after readback."""
-    rows = await _rows(
+    """Every node (labels, typed properties) and relationship (endpoints, type, typed properties): X06 readback."""
+    nodes = await _rows(driver, "MATCH (n) RETURN elementId(n) AS id, labels(n) AS labels, properties(n) AS p", db=db)
+    key = {row["id"]: (tuple(sorted(row["labels"])), _typed(row["p"])) for row in nodes}
+    rels = await _rows(
         driver,
-        "MATCH (a)-[r]->(b) RETURN coalesce(a.sid, a.rid, a.name) AS a, type(r) AS t, "
-        "coalesce(b.sid, b.rid, b.name) AS b, properties(r) AS p",
+        "MATCH (a)-[r]->(b) RETURN elementId(a) AS a, type(r) AS t, elementId(b) AS b, properties(r) AS p",
         db=db,
     )
-    return sorted(
-        (row["a"], row["t"], row["b"], tuple(sorted((k, str(v)) for k, v in row["p"].items()))) for row in rows
+    return sorted([("node", *key[row["id"]]) for row in nodes]) + sorted(
+        ("rel", key[row["a"]], row["t"], key[row["b"]], _typed(row["p"])) for row in rels
     )
 
 
@@ -548,10 +554,10 @@ async def test_g22_causal_chain_scoring_without_declared_causal_edges(
 
 @pytest.mark.asyncio
 async def test_g22_feedback_recalculation_dispatch_is_visible_and_flag_off_applies_nothing(
-    graph_driver: Any, domain_database: str, clean_db: None
+    graph_driver: Any, domain_database: str, clean_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Dispatch only: the weight writer and its flags belong to the feedback lane."""
-    assert settings.learned_weight_auto_apply_enabled is False
+    monkeypatch.setattr(settings, "learned_weight_auto_apply_enabled", False)
     before = await _rows(graph_driver, "MATCH (w:DimensionWeight) RETURN count(w) AS n")
     job = _job("weights", "feedback_recalculation", ["LINKS"])
     feedbackloop = {"enabled": True, "outcome_node_label": "Outcome"}
@@ -606,7 +612,13 @@ async def test_g20_node_similarity_keeps_last_good_output_on_pre_swap_failure(
     good = await _similar(graph_driver)
     assert first["status"] == "success", first
     assert first["relationships_written"] == len(good) - 1  # + the foreign edge
-    owned = {pair for pair in good if pair != ("c", "d")}
+    owned_rows = await _rows(
+        graph_driver,
+        "MATCH (a:Site)-[r:SIMILAR {gds_job: 'site_similarity'}]->(b:Site) RETURN a.sid AS a, b.sid AS b, r.sim AS s",
+    )
+    owned = {(r["a"], r["b"]): r["s"] for r in owned_rows}
+    assert owned[("a", "b")] == pytest.approx(1.0)  # a and b share r1, r2, r3: job output exists
+    assert set(owned) | {("c", "d")} == set(good)
     assert all(sum(1 for (a, _b) in owned if a == sid) <= 2 for sid in "abcd")  # topK bound
 
     # New source data, then a failure after the staging write but before the swap.
@@ -712,3 +724,29 @@ async def test_g10_x06_cooccurrence_prune_spares_foreign_edges_and_stays_in_decl
     assert first["edges_pruned"] == 0
     assert second["status"] == "success", second
     assert second["edges_created"] == 24  # MERGE on the owner marker: no duplicates on rerun
+
+
+@pytest.mark.asyncio
+async def test_g10_upgrade_adopts_legacy_unmarked_edges_without_duplicates(
+    graph_driver: Any, domain_database: str, clean_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CodeRabbit on #543: the first owned run must not write a marked twin beside a pre-flag edge."""
+    await _write(graph_driver, COOCCURRENCE_SEED, {"uses": USES})
+    job = _job(
+        "co_usage", "cooccurrence", ["USES"], nodelabels=["Site", "Resource"], sourceedge="USES", writeedge="CO_USES"
+    )
+    monkeypatch.setattr(settings, "gds_cooccurrence_owned_edges_enabled", False)
+    assert (await GDSScheduler(_spec([job]), graph_driver).execute_job(job))["status"] == "success"  # pre-flag run
+    monkeypatch.setattr(settings, "gds_cooccurrence_owned_edges_enabled", True)
+
+    assert (await GDSScheduler(_spec([job]), graph_driver).execute_job(job))["status"] == "success"
+
+    rows = await _rows(
+        graph_driver,
+        "MATCH (a:Site)-[r:CO_USES]->(b:Site) RETURN a.sid AS a, b.sid AS b, r.gds_job AS owner, r.weight AS w",
+    )
+    found = sorted(("".join(sorted((r["a"], r["b"]))), str(r["owner"]), r["w"]) for r in rows)
+    assert found == [("ab", "co_usage", 3), ("ac", "co_usage", 2), ("bc", "co_usage", 2)]
+    monkeypatch.setattr(settings, "gds_cooccurrence_owned_edges_enabled", False)  # rollback: still one edge per pair
+    assert (await GDSScheduler(_spec([job]), graph_driver).execute_job(job))["status"] == "success"
+    assert len(await _rows(graph_driver, "MATCH (:Site)-[r:CO_USES]->(:Site) RETURN r")) == 3
