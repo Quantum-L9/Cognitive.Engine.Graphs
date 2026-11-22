@@ -599,8 +599,9 @@ async def test_init_schema_propagates_a_failed_obligation_constraint(monkeypatch
                 raise RuntimeError(msg)
             return await super().execute_query(cypher, parameters, database)
 
+    driver, spec = _Refusing(), _spec(["infer_company_size_tier"])
     with pytest.raises(RuntimeError, match="cannot create this constraint"):
-        await _init_schema(_Refusing(), _spec(["infer_company_size_tier"]))  # type: ignore[arg-type]
+        await _init_schema(driver, spec)  # type: ignore[arg-type]
 
 
 def test_record_evaluations_statement_carries_every_compare_and_set_predicate() -> None:
@@ -612,7 +613,7 @@ def test_record_evaluations_statement_carries_every_compare_and_set_predicate() 
         assert f"coalesce(o.{field}, '') = coalesce(row.prior_{field}, '')" in source
     for field in ("wire_key", "last_detail"):
         assert f"o.{field} = CASE WHEN emit THEN null ELSE o.{field} END" in source
-    evaluate = inspect.getsource(trigger.evaluate_and_record)
+    evaluate = inspect.getsource(trigger._evaluation_row)
     assert '"prior_accepted_findings_digest": prior.get("accepted_findings_digest")' in evaluate
 
 
