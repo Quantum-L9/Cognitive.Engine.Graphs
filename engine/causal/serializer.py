@@ -161,7 +161,9 @@ class CausalSubgraphSerializer:
             parts: list[str] = []
             for i, node in enumerate(path_nodes):
                 node_str = f"{node.get('label', '?')}[{node.get('name', '?')}]"
-                visited_nodes.add(str(node.get("id", "")))
+                # Declared ids are unique per label only, so the visited
+                # identity is label-qualified; the declared id stays the display.
+                visited_nodes.add(f"{node.get('label', '')}:{node.get('id', '')}")
                 parts.append(node_str)
                 if i < len(path_rels):
                     rel = path_rels[i]

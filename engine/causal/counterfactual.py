@@ -345,7 +345,7 @@ class CounterfactualGenerator:
         """C16 (``counterfactual_dedupe_and_spec_label``): idempotent scenario write.
 
         A retry for an outcome whose scenarios are already stored adds no
-        duplicate node; each returned scenario carries the id actually stored.
+        duplicate node; each returned scenario carries the id and evidence actually stored.
         """
         fields = _SUPPORT_FIELDS if settings.counterfactual_support_semantics_enabled else _LEGACY_FIELDS
         rows = await self._graph_driver.execute_query(
@@ -354,12 +354,19 @@ class CounterfactualGenerator:
             database=self._db,
         )
         stored = {
-            row["proposed_id"]: row["scenario_id"]
+            row["proposed_id"]: row["stored"]
             for row in rows or []
-            if isinstance(row, dict) and row.get("proposed_id") and row.get("scenario_id")
+            if isinstance(row, dict) and row.get("proposed_id") and isinstance(row.get("stored"), dict)
         }
         for scenario in scenarios:
-            scenario["scenario_id"] = stored.get(scenario["scenario_id"], scenario["scenario_id"])
+            existing = stored.get(scenario["scenario_id"])
+            if existing is None:
+                continue
+            # First write wins: a retry over a changed comparison pool returns
+            # the evidence actually stored, never the recomputed values.
+            for key in list(scenario):
+                if key in existing:
+                    scenario[key] = existing[key]
 
     async def _store_support_scenarios(self, scenarios: list[dict[str, Any]]) -> None:
         """SI-26: persist scenarios with their support fields and no confidence property."""
@@ -414,7 +421,7 @@ def _merge_scenarios_cypher(fields: tuple[str, ...]) -> str:
         "intervention_type: s.intervention_type, key_difference: s.key_difference, "
         "counterfactual_outcome: s.counterfactual_outcome, domain_id: $domain_id})\n"
         f"ON CREATE SET cs += {{{on_create}, created_at: datetime()}}\n"
-        "RETURN s.scenario_id AS proposed_id, cs.scenario_id AS scenario_id"
+        "RETURN s.scenario_id AS proposed_id, properties(cs) AS stored"
     )
 
 

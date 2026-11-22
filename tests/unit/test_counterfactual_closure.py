@@ -82,7 +82,11 @@ def test_scenarios_are_deduped_bounded_and_deterministic(monkeypatch, support_mo
 async def test_store_merges_on_semantic_key_and_returns_stored_ids() -> None:
     """C16: the write is a MERGE on the intervention key; a stored id replaces the proposed one."""
     gen = _generator()
-    gen._graph_driver.execute_query = AsyncMock(return_value=[{"proposed_id": "cf_new", "scenario_id": "cf_old"}])
+    gen._graph_driver.execute_query = AsyncMock(
+        return_value=[
+            {"proposed_id": "cf_new", "stored": {"scenario_id": "cf_old", "confidence": 0.5, "domain_id": "d"}}
+        ]
+    )
     scenarios = [
         {
             "scenario_id": "cf_new",
@@ -98,6 +102,8 @@ async def test_store_merges_on_semantic_key_and_returns_stored_ids() -> None:
     assert "MERGE (cs:CounterfactualScenario {actual_outcome: s.actual_outcome" in cypher
     assert "CREATE (cs:CounterfactualScenario" not in cypher
     assert scenarios[0]["scenario_id"] == "cf_old"
+    assert scenarios[0]["confidence"] == 0.5  # stored evidence, not the recomputed 0.6
+    assert "domain_id" not in scenarios[0]
 
 
 @pytest.mark.asyncio

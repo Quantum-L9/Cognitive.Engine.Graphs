@@ -82,6 +82,29 @@ async def test_mixed_label_path_nodes_keep_their_declared_identity(
 
 
 @pytest.mark.asyncio
+async def test_equal_ids_across_labels_count_as_distinct_nodes(
+    engine_deps, graph_driver, domain_loader, clean_db
+) -> None:
+    """C11: declared ids are label-scoped, so equal values on two labels are two nodes."""
+    spec = _causal_spec(domain_loader.load_domain("orbital-logistics"))
+    await graph_driver.execute_write(
+        cypher=(
+            "MERGE (a:OrbitalDepot {depot_id: 'shared'}) "
+            "MERGE (o:DockingResult {outcome_id: 'shared'}) "
+            "MERGE (a)-[:RESULTED_IN {confidence: 0.9}]->(o)"
+        ),
+        parameters={},
+        database=spec.domain.id,
+    )
+    serializer = CausalSubgraphSerializer(graph_driver, spec)
+
+    result = await serializer.serialize_neighborhood("shared", "OrbitalDepot", max_depth=1, id_property="depot_id")
+
+    assert result["nodes_visited"] == 2, result
+    assert result["serialized"] == "OrbitalDepot[shared] -[RESULTED_IN]-> DockingResult[shared]"
+
+
+@pytest.mark.asyncio
 async def test_depth_bound_and_edge_whitelist(engine_deps, graph_driver, domain_loader, clean_db) -> None:
     """C08: BFS stops at the approved bound and follows only declared edge types."""
     spec = _causal_spec(domain_loader.load_domain("orbital-logistics"))

@@ -21,6 +21,7 @@ one server never see each other's outcomes.
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -164,6 +165,28 @@ async def test_retry_does_not_duplicate_scenarios(seed, graph_driver, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_retry_over_changed_pool_returns_stored_evidence(seed, graph_driver, monkeypatch) -> None:
+    """C16: first write wins; a retry after the pool grew returns what the graph holds."""
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "counterfactual_support_semantics_enabled", True)
+    negative = await _seed_contrast(seed)
+    generator = _generator(graph_driver)
+    await generator.generate_for_outcome(negative)
+    await seed.outcome(f"{seed.tag}_p4", "success", ["price", "geo"], {"price": 0.7, "geo": 0.3})
+
+    retried = await generator.generate_for_outcome(negative)
+    stored = {s["scenario_id"]: s for s in await seed.scenarios(negative)}
+
+    assert len(stored) == 2
+    for scenario in retried:
+        node = stored[scenario["scenario_id"]]
+        for key in ("support", "support_count", "compared_positives", "claim", "counterfactual_outcome"):
+            assert scenario[key] == node[key]
+    assert {s["compared_positives"] for s in retried} == {3}
+
+
+@pytest.mark.asyncio
 async def test_missing_fingerprint_and_persistence_error_are_not_success(seed, graph_driver) -> None:
     """C17: no fingerprint -> no scenario; a failed scenario write raises, never returns as stored."""
     assert await _generator(graph_driver).generate_for_outcome(f"{seed.tag}_absent") == []
@@ -259,7 +282,9 @@ async def test_repeat_outcome_records_one_observation(seed, graph_driver, minima
 
 
 @pytest.mark.asyncio
-async def test_counterfactual_stage_failure_keeps_outcome(seed, graph_driver, minimal_domain_spec, monkeypatch) -> None:
+async def test_counterfactual_stage_failure_keeps_outcome(
+    seed, graph_driver, minimal_domain_spec, monkeypatch, caplog
+) -> None:
     """C13 / F10 witness: the outcome survives a generator failure; a replay does not rerun the stage.
 
     The stage failure is visible only as a WARNING log ("Counterfactual
@@ -279,7 +304,7 @@ async def test_counterfactual_stage_failure_keeps_outcome(seed, graph_driver, mi
         raise RuntimeError(msg)
 
     try:
-        with monkeypatch.context() as patch:
+        with monkeypatch.context() as patch, caplog.at_level(logging.WARNING, logger="engine.handlers"):
             patch.setattr(CounterfactualGenerator, "generate_for_outcome", _boom)
             first = await handle_outcomes(_DB, _failure_payload(seed, outcome_id))
         replay = await handle_outcomes(_DB, _failure_payload(seed, outcome_id))
@@ -289,6 +314,19 @@ async def test_counterfactual_stage_failure_keeps_outcome(seed, graph_driver, mi
     assert await _outcome_nodes(graph_driver, outcome_id) == 1
     assert first["status"] == "recorded"
     assert "counterfactual" not in first  # no completion claim is made
+    # C13 evidence: the stage failure is surfaced in the handler's WARNING log,
+    # naming the outcome and carrying the exception (no response field: the
+    # public outcome payload shape is frozen for this campaign).
+    failures = [
+        r
+        for r in caplog.records
+        if r.name == "engine.handlers" and "Counterfactual generation failed" in r.getMessage()
+    ]
+    assert len(failures) == 1
+    assert outcome_id in failures[0].getMessage()
+    assert failures[0].levelno == logging.WARNING
+    assert failures[0].exc_info is not None
+    assert "transient counterfactual failure" in str(failures[0].exc_info[1])
     assert replay.get("replayed") is True
     # F10 (CONDITIONAL C14): the replay path does not recover the failed stage.
     assert await seed.scenarios(outcome_id) == []
