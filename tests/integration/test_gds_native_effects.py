@@ -130,8 +130,10 @@ async def _relationship_fingerprint(driver: Any, db: str) -> list[tuple[Any, ...
         "MATCH (a)-[r]->(b) RETURN elementId(a) AS a, type(r) AS t, elementId(b) AS b, properties(r) AS p",
         db=db,
     )
-    return sorted([("node", *key[row["id"]]) for row in nodes]) + sorted(
-        ("rel", key[row["a"]], row["t"], key[row["b"]], _typed(row["p"])) for row in rels
+    # elementId is stable within one database between the before and after reads,
+    # so a relationship rewired between two otherwise identical nodes is visible.
+    return sorted([("node", row["id"], *key[row["id"]]) for row in nodes]) + sorted(
+        ("rel", row["a"], row["t"], row["b"], _typed(row["p"])) for row in rels
     )
 
 
