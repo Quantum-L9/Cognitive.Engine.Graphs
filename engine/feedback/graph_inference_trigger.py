@@ -360,12 +360,9 @@ async def record_delivery(
     pending_key: str,
     status: str,
     detail: str,
+    wire_key: str | None = None,
 ) -> None:
-    """Record a delivery disposition, only against the obligation it was for.
-
-    A delivery for a key that is no longer the pending one (a newer change was
-    recorded meanwhile) does not overwrite the newer obligation.
-    """
+    """Record a disposition (and the wire key it used) only against its own pending key."""
     cypher = (
         "// ceg:inference:record_delivery\n"
         "MATCH "
@@ -373,6 +370,7 @@ async def record_delivery(
         + "\n"
         + "WHERE o.pending_key = $pending_key\n"
         "SET o.status = $status, o.last_detail = $detail, o.attempts = coalesce(o.attempts, 0) + 1,\n"
+        "    o.wire_key = coalesce($wire_key, o.wire_key),\n"
         "    o.delivered_at = CASE WHEN $status = 'accepted' THEN datetime() ELSE o.delivered_at END,\n"
         "    o.accepted_key = CASE WHEN $status = 'accepted' THEN $pending_key ELSE o.accepted_key END,\n"
         "    o.accepted_findings_digest = CASE WHEN $status = 'accepted' THEN o.pending_findings_digest\n"
@@ -387,6 +385,7 @@ async def record_delivery(
             "pending_key": pending_key,
             "status": status,
             "detail": detail,
+            "wire_key": wire_key,
         },
         database=_database(domain_spec),
     )
@@ -547,6 +546,7 @@ async def deliver(
             pending_key=pending.pending_key,
             status=status,
             detail=detail,
+            wire_key=wire_key or pending.pending_key,
         )
     except Exception:
         # Sent but unrecorded: stays pending; a same-key retry is deduped.
@@ -555,10 +555,9 @@ async def deliver(
 
 
 def schedule_deliveries(driver: Any, domain_spec: Any, *, tenant: str, label: str, report: TriggerReport) -> int:
-    """Deliver after the caller returns: never awaited inside the ``sync`` that caused it.
+    """Schedule deliveries, never awaited inside the ``sync`` that caused them.
 
-    Returns how many deliveries were scheduled; any beyond the in-flight bound
-    stay ``pending`` in the graph for a later retry.
+    Returns how many were scheduled; any beyond the in-flight bound stay pending.
     """
     from engine.state import get_state
 
@@ -600,6 +599,7 @@ async def retry_pending(
     if not key or not outputs_json:
         return None
     outputs = json.loads(outputs_json)
+    # Rotate (attempt-derived, stable) only after a confirmed zero intake; else reuse.
     zero_intake = str(prior.get("last_detail") or "").startswith("targets_queued=0")
     return await deliver(
         driver,
@@ -607,5 +607,5 @@ async def retry_pending(
         tenant=tenant,
         label=label,
         pending=PendingDelivery(entity_id=entity_id, pending_key=str(key), outputs=list(outputs)),
-        wire_key=f"{key}:zero-intake-retry:{prior.get('attempts', 0)}" if zero_intake else None,
+        wire_key=f"{key}:zero-intake-retry:{prior.get('attempts', 0)}" if zero_intake else prior.get("wire_key"),
     )
