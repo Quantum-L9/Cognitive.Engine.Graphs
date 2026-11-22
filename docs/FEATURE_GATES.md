@@ -74,6 +74,7 @@ independently of the code default.
 | Boot Cancellation Propagates | `BOOT_CANCELLATION_PROPAGATES` (`boot_cancellation_propagates`) | `True` | unset | active (hardening); the compliance flush task ends cancelled and a cancelled `shutdown()` is not swallowed (SonarCloud python:S7497); off restores the previous swallowing |
 | Dormant Domain Packs | `DORMANT_DOMAIN_PACKS_ENABLED` (`dormant_domain_packs_enabled`) | `False` | unset | dormant; serve packs that declare `domain.activation: dormant` (replaces the per-domain `idea_portfolio_enabled`) — see §16 |
 | Graph Inference Feedback | `GRAPH_INFERENCE_FEEDBACK_ENABLED` (`graph_inference_feedback_enabled`) | `False` | unset | dormant; CEG → Gate → EIE `graph-inference-result` — see §13 |
+| Graph Inference Trigger | `GRAPH_INFERENCE_TRIGGER_ENABLED` (`graph_inference_trigger_enabled`) | `False` | unset | dormant; inference reads the node from the graph (not a caller `entity`), a committed node `sync` evaluates it, findings are recorded as `CegInferenceObligation` and delivered after the write; needs `graph_inference_feedback_enabled` and the tenant's `plugins.inference_rules` — see §13 |
 | Relationship Evidence Sync | `RELATIONSHIP_SYNC_ENABLED` (`relationship_sync_enabled`) | `True` | unset | active; `sync` to a `targetedge` endpoint writes typed evidence edges; requires Neo4j Enterprise 5.7+ — see §28 |
 | Relationship Sync Audit On Commit | `RELATIONSHIP_SYNC_AUDIT_ON_COMMIT_ENABLED` (`relationship_sync_audit_on_commit_enabled`) | `True` | unset | active (hardening); refused/rolled-back batches leave no success audit record — see §28 |
 | Observed Association Required | `OBSERVED_ASSOCIATION_REQUIRED` (`observed_association_required`) | `False` | unset | staged (D-9, #386); a present `observed_association` is always checked; on, an observed row on an `observedfrom` endpoint must carry one — see §28 |
@@ -716,6 +717,52 @@ round trip to queue nothing.
 Set the flag back to `False`. Each emission queues re-enrichment targets in EIE
 and therefore spends EIE budget, which is why it ships off. This is now CEG's
 only egress to EIE: CEG sends no `enrich` request (§15).
+
+### Graph-read trigger (A3, `GRAPH_INFERENCE_TRIGGER_ENABLED`, default off)
+
+Added 2026-11-22 (campaign EIE-CEG-GATE-COLLAB-2026-11-21). The activation
+steps above feed the rules a caller-supplied `entity`, so what CEG sends is what
+the caller asserted. With this flag on as well:
+
+- **Evidence is the graph.** Inference reads the node as stored, scoped to the
+  packet tenant (`n._tenant = $tenant`), and runs only the rules the tenant's
+  spec authorizes (`plugins.inference_rules`; `rules: []` runs none). A node of
+  another tenant is not found.
+- **Trigger.** A node `sync` whose write committed evaluates the synced
+  entities (at most 500 per batch). Relationship and outcome syncs do not.
+  The sync response is unchanged (no new keys) and never waits for Gate:
+  delivery is scheduled after it answers.
+- **Change detection.** `evidence_revision` is a digest of the node's own
+  properties (no `_`-prefixed keys, no timestamps); `rule_revision` digests the
+  authorized rules, their declared parameters and the spec version. Both are
+  stored on one `CegInferenceObligation` node per (tenant, entity_type = node
+  label, entity_id). An unchanged revision pair is not new work; a finding
+  whose value the graph already holds (an EIE writeback) proposes nothing; a
+  finding set equal to the last accepted one is not resent.
+- **Delivery.** One `graph-inference-result` through `engine/gate_egress.py`
+  with an idempotency key bound to tenant, entity, both revisions and the
+  findings. The obligation is `accepted` only on EIE's complete intake ack
+  (`status: accepted`, `targets_queued` equal to the outputs sent) — an intake
+  ack, not consumption. `partial` (some targets queued; never resent, since a
+  resend could queue them twice), `unconfirmed`, `blocked` (no `GATE_URL`)
+  and `pending` (Gate/EIE failure, or zero targets queued) are not delivered.
+  `admin` `emit_inference_feedback` with `retry: true` re-sends a `pending`,
+  `blocked` or `unconfirmed` obligation under its original key. Writes are
+  compare-and-set on the revisions the decision read, and a superseded
+  pending finding is retired, so a retry or a late scheduled delivery never
+  sends a finding the graph no longer supports.
+- **Admin.** `emit_inference_feedback` takes `entity_type` + `entity_id`
+  instead of `entity` (refused while the flag is on); see
+  `docs/contracts/HANDLER_PAYLOADS.md`.
+- **Schema.** `init_schema` creates the uniqueness constraint
+  `ceg_inference_obligation_key` on `(tenant, entity_type, entity_id)` and
+  fails if it cannot (Neo4j 5 node-key/uniqueness support required). Until the
+  constraint exists the trigger writes nothing (`obligation_constraint_missing`).
+
+Activation: set both flags, declare the tenant's `plugins.inference_rules`,
+run `admin init_schema`, ensure Gate's caller policy lets CEG originate
+`graph-inference-result`. Rollback: set this flag off; obligation nodes stay
+inert and the admin subaction returns to its caller-entity form.
 
 ---
 
