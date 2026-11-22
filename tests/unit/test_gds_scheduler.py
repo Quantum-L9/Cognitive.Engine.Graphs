@@ -778,3 +778,67 @@ class TestPruneFailureIsPartial:
         from engine.config.settings import Settings
 
         assert Settings.model_fields["gds_prune_failure_partial_enabled"].default is True
+
+
+# ── CEG-NATIVE-CLOSURE-001 G22: causal_chain_scoring reads declared causal edges only ──
+
+
+class TestCausalChainScoringVocabulary:
+    @pytest.mark.asyncio
+    async def test_no_declared_causal_edges_refuses_without_a_query(self):
+        driver = _mock_driver([{"nodes_scored": 3}])
+        job = _job("influence", "causal_chain_scoring", writeproperty="influence")
+        result = await GDSScheduler(_minimal_spec([job]), driver).execute_job(job)
+
+        assert result["status"] == "failed"
+        assert result["error"].startswith("undeclared structural property: ")
+        assert "causal.causal_edges" in result["error"]
+        driver.execute_query.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_flag_off_restores_any_relationship_pattern(self, monkeypatch):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "declared_structural_properties_required_enabled", False)
+        driver = _mock_driver([{"nodes_scored": 3}])
+        job = _job("influence", "causal_chain_scoring", writeproperty="influence")
+        result = await GDSScheduler(_minimal_spec([job]), driver).execute_job(job)
+
+        assert result["status"] == "success"
+        assert "-[*1..5]->" in _cypher_sent(driver)
+
+
+# ── CEG-NATIVE-CLOSURE-001 G10/X06: cooccurrence owns what it writes ──
+
+
+class TestCooccurrenceOwnedEdges:
+    @pytest.mark.asyncio
+    async def test_pairs_declared_label_merges_and_prunes_on_owner_marker(self):
+        driver = _mock_driver()
+        driver.execute_query = AsyncMock(side_effect=[[{"edges_created": 4}], [{"pruned_edges": 0}]])
+        job = _job("co", "cooccurrence", sourceedge="INTERACTED_WITH", writeedge="CO_WITH")
+        await GDSScheduler(_minimal_spec([job]), driver).execute_job(job)
+
+        create, prune = (call.args[0] for call in driver.execute_query.call_args_list)
+        assert "MATCH (a:Site)-[:INTERACTED_WITH]->(common)<-[:INTERACTED_WITH]-(b:Site)" in create
+        assert "MERGE (a)-[r:CO_WITH {gds_job: $job_id}]->(b)" in create
+        assert "MATCH (n:Site)-[r:CO_WITH]-(:Site)" in prune
+        assert "WHERE r.gds_job = $job_id" in prune
+        for call in driver.execute_query.call_args_list:
+            assert call.kwargs["parameters"] == {"job_id": "co"}
+
+    @pytest.mark.asyncio
+    async def test_flag_off_restores_unscoped_cypher(self, monkeypatch):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gds_cooccurrence_owned_edges_enabled", False)
+        driver = _mock_driver()
+        driver.execute_query = AsyncMock(side_effect=[[{"edges_created": 4}], [{"pruned_edges": 0}]])
+        job = _job("co", "cooccurrence", sourceedge="INTERACTED_WITH", writeedge="CO_WITH")
+        await GDSScheduler(_minimal_spec([job]), driver).execute_job(job)
+
+        create, prune = (call.args[0] for call in driver.execute_query.call_args_list)
+        assert "MATCH (a)-[:INTERACTED_WITH]->(common)<-[:INTERACTED_WITH]-(b)" in create
+        assert "MERGE (a)-[r:CO_WITH]->(b)" in create
+        assert "MATCH (n)-[r:CO_WITH]-()" in prune
+        assert "gds_job" not in prune
