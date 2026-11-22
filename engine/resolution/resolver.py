@@ -18,6 +18,11 @@ relationships are moved from a duplicate to its canonical, no node is deleted,
 and no engine match or scoring query consults RESOLVED_FROM, so a resolved
 duplicate remains a match candidate. The resolver itself reads the edge only
 to skip already-resolved entities.
+
+Every read and write addresses nodes by the label's declared id property
+(``SimilarityScorer.id_property`` / ``declared_id_property``; F01), the same key
+the scorer uses, so a domain keyed by anything other than ``entity_id`` resolves
+on its own identity.
 """
 
 from __future__ import annotations
@@ -162,11 +167,12 @@ class EntityResolver:
         if _merge_integrity():
             return await self._resolve_batch_verified(entity_label, _validate_threshold(threshold))
         label = sanitize_label(entity_label)
+        id_prop = sanitize_label(self._scorer.id_property(label))
 
         cypher = f"""
         MATCH (e:{label})
         WHERE NOT EXISTS((e)-[:RESOLVED_FROM]->())
-        RETURN e.entity_id AS entity_id
+        RETURN e.{id_prop} AS entity_id
         """
         results = await self._graph_driver.execute_query(
             cypher=cypher,
@@ -174,7 +180,7 @@ class EntityResolver:
             database=self._db,
         )
 
-        entity_ids = [r["entity_id"] for r in results if r.get("entity_id")]
+        entity_ids = [r["entity_id"] for r in results if r.get("entity_id") is not None]
         resolved_set: set[str] = set()
         total_merged = 0
         resolution_groups = 0
@@ -305,16 +311,22 @@ class EntityResolver:
         }
 
     async def _resolve_batch_verified(self, entity_label: str, threshold: float | None) -> dict[str, Any]:
-        """Batch resolution that skips by entity id and counts only new edges."""
+        """Batch resolution that skips by entity id and counts only new edges.
+
+        Entities are visited in id order, so the same graph resolves the same
+        way whatever order its nodes were created in.
+        """
         label = sanitize_label(entity_label)
+        id_prop = sanitize_label(self._scorer.id_property(label))
         cypher = f"""
         MATCH (e:{label})
-        WHERE NOT EXISTS {{ (e)-[:RESOLVED_FROM]->() }}
-        RETURN e.entity_id AS entity_id
+        WHERE e.{id_prop} IS NOT NULL AND NOT EXISTS {{ (e)-[:RESOLVED_FROM]->() }}
+        RETURN e.{id_prop} AS entity_id
+        ORDER BY entity_id
         """
         results = await self._graph_driver.execute_query(cypher=cypher, parameters={}, database=self._db)
 
-        entity_ids = [r["entity_id"] for r in results if r.get("entity_id")]
+        entity_ids = [r["entity_id"] for r in results if r.get("entity_id") is not None]
         resolved_set: set[str] = set()
         total_merged = 0
         resolution_groups = 0
@@ -340,11 +352,12 @@ class EntityResolver:
     async def _already_resolved(self, entity_ids: list[str], entity_label: str) -> set[str]:
         """Ids among ``entity_ids`` that already carry an outgoing RESOLVED_FROM."""
         label = sanitize_label(entity_label)
+        id_prop = sanitize_label(self._scorer.id_property(label))
         cypher = f"""
         UNWIND $entity_ids AS eid
-        MATCH (e:{label} {{entity_id: eid}})
+        MATCH (e:{label} {{{id_prop}: eid}})
         WHERE EXISTS {{ (e)-[:RESOLVED_FROM]->() }}
-        RETURN DISTINCT e.entity_id AS resolved_id
+        RETURN DISTINCT e.{id_prop} AS resolved_id
         """
         results = await self._graph_driver.execute_query(
             cypher=cypher,
@@ -362,10 +375,11 @@ class EntityResolver:
     ) -> tuple[str, bool] | None:
         """MERGE the RESOLVED_FROM edge; return (resolution_id, created) or None if absent."""
         label = sanitize_label(entity_label)
+        id_prop = sanitize_label(self._scorer.id_property(label))
         resolution_id = f"res_{uuid.uuid4().hex[:12]}"
         cypher = f"""
-        MATCH (source:{label} {{entity_id: $source_id}})
-        MATCH (canonical:{label} {{entity_id: $canonical_id}})
+        MATCH (source:{label} {{{id_prop}: $source_id}})
+        MATCH (canonical:{label} {{{id_prop}: $canonical_id}})
         MERGE (source)-[rel:RESOLVED_FROM]->(canonical)
         ON CREATE SET rel.resolution_id = $resolution_id,
                       rel.confidence = $similarity,
@@ -403,14 +417,15 @@ class EntityResolver:
         not count toward degree, and ties break on entity_id ascending.
         """
         label = sanitize_label(entity_label)
+        id_prop = sanitize_label(self._scorer.id_property(label))
         if _merge_integrity():
             cypher = f"""
         UNWIND $entity_ids AS eid
-        MATCH (e:{label} {{entity_id: eid}})
+        MATCH (e:{label} {{{id_prop}: eid}})
         WHERE NOT EXISTS {{ (e)-[:RESOLVED_FROM]->() }}
         OPTIONAL MATCH (e)-[r]-()
         WHERE type(r) <> 'RESOLVED_FROM'
-        WITH e.entity_id AS entity_id, count(r) AS degree
+        WITH e.{id_prop} AS entity_id, count(r) AS degree
         ORDER BY degree DESC, entity_id ASC
         LIMIT 1
         RETURN entity_id
@@ -425,9 +440,9 @@ class EntityResolver:
             return entity_ids[0]
         cypher = f"""
         UNWIND $entity_ids AS eid
-        MATCH (e:{label} {{entity_id: eid}})
+        MATCH (e:{label} {{{id_prop}: eid}})
         OPTIONAL MATCH (e)-[r]-()
-        WITH e.entity_id AS entity_id, count(r) AS degree
+        WITH e.{id_prop} AS entity_id, count(r) AS degree
         ORDER BY degree DESC
         LIMIT 1
         RETURN entity_id
@@ -450,11 +465,12 @@ class EntityResolver:
     ) -> str:
         """Create a RESOLVED_FROM edge between source and canonical."""
         label = sanitize_label(entity_label)
+        id_prop = sanitize_label(self._scorer.id_property(label))
         resolution_id = f"res_{uuid.uuid4().hex[:12]}"
 
         cypher = f"""
-        MATCH (source:{label} {{entity_id: $source_id}})
-        MATCH (canonical:{label} {{entity_id: $canonical_id}})
+        MATCH (source:{label} {{{id_prop}: $source_id}})
+        MATCH (canonical:{label} {{{id_prop}: $canonical_id}})
         CREATE (source)-[:RESOLVED_FROM {{
             resolution_id: $resolution_id,
             confidence: $similarity,

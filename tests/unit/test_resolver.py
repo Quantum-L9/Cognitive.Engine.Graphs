@@ -120,7 +120,7 @@ class TestSimilarityScorer:
             [{"shared_count": 3, "union_count": 6}],  # behavioral: 3/6 = 0.5
         ]
 
-        scorer = SimilarityScorer(spec, driver, "test_domain")
+        scorer = SimilarityScorer(spec, driver, "test_domain", domain_spec=_supplier_domain("entity_id"))
         sim = await scorer.compute_similarity("e1", "e2", "Supplier")
 
         assert abs(sim - 0.5) < 0.01
@@ -137,7 +137,7 @@ class TestSimilarityScorer:
             [{"shared_count": 2, "union_count": 10}],  # 2/10 = 0.2
         ]
 
-        scorer = SimilarityScorer(spec, driver, "test_domain")
+        scorer = SimilarityScorer(spec, driver, "test_domain", domain_spec=_supplier_domain("entity_id"))
         sim = await scorer.compute_similarity("e1", "e2", "Supplier")
 
         # 0.5 * 0.5 + 0.3 * 0.5 + 0.2 * 0.2 = 0.25 + 0.15 + 0.04 = 0.44
@@ -232,7 +232,7 @@ class TestEntityResolver:
             [{"resolution_id": "res_000000000001", "created": True}],
         ]
 
-        resolver = EntityResolver(spec, driver, "test_domain")
+        resolver = EntityResolver(spec, driver, "test_domain", domain_spec=_supplier_domain("entity_id"))
         result = await resolver.resolve_entity("e1", "Supplier")
 
         assert result["canonical_id"] == "e1"
@@ -332,6 +332,9 @@ class _FakeScorer:
 
     async def compute_similarity(self, a: str, b: str, entity_label: str) -> float:
         return self._sims.get(frozenset((a, b)), 0.0)
+
+    def id_property(self, label: str) -> str:
+        return "entity_id"
 
     async def find_candidates(
         self, entity_id: str, entity_label: str, threshold: float | None = None, limit: int | None = None
@@ -454,7 +457,7 @@ class TestMergeIntegrity:
 # ── RU-103 / CEG-COR-177: behavioral similarity scoped to the entity label ──
 
 
-def _supplier_domain(id_property: str = "supplier_id") -> Any:
+def _supplier_domain(id_property: str = "supplier_id", outcome_label: str | None = "SupplyOutcome") -> Any:
     from engine.config.schema import DomainSpec
 
     raw: dict[str, Any] = {
@@ -487,6 +490,8 @@ def _supplier_domain(id_property: str = "supplier_id") -> Any:
         "gates": [],
         "scoring": {"dimensions": []},
     }
+    if outcome_label is not None:
+        raw["feedbackloop"] = {"outcome_node_label": outcome_label}
     return DomainSpec(**raw)
 
 
@@ -532,11 +537,14 @@ class TestBehavioralLabelScope:
             [{"shared_count": 0, "union_count": 0}],
             [{"shared_count": 3, "union_count": 6}],
         ]
-        scorer = SimilarityScorer(spec, driver, "test_domain")
+        scorer = SimilarityScorer(spec, driver, "test_domain", domain_spec=_supplier_domain("entity_id"))
         assert abs(await scorer.compute_similarity("e1", "e2", "Supplier") - 0.5) < 0.01
         behavioral = str(driver.execute_query.call_args_list[2].kwargs["cypher"])
         assert "(a:Supplier {entity_id: $a_id})" in behavioral
         assert "(b:Supplier {entity_id: $b_id})" in behavioral
+        assert "(oa:SupplyOutcome)" in behavioral
+        assert "(ob:SupplyOutcome)" in behavioral
+        assert "TransactionOutcome" not in behavioral
 
     @pytest.mark.asyncio
     async def test_same_id_node_of_another_label_does_not_change_the_score(self) -> None:
@@ -548,7 +556,7 @@ class TestBehavioralLabelScope:
                 ("Buyer", {"entity_id": "e1"}, {"m7", "m8", "m9"}),
             ]
         )
-        scorer = SimilarityScorer(_make_spec(), graph, "test_domain")  # type: ignore[arg-type]
+        scorer = SimilarityScorer(_make_spec(), graph, "test_domain", domain_spec=_supplier_domain("entity_id"))  # type: ignore[arg-type]
         assert await scorer._behavioral_similarity("e1", "e2", "Supplier") == 1.0
 
     @pytest.mark.asyncio
@@ -563,6 +571,7 @@ class TestBehavioralLabelScope:
         scorer = SimilarityScorer(_make_spec(), graph, "test_domain", domain_spec=_supplier_domain())  # type: ignore[arg-type]
         assert await scorer._behavioral_similarity("s1", "s2", "Supplier") == 0.5
         assert "(a:Supplier {supplier_id: $a_id})" in graph.cyphers[-1]
+        assert "(oa:SupplyOutcome)" in graph.cyphers[-1]
         assert "entity_id" not in graph.cyphers[-1]
 
     @pytest.mark.asyncio
@@ -653,3 +662,147 @@ class TestMergeIntegrityReviewFollowUp:
         result = await resolver.resolve_entity("e1", "Supplier")
         assert graph.resolved_from() == [("e1", "e2", 0.9)]
         assert result["merged_entity_ids"] == ["e1"]
+
+
+# ── CEG-NATIVE-CLOSURE-001 N1: declared identity, declared outcome, refusals ──
+
+
+def _declared_scorer(driver: Any, spec: SemanticRegistrySpec | None = None, **domain: Any) -> SimilarityScorer:
+    return SimilarityScorer(spec or _make_spec(), driver, "test_domain", domain_spec=_supplier_domain(**domain))
+
+
+@pytest.mark.unit
+class TestDeclaredIdentityAndOutcome:
+    @pytest.mark.asyncio
+    async def test_every_scorer_query_addresses_nodes_by_the_declared_id(self) -> None:
+        """F01: property, structural, behavioral and candidate Cypher use supplier_id."""
+        driver = _mock_driver()
+        driver.execute_query.side_effect = [
+            [{"entity_id": "s2"}],
+            [{"a_name": "A", "b_name": "A", "a_region": "US", "b_region": "US"}],
+            [{"shared_count": 1, "union_count": 1}],
+            [{"shared_count": 1, "union_count": 1}],
+        ]
+        await _declared_scorer(driver).find_candidates("s1", "Supplier")
+        cyphers = [str(c.kwargs["cypher"]) for c in driver.execute_query.call_args_list]
+        assert len(cyphers) == 4
+        for cypher in cyphers:
+            assert "supplier_id" in cypher
+            assert "entity_id:" not in cypher
+            assert ".entity_id" not in cypher
+
+    @pytest.mark.asyncio
+    async def test_prefilter_admits_any_declared_comparison_property(self) -> None:
+        """F03: the candidate prefilter ORs every comparison property, capped and ordered."""
+        driver = _mock_driver()
+        driver.execute_query.side_effect = [[]]
+        await _declared_scorer(driver).find_candidates("s1", "Supplier", limit=7)
+        call = driver.execute_query.call_args_list[0]
+        cypher = str(call.kwargs["cypher"])
+        assert "candidate.name = source.name" in cypher
+        assert "candidate.region = source.region" in cypher
+        assert " OR " in cypher
+        assert "ORDER BY shared DESC, entity_id ASC" in cypher
+        assert "LIMIT $limit" in cypher
+        assert call.kwargs["parameters"]["limit"] == 7
+
+    @pytest.mark.asyncio
+    async def test_r06_three_signals_follow_declared_weights_and_bound(self) -> None:
+        """R06: 0.5*0.5 + 0.3*0.25 + 0.2*0.75 = 0.475; weights above 1 still clamp to [0, 1]."""
+        driver = _mock_driver()
+        driver.execute_query.side_effect = [
+            [{"a_name": "A", "b_name": "A", "a_region": "US", "b_region": "EU"}],
+            [{"shared_count": 1, "union_count": 4}],
+            [{"shared_count": 3, "union_count": 4}],
+        ]
+        sim = await _declared_scorer(driver).compute_similarity("s1", "s2", "Supplier")
+        assert sim == pytest.approx(0.475)
+        heavy = _make_spec(property_weight=1.0, structural_weight=1.0, behavioral_weight=1.0)
+        driver.execute_query.side_effect = [
+            [{"a_name": "A", "b_name": "A", "a_region": "US", "b_region": "US"}],
+            [{"shared_count": 1, "union_count": 1}],
+            [{"shared_count": 1, "union_count": 1}],
+        ]
+        assert await _declared_scorer(driver, heavy).compute_similarity("s1", "s2", "Supplier") == 1.0
+
+    @pytest.mark.asyncio
+    async def test_r15_undeclared_outcome_label_is_no_evidence_and_no_query(self) -> None:
+        """R15: no declared outcome label -> behavioral 0.0, no guessed label is read."""
+        driver = _mock_driver()
+        driver.execute_query.side_effect = [
+            [{"a_name": "A", "b_name": "A", "a_region": "US", "b_region": "US"}],
+            [{"shared_count": 0, "union_count": 0}],
+        ]
+        scorer = _declared_scorer(driver, outcome_label=None)
+        sim = await scorer.compute_similarity("s1", "s2", "Supplier")
+        assert sim == pytest.approx(0.5)  # property term only; behavioral contributes nothing
+        assert driver.execute_query.await_count == 2
+        assert all("Outcome" not in str(c.kwargs["cypher"]) for c in driver.execute_query.call_args_list)
+
+    @pytest.mark.asyncio
+    async def test_r15_no_domain_spec_reads_no_guessed_outcome(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No domain spec available: behavioral evidence is unavailable (0.0), never TransactionOutcome."""
+        import engine.state as state_module
+
+        monkeypatch.setattr(state_module, "get_state", lambda: MagicMock(is_initialized=False))
+        driver = _mock_driver()
+        scorer = SimilarityScorer(_make_spec(), driver, "test_domain")
+        assert await scorer._behavioral_similarity("e1", "e2", "Supplier") == 0.0
+        driver.execute_query.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_rollback_flag_reads_the_legacy_outcome_label(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """C-21 rollback: outcome_vocabulary_required_enabled off restores the legacy label."""
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "outcome_vocabulary_required_enabled", False)
+        graph = _BehavioralGraph([("Supplier", {"supplier_id": "s1"}, {"m1"})])
+        scorer = SimilarityScorer(_make_spec(), graph, "test_domain", domain_spec=_supplier_domain(outcome_label=None))  # type: ignore[arg-type]
+        await scorer._behavioral_similarity("s1", "s1", "Supplier")
+        assert "(oa:TransactionOutcome)" in graph.cyphers[-1]
+
+    @pytest.mark.asyncio
+    async def test_r05_unsafe_declared_id_property_is_refused_before_any_query(self) -> None:
+        """R05: an admitted spec carrying an unsafe id property never reaches the graph."""
+        driver = _mock_driver()
+        unsafe = {"id_property": "x}) DETACH DELETE n //"}
+        scorer = _declared_scorer(driver, **unsafe)
+        resolver = EntityResolver(_make_spec(), driver, "test_domain", domain_spec=_supplier_domain(**unsafe))
+        with pytest.raises(ValueError, match="Invalid label"):
+            await scorer.find_candidates("s1", "Supplier")
+        with pytest.raises(ValueError, match="Invalid label"):
+            await resolver.resolve_batch("Supplier")
+        with pytest.raises(ValueError, match="Invalid label"):
+            await resolver._merge_resolution("s2", "s1", "Supplier", 0.9)
+        driver.execute_query.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_r05_unsafe_declared_outcome_label_is_refused_before_any_query(self) -> None:
+        """R05: an unsafe outcome node label is refused at interpolation, never queried."""
+        driver = _mock_driver()
+        scorer = _declared_scorer(driver, outcome_label="Outcome) DETACH DELETE n //")
+        with pytest.raises(ValueError, match="Invalid label"):
+            await scorer._behavioral_similarity("s1", "s2", "Supplier")
+        driver.execute_query.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_resolver_writes_address_the_declared_id(self) -> None:
+        """F01 resolver half: batch listing, already-resolved, canonical and MERGE use supplier_id."""
+        driver = _mock_driver()
+        driver.execute_query.side_effect = [[]]
+        resolver = EntityResolver(_make_spec(), driver, "test_domain", domain_spec=_supplier_domain())
+        await resolver.resolve_batch("Supplier")
+        listing = str(driver.execute_query.call_args_list[0].kwargs["cypher"])
+        assert "RETURN e.supplier_id AS entity_id" in listing
+        assert "e.supplier_id IS NOT NULL" in listing
+        assert "ORDER BY entity_id" in listing
+        for method, args, result in (
+            (resolver._already_resolved, (["s1"], "Supplier"), []),
+            (resolver._find_canonical, (["s1", "s2"], "Supplier"), [{"entity_id": "s1"}]),
+            (resolver._merge_resolution, ("s2", "s1", "Supplier", 0.9), [{"resolution_id": "r", "created": True}]),
+        ):
+            driver.execute_query.side_effect = [result]
+            await method(*args)
+            cypher = str(driver.execute_query.call_args_list[-1].kwargs["cypher"])
+            assert "{supplier_id: " in cypher
+            assert "entity_id:" not in cypher
