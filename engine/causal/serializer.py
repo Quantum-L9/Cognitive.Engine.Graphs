@@ -220,7 +220,7 @@ class CausalSubgraphSerializer:
             if prop == FALLBACK_ID_PROPERTY:
                 branches.append(f"WHEN n:{label} THEN n.{prop}")
             else:
-                branches.append(f"WHEN n:{label} THEN coalesce(n.{prop}, n.{FALLBACK_ID_PROPERTY})")
+                branches.append(f"WHEN n:{label} THEN coalesce(n.{prop}, n.{sanitize_label(FALLBACK_ID_PROPERTY)})")
         if not branches:
             return fallback
         return f"CASE {' '.join(branches)} ELSE {fallback} END"

@@ -407,7 +407,7 @@ def _merge_scenarios_cypher(fields: tuple[str, ...]) -> str:
     ``untested`` support scenario never merge into one node. Field names are
     module constants, never input.
     """
-    on_create = ", ".join(f"{field}: s.{field}" for field in ("scenario_id", *fields))
+    on_create = ", ".join(f"{sanitize_label(field)}: s.{sanitize_label(field)}" for field in ("scenario_id", *fields))
     return (
         "UNWIND $scenarios AS s\n"
         "MERGE (cs:CounterfactualScenario {actual_outcome: s.actual_outcome, "
