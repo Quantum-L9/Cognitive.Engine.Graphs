@@ -434,3 +434,30 @@ class TestReviewFindings:
         scheduler, _ = _scheduler([a1, a2, b])
         scheduler.register_jobs()
         assert {job.id for job in scheduler.scheduler.get_jobs()} == {"louvain_a", "louvain_b", "b"}
+
+
+@pytest.mark.asyncio
+async def test_latest_started_attempt_decides_when_attempts_overlap() -> None:
+    """CodeRabbit on #543: an older attempt finishing last must not override a newer failure."""
+    a = _job("a", "louvain")
+    b = _job("b", "cooccurrence", ["louvain"])
+    scheduler, _ = _scheduler([a, b])
+    older_gate = asyncio.Event()
+    calls = iter(["older", "newer"])
+
+    async def _run(job_spec: GDSJobSpec) -> dict[str, Any]:
+        if next(calls) == "older":
+            await older_gate.wait()
+            return {}
+        msg = "newer attempt fails"
+        raise RuntimeError(msg)
+
+    scheduler._run_louvain = _run  # type: ignore[method-assign]
+    older = asyncio.create_task(scheduler.execute_job(a))
+    await asyncio.sleep(0.02)
+    assert (await scheduler.execute_job(a))["status"] == "failed"  # newer, finishes first
+    older_gate.set()
+    assert (await older)["status"] == "success"  # older, finishes last
+    result = await scheduler.execute_job(b)
+    assert result["status"] == "blocked"
+    assert result["unsatisfied"] == ["a: last attempt failed"]

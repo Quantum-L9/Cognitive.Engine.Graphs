@@ -262,10 +262,14 @@ class TestAlgorithmDispatch:
         from engine.config.settings import settings
 
         monkeypatch.setattr(settings, "gds_cooccurrence_deterministic_prune", False)
-        driver = _mock_driver([{"edges_created": 15}])
+        driver = _mock_driver()
+        # Step 1 MERGE, then the prune (each returns its own column).
+        driver.execute_query = AsyncMock(side_effect=[[{"edges_created": 15}], [{"pruned_edges": 2}]])
         job = _job("test_cooc", "cooccurrence", sourceedge="ACCEPTS_POLYMER", writeedge="CO_PROCESSES")
         scheduler = GDSScheduler(_minimal_spec([job]), driver)
         result = await scheduler.execute_job(job)
+        assert result["status"] == "success"
+        assert result["edges_pruned"] == 2
         assert result["pruning_alpha"] == 0.86
         prune = str(driver.execute_query.call_args_list[1].args[0])
         assert "ORDER BY" not in prune
