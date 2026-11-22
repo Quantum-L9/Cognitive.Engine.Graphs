@@ -2360,6 +2360,6 @@ Under the existing flags the change also does the following.
 - **Outcome label** (`resolution_behavioral_label_scoped`): behavioral similarity reads `feedbackloop.outcome_node_label`. A domain that declares none contributes 0.0 and reads nothing.
 - **Verified path** (`entity_resolution_merge_integrity`):
   - Already-resolved nodes are excluded before `LIMIT` on both prefilter paths.
-  - `_merge_resolution` write-locks both endpoints in `elementId` order, using the reserved key `ceg:resolution-lock`, which is set and removed in the same transaction. It then checks eligibility again before the `MERGE`, so concurrent resolutions never give one source two canonicals.
+  - `_merge_resolution` write-locks both endpoints in `elementId` order, by writing a per-call token to `ceg:resolution-lock` and then writing the prior value back, so any stored value under that key is unchanged. It then checks eligibility again before the `MERGE`, so concurrent resolutions never give one source two canonicals.
 
 Tests: `tests/unit/test_resolver.py` and `tests/integration/test_resolution_native_identity.py`.

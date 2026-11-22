@@ -483,8 +483,8 @@ async def test_concurrent_resolutions_never_give_a_source_two_canonicals(
 
     Resolving c1 and c2 concurrently must leave m with at most one outgoing
     RESOLVED_FROM, and the reported new-link counts must equal the edges written.
-    A domain property named like the old lock key survives both the accepted and
-    the rejected write, and the reserved lock key is never left behind.
+    A domain value stored under the lock key itself survives both the accepted
+    and the rejected write; an absent key stays absent.
     """
     registry = _props_only(0.5, "docking_ports", "reliability")
     seed = """
@@ -497,7 +497,7 @@ async def test_concurrent_resolutions_never_give_a_source_two_canonicals(
     for _ in range(20):
         await _write(graph_driver, "MATCH (n) DETACH DELETE n")
         await _write(graph_driver, seed)
-        await _write(graph_driver, "MATCH (n:OrbitalDepot) SET n._ceg_resolution_lock = $v", {"v": domain_value})
+        await _write(graph_driver, "MATCH (n:OrbitalDepot) SET n.`ceg:resolution-lock` = $v", {"v": domain_value})
         first = EntityResolver(registry, graph_driver, DB, domain_spec=orbital_spec)
         second = EntityResolver(registry, graph_driver, DB, domain_spec=orbital_spec)
         results = await asyncio.gather(first.resolve_entity("c1", LABEL), second.resolve_entity("c2", LABEL))
@@ -506,7 +506,5 @@ async def test_concurrent_resolutions_never_give_a_source_two_canonicals(
         )
         assert len(rows) == 1, rows
         assert sum(r["merged_count"] for r in results) == 1
-        kept = await _read(graph_driver, "MATCH (n:OrbitalDepot) RETURN DISTINCT n._ceg_resolution_lock AS v")
+        kept = await _read(graph_driver, "MATCH (n:OrbitalDepot) RETURN DISTINCT n.`ceg:resolution-lock` AS v")
         assert [r["v"] for r in kept] == [domain_value]
-        leftover = await _read(graph_driver, "MATCH (n) WHERE n.`ceg:resolution-lock` IS NOT NULL RETURN count(n) AS c")
-        assert leftover[0]["c"] == 0

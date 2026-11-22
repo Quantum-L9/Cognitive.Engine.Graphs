@@ -879,11 +879,12 @@ class TestPrefilterRecallFlag:
         resolver = EntityResolver(_make_spec(), driver, "test_domain", domain_spec=_supplier_domain())
         assert await resolver._merge_resolution("s2", "s1", "Supplier", 0.9) is None
         cypher = str(driver.execute_query.call_args_list[0].kwargs["cypher"])
-        lock = cypher.index("SET n.`ceg:resolution-lock` = true")
-        unlock = cypher.index("REMOVE n.`ceg:resolution-lock`")
+        lock = cypher.index("SET n.`ceg:resolution-lock` = $lock_token")
+        unlock = cypher.index("SET n.`ceg:resolution-lock` = prior")
         recheck = cypher.index("NOT EXISTS { (source)-[:RESOLVED_FROM]->(other) WHERE other <> canonical }")
         canonical_free = cypher.index("NOT EXISTS { (canonical)-[:RESOLVED_FROM]->() }")
         assert (
             lock < unlock < canonical_free < recheck < cypher.index("MERGE (source)-[rel:RESOLVED_FROM]->(canonical)")
         )
         assert "elementId(source) < elementId(canonical)" in cypher
+        assert cypher.index("n.`ceg:resolution-lock` AS prior") < lock

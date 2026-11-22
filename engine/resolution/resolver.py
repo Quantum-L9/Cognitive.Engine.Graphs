@@ -385,10 +385,10 @@ class EntityResolver:
         pair): the source must carry no RESOLVED_FROM to any other node and the
         canonical none at all. A concurrent resolution that already linked the
         source elsewhere therefore wins, and this call writes nothing (None),
-        so a source never gets two canonicals. The lock sets and removes the
-        reserved key ``ceg:resolution-lock`` in the same transaction; ``:`` and
-        ``-`` fail ``sanitize_label``, so no property the engine reads or writes
-        can carry that key, and nothing is committed on either node.
+        so a source never gets two canonicals. The lock writes a per-call token to
+        ``ceg:resolution-lock`` (a real write, so it takes the node lock) and then
+        writes the prior value back (null removes the key), so whatever either
+        node stored under that key is unchanged when the transaction commits.
         """
         label = sanitize_label(entity_label)
         id_prop = sanitize_label(self._scorer.id_property(label))
@@ -397,11 +397,12 @@ class EntityResolver:
         MATCH (source:{label} {{{id_prop}: $source_id}})
         MATCH (canonical:{label} {{{id_prop}: $canonical_id}})
         WHERE source <> canonical
-        FOREACH (n IN CASE WHEN elementId(source) < elementId(canonical)
-                           THEN [source, canonical] ELSE [canonical, source] END |
-            SET n.`ceg:resolution-lock` = true
-            REMOVE n.`ceg:resolution-lock`)
-        WITH source, canonical
+        UNWIND CASE WHEN elementId(source) < elementId(canonical)
+                    THEN [source, canonical] ELSE [canonical, source] END AS n
+        WITH source, canonical, n, n.`ceg:resolution-lock` AS prior
+        SET n.`ceg:resolution-lock` = $lock_token
+        SET n.`ceg:resolution-lock` = prior
+        WITH DISTINCT source, canonical
         WHERE NOT EXISTS {{ (canonical)-[:RESOLVED_FROM]->() }}
           AND NOT EXISTS {{ (source)-[:RESOLVED_FROM]->(other) WHERE other <> canonical }}
         MERGE (source)-[rel:RESOLVED_FROM]->(canonical)
@@ -419,6 +420,7 @@ class EntityResolver:
                 "source_id": source_id,
                 "canonical_id": canonical_id,
                 "resolution_id": resolution_id,
+                "lock_token": resolution_id,
                 "similarity": similarity,
                 "signal": "semantic_registry",
                 "domain_id": self._db,
