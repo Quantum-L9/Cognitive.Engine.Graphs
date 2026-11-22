@@ -2875,11 +2875,10 @@ async def _init_schema(driver: GraphDriver, spec: DomainSpec) -> int:
     if _schema_settings.graph_inference_trigger_enabled:
         from engine.feedback.graph_inference_trigger import obligation_constraint_cypher
 
-        try:
-            await driver.execute_query(obligation_constraint_cypher(), database=db)
-            count += 1
-        except Exception as exc:
-            logger.warning("Graph inference obligation constraint failed: %s", exc)
+        # Propagated, not logged: without the constraint the trigger refuses to
+        # write obligations, so a silent failure would leave it inert.
+        await driver.execute_query(obligation_constraint_cypher(), database=db)
+        count += 1
     return count
 
 

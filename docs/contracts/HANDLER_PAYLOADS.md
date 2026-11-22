@@ -232,6 +232,18 @@ The entity is read from the graph scoped to the tenant. Response: `status`
 `trigger` (`evaluated`, `decisions`, `pending`, `skipped`). Delivery is awaited
 here; after `sync` it never is. See `docs/FEATURE_GATES.md` §13.
 
+WRONG (flag on) — a caller-asserted entity is refused with `ValidationError`:
+
+```json
+{"subaction": "emit_inference_feedback", "entity": {"employee_count": 40}, "entity_id": "c1"}
+```
+
+RIGHT (both flags on) — the entity is read from the tenant's graph:
+
+```json
+{"subaction": "emit_inference_feedback", "entity_type": "aging-caves", "entity_id": "c1"}
+```
+
 
 ## health-assess (HEALTH-01)
 

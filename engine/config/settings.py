@@ -940,13 +940,9 @@ class Settings(BaseSettings):
     enrich_local_writer_enabled: bool = False
 
     # ── Campaign EIE-CEG-GATE-COLLAB-2026-11-21, lane CEG-W (default-off, appended) ──
-    # A3 (EIE-CEG-GATE-COLLAB): graph inference reads the node from the graph,
-    # not from a caller `entity`, and a committed node `sync` becomes the opt-in
-    # trigger. Each changed finding set is recorded as a CegInferenceObligation
-    # and delivered after the write; delivery counts only on EIE's complete
-    # intake ack. Needs graph_inference_feedback_enabled too, and the tenant's
-    # spec must declare plugins.inference_rules. Off: the admin subaction keeps
-    # its caller-entity behaviour and sync never evaluates inference.
+    # A3: graph inference reads the node from the graph (never a caller `entity`);
+    # a committed node `sync` is the opt-in trigger. Also needs
+    # graph_inference_feedback_enabled and plugins.inference_rules. FEATURE_GATES §13.
     graph_inference_trigger_enabled: bool = False
 
     @model_validator(mode="after")

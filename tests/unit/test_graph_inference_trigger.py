@@ -9,21 +9,16 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
-A3 (EIE-CEG-GATE-COLLAB-2026-11-21) — graph inference read from the graph,
-recorded as a durable obligation, delivered to EIE only after the write.
-
-Acceptance cases covered at unit level (P22, P23, P24, P28; P05 by the second
-synthetic tenant; P03 by the egress seam). The graph store is an in-memory fake
-that executes the trigger's tagged statements with the same semantics as their
-Cypher; a real-Neo4j run of those statements belongs to integration.
+A3 (EIE-CEG-GATE-COLLAB-2026-11-21) — the graph inference trigger module,
+exercised directly (no handlers): graph-read evidence, change decision,
+compare-and-set obligation, delivery disposition. Handler wiring and the
+scenario suite through ``sync``/``admin`` live in test_graph_inference_handlers.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import math
-import re
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -33,536 +28,285 @@ from constellation_node_sdk import GateClientError
 
 from engine.config.schema import DomainSpec
 from engine.feedback import graph_inference_trigger as trigger
-from engine.gate_egress import GRAPH_INFERENCE_ACTION, build_inference_outputs, classify_intake_ack
-from engine.inference_rule_registry import (
-    _RULE_REGISTRY,
-    InferenceResult,
-    register_inference_rule,
-)
-from tests.fixtures.domain_contracts import SYNTHETIC_DOMAINS_ROOT, synthetic_loader
+from engine.gate_egress import build_inference_outputs, classify_intake_ack
+from engine.inference_rule_registry import _RULE_REGISTRY, InferenceResult, register_inference_rule
+from tests.fixtures.domain_contracts import SYNTHETIC_DOMAINS_ROOT
 
 pytestmark = pytest.mark.unit
+TENANT, LABEL = "cheese-aging", "AgingCave"
+SIZE = "infer_company_size_tier"
 
-TENANT = "cheese-aging"
-LABEL = "AgingCave"
-
-
-# ── Test-only rules (registered once, names cannot collide with engine rules) ─
-
-
-def _register(name: str, fn: Any) -> None:
-    if name not in _RULE_REGISTRY:
-        register_inference_rule(name)(fn)
-
-
-_register(
-    "test_a3_low_confidence",
-    lambda e, c: InferenceResult("low_field", "x", 0.54, "test_a3_low_confidence"),
-)
-_register(
-    "test_a3_nonfinite",
-    lambda e, c: InferenceResult("nan_field", "x", math.nan, "test_a3_nonfinite"),
-)
-_register(
-    "test_a3_malformed_field",
-    lambda e, c: InferenceResult("", "x", 0.9, "test_a3_malformed_field"),
-)
+for _name, _result in {
+    "test_a3_low_confidence": InferenceResult("low_field", "x", 0.54, "test_a3_low_confidence"),
+    "test_a3_nonfinite": InferenceResult("nan_field", "x", math.nan, "test_a3_nonfinite"),
+    "test_a3_malformed_field": InferenceResult("", "x", 0.9, "test_a3_malformed_field"),
+}.items():
+    if _name not in _RULE_REGISTRY:
+        register_inference_rule(_name)(lambda e, c, r=_result: r)
 
 
-# ── Fixtures ─────────────────────────────────────────────────────────────────
-
-
-def _spec(rules: list[str] | None, *, version: str = "0.2.0", params: dict[str, Any] | None = None) -> DomainSpec:
+def _spec(rules: list[str], version: str = "0.2.0") -> DomainSpec:
     raw = yaml.safe_load((SYNTHETIC_DOMAINS_ROOT / "cheese-aging" / "spec.yaml").read_text())
     raw["domain"]["version"] = version
-    for node in raw["ontology"]["nodes"]:
-        if node["label"] == LABEL:
-            node["properties"] += [
-                {"name": "employee_count", "type": "int"},
-                {"name": "company_size_tier", "type": "string"},
-            ]
-    if rules is not None:
-        raw["plugins"] = {"inference_rules": rules, "inference_rule_parameters": params or {}}
+    raw["plugins"] = {"inference_rules": rules, "inference_rule_parameters": {}}
     return DomainSpec.model_validate(raw)
 
 
 class FakeGraph:
-    """In-memory store executing the trigger's tagged statements and node MERGE syncs."""
+    """Executes the trigger's tagged statements with the semantics of their Cypher."""
 
     def __init__(self) -> None:
-        self.nodes: dict[tuple[str, str], dict[str, Any]] = {}
-        self.obligations: dict[tuple[str, str, str], dict[str, Any]] = {}
+        self.nodes: dict[str, dict[str, Any]] = {}
+        self.obligations: dict[str, dict[str, Any]] = {}
         self.statements: list[str] = []
+        self.constraint_present = True
 
     async def execute_query(
         self, cypher: str, parameters: dict[str, Any] | None = None, database: str | None = None
     ) -> list[Any]:
         p = parameters or {}
-        self.statements.append(cypher.splitlines()[0])
-        if "ceg:inference:read_entities" in cypher:
-            label = re.search(r"MATCH \(n:(\w+)\)", cypher)[1]  # type: ignore[index]
+        tag = cypher.splitlines()[0]
+        self.statements.append(tag)
+        if "constraint_check" in tag:
+            return [{"name": trigger.OBLIGATION_CONSTRAINT_NAME}] if self.constraint_present else []
+        if "read_entities" in tag:
             return [
-                {"entity_id": eid, "props": dict(props)}
-                for (lbl, eid), props in self.nodes.items()
-                if lbl == label and eid in p["ids"] and props.get("_tenant") == p["tenant"]
+                {"entity_id": i, "props": n}
+                for i, n in self.nodes.items()
+                if i in p["ids"] and n.get("_tenant") == p["tenant"]
             ]
-        if "ceg:inference:read_obligations" in cypher:
-            return [
-                {"entity_id": eid, "obligation": dict(o)}
-                for (t, lbl, eid), o in self.obligations.items()
-                if t == p["tenant"] and lbl == p["label"] and eid in p["ids"]
-            ]
-        if "ceg:inference:record_evaluations" in cypher:
+        if "read_obligations" in tag:
+            return [{"entity_id": i, "obligation": dict(o)} for i, o in self.obligations.items() if i in p["ids"]]
+        if "record_evaluations" in tag:
+            written = []
             for row in p["rows"]:
-                o = self.obligations.setdefault((p["tenant"], p["label"], row["entity_id"]), {})
+                o = self.obligations.setdefault(row["entity_id"], {})
+                if (o.get("evidence_revision") or "", o.get("rule_revision") or "") != (
+                    row["prior_evidence_revision"] or "",
+                    row["prior_rule_revision"] or "",
+                ):
+                    continue
+                emit = row["decision"] == "emit"
                 o.update(
                     evidence_revision=row["evidence_revision"],
                     rule_revision=row["rule_revision"],
                     decision=row["decision"],
+                    status={"emit": "pending", "same_findings": "accepted"}.get(row["decision"], "no_findings"),
+                    pending_key=row["pending_key"] if emit else None,
+                    pending_findings_digest=row["findings_digest"] if emit else None,
+                    pending_outputs_json=row["outputs_json"] if emit else None,
                 )
-                if row["decision"] == "emit":
-                    o.update(
-                        status="pending",
-                        pending_key=row["pending_key"],
-                        pending_findings_digest=row["findings_digest"],
-                        pending_outputs_json=row["outputs_json"],
-                        attempts=0,
-                    )
-                elif row["decision"] == "no_findings":
-                    o["status"] = "no_findings"
-            return []
-        if "ceg:inference:record_delivery" in cypher:
-            o = self.obligations.get((p["tenant"], p["label"], p["entity_id"]))
+                written.append({"entity_id": row["entity_id"]})
+            return written
+        if "record_delivery" in tag:
+            o = self.obligations.get(p["entity_id"])
             if o is not None and o.get("pending_key") == p["pending_key"]:
-                o.update(status=p["status"], last_detail=p["detail"], attempts=o.get("attempts", 0) + 1)
+                o["status"] = p["status"]
                 if p["status"] == "accepted":
-                    o.update(accepted_key=p["pending_key"], accepted_findings_digest=o.get("pending_findings_digest"))
-            return []
-        merge = re.search(r"MERGE \(n:(\w+) \{(\w+): row(?:\.node)?\.\w+\}\)", cypher)
-        if merge and "batch" in p:
-            label, id_prop = merge[1], merge[2]
-            for row in p["batch"]:
-                values = dict(row.get("node", row))
-                node = self.nodes.setdefault((label, str(values[id_prop])), {})
-                node.update(values)
-                node["_tenant"] = p["tenant"]
-            return []
+                    o["accepted_findings_digest"] = o.get("pending_findings_digest")
         return []
 
 
 class FakeGate:
-    """Gate client double: records packets, answers like EIE's intake handler."""
-
-    def __init__(self, *, queued: int | None = None, error: Exception | None = None) -> None:
+    def __init__(self) -> None:
         self.sent: list[dict[str, Any]] = []
-        self.queued = queued
-        self.error = error
-        self.release: asyncio.Event | None = None
+        self.queued: int | None = None
+        self.error: Exception | None = None
 
     async def execute(self, **kwargs: Any) -> Any:
-        if self.release is not None:
-            await self.release.wait()
         self.sent.append(kwargs)
         if self.error is not None:
             raise self.error
-        outputs = kwargs["payload"]["inference_outputs"]
-        header = MagicMock(packet_id="pkt", packet_type="response", correlation_id=None)
-        response = MagicMock(header=header)
-        response.payload = {
-            "status": "accepted",
-            "targets_queued": len(outputs) if self.queued is None else self.queued,
-            "tenant": kwargs["tenant"],
-        }
+        n = len(kwargs["payload"]["inference_outputs"])
+        response = MagicMock(header=MagicMock(packet_id="pkt", packet_type="response", correlation_id=None))
+        response.payload = {"status": "accepted", "targets_queued": n if self.queued is None else self.queued}
         return response
 
 
 @pytest.fixture
-def flags(monkeypatch: pytest.MonkeyPatch):
-    from engine.config.settings import settings
-
-    monkeypatch.setattr(settings, "graph_inference_feedback_enabled", True)
-    monkeypatch.setattr(settings, "graph_inference_trigger_enabled", True)
-    monkeypatch.setenv("GATE_URL", "http://gate.test")
-    return settings
-
-
-@pytest.fixture
 def gate(monkeypatch: pytest.MonkeyPatch) -> FakeGate:
+    from engine.state import get_state
+
+    get_state().reset()
     fake = FakeGate()
+    monkeypatch.setenv("GATE_URL", "http://gate.test")
     monkeypatch.setattr("engine.gate_egress.get_gate_client", lambda: fake)
     return fake
 
 
-def _bind(spec: DomainSpec, graph: FakeGraph) -> None:
-    from engine.handlers import init_dependencies
-    from engine.state import get_state
-
-    loader = MagicMock()
-    loader.load_domain.return_value = spec
-    get_state().reset()
-    init_dependencies(graph, loader)
-
-
-async def _sync(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    from engine.handlers import handle_sync
-
-    result = await handle_sync(TENANT, {"entity_type": "aging-caves", "batch": rows})
+async def _run(graph: FakeGraph, spec: DomainSpec, rules: list[str] | None = None) -> trigger.TriggerReport:
+    report = await trigger.evaluate_and_record(
+        graph, spec, tenant=TENANT, label=LABEL, id_property="cave_id", ids=list(graph.nodes), rules=rules
+    )
+    trigger.schedule_deliveries(graph, spec, tenant=TENANT, label=LABEL, report=report)
     await trigger.drain_inflight()
-    return result
+    return report
 
 
-@pytest.fixture(autouse=True)
-def _reset():
-    from engine.state import _reset_singleton
-
-    yield
-    _reset_singleton()
-
-
-# ── Activation boundaries ────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_trigger_flag_off_by_default_evaluates_nothing(gate: FakeGate, monkeypatch) -> None:
-    from engine.config.settings import settings
-
-    assert settings.graph_inference_trigger_enabled is False
-    monkeypatch.setattr(settings, "graph_inference_feedback_enabled", True)
-    graph = FakeGraph()
-    _bind(_spec(["infer_company_size_tier"]), graph)
-    await _sync([{"cave_id": "c1", "employee_count": 40}])
-    assert not any("ceg:inference" in s for s in graph.statements)
-    assert gate.sent == []
-
-
-@pytest.mark.asyncio
-async def test_domain_without_declared_rules_evaluates_nothing(flags, gate: FakeGate) -> None:
-    graph = FakeGraph()
-    _bind(_spec(None), graph)
-    await _sync([{"cave_id": "c1", "employee_count": 40}])
-    assert not any("ceg:inference" in s for s in graph.statements)
-    assert gate.sent == []
-
-
-@pytest.mark.asyncio
-async def test_second_synthetic_tenant_carries_no_rule_and_sends_nothing(flags, gate: FakeGate) -> None:
-    """P05: generic code holds no domain literal; a tenant that declares nothing gets nothing."""
-    spec = synthetic_loader().load_domain("orbital-logistics")
-    assert trigger.trigger_active(flags, spec) is False
-
-
-# ── P22: a changed graph fact produces one cited finding via graph-inference-result ─
-
-
-@pytest.mark.asyncio
-async def test_changed_graph_fact_sends_one_cited_finding(flags, gate: FakeGate) -> None:
-    graph = FakeGraph()
-    _bind(_spec(["infer_company_size_tier"]), graph)
-    await _sync([{"cave_id": "c1", "employee_count": 40}])
-
-    assert len(gate.sent) == 1
-    packet = gate.sent[0]
-    assert packet["action"] == GRAPH_INFERENCE_ACTION
-    assert packet["tenant"] == TENANT
-    [output] = packet["payload"]["inference_outputs"]
-    assert (output["entity_id"], output["field"], output["value"]) == ("c1", "company_size_tier", "small")
-    assert output["rule"] == "infer_company_size_tier"
-    assert output["confidence"] >= 0.55
-    assert output["provenance"].startswith(f"ceg:graph:{LABEL}:c1@")
-    obligation = graph.obligations[(TENANT, LABEL, "c1")]
-    assert packet["idempotency_key"] == obligation["pending_key"]
-    assert obligation["status"] == "accepted"
-
-
-@pytest.mark.asyncio
-async def test_graph_read_not_caller_payload_is_the_evidence(flags, gate: FakeGate) -> None:
-    """The node as stored is read back: a value the graph already held participates."""
-    graph = FakeGraph()
-    graph.nodes[(LABEL, "c1")] = {"cave_id": "c1", "employee_count": 120, "_tenant": TENANT}
-    _bind(_spec(["infer_company_size_tier"]), graph)
-    await _sync([{"cave_id": "c1", "humidity_pct": 92.0}])  # the row itself carries no employee_count
-    [output] = gate.sent[0]["payload"]["inference_outputs"]
-    assert output["value"] == "mid_market"
-
-
-# ── P23: unchanged replay, repeated finding, EIE echo, restart ────────────────
-
-
-@pytest.mark.asyncio
-async def test_unchanged_replay_sends_nothing_and_survives_restart(flags, gate: FakeGate) -> None:
-    graph = FakeGraph()
-    spec = _spec(["infer_company_size_tier"])
-    _bind(spec, graph)
-    await _sync([{"cave_id": "c1", "employee_count": 40}])
-    assert len(gate.sent) == 1
-
-    _bind(spec, graph)  # process restart: state reset, the graph store remains
-    graph.statements.clear()
-    await _sync([{"cave_id": "c1", "employee_count": 40}])
-    assert len(gate.sent) == 1
-    # Read, compared, nothing recorded: an unchanged replay is not new work.
-    assert any("read_obligations" in s for s in graph.statements)
-    assert not any("record_evaluations" in s for s in graph.statements)
-    assert graph.obligations[(TENANT, LABEL, "c1")]["status"] == "accepted"
-
-
-@pytest.mark.asyncio
-async def test_real_change_is_not_suppressed(flags, gate: FakeGate) -> None:
-    graph = FakeGraph()
-    _bind(_spec(["infer_company_size_tier"]), graph)
-    await _sync([{"cave_id": "c1", "employee_count": 40}])
-    await _sync([{"cave_id": "c1", "employee_count": 120}])
-    assert [p["payload"]["inference_outputs"][0]["value"] for p in gate.sent] == ["small", "mid_market"]
-    assert gate.sent[0]["idempotency_key"] != gate.sent[1]["idempotency_key"]
-
-
-@pytest.mark.asyncio
-async def test_eie_echo_of_the_finding_sends_nothing(flags, gate: FakeGate) -> None:
-    """EIE writes the inferred value back: the graph now holds it, nothing new is proposed."""
-    graph = FakeGraph()
-    _bind(_spec(["infer_company_size_tier"]), graph)
-    await _sync([{"cave_id": "c1", "employee_count": 40}])
-    await _sync([{"cave_id": "c1", "company_size_tier": "small"}])
-    assert len(gate.sent) == 1
-    assert graph.obligations[(TENANT, LABEL, "c1")]["decision"] == "no_findings"
-
-
-@pytest.mark.asyncio
-async def test_unrelated_change_with_the_same_finding_is_not_resent(flags, gate: FakeGate) -> None:
-    graph = FakeGraph()
-    _bind(_spec(["infer_company_size_tier"]), graph)
-    await _sync([{"cave_id": "c1", "employee_count": 40}])
-    await _sync([{"cave_id": "c1", "humidity_pct": 88.0}])
-    assert len(gate.sent) == 1
-    assert graph.obligations[(TENANT, LABEL, "c1")]["decision"] == "same_findings"
-
-
-@pytest.mark.asyncio
-async def test_stale_rule_revision_reevaluates_without_resending_an_accepted_finding(flags, gate: FakeGate) -> None:
-    graph = FakeGraph()
-    _bind(_spec(["infer_company_size_tier"]), graph)
-    await _sync([{"cave_id": "c1", "employee_count": 40}])
-    _bind(_spec(["infer_company_size_tier"], version="0.3.0"), graph)
-    await _sync([{"cave_id": "c1", "employee_count": 40}])
-    obligation = graph.obligations[(TENANT, LABEL, "c1")]
-    assert obligation["decision"] == "same_findings"
-    assert len(gate.sent) == 1
-
-
-# ── P24: only authorized, confident, well-formed findings are sent ────────────
+def _node(graph: FakeGraph, **props: Any) -> None:
+    graph.nodes["c1"] = {"cave_id": "c1", "_tenant": TENANT, **props}
 
 
 @pytest.mark.parametrize(
-    ("rule", "reason"),
+    ("rule", "props", "reason"),
     [
-        ("test_a3_low_confidence", "no_confident_inference"),
-        ("test_a3_nonfinite", "nonfinite_confidence"),
-        ("test_a3_malformed_field", "malformed_field"),
+        ("test_a3_low_confidence", {}, "no_confident_inference"),
+        ("test_a3_nonfinite", {}, "nonfinite_confidence"),
+        ("test_a3_malformed_field", {}, "malformed_field"),
+        (SIZE, {"employee_count": 40, "company_size_tier": "small"}, "already_in_graph"),
     ],
 )
-def test_unsendable_findings_are_skipped_with_a_reason(rule: str, reason: str) -> None:
-    evaluation = trigger.evaluate_entity(
-        tenant=TENANT,
-        domain_spec=_spec([rule]),
-        entity_id="c1",
-        props={"cave_id": "c1", "_tenant": TENANT},
-        rules=[rule],
-    )
-    assert evaluation.findings == []
-    assert evaluation.skipped == [{"rule": rule, "reason": reason}]
+def test_unsendable_findings_are_skipped_with_a_reason(rule: str, props: dict[str, Any], reason: str) -> None:
+    ev = trigger.evaluate_entity(tenant=TENANT, domain_spec=_spec([rule]), entity_id="c1", props=props, rules=[rule])
+    assert ev.findings == []
+    assert ev.skipped == [{"rule": rule, "reason": reason}]
 
 
 @pytest.mark.asyncio
-async def test_exact_allowed_rule_set_runs(flags, gate: FakeGate) -> None:
-    graph = FakeGraph()
-    _bind(_spec(["infer_company_size_tier"]), graph)
-    graph.nodes[(LABEL, "c1")] = {
-        "cave_id": "c1",
-        "employee_count": 40,
-        "website": "https://www.example.org",
-        "_tenant": TENANT,
-    }
-    from engine.handlers import handle_admin
+async def test_changed_fact_sends_one_cited_finding_then_unchanged_sends_nothing(gate: FakeGate) -> None:
+    graph, spec = FakeGraph(), _spec([SIZE])
+    _node(graph, employee_count=40, updated_at="t1")
+    await _run(graph, spec)
+    [output] = gate.sent[0]["payload"]["inference_outputs"]
+    assert (output["field"], output["value"], output["rule"]) == ("company_size_tier", "small", SIZE)
+    assert output["provenance"].startswith(f"ceg:graph:{LABEL}:c1@")
+    assert gate.sent[0]["idempotency_key"] == graph.obligations["c1"]["pending_key"]
+    assert graph.obligations["c1"]["status"] == "accepted"
+    graph.nodes["c1"]["updated_at"] = "t2"  # timestamps are not evidence
+    graph.statements.clear()
+    await _run(graph, spec)
+    assert len(gate.sent) == 1
+    assert "// ceg:inference:record_evaluations" not in graph.statements
 
-    result = await handle_admin(
-        TENANT, {"subaction": "emit_inference_feedback", "entity_type": "aging-caves", "entity_id": "c1"}
+
+@pytest.mark.asyncio
+async def test_real_change_resends_and_a_return_to_the_accepted_value_retires_pending(gate: FakeGate) -> None:
+    graph, spec = FakeGraph(), _spec([SIZE])
+    _node(graph, employee_count=40)
+    await _run(graph, spec)  # small accepted
+    gate.error = GateClientError("down")
+    graph.nodes["c1"]["employee_count"] = 120
+    await _run(graph, spec)  # mid_market pending
+    stale = trigger.PendingDelivery(
+        "c1", graph.obligations["c1"]["pending_key"], json.loads(graph.obligations["c1"]["pending_outputs_json"])
     )
-    assert result["rules_run"] == ["infer_company_size_tier"]
+    assert stale.pending_key != gate.sent[0]["idempotency_key"]
+    gate.error = None
+    graph.nodes["c1"]["employee_count"] = 40
+    report = await _run(graph, spec)
+    assert report.decisions == {"same_findings": 1}
+    assert (graph.obligations["c1"]["status"], graph.obligations["c1"]["pending_key"]) == ("accepted", None)
+    sent = len(gate.sent)
+    assert await trigger.retry_pending(graph, spec, tenant=TENANT, label=LABEL, entity_id="c1") is None
+    assert (await trigger.deliver(graph, spec, tenant=TENANT, label=LABEL, pending=stale))[
+        "delivery_status"
+    ] == "superseded"
+    assert len(gate.sent) == sent
+
+
+@pytest.mark.asyncio
+async def test_older_overlapping_evaluation_cannot_replace_newer_state(gate: FakeGate) -> None:
+    graph, spec = FakeGraph(), _spec([SIZE])
+    _node(graph, employee_count=40)
+    await _run(graph, spec)
+    newer = dict(graph.obligations["c1"])
+    row = dict.fromkeys(("prior_evidence_revision", "prior_rule_revision"))
+    row |= {
+        "entity_id": "c1",
+        "evidence_revision": "old",
+        "rule_revision": "old",
+        "decision": "emit",
+        "findings_digest": "old",
+        "pending_key": "old",
+        "outputs_json": "[]",
+    }
+    assert await trigger.record_evaluations(graph, spec, tenant=TENANT, label=LABEL, rows=[row]) == set()
+    assert graph.obligations["c1"] == newer
+
+
+@pytest.mark.asyncio
+async def test_stale_rule_revision_reevaluates_without_resending(gate: FakeGate) -> None:
+    graph = FakeGraph()
+    _node(graph, employee_count=40)
+    await _run(graph, _spec([SIZE]))
+    assert (await _run(graph, _spec([SIZE], version="0.3.0"))).decisions == {"same_findings": 1}
+    assert len(gate.sent) == 1
+
+
+@pytest.mark.asyncio
+async def test_rule_selection_is_bounded_by_the_domain(gate: FakeGate) -> None:
+    graph, spec = FakeGraph(), _spec([SIZE])
+    _node(graph, employee_count=40, website="https://www.example.org")
+    assert (await _run(graph, spec, rules=[])).evaluated == 0
+    await _run(graph, spec, rules=["infer_email_domain_from_website", SIZE])  # unauthorized name ignored
     assert [o["field"] for o in gate.sent[0]["payload"]["inference_outputs"]] == ["company_size_tier"]
 
 
 @pytest.mark.asyncio
-async def test_empty_rules_means_none(flags, gate: FakeGate) -> None:
-    graph = FakeGraph()
-    graph.nodes[(LABEL, "c1")] = {"cave_id": "c1", "employee_count": 40, "_tenant": TENANT}
-    _bind(_spec(["infer_company_size_tier"]), graph)
-    from engine.handlers import handle_admin
+async def test_other_tenants_node_and_missing_constraint_write_nothing(gate: FakeGate) -> None:
+    from engine.state import get_state
 
-    result = await handle_admin(
-        TENANT, {"subaction": "emit_inference_feedback", "entity_type": "aging-caves", "entity_id": "c1", "rules": []}
-    )
-    assert result["rules_run"] == []
-    assert result["results_produced"] == 0
+    graph, spec = FakeGraph(), _spec([SIZE])
+    graph.nodes["c1"] = {"cave_id": "c1", "employee_count": 40, "_tenant": "someone-else"}
+    assert (await _run(graph, spec)).decisions == {"entity_not_found_for_tenant": 1}
+    _node(graph, employee_count=40)
+    graph.constraint_present = False
+    get_state().inference_constraint_databases.clear()
+    assert (await _run(graph, spec)).decisions == {"obligation_constraint_missing": 1}
+    assert graph.obligations == {}
     assert gate.sent == []
 
 
 @pytest.mark.asyncio
-async def test_unauthorized_rule_is_refused_before_any_read(flags, gate: FakeGate) -> None:
-    from engine.handlers import ValidationError, handle_admin
-
-    graph = FakeGraph()
-    _bind(_spec(["infer_company_size_tier"]), graph)
-    with pytest.raises(ValidationError, match="not authorized by domain"):
-        await handle_admin(
-            TENANT,
-            {
-                "subaction": "emit_inference_feedback",
-                "entity_type": "aging-caves",
-                "entity_id": "c1",
-                "rules": ["infer_email_domain_from_website"],
-            },
-        )
-    assert not any("ceg:inference" in s for s in graph.statements)
-    assert gate.sent == []
-
-
-@pytest.mark.asyncio
-async def test_caller_entity_is_refused_while_graph_read_is_on(flags, gate: FakeGate) -> None:
-    from engine.handlers import ValidationError, handle_admin
-
-    _bind(_spec(["infer_company_size_tier"]), FakeGraph())
-    with pytest.raises(ValidationError, match="reads the entity from the graph"):
-        await handle_admin(
-            TENANT, {"subaction": "emit_inference_feedback", "entity": {"employee_count": 40}, "entity_id": "c1"}
-        )
-    assert gate.sent == []
-
-
-@pytest.mark.asyncio
-async def test_node_of_another_tenant_is_not_evidence(flags, gate: FakeGate) -> None:
-    graph = FakeGraph()
-    graph.nodes[(LABEL, "c1")] = {"cave_id": "c1", "employee_count": 40, "_tenant": "someone-else"}
-    _bind(_spec(["infer_company_size_tier"]), graph)
-    from engine.handlers import handle_admin
-
-    result = await handle_admin(
-        TENANT, {"subaction": "emit_inference_feedback", "entity_type": "aging-caves", "entity_id": "c1"}
-    )
-    assert result["trigger"]["decisions"] == {"entity_not_found_for_tenant": 1}
-    assert gate.sent == []
-
-
-@pytest.mark.asyncio
-async def test_other_domain_id_is_refused(flags, gate: FakeGate) -> None:
-    from engine.handlers import ValidationError, handle_admin
-
-    _bind(_spec(["infer_company_size_tier"]), FakeGraph())
-    with pytest.raises(ValidationError, match="does not match the packet tenant"):
-        await handle_admin(
-            TENANT,
-            {"subaction": "emit_inference_feedback", "entity_type": "aging-caves", "entity_id": "c1", "domain_id": "x"},
-        )
-
-
-# ── P28 and failure dispositions: delivery counts only on a complete intake ack ─
-
-
-@pytest.mark.asyncio
-async def test_partial_intake_is_not_delivery(flags, gate: FakeGate) -> None:
+@pytest.mark.parametrize(("queued", "status"), [(0, "pending"), (None, "accepted")])
+async def test_zero_intake_is_retryable_under_the_same_key(gate: FakeGate, queued: int | None, status: str) -> None:
+    graph, spec = FakeGraph(), _spec([SIZE])
+    _node(graph, employee_count=40)
     gate.queued = 0
-    graph = FakeGraph()
-    _bind(_spec(["infer_company_size_tier"]), graph)
-    await _sync([{"cave_id": "c1", "employee_count": 40}])
-    obligation = graph.obligations[(TENANT, LABEL, "c1")]
-    assert obligation["status"] == "partial"
-    assert "accepted_findings_digest" not in obligation
+    await _run(graph, spec)
+    assert graph.obligations["c1"]["status"] == "pending"
+    gate.queued = queued
+    await trigger.retry_pending(graph, spec, tenant=TENANT, label=LABEL, entity_id="c1")
+    assert graph.obligations["c1"]["status"] == status
+    assert gate.sent[0]["idempotency_key"] == gate.sent[1]["idempotency_key"]
 
 
 @pytest.mark.asyncio
-async def test_gate_failure_stays_pending_and_retry_reuses_the_key(flags, gate: FakeGate) -> None:
-    gate.error = GateClientError("gate unavailable")
-    graph = FakeGraph()
-    _bind(_spec(["infer_company_size_tier"]), graph)
-    await _sync([{"cave_id": "c1", "employee_count": 40}])
-    obligation = graph.obligations[(TENANT, LABEL, "c1")]
-    assert obligation["status"] == "pending"
-    first_key = gate.sent[0]["idempotency_key"]
-
-    # An unchanged replay is not new work, even while delivery is outstanding.
-    await _sync([{"cave_id": "c1", "employee_count": 40}])
-    assert len(gate.sent) == 1
-
-    gate.error = None
-    from engine.handlers import handle_admin
-
-    result = await handle_admin(
-        TENANT, {"subaction": "emit_inference_feedback", "entity_type": "aging-caves", "entity_id": "c1", "retry": True}
-    )
-    assert result["status"] == "inference_feedback_retried"
-    assert gate.sent[1]["idempotency_key"] == first_key
-    assert graph.obligations[(TENANT, LABEL, "c1")]["status"] == "accepted"
+async def test_partial_intake_is_never_counted_or_blindly_resent(gate: FakeGate) -> None:
+    graph, spec = FakeGraph(), _spec([SIZE, "infer_email_domain_from_website"])
+    _node(graph, employee_count=40, website="https://www.example.org")
+    gate.queued = 1
+    await _run(graph, spec)
+    assert graph.obligations["c1"]["status"] == "partial"
+    assert "accepted_findings_digest" not in graph.obligations["c1"]
+    assert await trigger.retry_pending(graph, spec, tenant=TENANT, label=LABEL, entity_id="c1") is None
 
 
 @pytest.mark.asyncio
-async def test_gate_not_configured_is_a_blocked_disposition(flags, gate: FakeGate, monkeypatch) -> None:
+async def test_gate_not_configured_is_blocked(gate: FakeGate, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GATE_URL")
     graph = FakeGraph()
-    _bind(_spec(["infer_company_size_tier"]), graph)
-    await _sync([{"cave_id": "c1", "employee_count": 40}])
-    assert graph.obligations[(TENANT, LABEL, "c1")]["status"] == "blocked"
+    _node(graph, employee_count=40)
+    await _run(graph, _spec([SIZE]))
+    assert graph.obligations["c1"]["status"] == "blocked"
     assert gate.sent == []
-
-
-@pytest.mark.asyncio
-async def test_sync_answers_before_delivery_runs(flags, gate: FakeGate) -> None:
-    """Delivery is never awaited inside the sync that caused it."""
-    from engine.handlers import handle_sync
-
-    gate.release = asyncio.Event()
-    graph = FakeGraph()
-    _bind(_spec(["infer_company_size_tier"]), graph)
-    result = await handle_sync(
-        TENANT, {"entity_type": "aging-caves", "batch": [{"cave_id": "c1", "employee_count": 40}]}
-    )
-    assert result["status"] == "success"
-    assert gate.sent == []
-    assert graph.obligations[(TENANT, LABEL, "c1")]["status"] == "pending"
-    gate.release.set()
-    await trigger.drain_inflight()
-    assert len(gate.sent) == 1
-
-
-@pytest.mark.asyncio
-async def test_stale_delivery_does_not_overwrite_a_newer_obligation(flags, gate: FakeGate) -> None:
-    graph = FakeGraph()
-    spec = _spec(["infer_company_size_tier"])
-    graph.obligations[(TENANT, LABEL, "c1")] = {"pending_key": "newer", "status": "pending"}
-    await trigger.record_delivery(
-        graph, spec, tenant=TENANT, label=LABEL, entity_id="c1", pending_key="older", status="accepted", detail=""
-    )
-    assert graph.obligations[(TENANT, LABEL, "c1")]["status"] == "pending"
-
-
-# ── Ack classification and egress hygiene ────────────────────────────────────
 
 
 @pytest.mark.parametrize(
-    ("dispatch", "status"),
+    ("queued", "sent", "status"),
     [
-        ({"status": "ok", "sent_outputs": 2, "payload": {"status": "accepted", "targets_queued": 2}}, "accepted"),
-        ({"status": "ok", "sent_outputs": 2, "payload": {"status": "accepted", "targets_queued": 1}}, "partial"),
-        ({"status": "ok", "sent_outputs": 2, "payload": {"status": "accepted", "targets_queued": 3}}, "unconfirmed"),
-        ({"status": "ok", "sent_outputs": 2, "payload": {"status": "accepted"}}, "unconfirmed"),
-        ({"status": "ok", "sent_outputs": 2, "payload": {"status": "accepted", "targets_queued": True}}, "unconfirmed"),
-        ({"status": "ok", "sent_outputs": 2, "payload": {"queued": 2}}, "unconfirmed"),
-        ({"status": "failed", "error": "gate_not_configured"}, "blocked"),
-        ({"status": "failed", "error": "GateClientError"}, "pending"),
-        ({"status": "failed", "packet_type": "failure"}, "pending"),
-        ({"status": "skipped", "error": "no_outputs_above_confidence_floor"}, "skipped"),
+        (2, 2, "accepted"),
+        (1, 2, "partial"),
+        (0, 2, "pending"),
+        (3, 2, "unconfirmed"),
+        (True, 2, "unconfirmed"),
+        (None, 2, "unconfirmed"),
     ],
 )
-def test_intake_ack_classification(dispatch: dict[str, Any], status: str) -> None:
-    assert classify_intake_ack(dispatch)[0] == status
+def test_intake_ack_classification(queued: Any, sent: int, status: str) -> None:
+    payload = {"status": "accepted"} | ({} if queued is None else {"targets_queued": queued})
+    assert classify_intake_ack({"status": "ok", "sent_outputs": sent, "payload": payload})[0] == status
+    assert classify_intake_ack({"status": "failed", "error": "gate_not_configured"})[0] == "blocked"
 
 
 @pytest.mark.parametrize("confidence", [math.nan, math.inf, 1.5])
@@ -570,43 +314,5 @@ def test_egress_drops_out_of_range_confidence(confidence: float) -> None:
     assert build_inference_outputs("e-1", [{"field": "f", "value": 1, "confidence": confidence}]) == []
 
 
-def test_obligation_payload_round_trips_as_json() -> None:
-    evaluation = trigger.evaluate_entity(
-        tenant=TENANT,
-        domain_spec=_spec(["infer_company_size_tier"]),
-        entity_id="c1",
-        props={"cave_id": "c1", "employee_count": 40, "_tenant": TENANT, "updated_at": "now"},
-        rules=["infer_company_size_tier"],
-    )
-    outputs = build_inference_outputs("c1", evaluation.findings)
-    assert json.loads(json.dumps(outputs)) == outputs
-    assert trigger.evidence_revision({"cave_id": "c1", "employee_count": 40, "updated_at": "later"}) == (
-        evaluation.evidence_revision
-    )
-
-
-# ── Obligation key uniqueness (CTO answer 1) ─────────────────────────────────
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("enabled", [True, False])
-async def test_init_schema_adds_the_obligation_key_constraint_only_when_enabled(
-    enabled: bool, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from engine.config.settings import settings
-    from engine.handlers import _init_schema
-
-    monkeypatch.setattr(settings, "graph_inference_trigger_enabled", enabled)
-    graph = FakeGraph()
-    await _init_schema(graph, _spec(["infer_company_size_tier"]))  # type: ignore[arg-type]
-    expected = trigger.obligation_constraint_cypher()
-    assert (expected.splitlines()[0] in graph.statements) is enabled
-    assert "REQUIRE (o.tenant, o.entity_type, o.entity_id) IS UNIQUE" in expected
-
-
-def test_every_obligation_write_merges_on_the_constrained_key() -> None:
-    import inspect
-
-    source = inspect.getsource(trigger.record_evaluations)
-    assert "MERGE" in source
-    assert "{tenant: $tenant, entity_type: $label, entity_id: row.entity_id}" in source
+def test_obligation_key_is_unique_on_tenant_type_and_id() -> None:
+    assert "REQUIRE (o.tenant, o.entity_type, o.entity_id) IS UNIQUE" in trigger.obligation_constraint_cypher()

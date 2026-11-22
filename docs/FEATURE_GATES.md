@@ -743,15 +743,21 @@ the caller asserted. With this flag on as well:
   with an idempotency key bound to tenant, entity, both revisions and the
   findings. The obligation is `accepted` only on EIE's complete intake ack
   (`status: accepted`, `targets_queued` equal to the outputs sent) — an intake
-  ack, not consumption. `partial`, `unconfirmed`, `blocked` (no `GATE_URL`)
-  and `pending` (Gate/EIE failure) are not delivered. `admin`
-  `emit_inference_feedback` with `retry: true` re-sends a `pending`,
-  `blocked` or `unconfirmed` obligation under its original key.
+  ack, not consumption. `partial` (some targets queued; never resent, since a
+  resend could queue them twice), `unconfirmed`, `blocked` (no `GATE_URL`)
+  and `pending` (Gate/EIE failure, or zero targets queued) are not delivered.
+  `admin` `emit_inference_feedback` with `retry: true` re-sends a `pending`,
+  `blocked` or `unconfirmed` obligation under its original key. Writes are
+  compare-and-set on the revisions the decision read, and a superseded
+  pending finding is retired, so a retry or a late scheduled delivery never
+  sends a finding the graph no longer supports.
 - **Admin.** `emit_inference_feedback` takes `entity_type` + `entity_id`
   instead of `entity` (refused while the flag is on); see
   `docs/contracts/HANDLER_PAYLOADS.md`.
 - **Schema.** `init_schema` creates the uniqueness constraint
-  `ceg_inference_obligation_key` on `(tenant, entity_type, entity_id)`.
+  `ceg_inference_obligation_key` on `(tenant, entity_type, entity_id)` and
+  fails if it cannot (Neo4j 5 node-key/uniqueness support required). Until the
+  constraint exists the trigger writes nothing (`obligation_constraint_missing`).
 
 Activation: set both flags, declare the tenant's `plugins.inference_rules`,
 run `admin init_schema`, ensure Gate's caller policy lets CEG originate
