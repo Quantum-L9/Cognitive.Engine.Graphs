@@ -125,3 +125,13 @@ class TestHistoryTimestamp:
     @pytest.mark.parametrize("value", [None, "", "yesterday", 42])
     def test_unreadable_timestamp_is_none(self, value: object) -> None:
         assert parse_history_timestamp(value) is None
+
+
+def test_reference_just_before_a_fire_does_not_skip_it() -> None:
+    """CodeRabbit on #543: APScheduler rounds the search start up to a whole second."""
+    from engine.gds.staleness import next_fire_after
+
+    reference = datetime(2026, 11, 22, 11, 59, 59, 500000, tzinfo=UTC)
+    assert next_fire_after("0 * * * *", reference) == datetime(2026, 11, 22, 12, 0, tzinfo=UTC)
+    exact = datetime(2026, 11, 22, 12, 0, tzinfo=UTC)
+    assert next_fire_after("0 * * * *", exact) == datetime(2026, 11, 22, 13, 0, tzinfo=UTC)

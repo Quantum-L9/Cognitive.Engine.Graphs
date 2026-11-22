@@ -752,7 +752,16 @@ class TestPruneFailureIsPartial:
 
     @pytest.mark.asyncio
     async def test_reinforcement_prune_failure_is_partial(self):
-        driver = _prune_failing_driver([{"accepted_edges": 2, "rejected_edges": 1}])
+        driver = _prune_failing_driver([])
+        writes = iter([[{"accepted_edges": 2}], [{"rejected_edges": 1}]])  # each write returns its own column
+        prune_failing = driver.execute_query.side_effect
+
+        async def _execute(cypher, *args, **kwargs):
+            if "DELETE r" in cypher:
+                return await prune_failing(cypher, *args, **kwargs)
+            return next(writes)
+
+        driver.execute_query.side_effect = _execute
         job = _job("rf", "reinforcement", **_REINFORCEMENT_JOB)
         scheduler = GDSScheduler(_minimal_spec([job]), driver)
 

@@ -333,3 +333,104 @@ class TestFlagOff:
         from engine.config.settings import Settings
 
         assert Settings.model_fields["gds_dependency_barrier_enabled"].default is True
+
+
+class TestReviewFindings:
+    """CodeRabbit on #543: provider in-flight state, cancellation, identity, registration."""
+
+    @pytest.mark.asyncio
+    async def test_provider_waiting_on_its_own_dependency_is_in_flight(self) -> None:
+        """C depends on B, B on A: while B waits for A, C must not read B's old success."""
+        a = _job("a", "louvain")
+        b = _job("b", "cooccurrence", ["louvain"])
+        c = _job("c", "reinforcement", ["cooccurrence"])
+        scheduler, rec = _scheduler([a, b, c])
+        scheduler.dependency_wait_timeout_sec = 5.0
+        await scheduler.execute_job(a)
+        await scheduler.execute_job(b)  # B succeeded once
+        rec.gates["a"] = asyncio.Event()
+        a_task = asyncio.create_task(scheduler.execute_job(a))
+        await asyncio.sleep(0.02)
+        b_task = asyncio.create_task(scheduler.execute_job(b))  # waits on A
+        await asyncio.sleep(0.02)
+        c_task = asyncio.create_task(scheduler.execute_job(c))
+        await asyncio.sleep(0.05)
+        assert rec.events.count(("start", "c")) == 0, "C started on B's previous success"
+        rec.gates["a"].set()
+        await asyncio.gather(a_task, b_task, c_task)
+        assert rec.events.index(("end", "b"), rec.events.index(("end", "a"), 4)) < rec.events.index(("start", "c"))
+
+    @pytest.mark.asyncio
+    async def test_concurrent_attempts_of_one_provider_keep_it_running(self) -> None:
+        a = _job("a", "louvain")
+        b = _job("b", "cooccurrence", ["louvain"])
+        scheduler, _ = _scheduler([a, b])
+        scheduler.dependency_wait_timeout_sec = 0.2
+        first, second = asyncio.Event(), asyncio.Event()
+        gates = iter([first, second])
+
+        async def _run(job_spec: GDSJobSpec) -> dict[str, Any]:
+            await next(gates).wait()
+            return {}
+
+        scheduler._run_louvain = _run  # type: ignore[method-assign]
+        t1 = asyncio.create_task(scheduler.execute_job(a))
+        t2 = asyncio.create_task(scheduler.execute_job(a))
+        await asyncio.sleep(0.02)
+        first.set()
+        await t1
+        result = await scheduler.execute_job(b)
+        assert result["status"] == "blocked"
+        assert result["unsatisfied"] == ["a: running"]
+        second.set()
+        await t2
+
+    @pytest.mark.asyncio
+    async def test_cancelled_retry_invalidates_previous_success(self) -> None:
+        a = _job("a", "louvain")
+        b = _job("b", "cooccurrence", ["louvain"])
+        scheduler, rec = _scheduler([a, b])
+        await scheduler.execute_job(a)
+        rec.gates["a"] = asyncio.Event()
+        retry = asyncio.create_task(scheduler.execute_job(a))
+        await asyncio.sleep(0.02)
+        retry.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await retry
+        result = await scheduler.execute_job(b)
+        assert result["status"] == "blocked"
+        assert result["unsatisfied"] == ["a: last attempt cancelled"]
+        assert scheduler.job_history[-2]["status"] == "cancelled"
+        rec.gates["a"].set()
+        await scheduler.execute_job(a)
+        assert (await scheduler.execute_job(b))["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_duplicate_job_names_are_refused(self) -> None:
+        geo = _job("shared", "geoproximity")
+        louvain = _job("shared", "louvain")
+        b = _job("b", "cooccurrence", ["louvain"])
+        scheduler, rec = _scheduler([geo, louvain, b])
+        assert scheduler.refused_jobs["shared"] == "job name declared 2 times; dependency state needs a unique name"
+        assert scheduler.refused_jobs["b"] == "depends on unexecutable job 'shared'"
+        assert (await scheduler.trigger_job("shared"))["status"] == "refused"
+        assert rec.events == []
+
+    def test_unknown_algorithm_cron_job_is_not_registered(self) -> None:
+        mystery = _job("mystery", "pagerank", cron="0 3 * * *")
+        free = _job("free", "geoproximity", cron="0 4 * * *")
+        scheduler, _ = _scheduler([mystery, free])
+        scheduler.register_jobs()
+        assert {job.id for job in scheduler.scheduler.get_jobs()} == {"free"}
+        assert "mystery" not in scheduler.refused_jobs  # dependents of it block, not refuse
+
+    def test_barrier_registers_every_provider_with_algorithm_keyed_dag_off(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(settings, "gds_dag_job_identity_by_name", False)
+        a1 = _job("louvain_a", "louvain", cron="0 1 * * *")
+        a2 = _job("louvain_b", "louvain", cron="0 1 * * *")
+        b = _job("b", "cooccurrence", ["louvain"], cron="0 2 * * *")
+        scheduler, _ = _scheduler([a1, a2, b])
+        scheduler.register_jobs()
+        assert {job.id for job in scheduler.scheduler.get_jobs()} == {"louvain_a", "louvain_b", "b"}

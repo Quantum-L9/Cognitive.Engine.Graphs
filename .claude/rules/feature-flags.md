@@ -200,5 +200,5 @@ settings and the boot assertion over them were retired (Stage 2).
 
 | Flag | Default | Effect |
 |---|---|---|
-| gds_dependency_barrier_enabled | True | `depends_on` is a run-time barrier: a dependent waits for running/due providers and runs only when every provider's latest attempt is `success`, else records `blocked`; undeclared-algorithm deps, cycles and their downstream are `refused` and never cron-registered; unknown algorithm is `refused`; off restores registration-order waves |
+| gds_dependency_barrier_enabled | True | `depends_on` is a run-time barrier: a dependent waits for running/due providers and runs only when every provider's latest attempt is `success`, else records `blocked`; duplicate job names, undeclared-algorithm deps, cycles and their downstream are `refused` and never cron-registered; unknown algorithm is `refused`; off restores registration-order waves |
 | gds_prune_failure_partial_enabled | True | A cooccurrence/reinforcement prune failure after the write makes the job `partial` with `prune_error`; off logs it and reports `success` |
