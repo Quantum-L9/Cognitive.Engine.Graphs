@@ -22,6 +22,7 @@ from typing import Any
 
 import structlog
 
+from engine.causal.identity import FALLBACK_ID_PROPERTY, node_id_property
 from engine.config.schema import DomainSpec
 from engine.config.settings import settings
 from engine.graph.driver import GraphDriver
@@ -88,6 +89,7 @@ class CausalSubgraphSerializer:
         else:
             rel_pattern = "[r]"
 
+        path_node_id = self._path_node_id_expression(safe_label, safe_id)
         cypher = f"""
         MATCH (start:{safe_label})
         WHERE start.{safe_id} = $node_id
@@ -101,7 +103,7 @@ class CausalSubgraphSerializer:
             LIMIT $max_nodes
         }}
         WITH path, depth,
-             [n IN nodes(path) | {{id: n.{safe_id}, label: labels(n)[0], name: coalesce(n.name, n.{safe_id})}}] AS path_nodes,
+             [n IN nodes(path) | {{id: {path_node_id}, label: labels(n)[0], name: coalesce(n.name, {path_node_id})}}] AS path_nodes,
              [r IN relationships(path) | {{type: type(r), confidence: coalesce(r.confidence, 0.0)}}] AS path_rels
         RETURN path_nodes, path_rels, depth
         ORDER BY depth ASC
@@ -117,11 +119,16 @@ class CausalSubgraphSerializer:
                 },
                 database=self._db,
             )
-        except Exception:
+        except Exception as exc:
+            # C09: a failed query is distinguishable from an empty neighborhood
+            # (which logs nothing) by this event and its error class; the
+            # returned explanation keeps the locked match shape.
             logger.warning(
                 "causal_serialization_failed",
                 node_id=node_id,
                 node_label=node_label,
+                error_type=type(exc).__name__,
+                exc_info=True,
             )
             return {
                 "serialized": "",
@@ -174,3 +181,46 @@ class CausalSubgraphSerializer:
             "edges_traversed": list(dict.fromkeys(edge_types)),
             "depth_reached": max_depth_seen,
         }
+
+    def _path_node_id_expression(self, start_label: str, start_id_property: str) -> str:
+        """Cypher for a path node's identity, by the DECLARED id of its label (F09).
+
+        A causal path can cross labels whose identity properties differ (e.g. a
+        depot's ``depot_id`` and an outcome's ``outcome_id``); reading every node
+        by the start node's property gave the other labels a NULL id, so their
+        nodes collapsed into one in ``nodes_visited``. With
+        ``spec_declared_candidate_id`` on, each label the spec declares (ontology
+        nodes, causal-edge endpoints, the outcome label) is read by
+        ``engine.causal.identity.node_id_property`` — the start label by the
+        caller's ``id_property`` — falling back to ``entity_id`` for a node that
+        lacks the declared property; undeclared labels keep the start property.
+        Labels and properties are sanitized (C-9). Flag off: the start property.
+        """
+        from engine.config.outcome_vocabulary import declared_outcome_node_label
+
+        fallback = f"n.{sanitize_label(start_id_property)}"
+        if not settings.spec_declared_candidate_id:
+            return fallback
+        labels: list[str] = [node.label for node in self._spec.ontology.nodes]
+        for edge in self._spec.causal.causal_edges:
+            labels += [edge.source_label, edge.target_label]
+        outcome_label = declared_outcome_node_label(self._spec)
+        if outcome_label is not None:
+            labels.append(outcome_label)
+        branches: list[str] = []
+        seen: set[str] = set()
+        for raw_label in labels:
+            label = sanitize_label(raw_label)
+            if label in seen:
+                continue
+            seen.add(label)
+            prop = sanitize_label(
+                start_id_property if label == start_label else node_id_property(self._spec, raw_label)
+            )
+            if prop == FALLBACK_ID_PROPERTY:
+                branches.append(f"WHEN n:{label} THEN n.{prop}")
+            else:
+                branches.append(f"WHEN n:{label} THEN coalesce(n.{prop}, n.{FALLBACK_ID_PROPERTY})")
+        if not branches:
+            return fallback
+        return f"CASE {' '.join(branches)} ELSE {fallback} END"
