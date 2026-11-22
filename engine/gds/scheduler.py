@@ -37,17 +37,11 @@ from typing import Any
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from engine.config.schema import AggregationStrategy, DomainSpec, EdgeCategory, GDSJobSpec
-from engine.config.structural_vocabulary import (
-    STRUCTURAL_DEFECT_PREFIX,
-    UndeclaredStructuralPropertyError,
-    declared,
-)
-from engine.config.structural_vocabulary import required as structural_required
+from engine.config.structural_vocabulary import declared
 from engine.gds.cron import crontab_trigger
 from engine.gds.node_similarity import (
     NODE_SIMILARITY_ALGORITHM,
     NODE_SIMILARITY_ALGORITHMS,
-    OWNER_PROPERTY,
     build_node_similarity_plan,
 )
 from engine.gds.staleness import next_fire_after
@@ -808,41 +802,30 @@ class GDSScheduler:
         write_edge = sanitize_label(job_spec.writeedge)
         db = self.domain_spec.domain.id
         pruning_alpha = 0.86
-        from engine.config.settings import settings
-
-        # G10/X06: pair only the job's label and own what it writes.
-        owned = settings.gds_cooccurrence_owned_edges_enabled
-        node_label = self._get_candidate_label(job_spec) if owned else None
-        params: dict[str, Any] = {"job_id": job_spec.name} if owned else {}
-        a_node, b_node = "(a)", "(b)"
-        merge = f"MERGE (a)-[r:{write_edge}]->(b)"
-        if node_label is not None:
-            label = sanitize_label(node_label)
-            owner = sanitize_label(OWNER_PROPERTY)
-            a_node, b_node = f"(a:{label})", f"(b:{label})"
-            merge = f"MERGE (a)-[r:{write_edge} {{{owner}: $job_id}}]->(b)"
 
         # Step 1: Build co-occurrence edges
         cypher = f"""
-        MATCH {a_node}-[:{source_edge}]->(common)<-[:{source_edge}]-{b_node}
+        MATCH (a)-[:{source_edge}]->(common)<-[:{source_edge}]-(b)
         WHERE id(a) < id(b)
         WITH a, b, count(common) AS weight
         WHERE weight >= 2
-        {merge}
+        MERGE (a)-[r:{write_edge}]->(b)
         SET r.weight = weight, r.updated_at = datetime()
         RETURN count(r) AS edges_created
         """
-        result = await self.graph_driver.execute_query(cypher, parameters=params, database=db)
+        result = await self.graph_driver.execute_query(cypher, database=db)
         edges = result[0]["edges_created"] if result else 0
 
         # Step 2: Power-law pruning — prune high-degree nodes to d^0.86 edges
         # Only prune nodes with >10 co-occurrence edges to avoid over-pruning
+        from engine.config.settings import settings
+
         if settings.gds_cooccurrence_deterministic_prune:
-            prune_cypher = self._deterministic_cooccurrence_prune_cypher(write_edge, pruning_alpha, node_label)
+            prune_cypher = self._deterministic_cooccurrence_prune_cypher(write_edge, pruning_alpha)
         else:
-            prune_cypher = self._legacy_cooccurrence_prune_cypher(write_edge, pruning_alpha, node_label)
+            prune_cypher = self._legacy_cooccurrence_prune_cypher(write_edge, pruning_alpha)
         try:
-            prune_result = await self.graph_driver.execute_query(prune_cypher, parameters=params, database=db)
+            prune_result = await self.graph_driver.execute_query(prune_cypher, database=db)
             pruned = prune_result[0]["pruned_edges"] if prune_result else 0
         except Exception as e:
             if settings.gds_prune_failure_partial_enabled:
@@ -862,22 +845,7 @@ class GDSScheduler:
         return {"edges_created": edges, "edges_pruned": pruned, "pruning_alpha": pruning_alpha}
 
     @staticmethod
-    def _owned_pattern(edge: str, node_label: str | None) -> str:
-        """The prune's MATCH: any edge of the type, or (G10) this job's own edges between its label."""
-        edge = sanitize_label(edge)
-        if node_label is None:
-            return f"""
-        MATCH (n)-[r:{edge}]-()"""
-        label = sanitize_label(node_label)
-        owner = sanitize_label(OWNER_PROPERTY)
-        return f"""
-        MATCH (n:{label})-[r:{edge}]-(:{label})
-        WHERE r.{owner} = $job_id"""
-
-    @staticmethod
-    def _deterministic_cooccurrence_prune_cypher(
-        write_edge: str, pruning_alpha: float, node_label: str | None = None
-    ) -> str:
+    def _deterministic_cooccurrence_prune_cypher(write_edge: str, pruning_alpha: float) -> str:
         """RU-098 / CEG-COR-168: weight-ordered, deterministic power-law pruning.
 
         Every node with degree > 10 keeps its strongest
@@ -886,14 +854,12 @@ class GDSScheduler:
         when *both* endpoints prune and neither keeps it (two rejection votes),
         so a node never ends below its keep count and a node with degree <= 10
         keeps all of its edges. Identical input gives an identical result.
-        ``write_edge`` arrives sanitized and is re-validated here. With
-        ``node_label`` (G10) degree and deletion cover only edges this job
-        owns (``$job_id``) between nodes of that label.
+        ``write_edge`` arrives sanitized and is re-validated here.
         """
         edge = sanitize_label(write_edge)
         alpha = cypher_number(pruning_alpha)
         return f"""
-        {GDSScheduler._owned_pattern(edge, node_label)}
+        MATCH (n)-[r:{edge}]-()
         WITH n, r
         ORDER BY r.weight DESC, elementId(r)
         WITH n, collect(r) AS edges
@@ -908,12 +874,12 @@ class GDSScheduler:
         """
 
     @staticmethod
-    def _legacy_cooccurrence_prune_cypher(write_edge: str, pruning_alpha: float, node_label: str | None = None) -> str:
+    def _legacy_cooccurrence_prune_cypher(write_edge: str, pruning_alpha: float) -> str:
         """Pre-RU-098 prune: unordered collect, per-endpoint deletion."""
         edge = sanitize_label(write_edge)
         alpha = cypher_number(pruning_alpha)
         return f"""
-        {GDSScheduler._owned_pattern(edge, node_label)}
+        MATCH (n)-[r:{edge}]-()
         WITH n, collect(r) AS edges, count(r) AS degree
         WHERE degree > 10
         WITH n, edges, degree, toInteger(degree ^ {alpha}) AS keep_count
@@ -1369,13 +1335,6 @@ class GDSScheduler:
             safe_types = [sanitize_label(e.edge_type) for e in causal_spec.causal_edges]
             edge_pattern = "|".join(safe_types)
             rel_pattern = f"[:{edge_pattern}*1..{depth}]"
-        elif structural_required():
-            # CEG-NATIVE-CLOSURE-001 G22: with no declared causal edge type the
-            # any-relationship pattern below scored every path as causation.
-            raise UndeclaredStructuralPropertyError(
-                f"{STRUCTURAL_DEFECT_PREFIX}GDS job {job_spec.name!r} (causal_chain_scoring) runs over a domain "
-                "that declares no causal.causal_edges (the edge types it may read as causation)"
-            )
         else:
             rel_pattern = f"[*1..{depth}]"
 
