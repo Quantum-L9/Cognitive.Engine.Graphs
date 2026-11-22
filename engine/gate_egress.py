@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import os
 from collections.abc import Sequence
 from typing import Any
@@ -96,6 +97,11 @@ def build_inference_outputs(
         except (TypeError, ValueError):
             logger.warning("gate_egress: non-numeric confidence for field=%s — dropped", field_name)
             continue
+        # NaN compares False against the floor and would otherwise pass it; an
+        # infinite or >1 confidence is not a confidence. Dropped, not clamped.
+        if not math.isfinite(confidence) or confidence > 1.0:
+            logger.warning("gate_egress: confidence out of [0, 1] for field=%s — dropped", field_name)
+            continue
         if confidence < INFERENCE_CONFIDENCE_FLOOR:
             logger.debug(
                 "gate_egress: confidence %.3f below floor %.3f for field=%s — not sent",
@@ -125,6 +131,7 @@ async def emit_graph_inference_result(
     results: Sequence[Any],
     timeout_ms: int = DEFAULT_INFERENCE_TIMEOUT_MS,
     correlation_id: str | None = None,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     """Hand graph-derived field values to EIE via Gate. One attempt, fail closed.
 
@@ -139,7 +146,9 @@ async def emit_graph_inference_result(
     a Gate round trip to queue nothing.
     """
     outputs = build_inference_outputs(entity_id, results)
-    key = inference_idempotency_key(tenant, entity_id, outputs)
+    # A caller that binds the key to more than the findings (the graph trigger
+    # binds evidence and rule revision too) supplies it; otherwise it is derived.
+    key = idempotency_key or inference_idempotency_key(tenant, entity_id, outputs)
 
     if not outputs:
         return {
@@ -205,11 +214,46 @@ async def emit_graph_inference_result(
     }
 
 
+def classify_intake_ack(dispatch: dict[str, Any]) -> tuple[str, str]:
+    """Delivery disposition of one ``emit_graph_inference_result`` result.
+
+    ``accepted`` only on EIE's complete intake ack: a non-failure response whose
+    payload says ``status: accepted`` with ``targets_queued`` equal to the
+    outputs sent. EIE's handler queues in memory, so even ``accepted`` is an
+    intake ack, never consumption. Everything else is not delivered:
+
+    * ``partial``      — accepted with fewer targets queued than outputs sent;
+    * ``unconfirmed``  — a non-failure response without a readable ack;
+    * ``blocked``      — Gate is not configured (no direct fallback exists);
+    * ``pending``      — Gate/EIE refused or was unreachable; retriable;
+    * ``skipped``      — nothing above the floor, nothing sent.
+    """
+    status = dispatch.get("status")
+    if status == "skipped":
+        return "skipped", str(dispatch.get("error", "skipped"))
+    if status != "ok":
+        error = str(dispatch.get("error") or dispatch.get("packet_type") or "failed")
+        return ("blocked" if error == "gate_not_configured" else "pending"), error
+    sent = int(dispatch.get("sent_outputs") or 0)
+    payload = dispatch.get("payload")
+    if not isinstance(payload, dict) or payload.get("status") != "accepted":
+        return "unconfirmed", "no_intake_ack"
+    queued = payload.get("targets_queued")
+    if isinstance(queued, bool) or not isinstance(queued, int) or queued < 0:
+        return "unconfirmed", "targets_queued_unreadable"
+    if queued < sent:
+        return "partial", f"targets_queued={queued} < sent={sent}"
+    if queued > sent:
+        return "unconfirmed", f"targets_queued={queued} > sent={sent}"
+    return "accepted", f"targets_queued={queued}"
+
+
 __all__ = [
     "DEFAULT_INFERENCE_TIMEOUT_MS",
     "GRAPH_INFERENCE_ACTION",
     "INFERENCE_CONFIDENCE_FLOOR",
     "build_inference_outputs",
+    "classify_intake_ack",
     "emit_graph_inference_result",
     "inference_idempotency_key",
 ]

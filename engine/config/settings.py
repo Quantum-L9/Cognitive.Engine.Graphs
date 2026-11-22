@@ -939,6 +939,16 @@ class Settings(BaseSettings):
     # "Local enrich property writer".
     enrich_local_writer_enabled: bool = False
 
+    # ── Campaign EIE-CEG-GATE-COLLAB-2026-11-21, lane CEG-W (default-off, appended) ──
+    # A3 (EIE-CEG-GATE-COLLAB): graph inference reads the node from the graph,
+    # not from a caller `entity`, and a committed node `sync` becomes the opt-in
+    # trigger. Each changed finding set is recorded as a CegInferenceObligation
+    # and delivered after the write; delivery counts only on EIE's complete
+    # intake ack. Needs graph_inference_feedback_enabled too, and the tenant's
+    # spec must declare plugins.inference_rules. Off: the admin subaction keeps
+    # its caller-entity behaviour and sync never evaluates inference.
+    graph_inference_trigger_enabled: bool = False
+
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
         """Raise if default secrets are used in production environment."""

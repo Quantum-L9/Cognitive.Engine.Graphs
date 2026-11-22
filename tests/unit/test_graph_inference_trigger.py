@@ -1,4 +1,15 @@
-"""A3 (EIE-CEG-GATE-COLLAB-2026-11-21) — graph inference read from the graph,
+"""
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [test, unit, inference, feedback, gate]
+owner: engine-team
+status: active
+--- /L9_META ---
+
+A3 (EIE-CEG-GATE-COLLAB-2026-11-21) — graph inference read from the graph,
 recorded as a durable obligation, delivered to EIE only after the write.
 
 Acceptance cases covered at unit level (P22, P23, P24, P28; P05 by the second
@@ -572,3 +583,30 @@ def test_obligation_payload_round_trips_as_json() -> None:
     assert trigger.evidence_revision({"cave_id": "c1", "employee_count": 40, "updated_at": "later"}) == (
         evaluation.evidence_revision
     )
+
+
+# ── Obligation key uniqueness (CTO answer 1) ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_init_schema_adds_the_obligation_key_constraint_only_when_enabled(
+    enabled: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from engine.config.settings import settings
+    from engine.handlers import _init_schema
+
+    monkeypatch.setattr(settings, "graph_inference_trigger_enabled", enabled)
+    graph = FakeGraph()
+    await _init_schema(graph, _spec(["infer_company_size_tier"]))  # type: ignore[arg-type]
+    expected = trigger.obligation_constraint_cypher()
+    assert (expected.splitlines()[0] in graph.statements) is enabled
+    assert "REQUIRE (o.tenant, o.entity_type, o.entity_id) IS UNIQUE" in expected
+
+
+def test_every_obligation_write_merges_on_the_constrained_key() -> None:
+    import inspect
+
+    source = inspect.getsource(trigger.record_evaluations)
+    assert "MERGE" in source
+    assert "{tenant: $tenant, entity_type: $label, entity_id: row.entity_id}" in source
