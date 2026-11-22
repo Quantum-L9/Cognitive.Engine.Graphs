@@ -19,8 +19,11 @@
 #
 #   make setup     repo-setup     $(VENV) with runtime + dev + CI requirements
 #   make validate  repo-validate  action refs, contract wiring + scan, payload
-#                                 contract compiler, C-18 L9_META headers
-#   make check     repo-check     ruff check, ruff format --check, mypy engine/,
+#                                 contract compiler, C-18 L9_META headers,
+#                                 compliance layout, PacketEnvelope ledger,
+#                                 uv lock --check
+#   make check     repo-check     ruff check, ruff format --check,
+#                                 mypy engine/ chassis/ scripts/,
 #                                 C-009 cypher-lint (non-mutating)
 #   make test      repo-test      PR pytest owner: pytest -m unit (no Docker, no Neo4j)
 #   make test-deep                one full plan, not a make-v1 phase. Missing
@@ -58,7 +61,7 @@ repo-setup:	## Create $(VENV) if absent; install the full profile (project + eve
 	@test -x "$(VENV)/bin/python" || python3 -m venv "$(VENV)"
 	@UV_PROJECT_ENVIRONMENT="$(abspath $(VENV))" PYTHON="$(VENV)/bin/python" bash tools/deps/install_locked.sh full
 
-repo-validate:	## Action refs, contract files + scan, payload contract compiler, C-18 L9_META headers
+repo-validate:	## Action refs, contract files + scan, payload contract compiler, C-18 L9_META headers, compliance layout, PacketEnvelope ledger, uv lock --check
 	@echo "── Action references ──"
 	@$(REPO_PY) tools/check_action_refs.py
 	@echo "── Contract files present + wired ──"
@@ -69,14 +72,20 @@ repo-validate:	## Action refs, contract files + scan, payload contract compiler,
 	@PYTHONPATH="$${PYTHONPATH:-}:." $(REPO_PY) tools/payload_contract_compiler.py $(PAYLOAD_COMPILER_ARGS)
 	@echo "── L9_META headers (C-18) ──"
 	@$(REPO_PY) tools/l9_meta_injector.py check
+	@echo "── Compliance layout: banned engine files, design-pack DomainSpecs ──"
+	@$(REPO_PY) tools/check_compliance_layout.py
+	@echo "── PacketEnvelope debt ledger (SDK baseline compare) ──"
+	@$(REPO_PY) tools/packet_envelope_gate.py
+	@echo "── uv.lock agrees with pyproject.toml ──"
+	@UV_PYTHON_DOWNLOADS=never $(REPO_PY) -m uv lock --check
 
-repo-check:	## Non-mutating static gate: ruff check, ruff format --check, mypy engine/, cypher-lint (C-009)
+repo-check:	## Non-mutating static gate: ruff check, ruff format --check, mypy engine/ chassis/ scripts/, cypher-lint (C-009)
 	@echo "── Ruff lint ──"
 	@$(REPO_PY) -m ruff check .
 	@echo "── Ruff format (check only) ──"
 	@$(REPO_PY) -m ruff format --check .
 	@echo "── Type check ──"
-	@$(REPO_PY) -m mypy engine/
+	@$(REPO_PY) -m mypy engine/ chassis/ scripts/
 	@echo "── Cypher lint (C-009) ──"
 	@$(REPO_PY) tools/cypher_lint.py
 

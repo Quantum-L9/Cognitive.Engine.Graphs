@@ -108,6 +108,7 @@ select = [
     "S",        # flake8-bandit: security checks (harvested from L9 Kernel)
     "ASYNC",    # flake8-async: async antipattern detection (harvested from L9 Kernel)
     "TID",      # flake8-tidy-imports: banned deprecated APIs (DomainSpecLoader → DomainPackLoader)
+    "T20",      # flake8-print: no print() in engine or chassis runtime code (was terminology-guard only)
 ]
 ignore = [
     "E501",     # line too long (handled by formatter)
@@ -151,13 +152,17 @@ ignore = [
 "tests/fixtures/design_packs/**" = ["PTH123"]
 "engine/packet/test_*.py" = ["B017"]
 "engine/packet/packet_store.py" = ["TRY300"]
-"scripts/**" = ["S603", "S607", "E402"]
+"scripts/**" = ["S603", "S607", "E402", "T201"]
 # FeatureNotEnabled is a stable, serialized error-type name consumed by API
 # clients (chassis error envelope `error` field) and asserted in tests.
 # Renaming to satisfy N818's Error-suffix convention would be a breaking
 # wire-format change, so it is intentionally kept as-is.
 "chassis/errors.py" = ["N818"]
-"tools/**" = ["S603", "S607", "TRY300", "PTH123", "PLR0915", "PLW1510", "E402", "B904", "TID251"]
+# Operator CLI: it prints the generated key and its storage instructions.
+"chassis/auth/generate_l9_api_key.py" = ["T201"]
+# tools/ and scripts/ are command-line programs: stdout is their output, so
+# print() is allowed there (T201) and nowhere else.
+"tools/**" = ["S603", "S607", "TRY300", "PTH123", "PLR0915", "PLW1510", "E402", "B904", "T201"]
 "auth/**" = ["S101", "S105", "S106", "TC002", "TRY301", "TRY401"]
 "chassis/**" = ["TRY300", "TRY301", "TRY401", "S105", "B027", "B904"]
 "chassis/auth/test_*.py" = ["S101", "S105", "S106"]
@@ -204,10 +209,6 @@ check_untyped_defs = false
 module = "tools.*"
 disallow_untyped_defs = false
 check_untyped_defs = false
-
-[[tool.mypy.overrides]]
-module = "chassis.*"
-ignore_errors = true
 
 [tool.l9_meta]
 l9_schema = 1

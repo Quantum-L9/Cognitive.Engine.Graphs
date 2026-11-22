@@ -31,18 +31,10 @@ jobs:
         run: |
           bash tools/deps/install_locked.sh full
 
-      - name: Check for banned files
-        run: |
-          # Fail if engine/middleware.py exists (tenant resolution is chassis-only)
-          if [ -f "engine/middleware.py" ]; then
-            echo "ERROR: engine/middleware.py exists (tenant resolution is chassis-only)"
-            exit 1
-          fi
-          # Fail if engine/api/ directory exists (app factory is in chassis/chassis_app.py)
-          if [ -d "engine/api" ]; then
-            echo "ERROR: engine/api/ directory exists (app factory belongs in chassis/)"
-            exit 1
-          fi
+      - name: Banned engine files and design-pack DomainSpec validation
+        # tools/check_compliance_layout.py is the one owner; Repo.mk
+        # repo-validate runs the same script in Analyze (central Core).
+        run: python tools/check_compliance_layout.py
 
       - name: Check for FastAPI imports in engine/
         run: |
@@ -53,30 +45,3 @@ jobs:
             echo "$violations"
             exit 1
           fi
-
-      - name: Validate domain specs
-        run: |
-          # Every pack under tests/fixtures/design_packs/<id>/spec.yaml must load as a DomainSpec.
-          # The former glob ('*_domain_spec.yaml') matched no file, so this step
-          # validated nothing (Stage 2 follow-up, M12). A pack that does not
-          # validate, or an empty match, fails the step.
-          python -c "
-          import sys
-          from pathlib import Path
-          import yaml
-          from engine.config.schema import DomainSpec
-          paths = sorted(Path('tests/fixtures/design_packs').glob('*/spec.yaml'))
-          if not paths:
-              sys.exit('no tests/fixtures/design_packs/*/spec.yaml found: the glob matches nothing')
-          failures = []
-          for path in paths:
-              try:
-                  DomainSpec.model_validate(yaml.safe_load(path.read_text()))
-                  print(f'  {path}: OK')
-              except Exception as e:
-                  failures.append(str(path))
-                  print(f'  FAIL {path}: {e}')
-          if failures:
-              sys.exit(f'{len(failures)} of {len(paths)} domain spec(s) do not validate: {failures}')
-          print(f'Domain spec validation complete: {len(paths)} spec(s) OK')
-          "

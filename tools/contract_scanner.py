@@ -434,7 +434,9 @@ RULES: list[dict] = [
         r'f["\'].*MATCH\s*\(.*\{[^$]',
         "Cypher label interpolation without sanitize_label()",
         remediation="Use sanitize_label() for labels, $param for values",
-        include_dirs=[ENGINE_DIR],
+        # chassis/, tools/ and scripts/ build Cypher too; the pre-commit
+        # check-cypher-interpolation hook scanned them, the CI scan did not.
+        include_dirs=[ENGINE_DIR, "chassis/", "tools/", "scripts/"],
         exclude_dirs=[
             "engine/sync/generator.py",
             "engine/handlers.py",

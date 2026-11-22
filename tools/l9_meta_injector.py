@@ -313,9 +313,23 @@ FILE_REGISTRY: list[FileMeta] = [
     ),
     FileMeta("tests/unit/test_chassis_app.py", "engine-specific", ["test"], ["test", "unit", "chassis"], "engine-team"),
     FileMeta(
+        "tests/unit/test_ruff_print_and_banned_api_scope.py",
+        "engine-specific",
+        ["test", "ci"],
+        ["test", "unit", "ci", "ruff"],
+        "engine-team",
+    ),
+    FileMeta(
         "tests/unit/test_chassis_contract.py", "engine-specific", ["test"], ["test", "unit", "chassis"], "engine-team"
     ),
     FileMeta("tests/unit/test_config.py", "engine-specific", ["test"], ["test", "unit", "config"], "engine-team"),
+    FileMeta(
+        "tests/unit/test_check_compliance_layout.py",
+        "engine-specific",
+        ["test", "ci"],
+        ["test", "unit", "ci", "compliance"],
+        "engine-team",
+    ),
     FileMeta(
         "tests/unit/test_config_schema.py", "engine-specific", ["test"], ["test", "unit", "config"], "engine-team"
     ),
@@ -568,6 +582,13 @@ FILE_REGISTRY: list[FileMeta] = [
     FileMeta("tools/audit_dispatch.py", "l9-template", ["audit"], ["L9_TEMPLATE", "audit", "dispatch"], "platform"),
     FileMeta("tools/contract_scanner.py", "l9-template", ["audit"], ["L9_TEMPLATE", "audit", "contracts"], "platform"),
     FileMeta("tools/verify_contracts.py", "l9-template", ["audit"], ["L9_TEMPLATE", "audit", "verify"], "platform"),
+    FileMeta(
+        "tools/check_compliance_layout.py",
+        "engine-specific",
+        ["tooling", "ci"],
+        ["tooling", "ci", "compliance"],
+        "engine-team",
+    ),
     FileMeta("tools/auditors/__init__.py", "l9-template", ["audit"], ["L9_TEMPLATE", "auditors"], "platform"),
     FileMeta("tools/auditors/base.py", "l9-template", ["audit"], ["L9_TEMPLATE", "auditors", "base"], "platform"),
     FileMeta(

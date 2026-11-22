@@ -297,11 +297,14 @@ push to `main`, so the local owner is what checks `main`.
 |---|---|---|---|
 | `ruff check .` | `l9-lint-test.yml` (org-distributed) | `make check` | `ci.yml` lint, `ci-quality.yml` lint-format, `contracts.yml` lint, `compliance.yml`, pre-commit `ruff` in CI, `refactoring-validation.yml` (retired) |
 | `ruff format --check .` | `l9-lint-test.yml` | `make check` | `ci.yml` lint, `ci-quality.yml` lint-format, `contracts.yml` lint, pre-commit `ruff-format` in CI, `refactoring-validation.yml` (retired) |
-| `mypy engine/` | `l9-lint-test.yml` | `make check` | `ci.yml` lint, `ci-quality.yml` lint-format, `contracts.yml` lint, `compliance.yml`, pre-commit `mypy` in CI, `refactoring-validation.yml` (retired) |
+| `mypy engine/` (central: `mypy engine/ chassis/ scripts/`) | `l9-lint-test.yml` (`engine/` only) | `make check` | `ci.yml` lint, `ci-quality.yml` lint-format, `contracts.yml` lint, `compliance.yml`, pre-commit `mypy` in CI, `refactoring-validation.yml` (retired) |
 | `tools/contract_scanner.py` | `contracts.yml` | `make validate` | `compliance.yml`, pre-commit `l9-contract-scan` in CI |
 | `tools/verify_contracts.py` | `contracts.yml` | `make validate` | pre-commit `l9-contract-files-exist` in CI |
 | `tools/l9_meta_injector.py` | `contracts.yml` | `make validate` | pre-commit `l9-meta-check` in CI |
 | `tools/check_action_refs.py` | `contracts.yml` | `make validate` | none |
+| `tools/check_compliance_layout.py` (banned engine files, design-pack DomainSpecs) | `compliance.yml` | `make validate` | the inline compliance.yml steps it replaces |
+| `tools/packet_envelope_gate.py` (own SDK runtime, `.l9/runtime/packet-envelope-sdk`) | `ci.yml` pre-commit (`packet-envelope-prohibited`) | `make validate` | none |
+| `uv lock --check` | `ci.yml` `sdk-channel` | `make validate` | none |
 
 Local pre-commit still runs every hook; only the CI pre-commit pass skips the
 copies above. `lint-autofix.yml` (rewrites `main`, opens a fix PR) is not a
