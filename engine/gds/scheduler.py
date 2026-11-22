@@ -30,7 +30,7 @@ import asyncio
 import contextlib
 import json
 import logging
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from datetime import UTC, datetime
 from typing import Any
 
@@ -118,7 +118,9 @@ class GDSScheduler:
     ``refused``: never cron-registered, and refused on manual trigger.
     Provider state is this scheduler's own (it starts empty, like the job
     history), so after a restart a dependent waits for its providers' next
-    successful run.
+    successful run. A job counts as running from the moment it is triggered,
+    including while it waits on its own providers, and once per concurrent
+    attempt; a run cancelled after its effect started records ``cancelled``.
     """
 
     # Upper bound on how long a dependent job waits for a running or due provider.
@@ -132,7 +134,7 @@ class GDSScheduler:
         self._history_lock = asyncio.Lock()
         # F04 run-time barrier state, keyed by job name.
         self._state_changed = asyncio.Condition()
-        self._running: set[str] = set()
+        self._in_flight: Counter[str] = Counter()
         self._last_started: dict[str, datetime] = {}
         self._last_attempt_status: dict[str, str] = {}
         self._started_at: datetime | None = None
@@ -268,11 +270,10 @@ class GDSScheduler:
         registered = 0
         for wave_idx, wave in enumerate(waves):
             for job_spec in wave:
-                if barrier and job_spec.name in self.refused_jobs:
+                refusal = self._refusal(job_spec) if barrier else None
+                if refusal is not None:
                     # F04: no fallback wave — an unexecutable job is never scheduled.
-                    logger.error(
-                        "GDS job %s refused, not scheduled: %s", job_spec.name, self.refused_jobs[job_spec.name]
-                    )
+                    logger.error("GDS job %s refused, not scheduled: %s", job_spec.name, refusal)
                     continue
                 if job_spec.schedule.type == "cron":
                     self._register_cron_job(job_spec)
@@ -311,7 +312,9 @@ class GDSScheduler:
 
         from engine.config.settings import settings
 
-        if settings.gds_dag_job_identity_by_name:
+        # The dependency barrier needs every provider job registered, so it
+        # implies the name-keyed DAG (an algorithm key collapses same-algorithm jobs).
+        if settings.gds_dag_job_identity_by_name or settings.gds_dependency_barrier_enabled:
             return GDSScheduler._build_execution_dag_by_job(jobs)
 
         job_map: dict[str, GDSJobSpec] = {j.algorithm: j for j in jobs}
@@ -423,9 +426,10 @@ class GDSScheduler:
     def dependency_refusals(jobs: list[GDSJobSpec]) -> dict[str, str]:
         """F04: jobs whose ``depends_on`` can never be satisfied, with the reason.
 
-        A dependency on an algorithm no declared job runs, membership of a
+        A job name declared more than once (provider state is keyed by name),
+        a dependency on an algorithm no declared job runs, membership of a
         dependency cycle (including a job depending on its own algorithm), and
-        depending on a job refused for either reason. Keyed by job name; an
+        depending on a job refused for any of these reasons. Keyed by job name; an
         independent job is never listed.
         """
         by_algorithm: dict[str, list[str]] = defaultdict(list)
@@ -433,6 +437,11 @@ class GDSScheduler:
             by_algorithm[job.algorithm].append(job.name)
 
         refused: dict[str, str] = {}
+        # Provider state is keyed by job name: a name declared twice is ambiguous.
+        declared_names = Counter(job.name for job in jobs)
+        for name, count in declared_names.items():
+            if count > 1:
+                refused[name] = f"job name declared {count} times; dependency state needs a unique name"
         providers: dict[str, list[str]] = {}
         for job in jobs:
             names: list[str] = []
@@ -521,12 +530,20 @@ class GDSScheduler:
             return datetime.now(tz=UTC) if utc else datetime.now()
 
         barrier = settings.gds_dependency_barrier_enabled
-        if barrier:
-            refusal = self._refusal(job_spec)
-            if refusal is None:
+        name = job_spec.name
+        # In flight from entry, while waiting on its own providers too, so a job
+        # depending on this one never reads an older success (one count per attempt).
+        self._in_flight[name] += 1
+        effect_started = False
+        try:
+            if barrier:
+                refusal = self._refusal(job_spec)
+                if refusal is not None:
+                    logger.error("GDS job %s refused: %s", name, refusal)
+                    return await self._record(job_spec, {"status": "refused", "reason": refusal}, _now)
                 unsatisfied = await self._await_dependencies(job_spec)
                 if unsatisfied:
-                    logger.warning("GDS job %s blocked by dependencies: %s", job_spec.name, unsatisfied)
+                    logger.warning("GDS job %s blocked by dependencies: %s", name, unsatisfied)
                     return await self._record(
                         job_spec,
                         {
@@ -536,19 +553,29 @@ class GDSScheduler:
                         },
                         _now,
                     )
-            else:
-                logger.error("GDS job %s refused: %s", job_spec.name, refusal)
-                return await self._record(job_spec, {"status": "refused", "reason": refusal}, _now)
-
-        async with self._state_changed:
-            self._running.add(job_spec.name)
-            self._last_started[job_spec.name] = datetime.now(tz=UTC)
-        try:
+            self._last_started[name] = datetime.now(tz=UTC)
+            effect_started = True
             return await self._execute_effect(job_spec, resolved_agg, _now)
+        except asyncio.CancelledError:
+            if effect_started:
+                # The effect may be half-written: the previous success no longer stands.
+                self._last_attempt_status[name] = "cancelled"
+                self._job_history.append(
+                    {
+                        "job": name,
+                        "algorithm": job_spec.algorithm,
+                        "timestamp": _now().isoformat(),
+                        "status": "cancelled",
+                    }
+                )
+            raise
         finally:
-            async with self._state_changed:
-                self._running.discard(job_spec.name)
-                self._state_changed.notify_all()
+            self._in_flight[name] -= 1
+            if self._in_flight[name] <= 0:
+                del self._in_flight[name]
+            with contextlib.suppress(asyncio.CancelledError):
+                async with self._state_changed:
+                    self._state_changed.notify_all()
 
     async def _execute_effect(self, job_spec: GDSJobSpec, resolved_agg: str, _now: Any) -> dict[str, Any]:
         """Run the job's algorithm and record the attempt (status from the algorithm)."""
@@ -628,7 +655,7 @@ class GDSScheduler:
 
     def _provider_wait(self, provider: GDSJobSpec, now: datetime) -> str | None:
         """Why the dependent must keep waiting on ``provider``, or None."""
-        if provider.name in self._running:
+        if self._in_flight.get(provider.name):
             return f"{provider.name}: running"
         if provider.schedule.type != "cron" or not self.scheduler.running:
             return None
