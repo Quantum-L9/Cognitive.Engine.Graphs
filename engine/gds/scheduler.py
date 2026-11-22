@@ -814,12 +814,13 @@ class GDSScheduler:
         owned = settings.gds_cooccurrence_owned_edges_enabled
         node_label = self._get_candidate_label(job_spec) if owned else None
         params: dict[str, Any] = {"job_id": job_spec.name} if owned else {}
-        a_node, b_node = (f"(a:{node_label})", f"(b:{node_label})") if node_label else ("(a)", "(b)")
-        merge = (
-            f"MERGE (a)-[r:{write_edge} {{{OWNER_PROPERTY}: $job_id}}]->(b)"
-            if owned
-            else f"MERGE (a)-[r:{write_edge}]->(b)"
-        )
+        a_node, b_node = "(a)", "(b)"
+        merge = f"MERGE (a)-[r:{write_edge}]->(b)"
+        if node_label is not None:
+            label = sanitize_label(node_label)
+            owner = sanitize_label(OWNER_PROPERTY)
+            a_node, b_node = f"(a:{label})", f"(b:{label})"
+            merge = f"MERGE (a)-[r:{write_edge} {{{owner}: $job_id}}]->(b)"
 
         # Step 1: Build co-occurrence edges
         cypher = f"""
@@ -863,10 +864,15 @@ class GDSScheduler:
     @staticmethod
     def _owned_pattern(edge: str, node_label: str | None) -> str:
         """The prune's MATCH: any edge of the type, or (G10) this job's own edges between its label."""
+        edge = sanitize_label(edge)
         if node_label is None:
-            return f"MATCH (n)-[r:{edge}]-()"
+            return f"""
+        MATCH (n)-[r:{edge}]-()"""
         label = sanitize_label(node_label)
-        return f"MATCH (n:{label})-[r:{edge}]-(:{label})\n        WHERE r.{OWNER_PROPERTY} = $job_id"
+        owner = sanitize_label(OWNER_PROPERTY)
+        return f"""
+        MATCH (n:{label})-[r:{edge}]-(:{label})
+        WHERE r.{owner} = $job_id"""
 
     @staticmethod
     def _deterministic_cooccurrence_prune_cypher(
