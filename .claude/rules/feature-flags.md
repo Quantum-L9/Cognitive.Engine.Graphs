@@ -51,7 +51,6 @@ All in Settings class, controllable via env vars. Contract 21: every behavioral 
 | health_batch_entity_cost_usd | 0.05 | Server-owned cost charged to the batch ceiling per entity with a gap (critical gap or enrichment target); no-gap entities cost 0 (replaced the retired ROI priority, 2026-11-15; FEATURE_GATES §22) |
 | packet_store_enabled / packet_store_dsn | False / unset | PacketStore persistence, read through Settings (PERSIST-01; env names unchanged) |
 | graph_inference_feedback_enabled | False | Emit `graph-inference-result` to EIE through Gate (EIE-008 / CEG-006) |
-| graph_inference_trigger_enabled | False | A3: inference reads the node from the graph (not a caller `entity`); a committed node `sync` evaluates it, records a `CegInferenceObligation`, delivers after the write; accepted only on EIE's complete intake ack (FEATURE_GATES §13) |
 | auto_create_domain_database | False | Provision the tenant domain database on first use (CEG-008; Enterprise-only CREATE DATABASE) |
 | health_api_enabled | True | Expose engine/health/api.py via the `health-assess` action (CEG-006); on since 2026-11-15 for EIE's enrichment trigger. CEG's own trigger and `auto_enrich_via_gate` were retired 2026-11-15: CEG sends no `enrich` |
 | packet_store_packet_identity_dedup_enabled | True | PacketStore `content_hash` = SDK `transport_hash`; a duplicate-skipped packet writes no child rows (RU-078) |

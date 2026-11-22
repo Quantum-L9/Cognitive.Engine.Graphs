@@ -9,44 +9,24 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
-engine/feedback/graph_inference_trigger.py — graph-derived inference, read from
-the graph, recorded as a durable obligation, delivered to EIE after the write.
+engine/feedback/graph_inference_trigger.py — graph-derived inference read from
+the graph (never a caller ``entity``), recorded as a durable obligation and
+delivered to EIE after the write (A3). Full contract: docs/FEATURE_GATES.md §13.
 
-The admin ``emit_inference_feedback`` subaction ran the inference rules over an
-``entity`` dict the caller sent, so the "graph inference" CEG handed EIE was
-whatever the caller asserted (A3). This module replaces that input with an
-authoritative, tenant-scoped read of the node as the graph holds it, and adds
-the one opt-in trigger: a node ``sync`` whose write committed.
+1. **evaluate** — tenant-scoped node read; ``evidence_revision`` digests its
+   first-party properties, ``rule_revision`` the authorized rules, their
+   parameters and the spec version; only those rules run.
+2. **decide** — against the entity's ``CegInferenceObligation``: unchanged
+   revisions, a value the graph already holds (EIE echo) and a finding set equal
+   to the last accepted one send nothing; only a changed set becomes ``pending``.
+3. **deliver** — after the source write, one ``graph-inference-result`` via
+   ``engine.gate_egress``; ``accepted`` only on EIE's complete intake ack, which
+   is an intake ack, not consumption.
 
-Lifecycle of one entity (states are this module's, not EIE's):
-
-1. **evaluate** — read the node (``_tenant`` must equal the request tenant),
-   compute ``evidence_revision`` over its first-party properties and
-   ``rule_revision`` over the domain-authorized rules and their declared
-   parameters, run only those rules.
-2. **decide** — compare with the entity's ``CegInferenceObligation`` record:
-   an unchanged evidence + rule revision is not new evidence (``unchanged``);
-   a finding whose value the graph already holds proposes nothing (EIE echo,
-   copied observation); a finding set equal to the last *accepted* one is not
-   resent (``same_findings``). Only a changed, non-empty finding set becomes a
-   ``pending`` obligation with a stable idempotency key.
-3. **deliver** — after the source write committed and outside any open graph
-   transaction: one ``graph-inference-result`` through ``engine.gate_egress``.
-   The obligation becomes ``accepted`` only on EIE's complete intake ack
-   (``status=accepted`` and ``targets_queued`` equal to the outputs sent).
-   ``partial``, ``unconfirmed``, ``blocked`` and ``pending`` are never counted as
-   delivered. Accepted is an intake ack, not consumption: EIE's queue is not a
-   durable handling record.
-
-The obligation lives in the tenant's own graph database (the existing CEG
-store), one node per (tenant, entity_type, entity_id), where entity_type is the
-entity's node label (two sync endpoints of one label share one obligation), so dedup survives a
-restart and a failed delivery stays retriable. There is no second bus.
-
-Activation: ``settings.graph_inference_trigger_enabled`` (default False) AND
-``settings.graph_inference_feedback_enabled`` (the egress gate) AND a non-empty
-``plugins.inference_rules`` in the tenant's own spec. Nothing here runs a rule
-a domain did not authorize, and ``rules=[]`` means none.
+One obligation node per (tenant, entity_type = node label, entity_id) in the
+tenant database: dedup survives a restart, failures stay retriable, no second
+bus. Active only with ``graph_inference_trigger_enabled``,
+``graph_inference_feedback_enabled`` and a non-empty ``plugins.inference_rules``.
 """
 
 from __future__ import annotations
@@ -307,15 +287,12 @@ async def read_obligations(
 async def record_evaluations(
     driver: Any, domain_spec: Any, *, tenant: str, label: str, rows: list[dict[str, Any]]
 ) -> set[str]:
-    """Persist each evaluation; return the entity ids whose write applied.
+    """Compare-and-set each evaluation; return the entity ids whose write applied.
 
-    Compare-and-set: a row applies only while the stored revisions still equal
-    the ones its decision read (``prior_*``), so an overlapping evaluation that
-    read older evidence cannot replace newer state. The node is write-locked
-    (``_ceg_lock`` written and removed: the lock stays for the transaction)
-    before the comparison. ``same_findings`` and
-    ``no_findings`` retire any pending work they supersede; accepted history
-    (``accepted_*``) is kept.
+    A row applies only while the stored revisions equal the ones its decision
+    read (``prior_*``; node write-locked first), so an older overlapping
+    evaluation cannot replace newer state. ``same_findings`` / ``no_findings``
+    retire superseded pending work; ``accepted_*`` history is kept.
     """
     if not rows:
         return set()
@@ -623,29 +600,3 @@ async def retry_pending(
         label=label,
         pending=PendingDelivery(entity_id=entity_id, pending_key=str(key), outputs=list(outputs)),
     )
-
-
-__all__ = [
-    "MAX_INFLIGHT_DELIVERIES",
-    "MAX_TRIGGER_ENTITIES",
-    "OBLIGATION_CONSTRAINT_NAME",
-    "OBLIGATION_LABEL",
-    "Evaluation",
-    "PendingDelivery",
-    "TriggerReport",
-    "decide",
-    "deliver",
-    "drain_inflight",
-    "evaluate_and_record",
-    "evaluate_entity",
-    "evidence_revision",
-    "findings_digest",
-    "first_party_properties",
-    "obligation_constraint_cypher",
-    "obligation_constraint_present",
-    "obligation_key",
-    "retry_pending",
-    "rule_revision",
-    "schedule_deliveries",
-    "trigger_active",
-]
