@@ -114,6 +114,8 @@ class FakeGraph:
             o = self.obligations.get((p["tenant"], p["label"], p["entity_id"]))
             if o is not None and o.get("pending_key") == p["pending_key"]:
                 o.update(status=p["status"], last_detail=p["detail"], attempts=o.get("attempts", 0) + 1)
+                if p.get("wire_key") is not None:
+                    o["wire_key"] = p["wire_key"]
                 if p["status"] == "accepted":
                     o.update(accepted_key=p["pending_key"], accepted_findings_digest=o.get("pending_findings_digest"))
             return []
@@ -597,3 +599,58 @@ async def test_init_schema_propagates_a_failed_obligation_constraint(monkeypatch
 
     with pytest.raises(RuntimeError, match="cannot create this constraint"):
         await _init_schema(_Refusing(), _spec(["infer_company_size_tier"]))  # type: ignore[arg-type]
+
+
+def test_record_evaluations_statement_carries_every_compare_and_set_predicate() -> None:
+    """The fake graph applies the CAS itself; pin that the production statement does too."""
+    import inspect
+
+    source = inspect.getsource(trigger.record_evaluations)
+    for field in ("evidence_revision", "rule_revision", "accepted_findings_digest"):
+        assert f"coalesce(o.{field}, '') = coalesce(row.prior_{field}, '')" in source
+    evaluate = inspect.getsource(trigger.evaluate_and_record)
+    assert '"prior_accepted_findings_digest": prior.get("accepted_findings_digest")' in evaluate
+
+
+class CachingGate(FakeGate):
+    """Gate that caches every terminal success per idempotency key, like Constellation.Gate."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.cache: dict[str, Any] = {}
+        self.queued_targets: list[str] = []
+        self.lose_next_response = False
+
+    async def execute(self, **kwargs: Any) -> Any:
+        key = kwargs["idempotency_key"]
+        if key in self.cache:
+            self.sent.append(kwargs)
+            return self.cache[key]
+        response = await super().execute(**kwargs)
+        self.queued_targets += [key] * response.payload["targets_queued"]
+        self.cache[key] = response
+        if self.lose_next_response:
+            self.lose_next_response = False
+            msg = "response lost after EIE queued the targets"
+            raise GateClientError(msg)
+        return response
+
+
+@pytest.mark.asyncio
+async def test_lost_response_after_a_derived_retry_never_queues_twice(flags, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CodeRabbit #540: reuse the wire key after an ambiguous outcome; rotate only on a confirmed zero intake."""
+    gate = CachingGate()
+    monkeypatch.setattr("engine.gate_egress.get_gate_client", lambda: gate)
+    graph = FakeGraph()
+    spec = _spec(["infer_company_size_tier"])
+    _bind(spec, graph)
+    gate.queued = 0
+    await _sync([{"cave_id": "c1", "employee_count": 40}])  # zero intake under the original key
+    gate.queued, gate.lose_next_response = None, True
+    await trigger.retry_pending(graph, spec, tenant=TENANT, label=LABEL, entity_id="c1")  # queued, response lost
+    assert graph.obligations[(TENANT, LABEL, "c1")]["status"] == "pending"
+    await trigger.retry_pending(graph, spec, tenant=TENANT, label=LABEL, entity_id="c1")  # same derived key
+    keys = [packet["idempotency_key"] for packet in gate.sent]
+    assert keys[1] == keys[2] != keys[0]
+    assert len(gate.queued_targets) == 1
+    assert graph.obligations[(TENANT, LABEL, "c1")]["status"] == "accepted"
