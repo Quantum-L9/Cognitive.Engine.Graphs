@@ -348,9 +348,6 @@ async def record_evaluations(
     return {str(r["entity_id"]) for r in written or [] if isinstance(r, Mapping)}
 
 
-_VERIFIED_CONSTRAINT_DATABASES: set[str] = set()  # bounded: one entry per tenant database
-
-
 async def obligation_constraint_present(driver: Any, domain_spec: Any) -> bool:
     """Whether the obligation-key uniqueness constraint exists in the tenant database.
 
@@ -358,8 +355,11 @@ async def obligation_constraint_present(driver: Any, domain_spec: Any) -> bool:
     so the trigger writes nothing until ``init_schema`` has created it. A
     positive answer is cached per database for the process.
     """
+    from engine.state import get_state
+
+    verified = get_state().inference_constraint_databases  # bounded: one per tenant database
     database = _database(domain_spec)
-    if database in _VERIFIED_CONSTRAINT_DATABASES:
+    if database in verified:
         return True
     rows = await driver.execute_query(
         cypher="// ceg:inference:constraint_check\nSHOW CONSTRAINTS YIELD name RETURN name",
@@ -368,7 +368,7 @@ async def obligation_constraint_present(driver: Any, domain_spec: Any) -> bool:
     )
     present = any(isinstance(r, Mapping) and r.get("name") == OBLIGATION_CONSTRAINT_NAME for r in rows or [])
     if present:
-        _VERIFIED_CONSTRAINT_DATABASES.add(database)
+        verified.add(database)
     return present
 
 
@@ -571,33 +571,36 @@ async def deliver(
     return {**dispatch, "delivery_status": status, "delivery_detail": detail}
 
 
-_INFLIGHT: set[asyncio.Task[Any]] = set()
-
-
 def schedule_deliveries(driver: Any, domain_spec: Any, *, tenant: str, label: str, report: TriggerReport) -> int:
     """Deliver after the caller returns: never awaited inside the ``sync`` that caused it.
 
     Returns how many deliveries were scheduled; any beyond the in-flight bound
     stay ``pending`` in the graph for a later retry.
     """
+    from engine.state import get_state
+
+    inflight = get_state().inference_deliveries
     scheduled = 0
     for pending in report.pending:
-        if len(_INFLIGHT) >= MAX_INFLIGHT_DELIVERIES:
+        if len(inflight) >= MAX_INFLIGHT_DELIVERIES:
             logger.warning("graph inference: in-flight bound reached; %s stays pending", pending.pending_key)
             continue
         task = asyncio.get_running_loop().create_task(
             deliver(driver, domain_spec, tenant=tenant, label=label, pending=pending)
         )
-        _INFLIGHT.add(task)
-        task.add_done_callback(_INFLIGHT.discard)
+        inflight.add(task)
+        task.add_done_callback(inflight.discard)
         scheduled += 1
     return scheduled
 
 
 async def drain_inflight() -> None:
     """Await every scheduled delivery (tests and orderly shutdown)."""
-    while _INFLIGHT:
-        await asyncio.gather(*list(_INFLIGHT), return_exceptions=True)
+    from engine.state import get_state
+
+    inflight = get_state().inference_deliveries
+    while inflight:
+        await asyncio.gather(*list(inflight), return_exceptions=True)
 
 
 async def retry_pending(

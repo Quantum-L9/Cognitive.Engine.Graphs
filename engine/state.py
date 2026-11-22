@@ -59,6 +59,11 @@ class EngineState:
         self._compliance_engines: dict[str, ComplianceEngine] = {}
         self._tenant_allowlist: set[str] | None = None  # None = all tenants allowed
         self._db_pool: Any | None = None  # optional asyncpg pool for compliance audit flush
+        # A3 graph inference (engine/feedback/graph_inference_trigger.py): scheduled
+        # deliveries still running (bounded by MAX_INFLIGHT_DELIVERIES), and tenant
+        # databases where the obligation-key constraint was confirmed.
+        self._inference_deliveries: set[asyncio.Task[Any]] = set()
+        self._inference_constraint_databases: set[str] = set()
 
     # ------------------------------------------------------------------
     # Properties (read-only after initialization)
@@ -93,6 +98,14 @@ class EngineState:
     @property
     def tenant_allowlist(self) -> set[str] | None:
         return self._tenant_allowlist
+
+    @property
+    def inference_deliveries(self) -> set[asyncio.Task[Any]]:
+        return self._inference_deliveries
+
+    @property
+    def inference_constraint_databases(self) -> set[str]:
+        return self._inference_constraint_databases
 
     @property
     def db_pool(self) -> Any | None:
@@ -201,6 +214,8 @@ class EngineState:
         self._compliance_engines = {}
         self._tenant_allowlist = None
         self._db_pool = None
+        self._inference_deliveries = set()
+        self._inference_constraint_databases = set()
         self._lock = asyncio.Lock()
 
     def health_check(self) -> dict[str, Any]:

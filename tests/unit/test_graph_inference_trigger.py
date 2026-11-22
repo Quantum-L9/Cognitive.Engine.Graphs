@@ -221,9 +221,7 @@ async def _sync(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def _reset():
     from engine.state import _reset_singleton
 
-    trigger._VERIFIED_CONSTRAINT_DATABASES.clear()
     yield
-    trigger._VERIFIED_CONSTRAINT_DATABASES.clear()
     _reset_singleton()
 
 
