@@ -102,8 +102,15 @@ async def _snapshot(graph_driver: Any, db: str = DB) -> dict[str, Any]:
     }
 
 
-# Three depots keyed by depot_id only (no entity_id): d_hub has the highest
-# non-resolution degree, all share docking_ports and two Thing neighbours.
+def _props_only(threshold: float, *props: str, max_candidates: int = 20) -> SemanticRegistrySpec:
+    """Property-similarity-only registry (structural and behavioral weight 0)."""
+    names = list(props) or ["docking_ports"]
+    return _registry(threshold=threshold, property_weight=1.0, structural_weight=0.0, behavioral_weight=0.0,
+                     comparison_properties=names, max_candidates=max_candidates)  # fmt: skip
+
+
+# Three depots keyed by depot_id only (no entity_id), sharing docking_ports and
+# three neighbours; d_hub's fourth link makes it the highest-degree canonical.
 DUPLICATES_SEED = """
 CREATE (h:OrbitalDepot {depot_id: 'd_hub', docking_ports: 6, reliability: 0.9})
 CREATE (a:OrbitalDepot {depot_id: 'd_a', docking_ports: 6, reliability: 0.9})
@@ -112,6 +119,7 @@ CREATE (n1:Thing {thing_id: 1}), (n2:Thing {thing_id: 2}), (n3:Thing {thing_id: 
 CREATE (h)-[:LINKS]->(n1), (h)-[:LINKS]->(n2), (h)-[:LINKS]->(n3)
 CREATE (a)-[:LINKS]->(n1), (a)-[:LINKS]->(n2), (a)-[:LINKS]->(n3)
 CREATE (b)-[:LINKS]->(n1), (b)-[:LINKS]->(n2), (b)-[:LINKS]->(n3)
+CREATE (h)-[:LINKS]->(:Thing {thing_id: 9})
 """
 
 
@@ -266,7 +274,7 @@ async def test_r14_capped_prefilter_is_deterministic_across_insertion_order(
     await _write(graph_driver, "CREATE (:OrbitalDepot {depot_id: 'src', docking_ports: 6})")
     for cid in insertion:
         await _write(graph_driver, "CREATE (:OrbitalDepot {depot_id: $id, docking_ports: 6})", {"id": cid})
-    registry = _registry(threshold=0.5, property_weight=1.0, structural_weight=0.0, behavioral_weight=0.0)
+    registry = _props_only(0.5)
     scorer = SimilarityScorer(registry, graph_driver, DB, domain_spec=orbital_spec)
     found = await scorer.find_candidates("src", LABEL, limit=2)
     assert found == [{"entity_id": "c1", "similarity": 1.0}, {"entity_id": "c2", "similarity": 1.0}]
@@ -282,9 +290,6 @@ async def test_r08_batch_links_two_duplicates_to_highest_degree_canonical(
 ) -> None:
     """R08 (+R11 rerun, R12 readback): exactly two links to d_hub, rerun creates none."""
     await _write(graph_driver, DUPLICATES_SEED)
-    # Give d_hub its extra non-resolution edge after the others are created, so
-    # canonical choice depends on degree, never on creation order.
-    await _write(graph_driver, "MATCH (h:OrbitalDepot {depot_id: 'd_hub'}) CREATE (h)-[:LINKS]->(:Thing {thing_id: 9})")
     before = await _snapshot(graph_driver)
     resolver = EntityResolver(_registry(threshold=0.6), graph_driver, DB, domain_spec=orbital_spec)
 
@@ -311,19 +316,6 @@ async def test_r08_batch_links_two_duplicates_to_highest_degree_canonical(
 
 
 @pytest.mark.asyncio
-async def test_r08_batch_mode_from_clean_graph(graph_driver, clean_db, orbital_spec) -> None:
-    """R08: batch mode alone, keyed by depot_id, creates exactly two idempotent links."""
-    await _write(graph_driver, DUPLICATES_SEED)
-    await _write(graph_driver, "MATCH (h:OrbitalDepot {depot_id: 'd_hub'}) CREATE (h)-[:LINKS]->(:Thing {thing_id: 9})")
-    resolver = EntityResolver(_registry(threshold=0.6), graph_driver, DB, domain_spec=orbital_spec)
-    first = await resolver.resolve_batch(LABEL)
-    second = await resolver.resolve_batch(LABEL)
-    assert first == {"total_entities": 3, "total_merged": 2, "resolution_groups": 1}
-    assert second["total_merged"] == 0
-    assert await _links(graph_driver) == [("d_a", "d_hub"), ("d_b", "d_hub")]
-
-
-@pytest.mark.asyncio
 async def test_r10_resolution_affects_only_the_named_tenant_database(graph_driver, orbital_spec) -> None:
     """R10: identical ids in two tenant databases; resolving one leaves the other unchanged."""
     tenants = ("res-tenant-a", "res-tenant-b")
@@ -337,7 +329,8 @@ async def test_r10_resolution_affects_only_the_named_tenant_database(graph_drive
         before_b = await _snapshot(graph_driver, db=tenants[1])
         resolver = EntityResolver(_registry(threshold=0.6), graph_driver, tenants[0], domain_spec=orbital_spec)
         result = await resolver.resolve_batch(LABEL)
-        assert result["total_merged"] == 2
+        assert result == {"total_entities": 3, "total_merged": 2, "resolution_groups": 1}  # R08: batch alone
+        assert (await resolver.resolve_batch(LABEL))["total_merged"] == 0  # idempotent rerun
         assert len(await _links(graph_driver, db=tenants[0])) == 2
         assert await _links(graph_driver, db=tenants[1]) == []
         assert await _snapshot(graph_driver, db=tenants[1]) == before_b
@@ -354,7 +347,6 @@ async def test_r10_resolution_affects_only_the_named_tenant_database(graph_drive
 async def test_r11_concurrent_identical_requests_create_each_link_once(graph_driver, clean_db, orbital_spec) -> None:
     """R11: parallel identical single and batch requests; stable canonical, two links, counts sum to 2."""
     await _write(graph_driver, DUPLICATES_SEED)
-    await _write(graph_driver, "MATCH (h:OrbitalDepot {depot_id: 'd_hub'}) CREATE (h)-[:LINKS]->(:Thing {thing_id: 9})")
     resolvers = [EntityResolver(_registry(threshold=0.6), graph_driver, DB, domain_spec=orbital_spec) for _ in range(6)]
     singles = await asyncio.gather(*(r.resolve_entity("d_a", LABEL) for r in resolvers[:3]))
     batches = await asyncio.gather(*(r.resolve_batch(LABEL) for r in resolvers[3:]))
@@ -389,13 +381,7 @@ async def test_x05_resolved_duplicate_remains_a_match_candidate(
     before_match = ids(await handle_match(ORBITAL, query))
     before_graph = await _snapshot(graph_driver, db=ORBITAL)
     resolver = EntityResolver(
-        _registry(
-            threshold=0.6,
-            property_weight=1.0,
-            structural_weight=0.0,
-            behavioral_weight=0.0,
-            comparison_properties=["docking_ports", "reliability"],
-        ),
+        _props_only(0.6, "docking_ports", "reliability"),
         graph_driver,
         ORBITAL,
         domain_spec=orbital_spec,
@@ -420,7 +406,7 @@ async def test_integer_declared_ids_resolve_with_native_types(graph_driver, clea
         CREATE (h)-[:LINKS]->(:Thing {thing_id: 1})
         """,
     )
-    registry = _registry(threshold=0.9, property_weight=1.0, structural_weight=0.0, behavioral_weight=0.0)
+    registry = _props_only(0.9)
     resolver = EntityResolver(registry, graph_driver, DB, domain_spec=orbital_spec)
     single = await resolver.resolve_entity(20, LABEL)  # type: ignore[arg-type]
     batch = await resolver.resolve_batch(LABEL)
@@ -477,14 +463,7 @@ async def test_resolved_nodes_do_not_fill_the_capped_prefilter(
         CREATE (r)-[:RESOLVED_FROM {resolution_id: 'pre', domain_id: 'neo4j'}]->(h)
         """,
     )
-    registry = _registry(
-        threshold=0.3,
-        property_weight=1.0,
-        structural_weight=0.0,
-        behavioral_weight=0.0,
-        comparison_properties=["docking_ports", "reliability", "lat"],
-        max_candidates=1,
-    )
+    registry = _props_only(0.3, "docking_ports", "reliability", "lat", max_candidates=1)
     resolver = EntityResolver(registry, graph_driver, DB, domain_spec=orbital_spec)
     result = await resolver.resolve_entity("s", LABEL)
     assert result["canonical_id"] in {"s", "t"}
@@ -495,20 +474,19 @@ async def test_resolved_nodes_do_not_fill_the_capped_prefilter(
     assert await _links(graph_driver) == sorted(expected)
 
 
+@pytest.mark.parametrize("domain_value", [None, "domain-owned"])
 @pytest.mark.asyncio
-async def test_concurrent_resolutions_never_give_a_source_two_canonicals(graph_driver, clean_db, orbital_spec) -> None:
+async def test_concurrent_resolutions_never_give_a_source_two_canonicals(
+    graph_driver, clean_db, orbital_spec, domain_value: str | None
+) -> None:
     """m is a duplicate of c1 and of c2 (which are not duplicates of each other).
 
     Resolving c1 and c2 concurrently must leave m with at most one outgoing
     RESOLVED_FROM, and the reported new-link counts must equal the edges written.
+    A domain property named like the old lock key survives both the accepted and
+    the rejected write, and the reserved lock key is never left behind.
     """
-    registry = _registry(
-        threshold=0.5,
-        property_weight=1.0,
-        structural_weight=0.0,
-        behavioral_weight=0.0,
-        comparison_properties=["docking_ports", "reliability"],
-    )
+    registry = _props_only(0.5, "docking_ports", "reliability")
     seed = """
     CREATE (c1:OrbitalDepot {depot_id: 'c1', docking_ports: 6, reliability: 0.1})
     CREATE (c2:OrbitalDepot {depot_id: 'c2', docking_ports: 5, reliability: 0.9})
@@ -519,6 +497,7 @@ async def test_concurrent_resolutions_never_give_a_source_two_canonicals(graph_d
     for _ in range(20):
         await _write(graph_driver, "MATCH (n) DETACH DELETE n")
         await _write(graph_driver, seed)
+        await _write(graph_driver, "MATCH (n:OrbitalDepot) SET n._ceg_resolution_lock = $v", {"v": domain_value})
         first = EntityResolver(registry, graph_driver, DB, domain_spec=orbital_spec)
         second = EntityResolver(registry, graph_driver, DB, domain_spec=orbital_spec)
         results = await asyncio.gather(first.resolve_entity("c1", LABEL), second.resolve_entity("c2", LABEL))
@@ -527,3 +506,7 @@ async def test_concurrent_resolutions_never_give_a_source_two_canonicals(graph_d
         )
         assert len(rows) == 1, rows
         assert sum(r["merged_count"] for r in results) == 1
+        kept = await _read(graph_driver, "MATCH (n:OrbitalDepot) RETURN DISTINCT n._ceg_resolution_lock AS v")
+        assert [r["v"] for r in kept] == [domain_value]
+        leftover = await _read(graph_driver, "MATCH (n) WHERE n.`ceg:resolution-lock` IS NOT NULL RETURN count(n) AS c")
+        assert leftover[0]["c"] == 0

@@ -385,8 +385,10 @@ class EntityResolver:
         pair): the source must carry no RESOLVED_FROM to any other node and the
         canonical none at all. A concurrent resolution that already linked the
         source elsewhere therefore wins, and this call writes nothing (None),
-        so a source never gets two canonicals. The lock is a property set and
-        removed in the same transaction: nothing is committed on either node.
+        so a source never gets two canonicals. The lock sets and removes the
+        reserved key ``ceg:resolution-lock`` in the same transaction; ``:`` and
+        ``-`` fail ``sanitize_label``, so no property the engine reads or writes
+        can carry that key, and nothing is committed on either node.
         """
         label = sanitize_label(entity_label)
         id_prop = sanitize_label(self._scorer.id_property(label))
@@ -397,8 +399,8 @@ class EntityResolver:
         WHERE source <> canonical
         FOREACH (n IN CASE WHEN elementId(source) < elementId(canonical)
                            THEN [source, canonical] ELSE [canonical, source] END |
-            SET n._ceg_resolution_lock = true
-            REMOVE n._ceg_resolution_lock)
+            SET n.`ceg:resolution-lock` = true
+            REMOVE n.`ceg:resolution-lock`)
         WITH source, canonical
         WHERE NOT EXISTS {{ (canonical)-[:RESOLVED_FROM]->() }}
           AND NOT EXISTS {{ (source)-[:RESOLVED_FROM]->(other) WHERE other <> canonical }}

@@ -2355,20 +2355,11 @@ Tests: `tests/unit/test_buyer_line_identity.py`.
 |---|---|---|---|---|
 | `resolution_prefilter_recall_enabled` (`RESOLUTION_PREFILTER_RECALL_ENABLED`) | `true` | CEG-NATIVE-CLOSURE-001 F03 | `SimilarityScorer._find_property_candidates` admits a candidate sharing **any** declared `semantic_registry.comparison_properties` value (source value non-null), never a node without the label's declared id, and orders the capped read by shared-value count DESC then id ASC, so the `max_candidates` subset and tied results do not depend on insertion order. Only reachable when a domain enables `semantic_registry` | The previous prefilter: the first comparison property only, no ordering (still on the declared id property) |
 
-Independent of this flag, on the resolver's verified path (`entity_resolution_merge_integrity`) nodes with an outgoing `RESOLVED_FROM` are excluded before `LIMIT` on both prefilter paths, so an already-resolved node never takes a `max_candidates` slot (`test_resolved_nodes_do_not_fill_the_capped_prefilter`).
+Under the existing flags the change also does the following.
+- **Declared ids** (`spec_declared_candidate_id`): every scorer and resolver query uses the label's declared id property. Ids keep their stored type.
+- **Outcome label** (`resolution_behavioral_label_scoped`): behavioral similarity reads `feedbackloop.outcome_node_label`. A domain that declares none contributes 0.0 and reads nothing.
+- **Verified path** (`entity_resolution_merge_integrity`):
+  - Already-resolved nodes are excluded before `LIMIT` on both prefilter paths.
+  - `_merge_resolution` write-locks both endpoints in `elementId` order, using the reserved key `ceg:resolution-lock`, which is set and removed in the same transaction. It then checks eligibility again before the `MERGE`, so concurrent resolutions never give one source two canonicals.
 
-The same change also does the following under the existing flags. With
-`spec_declared_candidate_id` on, every scorer and resolver query uses the
-label's declared id property, and ids keep their stored type. With
-`resolution_behavioral_label_scoped` on, behavioral similarity reads the
-domain's `feedbackloop.outcome_node_label`. A domain that declares none
-contributes 0.0 and reads nothing. Tests:
-`tests/unit/test_resolver.py` and `tests/integration/test_resolution_native_identity.py`.
-
-The verified path (`entity_resolution_merge_integrity`) also writes the edge
-atomically. `_merge_resolution` write-locks both endpoints in `elementId`
-order, then checks again that the source has no `RESOLVED_FROM` to another
-node and the canonical has none at all. Only then does it `MERGE`. Two
-concurrent resolutions therefore never give one source two canonicals. The
-lock is a property set and removed in the same transaction, so nothing is
-committed (`test_concurrent_resolutions_never_give_a_source_two_canonicals`).
+Tests: `tests/unit/test_resolver.py` and `tests/integration/test_resolution_native_identity.py`.

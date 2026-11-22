@@ -713,7 +713,7 @@ class TestDeclaredIdentityAndOutcome:
 
     @pytest.mark.asyncio
     async def test_r06_three_signals_follow_declared_weights_and_bound(self) -> None:
-        """R06: 0.5*0.5 + 0.3*0.25 + 0.2*0.75 = 0.475; weights above 1 still clamp to [0, 1]."""
+        """R06: 0.5*0.5 + 0.3*0.25 + 0.2*0.75 = 0.475 (clamping: test_score_clamped_to_0_1)."""
         driver = _mock_driver()
         driver.execute_query.side_effect = [
             [{"a_name": "A", "b_name": "A", "a_region": "US", "b_region": "EU"}],
@@ -722,13 +722,6 @@ class TestDeclaredIdentityAndOutcome:
         ]
         sim = await _declared_scorer(driver).compute_similarity("s1", "s2", "Supplier")
         assert sim == pytest.approx(0.475)
-        heavy = _make_spec(property_weight=1.0, structural_weight=1.0, behavioral_weight=1.0)
-        driver.execute_query.side_effect = [
-            [{"a_name": "A", "b_name": "A", "a_region": "US", "b_region": "US"}],
-            [{"shared_count": 1, "union_count": 1}],
-            [{"shared_count": 1, "union_count": 1}],
-        ]
-        assert await _declared_scorer(driver, heavy).compute_similarity("s1", "s2", "Supplier") == 1.0
 
     @pytest.mark.asyncio
     async def test_r15_undeclared_outcome_label_is_no_evidence_and_no_query(self) -> None:
@@ -886,8 +879,8 @@ class TestPrefilterRecallFlag:
         resolver = EntityResolver(_make_spec(), driver, "test_domain", domain_spec=_supplier_domain())
         assert await resolver._merge_resolution("s2", "s1", "Supplier", 0.9) is None
         cypher = str(driver.execute_query.call_args_list[0].kwargs["cypher"])
-        lock = cypher.index("SET n._ceg_resolution_lock = true")
-        unlock = cypher.index("REMOVE n._ceg_resolution_lock")
+        lock = cypher.index("SET n.`ceg:resolution-lock` = true")
+        unlock = cypher.index("REMOVE n.`ceg:resolution-lock`")
         recheck = cypher.index("NOT EXISTS { (source)-[:RESOLVED_FROM]->(other) WHERE other <> canonical }")
         canonical_free = cypher.index("NOT EXISTS { (canonical)-[:RESOLVED_FROM]->() }")
         assert (
