@@ -106,7 +106,7 @@ repo-test:	## Unit suite (pytest -m unit): no Docker, no Neo4j
 # folder or top-level module must be added. tests/e2e, tests/performance and
 # tests/fixtures hold no unit tests and are not listed. An empty selection or a
 # missing path fails before pytest runs. `repo-test` above stays the whole unit
-# suite (push to main, nightly, dispatch).
+# suite (schedule and workflow_dispatch only; never on pull_request or push).
 PR_FAST_TESTS := \
 	tests/unit \
 	tests/contracts \
