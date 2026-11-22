@@ -7,7 +7,7 @@
   "packs": {
     "plasticos": {
       "ceg_spec": "plasticos/spec.yaml",
-      "ceg_spec_sha256": "d8cbd15c339e1742032948186069827e5b1c6969a610ea9ef39aebf0ddf13863",
+      "ceg_spec_sha256": "1437177929cd1ccd1a6c6f91fa7f28af1231882f1a561177d81f31d57bd20b6b",
       "composed_from": [
         {
           "repo": "Quantum-L9/Cognitive.Engine.Graphs",
@@ -24,17 +24,19 @@
           "use": "EIE cartridge counterpart, unmodified"
         }
       ],
-      "overlay": "appended plugins.inference_rules: [infer_geography_from_postal_code] (existing PluginsSpec key)"
+      "overlay": "appended (1) plugins.inference_rules: [infer_geography_from_postal_code]; (2) capabilities: tenant-scoped match:read, sync:write, admin:write (score:read NOT granted). Both existing DomainSpec keys."
     },
     "synthneutral": {
       "ceg_spec": "synthneutral/spec.yaml",
-      "ceg_spec_sha256": "6af7ad9814b4c134274d09534df9e72b7576b1deec80d7b1e15d7d56c4505a82",
+      "ceg_spec_sha256": "d50b9ab2aba2addf0c11b5c6ad3636f102f6e6479262f6b38d526d9f545bbb3e",
       "eie_cartridge": {
         "repo": "Quantum-L9/Enrichment.Inference.Engine",
         "path": "tests/e2e/gate_loop/cartridges/synthneutral/spec.yaml",
         "sha256": "1a37a607c1d6227a383896d8fda0a8b191b9b40a610dc25aace9870904010bc0"
       },
-      "composed_from": "synthetic; no PlasticOS literal"
+      "composed_from": "synthetic; no PlasticOS literal",
+      "overlay": "appended capabilities: tenant-scoped match:read, sync:write, admin:write (score:read NOT granted)."
     }
-  }
+  },
+  "revision_note": "r2: capability grants added because a staging-mode CEG refuses writes without an explicit grant (engine/handlers.py _enforce_capability)."
 }

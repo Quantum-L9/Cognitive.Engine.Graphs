@@ -8,10 +8,11 @@
 #           EIE cartridge counterpart: Enrichment.Inference.Engine
 #           domains/plasticos/spec.yaml (current.json) sha256
 #           dd09cc9ec8fea4a8766b0f3650cfab83a0b0a894d0e499f9f75405f21ae48cfe, unmodified.
-# overlay:  plugins.inference_rules authorizes the one registered rule this
+# overlay:  (1) plugins.inference_rules authorizes the one registered rule this
 #           pack can witness (infer_geography_from_postal_code). `plugins` is an
 #           existing DomainSpec key (engine/config/schema.py PluginsSpec); no new
 #           key is introduced. See TEST_ONLY.json for this file's sha256.
+#           (2) capabilities: tenant-scoped grants (see the appended block).
 # --- end TEST_ONLY header ---
 # --- L9_META ---
 # l9_schema: 1
@@ -772,3 +773,11 @@ outcome_signals:
 plugins:
   inference_rules:
   - infer_geography_from_postal_code
+# --- TEST_ONLY overlay: capability grants for a staging-mode CEG ---
+# CEG refuses writes in staging without an explicit grant (engine/handlers.py
+# _enforce_capability). Grants are scoped to this tenant only; score:read is
+# deliberately NOT granted (P36 stays conditional).
+capabilities:
+- {name: tenant_match_read, actions: ["match:read"], allowed_subjects: [plasticos]}
+- {name: tenant_sync_write, actions: ["sync:write"], allowed_subjects: [plasticos]}
+- {name: tenant_admin_write, actions: ["admin:write"], allowed_subjects: [plasticos]}

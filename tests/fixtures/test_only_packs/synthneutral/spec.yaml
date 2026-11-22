@@ -108,3 +108,11 @@ sync:
       edgedirection: parenttochild
       edgeidentity: slot_id
       edgeproperties: [slot_id, direction]
+# --- TEST_ONLY overlay: capability grants for a staging-mode CEG ---
+# CEG refuses writes in staging without an explicit grant (engine/handlers.py
+# _enforce_capability). Grants are scoped to this tenant only; score:read is
+# deliberately NOT granted (P36 stays conditional).
+capabilities:
+- {name: tenant_match_read, actions: ["match:read"], allowed_subjects: [synthneutral]}
+- {name: tenant_sync_write, actions: ["sync:write"], allowed_subjects: [synthneutral]}
+- {name: tenant_admin_write, actions: ["admin:write"], allowed_subjects: [synthneutral]}
