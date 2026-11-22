@@ -1,0 +1,110 @@
+# --- TEST_ONLY PACK (EIE-CEG-GATE-COLLAB-2026-11-21, lane PROOF) ---
+# label:   TEST_ONLY — synthetic, domain-neutral tenant. Carries no PlasticOS
+#          literal: no node, edge, property or code is shared with the
+#          PlasticOS packs. It exercises the same spec constructs: a sync-managed candidate node with a
+#          list<map> childsync keyed by edgeidentity, a taxonomy node, a
+#          traversal hard gate with edge predicates (nullbehavior fail), a
+#          threshold gate with nullbehavior pass, and one scoring dimension.
+# purpose: P05 domain-neutrality witness. See TEST_ONLY.json for sha256.
+# --- end TEST_ONLY header ---
+domain:
+  id: synthneutral
+  name: Synthetic Neutral Witness
+  version: 0.1.0
+  description: TEST_ONLY synthetic tenant for domain-neutrality proof.
+ontology:
+  nodes:
+  - label: Station
+    managedby: sync
+    candidate: true
+    matchdirection: request_to_station
+    properties:
+    - {name: station_id, type: string, required: true}
+    - {name: title, type: string, required: true}
+    - {name: max_load, type: float}
+    - {name: band, type: string}
+    - name: handled_kinds
+      type: list
+      items:
+        type: map
+        properties:
+        - {name: code, type: string, required: true}
+        - {name: slot_id, type: string}
+        - {name: direction, type: string}
+  - label: Kind
+    managedby: static
+    taxonomy: true
+    properties:
+    - {name: code, type: string, required: true}
+  - label: Request
+    managedby: api
+    queryentity: true
+    matchdirection: request_to_station
+    properties:
+    - {name: request_id, type: string, required: true}
+    - {name: kind_code, type: string}
+    - {name: load, type: float}
+  edges:
+  - type: HANDLES
+    from: Station
+    to: Kind
+    direction: DIRECTED
+    category: capability
+    managedby: sync
+    properties:
+    - {name: slot_id, type: string}
+    - {name: direction, type: string}
+matchentities:
+  candidate:
+  - {label: Station, matchdirection: request_to_station}
+  queryentity:
+  - {label: Request, matchdirection: request_to_station}
+queryschema:
+  matchdirections: [request_to_station]
+  fields:
+  - {name: kind_code, type: string, required: true}
+  - {name: load, type: float}
+traversal:
+  steps: []
+gates:
+- name: load_threshold
+  type: threshold
+  candidateprop: max_load
+  queryparam: load
+  operator: '>='
+  nullbehavior: pass
+  matchdirections: [request_to_station]
+- name: kind_capability_gate
+  type: traversal
+  edgetype: HANDLES
+  tonode: Kind
+  candidateprop: code
+  queryparam: kind_code
+  nullbehavior: fail
+  matchdirections: [request_to_station]
+  edgepredicates:
+  - {property: direction, equals: in}
+scoring:
+  dimensions:
+  - name: load_headroom
+    source: candidateproperty
+    computation: lognormalized
+    candidateprop: max_load
+    maxvalue: 1000.0
+    weightkey: w_load
+    defaultweight: 0.5
+    matchdirections: [request_to_station]
+sync:
+  endpoints:
+  - path: /v1/sync/stations
+    targetnode: Station
+    idproperty: station_id
+    batchstrategy: UNWINDMERGE
+    childsync:
+    - field: handled_kinds
+      targetnode: Kind
+      targetid: code
+      edgetype: HANDLES
+      edgedirection: parenttochild
+      edgeidentity: slot_id
+      edgeproperties: [slot_id, direction]

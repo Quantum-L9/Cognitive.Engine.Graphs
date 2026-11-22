@@ -1,0 +1,40 @@
+{
+ "schema": "l9.proof.test-only-packs/v1",
+ "label": "TEST_ONLY",
+ "campaign": "EIE-CEG-GATE-COLLAB-2026-11-21",
+ "lane": "PROOF",
+ "warning": "TEST_ONLY packs. Never deployment material. Best reachable verdict with these packs: PROVEN_FOR_STAGING_CANDIDATE (test-pack).",
+ "packs": {
+  "plasticos": {
+   "ceg_spec": "plasticos/spec.yaml",
+   "ceg_spec_sha256": "d8cbd15c339e1742032948186069827e5b1c6969a610ea9ef39aebf0ddf13863",
+   "composed_from": [
+    {
+     "repo": "Quantum-L9/Cognitive.Engine.Graphs",
+     "commit": "9d17d01b13671c58376f1e659e34958ced445e0c",
+     "path": "tests/fixtures/design_packs/plasticos/spec.yaml",
+     "sha256": "825e98d143a60db6eabb84c2a00f12a9fe827f0f58250d3cf35e449147fdd863",
+     "use": "verbatim body"
+    },
+    {
+     "repo": "Quantum-L9/Enrichment.Inference.Engine",
+     "commit": "aabf855f3f027dab87a78cf09bcb3f465b1be397",
+     "path": "domains/plasticos/spec.yaml (current.json)",
+     "sha256": "dd09cc9ec8fea4a8766b0f3650cfab83a0b0a894d0e499f9f75405f21ae48cfe",
+     "use": "EIE cartridge counterpart, unmodified"
+    }
+   ],
+   "overlay": "appended plugins.inference_rules: [infer_geography_from_postal_code] (existing PluginsSpec key)"
+  },
+  "synthneutral": {
+   "ceg_spec": "synthneutral/spec.yaml",
+   "ceg_spec_sha256": "6af7ad9814b4c134274d09534df9e72b7576b1deec80d7b1e15d7d56c4505a82",
+   "eie_cartridge": {
+    "repo": "Quantum-L9/Enrichment.Inference.Engine",
+    "path": "tests/e2e/gate_loop/cartridges/synthneutral/spec.yaml",
+    "sha256": "1a37a607c1d6227a383896d8fda0a8b191b9b40a610dc25aace9870904010bc0"
+   },
+   "composed_from": "synthetic; no PlasticOS literal"
+  }
+ }
+}
