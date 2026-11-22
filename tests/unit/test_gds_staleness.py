@@ -14,12 +14,15 @@ GDS-STALE-01: a GDS job is stale when it misses its own schedule, not one global
 
 from __future__ import annotations
 
+import functools
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from engine.config.schema import GDSJobScheduleSpec, GDSJobSpec, GDSProjectionSpec
 from engine.config.settings import settings
+from engine.gds import cron as gds_cron
+from engine.gds import staleness as gds_staleness
 from engine.gds.staleness import StalenessPolicy, job_staleness, parse_history_timestamp
 
 pytestmark = pytest.mark.unit
@@ -42,6 +45,13 @@ def _job(schedule_type: str, cron: str | None = None) -> GDSJobSpec:
     )
 
 
+@pytest.fixture
+def utc_cron(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Build triggers in UTC: crontab_trigger defaults to the host zone, these expectations are UTC."""
+    monkeypatch.setattr(gds_staleness, "crontab_trigger", functools.partial(gds_cron.crontab_trigger, timezone=UTC))
+
+
+@pytest.mark.usefixtures("utc_cron")
 class TestCronSchedule:
     def test_hourly_job_is_fresh_until_one_missed_run_plus_grace(self) -> None:
         job = _job("cron", "0 * * * *")
@@ -131,7 +141,9 @@ def test_reference_just_before_a_fire_does_not_skip_it() -> None:
     """CodeRabbit on #543: APScheduler rounds the search start up to a whole second."""
     from engine.gds.staleness import next_fire_after
 
+    # Every-minute cron: its fires are minute boundaries in any host zone (all
+    # real UTC offsets are whole minutes), so the expected instants hold off UTC.
     reference = datetime(2026, 11, 22, 11, 59, 59, 500000, tzinfo=UTC)
-    assert next_fire_after("0 * * * *", reference) == datetime(2026, 11, 22, 12, 0, tzinfo=UTC)
+    assert next_fire_after("* * * * *", reference) == datetime(2026, 11, 22, 12, 0, tzinfo=UTC)
     exact = datetime(2026, 11, 22, 12, 0, tzinfo=UTC)
-    assert next_fire_after("0 * * * *", exact) == datetime(2026, 11, 22, 13, 0, tzinfo=UTC)
+    assert next_fire_after("* * * * *", exact) == datetime(2026, 11, 22, 12, 1, tzinfo=UTC)

@@ -132,6 +132,11 @@ class GDSScheduler:
         self._last_started: dict[str, datetime] = {}
         self._last_attempt_status: dict[str, str] = {}
         self._started_at: datetime | None = None
+        # Attempts are numbered at entry; only the latest-started attempt of a
+        # job sets its status, so an older attempt finishing last cannot hide a
+        # newer one's failure.
+        self._attempt_seq = 0
+        self._status_seq: dict[str, int] = {}
         self._refused_jobs: dict[str, str] | None = None
 
     @property
@@ -528,13 +533,15 @@ class GDSScheduler:
         # In flight from entry, while waiting on its own providers too, so a job
         # depending on this one never reads an older success (one count per attempt).
         self._in_flight[name] += 1
+        self._attempt_seq += 1
+        seq = self._attempt_seq
         effect_started = False
         try:
             if barrier:
                 refusal = self._refusal(job_spec)
                 if refusal is not None:
                     logger.error("GDS job %s refused: %s", name, refusal)
-                    return await self._record(job_spec, {"status": "refused", "reason": refusal}, _now)
+                    return await self._record(job_spec, {"status": "refused", "reason": refusal}, _now, seq)
                 unsatisfied = await self._await_dependencies(job_spec)
                 if unsatisfied:
                     logger.warning("GDS job %s blocked by dependencies: %s", name, unsatisfied)
@@ -546,13 +553,15 @@ class GDSScheduler:
                             "unsatisfied": unsatisfied,
                         },
                         _now,
+                        seq,
                     )
             self._last_started[name] = datetime.now(tz=UTC)
             effect_started = True
-            return await self._execute_effect(job_spec, resolved_agg, _now)
+            return await self._execute_effect(job_spec, resolved_agg, _now, seq)
         except asyncio.CancelledError:
-            if effect_started:
+            if effect_started and seq >= self._status_seq.get(name, 0):
                 # The effect may be half-written: the previous success no longer stands.
+                self._status_seq[name] = seq
                 self._last_attempt_status[name] = "cancelled"
                 self._job_history.append(
                     {
@@ -571,7 +580,7 @@ class GDSScheduler:
                 async with self._state_changed:
                     self._state_changed.notify_all()
 
-    async def _execute_effect(self, job_spec: GDSJobSpec, resolved_agg: str, _now: Any) -> dict[str, Any]:
+    async def _execute_effect(self, job_spec: GDSJobSpec, resolved_agg: str, _now: Any, seq: int) -> dict[str, Any]:
         """Run the job's algorithm and record the attempt (status from the algorithm)."""
         start = _now()
         result: dict[str, Any] = {}
@@ -616,10 +625,10 @@ class GDSScheduler:
             logger.exception(f"Job {job_spec.name} failed")
             result = {"status": "failed", "error": str(e)}
 
-        return await self._record(job_spec, result, _now)
+        return await self._record(job_spec, result, _now, seq)
 
-    async def _record(self, job_spec: GDSJobSpec, result: dict[str, Any], _now: Any) -> dict[str, Any]:
-        """Append one attempt to the history and the barrier's provider state."""
+    async def _record(self, job_spec: GDSJobSpec, result: dict[str, Any], _now: Any, seq: int) -> dict[str, Any]:
+        """Append one attempt to the history; the latest-started attempt sets the provider state."""
         async with self._history_lock:
             self._job_history.append(
                 {
@@ -630,7 +639,9 @@ class GDSScheduler:
                 }
             )
         async with self._state_changed:
-            self._last_attempt_status[job_spec.name] = str(result.get("status"))
+            if seq >= self._status_seq.get(job_spec.name, 0):
+                self._status_seq[job_spec.name] = seq
+                self._last_attempt_status[job_spec.name] = str(result.get("status"))
             self._state_changed.notify_all()
         return result
 
