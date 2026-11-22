@@ -25,7 +25,7 @@
 #   make check     repo-check     ruff check, ruff format --check,
 #                                 mypy engine/ chassis/ scripts/,
 #                                 C-009 cypher-lint (non-mutating)
-#   make test-fast repo-test-fast PR pytest owner: the bounded tests/pr_fast.d selection
+#   make test-fast repo-test-fast PR pytest owner: the literal PR_FAST_TESTS lane blocks
 #   make test      repo-test      whole unit suite: pytest tests/ -m unit (local, nightly)
 #   make test-deep                one full plan, not a make-v2 phase. Missing
 #                                 pinned Odoo mapper is NOT_RUN.
@@ -99,18 +99,24 @@ repo-check:	## Non-mutating static gate: ruff check, ruff format --check, mypy e
 repo-test:	## Unit suite (pytest -m unit): no Docker, no Neo4j
 	@PYTHONPATH="$${PYTHONPATH:-}:." $(REPO_PY) -m pytest tests/ -m unit --tb=short -q
 
-# make-v2 pull-request selection (`make test-fast`). Core's expense judge needs a
-# literal, bounded list, so each campaign lane owns one Make fragment in
-# tests/pr_fast.d/ that appends literal paths to PR_FAST_TESTS (see its README).
-# A lane adds its own fragment and one include line, and edits no other lane's
-# file. Duplicate paths collapse in pytest's collection; an empty selection or a
-# missing path fails before pytest runs. `repo-test` above stays the whole unit
-# suite for local and nightly runs.
+# make-v2 pull-request selection (`make test-fast`). Core's expense judge accepts
+# only a literal, bounded list, so every path is written out below, one per line,
+# in one commented block per campaign lane. A lane appends its own block after
+# the last one and edits no other lane's lines. It must list every test that
+# exercises that lane's code. Duplicate paths collapse in pytest's collection;
+# an empty selection or a missing path fails before pytest runs. `repo-test`
+# above stays the whole unit suite (push to main, nightly, dispatch).
 PR_FAST_TESTS :=
-include tests/pr_fast.d/ceg-w.mk
 
-repo-test-fast:	## Bounded pull-request selection from tests/pr_fast.d/*.mk (unit, no Docker, no Neo4j)
-	@test -n "$(strip $(PR_FAST_TESTS))" || { echo "repo-test-fast: tests/pr_fast.d selects nothing" >&2; exit 1; }
+# lane: eie-ceg-gate/ceg-w
+PR_FAST_TESTS += tests/unit/test_graph_inference_egress.py
+PR_FAST_TESTS += tests/unit/test_first_match_direction.py
+PR_FAST_TESTS += tests/unit/test_second_match_direction.py
+PR_FAST_TESTS += tests/unit/test_match_gate_row_scope.py
+PR_FAST_TESTS += tests/unit/test_match_dimension_projection.py
+
+repo-test-fast:	## Bounded pull-request selection: the literal PR_FAST_TESTS lane blocks (unit, no Docker, no Neo4j)
+	@test -n "$(strip $(PR_FAST_TESTS))" || { echo "repo-test-fast: PR_FAST_TESTS selects nothing" >&2; exit 1; }
 	@for path in $(PR_FAST_TESTS); do test -e "$$path" || { echo "repo-test-fast: missing $$path" >&2; exit 1; }; done
 	@PYTHONPATH="$${PYTHONPATH:-}:." $(REPO_PY) -m pytest $(PR_FAST_TESTS) -m unit --tb=short -q
 
