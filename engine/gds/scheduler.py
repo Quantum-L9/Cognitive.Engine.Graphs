@@ -431,6 +431,18 @@ class GDSScheduler:
         depending on a job refused for any of these reasons. Keyed by job name; an
         independent job is never listed.
         """
+        refused, providers = GDSScheduler._declaration_refusals(jobs)
+        dependents = GDSScheduler._dependents_of(providers)
+        unplaced = GDSScheduler._unplaced_by_kahn(providers, dependents)
+        cycle = sorted(name for name in unplaced if GDSScheduler._reaches(dependents, name, name))
+        for name in cycle:
+            refused.setdefault(name, f"dependency cycle among jobs {cycle}")
+        GDSScheduler._propagate_refusals(providers, refused)
+        return refused
+
+    @staticmethod
+    def _declaration_refusals(jobs: list[GDSJobSpec]) -> tuple[dict[str, str], dict[str, list[str]]]:
+        """Duplicate names and undeclared algorithm deps, plus each job's provider jobs."""
         by_algorithm: dict[str, list[str]] = defaultdict(list)
         for job in jobs:
             by_algorithm[job.algorithm].append(job.name)
@@ -449,14 +461,20 @@ class GDSScheduler:
                     refused.setdefault(job.name, f"depends on undeclared algorithm {dep!r}")
                 names.extend(by_algorithm.get(dep, []))
             providers[job.name] = names
+        return refused, providers
 
-        # Kahn over the provider graph: whatever never reaches in-degree 0 is in,
-        # or downstream of, a cycle.
-        in_degree = {name: len(set(deps)) for name, deps in providers.items()}
+    @staticmethod
+    def _dependents_of(providers: dict[str, list[str]]) -> dict[str, list[str]]:
         dependents: dict[str, list[str]] = defaultdict(list)
         for name, deps in providers.items():
             for provider in set(deps):
                 dependents[provider].append(name)
+        return dependents
+
+    @staticmethod
+    def _unplaced_by_kahn(providers: dict[str, list[str]], dependents: dict[str, list[str]]) -> list[str]:
+        """Kahn over the provider graph: jobs never reaching in-degree 0 are in, or downstream of, a cycle."""
+        in_degree = {name: len(set(deps)) for name, deps in providers.items()}
         queue = [name for name, degree in in_degree.items() if degree == 0]
         placed: set[str] = set()
         while queue:
@@ -466,25 +484,25 @@ class GDSScheduler:
                 in_degree[dependent] -= 1
                 if in_degree[dependent] == 0:
                     queue.append(dependent)
-        unplaced = [name for name in providers if name not in placed]
+        return [name for name in providers if name not in placed]
 
-        # A cycle member is an unplaced job reachable from itself.
-        def _reaches(start: str, target: str) -> bool:
-            seen: set[str] = set()
-            stack = list(dependents[start])
-            while stack:
-                node = stack.pop()
-                if node == target:
-                    return True
-                if node not in seen:
-                    seen.add(node)
-                    stack.extend(dependents[node])
-            return False
+    @staticmethod
+    def _reaches(dependents: dict[str, list[str]], start: str, target: str) -> bool:
+        """True when ``target`` is reachable from ``start`` (a cycle member reaches itself)."""
+        seen: set[str] = set()
+        stack = list(dependents[start])
+        while stack:
+            node = stack.pop()
+            if node == target:
+                return True
+            if node not in seen:
+                seen.add(node)
+                stack.extend(dependents[node])
+        return False
 
-        cycle = sorted(name for name in unplaced if _reaches(name, name))
-        for name in cycle:
-            refused.setdefault(name, f"dependency cycle among jobs {cycle}")
-
+    @staticmethod
+    def _propagate_refusals(providers: dict[str, list[str]], refused: dict[str, str]) -> None:
+        """Refuse, to a fixed point, every job depending on a refused job."""
         changed = True
         while changed:
             changed = False
@@ -495,7 +513,6 @@ class GDSScheduler:
                 if blocker is not None:
                     refused[name] = f"depends on unexecutable job {blocker!r}"
                     changed = True
-        return refused
 
     def _register_cron_job(self, job_spec: GDSJobSpec) -> None:
         if not job_spec.schedule.cron:
