@@ -796,13 +796,16 @@ class TestDeclaredIdentityAndOutcome:
         assert "RETURN e.supplier_id AS entity_id" in listing
         assert "e.supplier_id IS NOT NULL" in listing
         assert "ORDER BY entity_id" in listing
-        for method, args, result in (
-            (resolver._already_resolved, (["s1"], "Supplier"), []),
-            (resolver._find_canonical, (["s1", "s2"], "Supplier"), [{"entity_id": "s1"}]),
-            (resolver._merge_resolution, ("s2", "s1", "Supplier", 0.9), [{"resolution_id": "r", "created": True}]),
-        ):
-            driver.execute_query.side_effect = [result]
-            await method(*args)
-            cypher = str(driver.execute_query.call_args_list[-1].kwargs["cypher"])
+        driver.execute_query.side_effect = [
+            [],
+            [{"entity_id": "s1"}],
+            [{"resolution_id": "r", "created": True}],
+        ]
+        await resolver._already_resolved(["s1"], "Supplier")
+        await resolver._find_canonical(["s1", "s2"], "Supplier")
+        await resolver._merge_resolution("s2", "s1", "Supplier", 0.9)
+        writes = [str(c.kwargs["cypher"]) for c in driver.execute_query.call_args_list[1:]]
+        assert len(writes) == 3
+        for cypher in writes:
             assert "{supplier_id: " in cypher
             assert "entity_id:" not in cypher
