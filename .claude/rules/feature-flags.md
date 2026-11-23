@@ -196,3 +196,12 @@ settings and the boot assertion over them were retired (Stage 2).
 | declared_structural_properties_required_enabled | True | Exclusion edge / target property, community property, geo lat/lon/id properties and the Louvain write property are declarations; a pack using one undeclared is withheld (`undeclared structural property: …`) and the compilers raise `UndeclaredStructuralPropertyError`; off restores `EXCLUDED_FROM` / `entity_id` / `community_id` / `communityId` / `lat` / `lon` |
 | preference_attention_declared_community_enabled | True | `preference_attention` outcome-side community property is `metadata.outcome_community_property`, defaulting to the candidate's declared one; off restores a hardcoded `community_id` |
 | preference_attention_metadata_required_enabled | True | A pack whose `preference_attention` dimension declares no `metadata.success_value` is withheld at admission (`undeclared scoring metadata: …`, reported once); off admits it and the scoring compiler refuses the dimension at match time |
+
+## CEG-NATIVE-CLOSURE-001 GDS flags (lane A2 / N3-N4)
+
+| Flag | Default | Effect |
+|---|---|---|
+| gds_dependency_barrier_enabled | True | `depends_on` is a run-time barrier: a dependent waits for running/due providers and runs only when every provider's latest attempt is `success`, else records `blocked`; duplicate job names, undeclared-algorithm deps, cycles and their downstream are `refused` and never cron-registered; unknown algorithm is `refused`; off restores registration-order waves |
+| gds_prune_failure_partial_enabled | True | A cooccurrence/reinforcement prune failure after the write makes the job `partial` with `prune_error`; off logs it and reports `success` |
+| gds_cooccurrence_owned_edges_enabled | True | Cooccurrence pairs only the job's label, MERGEs on owner marker `gds_job`, prunes only owned edges; off restores unscoped pairing and prune |
+| gds_health_last_attempt_enabled | True | Admin `gds_health` and the boot GDS probe judge each declared job with `engine.gds.staleness.assess_gds_health`: healthy only when the latest attempt is `success` and the latest success is fresh; `never_run` and any non-success attempt are not healthy; off restores the newest-entry verdict |

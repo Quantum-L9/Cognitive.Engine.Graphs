@@ -762,6 +762,35 @@ class Settings(BaseSettings):
     # writeedge relationships. Off: the job is skipped with an explicit reason
     # (no write), as before this flag existed it fell to "unknown algorithm".
     gds_node_similarity_enabled: bool = False
+    # CEG-NATIVE-CLOSURE-001 F04: a job's depends_on is a run-time barrier.
+    # Before a dependent job runs (cron or manual) every job providing each
+    # declared algorithm must have no run in flight, no cron fire due, and a
+    # latest attempt of `success`; otherwise the dependent records `blocked`
+    # and writes nothing. A dependency on an undeclared algorithm, a cycle and
+    # any job downstream of either are `refused` (never cron-registered) and an
+    # unknown algorithm is `refused`, not `skipped`. Independent jobs are
+    # unaffected. Off: registration-order waves only, cycle members in a
+    # fallback wave, unknown algorithm `skipped`.
+    gds_dependency_barrier_enabled: bool = True
+    # CEG-NATIVE-CLOSURE-001 F05: a cooccurrence or reinforcement prune that
+    # fails after its edges were written makes the job `partial` with
+    # `prune_error` (written edges stay for the retry). Off: the failure is
+    # logged and the job reports `success`.
+    gds_prune_failure_partial_enabled: bool = True
+    # CEG-NATIVE-CLOSURE-001 G10/X06: cooccurrence pairs only nodes of the
+    # job's label, writes edges carrying the owner marker gds_job=<job name>
+    # (MERGE on it, so another producer's edge of the same type is never
+    # re-weighted), and prunes only edges it owns. Off: any label pairs, the
+    # MERGE adopts an existing edge, the prune counts and deletes any edge of
+    # the type.
+    gds_cooccurrence_owned_edges_enabled: bool = True
+    # CEG-NATIVE-CLOSURE-001 F06/F07: admin gds_health and the boot W6-03 probe
+    # judge each declared job with engine.gds.staleness.assess_gds_health:
+    # healthy only when its latest attempt is `success` and its latest success
+    # is fresh; failed/skipped/partial/blocked/refused and never_run are not
+    # healthy. Off: the newest entry's timestamp alone decides, and the probe
+    # reports `ok` while no job has run.
+    gds_health_last_attempt_enabled: bool = True
     # RU-101 / CEG-COR-059..061: entity resolution threads and validates the
     # batch threshold, verifies each member against the chosen canonical,
     # MERGEs RESOLVED_FROM (at most one per pair, no cycles) and skips batch
@@ -773,6 +802,13 @@ class Settings(BaseSettings):
     # also follows spec_declared_candidate_id). Off: label-less entity_id match,
     # which counts outcomes of same-id nodes of other labels.
     resolution_behavioral_label_scoped: bool = True
+    # CEG-NATIVE-CLOSURE-001 F03: the resolution candidate prefilter admits a
+    # candidate sharing any declared comparison property value (not only the
+    # first), never admits a node without the declared id, orders the capped
+    # read by shared-value count then id. Off: the previous first-property
+    # prefilter. Either way the verified resolver excludes already-resolved
+    # nodes before LIMIT (entity_resolution_merge_integrity).
+    resolution_prefilter_recall_enabled: bool = True
     # Correctness remediation lane G (plan 0d84ec8, RU-108..)
     # RU-108 / CEG-COR-044: readiness coerced an absent field confidence to 0,
     # so a fully populated entity with no confidence map scored 0.0/F, and
