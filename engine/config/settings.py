@@ -777,6 +777,20 @@ class Settings(BaseSettings):
     # `prune_error` (written edges stay for the retry). Off: the failure is
     # logged and the job reports `success`.
     gds_prune_failure_partial_enabled: bool = True
+    # CEG-NATIVE-CLOSURE-001 G10/X06: cooccurrence pairs only nodes of the
+    # job's label, writes edges carrying the owner marker gds_job=<job name>
+    # (MERGE on it, so another producer's edge of the same type is never
+    # re-weighted), and prunes only edges it owns. Off: any label pairs, the
+    # MERGE adopts an existing edge, the prune counts and deletes any edge of
+    # the type.
+    gds_cooccurrence_owned_edges_enabled: bool = True
+    # CEG-NATIVE-CLOSURE-001 F06/F07: admin gds_health and the boot W6-03 probe
+    # judge each declared job with engine.gds.staleness.assess_gds_health:
+    # healthy only when its latest attempt is `success` and its latest success
+    # is fresh; failed/skipped/partial/blocked/refused and never_run are not
+    # healthy. Off: the newest entry's timestamp alone decides, and the probe
+    # reports `ok` while no job has run.
+    gds_health_last_attempt_enabled: bool = True
     # RU-101 / CEG-COR-059..061: entity resolution threads and validates the
     # batch threshold, verifies each member against the chosen canonical,
     # MERGEs RESOLVED_FROM (at most one per pair, no cycles) and skips batch
