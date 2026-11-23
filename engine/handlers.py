@@ -3254,6 +3254,9 @@ async def handle_resolve(tenant: str, payload: dict[str, Any]) -> dict[str, Any]
             registry_spec=domain_spec.semantic_registry,
             graph_driver=graph_driver,
             domain_id=domain_spec.domain.id,
+            # The spec admitted above: declared ids and outcome label come from
+            # this revision, not from a second admission inside the scorer.
+            domain_spec=domain_spec,
         )
 
         # Batch mode: resolve all entities of this type

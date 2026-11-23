@@ -2348,3 +2348,18 @@ Off: the relationship is unkeyed, `fromrow` keys are undeclared, and
 non-empty form, on the same relationship as the polymer.
 
 Tests: `tests/unit/test_buyer_line_identity.py`.
+
+## Resolution on the declared identity (CEG-NATIVE-CLOSURE-001, A1 / L-RES)
+
+| Flag (env var) | Default | Origin | Behaviour when on | Behaviour when off |
+|---|---|---|---|---|
+| `resolution_prefilter_recall_enabled` (`RESOLUTION_PREFILTER_RECALL_ENABLED`) | `true` | CEG-NATIVE-CLOSURE-001 F03 | `SimilarityScorer._find_property_candidates` admits a candidate sharing **any** declared `semantic_registry.comparison_properties` value (source value non-null), never a node without the label's declared id, and orders the capped read by shared-value count DESC then id ASC, so the `max_candidates` subset and tied results do not depend on insertion order. Only reachable when a domain enables `semantic_registry` | The previous prefilter: the first comparison property only, no ordering (still on the declared id property) |
+
+Under the existing flags the change also does the following.
+- **Declared ids** (`spec_declared_candidate_id`): every scorer and resolver query uses the label's declared id property. Ids keep their stored type.
+- **Outcome label** (`resolution_behavioral_label_scoped`): behavioral similarity reads `feedbackloop.outcome_node_label`. A domain that declares none contributes 0.0 and reads nothing.
+- **Verified path** (`entity_resolution_merge_integrity`):
+  - Already-resolved nodes are excluded before `LIMIT` on both prefilter paths.
+  - `_merge_resolution` write-locks both endpoints in `elementId` order, by writing a per-call token to `ceg:resolution-lock` and then writing the prior value back, so any stored value under that key is unchanged. It then checks eligibility again before the `MERGE`, so concurrent resolutions never give one source two canonicals.
+
+Tests: `tests/unit/test_resolver.py` and `tests/integration/test_resolution_native_identity.py`.
