@@ -14,6 +14,7 @@ GDS-CRON-01: a GDS job's cron reads day_of_week as standard crontab (0 = Sunday)
 
 from __future__ import annotations
 
+import functools
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
@@ -23,6 +24,7 @@ from apscheduler.triggers.cron import CronTrigger
 from engine.config.schema import DomainSpec, GDSJobScheduleSpec, GDSJobSpec, GDSProjectionSpec
 from engine.config.settings import settings
 from engine.gds import cron as gds_cron
+from engine.gds import staleness as gds_staleness
 from engine.gds.cron import crontab_trigger, posix_day_of_week
 from engine.gds.scheduler import GDSScheduler
 from engine.gds.staleness import StalenessPolicy, job_staleness
@@ -162,14 +164,22 @@ class TestFlagOff:
             crontab_trigger("0 2 * *", posix_weekday=False)
 
 
+@pytest.fixture
+def utc_cron(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Build staleness triggers in UTC: crontab_trigger defaults to the host zone, these deadlines are UTC."""
+    monkeypatch.setattr(gds_staleness, "crontab_trigger", functools.partial(gds_cron.crontab_trigger, timezone=UTC))
+
+
 class TestStalenessUsesTheSameRule:
     POLICY = StalenessPolicy(max_staleness=timedelta(hours=25), grace=timedelta(hours=1), per_schedule=True)
 
+    @pytest.mark.usefixtures("utc_cron")
     def test_deadline_is_the_posix_sunday(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings, "gds_cron_posix_weekday_enabled", True)
         verdict = job_staleness(_job("0 2 * * 0"), SATURDAY, SATURDAY, self.POLICY)
         assert verdict.deadline == datetime(2026, 11, 15, 2, 0, tzinfo=UTC) + timedelta(hours=1)
 
+    @pytest.mark.usefixtures("utc_cron")
     def test_deadline_off_matches_from_crontab(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings, "gds_cron_posix_weekday_enabled", False)
         verdict = job_staleness(_job("0 2 * * 0"), SATURDAY, SATURDAY, self.POLICY)

@@ -253,6 +253,8 @@ class TestDAGJobIdentity:
         from engine.config.settings import settings
 
         monkeypatch.setattr(settings, "gds_dag_job_identity_by_name", False)
+        # The dependency barrier implies the name-keyed DAG; the legacy DAG needs both off.
+        monkeypatch.setattr(settings, "gds_dependency_barrier_enabled", False)
         jobs = [_named_job("louvain_by_material", "louvain"), _named_job("louvain_by_polymer", "louvain")]
         waves = GDSScheduler._build_execution_dag(jobs)
         assert [[j.name for j in wave] for wave in waves] == [["louvain_by_polymer"]]
