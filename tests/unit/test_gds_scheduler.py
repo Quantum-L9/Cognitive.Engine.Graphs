@@ -236,13 +236,17 @@ class TestAlgorithmDispatch:
 
     @pytest.mark.asyncio
     async def test_cooccurrence_happy_path(self):
-        driver = _mock_driver([{"edges_created": 15}])
+        driver = _mock_driver()
+        # Step 1 MERGE, then the prune (each returns its own column).
+        driver.execute_query = AsyncMock(side_effect=[[{"edges_created": 15}], [{"pruned_edges": 3}]])
         job = _job("test_cooc", "cooccurrence", sourceedge="ACCEPTS_POLYMER", writeedge="CO_PROCESSES")
         spec = _minimal_spec([job])
         scheduler = GDSScheduler(spec, driver)
 
         result = await scheduler.execute_job(job)
         assert result["status"] == "success"
+        assert result["edges_created"] == 15
+        assert result["edges_pruned"] == 3
         # RU-098 / CEG-COR-168: per-node keep sets are ordered by weight (with a
         # deterministic tie-break) before collect; an edge is deleted only when
         # both endpoints prune (degree > 10) and neither keeps it.
@@ -258,10 +262,14 @@ class TestAlgorithmDispatch:
         from engine.config.settings import settings
 
         monkeypatch.setattr(settings, "gds_cooccurrence_deterministic_prune", False)
-        driver = _mock_driver([{"edges_created": 15}])
+        driver = _mock_driver()
+        # Step 1 MERGE, then the prune (each returns its own column).
+        driver.execute_query = AsyncMock(side_effect=[[{"edges_created": 15}], [{"pruned_edges": 2}]])
         job = _job("test_cooc", "cooccurrence", sourceedge="ACCEPTS_POLYMER", writeedge="CO_PROCESSES")
         scheduler = GDSScheduler(_minimal_spec([job]), driver)
         result = await scheduler.execute_job(job)
+        assert result["status"] == "success"
+        assert result["edges_pruned"] == 2
         assert result["pruning_alpha"] == 0.86
         prune = str(driver.execute_query.call_args_list[1].args[0])
         assert "ORDER BY" not in prune
@@ -511,7 +519,12 @@ class TestAlgorithmDispatch:
             scheduler._get_candidate_label(job)
 
     @pytest.mark.asyncio
-    async def test_unknown_algorithm_skipped(self):
+    async def test_unknown_algorithm_skipped(self, monkeypatch):
+        # Legacy contract; with gds_dependency_barrier_enabled (default) it is
+        # `refused` — tests/unit/test_gds_dependency_barrier.py.
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gds_dependency_barrier_enabled", False)
         driver = _mock_driver()
         job = _job("test_unknown", "nonexistent_algo")
         spec = _minimal_spec([job])
@@ -708,3 +721,137 @@ class TestStableLouvainContract:
         doc = (GDSScheduler._run_stable_louvain.__doc__ or "").lower()
         assert "majority" not in doc
         assert "last successful run" in doc
+
+
+# ── CEG-NATIVE-CLOSURE-001 F05: prune failure after write is not success ──
+
+
+def _prune_failing_driver(first_result: list) -> AsyncMock:
+    """Every statement succeeds except one whose Cypher deletes (the prune)."""
+
+    async def _execute(cypher, *args, **kwargs):
+        if "DELETE r" in cypher:
+            raise RuntimeError("injected prune failure")
+        return first_result
+
+    driver = AsyncMock()
+    driver.execute_query = AsyncMock(side_effect=_execute)
+    return driver
+
+
+class TestPruneFailureIsPartial:
+    @pytest.mark.asyncio
+    async def test_cooccurrence_prune_failure_is_partial(self):
+        driver = _prune_failing_driver([{"edges_created": 7}])
+        job = _job("co", "cooccurrence", sourceedge="INTERACTED_WITH", writeedge="CO_WITH")
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+
+        result = await scheduler.execute_job(job)
+
+        assert result["status"] == "partial"
+        assert result["edges_created"] == 7
+        assert result["edges_pruned"] is None
+        assert "injected prune failure" in result["prune_error"]
+        assert scheduler.job_history[-1]["status"] == "partial"
+
+    @pytest.mark.asyncio
+    async def test_reinforcement_prune_failure_is_partial(self):
+        driver = _prune_failing_driver([])
+        writes = iter([[{"accepted_edges": 2}], [{"rejected_edges": 1}]])  # each write returns its own column
+        prune_failing = driver.execute_query.side_effect
+
+        async def _execute(cypher, *args, **kwargs):
+            if "DELETE r" in cypher:
+                return await prune_failing(cypher, *args, **kwargs)
+            return next(writes)
+
+        driver.execute_query.side_effect = _execute
+        job = _job("rf", "reinforcement", **_REINFORCEMENT_JOB)
+        scheduler = GDSScheduler(_minimal_spec([job]), driver)
+
+        result = await scheduler.execute_job(job)
+
+        assert result["status"] == "partial"
+        assert result["accepted_edges"] == 2
+        assert result["rejected_edges"] == 1
+        assert "injected prune failure" in result["prune_error"]
+
+    @pytest.mark.asyncio
+    async def test_flag_off_keeps_logged_success(self, monkeypatch):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gds_prune_failure_partial_enabled", False)
+        driver = _prune_failing_driver([{"edges_created": 7}])
+        job = _job("co", "cooccurrence", sourceedge="INTERACTED_WITH", writeedge="CO_WITH")
+        result = await GDSScheduler(_minimal_spec([job]), driver).execute_job(job)
+        assert result["status"] == "success"
+        assert result["edges_pruned"] == 0
+
+    def test_flag_default_on(self):
+        from engine.config.settings import Settings
+
+        assert Settings.model_fields["gds_prune_failure_partial_enabled"].default is True
+
+
+# ── CEG-NATIVE-CLOSURE-001 G22: causal_chain_scoring reads declared causal edges only ──
+
+
+class TestCausalChainScoringVocabulary:
+    @pytest.mark.asyncio
+    async def test_no_declared_causal_edges_refuses_without_a_query(self):
+        driver = _mock_driver([{"nodes_scored": 3}])
+        job = _job("influence", "causal_chain_scoring", writeproperty="influence")
+        result = await GDSScheduler(_minimal_spec([job]), driver).execute_job(job)
+
+        assert result["status"] == "failed"
+        assert result["error"].startswith("undeclared structural property: ")
+        assert "causal.causal_edges" in result["error"]
+        driver.execute_query.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_flag_off_restores_any_relationship_pattern(self, monkeypatch):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "declared_structural_properties_required_enabled", False)
+        driver = _mock_driver([{"nodes_scored": 3}])
+        job = _job("influence", "causal_chain_scoring", writeproperty="influence")
+        result = await GDSScheduler(_minimal_spec([job]), driver).execute_job(job)
+
+        assert result["status"] == "success"
+        assert "-[*1..5]->" in _cypher_sent(driver)
+
+
+# ── CEG-NATIVE-CLOSURE-001 G10/X06: cooccurrence owns what it writes ──
+
+
+class TestCooccurrenceOwnedEdges:
+    @pytest.mark.asyncio
+    async def test_pairs_declared_label_merges_and_prunes_on_owner_marker(self):
+        driver = _mock_driver()
+        driver.execute_query = AsyncMock(side_effect=[[{"edges_created": 4}], [{"pruned_edges": 0}]])
+        job = _job("co", "cooccurrence", sourceedge="INTERACTED_WITH", writeedge="CO_WITH")
+        await GDSScheduler(_minimal_spec([job]), driver).execute_job(job)
+
+        create, prune = (call.args[0] for call in driver.execute_query.call_args_list)
+        assert "MATCH (a:Site)-[:INTERACTED_WITH]->(common)<-[:INTERACTED_WITH]-(b:Site)" in create
+        assert "MERGE (a)-[r:CO_WITH {gds_job: $job_id}]->(b)" in create
+        assert "MATCH (n:Site)-[r:CO_WITH]-(:Site)" in prune
+        assert "WHERE r.gds_job = $job_id" in prune
+        for call in driver.execute_query.call_args_list:
+            assert call.kwargs["parameters"] == {"job_id": "co"}
+
+    @pytest.mark.asyncio
+    async def test_flag_off_restores_unscoped_cypher(self, monkeypatch):
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "gds_cooccurrence_owned_edges_enabled", False)
+        driver = _mock_driver()
+        driver.execute_query = AsyncMock(side_effect=[[{"edges_created": 4}], [{"pruned_edges": 0}]])
+        job = _job("co", "cooccurrence", sourceedge="INTERACTED_WITH", writeedge="CO_WITH")
+        await GDSScheduler(_minimal_spec([job]), driver).execute_job(job)
+
+        create, prune = (call.args[0] for call in driver.execute_query.call_args_list)
+        assert "MATCH (a)-[:INTERACTED_WITH]->(common)<-[:INTERACTED_WITH]-(b)" in create
+        assert "MERGE (a)-[r:CO_WITH]->(b)" in create
+        assert "MATCH (n)-[r:CO_WITH]-()" in prune
+        assert "gds_job" not in prune
