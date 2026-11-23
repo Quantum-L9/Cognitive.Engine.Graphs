@@ -177,40 +177,94 @@ class GraphLifecycle(LifecycleHook):
         async def gds_health_check() -> dict[str, Any]:
             from datetime import UTC, datetime
 
-            from engine.gds.staleness import StalenessPolicy, job_staleness, parse_history_timestamp
+            from engine.gds.staleness import StalenessPolicy
 
             policy = StalenessPolicy.from_settings()
             now = datetime.now(tz=UTC)
-            stale_jobs: list[str] = []
-            for scheduler in self._registered_schedulers():
-                history = await scheduler.get_job_history()
-                jobs = {job.name: job for job in scheduler.domain_spec.gdsjobs}
-                # Most recent entry per job. GDS-STALE-01 keys by job name, so two
-                # jobs sharing an algorithm are judged separately; off keeps the
-                # legacy algorithm key.
-                seen: set[str] = set()
-                for entry in reversed(history):
-                    if policy.per_schedule:
-                        key = entry.get("job") or entry.get("algorithm", "unknown")
-                    else:
-                        key = entry.get("algorithm") or entry.get("job", "unknown")
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    verdict = job_staleness(
-                        jobs.get(entry.get("job", "")),
-                        parse_history_timestamp(entry.get("timestamp")),
-                        now,
-                        policy,
-                    )
-                    if verdict.stale:
-                        stale_jobs.append(key)
-            if stale_jobs:
-                return {"gds": f"degraded: stale jobs: {', '.join(stale_jobs)}"}
-            return {"gds": "ok"}
+            if settings.gds_health_last_attempt_enabled:
+                return await self._gds_health_by_last_attempt(policy, now)
+            return await self._gds_health_by_newest_entry(policy, now)
 
         self._gds_health_check = gds_health_check
         logger.info("W6-03: GDS health probe registered")
+
+    @staticmethod
+    def _history_key(entry: dict[str, Any], per_schedule: bool) -> Any:
+        """GDS-STALE-01: job name per schedule; off keeps the legacy algorithm key."""
+        if per_schedule:
+            return entry.get("job") or entry.get("algorithm", "unknown")
+        return entry.get("algorithm") or entry.get("job", "unknown")
+
+    async def _gds_health_by_newest_entry(self, policy: Any, now: Any) -> dict[str, Any]:
+        """W6-03 legacy verdict (gds_health_last_attempt_enabled off): newest entry per key."""
+        from engine.gds.staleness import job_staleness, parse_history_timestamp
+
+        stale_jobs: list[str] = []
+        for scheduler in self._registered_schedulers():
+            history = await scheduler.get_job_history()
+            jobs = {job.name: job for job in scheduler.domain_spec.gdsjobs}
+            # Most recent entry per job. GDS-STALE-01 keys by job name, so two
+            # jobs sharing an algorithm are judged separately; off keeps the
+            # legacy algorithm key.
+            seen: set[str] = set()
+            for entry in reversed(history):
+                key = self._history_key(entry, policy.per_schedule)
+                if key in seen:
+                    continue
+                seen.add(key)
+                verdict = job_staleness(
+                    jobs.get(entry.get("job", "")),
+                    parse_history_timestamp(entry.get("timestamp")),
+                    now,
+                    policy,
+                )
+                if verdict.stale:
+                    stale_jobs.append(key)
+        if stale_jobs:
+            return {"gds": f"degraded: stale jobs: {', '.join(stale_jobs)}"}
+        return {"gds": "ok"}
+
+    async def _gds_health_by_last_attempt(self, policy: Any, now: Any) -> dict[str, Any]:
+        """CEG-NATIVE-CLOSURE-001 F07: every declared job, judged by assess_gds_health.
+
+        A job with no successful run (never run after boot included) or whose
+        latest success is past its deadline is stale; a job whose success is
+        fresh but whose latest attempt is not ``success`` is unhealthy.
+        """
+        from engine.gds.staleness import assess_gds_health
+
+        stale_jobs: list[str] = []
+        unhealthy: list[str] = []
+        for scheduler in self._registered_schedulers():
+            history = await scheduler.get_job_history()
+            jobs = list(scheduler.domain_spec.gdsjobs)
+            verdicts = assess_gds_health(jobs, history, now, policy)
+            self._classify_gds_verdicts(jobs, verdicts, policy, stale_jobs, unhealthy)
+        problems = []
+        if stale_jobs:
+            problems.append(f"stale jobs: {', '.join(stale_jobs)}")
+        if unhealthy:
+            problems.append(f"unhealthy jobs: {', '.join(unhealthy)}")
+        return {"gds": f"degraded: {'; '.join(problems)}"} if problems else {"gds": "ok"}
+
+    @staticmethod
+    def _classify_gds_verdicts(
+        jobs: list[Any],
+        verdicts: dict[str, Any],
+        policy: Any,
+        stale_jobs: list[str],
+        unhealthy: list[str],
+    ) -> None:
+        """Append each stale label (once) and each unhealthy ``label (status)``."""
+        # GDS-STALE-01 off keeps the legacy algorithm key in the message.
+        algorithm = {job.name: job.algorithm for job in jobs}
+        for name, verdict in verdicts.items():
+            label = name if policy.per_schedule else algorithm.get(name, name)
+            if verdict.stale:
+                if label not in stale_jobs:
+                    stale_jobs.append(label)
+            elif not verdict.healthy:
+                unhealthy.append(f"{label} ({verdict.last_attempt_status})")
 
     async def shutdown(self) -> None:
         logger.info("GraphLifecycle.shutdown → stopping schedulers and closing Neo4j pool")
