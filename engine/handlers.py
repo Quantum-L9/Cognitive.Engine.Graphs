@@ -2174,6 +2174,21 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         policy = StalenessPolicy.from_settings()
         jobs = {job.name: job for job in spec.gdsjobs}
         now = datetime.now(tz=UTC)
+        from engine.config.settings import settings as _gds_health_settings
+
+        if _gds_health_settings.gds_health_last_attempt_enabled:
+            # CEG-NATIVE-CLOSURE-001 F06: latest attempt AND fresh latest success.
+            from engine.gds.staleness import assess_gds_health
+
+            verdicts = assess_gds_health(list(spec.gdsjobs), history, now, policy)
+            return {
+                "status": "healthy" if all(v.healthy for v in verdicts.values()) else "degraded",
+                "domain_id": domain_id,
+                "max_staleness_hours": int(policy.max_staleness.total_seconds() // 3600),
+                "staleness_per_schedule": policy.per_schedule,
+                "staleness_grace_minutes": int(policy.grace.total_seconds() // 60),
+                "algorithms": {name: v.as_dict() for name, v in verdicts.items()},
+            }
         algo_health: dict[str, Any] = {}
         # Build per-job health from most recent entry (prefer job name, fallback to algorithm)
         for entry in reversed(history):
