@@ -204,10 +204,31 @@ class TestDeclaredIdProperty:
         cypher = driver.execute_query.call_args.args[0]
         assert "MATCH (start:Depot)" in cypher
         assert "WHERE start.depot_code = $node_id" in cypher
+        # F09: path nodes are named by their own label's declared id; a label the
+        # spec does not declare (Depot here) keeps the start node's property.
+        assert "WHEN n:Facility THEN coalesce(n.facility_id, n.entity_id)" in cypher
+        assert "WHEN n:TransactionOutcome THEN n.entity_id" in cypher  # undeclared id: fallback
+        assert "ELSE n.depot_code END" in cypher
+        assert "coalesce(n.name, CASE " in cypher
+        assert "start.entity_id" not in cypher
+        assert driver.execute_query.call_args.kwargs["parameters"]["node_id"] == "D-1"
+
+    @pytest.mark.asyncio
+    async def test_declared_identity_flag_off_keeps_start_property(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SPEC_DECLARED_CANDIDATE_ID=false: every path node keyed by the start property (rollback)."""
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "spec_declared_candidate_id", False)
+        driver = AsyncMock()
+        driver.execute_query = AsyncMock(return_value=[])
+        serializer = CausalSubgraphSerializer(driver, _spec_with_causal())
+
+        await serializer.serialize_neighborhood("D-1", "Depot", id_property="depot_code")
+
+        cypher = driver.execute_query.call_args.args[0]
         assert "id: n.depot_code" in cypher
         assert "coalesce(n.name, n.depot_code)" in cypher
-        assert "entity_id" not in cypher
-        assert driver.execute_query.call_args.kwargs["parameters"]["node_id"] == "D-1"
+        assert "CASE" not in cypher
 
     @pytest.mark.asyncio
     async def test_default_id_property_is_entity_id(self) -> None:
@@ -220,7 +241,8 @@ class TestDeclaredIdProperty:
 
         cypher = driver.execute_query.call_args.args[0]
         assert "WHERE start.entity_id = $node_id" in cypher
-        assert "id: n.entity_id" in cypher
+        assert "WHEN n:Facility THEN n.entity_id" in cypher
+        assert "ELSE n.entity_id END" in cypher
 
     @pytest.mark.asyncio
     async def test_unsafe_id_property_is_refused_before_execution(self) -> None:
