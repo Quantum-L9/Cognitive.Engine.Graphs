@@ -2404,38 +2404,22 @@ Tests: `tests/unit/test_buyer_line_identity.py`.
 ## 39. Value provenance precedence (#351 revision, 2026-11-24)
 
 `sync_provenance_precedence_enabled` (env `SYNC_PROVENANCE_PRECEDENCE_ENABLED`,
-default `False`; the EIE-CEG rail turns it on for its test tenants).
+default `False`; the EIE-CEG rail enables it for its test tenants; requires
+`sync_declared_projection_enabled`).
 
-EIE syncs consumer-observed values as well as enriched ones. Naming is agreed
-with EIE #419. A node row field `F` is declared beside
-`F_provenance: enum[observed|enriched]`. A childsync `list<map>` item declares
-one item-level `provenance` with the same enum among its item properties. It is
-stored as `provenance` on what receives the item's keys: the line edge (declared
-on the edge and listed in `edgeproperties`), or the child node (declared on
-it). Identity keys (`idproperty`, `targetid`, `edgeidentity`) are never
-governed. A field or item that declares no provenance stays in legacy mode,
-with byte-identical Cypher, even with the flag on.
+Naming (EIE #419): a node row field `F` is declared beside
+`F_provenance: enum[observed|enriched]`; a childsync item declares one
+item-level `provenance`, stored on the line edge or child node that receives
+it. Identity keys are never governed. Undeclared fields and items stay legacy
+(byte-identical Cypher) with the flag on.
 
-On, the sync write resolves precedence in Cypher, in the same `SET`, never in
-Python after the read. A stored value stays when the incoming value is null
-(a null never clears), or when the incoming provenance is `enriched` (an absent
-provenance value counts as `enriched`) and the stored provenance is `observed`.
-Otherwise the value is written. The stored provenance moves with its value; an
-item's `provenance` moves only when the item writes at least one value. That
-means observed over anything, and enriched over enriched or over no recorded
-provenance. It covers the node `SET` (a map projection over `row.node`),
-`UNWINDMATCHSET` `fieldsupdated`, childsync child nodes and keyed line
-relationships (values first, then provenance). The two values are
-`$provenance_observed` / `$provenance_enriched` parameters
-(`SyncGenerator.query_parameters`). With the flag on, admission withholds a pack
-whose `F_provenance` is not that enum or has no storable `F` beside it, whose
-item-level `provenance` is not that enum, or whose item map or line edge
-declares a per-field companion (`engine/sync/row_contract.py`). The flag
-requires `sync_declared_projection_enabled`; the legacy `row{.*}` paths raise
-`ValueError`.
-
-Off: last write wins, as before, and the provenance properties are stored as declared
-values.
+On, the sync `SET` keeps a stored value when the incoming one is null, or is
+`enriched` (an absent provenance value counts as `enriched`) while the stored
+provenance is `observed`; otherwise it writes the value and its provenance
+(an item's `provenance` moves only when the item writes a value). Covers node
+`SET`, `fieldsupdated`, child nodes and keyed line edges; values bind as
+`$provenance_observed` / `$provenance_enriched`. Admission withholds malformed
+declarations (`engine/sync/row_contract.py`). Off: last write wins.
 
 Tests: `tests/unit/test_sync_provenance.py`,
 `tests/integration/test_sync_provenance_precedence.py`.

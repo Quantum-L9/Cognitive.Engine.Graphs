@@ -16,13 +16,13 @@
   "packs": {
     "plasticos": {
       "ceg_spec": "plasticos/spec.yaml",
-      "ceg_spec_sha256": "568704c966c2e8b72eb1e45b0aac2026621f3c6a0d2a7ea2a3f6f1eb5468ca15",
+      "ceg_spec_sha256": "c8ef2fbec0d5dc6deca50f6f721bd5c43c2b6583574c199aa4f1eb7060717fce",
       "composed_from": [
         {
           "repo": "Quantum-L9/Cognitive.Engine.Graphs",
           "commit": "r4: same commit as this manifest (#351 provenance revision)",
           "path": "tests/fixtures/design_packs/plasticos/spec.yaml",
-          "sha256": "27c423f46fc034ca967bc3afe1565e8541f3143da794904f296ce5d357784bb2",
+          "sha256": "08ff16efa9a6d84979574fe55c806c79f70cd9d2c97fc30fa009aa997cfe98b3",
           "use": "verbatim body"
         },
         {
