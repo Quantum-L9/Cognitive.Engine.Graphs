@@ -444,8 +444,11 @@ def childsync_edges(domain_spec: DomainSpec, parent_label: str, child: ChildSync
 
 def _item_provenance_store_defect(scope: _EndpointScope, child: ChildSyncSpec, edges: list[EdgeSpec]) -> str | None:
     """A declared item ``provenance`` must reach the line edge or the child node, never be dropped."""
+    from engine.config.settings import settings
+
     child_node = _node(scope.domain_spec, child.targetnode)
-    if child.edgeproperties:
+    # Line edges are written only with buyer_line_identity_enabled; otherwise item keys reach the child node.
+    if child.edgeproperties and settings.buyer_line_identity_enabled:
         if ITEM_PROVENANCE in child.edgeproperties and any(item_provenance_declared(e.properties) for e in edges):
             return None
         where = f"edgeproperties and on edge {child.edgetype}"

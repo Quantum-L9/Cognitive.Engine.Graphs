@@ -448,3 +448,16 @@ def test_enrich_treats_a_governed_fields_companion_as_sync_owned(monkeypatch: py
     assert "band_provenance" not in _enrich_node_endpoint_owned(spec, "Station", endpoint)
     monkeypatch.setattr(settings, "sync_provenance_precedence_enabled", True)
     assert {"band", "band_provenance"} <= _enrich_node_endpoint_owned(spec, "Station", endpoint)
+
+
+def test_line_edge_item_provenance_is_refused_when_line_routing_is_off(
+    precedence_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "buyer_line_identity_enabled", False)
+    spec = _declared()
+    assert endpoint_shape_defects(spec, _endpoint(spec, "/v1/sync/stations")) == [
+        (
+            "sync /v1/sync/stations: childsync 'handled_kinds' declares item 'provenance'; it must also be "
+            "declared on child node Kind"
+        )
+    ]
