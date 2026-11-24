@@ -938,10 +938,24 @@ FILE_REGISTRY: list[FileMeta] = [
         ".semgrep/semgrep-rules.yaml", "l9-template", ["security"], ["L9_TEMPLATE", "semgrep", "rules"], "platform"
     ),
     FileMeta(
-        ".semgrep/fixtures/semgrep-rules.py",
+        ".semgrep/ceg-consumer-rules.yaml",
+        "engine-specific",
+        ["security"],
+        ["semgrep", "rules", "consumer"],
+        "platform",
+    ),
+    FileMeta(
+        ".semgrep/fixtures/ceg-consumer-rules.py",
         "engine-specific",
         ["test"],
         ["semgrep", "rules", "fixtures"],
+        "platform",
+    ),
+    FileMeta(
+        ".l9/semgrep-consumer-rules.yaml",
+        "engine-specific",
+        ["ci"],
+        ["semgrep", "rules", "consumer"],
         "platform",
     ),
     FileMeta(
