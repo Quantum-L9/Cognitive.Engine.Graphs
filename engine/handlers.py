@@ -1378,12 +1378,17 @@ def _check_sync_rows(domain_spec: DomainSpec, endpoint_spec: Any, batch: list[An
     """Refuse a node sync batch whose rows disagree with the declared types (``SyncRowContract``).
 
     Relationship endpoints have their own row contract (``normalize_relationship_rows``).
-    With ``sync_row_type_validation_enabled`` off nothing is checked here.
+    With ``sync_row_type_validation_enabled`` off only the stale-write guard's
+    version requirement is checked (``SyncRowContract.version_defects``): a row
+    the guard cannot compare never reaches the write.
     """
     from engine.config.settings import settings as _row_settings
     from engine.sync.row_contract import SyncRowContract
 
-    if endpoint_spec.targetedge or not _row_settings.sync_row_type_validation_enabled:
+    if endpoint_spec.targetedge:
+        return
+    validating = _row_settings.sync_row_type_validation_enabled
+    if not validating and not _row_settings.sync_provenance_precedence_enabled:
         return
     try:
         contract = SyncRowContract.from_spec(domain_spec, endpoint_spec)
@@ -1393,7 +1398,10 @@ def _check_sync_rows(domain_spec: DomainSpec, endpoint_spec: Any, batch: list[An
             action="sync",
             tenant=tenant,
         ) from exc
-    defects = contract.defects(batch, refuse_undeclared=_row_settings.sync_undeclared_property_refusal_enabled)
+    if validating:
+        defects = contract.defects(batch, refuse_undeclared=_row_settings.sync_undeclared_property_refusal_enabled)
+    else:
+        defects = contract.version_defects(batch)
     if defects:
         raise SyncRowRejectedError(defects, action="sync", tenant=tenant)
 

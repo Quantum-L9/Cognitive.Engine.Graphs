@@ -895,6 +895,26 @@ class SyncRowContract:
         """Every defect of every row; empty when the whole batch conforms."""
         return self._walk(batch, refuse_undeclared=refuse_undeclared).defects
 
+    def version_defects(self, batch: list[Any]) -> list[str]:
+        """Rows the stale-write guard cannot compare: no int ``sync_version`` on a versioned target.
+
+        ``defects`` reports these too; this check stands alone so the guard holds
+        with ``sync_row_type_validation_enabled`` off. Empty when the guard is off.
+        """
+        if not self._requires_version():
+            return []
+        walk = _Walk(refuse_undeclared=False)
+        for index, row in enumerate(batch):
+            if not isinstance(row, dict):
+                continue
+            version = row.get(SYNC_VERSION)
+            if version is None:
+                got = "missing" if SYNC_VERSION not in row else "null"
+                walk.defect(index, SYNC_VERSION, "int (required by the stale-write guard)", got)
+            elif isinstance(version, bool) or not isinstance(version, int):
+                walk.defect(index, SYNC_VERSION, "int (required by the stale-write guard)", actual_type(version))
+        return walk.defects
+
     def project(self, batch: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
         """Rows in write shape, plus how often each undeclared key was dropped.
 

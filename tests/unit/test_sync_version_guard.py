@@ -184,3 +184,33 @@ def test_ingress_accepts_an_unversioned_row_with_the_guard_off() -> None:
     endpoint = next(endpoint for endpoint in spec.sync.endpoints if endpoint.path == "/v1/sync/stations")
     contract = SyncRowContract.from_spec(spec, endpoint)
     assert contract.defects([{"station_id": "b", "title": "b"}], refuse_undeclared=False) == []
+
+
+def test_the_version_check_stands_alone_for_validation_off(precedence_on: None) -> None:
+    """#560 review: the guard's version requirement does not depend on row type validation."""
+    from engine.sync.row_contract import SyncRowContract
+
+    spec = DomainSpec(**_raw())
+    endpoint = next(endpoint for endpoint in spec.sync.endpoints if endpoint.path == "/v1/sync/stations")
+    contract = SyncRowContract.from_spec(spec, endpoint)
+    rows = [
+        {"station_id": "a", "sync_version": 3},
+        {"station_id": "b"},
+        {"station_id": "c", "sync_version": None},
+        {"station_id": "d", "sync_version": "4"},
+        {"station_id": "e", "sync_version": True},
+    ]
+    assert contract.version_defects(rows) == [
+        "row 1 sync_version: expected int (required by the stale-write guard), got missing",
+        "row 2 sync_version: expected int (required by the stale-write guard), got null",
+        "row 3 sync_version: expected int (required by the stale-write guard), got string",
+        "row 4 sync_version: expected int (required by the stale-write guard), got bool",
+    ]
+
+
+def test_the_standalone_version_check_is_off_with_the_guard() -> None:
+    from engine.sync.row_contract import SyncRowContract
+
+    spec = DomainSpec(**_raw())
+    endpoint = next(endpoint for endpoint in spec.sync.endpoints if endpoint.path == "/v1/sync/stations")
+    assert SyncRowContract.from_spec(spec, endpoint).version_defects([{"station_id": "b"}]) == []

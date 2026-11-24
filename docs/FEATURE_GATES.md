@@ -2428,7 +2428,8 @@ row. With the flag on, the statement locks the node (`SET n._tenant`), compares
 taxonomy, childsync) in a unit `CALL` subquery only when it is not lower. Equal
 is an idempotent replay, lower is refused whole and counted as `stale_count` in
 the ack (not an error). With the flag on, a versioned endpoint refuses (ingress) a
-row without a non-null integer `sync_version`, and the write never clears a
+row without a non-null integer `sync_version`, whether or not
+`sync_row_type_validation_enabled` is on, and the write never clears a
 stored version. Rows compare per row, so a later row of the same batch sees an
 earlier one's write.
 Undeclared: today's statement. Tests: `tests/unit/test_sync_version_guard.py`,
