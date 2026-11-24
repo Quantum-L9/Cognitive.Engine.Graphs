@@ -3268,8 +3268,13 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
     # write. Only the feedback loop runs again; its propagation claim makes the
     # boost apply once per outcome_id and lets a retry finish a failed one.
 
-    # R6: Counterfactual generation for negative outcomes
-    if domain_spec.counterfactual.enabled and outcome == "failure" and not replayed:
+    # R6: Counterfactual generation for negative outcomes. N7b (F10): a replay
+    # reruns it so a failed first run is recovered. Safe only while scenarios
+    # are written under the per-outcome generation claim
+    # (counterfactual_dedupe_and_spec_label): a run that finds the outcome
+    # already generated stores nothing. Flag off: a replay still skips.
+    cf_retry_safe = bool(_idempotency_settings.counterfactual_dedupe_and_spec_label)
+    if domain_spec.counterfactual.enabled and outcome == "failure" and (not replayed or cf_retry_safe):
         try:
             from engine.causal.counterfactual import CounterfactualGenerator
 
