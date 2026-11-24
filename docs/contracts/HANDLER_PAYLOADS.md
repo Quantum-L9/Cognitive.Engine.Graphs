@@ -207,6 +207,43 @@ negative expiry is refused. Payload fields cannot create a root capability.
 The target tenant is recorded while the child capability is derived, before it
 is registered and hashed.
 
+### admin / emit_inference_feedback (A3, 2026-11-22)
+
+`admin` is an operator surface, not a Gate route, so this is not the locked
+TransportPacket contract. With `GRAPH_INFERENCE_TRIGGER_ENABLED` off the
+payload is unchanged: `entity` (dict), `entity_id`, optional `rules`,
+`domain_id`, `pass_number`. With it on (it also needs
+`GRAPH_INFERENCE_FEEDBACK_ENABLED`):
+
+| Key | Type | Required | Meaning |
+|---|---|---|---|
+| `entity_type` | str | yes | A node sync endpoint of the tenant's spec (last path segment, as for `sync`); a relationship endpoint is refused |
+| `entity_id` | str | yes | The node's declared `idproperty` value |
+| `rules` | list[str] | no | Absent: every rule in `plugins.inference_rules`; `[]`: none; an unauthorized name raises `ValidationError` before any read |
+| `retry` | bool | no | `true`: re-send the entity's recorded `pending` / `blocked` / `unconfirmed` obligation under its original idempotency key; nothing is re-evaluated |
+| `domain_id` | str | no | Must equal the packet tenant (always, independent of RU-003) |
+| `entity` | — | refused | A caller-supplied entity is not evidence; sending it raises `ValidationError` |
+
+The entity is read from the graph scoped to the tenant. Response: `status`
+(`inference_feedback_emitted`, `inference_feedback_not_emitted`,
+`inference_feedback_retried`, `nothing_to_retry`), `entity_id`, `rules_run`,
+`results_produced`, `dispatch` (the egress result plus `delivery_status` —
+`accepted` only on EIE's complete intake ack — and `delivery_detail`), and
+`trigger` (`evaluated`, `decisions`, `pending`, `skipped`). Delivery is awaited
+here; after `sync` it never is. See `docs/FEATURE_GATES.md` §13.
+
+WRONG (flag on) — a caller-asserted entity is refused with `ValidationError`:
+
+```json
+{"subaction": "emit_inference_feedback", "entity": {"employee_count": 40}, "entity_id": "c1"}
+```
+
+RIGHT (both flags on) — the entity is read from the tenant's graph:
+
+```json
+{"subaction": "emit_inference_feedback", "entity_type": "aging-caves", "entity_id": "c1"}
+```
+
 
 ## health-assess (HEALTH-01)
 

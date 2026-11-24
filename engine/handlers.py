@@ -1622,7 +1622,49 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         result["unmatched_count"] = len(batch) - matched
     if rejected_count > 0:
         result["rejected_count"] = rejected_count
+    await _schedule_graph_inference(graph_driver, domain_spec, endpoint_spec, batch, tenant=tenant)
     return result
+
+
+async def _schedule_graph_inference(
+    graph_driver: GraphDriver,
+    domain_spec: DomainSpec,
+    endpoint_spec: SyncEndpointSpec,
+    batch: list[Any],
+    *,
+    tenant: str,
+) -> None:
+    """A3: after a committed node sync, evaluate graph inference and schedule delivery.
+
+    Runs after the source write returned, records its obligations in a separate
+    statement, and never awaits the Gate round trip: delivery is scheduled to
+    run after this ``sync`` has answered. Any failure here is logged and leaves
+    the sync result untouched — the source write already committed, and an
+    unrecorded evaluation is recovered by the next sync of the same entity.
+    """
+    from engine.config.settings import settings as _trigger_settings
+    from engine.feedback import graph_inference_trigger as trigger
+
+    if not trigger.trigger_active(_trigger_settings, domain_spec):
+        return
+    if not endpoint_spec.targetnode or not endpoint_spec.idproperty:
+        return
+    ids = [row.get(endpoint_spec.idproperty) for row in batch if isinstance(row, dict)]
+    try:
+        report = await trigger.evaluate_and_record(
+            graph_driver,
+            domain_spec,
+            tenant=tenant,
+            label=endpoint_spec.targetnode,
+            id_property=endpoint_spec.idproperty,
+            ids=ids,
+        )
+        trigger.schedule_deliveries(
+            graph_driver, domain_spec, tenant=tenant, label=endpoint_spec.targetnode, report=report
+        )
+        logger.info("graph inference after sync tenant=%s: %s", tenant, report.decisions)
+    except Exception:
+        logger.warning("graph inference after sync tenant=%s not evaluated", tenant, exc_info=True)
 
 
 def _bind_admin_domain(
@@ -2527,6 +2569,9 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             execute_rule,
         )
 
+        if _inf_settings.graph_inference_trigger_enabled:
+            return await _emit_inference_from_graph(tenant, payload, graph_driver, domain_loader)
+
         entity = _require_key(payload, "entity", "admin", tenant)
         entity_id = _require_key(payload, "entity_id", "admin", tenant)
         domain_id = _bind_admin_domain(tenant, payload, required=False, default=tenant)
@@ -2538,25 +2583,7 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         # rather than iterated — a bare string would otherwise be walked
         # character by character and every char looked up as a rule name.
         inference_spec = domain_loader.load_domain(domain_id)
-        authorized = authorized_rules(inference_spec)
-        if "rules" in payload:
-            requested = payload["rules"]
-            if not isinstance(requested, list) or not all(isinstance(r, str) for r in requested):
-                raise ValidationError(
-                    "admin.rules must be a list of rule-name strings",
-                    action="admin",
-                    tenant=tenant,
-                )
-            unauthorized = sorted(set(requested) - set(authorized))
-            if unauthorized:
-                raise ValidationError(
-                    f"admin.rules {unauthorized} are not authorized by domain {domain_id!r} "
-                    "(declare them under plugins.inference_rules in the domain spec)",
-                    action="admin",
-                    tenant=tenant,
-                )
-        else:
-            requested = list(authorized)
+        requested = _requested_inference_rules(payload, authorized_rules(inference_spec), domain_id, tenant)
 
         context = InferenceContext(
             tenant_id=tenant,
@@ -2586,6 +2613,108 @@ async def handle_admin(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         }
 
     raise ValidationError(f"Unknown admin subaction: {subaction!r}", action="admin", tenant=tenant)
+
+
+def _requested_inference_rules(
+    payload: dict[str, Any], authorized: list[str], domain_id: str, tenant: str
+) -> list[str]:
+    """``rules`` absent: every authorized rule; ``[]``: none; an unauthorized name: refused."""
+    if "rules" not in payload:
+        return list(authorized)
+    requested = payload["rules"]
+    if not isinstance(requested, list) or not all(isinstance(r, str) for r in requested):
+        raise ValidationError("admin.rules must be a list of rule-name strings", action="admin", tenant=tenant)
+    unauthorized = sorted(set(requested) - set(authorized))
+    if unauthorized:
+        raise ValidationError(
+            f"admin.rules {unauthorized} are not authorized by domain {domain_id!r} "
+            "(declare them under plugins.inference_rules in the domain spec)",
+            action="admin",
+            tenant=tenant,
+        )
+    return list(requested)
+
+
+async def _emit_inference_from_graph(
+    tenant: str,
+    payload: dict[str, Any],
+    graph_driver: GraphDriver,
+    domain_loader: DomainPackLoader,
+) -> dict[str, Any]:
+    """A3: ``emit_inference_feedback`` over the node the graph holds, not a caller ``entity``.
+
+    Payload: ``entity_type`` (a node sync endpoint of the tenant's spec, as for
+    ``sync``), ``entity_id``, optional ``rules``, optional ``retry`` (re-deliver
+    the entity's recorded, not-accepted obligation under its original key).
+    The domain is always the packet tenant's. Delivery is awaited here: admin is
+    an operator call, not a ``sync`` whose answer another node is waiting on.
+    """
+    from engine.feedback import graph_inference_trigger as trigger
+    from engine.inference_rule_registry import authorized_rules
+
+    if "entity" in payload:
+        raise ValidationError(
+            "admin.entity is not accepted while graph_inference_trigger_enabled: inference reads the "
+            "entity from the graph (send entity_type and entity_id)",
+            action="admin",
+            tenant=tenant,
+        )
+    entity_type = _require_key(payload, "entity_type", "admin", tenant)
+    entity_id = str(_require_key(payload, "entity_id", "admin", tenant))
+    domain_id = payload.get("domain_id", tenant)
+    if domain_id != tenant:
+        raise ValidationError(
+            f"admin domain_id {domain_id!r} does not match the packet tenant {tenant!r}",
+            action="admin",
+            tenant=tenant,
+        )
+    spec = domain_loader.load_domain(tenant)
+    endpoint = next(
+        (
+            e
+            for e in (spec.sync.endpoints if spec.sync else [])
+            if e.path.rstrip("/").rsplit("/", 1)[-1] == entity_type and not e.targetedge
+        ),
+        None,
+    )
+    if endpoint is None or not endpoint.targetnode or not endpoint.idproperty:
+        raise ValidationError(f"No node sync endpoint for entity type {entity_type!r}", action="admin", tenant=tenant)
+    requested = _requested_inference_rules(payload, authorized_rules(spec), tenant, tenant)
+
+    if payload.get("retry") is True:
+        dispatch = await trigger.retry_pending(
+            graph_driver, spec, tenant=tenant, label=endpoint.targetnode, entity_id=entity_id
+        )
+        return {
+            "status": "inference_feedback_retried" if dispatch is not None else "nothing_to_retry",
+            "entity_id": entity_id,
+            "rules_run": [],
+            "results_produced": 0,
+            "dispatch": dispatch or {"status": "skipped", "error": "no_retriable_obligation"},
+        }
+
+    report = await trigger.evaluate_and_record(
+        graph_driver,
+        spec,
+        tenant=tenant,
+        label=endpoint.targetnode,
+        id_property=endpoint.idproperty,
+        ids=[entity_id],
+        rules=requested,
+    )
+    deliveries = [
+        await trigger.deliver(graph_driver, spec, tenant=tenant, label=endpoint.targetnode, pending=pending)
+        for pending in report.pending
+    ]
+    findings = sum(len(p.outputs) for p in report.pending)
+    return {
+        "status": "inference_feedback_emitted" if deliveries else "inference_feedback_not_emitted",
+        "entity_id": entity_id,
+        "rules_run": requested,
+        "results_produced": findings,
+        "dispatch": deliveries[0] if deliveries else {"status": "skipped", "trigger": report.as_dict()},
+        "trigger": report.as_dict(),
+    }
 
 
 async def _handle_evaluate(
@@ -2753,6 +2882,18 @@ async def _init_schema(driver: GraphDriver, spec: DomainSpec) -> int:
                 count += 1
             except Exception as exc:
                 logger.warning("Uniqueness constraint failed %s.%s: %s", label, prop.name, exc)
+    # A3: one graph-inference obligation per (tenant, entity_type, entity_id), so
+    # two concurrent syncs of one entity cannot MERGE two obligation nodes.
+    # Created only while the trigger that writes those nodes is enabled.
+    from engine.config.settings import settings as _schema_settings
+
+    if _schema_settings.graph_inference_trigger_enabled:
+        from engine.feedback.graph_inference_trigger import obligation_constraint_cypher
+
+        # Propagated, not logged: without the constraint the trigger refuses to
+        # write obligations, so a silent failure would leave it inert.
+        await driver.execute_query(obligation_constraint_cypher(), database=db)
+        count += 1
     return count
 
 

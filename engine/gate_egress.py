@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import os
 from collections.abc import Sequence
 from typing import Any
@@ -96,6 +97,10 @@ def build_inference_outputs(
         except (TypeError, ValueError):
             logger.warning("gate_egress: non-numeric confidence for field=%s — dropped", field_name)
             continue
+        # NaN passes `< floor`; inf or >1 is not a confidence. Dropped, not clamped.
+        if not math.isfinite(confidence) or confidence > 1.0:
+            logger.warning("gate_egress: confidence out of [0, 1] for field=%s — dropped", field_name)
+            continue
         if confidence < INFERENCE_CONFIDENCE_FLOOR:
             logger.debug(
                 "gate_egress: confidence %.3f below floor %.3f for field=%s — not sent",
@@ -125,6 +130,7 @@ async def emit_graph_inference_result(
     results: Sequence[Any],
     timeout_ms: int = DEFAULT_INFERENCE_TIMEOUT_MS,
     correlation_id: str | None = None,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     """Hand graph-derived field values to EIE via Gate. One attempt, fail closed.
 
@@ -139,7 +145,8 @@ async def emit_graph_inference_result(
     a Gate round trip to queue nothing.
     """
     outputs = build_inference_outputs(entity_id, results)
-    key = inference_idempotency_key(tenant, entity_id, outputs)
+    # The graph trigger supplies a key bound to evidence and rule revision too.
+    key = idempotency_key or inference_idempotency_key(tenant, entity_id, outputs)
 
     if not outputs:
         return {
@@ -205,11 +212,41 @@ async def emit_graph_inference_result(
     }
 
 
+def classify_intake_ack(dispatch: dict[str, Any]) -> tuple[str, str]:
+    """Delivery disposition: ``accepted`` only when EIE queued every output sent.
+
+    That is an intake ack, never consumption. Otherwise ``partial`` (some queued;
+    not resent), ``unconfirmed`` (no readable ack), ``blocked`` (no Gate),
+    ``pending`` (failure or nothing queued; retriable) or ``skipped``.
+    """
+    status = dispatch.get("status")
+    if status == "skipped":
+        return "skipped", str(dispatch.get("error", "skipped"))
+    if status != "ok":
+        error = str(dispatch.get("error") or dispatch.get("packet_type") or "failed")
+        return ("blocked" if error == "gate_not_configured" else "pending"), error
+    sent = int(dispatch.get("sent_outputs") or 0)
+    payload = dispatch.get("payload")
+    if not isinstance(payload, dict) or payload.get("status") != "accepted":
+        return "unconfirmed", "no_intake_ack"
+    queued = payload.get("targets_queued")
+    if isinstance(queued, bool) or not isinstance(queued, int) or queued < 0:
+        return "unconfirmed", "targets_queued_unreadable"
+    if queued == 0 and sent > 0:  # nothing taken in: a resend duplicates nothing
+        return "pending", f"targets_queued=0 < sent={sent}"
+    if queued < sent:  # a blind resend could queue the accepted ones twice
+        return "partial", f"targets_queued={queued} < sent={sent}"
+    if queued > sent:
+        return "unconfirmed", f"targets_queued={queued} > sent={sent}"
+    return "accepted", f"targets_queued={queued}"
+
+
 __all__ = [
     "DEFAULT_INFERENCE_TIMEOUT_MS",
     "GRAPH_INFERENCE_ACTION",
     "INFERENCE_CONFIDENCE_FLOOR",
     "build_inference_outputs",
+    "classify_intake_ack",
     "emit_graph_inference_result",
     "inference_idempotency_key",
 ]

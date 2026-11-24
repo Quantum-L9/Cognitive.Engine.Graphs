@@ -975,6 +975,12 @@ class Settings(BaseSettings):
     # "Local enrich property writer".
     enrich_local_writer_enabled: bool = False
 
+    # ── Campaign EIE-CEG-GATE-COLLAB-2026-11-21, lane CEG-W (default-off, appended) ──
+    # A3: graph inference reads the node from the graph (never a caller `entity`);
+    # a committed node `sync` is the opt-in trigger. Also needs
+    # graph_inference_feedback_enabled and plugins.inference_rules. FEATURE_GATES §13.
+    graph_inference_trigger_enabled: bool = False
+
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":
         """Raise if default secrets are used in production environment."""
