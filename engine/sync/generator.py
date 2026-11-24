@@ -204,12 +204,14 @@ class SyncGenerator:
             tax_label = sanitize_label(tax_edge.targetlabel)
             tax_id = sanitize_label(tax_edge.targetid)
             tax_field = sanitize_label(tax_edge.field)
+            # A governed field may have kept its stored value: link what was accepted.
+            tax_source = "n" if tax_edge.field in governed else "row.node"
             if tax_edge.field in contract.taxonomy_lists:
                 # One edge per element; an element naming no taxonomy node links nothing.
                 cypher_parts.extend(
                     [
                         "WITH n, row",
-                        f"OPTIONAL MATCH (tax:{tax_label}) WHERE tax.{tax_id} IN coalesce(row.node.{tax_field}, [])",
+                        f"OPTIONAL MATCH (tax:{tax_label}) WHERE tax.{tax_id} IN coalesce({tax_source}.{tax_field}, [])",
                         "WITH n, row, collect(tax) AS taxonomy_nodes",
                         f"FOREACH (tax IN taxonomy_nodes | MERGE (n)-[:{edge_type}]->(tax))",
                     ]
@@ -218,7 +220,7 @@ class SyncGenerator:
                 cypher_parts.extend(
                     [
                         "WITH n, row",
-                        f"OPTIONAL MATCH (tax:{tax_label} {{{tax_id}: row.node.{tax_field}}})",
+                        f"OPTIONAL MATCH (tax:{tax_label} {{{tax_id}: {tax_source}.{tax_field}}})",
                         "FOREACH (_ IN CASE WHEN tax IS NOT NULL THEN [1] ELSE [] END |",
                         f"  MERGE (n)-[:{edge_type}]->(tax)",
                         ")",
@@ -446,10 +448,10 @@ class SyncGenerator:
         ]
 
         if spec.fieldsupdated:
-            updated = [field for field in spec.fieldsupdated if field in governed]
-            resolved = frozenset(updated)
+            resolved = frozenset(field for field in spec.fieldsupdated if field in governed)
+            # A governed companion moves only with its value: never assigned on its own.
             written = {sanitize_label(name) for name in resolved} | {
-                sanitize_label(provenance_companion(name)) for name in resolved
+                sanitize_label(provenance_companion(name)) for name in governed
             }
             set_clauses = [
                 f"n.{sanitize_label(field)} = {row_source}.{sanitize_label(field)}"

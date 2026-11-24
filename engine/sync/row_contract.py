@@ -425,21 +425,57 @@ def endpoint_shape_defects(domain_spec: DomainSpec, endpoint: SyncEndpointSpec) 
     return defects
 
 
+def childsync_edges(domain_spec: DomainSpec, parent_label: str, child: ChildSyncSpec) -> list[EdgeSpec]:
+    """The ontology edges a childsync writes: its type between its parent and child, in its direction."""
+    source, target = (
+        (child.targetnode, parent_label)
+        if child.edgedirection == "childtoparent"
+        else (
+            parent_label,
+            child.targetnode,
+        )
+    )
+    return [
+        edge
+        for edge in domain_spec.ontology.edges
+        if edge.type == child.edgetype and edge.from_ == source and edge.to == target
+    ]
+
+
+def _item_provenance_store_defect(scope: _EndpointScope, child: ChildSyncSpec, edges: list[EdgeSpec]) -> str | None:
+    """A declared item ``provenance`` must reach the line edge or the child node, never be dropped."""
+    child_node = _node(scope.domain_spec, child.targetnode)
+    if child.edgeproperties:
+        if ITEM_PROVENANCE in child.edgeproperties and any(item_provenance_declared(e.properties) for e in edges):
+            return None
+        where = f"edgeproperties and on edge {child.edgetype}"
+    elif child_node is not None and item_provenance_declared(child_node.properties):
+        return None
+    else:
+        where = f"on child node {child.targetnode}"
+    return (
+        f"{scope.where}: childsync {child.field!r} declares item {ITEM_PROVENANCE!r}; it must also be declared {where}"
+    )
+
+
 def _provenance_scope_defects(scope: _EndpointScope, endpoint: SyncEndpointSpec) -> list[str]:
     """Provenance companions on the target node, each childsync item map, child node and edge."""
     defects = provenance_defects(f"{scope.where}: {scope.target.label}", scope.target.properties)
     for child in endpoint.childsync or []:
         item = _item_properties(scope.props.get(child.field))
         defects.extend(item_provenance_defects(f"{scope.where}: {child.field} items", item, field_companions=False))
+        edges = childsync_edges(scope.domain_spec, scope.target.label, child)
+        if item_provenance_declared(item):
+            store_defect = _item_provenance_store_defect(scope, child, edges)
+            defects.extend([store_defect] if store_defect else [])
         child_node = _node(scope.domain_spec, child.targetnode)
         if child_node is not None:
             # A child node may be another endpoint's target, with field companions of its own.
             owner = f"{scope.where}: {child_node.label}"
             defects.extend(item_provenance_defects(owner, child_node.properties, field_companions=True))
-        for edge in scope.domain_spec.ontology.edges:
-            if edge.type == child.edgetype:
-                owner = f"{scope.where}: edge {edge.type}"
-                defects.extend(item_provenance_defects(owner, edge.properties, field_companions=False))
+        for edge in edges:
+            owner = f"{scope.where}: edge {edge.type}"
+            defects.extend(item_provenance_defects(owner, edge.properties, field_companions=False))
     return defects
 
 
@@ -625,7 +661,9 @@ class ChildProjection:
     governed_edge: frozenset[str] = frozenset()
 
     @classmethod
-    def from_spec(cls, domain_spec: DomainSpec, item: PropertySpec, child: ChildSyncSpec) -> ChildProjection:
+    def from_spec(
+        cls, domain_spec: DomainSpec, item: PropertySpec, child: ChildSyncSpec, parent_label: str = ""
+    ) -> ChildProjection:
         """Writable keys: declared by the item map and by the child node, storable on both."""
         child_node = _node(domain_spec, child.targetnode)
         child_props = _properties(child_node)
@@ -645,7 +683,7 @@ class ChildProjection:
             if ITEM_PROVENANCE in writable:
                 governed_node = writable - {ITEM_PROVENANCE, child.targetid}
         governed_edge: frozenset[str] = frozenset()
-        edges = [edge for edge in domain_spec.ontology.edges if edge.type == child.edgetype]
+        edges = childsync_edges(domain_spec, parent_label, child)
         if (
             item_governed
             and ITEM_PROVENANCE in edge_keys
@@ -718,7 +756,8 @@ class SyncRowContract:
             idproperty=str(endpoint.idproperty),
             properties=props,
             children=tuple(
-                ChildProjection.from_spec(domain_spec, props[child.field], child) for child in endpoint.childsync or []
+                ChildProjection.from_spec(domain_spec, props[child.field], child, str(endpoint.targetnode))
+                for child in endpoint.childsync or []
             ),
             taxonomy_lists=frozenset(
                 edge.field for edge in endpoint.taxonomyedges or [] if props[edge.field].type is PropertyType.LIST

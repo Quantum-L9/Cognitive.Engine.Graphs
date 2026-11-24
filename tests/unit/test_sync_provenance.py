@@ -332,3 +332,93 @@ def test_projection_keeps_companions_for_the_write(precedence_on: None) -> None:
     assert rows[0]["children"]["handled_kinds"] == [
         {"code": "k", "slot_id": "1", "direction": "in", "provenance": "enriched"}
     ]
+
+
+# ── review regressions (#558, CodeRabbit) ─────────────────────────────────────
+
+
+def _with_band_taxonomy(raw: dict[str, Any]) -> dict[str, Any]:
+    raw["sync"]["endpoints"][0]["taxonomyedges"] = [
+        {"field": "band", "edgetype": "IN_BAND", "targetlabel": "Kind", "targetid": "code"}
+    ]
+    return raw
+
+
+def test_a_governed_taxonomy_field_links_the_accepted_value(precedence_on: None) -> None:
+    spec = DomainSpec(**_with_band_taxonomy(_declared_raw()))
+    cypher = SyncGenerator(spec).generate_sync_query(_endpoint(spec, "/v1/sync/stations"), [])
+    assert "OPTIONAL MATCH (tax:Kind {code: n.band})" in cypher
+    assert "row.node.band" not in cypher
+
+
+def test_an_ungoverned_taxonomy_field_still_links_the_incoming_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    spec = DomainSpec(**_with_band_taxonomy(_declared_raw()))
+    cypher = SyncGenerator(spec).generate_sync_query(_endpoint(spec, "/v1/sync/stations"), [])
+    assert "OPTIONAL MATCH (tax:Kind {code: row.node.band})" in cypher
+
+
+def test_a_companion_is_never_assigned_without_its_value(precedence_on: None) -> None:
+    raw = _declared_raw()
+    raw["sync"]["endpoints"].append(
+        {
+            "path": "/v1/sync/station-provenance",
+            "targetnode": "Station",
+            "idproperty": "station_id",
+            "batchstrategy": "UNWINDMATCHSET",
+            "fieldsupdated": ["band_provenance", "station_id"],
+        }
+    )
+    spec = DomainSpec(**raw)
+    cypher = SyncGenerator(spec).generate_sync_query(_endpoint(spec, "/v1/sync/station-provenance"), [])
+    assert "band_provenance" not in cypher
+    assert "n.station_id = row.node.station_id" in cypher
+
+
+def test_admission_reads_only_the_childsync_edge_by_type_source_and_target(precedence_on: None) -> None:
+    raw = _declared_raw()
+    raw["ontology"]["edges"].append(
+        {
+            "type": "HANDLES",
+            "from": "Request",
+            "to": "Kind",
+            "direction": "DIRECTED",
+            "category": "capability",
+            "managedby": "sync",
+            "properties": [{"name": "direction_provenance", **ENUM}],
+        }
+    )
+    raw["gates"] = [gate for gate in raw["gates"] if gate["type"] != "traversal"]
+    spec = DomainSpec(**raw)
+    assert endpoint_shape_defects(spec, _endpoint(spec, "/v1/sync/stations")) == []
+
+
+def test_a_declared_item_provenance_that_reaches_no_store_is_refused(precedence_on: None) -> None:
+    raw = _declared_raw()
+    raw["sync"]["endpoints"][0]["childsync"][0]["edgeproperties"] = ["slot_id", "direction"]
+    spec = DomainSpec(**raw)
+    assert endpoint_shape_defects(spec, _endpoint(spec, "/v1/sync/stations")) == [
+        (
+            "sync /v1/sync/stations: childsync 'handled_kinds' declares item 'provenance'; it must also be "
+            "declared edgeproperties and on edge HANDLES"
+        )
+    ]
+
+
+def test_enrich_treats_a_governed_fields_companion_as_sync_owned(monkeypatch: pytest.MonkeyPatch) -> None:
+    from engine.handlers import _enrich_node_endpoint_owned
+
+    raw = _declared_raw()
+    raw["sync"]["endpoints"].append(
+        {
+            "path": "/v1/sync/station-bands",
+            "targetnode": "Station",
+            "idproperty": "station_id",
+            "batchstrategy": "UNWINDMATCHSET",
+            "fieldsupdated": ["band"],
+        }
+    )
+    spec = DomainSpec(**raw)
+    endpoint = _endpoint(spec, "/v1/sync/station-bands")
+    assert "band_provenance" not in _enrich_node_endpoint_owned(spec, "Station", endpoint)
+    monkeypatch.setattr(settings, "sync_provenance_precedence_enabled", True)
+    assert {"band", "band_provenance"} <= _enrich_node_endpoint_owned(spec, "Station", endpoint)

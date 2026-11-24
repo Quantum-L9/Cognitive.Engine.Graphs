@@ -3691,6 +3691,15 @@ def _enrich_node_endpoint_owned(domain_spec: DomainSpec, label: str, endpoint: S
     """Properties one node sync endpoint targeting ``label`` writes (see the caller's rules)."""
     if endpoint.batchstrategy == SyncStrategy.UNWINDMATCHSET and endpoint.fieldsupdated:
         owned = {*endpoint.fieldsupdated, "updated_at"}
+        from engine.config.settings import settings as _provenance_settings
+
+        if _provenance_settings.sync_provenance_precedence_enabled:
+            # A governed field's provenance companion is written with it (#351 revision).
+            from engine.sync.row_contract import provenance_companion, provenance_governed
+
+            node = next((n for n in domain_spec.ontology.nodes if n.label == label), None)
+            governed = provenance_governed(node.properties) if node is not None else frozenset()
+            owned.update(provenance_companion(field) for field in endpoint.fieldsupdated if field in governed)
     else:
         owned = _enrich_declared_properties(domain_spec, label)
         owned.update(endpoint.fieldsupdated or [])
