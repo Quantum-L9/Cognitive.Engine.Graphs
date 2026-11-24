@@ -272,7 +272,7 @@ jobs:
       - name: Checkout pinned Odoo consumer
         uses: Quantum-L9/l9-ci-core/.github/actions/checkout-external@043f50ac41af17bf814f811076c5b48a640d9a2e
         with:
-          token: ${{ secrets.L9_GITHUB_READ_TOKEN }}
+          token: ${{ secrets.L9_EXTERNAL_READ_TOKEN }}
 
       - name: Fail closed when the pinned Odoo mapper is absent
         run: |
