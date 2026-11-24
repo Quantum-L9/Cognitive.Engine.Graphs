@@ -126,7 +126,7 @@ entries:
     reason: "behavioural-similarity Cypher hardcodes the outcome edge; not closed by Stage 2 (edge type deferred, A09)"
   - file: engine/resolution/similarity.py
     term: TransactionOutcome
-    count: 6
+    count: 3
     reason: "behavioural-similarity Cypher and docstrings hardcode the outcome label; open neutrality gap not listed in the closure record"
   - file: engine/scoring/assembler.py
     term: community_id
