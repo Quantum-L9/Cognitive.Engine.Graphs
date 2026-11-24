@@ -357,6 +357,26 @@ def test_an_ungoverned_taxonomy_field_still_links_the_incoming_value(monkeypatch
     assert "OPTIONAL MATCH (tax:Kind {code: row.node.band})" in cypher
 
 
+def test_admission_refuses_a_companion_only_fieldsupdated_entry(precedence_on: None) -> None:
+    raw = _declared_raw()
+    raw["sync"]["endpoints"].append(
+        {
+            "path": "/v1/sync/station-provenance",
+            "targetnode": "Station",
+            "idproperty": "station_id",
+            "batchstrategy": "UNWINDMATCHSET",
+            "fieldsupdated": ["band_provenance", "station_id"],
+        }
+    )
+    spec = DomainSpec(**raw)
+    assert endpoint_shape_defects(spec, _endpoint(spec, "/v1/sync/station-provenance")) == [
+        (
+            "sync /v1/sync/station-provenance: fieldsupdated 'band_provenance' moves only with 'band'; "
+            "list 'band' too or drop the companion"
+        )
+    ]
+
+
 def test_a_companion_is_never_assigned_without_its_value(precedence_on: None) -> None:
     raw = _declared_raw()
     raw["sync"]["endpoints"].append(
@@ -369,8 +389,14 @@ def test_a_companion_is_never_assigned_without_its_value(precedence_on: None) ->
         }
     )
     spec = DomainSpec(**raw)
+    with pytest.raises(ValueError, match="fieldsupdated 'band_provenance' moves only with 'band'"):
+        SyncGenerator(spec).generate_sync_query(_endpoint(spec, "/v1/sync/station-provenance"), [])
+    # Beside its value, the companion is written only by the precedence expression.
+    raw["sync"]["endpoints"][-1]["fieldsupdated"] = ["band_provenance", "band", "station_id"]
+    spec = DomainSpec(**raw)
     cypher = SyncGenerator(spec).generate_sync_query(_endpoint(spec, "/v1/sync/station-provenance"), [])
-    assert "band_provenance" not in cypher
+    assert "n.band_provenance = row.node.band_provenance" not in cypher
+    assert "n.band_provenance = CASE WHEN" in cypher
     assert "n.station_id = row.node.station_id" in cypher
 
 

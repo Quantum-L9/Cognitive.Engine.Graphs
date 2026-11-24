@@ -461,6 +461,14 @@ def _item_provenance_store_defect(scope: _EndpointScope, child: ChildSyncSpec, e
 def _provenance_scope_defects(scope: _EndpointScope, endpoint: SyncEndpointSpec) -> list[str]:
     """Provenance companions on the target node, each childsync item map, child node and edge."""
     defects = provenance_defects(f"{scope.where}: {scope.target.label}", scope.target.properties)
+    governed = provenance_governed(scope.target.properties)
+    updated = set(endpoint.fieldsupdated or [])
+    for name in sorted(governed):
+        if provenance_companion(name) in updated and name not in updated:
+            defects.append(
+                f"{scope.where}: fieldsupdated {provenance_companion(name)!r} moves only with {name!r}; "
+                f"list {name!r} too or drop the companion"
+            )
     for child in endpoint.childsync or []:
         item = _item_properties(scope.props.get(child.field))
         defects.extend(item_provenance_defects(f"{scope.where}: {child.field} items", item, field_companions=False))
