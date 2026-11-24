@@ -77,6 +77,8 @@ def _declared_raw() -> dict[str, Any]:
     """The synthneutral pack with provenance declared inline (idempotent over a pack that declares it)."""
     raw = yaml.safe_load(SYNTHNEUTRAL.read_text())
     station = next(node for node in raw["ontology"]["nodes"] if node["label"] == "Station")
+    # Precedence alone: the stale-write guard has its own suite (test_sync_version_guard.py).
+    station["properties"] = [prop for prop in station["properties"] if prop["name"] != "sync_version"]
 
     def declare(properties: list[dict[str, Any]], name: str) -> None:
         if name not in {prop["name"] for prop in properties}:

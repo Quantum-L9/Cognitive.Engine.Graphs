@@ -2421,6 +2421,16 @@ provenance is `observed`; otherwise it writes the value and its provenance
 `$provenance_observed` / `$provenance_enriched`. Admission withholds malformed
 declarations (`engine/sync/row_contract.py`). Off: last write wins.
 
+Stale-write guard (EIE #419 rule 6): a node sync target that declares
+`sync_version: int` takes a per-subject, strictly increasing version on each
+row. With the flag on, the statement locks the node (`SET n._tenant`), compares
+`row.node.sync_version` with the stored one and runs the whole row write (node,
+taxonomy, childsync) in a unit `CALL` subquery only when it is not lower. Equal
+is an idempotent replay, lower is refused whole and counted as `stale_count` in
+the ack (not an error), and a row or node without a version is never stale.
+Undeclared: today's statement. Tests: `tests/unit/test_sync_version_guard.py`,
+`tests/integration/test_sync_version_guard.py`.
+
 Tests: `tests/unit/test_sync_provenance.py`,
 `tests/integration/test_sync_provenance_precedence.py`.
 

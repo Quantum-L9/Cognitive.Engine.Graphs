@@ -128,6 +128,9 @@ def _item_properties(prop: PropertySpec | None) -> list[PropertySpec]:
 
 PROVENANCE_SUFFIX = "_provenance"
 ITEM_PROVENANCE = "provenance"
+# Stale-write guard (#351 guardrail, EIE #419 rule 6): a per-subject, strictly
+# increasing integer EIE sends on each node row.
+SYNC_VERSION = "sync_version"
 PROVENANCE_OBSERVED = "observed"
 PROVENANCE_ENRICHED = "enriched"
 PROVENANCE_VALUES = frozenset({PROVENANCE_OBSERVED, PROVENANCE_ENRICHED})
@@ -492,6 +495,12 @@ def _item_provenance_store_defect(scope: _EndpointScope, child: ChildSyncSpec, e
 def _provenance_scope_defects(scope: _EndpointScope, endpoint: SyncEndpointSpec) -> list[str]:
     """Provenance companions on the target node, each childsync item map, child node and edge."""
     defects = provenance_defects(f"{scope.where}: {scope.target.label}", scope.target.properties)
+    version = scope.props.get(SYNC_VERSION)
+    if version is not None and version.type is not PropertyType.INT:
+        defects.append(
+            f"{scope.where}: {scope.target.label} property {SYNC_VERSION!r} must be declared int, "
+            f"found {version.declared_type}"
+        )
     governed = provenance_governed(scope.target.properties)
     updated = set(endpoint.fieldsupdated or [])
     for name in sorted(governed):
@@ -807,6 +816,12 @@ class SyncRowContract:
     def stored(self) -> frozenset[str]:
         """Node properties the generator writes: declared and storable."""
         return frozenset(name for name, prop in self.properties.items() if not prop.wire_only)
+
+    @property
+    def versioned(self) -> bool:
+        """The target node declares an int ``sync_version``: rows carry the stale-write guard."""
+        declared = self.properties.get(SYNC_VERSION)
+        return declared is not None and declared.type is PropertyType.INT
 
     @property
     def governed(self) -> frozenset[str]:

@@ -82,10 +82,10 @@ def _companions(properties: list[dict[str, Any]]) -> tuple[set[str], set[str]]:
 
 
 # Identity keys and graph-written properties carry no provenance.
-SYNTHNEUTRAL_EXEMPT = {"station_id", "handled_kinds"}
+SYNTHNEUTRAL_EXEMPT = {"station_id", "handled_kinds", "sync_version"}
 PLASTICOS_EXEMPT = {
-    "Facility": {"facility_id", "entity_ref", "community_id", "processed_polymers"},
-    "SupplyOpportunity": {"opportunity_id", "facility_id"},
+    "Facility": {"facility_id", "entity_ref", "community_id", "processed_polymers", "sync_version"},
+    "SupplyOpportunity": {"opportunity_id", "facility_id", "sync_version"},
 }
 
 

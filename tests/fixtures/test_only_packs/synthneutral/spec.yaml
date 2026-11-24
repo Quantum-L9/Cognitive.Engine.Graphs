@@ -32,6 +32,7 @@ ontology:
     matchdirection: request_to_station
     properties:
     - {name: station_id, type: string, required: true}
+    - {name: sync_version, type: int}  # stale-write guard (#351, EIE #419 rule 6)
     - {name: title, type: string, required: true}
     - {name: title_provenance, type: enum, values: [observed, enriched]}
     - {name: max_load, type: float}
