@@ -85,7 +85,7 @@ jobs:
           fi
           "${SEMGREP}" scan --config "${RULES}" --error --metrics=off --disable-version-check
 
-      # The rule fixtures (.semgrep/fixtures/semgrep-rules.py: deliberate true
+      # The rule fixtures (.semgrep/fixtures/ceg-consumer-rules.py: deliberate true
       # positives and true negatives) must keep matching, or a rule edit could
       # silently stop catching what it exists for. Same engine as the policy
       # scan above. The fixture path is given as a file: semgrep --test with a
@@ -96,7 +96,7 @@ jobs:
           SEMGREP: ${{ steps.core.outputs.semgrep-executable }}
         run: |
           "${SEMGREP}" --test --metrics=off --disable-version-check \
-            --config .semgrep/semgrep-rules.yaml .semgrep/fixtures/semgrep-rules.py
+            --config .semgrep/ceg-consumer-rules.yaml .semgrep/fixtures/ceg-consumer-rules.py
 
   # ===========================================================================
   # SECRETS-SCAN — GitGuardian Secrets Detection
