@@ -3269,36 +3269,22 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
     # boost apply once per outcome_id and lets a retry finish a failed one.
 
     # R6: Counterfactual generation for negative outcomes. N7b (F10): a replay
-    # reruns it only to recover a run that stored nothing (scenarios are stored
-    # in one statement, so a failed run stores none); once any are stored the
-    # replay skips, keeping the outcome's total within max_scenarios_per_outcome.
-    # With counterfactual_dedupe_and_spec_label off a replay still skips it.
+    # reruns it so a failed first run is recovered. Safe only while scenarios
+    # are written under the per-outcome generation claim
+    # (counterfactual_dedupe_and_spec_label): a run that finds the outcome
+    # already generated stores nothing. Flag off: a replay still skips.
     cf_retry_safe = bool(_idempotency_settings.counterfactual_dedupe_and_spec_label)
     if domain_spec.counterfactual.enabled and outcome == "failure" and (not replayed or cf_retry_safe):
         try:
             from engine.causal.counterfactual import CounterfactualGenerator
 
-            if replayed:
-                stored_rows = await graph_driver.execute_query(
-                    cypher=(
-                        "MATCH (cs:CounterfactualScenario {actual_outcome: $outcome_id}) RETURN count(cs) AS stored"
-                    ),
-                    parameters={"outcome_id": outcome_id},
-                    database=domain_spec.domain.id,
-                )
-                cf_already_stored = bool(stored_rows and stored_rows[0].get("stored"))
-            else:
-                cf_already_stored = False
-            if not cf_already_stored:
-                generator = CounterfactualGenerator(
-                    counterfactual_spec=domain_spec.counterfactual,
-                    graph_driver=graph_driver,
-                    domain_id=domain_spec.domain.id,
-                    outcome_label=_outcome_label(
-                        domain_spec, tenant, "outcomes", "counterfactual generation"
-                    ),  # RU-075
-                )
-                await generator.generate_for_outcome(outcome_id)
+            generator = CounterfactualGenerator(
+                counterfactual_spec=domain_spec.counterfactual,
+                graph_driver=graph_driver,
+                domain_id=domain_spec.domain.id,
+                outcome_label=_outcome_label(domain_spec, tenant, "outcomes", "counterfactual generation"),  # RU-075
+            )
+            await generator.generate_for_outcome(outcome_id)
         except Exception:
             logger.warning("Counterfactual generation failed for %s", outcome_id, exc_info=True)
 

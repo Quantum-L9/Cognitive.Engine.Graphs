@@ -342,28 +342,42 @@ class CounterfactualGenerator:
         )
 
     async def _merge_scenarios(self, scenarios: list[dict[str, Any]]) -> None:
-        """C16 (``counterfactual_dedupe_and_spec_label``): idempotent scenario write.
+        """C16 / N7b (``counterfactual_dedupe_and_spec_label``): claimed, idempotent scenario write.
 
-        A retry for an outcome whose scenarios are already stored adds no
-        duplicate node; each returned scenario carries the id and evidence actually stored.
+        One statement, one transaction, after FEEDBACK-IDEMP-01's propagation
+        claim: the outcome node is write-locked by a temporary property, then
+        only the run that finds it unstamped (``counterfactual_generated_at``)
+        with no scenario stored writes its scenarios and stamps it. A
+        concurrent or later run writes nothing and gets the stored scenarios
+        back, so one outcome never holds more than one run's
+        ``max_scenarios_per_outcome``. A failed statement rolls the stamp back,
+        so a replay can still recover. Each returned scenario carries the id
+        and evidence actually stored.
         """
+        if not scenarios:
+            return
         fields = _SUPPORT_FIELDS if settings.counterfactual_support_semantics_enabled else _LEGACY_FIELDS
         rows = await self._graph_driver.execute_query(
-            cypher=_merge_scenarios_cypher(fields),
-            parameters={"scenarios": scenarios, "domain_id": self._db},
+            cypher=_merge_scenarios_cypher(fields, self._label()),
+            parameters={
+                "scenarios": scenarios,
+                "outcome_id": scenarios[0]["actual_outcome"],
+                "domain_id": self._db,
+            },
             database=self._db,
         )
-        stored = {
-            row["proposed_id"]: row["stored"]
-            for row in rows or []
-            if isinstance(row, dict) and row.get("proposed_id") and isinstance(row.get("stored"), dict)
-        }
+        rows = [row for row in rows or [] if isinstance(row, dict) and isinstance(row.get("stored"), dict)]
+        if rows and all(row.get("proposed_id") is None for row in rows):
+            # Another run holds this outcome's scenarios: return those, not ours.
+            kept = [{k: v for k, v in row["stored"].items() if k not in ("domain_id", "created_at")} for row in rows]
+            scenarios[:] = sorted(kept, key=lambda s: (str(s.get("intervention_type")), str(s.get("key_difference"))))
+            return
+        stored = {row["proposed_id"]: row["stored"] for row in rows if row.get("proposed_id")}
         for scenario in scenarios:
             existing = stored.get(scenario["scenario_id"])
             if existing is None:
                 continue
-            # First write wins: a retry over a changed comparison pool returns
-            # the evidence actually stored, never the recomputed values.
+            # First write wins: the evidence actually stored, never recomputed values.
             for key in scenario:  # values only change; the key set does not
                 if key in existing:
                     scenario[key] = existing[key]
@@ -405,23 +419,43 @@ _SUPPORT_FIELDS = (
 )
 
 
-def _merge_scenarios_cypher(fields: tuple[str, ...]) -> str:
-    """MERGE one CounterfactualScenario per semantic key; first write wins.
+def _merge_scenarios_cypher(fields: tuple[str, ...], outcome_label: str) -> str:
+    """Claim the outcome, then MERGE one CounterfactualScenario per semantic key (first run wins).
 
     The key is ``(actual_outcome, intervention_type, key_difference,
     counterfactual_outcome, domain_id)``: the RU-075 intervention key per
     outcome, split by the claim mode so a legacy ``success`` scenario and an
-    ``untested`` support scenario never merge into one node. Field names are
-    module constants, never input.
+    ``untested`` support scenario never merge into one node. A run that loses
+    the claim returns the stored scenarios with a null ``proposed_id``. Field
+    names are module constants and the label is sanitized, never raw input.
     """
     on_create = ", ".join(f"{sanitize_label(field)}: s.{sanitize_label(field)}" for field in ("scenario_id", *fields))
     return (
-        "UNWIND $scenarios AS s\n"
-        "MERGE (cs:CounterfactualScenario {actual_outcome: s.actual_outcome, "
+        f"MATCH (claim:{sanitize_label(outcome_label)} {{outcome_id: $outcome_id}})\n"
+        "SET claim._counterfactual_lock = true\n"
+        "REMOVE claim._counterfactual_lock\n"
+        "WITH claim, claim.counterfactual_generated_at IS NULL AND NOT EXISTS {\n"
+        "    MATCH (prior:CounterfactualScenario {actual_outcome: $outcome_id, domain_id: $domain_id})\n"
+        "} AS first_generation\n"
+        "SET claim.counterfactual_generated_at = CASE WHEN first_generation THEN datetime()\n"
+        "    ELSE claim.counterfactual_generated_at END\n"
+        "WITH first_generation\n"
+        "CALL {\n"
+        "    WITH first_generation\n"
+        "    WITH first_generation WHERE first_generation\n"
+        "    UNWIND $scenarios AS s\n"
+        "    MERGE (cs:CounterfactualScenario {actual_outcome: s.actual_outcome, "
         "intervention_type: s.intervention_type, key_difference: s.key_difference, "
         "counterfactual_outcome: s.counterfactual_outcome, domain_id: $domain_id})\n"
-        f"ON CREATE SET cs += {{{on_create}, created_at: datetime()}}\n"
-        "RETURN s.scenario_id AS proposed_id, properties(cs) AS stored"
+        f"    ON CREATE SET cs += {{{on_create}, created_at: datetime()}}\n"
+        "    RETURN s.scenario_id AS proposed_id, properties(cs) AS stored\n"
+        "    UNION ALL\n"
+        "    WITH first_generation\n"
+        "    WITH first_generation WHERE NOT first_generation\n"
+        "    MATCH (cs:CounterfactualScenario {actual_outcome: $outcome_id, domain_id: $domain_id})\n"
+        "    RETURN null AS proposed_id, properties(cs) AS stored\n"
+        "}\n"
+        "RETURN proposed_id, stored"
     )
 
 

@@ -11,9 +11,9 @@ status: active
 
 CEG-NATIVE-CLOSURE-001 N7b (F10, C14): a keyed outcome replay reruns the
 counterfactual stage, so a transient failure on the first write is recovered.
-The rerun is safe only while scenario writes MERGE on their semantic key
-(``counterfactual_dedupe_and_spec_label``); with that flag off a replay keeps
-skipping the stage. Graph effects are proven in
+The rerun is safe only while scenario writes go through the per-outcome
+generation claim (``counterfactual_dedupe_and_spec_label``); with that flag off
+a replay keeps skipping the stage. Graph effects are proven in
 tests/integration/test_counterfactual_closure.py.
 """
 
@@ -41,15 +41,10 @@ def _spec() -> Any:
 class _Driver:
     """Answers the keyed outcome MERGE as a replay (``created`` false) or a first write."""
 
-    def __init__(self, *, replay: bool, stored_scenarios: int = 0) -> None:
+    def __init__(self, *, replay: bool) -> None:
         self._replay = replay
-        self._stored_scenarios = stored_scenarios
-        self.scenario_probes: list[dict[str, Any]] = []
 
     async def execute_query(self, cypher: str, parameters: dict[str, Any] | None = None, **_: Any) -> list[Any]:
-        if "CounterfactualScenario" in cypher:
-            self.scenario_probes.append(dict(parameters or {}))
-            return [{"stored": self._stored_scenarios}]
         if "MERGE (o:" not in cypher:
             return []
         if not self._replay:
@@ -96,19 +91,6 @@ async def test_replay_reruns_the_counterfactual_stage(generate: AsyncMock) -> No
 
     assert result == {"status": "recorded", "outcome_id": "replay-1", "replayed": True}
     generate.assert_awaited_once_with("replay-1")
-
-
-async def test_replay_after_a_stored_run_does_not_rerun(generate: AsyncMock) -> None:
-    """A replay recovers only a run that stored nothing, so the stored total stays within the cap."""
-    from engine.handlers import handle_outcomes
-
-    driver = _Driver(replay=True, stored_scenarios=2)
-    _wire(driver)
-    result = await handle_outcomes(_TENANT, _payload())
-
-    assert result["replayed"] is True
-    generate.assert_not_awaited()
-    assert driver.scenario_probes == [{"outcome_id": "replay-1"}]
 
 
 async def test_first_write_runs_the_stage_once(generate: AsyncMock) -> None:
