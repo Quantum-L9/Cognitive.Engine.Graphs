@@ -32,8 +32,8 @@
   "fixtures": {
     "plasticos": {
       "path": "domains/plasticos/spec.yaml",
-      "git_blob_sha1": "edb51acbe4f5152e9404635ac2f03dbc0dcd6360",
-      "sha256": "08ff16efa9a6d84979574fe55c806c79f70cd9d2c97fc30fa009aa997cfe98b3",
+      "git_blob_sha1": "dffeeeba302b30c06c7de7a3e0110d255b668d9f",
+      "sha256": "825e98d143a60db6eabb84c2a00f12a9fe827f0f58250d3cf35e449147fdd863",
       "verdicts": {
         "default": {
           "flags": [],

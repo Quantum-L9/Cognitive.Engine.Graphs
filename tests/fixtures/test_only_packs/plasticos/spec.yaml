@@ -11,16 +11,13 @@
 # label:    TEST_ONLY — never a deployment pack; no operator-published CEG
 #           runtime pack was reachable (CTO decision, campaign A0).
 # composed: Cognitive.Engine.Graphs tests/fixtures/design_packs/plasticos/spec.yaml
-#           @ r4 (#351 provenance revision; same commit as this file)
-#           sha256 08ff16efa9a6d84979574fe55c806c79f70cd9d2c97fc30fa009aa997cfe98b3
+#           @ 9d17d01b13671c58376f1e659e34958ced445e0c
+#           sha256 825e98d143a60db6eabb84c2a00f12a9fe827f0f58250d3cf35e449147fdd863
 #           (bytes below this header verbatim, except its L9_META block, which C-18
 #           requires at the top of the file and which is retagged test-only) + appended blocks.
 #           EIE cartridge counterpart: Enrichment.Inference.Engine
 #           domains/plasticos/spec.yaml (current.json) sha256
 #           dd09cc9ec8fea4a8766b0f3650cfab83a0b0a894d0e499f9f75405f21ae48cfe, unmodified.
-#           r4: both sides declare F_provenance: enum[observed|enriched] beside
-#           each synced non-identity row field and one item-level provenance
-#           per childsync item (#351 revision, EIE #419, 2026-11-24).
 # overlay:  (1) plugins.inference_rules authorizes the one registered rule this
 #           pack can witness (infer_geography_from_postal_code). `plugins` is an
 #           existing DomainSpec key (engine/config/schema.py PluginsSpec); no new
@@ -67,66 +64,51 @@ ontology:
     - name: name
       type: string
       required: true
-    - {name: name_provenance, type: enum, values: [observed, enriched]}
     - name: lat
       type: float
       description: Latitude for geo-proximity scoring
-    - {name: lat_provenance, type: enum, values: [observed, enriched]}
     - name: lon
       type: float
       description: Longitude for geo-proximity scoring
-    - {name: lon_provenance, type: enum, values: [observed, enriched]}
     - name: credit_score
       type: float
       description: Financial creditworthiness score (0-100)
-    - {name: credit_score_provenance, type: enum, values: [observed, enriched]}
     - name: min_density
       type: float
       description: Minimum acceptable material density (g/cm³)
-    - {name: min_density_provenance, type: enum, values: [observed, enriched]}
     - name: max_density
       type: float
       description: Maximum acceptable material density (g/cm³)
-    - {name: max_density_provenance, type: enum, values: [observed, enriched]}
     - name: min_mfi
       type: float
       description: Minimum acceptable melt flow index
-    - {name: min_mfi_provenance, type: enum, values: [observed, enriched]}
     - name: max_mfi
       type: float
       description: Maximum acceptable melt flow index
-    - {name: max_mfi_provenance, type: enum, values: [observed, enriched]}
     - name: contamination_tolerance
       type: float
       description: Maximum contamination percentage accepted (0-100)
-    - {name: contamination_tolerance_provenance, type: enum, values: [observed, enriched]}
     - name: food_grade_certified
       type: bool
       description: FDA food-grade certification status
-    - {name: food_grade_certified_provenance, type: enum, values: [observed, enriched]}
     - name: capacity_tons_month
       type: float
       description: Monthly processing capacity in tons
-    - {name: capacity_tons_month_provenance, type: enum, values: [observed, enriched]}
     - name: tier
       type: string
       description: Facility tier (premium, standard, economy)
-    - {name: tier_provenance, type: enum, values: [observed, enriched]}
     - name: community_id
       type: int
       description: Louvain community assignment for network effects
     - name: rate_per_ton
       type: float
       description: Current rate per ton
-    - {name: rate_per_ton_provenance, type: enum, values: [observed, enriched]}
     - name: rate_confidence
       type: float
       description: Confidence in rate accuracy (0-1)
-    - {name: rate_confidence_provenance, type: enum, values: [observed, enriched]}
     - name: last_transaction_date
       type: datetime
       description: Date of most recent transaction
-    - {name: last_transaction_date_provenance, type: enum, values: [observed, enriched]}
     # Wire-only (list<map>): consumed by the facilities endpoint's childsync,
     # never stored on Facility. Each element names one PolymerFamily by code
     # and, when line_id is present, one PROCESSES relationship. direction and
@@ -151,7 +133,6 @@ ontology:
         - name: form
           type: string
           description: Physical form this line accepts or ships. Blank is not a form.
-        - {name: provenance, type: enum, values: [observed, enriched]}  # #351 revision, EIE #419
   - label: MaterialIntake
     managedby: api
     queryentity: true
@@ -226,24 +207,18 @@ ontology:
       description: Owning facility capability identity
     - name: polymer_type
       type: string
-    - {name: polymer_type_provenance, type: enum, values: [observed, enriched]}
     - name: available_tons
       type: float
       description: Currently available active supply tons
-    - {name: available_tons_provenance, type: enum, values: [observed, enriched]}
     - name: lat
       type: float
-    - {name: lat_provenance, type: enum, values: [observed, enriched]}
     - name: lon
       type: float
-    - {name: lon_provenance, type: enum, values: [observed, enriched]}
     - name: rate_per_ton
       type: float
-    - {name: rate_per_ton_provenance, type: enum, values: [observed, enriched]}
     - name: active
       type: bool
       description: True only when opportunity is currently offerable
-    - {name: active_provenance, type: enum, values: [observed, enriched]}
   - label: BuyerDemand
     managedby: api
     queryentity: true
@@ -281,7 +256,6 @@ ontology:
     - name: form
       type: string
       description: Physical form of this line. Blank is not eligible.
-    - {name: provenance, type: enum, values: [observed, enriched]}  # #351 revision, EIE #419
   - type: ACCEPTS_FORM
     from: Facility
     to: MaterialForm
@@ -613,7 +587,6 @@ sync:
       - line_id
       - direction
       - form
-      - provenance
       fromrow:
       - direction
       - form

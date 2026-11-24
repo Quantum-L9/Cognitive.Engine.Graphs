@@ -23,9 +23,11 @@ the write itself:
 * a null never clears; an absent provenance value counts as enriched;
 * a field or item that declares no provenance stays in legacy mode, flag on or off.
 
-These tests pin the generated Cypher, the admission of the declarations and
-the declarations in the PlasticOS and synthneutral packs. The precedence is
-executed against Neo4j in ``tests/integration/test_sync_provenance_precedence.py``.
+These tests pin the generated Cypher and the admission of the declarations on
+an inline fixture: the synthneutral pack with its provenance declared here. The
+shipped pack declarations and the Neo4j execution are covered by the stacked
+pack PR (``tests/unit/test_pack_provenance.py``,
+``tests/integration/test_sync_provenance_precedence.py``).
 """
 
 from __future__ import annotations
@@ -41,7 +43,6 @@ from engine.config.settings import settings
 from engine.sync.generator import SyncGenerator
 from engine.sync.row_contract import (
     ITEM_PROVENANCE,
-    PROVENANCE_VALUES,
     endpoint_shape_defects,
     item_provenance_declared,
     item_provenance_defects,
@@ -50,14 +51,11 @@ from engine.sync.row_contract import (
     provenance_governed,
 )
 from tests.fixtures import typed_sync as fx
-from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 pytestmark = pytest.mark.unit
 
 TEST_ONLY_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "test_only_packs"
 SYNTHNEUTRAL = TEST_ONLY_ROOT / "synthneutral" / "spec.yaml"
-PLASTICOS_DESIGN = DESIGN_PACKS_ROOT / "plasticos" / "spec.yaml"
-PLASTICOS_TEST_ONLY = TEST_ONLY_ROOT / "plasticos" / "spec.yaml"
 
 ENUM = {"type": "enum", "values": ["observed", "enriched"]}
 DEMOTED = (
@@ -75,8 +73,28 @@ def precedence_on(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "sync_provenance_precedence_enabled", True)
 
 
-def _spec(path: Path) -> DomainSpec:
-    return DomainSpec(**yaml.safe_load(path.read_text()))
+def _declared_raw() -> dict[str, Any]:
+    """The synthneutral pack with provenance declared inline (idempotent over a pack that declares it)."""
+    raw = yaml.safe_load(SYNTHNEUTRAL.read_text())
+    station = next(node for node in raw["ontology"]["nodes"] if node["label"] == "Station")
+
+    def declare(properties: list[dict[str, Any]], name: str) -> None:
+        if name not in {prop["name"] for prop in properties}:
+            properties.append({"name": name, **ENUM})
+
+    for field in ("title", "max_load", "band", "postal_code", "region"):
+        declare(station["properties"], provenance_companion(field))
+    items = next(prop for prop in station["properties"] if prop["name"] == "handled_kinds")["items"]["properties"]
+    declare(items, ITEM_PROVENANCE)
+    declare(next(edge for edge in raw["ontology"]["edges"] if edge["type"] == "HANDLES")["properties"], ITEM_PROVENANCE)
+    child = raw["sync"]["endpoints"][0]["childsync"][0]
+    if ITEM_PROVENANCE not in child["edgeproperties"]:
+        child["edgeproperties"].append(ITEM_PROVENANCE)
+    return raw
+
+
+def _declared() -> DomainSpec:
+    return DomainSpec(**_declared_raw())
 
 
 def _endpoint(spec: DomainSpec, path: str) -> Any:
@@ -115,7 +133,7 @@ def test_a_malformed_companion_is_an_admission_defect() -> None:
 
 
 def test_admission_checks_companions_only_with_precedence_on(monkeypatch: pytest.MonkeyPatch) -> None:
-    raw = yaml.safe_load(SYNTHNEUTRAL.read_text())
+    raw = _declared_raw()
     station = next(node for node in raw["ontology"]["nodes"] if node["label"] == "Station")
     station["properties"].append({"name": "orphan_provenance", "type": "enum", "values": ["observed", "enriched"]})
     spec = DomainSpec(**raw)
@@ -151,80 +169,11 @@ def test_an_item_declares_one_provenance_not_per_field_companions() -> None:
     assert item_provenance_defects("Kind", items[:2], field_companions=True) == []
 
 
-@pytest.mark.parametrize("path", [SYNTHNEUTRAL, PLASTICOS_DESIGN, PLASTICOS_TEST_ONLY], ids=lambda p: p.parent.name)
-def test_shipped_packs_admit_with_precedence_on(path: Path, precedence_on: None) -> None:
-    spec = _spec(path)
-    for endpoint in spec.sync.endpoints:
-        assert endpoint_shape_defects(spec, endpoint) == [], endpoint.path
-
-
-def _item_provenance(properties: list[dict[str, Any]]) -> bool:
-    assert not any(prop["name"].endswith("_provenance") for prop in properties)
-    declared = [prop for prop in properties if prop["name"] == ITEM_PROVENANCE]
-    return len(declared) == 1 and declared[0]["type"] == "enum" and set(declared[0]["values"]) == PROVENANCE_VALUES
-
-
-def _companions(properties: list[dict[str, Any]]) -> tuple[set[str], set[str]]:
-    names = {prop["name"] for prop in properties}
-    governed = set()
-    for prop in properties:
-        if prop["name"].endswith("_provenance"):
-            assert prop["type"] == "enum"
-            assert set(prop["values"]) == PROVENANCE_VALUES
-            governed.add(prop["name"].removesuffix("_provenance"))
-    return names, governed
-
-
-# Identity keys and graph-written properties carry no provenance.
-SYNTHNEUTRAL_EXEMPT = {"station_id", "handled_kinds"}
-PLASTICOS_EXEMPT = {
-    "Facility": {"facility_id", "entity_ref", "community_id", "processed_polymers"},
-    "SupplyOpportunity": {"opportunity_id", "facility_id"},
-}
-
-
-def test_synthneutral_declares_a_companion_for_every_synced_field() -> None:
-    raw = yaml.safe_load(SYNTHNEUTRAL.read_text())
-    station = next(node for node in raw["ontology"]["nodes"] if node["label"] == "Station")
-    names, governed = _companions(station["properties"])
-    synced = {name for name in names if not name.endswith("_provenance")} - SYNTHNEUTRAL_EXEMPT
-    assert governed == synced
-    items = next(prop for prop in station["properties"] if prop["name"] == "handled_kinds")["items"]["properties"]
-    assert _item_provenance(items)
-    edge = next(edge for edge in raw["ontology"]["edges"] if edge["type"] == "HANDLES")
-    assert _item_provenance(edge["properties"])
-    child = raw["sync"]["endpoints"][0]["childsync"][0]
-    assert {"direction", ITEM_PROVENANCE} <= set(child["edgeproperties"])
-
-
-@pytest.mark.parametrize("path", [PLASTICOS_DESIGN, PLASTICOS_TEST_ONLY], ids=["design", "test_only"])
-def test_plasticos_declares_a_companion_for_every_synced_field(path: Path) -> None:
-    raw = yaml.safe_load(path.read_text())
-    nodes = {node["label"]: node for node in raw["ontology"]["nodes"]}
-    for label, exempt in PLASTICOS_EXEMPT.items():
-        names, governed = _companions(nodes[label]["properties"])
-        assert governed == {name for name in names if not name.endswith("_provenance")} - exempt, label
-    items = next(prop for prop in nodes["Facility"]["properties"] if prop["name"] == "processed_polymers")
-    assert _item_provenance(items["items"]["properties"])
-    edge = next(edge for edge in raw["ontology"]["edges"] if edge["type"] == "PROCESSES")
-    assert _item_provenance(edge["properties"])
-    child = _endpoint(DomainSpec(**raw), "/v1/sync/facilities").childsync[0]
-    assert {"direction", "form", ITEM_PROVENANCE} <= set(child.edgeproperties or [])
-    assert child.fromrow == ["direction", "form"]
-
-
-def test_plasticos_test_only_pack_carries_the_design_pack_body_verbatim() -> None:
-    design = PLASTICOS_DESIGN.read_text().splitlines()[9:]
-    test_only = PLASTICOS_TEST_ONLY.read_text().splitlines()
-    start = test_only.index(design[0])
-    assert test_only[start : start + len(design)] == design
-
-
 # ── generator ─────────────────────────────────────────────────────────────────
 
 
 def test_precedence_off_leaves_the_cypher_unchanged() -> None:
-    spec = _spec(SYNTHNEUTRAL)
+    spec = _declared()
     cypher = SyncGenerator(spec).generate_sync_query(_endpoint(spec, "/v1/sync/stations"), [])
     assert "provenance_observed" not in cypher
     assert cypher.splitlines()[:3] == [
@@ -246,7 +195,7 @@ def test_a_pack_with_no_provenance_declared_stays_legacy_with_the_flag_on(monkey
 
 
 def test_an_undeclared_item_stays_legacy_beside_declared_fields(monkeypatch: pytest.MonkeyPatch) -> None:
-    raw = yaml.safe_load(SYNTHNEUTRAL.read_text())
+    raw = _declared_raw()
     station = next(node for node in raw["ontology"]["nodes"] if node["label"] == "Station")
     items = next(prop for prop in station["properties"] if prop["name"] == "handled_kinds")["items"]["properties"]
     items[:] = [prop for prop in items if prop["name"] != ITEM_PROVENANCE]
@@ -260,7 +209,7 @@ def test_an_undeclared_item_stays_legacy_beside_declared_fields(monkeypatch: pyt
 
 
 def test_node_properties_resolve_precedence_in_the_set(precedence_on: None) -> None:
-    spec = _spec(SYNTHNEUTRAL)
+    spec = _declared()
     lines = SyncGenerator(spec).generate_sync_query(_endpoint(spec, "/v1/sync/stations"), []).splitlines()
     assert lines[:3] == [
         "UNWIND $batch AS row",
@@ -285,7 +234,7 @@ def test_node_properties_resolve_precedence_in_the_set(precedence_on: None) -> N
 
 
 def test_line_edge_values_follow_the_item_provenance(precedence_on: None) -> None:
-    spec = _spec(SYNTHNEUTRAL)
+    spec = _declared()
     cypher = SyncGenerator(spec).generate_sync_query(_endpoint(spec, "/v1/sync/stations"), [])
     rel_set = next(line.strip() for line in cypher.splitlines() if line.strip().startswith("SET rel."))
     demoted = DEMOTED.format(stored="rel")
@@ -302,19 +251,8 @@ def test_line_edge_values_follow_the_item_provenance(precedence_on: None) -> Non
     assert "ON CREATE SET c += child_row{.*, slot_id: null, direction: null, provenance: null}" in cypher
 
 
-def test_plasticos_line_values_follow_the_item_provenance(precedence_on: None) -> None:
-    spec = _spec(PLASTICOS_DESIGN)
-    cypher = SyncGenerator(spec).generate_sync_query(_endpoint(spec, "/v1/sync/facilities"), [])
-    demoted = DEMOTED.format(stored="rel")
-    assert (
-        f"rel.provenance = CASE WHEN (child_row.direction IS NULL AND child_row.form IS NULL) OR {demoted} "
-        "THEN rel.provenance ELSE coalesce(child_row.provenance, $provenance_enriched) END, rel._tenant = $tenant"
-    ) in cypher
-    assert "rel.line_id = child_row.line_id" in cypher
-
-
 def test_child_node_values_follow_the_item_provenance(precedence_on: None) -> None:
-    raw = yaml.safe_load(SYNTHNEUTRAL.read_text())
+    raw = _declared_raw()
     kind = next(node for node in raw["ontology"]["nodes"] if node["label"] == "Kind")
     kind["managedby"] = "sync"
     kind["properties"] += [{"name": "grade", "type": "string"}, {"name": ITEM_PROVENANCE, **ENUM}]
@@ -334,7 +272,7 @@ def test_child_node_values_follow_the_item_provenance(precedence_on: None) -> No
 
 
 def test_match_set_fieldsupdated_resolves_precedence(precedence_on: None) -> None:
-    raw = yaml.safe_load(SYNTHNEUTRAL.read_text())
+    raw = _declared_raw()
     raw["sync"]["endpoints"].append(
         {
             "path": "/v1/sync/station-bands",
@@ -354,7 +292,7 @@ def test_match_set_fieldsupdated_resolves_precedence(precedence_on: None) -> Non
 
 
 def test_match_set_without_fieldsupdated_resolves_precedence(precedence_on: None) -> None:
-    raw = yaml.safe_load(SYNTHNEUTRAL.read_text())
+    raw = _declared_raw()
     raw["sync"]["endpoints"].append(
         {
             "path": "/v1/sync/station-patch",
@@ -371,13 +309,13 @@ def test_match_set_without_fieldsupdated_resolves_precedence(precedence_on: None
 
 def test_precedence_refuses_the_legacy_row_paths(precedence_on: None, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "sync_declared_projection_enabled", False)
-    spec = _spec(SYNTHNEUTRAL)
+    spec = _declared()
     with pytest.raises(ValueError, match="requires sync_declared_projection_enabled"):
         SyncGenerator(spec).generate_sync_query(_endpoint(spec, "/v1/sync/stations"), [])
 
 
 def test_projection_keeps_companions_for_the_write(precedence_on: None) -> None:
-    spec = _spec(SYNTHNEUTRAL)
+    spec = _declared()
     rows, undeclared = SyncGenerator(spec).project_batch(
         _endpoint(spec, "/v1/sync/stations"),
         [

@@ -15,9 +15,6 @@
 #          traversal hard gate with edge predicates (nullbehavior fail), a
 #          threshold gate with nullbehavior pass, and one scoring dimension.
 # purpose: P05 domain-neutrality witness. See TEST_ONLY.json for sha256.
-# provenance: every synced non-identity row field F is declared beside
-#          F_provenance: enum[observed|enriched]; each childsync item declares
-#          one item-level provenance (#351 revision, EIE #419, 2026-11-24).
 # --- end TEST_ONLY header ---
 domain:
   id: synthneutral
@@ -33,17 +30,12 @@ ontology:
     properties:
     - {name: station_id, type: string, required: true}
     - {name: title, type: string, required: true}
-    - {name: title_provenance, type: enum, values: [observed, enriched]}
     - {name: max_load, type: float}
-    - {name: max_load_provenance, type: enum, values: [observed, enriched]}
     - {name: band, type: string}
-    - {name: band_provenance, type: enum, values: [observed, enriched]}
     # F-A1-08 changed-fact witness: postal_code is the rule input, region the
     # rule output; both are declared identically by the EIE cartridge.
     - {name: postal_code, type: string}
-    - {name: postal_code_provenance, type: enum, values: [observed, enriched]}
     - {name: region, type: string}
-    - {name: region_provenance, type: enum, values: [observed, enriched]}
     - name: handled_kinds
       type: list
       items:
@@ -52,7 +44,6 @@ ontology:
         - {name: code, type: string, required: true}
         - {name: slot_id, type: string}
         - {name: direction, type: string}
-        - {name: provenance, type: enum, values: [observed, enriched]}
   - label: Kind
     managedby: static
     taxonomy: true
@@ -76,7 +67,6 @@ ontology:
     properties:
     - {name: slot_id, type: string}
     - {name: direction, type: string}
-    - {name: provenance, type: enum, values: [observed, enriched]}
 matchentities:
   candidate:
   - {label: Station, matchdirection: request_to_station}
@@ -135,7 +125,7 @@ sync:
       edgetype: HANDLES
       edgedirection: parenttochild
       edgeidentity: slot_id
-      edgeproperties: [slot_id, direction, provenance]
+      edgeproperties: [slot_id, direction]
 # --- TEST_ONLY overlay: capability grants for a staging-mode CEG ---
 # CEG refuses writes in staging without an explicit grant (engine/handlers.py
 # _enforce_capability). Grants are scoped to this tenant only; score:read is
