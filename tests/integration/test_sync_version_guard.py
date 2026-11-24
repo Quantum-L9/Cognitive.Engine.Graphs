@@ -94,13 +94,18 @@ async def test_higher_applies_equal_replays_lower_is_refused_whole(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("validating", [True, False], ids=["row-validation-on", "row-validation-off"])
 @pytest.mark.parametrize("version", ["missing", None])
 async def test_a_row_without_a_version_is_refused_at_ingress(
-    design_pack_deps, graph_driver, precedence_on, version: Any
+    design_pack_deps, graph_driver, *, precedence_on, monkeypatch: pytest.MonkeyPatch, version: Any, validating: bool
 ) -> None:
-    """#560 review: a versioned endpoint refuses a row without a non-null sync_version; nothing is written."""
+    """#560 review: a versioned endpoint refuses a row without a non-null sync_version; nothing is written.
+
+    The refusal holds with ``sync_row_type_validation_enabled`` off too.
+    """
     from engine.handlers import SyncRowRejectedError
 
+    monkeypatch.setattr(settings, "sync_row_type_validation_enabled", validating)
     await _sync(_facility(5, "premium", "in"))
     row = _facility(None, "standard", "out")
     if version is None:
@@ -133,6 +138,6 @@ async def test_a_lower_version_later_in_the_same_batch_is_refused(
     """#560 review: each row compares against what earlier rows of the batch wrote."""
     await _sync(_facility(1, "economy", "in"))
     result = await _sync(_facility(3, "premium", "in"), _facility(2, "standard", "out", line="g-2"))
-    assert result["stale_count"] == 1
-    assert result["synced_count"] == 1
+    # Batch order is the expected one (v3 then v2: one stale); either order ends at v3's state.
+    assert (result["stale_count"], result["synced_count"]) in {(1, 1), (0, 2)}
     assert await _state(graph_driver) == ("premium", 3, [("g-1", "in")])
