@@ -459,3 +459,22 @@ async def test_a_failed_store_leaves_no_claim_and_a_replay_recovers(
     assert replay.get("replayed") is True
     assert len(await seed.scenarios(outcome_id)) == 2
     assert await _generation_stamp(graph_driver, outcome_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_support_mode_read_of_a_legacy_outcome_returns_no_legacy_rows(seed, graph_driver, monkeypatch) -> None:
+    """N7b follow-up: a support-mode run never gets legacy success/confidence rows back."""
+    from engine.config.settings import settings
+
+    negative = await _seed_contrast(seed)
+    monkeypatch.setattr(settings, "counterfactual_support_semantics_enabled", False)
+    legacy = await _generator(graph_driver).generate_for_outcome(negative)
+    stored_before = await seed.scenarios(negative)
+    assert {s["counterfactual_outcome"] for s in stored_before} == {"success"}
+
+    monkeypatch.setattr(settings, "counterfactual_support_semantics_enabled", True)
+    returned = await _generator(graph_driver).generate_for_outcome(negative)
+
+    assert len(legacy) == 2
+    assert returned == []
+    assert await seed.scenarios(negative) == stored_before  # stored data and cap unchanged

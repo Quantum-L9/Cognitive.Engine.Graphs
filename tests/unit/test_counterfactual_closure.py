@@ -114,3 +114,29 @@ async def test_dedupe_flag_off_restores_create(monkeypatch) -> None:
     gen._graph_driver.execute_query = AsyncMock(return_value=[])
     await gen._store_scenarios([])
     assert "CREATE (cs:CounterfactualScenario" in gen._graph_driver.execute_query.call_args.kwargs["cypher"]
+
+
+@pytest.mark.parametrize(("support_mode", "mode_outcome"), [(False, "success"), (True, "untested")])
+@pytest.mark.asyncio
+async def test_losing_run_returns_only_the_current_modes_scenarios(
+    monkeypatch, support_mode: bool, mode_outcome: str
+) -> None:
+    """N7b follow-up: the losing branch reads only the current mode's rows; none stored -> []."""
+    monkeypatch.setattr(settings, "counterfactual_support_semantics_enabled", support_mode)
+    gen = _generator()
+    # The claim was lost and no stored scenario of this mode exists: one sentinel row.
+    gen._graph_driver.execute_query = AsyncMock(return_value=[{"proposed_id": None, "stored": None}])
+    scenarios = [
+        {
+            "scenario_id": "cf_new",
+            "actual_outcome": "o1",
+            "counterfactual_outcome": mode_outcome,
+            "intervention_type": "add_scoring_dimension",
+            "key_difference": "gamma",
+        }
+    ]
+    await gen._store_scenarios(scenarios)
+    call = gen._graph_driver.execute_query.call_args.kwargs
+    assert call["parameters"]["mode_outcome"] == mode_outcome
+    assert "counterfactual_outcome: $mode_outcome" in call["cypher"]
+    assert scenarios == []
