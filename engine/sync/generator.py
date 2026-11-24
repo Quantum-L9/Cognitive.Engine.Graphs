@@ -35,6 +35,7 @@ from engine.sync.row_contract import (
     ITEM_PROVENANCE,
     PROVENANCE_ENRICHED,
     PROVENANCE_OBSERVED,
+    SYNC_VERSION,
     ChildProjection,
     SyncRowContract,
     provenance_companion,
@@ -112,6 +113,42 @@ def _item_provenance_entries(incoming: str, stored: str, names: frozenset[str]) 
     return entries
 
 
+def _versioned_write(head: list[str], body: list[str], tail: str) -> list[str]:
+    """Wrap a row write in the stale-write guard: compare-and-set inside one statement.
+
+    ``SET n._tenant`` takes the node's write lock before ``sync_version`` is
+    read, so two concurrent writers cannot both pass the comparison. The
+    comparison runs per row inside the ``CALL``, so a later row of the same batch
+    reads what an earlier row wrote. A row whose ``sync_version`` is lower than
+    the stored one skips the guarded unit subquery (node, taxonomy and childsync
+    writes); an equal one replays idempotently; a row or node without a version
+    is never stale.
+    """
+    version = sanitize_label(SYNC_VERSION)
+    return [
+        *head,
+        "SET n._tenant = $tenant",
+        "WITH n, row",
+        "CALL {",
+        "  WITH n, row",
+        f"  WITH n, row, coalesce(row.node.{version} < n.{version}, false) AS stale_write",
+        "  CALL {",
+        "    WITH n, row, stale_write",
+        "    WITH n, row, stale_write WHERE NOT stale_write",
+        *(f"    {line}" for line in body),
+        "  }",
+        "  RETURN stale_write",
+        "}",
+        tail,
+    ]
+
+
+def _version_kept(incoming: str) -> tuple[str, str]:
+    """``sync_version`` written from the row, never cleared by an absent or null one."""
+    version = sanitize_label(SYNC_VERSION)
+    return (version, f"coalesce({incoming}.{version}, n.{version})")
+
+
 def _projection(variable: str, entries: list[tuple[str, str]]) -> str:
     """``variable`` as written, or its map projection with ``entries`` overriding keys."""
     if not entries:
@@ -184,7 +221,19 @@ class SyncGenerator:
         contract = self.row_contract(spec)
         target = sanitize_label(contract.target_label)
         id_property = sanitize_label(contract.idproperty)
-        governed = contract.governed if settings.sync_provenance_precedence_enabled else frozenset()
+        precedence = settings.sync_provenance_precedence_enabled
+        governed = contract.governed if precedence else frozenset()
+        if precedence and contract.versioned:
+            entries = [*_provenance_entries("node_row", "n", governed), _version_kept("node_row")]
+            body = [
+                "WITH n, row, row.node AS node_row",
+                f"SET n += {_projection('node_row', entries)}, n._tenant = $tenant",
+            ]
+            head = ["UNWIND $batch AS row", f"MERGE (n:{target} {{{id_property}: row.node.{id_property}}})"]
+            body.extend(self._declared_tail(spec, contract, governed))
+            return "\n".join(
+                _versioned_write(head, body, "RETURN count(CASE WHEN stale_write THEN 1 END) AS stale_count")
+            )
         if governed:
             # A map projection needs a variable: name the declared node row.
             cypher_parts = [
@@ -199,6 +248,12 @@ class SyncGenerator:
                 f"MERGE (n:{target} {{{id_property}: row.node.{id_property}}})",
                 "SET n += row.node, n._tenant = $tenant",
             ]
+        cypher_parts.extend(self._declared_tail(spec, contract, governed))
+        return "\n".join(cypher_parts)
+
+    def _declared_tail(self, spec: SyncEndpointSpec, contract: SyncRowContract, governed: frozenset[str]) -> list[str]:
+        """Taxonomy links and childsync blocks after the node write."""
+        cypher_parts: list[str] = []
         for tax_edge in spec.taxonomyedges or []:
             edge_type = sanitize_label(tax_edge.edgetype)
             tax_label = sanitize_label(tax_edge.targetlabel)
@@ -228,7 +283,7 @@ class SyncGenerator:
                 )
         for child, projection in zip(spec.childsync or [], contract.children, strict=True):
             cypher_parts.extend(self._declared_child_clauses(spec.path, child, projection))
-        return "\n".join(cypher_parts)
+        return cypher_parts
 
     def _declared_child_clauses(
         self, endpoint_path: str, child: ChildSyncSpec, projection: ChildProjection
@@ -436,11 +491,13 @@ class SyncGenerator:
         # Declared projection: rows are `project_batch` rows; read `row.node`.
         row_source = "row"
         governed: frozenset[str] = frozenset()
+        versioned = False
         if settings.sync_declared_projection_enabled:
             contract = self.row_contract(spec)  # refuses an endpoint whose fields are not declared
             row_source = "row.node"
             if settings.sync_provenance_precedence_enabled:
                 governed = contract.governed
+                versioned = contract.versioned
 
         cypher_parts = [
             "UNWIND $batch AS row",
@@ -453,6 +510,8 @@ class SyncGenerator:
             written = {sanitize_label(name) for name in resolved} | {
                 sanitize_label(provenance_companion(name)) for name in governed
             }
+            if versioned:
+                written.add(sanitize_label(SYNC_VERSION))  # kept below, never nulled
             set_clauses = [
                 f"n.{sanitize_label(field)} = {row_source}.{sanitize_label(field)}"
                 for field in spec.fieldsupdated
@@ -461,15 +520,28 @@ class SyncGenerator:
             set_clauses.extend(
                 f"n.{sanitize_label(key)} = {value}" for key, value in _provenance_entries(row_source, "n", resolved)
             )
+            if versioned:
+                key, value = _version_kept(row_source)
+                set_clauses.append(f"n.{sanitize_label(key)} = {value}")
             set_clauses.append("n._tenant = $tenant")
             set_clauses.append("n.updated_at = datetime()")
             cypher_parts.append("SET " + ",\n    ".join(set_clauses))
-        elif governed:
+        elif governed or versioned:
             cypher_parts.append("WITH n, row, row.node AS node_row")
             entries = _provenance_entries("node_row", "n", governed)
+            if versioned:
+                entries.append(_version_kept("node_row"))
             cypher_parts.append(f"SET n += {_projection('node_row', entries)}, n._tenant = $tenant")
         else:
             cypher_parts.append(f"SET n += {row_source}, n._tenant = $tenant")
+
+        if versioned:
+            head, body = cypher_parts[:2], cypher_parts[2:]
+            tail = (
+                "RETURN count(CASE WHEN NOT stale_write THEN 1 END) AS synced_count, "
+                "count(CASE WHEN stale_write THEN 1 END) AS stale_count"
+            )
+            return "\n".join(_versioned_write(head, body, tail))
 
         # RU-060 / CEG-COR-169: MATCH drops rows with no existing node; report how
         # many rows actually matched (and were updated) so the handler need not

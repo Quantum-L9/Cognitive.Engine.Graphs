@@ -12,7 +12,7 @@
 #           runtime pack was reachable (CTO decision, campaign A0).
 # composed: Cognitive.Engine.Graphs tests/fixtures/design_packs/plasticos/spec.yaml
 #           @ r4 (#351 provenance revision; same commit as this file)
-#           sha256 08ff16efa9a6d84979574fe55c806c79f70cd9d2c97fc30fa009aa997cfe98b3
+#           sha256 2177f4edb5d873a164e334d427f0da62d89c775dd4332da83003eefbfa842d31
 #           (bytes below this header verbatim, except its L9_META block, which C-18
 #           requires at the top of the file and which is retagged test-only) + appended blocks.
 #           EIE cartridge counterpart: Enrichment.Inference.Engine
@@ -58,6 +58,7 @@ ontology:
       type: string
       required: true
       description: Unique facility identifier
+    - {name: sync_version, type: int}  # stale-write guard (#351, EIE #419 rule 6)
     - name: entity_ref
       type: string
       required: false
@@ -220,6 +221,7 @@ ontology:
     - name: opportunity_id
       type: string
       required: true
+    - {name: sync_version, type: int}  # stale-write guard (#351, EIE #419 rule 6)
     - name: facility_id
       type: string
       required: true

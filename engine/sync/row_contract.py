@@ -128,6 +128,9 @@ def _item_properties(prop: PropertySpec | None) -> list[PropertySpec]:
 
 PROVENANCE_SUFFIX = "_provenance"
 ITEM_PROVENANCE = "provenance"
+# Stale-write guard (#351 guardrail, EIE #419 rule 6): a per-subject, strictly
+# increasing integer EIE sends on each node row.
+SYNC_VERSION = "sync_version"
 PROVENANCE_OBSERVED = "observed"
 PROVENANCE_ENRICHED = "enriched"
 PROVENANCE_VALUES = frozenset({PROVENANCE_OBSERVED, PROVENANCE_ENRICHED})
@@ -442,6 +445,35 @@ def childsync_edges(domain_spec: DomainSpec, parent_label: str, child: ChildSync
     ]
 
 
+def _edge_routed_node_writes_defect(
+    scope: _EndpointScope, child: ChildSyncSpec, child_node: NodeSpec | None
+) -> str | None:
+    """An edge-routed item provenance governs the line only: it may not also overwrite a synced child node.
+
+    The keyed write nulls edge keys on the child node, so the node can hold no
+    provenance of its own; a non-static child node receiving other item keys
+    would take enriched values over observed ones unguarded.
+    """
+    if child_node is None or child_node.managedby is ManagedByType.STATIC:
+        return None
+    node_props = _properties(child_node)
+    item = _item_properties(scope.props.get(child.field))
+    unguarded = sorted(
+        prop.name
+        for prop in item
+        if prop.name in node_props
+        and not prop.wire_only
+        and not node_props[prop.name].wire_only
+        and prop.name not in {child.targetid, *(child.edgeproperties or [])}
+    )
+    if not unguarded:
+        return None
+    return (
+        f"{scope.where}: childsync {child.field!r} routes item {ITEM_PROVENANCE!r} to edge {child.edgetype}; "
+        f"it may not also write {unguarded} on sync-managed child node {child_node.label} without provenance"
+    )
+
+
 def _item_provenance_store_defect(scope: _EndpointScope, child: ChildSyncSpec, edges: list[EdgeSpec]) -> str | None:
     """A declared item ``provenance`` must reach the line edge or the child node, never be dropped."""
     from engine.config.settings import settings
@@ -450,7 +482,7 @@ def _item_provenance_store_defect(scope: _EndpointScope, child: ChildSyncSpec, e
     # Line edges are written only with buyer_line_identity_enabled; otherwise item keys reach the child node.
     if child.edgeproperties and settings.buyer_line_identity_enabled:
         if ITEM_PROVENANCE in child.edgeproperties and any(item_provenance_declared(e.properties) for e in edges):
-            return None
+            return _edge_routed_node_writes_defect(scope, child, child_node)
         where = f"edgeproperties and on edge {child.edgetype}"
     elif child_node is not None and item_provenance_declared(child_node.properties):
         return None
@@ -464,6 +496,12 @@ def _item_provenance_store_defect(scope: _EndpointScope, child: ChildSyncSpec, e
 def _provenance_scope_defects(scope: _EndpointScope, endpoint: SyncEndpointSpec) -> list[str]:
     """Provenance companions on the target node, each childsync item map, child node and edge."""
     defects = provenance_defects(f"{scope.where}: {scope.target.label}", scope.target.properties)
+    version = scope.props.get(SYNC_VERSION)
+    if version is not None and version.type is not PropertyType.INT:
+        defects.append(
+            f"{scope.where}: {scope.target.label} property {SYNC_VERSION!r} must be declared int, "
+            f"found {version.declared_type}"
+        )
     governed = provenance_governed(scope.target.properties)
     updated = set(endpoint.fieldsupdated or [])
     for name in sorted(governed):
@@ -781,6 +819,12 @@ class SyncRowContract:
         return frozenset(name for name, prop in self.properties.items() if not prop.wire_only)
 
     @property
+    def versioned(self) -> bool:
+        """The target node declares an int ``sync_version``: rows carry the stale-write guard."""
+        declared = self.properties.get(SYNC_VERSION)
+        return declared is not None and declared.type is PropertyType.INT
+
+    @property
     def governed(self) -> frozenset[str]:
         """Stored target-node properties whose provenance companion is declared (never the id)."""
         governed = provenance_governed(list(self.properties.values())) - {self.idproperty}
@@ -809,8 +853,17 @@ class SyncRowContract:
             got = "missing" if self.idproperty not in row else "null"
             id_declared = self.properties[self.idproperty].declared_type
             walk.defect(index, self.idproperty, f"{id_declared} (required id)", got)
+        if self._requires_version() and row.get(SYNC_VERSION) is None:
+            # Stale-write guard: a versioned row must name its version; null never reaches the write.
+            got = "missing" if SYNC_VERSION not in row else "null"
+            walk.defect(index, SYNC_VERSION, "int (required by the stale-write guard)", got)
         for key, value in row.items():
             self._walk_field(walk, index, key, value)
+
+    def _requires_version(self) -> bool:
+        from engine.config.settings import settings
+
+        return settings.sync_provenance_precedence_enabled and self.versioned
 
     def _carried(self, key: str) -> PropertySpec | None:
         """A parent-row key a childsync copies onto its relationship, when line identity is on."""

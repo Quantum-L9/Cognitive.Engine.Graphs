@@ -22,6 +22,7 @@ declares no provenance: legacy last-write-wins with the flag on.
 
 from __future__ import annotations
 
+from itertools import count
 from typing import Any
 
 import pytest
@@ -38,8 +39,13 @@ def precedence_on(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "sync_provenance_precedence_enabled", True)
 
 
+# The PlasticOS sync targets declare sync_version, so every row carries an
+# increasing one; the stale-write guard has its own suite.
+_VERSIONS = count(1)
+
+
 def _facility(facility_id: str, **fields: Any) -> dict[str, Any]:
-    return {"facility_id": facility_id, "name": facility_id, **fields}
+    return {"facility_id": facility_id, "name": facility_id, "sync_version": next(_VERSIONS), **fields}
 
 
 async def _sync(*rows: dict[str, Any]) -> None:
@@ -155,8 +161,13 @@ async def test_a_kept_taxonomy_value_links_no_rejected_taxonomy(design_pack_deps
     for code in ("PET", "HDPE"):
         await sync("polymerfamilies", {"code": code, "name": code})
     lot = {"opportunity_id": "so-1", "facility_id": "f-10"}
-    await sync("supply-opportunities", {**lot, "polymer_type": "PET", "polymer_type_provenance": "observed"})
-    await sync("supply-opportunities", {**lot, "polymer_type": "HDPE", "polymer_type_provenance": "enriched"})
+    await sync(
+        "supply-opportunities", {**lot, "polymer_type": "PET", "polymer_type_provenance": "observed", "sync_version": 1}
+    )
+    await sync(
+        "supply-opportunities",
+        {**lot, "polymer_type": "HDPE", "polymer_type_provenance": "enriched", "sync_version": 2},
+    )
     rows = await graph_driver.execute_query(
         "MATCH (s:SupplyOpportunity {opportunity_id: 'so-1'}) "
         "OPTIONAL MATCH (s)-[:FULFILLS_POLYMER]->(p:PolymerFamily) "

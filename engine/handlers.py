@@ -1614,12 +1614,19 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # RU-060 / CEG-COR-169: UNWINDMATCHSET updates only rows that matched an
     # existing node; the statement RETURNs that count. UNWINDMERGE unchanged.
+    # Stale-write guard (#351): a versioned write RETURNs the rows it refused as stale.
+    # They are counted, never an error, and are not part of synced_count.
+    stale = 0
+    if write_rows and isinstance(write_rows[0], dict) and "stale_count" in write_rows[0]:
+        stale = int(write_rows[0].get("stale_count") or 0)
+        result["stale_count"] = stale
+        result["synced_count"] = len(batch) - stale
     if _sync_settings.sync_count_from_write_result and endpoint_spec.batchstrategy == SyncStrategy.UNWINDMATCHSET:
         matched = 0
         if write_rows and isinstance(write_rows[0], dict):
             matched = int(write_rows[0].get("synced_count") or 0)
         result["synced_count"] = matched
-        result["unmatched_count"] = len(batch) - matched
+        result["unmatched_count"] = len(batch) - matched - stale
     if rejected_count > 0:
         result["rejected_count"] = rejected_count
     await _schedule_graph_inference(graph_driver, domain_spec, endpoint_spec, batch, tenant=tenant)

@@ -77,6 +77,8 @@ def _declared_raw() -> dict[str, Any]:
     """The synthneutral pack with provenance declared inline (idempotent over a pack that declares it)."""
     raw = yaml.safe_load(SYNTHNEUTRAL.read_text())
     station = next(node for node in raw["ontology"]["nodes"] if node["label"] == "Station")
+    # Precedence alone: the stale-write guard has its own suite (test_sync_version_guard.py).
+    station["properties"] = [prop for prop in station["properties"] if prop["name"] != "sync_version"]
 
     def declare(properties: list[dict[str, Any]], name: str) -> None:
         if name not in {prop["name"] for prop in properties}:
@@ -461,3 +463,36 @@ def test_line_edge_item_provenance_is_refused_when_line_routing_is_off(
             "declared on child node Kind"
         )
     ]
+
+
+def test_an_edge_routed_item_may_not_write_a_synced_child_node_unguarded(precedence_on: None) -> None:
+    raw = _declared_raw()
+    kind = next(node for node in raw["ontology"]["nodes"] if node["label"] == "Kind")
+    kind["managedby"] = "sync"
+    kind["properties"].append({"name": "title", "type": "string"})
+    station = next(node for node in raw["ontology"]["nodes"] if node["label"] == "Station")
+    items = next(prop for prop in station["properties"] if prop["name"] == "handled_kinds")["items"]["properties"]
+    items.append({"name": "title", "type": "string"})
+    spec = DomainSpec(**raw)
+    assert endpoint_shape_defects(spec, _endpoint(spec, "/v1/sync/stations")) == [
+        (
+            "sync /v1/sync/stations: childsync 'handled_kinds' routes item 'provenance' to edge HANDLES; "
+            "it may not also write ['title'] on sync-managed child node Kind without provenance"
+        )
+    ]
+    kind["managedby"] = "static"  # a static child is written on create only: nothing to guard
+    spec = DomainSpec(**raw)
+    assert endpoint_shape_defects(spec, _endpoint(spec, "/v1/sync/stations")) == []
+
+
+def test_a_wire_only_child_property_is_not_an_unguarded_write(precedence_on: None) -> None:
+    raw = _declared_raw()
+    kind = next(node for node in raw["ontology"]["nodes"] if node["label"] == "Kind")
+    kind["managedby"] = "sync"
+    kind["properties"].append({"name": "details", "type": "map", "properties": [{"name": "note", "type": "string"}]})
+    station = next(node for node in raw["ontology"]["nodes"] if node["label"] == "Station")
+    items = next(prop for prop in station["properties"] if prop["name"] == "handled_kinds")["items"]["properties"]
+    items.append({"name": "details", "type": "string"})
+    spec = DomainSpec(**raw)
+    defects = endpoint_shape_defects(spec, _endpoint(spec, "/v1/sync/stations"))
+    assert not any("may not also write" in defect for defect in defects)

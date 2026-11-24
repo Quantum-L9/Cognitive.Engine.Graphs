@@ -38,6 +38,7 @@ ontology:
       type: string
       required: true
       description: Unique facility identifier
+    - {name: sync_version, type: int}  # stale-write guard (#351, EIE #419 rule 6)
     - name: entity_ref
       type: string
       required: false
@@ -200,6 +201,7 @@ ontology:
     - name: opportunity_id
       type: string
       required: true
+    - {name: sync_version, type: int}  # stale-write guard (#351, EIE #419 rule 6)
     - name: facility_id
       type: string
       required: true
