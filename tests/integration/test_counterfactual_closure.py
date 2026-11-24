@@ -283,6 +283,32 @@ async def test_repeat_outcome_records_one_observation(seed, graph_driver, minima
 
 
 @pytest.mark.asyncio
+async def test_replay_after_success_adds_no_scenario_from_a_changed_pool(
+    seed, graph_driver, minimal_domain_spec
+) -> None:
+    """N7b: once a run stored scenarios, a replay over a grown pool stores nothing new."""
+    from engine.handlers import handle_outcomes
+    from engine.state import get_state
+
+    await _seed_contrast(seed)
+    await _bind(graph_driver, _outcome_spec(minimal_domain_spec))
+    outcome_id = f"{seed.tag}_grown"
+    try:
+        await handle_outcomes(_DB, _failure_payload(seed, outcome_id))
+        stored = await seed.scenarios(outcome_id)
+        for i in range(3):
+            await seed.outcome(f"{seed.tag}_q{i}", "success", ["price", "speed"], {"price": 0.1, "speed": 0.9})
+        replay = await handle_outcomes(_DB, _failure_payload(seed, outcome_id))
+        after = await seed.scenarios(outcome_id)
+    finally:
+        get_state().reset()
+
+    assert replay.get("replayed") is True
+    assert len(stored) == 2
+    assert {s["scenario_id"] for s in after} == {s["scenario_id"] for s in stored}
+
+
+@pytest.mark.asyncio
 async def test_counterfactual_stage_failure_keeps_outcome(
     seed, graph_driver, minimal_domain_spec, monkeypatch, caplog
 ) -> None:
