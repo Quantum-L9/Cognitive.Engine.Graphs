@@ -38,6 +38,7 @@ _INTERVENTION_ADD_GATE = "add_gate"
 _SUPPORT_BASIS = "share_of_compared_positive_outcomes"
 _CLAIM_CO_OCCURRENCE = "co_occurrence"
 _OUTCOME_UNTESTED = "untested"
+_OUTCOME_LEGACY_SUCCESS = "success"  # legacy mode only (F08: an owner decision)
 
 
 class CounterfactualGenerator:
@@ -363,16 +364,26 @@ class CounterfactualGenerator:
                 "scenarios": scenarios,
                 "outcome_id": scenarios[0]["actual_outcome"],
                 "domain_id": self._db,
+                "mode_outcome": _mode_outcome(),
             },
             database=self._db,
         )
-        rows = [row for row in rows or [] if isinstance(row, dict) and isinstance(row.get("stored"), dict)]
+        rows = [row for row in rows or [] if isinstance(row, dict)]
         if rows and all(row.get("proposed_id") is None for row in rows):
-            # Another run holds this outcome's scenarios: return those, not ours.
-            kept = [{k: v for k, v in row["stored"].items() if k not in ("domain_id", "created_at")} for row in rows]
+            # Another run holds this outcome's scenarios: return those of the
+            # current mode only (none -> []), never another mode's rows.
+            kept = [
+                {k: v for k, v in row["stored"].items() if k not in ("domain_id", "created_at")}
+                for row in rows
+                if isinstance(row.get("stored"), dict)
+            ]
             scenarios[:] = sorted(kept, key=lambda s: (str(s.get("intervention_type")), str(s.get("key_difference"))))
             return
-        stored = {row["proposed_id"]: row["stored"] for row in rows if row.get("proposed_id")}
+        stored = {
+            row["proposed_id"]: row["stored"]
+            for row in rows
+            if row.get("proposed_id") and isinstance(row.get("stored"), dict)
+        }
         for scenario in scenarios:
             existing = stored.get(scenario["scenario_id"])
             if existing is None:
@@ -426,7 +437,9 @@ def _merge_scenarios_cypher(fields: tuple[str, ...], outcome_label: str) -> str:
     counterfactual_outcome, domain_id)``: the RU-075 intervention key per
     outcome, split by the claim mode so a legacy ``success`` scenario and an
     ``untested`` support scenario never merge into one node. A run that loses
-    the claim returns the stored scenarios with a null ``proposed_id``. Field
+    the claim returns the stored scenarios of its own mode
+    (``$mode_outcome``) with a null ``proposed_id``, or one row with a null
+    ``stored`` when that mode has none. Field
     names are module constants and the label is sanitized, never raw input.
     """
     on_create = ", ".join(f"{sanitize_label(field)}: s.{sanitize_label(field)}" for field in ("scenario_id", *fields))
@@ -452,11 +465,17 @@ def _merge_scenarios_cypher(fields: tuple[str, ...], outcome_label: str) -> str:
         "    UNION ALL\n"
         "    WITH first_generation\n"
         "    WITH first_generation WHERE NOT first_generation\n"
-        "    MATCH (cs:CounterfactualScenario {actual_outcome: $outcome_id, domain_id: $domain_id})\n"
+        "    OPTIONAL MATCH (cs:CounterfactualScenario {actual_outcome: $outcome_id, domain_id: $domain_id, "
+        "counterfactual_outcome: $mode_outcome})\n"
         "    RETURN null AS proposed_id, properties(cs) AS stored\n"
         "}\n"
         "RETURN proposed_id, stored"
     )
+
+
+def _mode_outcome() -> str:
+    """The ``counterfactual_outcome`` the current semantics write: ``untested`` (SI-26) or legacy ``success``."""
+    return _OUTCOME_UNTESTED if settings.counterfactual_support_semantics_enabled else _OUTCOME_LEGACY_SUCCESS
 
 
 def _by_support(counts: dict[str, int]) -> list[tuple[str, int]]:
