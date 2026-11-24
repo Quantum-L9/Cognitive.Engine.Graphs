@@ -18,6 +18,11 @@ relationships are moved from a duplicate to its canonical, no node is deleted,
 and no engine match or scoring query consults RESOLVED_FROM, so a resolved
 duplicate remains a match candidate. The resolver itself reads the edge only
 to skip already-resolved entities.
+
+Every read and write addresses nodes by the label's declared id property
+(``SimilarityScorer.id_property`` / ``declared_id_property``; F01), the same key
+the scorer uses, so a domain keyed by anything other than ``entity_id`` resolves
+on its own identity.
 """
 
 from __future__ import annotations
@@ -82,7 +87,7 @@ class EntityResolver:
 
     async def resolve_entity(
         self,
-        entity_id: str,
+        entity_id: str | int,
         entity_label: str,
         threshold: float | None = None,
     ) -> dict[str, Any]:
@@ -162,11 +167,12 @@ class EntityResolver:
         if _merge_integrity():
             return await self._resolve_batch_verified(entity_label, _validate_threshold(threshold))
         label = sanitize_label(entity_label)
+        id_prop = sanitize_label(self._scorer.id_property(label))
 
         cypher = f"""
         MATCH (e:{label})
         WHERE NOT EXISTS((e)-[:RESOLVED_FROM]->())
-        RETURN e.entity_id AS entity_id
+        RETURN e.{id_prop} AS entity_id
         """
         results = await self._graph_driver.execute_query(
             cypher=cypher,
@@ -174,7 +180,7 @@ class EntityResolver:
             database=self._db,
         )
 
-        entity_ids = [r["entity_id"] for r in results if r.get("entity_id")]
+        entity_ids = [r["entity_id"] for r in results if r.get("entity_id") is not None]
         resolved_set: set[str] = set()
         total_merged = 0
         resolution_groups = 0
@@ -206,7 +212,7 @@ class EntityResolver:
 
     async def _resolve_entity_verified(
         self,
-        entity_id: str,
+        entity_id: str | int,
         entity_label: str,
         threshold: float | None,
     ) -> dict[str, Any]:
@@ -236,6 +242,7 @@ class EntityResolver:
             entity_id=entity_id,
             entity_label=entity_label,
             threshold=effective,
+            exclude_resolved=True,
         )
         if not candidates:
             return no_op
@@ -305,16 +312,22 @@ class EntityResolver:
         }
 
     async def _resolve_batch_verified(self, entity_label: str, threshold: float | None) -> dict[str, Any]:
-        """Batch resolution that skips by entity id and counts only new edges."""
+        """Batch resolution that skips by entity id and counts only new edges.
+
+        Entities are visited in id order, so the same graph resolves the same
+        way whatever order its nodes were created in.
+        """
         label = sanitize_label(entity_label)
+        id_prop = sanitize_label(self._scorer.id_property(label))
         cypher = f"""
         MATCH (e:{label})
-        WHERE NOT EXISTS {{ (e)-[:RESOLVED_FROM]->() }}
-        RETURN e.entity_id AS entity_id
+        WHERE e.{id_prop} IS NOT NULL AND NOT EXISTS {{ (e)-[:RESOLVED_FROM]->() }}
+        RETURN e.{id_prop} AS entity_id
+        ORDER BY entity_id
         """
         results = await self._graph_driver.execute_query(cypher=cypher, parameters={}, database=self._db)
 
-        entity_ids = [r["entity_id"] for r in results if r.get("entity_id")]
+        entity_ids = [r["entity_id"] for r in results if r.get("entity_id") is not None]
         resolved_set: set[str] = set()
         total_merged = 0
         resolution_groups = 0
@@ -337,35 +350,61 @@ class EntityResolver:
             "resolution_groups": resolution_groups,
         }
 
-    async def _already_resolved(self, entity_ids: list[str], entity_label: str) -> set[str]:
-        """Ids among ``entity_ids`` that already carry an outgoing RESOLVED_FROM."""
+    async def _already_resolved(self, entity_ids: list[Any], entity_label: str) -> set[Any]:
+        """Ids among ``entity_ids`` that already carry an outgoing RESOLVED_FROM.
+
+        Ids keep the type the graph stores them with, so an integer declared id
+        compares equal to the candidate ids it is checked against.
+        """
         label = sanitize_label(entity_label)
+        id_prop = sanitize_label(self._scorer.id_property(label))
         cypher = f"""
         UNWIND $entity_ids AS eid
-        MATCH (e:{label} {{entity_id: eid}})
+        MATCH (e:{label} {{{id_prop}: eid}})
         WHERE EXISTS {{ (e)-[:RESOLVED_FROM]->() }}
-        RETURN DISTINCT e.entity_id AS resolved_id
+        RETURN DISTINCT e.{id_prop} AS resolved_id
         """
         results = await self._graph_driver.execute_query(
             cypher=cypher,
             parameters={"entity_ids": entity_ids},
             database=self._db,
         )
-        return {str(r["resolved_id"]) for r in results if r.get("resolved_id") is not None}
+        return {r["resolved_id"] for r in results if r.get("resolved_id") is not None}
 
     async def _merge_resolution(
         self,
-        source_id: str,
-        canonical_id: str,
+        source_id: str | int,
+        canonical_id: str | int,
         entity_label: str,
         similarity: float,
     ) -> tuple[str, bool] | None:
-        """MERGE the RESOLVED_FROM edge; return (resolution_id, created) or None if absent."""
+        """MERGE the RESOLVED_FROM edge; return (resolution_id, created) or None if not written.
+
+        Eligibility is re-checked inside the write, after both endpoints are
+        write-locked (in elementId order, so two writers never deadlock on a
+        pair): the source must carry no RESOLVED_FROM to any other node and the
+        canonical none at all. A concurrent resolution that already linked the
+        source elsewhere therefore wins, and this call writes nothing (None),
+        so a source never gets two canonicals. The lock writes a per-call token to
+        ``ceg:resolution-lock`` (a real write, so it takes the node lock) and then
+        writes the prior value back (null removes the key), so whatever either
+        node stored under that key is unchanged when the transaction commits.
+        """
         label = sanitize_label(entity_label)
+        id_prop = sanitize_label(self._scorer.id_property(label))
         resolution_id = f"res_{uuid.uuid4().hex[:12]}"
         cypher = f"""
-        MATCH (source:{label} {{entity_id: $source_id}})
-        MATCH (canonical:{label} {{entity_id: $canonical_id}})
+        MATCH (source:{label} {{{id_prop}: $source_id}})
+        MATCH (canonical:{label} {{{id_prop}: $canonical_id}})
+        WHERE source <> canonical
+        UNWIND CASE WHEN elementId(source) < elementId(canonical)
+                    THEN [source, canonical] ELSE [canonical, source] END AS n
+        WITH source, canonical, n, n.`ceg:resolution-lock` AS prior
+        SET n.`ceg:resolution-lock` = $lock_token
+        SET n.`ceg:resolution-lock` = prior
+        WITH DISTINCT source, canonical
+        WHERE NOT EXISTS {{ (canonical)-[:RESOLVED_FROM]->() }}
+          AND NOT EXISTS {{ (source)-[:RESOLVED_FROM]->(other) WHERE other <> canonical }}
         MERGE (source)-[rel:RESOLVED_FROM]->(canonical)
         ON CREATE SET rel.resolution_id = $resolution_id,
                       rel.confidence = $similarity,
@@ -381,6 +420,7 @@ class EntityResolver:
                 "source_id": source_id,
                 "canonical_id": canonical_id,
                 "resolution_id": resolution_id,
+                "lock_token": resolution_id,
                 "similarity": similarity,
                 "signal": "semantic_registry",
                 "domain_id": self._db,
@@ -394,23 +434,25 @@ class EntityResolver:
 
     async def _find_canonical(
         self,
-        entity_ids: list[str],
+        entity_ids: list[Any],
         entity_label: str,
-    ) -> str:
+    ) -> Any:
         """Find the entity with the highest degree (most connections).
 
         RU-101: already-resolved entities are excluded, RESOLVED_FROM edges do
-        not count toward degree, and ties break on entity_id ascending.
+        not count toward degree, and ties break on entity_id ascending. The id
+        is returned with its stored type (an integer declared id stays an int).
         """
         label = sanitize_label(entity_label)
+        id_prop = sanitize_label(self._scorer.id_property(label))
         if _merge_integrity():
             cypher = f"""
         UNWIND $entity_ids AS eid
-        MATCH (e:{label} {{entity_id: eid}})
+        MATCH (e:{label} {{{id_prop}: eid}})
         WHERE NOT EXISTS {{ (e)-[:RESOLVED_FROM]->() }}
         OPTIONAL MATCH (e)-[r]-()
         WHERE type(r) <> 'RESOLVED_FROM'
-        WITH e.entity_id AS entity_id, count(r) AS degree
+        WITH e.{id_prop} AS entity_id, count(r) AS degree
         ORDER BY degree DESC, entity_id ASC
         LIMIT 1
         RETURN entity_id
@@ -421,13 +463,13 @@ class EntityResolver:
                 database=self._db,
             )
             if results:
-                return str(results[0]["entity_id"])
+                return results[0]["entity_id"]
             return entity_ids[0]
         cypher = f"""
         UNWIND $entity_ids AS eid
-        MATCH (e:{label} {{entity_id: eid}})
+        MATCH (e:{label} {{{id_prop}: eid}})
         OPTIONAL MATCH (e)-[r]-()
-        WITH e.entity_id AS entity_id, count(r) AS degree
+        WITH e.{id_prop} AS entity_id, count(r) AS degree
         ORDER BY degree DESC
         LIMIT 1
         RETURN entity_id
@@ -438,7 +480,7 @@ class EntityResolver:
             database=self._db,
         )
         if results:
-            return str(results[0]["entity_id"])
+            return results[0]["entity_id"]
         return entity_ids[0]
 
     async def _create_resolution(
@@ -450,11 +492,12 @@ class EntityResolver:
     ) -> str:
         """Create a RESOLVED_FROM edge between source and canonical."""
         label = sanitize_label(entity_label)
+        id_prop = sanitize_label(self._scorer.id_property(label))
         resolution_id = f"res_{uuid.uuid4().hex[:12]}"
 
         cypher = f"""
-        MATCH (source:{label} {{entity_id: $source_id}})
-        MATCH (canonical:{label} {{entity_id: $canonical_id}})
+        MATCH (source:{label} {{{id_prop}: $source_id}})
+        MATCH (canonical:{label} {{{id_prop}: $canonical_id}})
         CREATE (source)-[:RESOLVED_FROM {{
             resolution_id: $resolution_id,
             confidence: $similarity,

@@ -29,22 +29,32 @@ matches what the scheduler will actually run (including the weekday numbering
 never reports a job fresh on evidence it could not read.
 
 Off: every job uses the global ``gds_max_staleness_hours`` age.
+
+``assess_gds_health`` (CEG-NATIVE-CLOSURE-001 F06/F07) is the one judgement
+of a job's health from scheduler history: a job is healthy only when its
+latest attempt is ``success`` and its latest *success* is not stale. A failed,
+skipped, partial, blocked or refused latest attempt is never healthy however
+recent, and a declared job with no history is ``never_run``, not healthy.
+Staleness is measured from the latest success, so a failure cannot reset the
+clock.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from engine.gds.cron import crontab_trigger
 
 if TYPE_CHECKING:
     from engine.config.schema import GDSJobSpec
 
-# One second past the last run, so a run that started exactly on a fire time
-# measures against the following fire, never the one it was.
-_PAST_LAST_RUN = timedelta(seconds=1)
+# Just past the last run, so a run that started exactly on a fire time measures
+# against the following fire, never the one it was. One microsecond, not one
+# second: APScheduler rounds the search start up to a whole second, so a full
+# second skipped a fire less than a second after the reference.
+_PAST_LAST_RUN = timedelta(microseconds=1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,7 +115,7 @@ def job_staleness(
         return JobStaleness(stale=False, deadline=None)
     if schedule_type != "cron":
         return _by_age(last_run, now, policy)
-    next_fire = _next_fire_after(job.schedule.cron, last_run)
+    next_fire = next_fire_after(job.schedule.cron, last_run)
     if next_fire is None:
         return JobStaleness(stale=True, deadline=None)
     deadline = next_fire + policy.grace
@@ -117,7 +127,12 @@ def _by_age(last_run: datetime, now: datetime, policy: StalenessPolicy) -> JobSt
     return JobStaleness(stale=now > deadline, deadline=deadline)
 
 
-def _next_fire_after(cron: str | None, last_run: datetime) -> datetime | None:
+def next_fire_after(cron: str | None, last_run: datetime) -> datetime | None:
+    """The first fire of ``cron`` strictly after ``last_run``, or None when unreadable.
+
+    Built with ``crontab_trigger`` exactly as the scheduler registers the job,
+    so a deadline and a due check here agree with when APScheduler fires.
+    """
     if not cron:
         return None
     try:
@@ -126,3 +141,73 @@ def _next_fire_after(cron: str | None, last_run: datetime) -> datetime | None:
         return None
     fire = trigger.get_next_fire_time(None, last_run + _PAST_LAST_RUN)
     return fire if isinstance(fire, datetime) else None
+
+
+SUCCESS = "success"
+NEVER_RUN = "never_run"
+
+
+@dataclass(frozen=True, slots=True)
+class JobHealth:
+    """One job's health: its latest attempt and the freshness of its latest success."""
+
+    job: str
+    healthy: bool
+    last_attempt_status: str
+    last_attempt: str | None
+    last_success: str | None
+    stale: bool
+    deadline: datetime | None
+
+    def as_dict(self) -> dict[str, Any]:
+        """JSON-ready form; ``status``/``last_run`` keep the existing admin field names."""
+        return {
+            "status": self.last_attempt_status,
+            "last_run": self.last_attempt,
+            "last_success": self.last_success,
+            "healthy": self.healthy,
+            "stale": self.stale,
+            "stale_after": self.deadline.isoformat() if self.deadline else None,
+        }
+
+
+def assess_gds_health(
+    jobs: list[GDSJobSpec],
+    history: list[dict[str, Any]],
+    now: datetime,
+    policy: StalenessPolicy,
+) -> dict[str, JobHealth]:
+    """Per-job health for every declared job and every job named in ``history``.
+
+    ``history`` is oldest first (``GDSScheduler.get_job_history``). Entries are
+    keyed by ``job`` (falling back to ``algorithm`` for an entry without one),
+    so two jobs sharing an algorithm are judged separately. Declared jobs come
+    first in declaration order.
+    """
+    declared = {job.name: job for job in jobs}
+    latest: dict[str, dict[str, Any]] = {}
+    latest_success: dict[str, dict[str, Any]] = {}
+    for entry in history:
+        key = entry.get("job") or entry.get("algorithm") or "unknown"
+        latest[key] = entry
+        if entry.get("status") == SUCCESS:
+            latest_success[key] = entry
+
+    names = list(declared) + [name for name in latest if name not in declared]
+    verdicts: dict[str, JobHealth] = {}
+    for name in names:
+        attempt = latest.get(name)
+        success = latest_success.get(name)
+        success_ts = success.get("timestamp") if success else None
+        staleness = job_staleness(declared.get(name), parse_history_timestamp(success_ts), now, policy)
+        status = str(attempt.get("status")) if attempt else NEVER_RUN
+        verdicts[name] = JobHealth(
+            job=name,
+            healthy=status == SUCCESS and not staleness.stale,
+            last_attempt_status=status,
+            last_attempt=attempt.get("timestamp") if attempt else None,
+            last_success=success_ts if isinstance(success_ts, str) else None,
+            stale=staleness.stale,
+            deadline=staleness.deadline,
+        )
+    return verdicts
