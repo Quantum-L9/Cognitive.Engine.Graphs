@@ -431,7 +431,7 @@ def _merge_scenarios_cypher(fields: tuple[str, ...], outcome_label: str) -> str:
     """
     on_create = ", ".join(f"{sanitize_label(field)}: s.{sanitize_label(field)}" for field in ("scenario_id", *fields))
     return (
-        f"MATCH (claim:{sanitize_label(outcome_label)} {{outcome_id: $outcome_id}})\n"
+        "MATCH (claim:" + sanitize_label(outcome_label) + " {outcome_id: $outcome_id})\n"
         "SET claim._counterfactual_lock = true\n"
         "REMOVE claim._counterfactual_lock\n"
         "WITH claim, claim.counterfactual_generated_at IS NULL AND NOT EXISTS {\n"
