@@ -47,51 +47,111 @@ ontology:
     - name: name
       type: string
       required: true
+    - name: name_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of name (#351 revision); precedence is enforced at sync
     - name: lat
       type: float
       description: Latitude for geo-proximity scoring
+    - name: lat_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of lat (#351 revision); precedence is enforced at sync
     - name: lon
       type: float
       description: Longitude for geo-proximity scoring
+    - name: lon_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of lon (#351 revision); precedence is enforced at sync
     - name: credit_score
       type: float
       description: Financial creditworthiness score (0-100)
+    - name: credit_score_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of credit_score (#351 revision); precedence is enforced at sync
     - name: min_density
       type: float
       description: Minimum acceptable material density (g/cm³)
+    - name: min_density_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of min_density (#351 revision); precedence is enforced at sync
     - name: max_density
       type: float
       description: Maximum acceptable material density (g/cm³)
+    - name: max_density_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of max_density (#351 revision); precedence is enforced at sync
     - name: min_mfi
       type: float
       description: Minimum acceptable melt flow index
+    - name: min_mfi_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of min_mfi (#351 revision); precedence is enforced at sync
     - name: max_mfi
       type: float
       description: Maximum acceptable melt flow index
+    - name: max_mfi_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of max_mfi (#351 revision); precedence is enforced at sync
     - name: contamination_tolerance
       type: float
       description: Maximum contamination percentage accepted (0-100)
+    - name: contamination_tolerance_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of contamination_tolerance (#351 revision); precedence is enforced at sync
     - name: food_grade_certified
       type: bool
       description: FDA food-grade certification status
+    - name: food_grade_certified_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of food_grade_certified (#351 revision); precedence is enforced at sync
     - name: capacity_tons_month
       type: float
       description: Monthly processing capacity in tons
+    - name: capacity_tons_month_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of capacity_tons_month (#351 revision); precedence is enforced at sync
     - name: tier
       type: string
       description: Facility tier (premium, standard, economy)
+    - name: tier_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of tier (#351 revision); precedence is enforced at sync
     - name: community_id
       type: int
       description: Louvain community assignment for network effects
     - name: rate_per_ton
       type: float
       description: Current rate per ton
+    - name: rate_per_ton_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of rate_per_ton (#351 revision); precedence is enforced at sync
     - name: rate_confidence
       type: float
       description: Confidence in rate accuracy (0-1)
+    - name: rate_confidence_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of rate_confidence (#351 revision); precedence is enforced at sync
     - name: last_transaction_date
       type: datetime
       description: Date of most recent transaction
+    - name: last_transaction_date_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of last_transaction_date (#351 revision); precedence is enforced at sync
     # Wire-only (list<map>): consumed by the facilities endpoint's childsync,
     # never stored on Facility. Each element names one PolymerFamily by code
     # and, when line_id is present, one PROCESSES relationship. direction and
@@ -113,9 +173,15 @@ ontology:
         - name: direction
           type: string
           description: in is material entering (buyer acceptance); out is material leaving
+        - name: direction_provenance
+          type: enum
+          values: [observed, enriched]
         - name: form
           type: string
           description: Physical form this line accepts or ships. Blank is not a form.
+        - name: form_provenance
+          type: enum
+          values: [observed, enriched]
   - label: MaterialIntake
     managedby: api
     queryentity: true
@@ -190,18 +256,42 @@ ontology:
       description: Owning facility capability identity
     - name: polymer_type
       type: string
+    - name: polymer_type_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of polymer_type (#351 revision); precedence is enforced at sync
     - name: available_tons
       type: float
       description: Currently available active supply tons
+    - name: available_tons_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of available_tons (#351 revision); precedence is enforced at sync
     - name: lat
       type: float
+    - name: lat_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of lat (#351 revision); precedence is enforced at sync
     - name: lon
       type: float
+    - name: lon_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of lon (#351 revision); precedence is enforced at sync
     - name: rate_per_ton
       type: float
+    - name: rate_per_ton_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of rate_per_ton (#351 revision); precedence is enforced at sync
     - name: active
       type: bool
       description: True only when opportunity is currently offerable
+    - name: active_provenance
+      type: enum
+      values: [observed, enriched]
+      description: Provenance of active (#351 revision); precedence is enforced at sync
   - label: BuyerDemand
     managedby: api
     queryentity: true
@@ -236,9 +326,15 @@ ontology:
     - name: direction
       type: string
       description: in or out. Blank stays blank and is not buyer acceptance.
+    - name: direction_provenance
+      type: enum
+      values: [observed, enriched]
     - name: form
       type: string
       description: Physical form of this line. Blank is not eligible.
+    - name: form_provenance
+      type: enum
+      values: [observed, enriched]
   - type: ACCEPTS_FORM
     from: Facility
     to: MaterialForm
@@ -569,10 +665,14 @@ sync:
       edgeproperties:
       - line_id
       - direction
+      - direction_provenance
       - form
+      - form_provenance
       fromrow:
       - direction
+      - direction_provenance
       - form
+      - form_provenance
   - path: /v1/sync/polymerfamilies
     targetnode: PolymerFamily
     idproperty: code

@@ -16,13 +16,13 @@
   "packs": {
     "plasticos": {
       "ceg_spec": "plasticos/spec.yaml",
-      "ceg_spec_sha256": "e6ec5b013c35ad7c6053a26f79bb7734fd110186247c162fe944fc93a8034448",
+      "ceg_spec_sha256": "cf4f869b4a8d0565853661c4e899e2ca03247587d49089ff73988960d73ad004",
       "composed_from": [
         {
           "repo": "Quantum-L9/Cognitive.Engine.Graphs",
-          "commit": "9d17d01b13671c58376f1e659e34958ced445e0c",
+          "commit": "r4: same commit as this manifest (#351 provenance revision)",
           "path": "tests/fixtures/design_packs/plasticos/spec.yaml",
-          "sha256": "825e98d143a60db6eabb84c2a00f12a9fe827f0f58250d3cf35e449147fdd863",
+          "sha256": "166d6ae99bccbce27b0ef8d599558231cebd334dc8c33e6fa40cda1a8f017717",
           "use": "verbatim body"
         },
         {
@@ -37,7 +37,7 @@
     },
     "synthneutral": {
       "ceg_spec": "synthneutral/spec.yaml",
-      "ceg_spec_sha256": "72aa88c8c237dfa2b61d754aa237e7a3051191668ef3ae93206fe9e52701d519",
+      "ceg_spec_sha256": "5426b0e11b96642ccf76da48c2f1867b184e2d4490cb0b572c042dd02cf478c4",
       "eie_cartridge": {
         "repo": "Quantum-L9/Enrichment.Inference.Engine",
         "path": "tests/e2e/gate_loop/cartridges/synthneutral/spec.yaml",
@@ -47,5 +47,5 @@
       "overlay": "capabilities: tenant-scoped match:read, sync:write, admin:write (score:read NOT granted); plugins.inference_rules: [infer_geography_from_postal_code] with postal_code and region declared on Station by both CEG pack and EIE cartridge (F-A1-08 changed-fact witness)."
     }
   },
-  "revision_note": "r3: C-18 L9_META header at the top of each file (plasticos: the design pack's own block moved and retagged test-only); synthneutral witness rule and fields (F-A1-08). r2: capability grants."
+  "revision_note": "r4: #351 revision (2026-11-24): every synced non-identity property X is declared beside X_provenance: enum[observed|enriched], on the CEG packs here and on the EIE cartridges (the EIE cartridge sha256 values above are r3 until EIE-W publishes its counterpart). r3: C-18 L9_META header at the top of each file (plasticos: the design pack's own block moved and retagged test-only); synthneutral witness rule and fields (F-A1-08). r2: capability grants."
 }

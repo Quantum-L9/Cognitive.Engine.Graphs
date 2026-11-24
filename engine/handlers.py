@@ -1590,7 +1590,7 @@ async def handle_sync(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         write_rows = await graph_driver.execute_query(
             cypher=cypher,
-            parameters={"batch": write_batch, "tenant": tenant},
+            parameters={"batch": write_batch, "tenant": tenant, **generator.query_parameters()},
             database=domain_spec.domain.id,
         )
     except Exception as exc:

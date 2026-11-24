@@ -113,6 +113,63 @@ def _item_properties(prop: PropertySpec | None) -> list[PropertySpec]:
     return prop.items.properties or []
 
 
+# ── value provenance (#351 revision) ──────────────────────────────────────────
+#
+# A synced property ``X`` is provenance-governed when the same declaration
+# scope (node, item map or edge) also declares ``X_provenance`` as
+# ``enum[observed|enriched]``. EIE sends the companion beside the value and CEG
+# stores it beside the value; with ``sync_provenance_precedence_enabled`` the
+# sync Cypher compares the incoming companion with the stored one. The suffix
+# and the two values are the agreed wire vocabulary, never a domain term.
+
+PROVENANCE_SUFFIX = "_provenance"
+PROVENANCE_OBSERVED = "observed"
+PROVENANCE_ENRICHED = "enriched"
+PROVENANCE_VALUES = frozenset({PROVENANCE_OBSERVED, PROVENANCE_ENRICHED})
+
+
+def provenance_companion(name: str) -> str:
+    """The declared property that carries ``name``'s provenance."""
+    return f"{name}{PROVENANCE_SUFFIX}"
+
+
+def _is_provenance_declaration(prop: PropertySpec) -> bool:
+    return prop.type is PropertyType.ENUM and set(prop.values or []) == PROVENANCE_VALUES
+
+
+def provenance_governed(properties: Sequence[PropertySpec]) -> frozenset[str]:
+    """Storable properties whose ``<name>_provenance`` companion is declared ``enum[observed|enriched]``."""
+    by_name = {prop.name: prop for prop in properties}
+    governed: set[str] = set()
+    for name, prop in by_name.items():
+        companion = by_name.get(provenance_companion(name))
+        if name.endswith(PROVENANCE_SUFFIX) or prop.wire_only or companion is None:
+            continue
+        if _is_provenance_declaration(companion):
+            governed.add(name)
+    return frozenset(governed)
+
+
+def provenance_defects(owner: str, properties: Sequence[PropertySpec]) -> list[str]:
+    """Every ``*_provenance`` declaration is the enum companion of a storable property beside it."""
+    by_name = {prop.name: prop for prop in properties}
+    defects: list[str] = []
+    for name, prop in by_name.items():
+        if not name.endswith(PROVENANCE_SUFFIX):
+            continue
+        base = by_name.get(name[: -len(PROVENANCE_SUFFIX)])
+        if base is None or base.wire_only:
+            defects.append(
+                f"{owner} property {name!r}: provenance companion of no storable property declared beside it"
+            )
+        if not _is_provenance_declaration(prop):
+            defects.append(
+                f"{owner} property {name!r}: provenance companion must be declared "
+                f"enum[{'|'.join(sorted(PROVENANCE_VALUES))}], found {prop.declared_type}"
+            )
+    return defects
+
+
 # ── stored shapes ─────────────────────────────────────────────────────────────
 
 
@@ -334,6 +391,25 @@ def endpoint_shape_defects(domain_spec: DomainSpec, endpoint: SyncEndpointSpec) 
     for entries, check in _ENDPOINT_FIELD_CHECKS:
         for entry in entries(endpoint) or []:
             defects.extend(check(scope, entry))
+    from engine.config.settings import settings
+
+    if settings.sync_provenance_precedence_enabled:
+        defects.extend(_provenance_scope_defects(scope, endpoint))
+    return defects
+
+
+def _provenance_scope_defects(scope: _EndpointScope, endpoint: SyncEndpointSpec) -> list[str]:
+    """Provenance companions on the target node, each childsync item map, child node and edge."""
+    defects = provenance_defects(f"{scope.where}: {scope.target.label}", scope.target.properties)
+    for child in endpoint.childsync or []:
+        item = _item_properties(scope.props.get(child.field))
+        defects.extend(provenance_defects(f"{scope.where}: {child.field} items", item))
+        child_node = _node(scope.domain_spec, child.targetnode)
+        if child_node is not None:
+            defects.extend(provenance_defects(f"{scope.where}: {child_node.label}", child_node.properties))
+        for edge in scope.domain_spec.ontology.edges:
+            if edge.type == child.edgetype:
+                defects.extend(provenance_defects(f"{scope.where}: edge {edge.type}", edge.properties))
     return defects
 
 
@@ -513,6 +589,10 @@ class ChildProjection:
     static: bool
     edge_keys: frozenset[str]  # item keys written on the relationship, not the child node
     fromrow: tuple[str, ...]  # parent-row keys that fill an item missing that edge key
+    # Provenance-governed keys: on the child node (item and child node both
+    # declare the companion) and on the relationship (item and edge both do).
+    governed_node: frozenset[str] = frozenset()
+    governed_edge: frozenset[str] = frozenset()
 
     @classmethod
     def from_spec(cls, domain_spec: DomainSpec, item: PropertySpec, child: ChildSyncSpec) -> ChildProjection:
@@ -528,7 +608,28 @@ class ChildProjection:
         edge_keys = frozenset(name for name in (child.edgeproperties or []) if name in item_names)
         fromrow = tuple(name for name in (child.fromrow or []) if name in edge_keys)
         static = child_node is not None and child_node.managedby is ManagedByType.STATIC
-        return cls(child.field, child.targetid, item, writable, static, edge_keys, fromrow)
+        item_governed = provenance_governed(_item_properties(item))
+        node_governed = item_governed & provenance_governed(child_node.properties if child_node else [])
+        governed_node = frozenset(
+            name
+            for name in node_governed
+            if name in writable and provenance_companion(name) in writable and name != child.targetid
+        )
+        edge_governed = item_governed & frozenset().union(
+            *(
+                provenance_governed(edge.properties)
+                for edge in domain_spec.ontology.edges
+                if edge.type == child.edgetype
+            )
+        )
+        governed_edge = frozenset(
+            name
+            for name in edge_governed
+            if name in edge_keys and provenance_companion(name) in edge_keys and name != child.edgeidentity
+        )
+        return cls(
+            child.field, child.targetid, item, writable, static, edge_keys, fromrow, governed_node, governed_edge
+        )
 
     def carried_prop(self, key: str) -> PropertySpec | None:
         """The item declaration of a parent-row key this child copies onto its edge."""
@@ -603,6 +704,12 @@ class SyncRowContract:
     def stored(self) -> frozenset[str]:
         """Node properties the generator writes: declared and storable."""
         return frozenset(name for name, prop in self.properties.items() if not prop.wire_only)
+
+    @property
+    def governed(self) -> frozenset[str]:
+        """Stored target-node properties whose provenance companion is declared (never the id)."""
+        governed = provenance_governed(list(self.properties.values())) - {self.idproperty}
+        return frozenset(name for name in governed if provenance_companion(name) in self.stored)
 
     def _walk_field(self, walk: _Walk, index: int, key: str, value: Any) -> None:
         """One top-level key of a row: undeclared, null, or a value to check."""

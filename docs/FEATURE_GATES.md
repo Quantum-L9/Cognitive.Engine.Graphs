@@ -2401,6 +2401,38 @@ non-empty form, on the same relationship as the polymer.
 
 Tests: `tests/unit/test_buyer_line_identity.py`.
 
+## 39. Value provenance precedence (#351 revision, 2026-11-24)
+
+`sync_provenance_precedence_enabled` (env `SYNC_PROVENANCE_PRECEDENCE_ENABLED`,
+default `False`; the EIE-CEG rail turns it on for its test tenants).
+
+EIE syncs consumer-observed values as well as enriched ones. A pack declares a
+governed property `X` beside `X_provenance: enum[observed|enriched]`, on a
+node, a childsync item map and the child node, or a childsync item map and its
+line edge (listed in `edgeproperties`, and in `fromrow` when `X` is). Identity
+keys (`idproperty`, `targetid`, `edgeidentity`) are never governed.
+
+On, the sync write resolves precedence in Cypher, in the same `SET`, never in
+Python after the read. The stored value stays when the incoming value is null
+(a null never clears), or when the incoming companion is `enriched` (an absent
+companion counts as `enriched`) and the stored companion is `observed`.
+Otherwise the value and its companion are written. That means observed over
+anything, and enriched over enriched or over no recorded provenance. It covers
+the node `SET` (a map projection over `row.node`), `UNWINDMATCHSET`
+`fieldsupdated`, childsync child nodes and keyed line relationships (value
+first, then companion). The two values are `$provenance_observed` /
+`$provenance_enriched` parameters (`SyncGenerator.query_parameters`). Admission
+withholds a pack whose `*_provenance` declaration is not that enum or names no
+storable property beside it (`engine/sync/row_contract.py`
+`provenance_defects`). It requires `sync_declared_projection_enabled`; the
+legacy `row{.*}` paths raise `ValueError`.
+
+Off: last write wins, as before, and the companions are stored as declared
+values.
+
+Tests: `tests/unit/test_sync_provenance.py`,
+`tests/integration/test_sync_provenance_precedence.py`.
+
 ## Resolution on the declared identity (CEG-NATIVE-CLOSURE-001, A1 / L-RES)
 
 | Flag (env var) | Default | Origin | Behaviour when on | Behaviour when off |
