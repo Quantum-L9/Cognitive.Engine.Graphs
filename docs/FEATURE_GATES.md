@@ -2401,6 +2401,29 @@ non-empty form, on the same relationship as the polymer.
 
 Tests: `tests/unit/test_buyer_line_identity.py`.
 
+## 39. Value provenance precedence (#351 revision, 2026-11-24)
+
+`sync_provenance_precedence_enabled` (env `SYNC_PROVENANCE_PRECEDENCE_ENABLED`,
+default `False`; the EIE-CEG rail enables it for its test tenants; requires
+`sync_declared_projection_enabled`).
+
+Naming (EIE #419): a node row field `F` is declared beside
+`F_provenance: enum[observed|enriched]`; a childsync item declares one
+item-level `provenance`, stored on the line edge or child node that receives
+it. Identity keys are never governed. Undeclared fields and items stay legacy
+(byte-identical Cypher) with the flag on.
+
+On, the sync `SET` keeps a stored value when the incoming one is null, or is
+`enriched` (an absent provenance value counts as `enriched`) while the stored
+provenance is `observed`; otherwise it writes the value and its provenance
+(an item's `provenance` moves only when the item writes a value). Covers node
+`SET`, `fieldsupdated`, child nodes and keyed line edges; values bind as
+`$provenance_observed` / `$provenance_enriched`. Admission withholds malformed
+declarations (`engine/sync/row_contract.py`). Off: last write wins.
+
+Tests: `tests/unit/test_sync_provenance.py`,
+`tests/integration/test_sync_provenance_precedence.py`.
+
 ## Resolution on the declared identity (CEG-NATIVE-CLOSURE-001, A1 / L-RES)
 
 | Flag (env var) | Default | Origin | Behaviour when on | Behaviour when off |

@@ -31,10 +31,92 @@ from engine.config.schema import (
     SyncStrategy,
 )
 from engine.config.tenant_mapping import declared_ref_namespace
-from engine.sync.row_contract import ChildProjection, SyncRowContract
+from engine.sync.row_contract import (
+    ITEM_PROVENANCE,
+    PROVENANCE_ENRICHED,
+    PROVENANCE_OBSERVED,
+    ChildProjection,
+    SyncRowContract,
+    provenance_companion,
+)
 from engine.utils.security import sanitize_label
 
 logger = logging.getLogger(__name__)
+
+
+def _provenance_keep(incoming: str, stored: str, name: str) -> str:
+    """Cypher predicate: the stored value of ``name`` stays.
+
+    A null never clears; an enriched value (an absent companion counts as
+    enriched) never overwrites a stored observed one. Everything else applies:
+    observed over anything, enriched over enriched or unknown.
+    """
+    prop = sanitize_label(name)
+    companion = sanitize_label(provenance_companion(name))
+    return (
+        f"({incoming}.{prop} IS NULL OR (coalesce({incoming}.{companion}, $provenance_enriched) = "
+        f"$provenance_enriched AND {stored}.{companion} = $provenance_observed))"
+    )
+
+
+def _provenance_entries(incoming: str, stored: str, names: frozenset[str]) -> list[tuple[str, str]]:
+    """``(property, expression)`` pairs: each governed value, then its provenance, resolved in Cypher."""
+    entries: list[tuple[str, str]] = []
+    for name in sorted(names):
+        prop = sanitize_label(name)
+        companion = sanitize_label(provenance_companion(name))
+        keep = _provenance_keep(incoming, stored, name)
+        entries.append((prop, f"CASE WHEN {keep} THEN {stored}.{prop} ELSE {incoming}.{prop} END"))
+        entries.append(
+            (
+                companion,
+                (
+                    f"CASE WHEN {keep} THEN {stored}.{companion} ELSE coalesce({incoming}.{companion}, "
+                    "$provenance_enriched) END"
+                ),
+            )
+        )
+    return entries
+
+
+def _item_provenance_entries(incoming: str, stored: str, names: frozenset[str]) -> list[tuple[str, str]]:
+    """Pairs for an item governed by one item-level ``provenance``: each value, then the provenance.
+
+    A value stays when it is null or when the item is enriched (or carries no
+    provenance) over a stored observed item. The provenance moves only when the
+    item writes at least one value.
+    """
+    if not names:
+        return []
+    marker = sanitize_label(ITEM_PROVENANCE)
+    demoted = (
+        f"(coalesce({incoming}.{marker}, $provenance_enriched) = $provenance_enriched "
+        f"AND {stored}.{marker} = $provenance_observed)"
+    )
+    entries: list[tuple[str, str]] = []
+    for name in sorted(names):
+        prop = sanitize_label(name)
+        entries.append(
+            (prop, f"CASE WHEN {incoming}.{prop} IS NULL OR {demoted} THEN {stored}.{prop} ELSE {incoming}.{prop} END")
+        )
+    all_null = " AND ".join(f"{incoming}.{sanitize_label(name)} IS NULL" for name in sorted(names))
+    entries.append(
+        (
+            marker,
+            (
+                f"CASE WHEN ({all_null}) OR {demoted} THEN {stored}.{marker} "
+                f"ELSE coalesce({incoming}.{marker}, $provenance_enriched) END"
+            ),
+        )
+    )
+    return entries
+
+
+def _projection(variable: str, entries: list[tuple[str, str]]) -> str:
+    """``variable`` as written, or its map projection with ``entries`` overriding keys."""
+    if not entries:
+        return variable
+    return f"{variable}{{.*, {', '.join(f'{sanitize_label(key)}: {value}' for key, value in entries)}}}"
 
 
 class SyncGenerator:
@@ -54,6 +136,23 @@ class SyncGenerator:
         if endpoint_spec.batchstrategy == SyncStrategy.UNWINDMATCHSET:
             return self._generate_unwind_match_set(endpoint_spec)
         raise ValueError(f"Unknown sync strategy: {endpoint_spec.batchstrategy}")
+
+    def query_parameters(self) -> dict[str, Any]:
+        """Parameters the sync Cypher reads besides ``$batch`` and ``$tenant``."""
+        from engine.config.settings import settings
+
+        if not settings.sync_provenance_precedence_enabled:
+            return {}
+        return {"provenance_observed": PROVENANCE_OBSERVED, "provenance_enriched": PROVENANCE_ENRICHED}
+
+    @staticmethod
+    def _require_declared_projection_for_provenance() -> None:
+        """Precedence is written over declared rows only; the legacy ``row{.*}`` paths refuse it."""
+        from engine.config.settings import settings
+
+        if settings.sync_provenance_precedence_enabled and not settings.sync_declared_projection_enabled:
+            msg = "sync_provenance_precedence_enabled requires sync_declared_projection_enabled"
+            raise ValueError(msg)
 
     def row_contract(self, endpoint_spec: SyncEndpointSpec) -> SyncRowContract:
         """The endpoint's typed row contract; ``ValueError`` names every undeclared shape."""
@@ -80,25 +179,39 @@ class SyncGenerator:
         the properties its item map and its node both declare; a
         ``managedby: static`` child is written only when the MERGE creates it.
         """
+        from engine.config.settings import settings
+
         contract = self.row_contract(spec)
         target = sanitize_label(contract.target_label)
         id_property = sanitize_label(contract.idproperty)
-        cypher_parts = [
-            "UNWIND $batch AS row",
-            f"MERGE (n:{target} {{{id_property}: row.node.{id_property}}})",
-            "SET n += row.node, n._tenant = $tenant",
-        ]
+        governed = contract.governed if settings.sync_provenance_precedence_enabled else frozenset()
+        if governed:
+            # A map projection needs a variable: name the declared node row.
+            cypher_parts = [
+                "UNWIND $batch AS row",
+                "WITH row, row.node AS node_row",
+                f"MERGE (n:{target} {{{id_property}: node_row.{id_property}}})",
+                f"SET n += {_projection('node_row', _provenance_entries('node_row', 'n', governed))}, n._tenant = $tenant",
+            ]
+        else:
+            cypher_parts = [
+                "UNWIND $batch AS row",
+                f"MERGE (n:{target} {{{id_property}: row.node.{id_property}}})",
+                "SET n += row.node, n._tenant = $tenant",
+            ]
         for tax_edge in spec.taxonomyedges or []:
             edge_type = sanitize_label(tax_edge.edgetype)
             tax_label = sanitize_label(tax_edge.targetlabel)
             tax_id = sanitize_label(tax_edge.targetid)
             tax_field = sanitize_label(tax_edge.field)
+            # A governed field may have kept its stored value: link what was accepted.
+            tax_source = "n" if tax_edge.field in governed else "row.node"
             if tax_edge.field in contract.taxonomy_lists:
                 # One edge per element; an element naming no taxonomy node links nothing.
                 cypher_parts.extend(
                     [
                         "WITH n, row",
-                        f"OPTIONAL MATCH (tax:{tax_label}) WHERE tax.{tax_id} IN coalesce(row.node.{tax_field}, [])",
+                        f"OPTIONAL MATCH (tax:{tax_label}) WHERE tax.{tax_id} IN coalesce({tax_source}.{tax_field}, [])",
                         "WITH n, row, collect(tax) AS taxonomy_nodes",
                         f"FOREACH (tax IN taxonomy_nodes | MERGE (n)-[:{edge_type}]->(tax))",
                     ]
@@ -107,7 +220,7 @@ class SyncGenerator:
                 cypher_parts.extend(
                     [
                         "WITH n, row",
-                        f"OPTIONAL MATCH (tax:{tax_label} {{{tax_id}: row.node.{tax_field}}})",
+                        f"OPTIONAL MATCH (tax:{tax_label} {{{tax_id}: {tax_source}.{tax_field}}})",
                         "FOREACH (_ IN CASE WHEN tax IS NOT NULL THEN [1] ELSE [] END |",
                         f"  MERGE (n)-[:{edge_type}]->(tax)",
                         ")",
@@ -144,6 +257,13 @@ class SyncGenerator:
         identity = child.edgeidentity
         use_lines = settings.buyer_line_identity_enabled and identity is not None and bool(projection.edge_keys)
         write = "ON CREATE SET" if projection.static else "SET"
+        precedence = settings.sync_provenance_precedence_enabled
+        edge_routed = frozenset(child.edgeproperties or []) & projection.edge_keys if use_lines else frozenset()
+        node_governed: frozenset[str] = frozenset()
+        if precedence and ITEM_PROVENANCE not in edge_routed:
+            node_governed = projection.governed_node - edge_routed
+        edge_governed = projection.governed_edge if precedence and use_lines else frozenset()
+        node_entries = _item_provenance_entries("child_row", "c", node_governed)
         merge_node = f"  MERGE (c:{child_label} {{{child_id}: child_row.{child_id}}})"
         header = [
             "WITH n, row",
@@ -153,7 +273,7 @@ class SyncGenerator:
         if not use_lines or identity is None:
             return [
                 *header,
-                f"  {write} c += child_row, c._tenant = $tenant",
+                f"  {write} c += {_projection('child_row', node_entries)}, c._tenant = $tenant",
                 f"  MERGE {plain}",
                 ")",
             ]
@@ -162,8 +282,18 @@ class SyncGenerator:
         # The child node's own id is not an edge override. Nulling it deletes the
         # identity the MERGE just bound and the next sync creates a second node.
         node_names = [name for name in names if name != sanitize_label(projection.targetid)]
-        overrides = ", ".join(f"{name}: null" for name in node_names)
-        rel_set = ", ".join(f"rel.{name} = child_row.{name}" for name in names)
+        overrides = ", ".join(
+            [f"{name}: null" for name in node_names]
+            + [f"{sanitize_label(key)}: {value}" for key, value in node_entries]
+        )
+        # Governed line properties and the item provenance are written by the
+        # precedence expressions (values first: their test reads the stored
+        # provenance, which the last assignment then replaces).
+        edge_entries = _item_provenance_entries("child_row", "rel", edge_governed)
+        governed_edge_keys = {sanitize_label(key) for key, _ in edge_entries}
+        rel_items = [f"rel.{name} = child_row.{name}" for name in names if name not in governed_edge_keys]
+        rel_items.extend(f"rel.{sanitize_label(key)} = {value}" for key, value in edge_entries)
+        rel_set = ", ".join(rel_items)
         keyed = f"{keyed_open}{identity_name}: child_row.{identity_name}{keyed_close}"
         absent = f"child_row.{identity_name} IS NULL OR child_row.{identity_name} = ''"
         lines_expr = f"coalesce(row.children.{child_field}, [])"
@@ -206,6 +336,7 @@ class SyncGenerator:
 
         from engine.config.settings import settings
 
+        self._require_declared_projection_for_provenance()
         if settings.sync_declared_projection_enabled:
             return self._generate_declared_merge(spec)
 
@@ -301,11 +432,15 @@ class SyncGenerator:
 
         from engine.config.settings import settings
 
+        self._require_declared_projection_for_provenance()
         # Declared projection: rows are `project_batch` rows; read `row.node`.
         row_source = "row"
+        governed: frozenset[str] = frozenset()
         if settings.sync_declared_projection_enabled:
-            self.row_contract(spec)  # refuses an endpoint whose fields are not declared
+            contract = self.row_contract(spec)  # refuses an endpoint whose fields are not declared
             row_source = "row.node"
+            if settings.sync_provenance_precedence_enabled:
+                governed = contract.governed
 
         cypher_parts = [
             "UNWIND $batch AS row",
@@ -313,12 +448,26 @@ class SyncGenerator:
         ]
 
         if spec.fieldsupdated:
+            resolved = frozenset(field for field in spec.fieldsupdated if field in governed)
+            # A governed companion moves only with its value: never assigned on its own.
+            written = {sanitize_label(name) for name in resolved} | {
+                sanitize_label(provenance_companion(name)) for name in governed
+            }
             set_clauses = [
-                f"n.{sanitize_label(field)} = {row_source}.{sanitize_label(field)}" for field in spec.fieldsupdated
+                f"n.{sanitize_label(field)} = {row_source}.{sanitize_label(field)}"
+                for field in spec.fieldsupdated
+                if sanitize_label(field) not in written
             ]
+            set_clauses.extend(
+                f"n.{sanitize_label(key)} = {value}" for key, value in _provenance_entries(row_source, "n", resolved)
+            )
             set_clauses.append("n._tenant = $tenant")
             set_clauses.append("n.updated_at = datetime()")
             cypher_parts.append("SET " + ",\n    ".join(set_clauses))
+        elif governed:
+            cypher_parts.append("WITH n, row, row.node AS node_row")
+            entries = _provenance_entries("node_row", "n", governed)
+            cypher_parts.append(f"SET n += {_projection('node_row', entries)}, n._tenant = $tenant")
         else:
             cypher_parts.append(f"SET n += {row_source}, n._tenant = $tenant")
 

@@ -338,6 +338,16 @@ class Settings(BaseSettings):
     # line with a form, and that two lines are not one directionless edge.
     # Off: the relationship is unkeyed and edgepredicates are not compiled.
     buyer_line_identity_enabled: bool = True
+    # Value provenance precedence (#351 revision, operator-approved 2026-11-24).
+    # EIE syncs consumer-observed and enriched values; a pack declares each
+    # governed property X beside X_provenance: enum[observed|enriched]. On: the
+    # sync Cypher (node properties, childsync child nodes and line edges) keeps
+    # the stored value when the incoming one is null, or when it is enriched (an
+    # absent companion counts as enriched) and the stored provenance is
+    # observed; otherwise it writes the value and its provenance. Admission
+    # refuses a malformed companion. Requires sync_declared_projection_enabled.
+    # Off: last write wins, as before. Ships off; the rail enables it per run.
+    sync_provenance_precedence_enabled: bool = False
     # Null and non-finite match scores stay ineligible. Off restores the previous
     # wire, where a missing score was sent as 0.0 and could be ranked.
     null_score_ineligible_enabled: bool = True
