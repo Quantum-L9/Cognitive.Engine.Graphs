@@ -144,6 +144,30 @@ async def test_an_all_null_item_leaves_the_stored_provenance(design_pack_deps, g
 
 
 @pytest.mark.asyncio
+async def test_a_kept_taxonomy_value_links_no_rejected_taxonomy(design_pack_deps, graph_driver, precedence_on) -> None:
+    """#558 review: an enriched polymer_type refused over an observed one links nothing for it."""
+    from engine.handlers import handle_sync
+
+    async def sync(entity_type: str, row: dict[str, Any]) -> None:
+        result = await handle_sync(PLASTICOS, {"entity_type": entity_type, "batch": [row]})
+        assert result.get("status") in ("ok", "success"), result
+
+    for code in ("PET", "HDPE"):
+        await sync("polymerfamilies", {"code": code, "name": code})
+    lot = {"opportunity_id": "so-1", "facility_id": "f-10"}
+    await sync("supply-opportunities", {**lot, "polymer_type": "PET", "polymer_type_provenance": "observed"})
+    await sync("supply-opportunities", {**lot, "polymer_type": "HDPE", "polymer_type_provenance": "enriched"})
+    rows = await graph_driver.execute_query(
+        "MATCH (s:SupplyOpportunity {opportunity_id: 'so-1'}) "
+        "OPTIONAL MATCH (s)-[:FULFILLS_POLYMER]->(p:PolymerFamily) "
+        "RETURN s.polymer_type AS polymer, collect(p.code) AS linked",
+        database=PLASTICOS,
+    )
+    assert rows[0]["polymer"] == "PET"
+    assert rows[0]["linked"] == ["PET"]
+
+
+@pytest.mark.asyncio
 async def test_a_pack_with_no_provenance_stays_last_write_wins_with_the_flag_on(
     engine_deps, graph_driver, clean_db, precedence_on
 ) -> None:
