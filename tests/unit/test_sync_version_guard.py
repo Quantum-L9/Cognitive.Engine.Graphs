@@ -157,3 +157,30 @@ def test_a_versioned_patch_without_fieldsupdated_keeps_the_version(precedence_on
     )
     cypher = _cypher(raw, "/v1/sync/station-patch")
     assert "sync_version: coalesce(node_row.sync_version, n.sync_version)" in cypher
+
+
+def test_ingress_refuses_a_versioned_row_without_a_version(precedence_on: None) -> None:
+    from engine.sync.row_contract import SyncRowContract
+
+    spec = DomainSpec(**_raw())
+    endpoint = next(endpoint for endpoint in spec.sync.endpoints if endpoint.path == "/v1/sync/stations")
+    contract = SyncRowContract.from_spec(spec, endpoint)
+    rows = [
+        {"station_id": "a", "title": "a", "sync_version": 3},
+        {"station_id": "b", "title": "b"},
+        {"station_id": "c", "title": "c", "sync_version": None},
+    ]
+    defects = contract.defects(rows, refuse_undeclared=False)
+    assert [defect for defect in defects if "sync_version" in defect] == [
+        "row 1 sync_version: expected int (required by the stale-write guard), got missing",
+        "row 2 sync_version: expected int (required by the stale-write guard), got null",
+    ]
+
+
+def test_ingress_accepts_an_unversioned_row_with_the_guard_off() -> None:
+    from engine.sync.row_contract import SyncRowContract
+
+    spec = DomainSpec(**_raw())
+    endpoint = next(endpoint for endpoint in spec.sync.endpoints if endpoint.path == "/v1/sync/stations")
+    contract = SyncRowContract.from_spec(spec, endpoint)
+    assert contract.defects([{"station_id": "b", "title": "b"}], refuse_undeclared=False) == []

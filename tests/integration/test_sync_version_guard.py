@@ -94,11 +94,20 @@ async def test_higher_applies_equal_replays_lower_is_refused_whole(
 
 
 @pytest.mark.asyncio
-async def test_a_row_without_a_version_is_never_stale(design_pack_deps, graph_driver, precedence_on) -> None:
+@pytest.mark.parametrize("version", ["missing", None])
+async def test_a_row_without_a_version_is_refused_at_ingress(
+    design_pack_deps, graph_driver, precedence_on, version: Any
+) -> None:
+    """#560 review: a versioned endpoint refuses a row without a non-null sync_version; nothing is written."""
+    from engine.handlers import SyncRowRejectedError
+
     await _sync(_facility(5, "premium", "in"))
-    result = await _sync(_facility(None, "standard", "in"))
-    assert result.get("stale_count") == 0
-    assert await _state(graph_driver) == ("standard", 5, [("g-1", "in")])
+    row = _facility(None, "standard", "out")
+    if version is None:
+        row["sync_version"] = None
+    with pytest.raises(SyncRowRejectedError, match="sync_version"):
+        await _sync(row)
+    assert await _state(graph_driver) == ("premium", 5, [("g-1", "in")])
 
 
 @pytest.mark.asyncio
@@ -127,18 +136,3 @@ async def test_a_lower_version_later_in_the_same_batch_is_refused(
     assert result["stale_count"] == 1
     assert result["synced_count"] == 1
     assert await _state(graph_driver) == ("premium", 3, [("g-1", "in")])
-
-
-@pytest.mark.asyncio
-async def test_an_explicit_null_version_never_clears_the_stored_one(
-    design_pack_deps, graph_driver, precedence_on
-) -> None:
-    """#560 review: a null sync_version is not stale, and it does not drop the watermark."""
-    await _sync(_facility(10, "premium", "in"))
-    nulled = _facility(None, "standard", "in")
-    nulled["sync_version"] = None
-    assert (await _sync(nulled)).get("stale_count") == 0
-    assert await _state(graph_driver) == ("standard", 10, [("g-1", "in")])
-    late = await _sync(_facility(9, "economy", "out"))
-    assert late["stale_count"] == 1
-    assert await _state(graph_driver) == ("standard", 10, [("g-1", "in")])

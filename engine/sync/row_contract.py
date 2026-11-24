@@ -853,8 +853,17 @@ class SyncRowContract:
             got = "missing" if self.idproperty not in row else "null"
             id_declared = self.properties[self.idproperty].declared_type
             walk.defect(index, self.idproperty, f"{id_declared} (required id)", got)
+        if self._requires_version() and row.get(SYNC_VERSION) is None:
+            # Stale-write guard: a versioned row must name its version; null never reaches the write.
+            got = "missing" if SYNC_VERSION not in row else "null"
+            walk.defect(index, SYNC_VERSION, "int (required by the stale-write guard)", got)
         for key, value in row.items():
             self._walk_field(walk, index, key, value)
+
+    def _requires_version(self) -> bool:
+        from engine.config.settings import settings
+
+        return settings.sync_provenance_precedence_enabled and self.versioned
 
     def _carried(self, key: str) -> PropertySpec | None:
         """A parent-row key a childsync copies onto its relationship, when line identity is on."""
