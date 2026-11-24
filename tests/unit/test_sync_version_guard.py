@@ -60,19 +60,29 @@ def _cypher(raw: dict[str, Any], path: str = "/v1/sync/stations") -> str:
 
 def test_a_versioned_merge_locks_compares_and_writes_in_one_statement(precedence_on: None) -> None:
     lines = _cypher(_raw()).splitlines()
-    assert lines[:7] == [
+    assert lines[:10] == [
         "UNWIND $batch AS row",
         "MERGE (n:Station {station_id: row.node.station_id})",
         "SET n._tenant = $tenant",
-        STALE,
+        "WITH n, row",
         "CALL {",
-        "  WITH n, row, stale_write",
-        "  WITH n, row, stale_write WHERE NOT stale_write",
+        "  WITH n, row",
+        f"  {STALE}",
+        "  CALL {",
+        "    WITH n, row, stale_write",
+        "    WITH n, row, stale_write WHERE NOT stale_write",
     ]
-    assert lines[-2:] == ["}", "RETURN count(CASE WHEN stale_write THEN 1 END) AS stale_count"]
-    body = lines[7:-2]
-    assert body[0] == "  WITH n, row, row.node AS node_row"
-    assert body[1].startswith("  SET n += node_row{.*, ")
+    assert lines[-4:] == [
+        "  }",
+        "  RETURN stale_write",
+        "}",
+        "RETURN count(CASE WHEN stale_write THEN 1 END) AS stale_count",
+    ]
+    body = lines[10:-4]
+    assert body[0] == "    WITH n, row, row.node AS node_row"
+    assert body[1].startswith("    SET n += node_row{.*, ")
+    # An absent or null version never clears the stored one.
+    assert "sync_version: coalesce(node_row.sync_version, n.sync_version)" in body[1]
     # The childsync line write sits inside the guarded subquery: a stale row writes no item.
     assert any(line.strip().startswith("MERGE (n)-[rel:HANDLES") for line in body)
 
@@ -110,9 +120,40 @@ def test_a_versioned_match_set_counts_synced_and_stale(precedence_on: None) -> N
     )
     lines = _cypher(raw, "/v1/sync/station-bands").splitlines()
     assert lines[1] == "MATCH (n:Station {station_id: row.node.station_id})"
-    assert lines[2:4] == ["SET n._tenant = $tenant", STALE]
+    assert lines[2:4] == ["SET n._tenant = $tenant", "WITH n, row"]
+    assert f"  {STALE}" in lines
     assert "n.sync_version = coalesce(row.node.sync_version, n.sync_version)" in "\n".join(lines)
     assert lines[-1] == (
         "RETURN count(CASE WHEN NOT stale_write THEN 1 END) AS synced_count, "
         "count(CASE WHEN stale_write THEN 1 END) AS stale_count"
     )
+
+
+def test_a_listed_sync_version_is_still_kept_not_nulled(precedence_on: None) -> None:
+    raw = _raw()
+    raw["sync"]["endpoints"].append(
+        {
+            "path": "/v1/sync/station-bands",
+            "targetnode": "Station",
+            "idproperty": "station_id",
+            "batchstrategy": "UNWINDMATCHSET",
+            "fieldsupdated": ["band", "sync_version"],
+        }
+    )
+    cypher = _cypher(raw, "/v1/sync/station-bands")
+    assert "n.sync_version = row.node.sync_version" not in cypher
+    assert cypher.count("n.sync_version = coalesce(row.node.sync_version, n.sync_version)") == 1
+
+
+def test_a_versioned_patch_without_fieldsupdated_keeps_the_version(precedence_on: None) -> None:
+    raw = _raw()
+    raw["sync"]["endpoints"].append(
+        {
+            "path": "/v1/sync/station-patch",
+            "targetnode": "Station",
+            "idproperty": "station_id",
+            "batchstrategy": "UNWINDMATCHSET",
+        }
+    )
+    cypher = _cypher(raw, "/v1/sync/station-patch")
+    assert "sync_version: coalesce(node_row.sync_version, n.sync_version)" in cypher

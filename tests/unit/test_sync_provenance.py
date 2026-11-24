@@ -483,3 +483,16 @@ def test_an_edge_routed_item_may_not_write_a_synced_child_node_unguarded(precede
     kind["managedby"] = "static"  # a static child is written on create only: nothing to guard
     spec = DomainSpec(**raw)
     assert endpoint_shape_defects(spec, _endpoint(spec, "/v1/sync/stations")) == []
+
+
+def test_a_wire_only_child_property_is_not_an_unguarded_write(precedence_on: None) -> None:
+    raw = _declared_raw()
+    kind = next(node for node in raw["ontology"]["nodes"] if node["label"] == "Kind")
+    kind["managedby"] = "sync"
+    kind["properties"].append({"name": "details", "type": "map", "properties": [{"name": "note", "type": "string"}]})
+    station = next(node for node in raw["ontology"]["nodes"] if node["label"] == "Station")
+    items = next(prop for prop in station["properties"] if prop["name"] == "handled_kinds")["items"]["properties"]
+    items.append({"name": "details", "type": "string"})
+    spec = DomainSpec(**raw)
+    defects = endpoint_shape_defects(spec, _endpoint(spec, "/v1/sync/stations"))
+    assert not any("may not also write" in defect for defect in defects)

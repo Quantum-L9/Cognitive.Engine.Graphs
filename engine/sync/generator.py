@@ -117,23 +117,36 @@ def _versioned_write(head: list[str], body: list[str], tail: str) -> list[str]:
     """Wrap a row write in the stale-write guard: compare-and-set inside one statement.
 
     ``SET n._tenant`` takes the node's write lock before ``sync_version`` is
-    read, so two concurrent writers cannot both pass the comparison. A row whose
-    ``sync_version`` is lower than the stored one skips the whole unit subquery
-    (node, taxonomy and childsync writes); an equal one replays idempotently; a
-    row or node without a version is never stale.
+    read, so two concurrent writers cannot both pass the comparison. The
+    comparison runs per row inside the ``CALL``, so a later row of the same batch
+    reads what an earlier row wrote. A row whose ``sync_version`` is lower than
+    the stored one skips the guarded unit subquery (node, taxonomy and childsync
+    writes); an equal one replays idempotently; a row or node without a version
+    is never stale.
     """
     version = sanitize_label(SYNC_VERSION)
     return [
         *head,
         "SET n._tenant = $tenant",
-        f"WITH n, row, coalesce(row.node.{version} < n.{version}, false) AS stale_write",
+        "WITH n, row",
         "CALL {",
-        "  WITH n, row, stale_write",
-        "  WITH n, row, stale_write WHERE NOT stale_write",
-        *(f"  {line}" for line in body),
+        "  WITH n, row",
+        f"  WITH n, row, coalesce(row.node.{version} < n.{version}, false) AS stale_write",
+        "  CALL {",
+        "    WITH n, row, stale_write",
+        "    WITH n, row, stale_write WHERE NOT stale_write",
+        *(f"    {line}" for line in body),
+        "  }",
+        "  RETURN stale_write",
         "}",
         tail,
     ]
+
+
+def _version_kept(incoming: str) -> tuple[str, str]:
+    """``sync_version`` written from the row, never cleared by an absent or null one."""
+    version = sanitize_label(SYNC_VERSION)
+    return (version, f"coalesce({incoming}.{version}, n.{version})")
 
 
 def _projection(variable: str, entries: list[tuple[str, str]]) -> str:
@@ -211,14 +224,11 @@ class SyncGenerator:
         precedence = settings.sync_provenance_precedence_enabled
         governed = contract.governed if precedence else frozenset()
         if precedence and contract.versioned:
-            set_line = "SET n += row.node, n._tenant = $tenant"
-            body = [set_line]
-            if governed:
-                entries = _provenance_entries("node_row", "n", governed)
-                body = [
-                    "WITH n, row, row.node AS node_row",
-                    f"SET n += {_projection('node_row', entries)}, n._tenant = $tenant",
-                ]
+            entries = [*_provenance_entries("node_row", "n", governed), _version_kept("node_row")]
+            body = [
+                "WITH n, row, row.node AS node_row",
+                f"SET n += {_projection('node_row', entries)}, n._tenant = $tenant",
+            ]
             head = ["UNWIND $batch AS row", f"MERGE (n:{target} {{{id_property}: row.node.{id_property}}})"]
             body.extend(self._declared_tail(spec, contract, governed))
             return "\n".join(
@@ -500,6 +510,8 @@ class SyncGenerator:
             written = {sanitize_label(name) for name in resolved} | {
                 sanitize_label(provenance_companion(name)) for name in governed
             }
+            if versioned:
+                written.add(sanitize_label(SYNC_VERSION))  # kept below, never nulled
             set_clauses = [
                 f"n.{sanitize_label(field)} = {row_source}.{sanitize_label(field)}"
                 for field in spec.fieldsupdated
@@ -508,15 +520,17 @@ class SyncGenerator:
             set_clauses.extend(
                 f"n.{sanitize_label(key)} = {value}" for key, value in _provenance_entries(row_source, "n", resolved)
             )
-            if versioned and SYNC_VERSION not in spec.fieldsupdated:
-                version = sanitize_label(SYNC_VERSION)
-                set_clauses.append(f"n.{version} = coalesce({row_source}.{version}, n.{version})")
+            if versioned:
+                key, value = _version_kept(row_source)
+                set_clauses.append(f"n.{sanitize_label(key)} = {value}")
             set_clauses.append("n._tenant = $tenant")
             set_clauses.append("n.updated_at = datetime()")
             cypher_parts.append("SET " + ",\n    ".join(set_clauses))
-        elif governed:
+        elif governed or versioned:
             cypher_parts.append("WITH n, row, row.node AS node_row")
             entries = _provenance_entries("node_row", "n", governed)
+            if versioned:
+                entries.append(_version_kept("node_row"))
             cypher_parts.append(f"SET n += {_projection('node_row', entries)}, n._tenant = $tenant")
         else:
             cypher_parts.append(f"SET n += {row_source}, n._tenant = $tenant")

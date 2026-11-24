@@ -463,6 +463,7 @@ def _edge_routed_node_writes_defect(
         for prop in item
         if prop.name in node_props
         and not prop.wire_only
+        and not node_props[prop.name].wire_only
         and prop.name not in {child.targetid, *(child.edgeproperties or [])}
     )
     if not unguarded:
