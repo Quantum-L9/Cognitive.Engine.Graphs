@@ -1,0 +1,20 @@
+# --- L9_META ---
+# l9_schema: 1
+# origin: engine-specific
+# engine: graph
+# layer: [ci]
+# tags: [semgrep, rules, consumer]
+# owner: platform
+# status: active
+# --- /L9_META ---
+#
+# Scoped consumer rulepack declaration (l9-ci-sdk ADR 0021). Analyze (central
+# Core) runs the rule files listed here as CEG's consumer Semgrep instance,
+# beside the central required run, which this declaration does not change.
+# These four rules have no central equivalent (CEG org-CI inventory,
+# 2026-11-21); the other .semgrep/semgrep-rules.yaml rules are covered by the
+# contract scanner (SEC-002/003/005/006) and ruff DTZ.
+schema: l9.semgrep-consumer-rulepack/v1
+owner: Quantum-L9/Cognitive.Engine.Graphs
+rule_files:
+  - .semgrep/ceg-consumer-rules.yaml

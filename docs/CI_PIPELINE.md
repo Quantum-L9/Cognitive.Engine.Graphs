@@ -86,10 +86,16 @@ status: active
 > failing does not, by itself, prevent merging unless GitHub is configured
 > to require it.
 
-> `ci-quality.yml`'s `semgrep` job runs the policy scan (`semgrep ci` with
-> `.semgrep/` rules, inside `returntocorp/semgrep-agent:v1`, semgrep 1.36.0),
-> then `semgrep --test` on `.semgrep/fixtures/semgrep-rules.py` in the same
-> image. The fixtures pin each rule's true positives and true negatives, so a
+> `ci-quality.yml`'s `semgrep` job runs the policy scan (`semgrep scan
+> --config .semgrep/ --error`) with the Semgrep executable Core's
+> `install-consumer-ci@v2` installs at Core's locked version, then
+> `semgrep --test` on `.semgrep/fixtures/ceg-consumer-rules.py` with the same
+> executable. The four rules in `.semgrep/ceg-consumer-rules.yaml`
+> (`l9.httpx-async-context-required`, `l9.singleton-requires-lock`,
+> `l9.float-requires-try-except`, `l9.no-structlog-getchild`) have no central
+> equivalent, so `.l9/semgrep-consumer-rules.yaml` declares them as CEG's
+> consumer rulepack (l9-ci-sdk ADR 0021) and the required `Analyze (central
+> Core)` runs them as the `semgrep:consumer` instance on every pull request. The fixtures pin each rule's true positives and true negatives, so a
 > rule must be precise rather than silenced line by line with `nosemgrep`.
 > `.semgrepignore` restates semgrep's default ignore list and adds the
 > fixture directory.
