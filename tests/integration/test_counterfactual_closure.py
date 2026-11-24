@@ -20,6 +20,7 @@ one server never see each other's outcomes.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -209,10 +210,10 @@ async def test_missing_fingerprint_and_persistence_error_are_not_success(seed, g
     assert await seed.scenarios(negative) == []
 
 
-def _outcome_spec(base: DomainSpec) -> DomainSpec:
+def _outcome_spec(base: DomainSpec, *, max_scenarios: int = 3) -> DomainSpec:
     raw = base.model_dump(by_alias=True)
     raw["domain"]["id"] = _DB
-    raw["counterfactual"] = {"enabled": True, "max_scenarios_per_outcome": 3, "min_confidence": 0.3}
+    raw["counterfactual"] = {"enabled": True, "max_scenarios_per_outcome": max_scenarios, "min_confidence": 0.3}
     raw["feedbackloop"] = {**raw.get("feedbackloop", {}), "outcome_node_label": _LABEL}
     return DomainSpec.model_validate(raw)
 
@@ -362,3 +363,99 @@ async def test_counterfactual_stage_failure_keeps_outcome(
     assert again.get("replayed") is True
     assert {s["scenario_id"] for s in await seed.scenarios(outcome_id)} == {s["scenario_id"] for s in recovered}
     assert await _outcome_nodes(graph_driver, outcome_id) == 1
+
+
+async def _generation_stamp(graph_driver: Any, outcome_id: str) -> Any:
+    rows = await graph_driver.execute_query(
+        cypher=f"MATCH (o:{_LABEL} {{outcome_id: $oid}}) RETURN o.counterfactual_generated_at AS stamp",
+        parameters={"oid": outcome_id},
+        database=_DB,
+    )
+    return rows[0]["stamp"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_write_and_replay_stay_within_the_cap(
+    seed, graph_driver, minimal_domain_spec, monkeypatch
+) -> None:
+    """N7b claim: a first write and a replay racing over different pools store one run's scenarios only."""
+    from engine.handlers import handle_outcomes
+    from engine.state import get_state
+
+    await _seed_contrast(seed)
+    await _bind(graph_driver, _outcome_spec(minimal_domain_spec, max_scenarios=2))
+    outcome_id = f"{seed.tag}_race"
+    real_pool = CounterfactualGenerator._find_similar_positives
+    other_pool = [
+        {
+            "active_dimensions": ["price", "speed"],
+            "dimension_weights": {"price": 0.1},
+            "gates_passed": [],
+            "outcome_id": f"x{i}",
+        }
+        for i in range(3)
+    ]
+    barrier = asyncio.Barrier(2)
+    calls: list[int] = []
+
+    async def racing_pool(self: Any, fingerprint: dict[str, Any]) -> list[dict[str, Any]]:
+        calls.append(1)
+        pool = await real_pool(self, fingerprint) if len(calls) == 1 else other_pool
+        await asyncio.wait_for(barrier.wait(), timeout=30)  # both runs computed before either stores
+        return pool
+
+    try:
+        # Create the outcome_id uniqueness constraint first: two concurrent
+        # CREATE CONSTRAINT statements deadlock in Neo4j's schema lock, which is
+        # not the race under test.
+        await handle_outcomes(_DB, {**_failure_payload(seed, f"{seed.tag}_warm"), "outcome": "success"})
+        monkeypatch.setattr(CounterfactualGenerator, "_find_similar_positives", racing_pool)
+        results = await asyncio.gather(
+            handle_outcomes(_DB, _failure_payload(seed, outcome_id)),
+            handle_outcomes(_DB, _failure_payload(seed, outcome_id)),
+        )
+    finally:
+        get_state().reset()
+
+    assert sorted(bool(r.get("replayed")) for r in results) == [False, True]
+    assert len(calls) == 2, "both the first write and the replay ran generation"
+    stored = await seed.scenarios(outcome_id)
+    assert 1 <= len(stored) <= 2, f"stored {len(stored)} scenarios past max_scenarios_per_outcome=2"
+    assert len({s["key_difference"] for s in stored} & {"speed"}) in (0, len(stored))  # one run's set only
+    assert await _generation_stamp(graph_driver, outcome_id) is not None
+    assert await _outcome_nodes(graph_driver, outcome_id) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failed_store_leaves_no_claim_and_a_replay_recovers(
+    seed, graph_driver, minimal_domain_spec, monkeypatch
+) -> None:
+    """Same recovery rule as the propagation claim: a failed claim statement rolls its stamp back."""
+    from engine.handlers import handle_outcomes
+    from engine.state import get_state
+
+    await _seed_contrast(seed)
+    await _bind(graph_driver, _outcome_spec(minimal_domain_spec))
+    outcome_id = f"{seed.tag}_crash"
+    real_diff = CounterfactualGenerator._diff_fingerprints
+
+    def poisoned(self: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        scenarios = real_diff(self, **kwargs)
+        scenarios.append(
+            {**scenarios[0], "scenario_id": "cf_poison", "key_difference": None}
+        )  # null MERGE key: fails in-database
+        return scenarios
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(CounterfactualGenerator, "_diff_fingerprints", poisoned)
+            await handle_outcomes(_DB, _failure_payload(seed, outcome_id))
+        assert await seed.scenarios(outcome_id) == []
+        assert await _generation_stamp(graph_driver, outcome_id) is None, "a failed run left a claim behind"
+        replay = await handle_outcomes(_DB, _failure_payload(seed, outcome_id))
+    finally:
+        get_state().reset()
+
+    assert replay.get("replayed") is True
+    assert len(await seed.scenarios(outcome_id)) == 2
+    assert await _generation_stamp(graph_driver, outcome_id) is not None
