@@ -11,11 +11,11 @@
 # L9 Graph Cognitive Engine — repository Make implementation
 # ─────────────────────────────────────────────────────────────
 #
-# REPOSITORY-OWNED. The root Makefile is the Core-owned make-v1 facade
-# (Quantum-L9/l9-ci-core tools/l9_repo/facades/make-v1.mk), reproduced
+# REPOSITORY-OWNED. The root Makefile is the Core-owned make-v2 facade
+# (Quantum-L9/l9-ci-core tools/l9_repo/facades/make-v2.mk), reproduced
 # byte-for-byte and validated byte-for-byte by Core's repository verification.
-# Never edit the Makefile; it owns help/setup/validate/check/test and includes
-# this file. Do not redefine any of those five targets here.
+# Never edit the Makefile; it owns help/setup/validate/check/test-fast/test and
+# includes this file. Do not redefine any of those six targets here.
 #
 #   make setup     repo-setup     $(VENV) with runtime + dev + CI requirements
 #   make validate  repo-validate  action refs, contract wiring + scan, payload
@@ -25,12 +25,14 @@
 #   make check     repo-check     ruff check, ruff format --check,
 #                                 mypy engine/ chassis/ scripts/,
 #                                 C-009 cypher-lint (non-mutating)
-#   make test      repo-test      PR pytest owner: pytest -m unit (no Docker, no Neo4j)
-#   make test-deep                one full plan, not a make-v1 phase. Missing
+#   make test-fast repo-test-fast PR pytest owner: the literal PR_FAST_TESTS folder list
+#   make test      repo-test      whole unit suite: pytest tests/ -m unit (local, nightly)
+#   make test-deep                one full plan, not a make-v2 phase. Missing
 #                                 pinned Odoo mapper is NOT_RUN.
 #
-# Core runs setup -> validate -> check -> test in that order on a plain runner,
-# so none of the four leaves may need Docker or Neo4j. The pre-V2 meanings of
+# On a pull request, merge group or push Core runs setup -> validate -> check ->
+# test-fast; on any other event it runs test in place of test-fast. All of them
+# run on a plain runner, so no leaf may need Docker or Neo4j. The pre-V2 meanings of
 # the two facade names that this file used to define live on under new names:
 #
 #   make test-docker   the old `make test` (full suite inside the api container)
@@ -50,12 +52,12 @@ REPO_PY := $(if $(wildcard $(VENV)/bin/python),$(VENV)/bin/python,python3)
 PAYLOAD_COMPILER_ARGS := --stdout-only --domains-root tests/fixtures/domains \
 	--fixtures-root tests/fixtures/payloads/orbital-logistics --domain orbital-logistics
 
-.PHONY: repo-setup repo-validate repo-check repo-test
+.PHONY: repo-setup repo-validate repo-check repo-test repo-test-fast
 .PHONY: dev dev-build dev-down dev-logs dev-restart health
 .PHONY: test-docker test-unit test-integration test-deep seed shell neo4j-shell cypher-lint
 .PHONY: local-dbs local-api local-api-legacy local-api-sdk
 
-# ── Core Repository Execution V2 phases (make-v1 ABI) ──────
+# ── Core Repository Execution V2 phases (make-v2 ABI) ──────
 
 repo-setup:	## Create $(VENV) if absent; install the full profile (project + every group) from uv.lock
 	@test -x "$(VENV)/bin/python" || python3 -m venv "$(VENV)"
@@ -89,12 +91,47 @@ repo-check:	## Non-mutating static gate: ruff check, ruff format --check, mypy e
 	@echo "── Cypher lint (C-009) ──"
 	@$(REPO_PY) tools/cypher_lint.py
 
-# Single pull-request pytest owner. Bounded nonempty `-m unit` selection,
-# which includes the unit scoring, match, identity, API, and Gate modules.
+# Whole unit suite (make-v2 `test`): every `-m unit` test, including the unit
+# scoring, match, identity, API, and Gate modules. Core runs it on events other
+# than pull requests, merge groups and pushes; pull requests run repo-test-fast.
 # An empty collection is pytest exit 5 and fails this leaf. Integration,
 # performance, and the pinned-Odoo proof run only under test-deep.
 repo-test:	## Unit suite (pytest -m unit): no Docker, no Neo4j
 	@PYTHONPATH="$${PYTHONPATH:-}:." $(REPO_PY) -m pytest tests/ -m unit --tb=short -q
+
+# make-v2 pull-request selection (`make test-fast`). Core's expense judge accepts
+# only a literal, bounded list (folders allowed, never `tests/` itself), so every
+# folder and top-level module that holds `-m unit` tests is written out below.
+# A new test in one of these folders is selected with no edit here; a new test
+# folder or top-level module must be added. tests/e2e, tests/performance and
+# tests/fixtures hold no unit tests and are not listed. An empty selection or a
+# missing path fails before pytest runs. `repo-test` above stays the whole unit
+# suite (schedule and workflow_dispatch only; never on pull_request or push).
+PR_FAST_TESTS := \
+	tests/unit \
+	tests/contracts \
+	tests/architecture \
+	tests/compliance \
+	tests/invariants \
+	tests/integration \
+	tests/security \
+	tests/property \
+	tests/gap_fixes \
+	tests/scoring \
+	tests/test_algorithmic_upgrades.py \
+	tests/test_boot_and_registry.py \
+	tests/test_compliance_engine.py \
+	tests/test_config_loader.py \
+	tests/test_enrich.py \
+	tests/test_handlers.py \
+	tests/test_health_check.py \
+	tests/test_pareto_wiring.py \
+	tests/test_scoring_extended.py
+
+repo-test-fast:	## Bounded pull-request selection: the literal PR_FAST_TESTS folders (unit, no Docker, no Neo4j)
+	@test -n "$(strip $(PR_FAST_TESTS))" || { echo "repo-test-fast: PR_FAST_TESTS selects nothing" >&2; exit 1; }
+	@for path in $(PR_FAST_TESTS); do test -e "$$path" || { echo "repo-test-fast: missing $$path" >&2; exit 1; }; done
+	@PYTHONPATH="$${PYTHONPATH:-}:." $(REPO_PY) -m pytest $(PR_FAST_TESTS) -m unit --tb=short -q
 
 # ── Governance ─────────────────────────────────────────────
 
