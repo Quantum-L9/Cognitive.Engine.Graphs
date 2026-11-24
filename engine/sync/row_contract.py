@@ -113,16 +113,21 @@ def _item_properties(prop: PropertySpec | None) -> list[PropertySpec]:
     return prop.items.properties or []
 
 
-# ── value provenance (#351 revision) ──────────────────────────────────────────
+# ── value provenance (#351 revision; naming agreed with EIE #419) ─────────────
 #
-# A synced property ``X`` is provenance-governed when the same declaration
-# scope (node, item map or edge) also declares ``X_provenance`` as
-# ``enum[observed|enriched]``. EIE sends the companion beside the value and CEG
-# stores it beside the value; with ``sync_provenance_precedence_enabled`` the
-# sync Cypher compares the incoming companion with the stored one. The suffix
-# and the two values are the agreed wire vocabulary, never a domain term.
+# A node row field ``F`` is provenance-governed when its node also declares
+# ``F_provenance: enum[observed|enriched]``. A childsync ``list<map>`` item is
+# governed as a whole when its item map declares one ``provenance`` property
+# with that enum; it is stored as ``provenance`` on whatever receives the item's
+# keys (the line edge, or the child node). EIE sends the provenance beside the
+# value and CEG stores it beside the value; with
+# ``sync_provenance_precedence_enabled`` the sync Cypher compares the incoming
+# provenance with the stored one. A field or item that declares none stays in
+# legacy mode. The names and the two values are the agreed wire vocabulary,
+# never a domain term.
 
 PROVENANCE_SUFFIX = "_provenance"
+ITEM_PROVENANCE = "provenance"
 PROVENANCE_OBSERVED = "observed"
 PROVENANCE_ENRICHED = "enriched"
 PROVENANCE_VALUES = frozenset({PROVENANCE_OBSERVED, PROVENANCE_ENRICHED})
@@ -166,6 +171,28 @@ def provenance_defects(owner: str, properties: Sequence[PropertySpec]) -> list[s
             defects.append(
                 f"{owner} property {name!r}: provenance companion must be declared "
                 f"enum[{'|'.join(sorted(PROVENANCE_VALUES))}], found {prop.declared_type}"
+            )
+    return defects
+
+
+def item_provenance_declared(properties: Sequence[PropertySpec]) -> bool:
+    """The scope declares one item-level ``provenance`` as ``enum[observed|enriched]``."""
+    declared = {prop.name: prop for prop in properties}.get(ITEM_PROVENANCE)
+    return declared is not None and _is_provenance_declaration(declared)
+
+
+def item_provenance_defects(owner: str, properties: Sequence[PropertySpec], *, field_companions: bool) -> list[str]:
+    """An item-level ``provenance`` is the enum; an item map carries no per-field companion."""
+    defects: list[str] = []
+    for prop in properties:
+        if prop.name == ITEM_PROVENANCE and not _is_provenance_declaration(prop):
+            defects.append(
+                f"{owner} property {ITEM_PROVENANCE!r}: item provenance must be declared "
+                f"enum[{'|'.join(sorted(PROVENANCE_VALUES))}], found {prop.declared_type}"
+            )
+        if not field_companions and prop.name.endswith(PROVENANCE_SUFFIX):
+            defects.append(
+                f"{owner} property {prop.name!r}: an item declares one {ITEM_PROVENANCE!r}, not a per-field companion"
             )
     return defects
 
@@ -403,13 +430,16 @@ def _provenance_scope_defects(scope: _EndpointScope, endpoint: SyncEndpointSpec)
     defects = provenance_defects(f"{scope.where}: {scope.target.label}", scope.target.properties)
     for child in endpoint.childsync or []:
         item = _item_properties(scope.props.get(child.field))
-        defects.extend(provenance_defects(f"{scope.where}: {child.field} items", item))
+        defects.extend(item_provenance_defects(f"{scope.where}: {child.field} items", item, field_companions=False))
         child_node = _node(scope.domain_spec, child.targetnode)
         if child_node is not None:
-            defects.extend(provenance_defects(f"{scope.where}: {child_node.label}", child_node.properties))
+            # A child node may be another endpoint's target, with field companions of its own.
+            owner = f"{scope.where}: {child_node.label}"
+            defects.extend(item_provenance_defects(owner, child_node.properties, field_companions=True))
         for edge in scope.domain_spec.ontology.edges:
             if edge.type == child.edgetype:
-                defects.extend(provenance_defects(f"{scope.where}: edge {edge.type}", edge.properties))
+                owner = f"{scope.where}: edge {edge.type}"
+                defects.extend(item_provenance_defects(owner, edge.properties, field_companions=False))
     return defects
 
 
@@ -589,8 +619,8 @@ class ChildProjection:
     static: bool
     edge_keys: frozenset[str]  # item keys written on the relationship, not the child node
     fromrow: tuple[str, ...]  # parent-row keys that fill an item missing that edge key
-    # Provenance-governed keys: on the child node (item and child node both
-    # declare the companion) and on the relationship (item and edge both do).
+    # Keys under the item-level ``provenance``: on the child node (item and
+    # child node both declare it) and on the line edge (item and edge do).
     governed_node: frozenset[str] = frozenset()
     governed_edge: frozenset[str] = frozenset()
 
@@ -608,25 +638,20 @@ class ChildProjection:
         edge_keys = frozenset(name for name in (child.edgeproperties or []) if name in item_names)
         fromrow = tuple(name for name in (child.fromrow or []) if name in edge_keys)
         static = child_node is not None and child_node.managedby is ManagedByType.STATIC
-        item_governed = provenance_governed(_item_properties(item))
-        node_governed = item_governed & provenance_governed(child_node.properties if child_node else [])
-        governed_node = frozenset(
-            name
-            for name in node_governed
-            if name in writable and provenance_companion(name) in writable and name != child.targetid
-        )
-        edge_governed = item_governed & frozenset().union(
-            *(
-                provenance_governed(edge.properties)
-                for edge in domain_spec.ontology.edges
-                if edge.type == child.edgetype
-            )
-        )
-        governed_edge = frozenset(
-            name
-            for name in edge_governed
-            if name in edge_keys and provenance_companion(name) in edge_keys and name != child.edgeidentity
-        )
+        # Item-level provenance: governs every non-identity key the item writes.
+        item_governed = item_provenance_declared(_item_properties(item))
+        governed_node: frozenset[str] = frozenset()
+        if item_governed and child_node is not None and item_provenance_declared(child_node.properties):
+            if ITEM_PROVENANCE in writable:
+                governed_node = writable - {ITEM_PROVENANCE, child.targetid}
+        governed_edge: frozenset[str] = frozenset()
+        edges = [edge for edge in domain_spec.ontology.edges if edge.type == child.edgetype]
+        if (
+            item_governed
+            and ITEM_PROVENANCE in edge_keys
+            and any(item_provenance_declared(e.properties) for e in edges)
+        ):
+            governed_edge = edge_keys - {ITEM_PROVENANCE, child.edgeidentity or ""}
         return cls(
             child.field, child.targetid, item, writable, static, edge_keys, fromrow, governed_node, governed_edge
         )

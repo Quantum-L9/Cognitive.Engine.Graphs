@@ -11,14 +11,17 @@ status: active
 
 Value provenance precedence (#351 revision, 2026-11-24).
 
-A pack declares each governed synced property ``X`` beside
-``X_provenance: enum[observed|enriched]``. With
+Naming agreed with EIE #419: a node row field ``F`` is declared beside
+``F_provenance: enum[observed|enriched]``; a childsync ``list<map>`` item
+declares one item-level ``provenance`` with the same enum, stored on the line
+edge (or child node) that receives the item. With
 ``sync_provenance_precedence_enabled`` the sync Cypher resolves precedence in
 the write itself:
 
 * observed over enriched applies; enriched over a stored observed is refused;
 * observed over observed (and enriched over enriched) applies;
-* a null never clears; an absent companion counts as enriched.
+* a null never clears; an absent provenance value counts as enriched;
+* a field or item that declares no provenance stays in legacy mode, flag on or off.
 
 These tests pin the generated Cypher, the admission of the declarations and
 the declarations in the PlasticOS and synthneutral packs. The precedence is
@@ -37,12 +40,16 @@ from engine.config.schema import DomainSpec, PropertySpec, PropertyType
 from engine.config.settings import settings
 from engine.sync.generator import SyncGenerator
 from engine.sync.row_contract import (
+    ITEM_PROVENANCE,
     PROVENANCE_VALUES,
     endpoint_shape_defects,
+    item_provenance_declared,
+    item_provenance_defects,
     provenance_companion,
     provenance_defects,
     provenance_governed,
 )
+from tests.fixtures import typed_sync as fx
 from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
 
 pytestmark = pytest.mark.unit
@@ -52,6 +59,11 @@ SYNTHNEUTRAL = TEST_ONLY_ROOT / "synthneutral" / "spec.yaml"
 PLASTICOS_DESIGN = DESIGN_PACKS_ROOT / "plasticos" / "spec.yaml"
 PLASTICOS_TEST_ONLY = TEST_ONLY_ROOT / "plasticos" / "spec.yaml"
 
+ENUM = {"type": "enum", "values": ["observed", "enriched"]}
+DEMOTED = (
+    "(coalesce(child_row.provenance, $provenance_enriched) = $provenance_enriched "
+    "AND {stored}.provenance = $provenance_observed)"
+)
 KEEP_BAND = (
     "(node_row.band IS NULL OR (coalesce(node_row.band_provenance, $provenance_enriched) = "
     "$provenance_enriched AND n.band_provenance = $provenance_observed))"
@@ -118,11 +130,38 @@ def test_admission_checks_companions_only_with_precedence_on(monkeypatch: pytest
     ]
 
 
+def test_an_item_declares_one_provenance_not_per_field_companions() -> None:
+    items = [
+        PropertySpec(name="direction", type=PropertyType.STRING),
+        PropertySpec(name="direction_provenance", type=PropertyType.ENUM, values=["observed", "enriched"]),
+        PropertySpec(name=ITEM_PROVENANCE, type=PropertyType.ENUM, values=["observed", "inferred"]),
+    ]
+    assert not item_provenance_declared(items)
+    defects = item_provenance_defects("handled_kinds items", items, field_companions=False)
+    assert defects == [
+        (
+            "handled_kinds items property 'direction_provenance': an item declares one 'provenance', not a "
+            "per-field companion"
+        ),
+        (
+            "handled_kinds items property 'provenance': item provenance must be declared enum[enriched|observed], "
+            "found enum[observed|inferred]"
+        ),
+    ]
+    assert item_provenance_defects("Kind", items[:2], field_companions=True) == []
+
+
 @pytest.mark.parametrize("path", [SYNTHNEUTRAL, PLASTICOS_DESIGN, PLASTICOS_TEST_ONLY], ids=lambda p: p.parent.name)
 def test_shipped_packs_admit_with_precedence_on(path: Path, precedence_on: None) -> None:
     spec = _spec(path)
     for endpoint in spec.sync.endpoints:
         assert endpoint_shape_defects(spec, endpoint) == [], endpoint.path
+
+
+def _item_provenance(properties: list[dict[str, Any]]) -> bool:
+    assert not any(prop["name"].endswith("_provenance") for prop in properties)
+    declared = [prop for prop in properties if prop["name"] == ITEM_PROVENANCE]
+    return len(declared) == 1 and declared[0]["type"] == "enum" and set(declared[0]["values"]) == PROVENANCE_VALUES
 
 
 def _companions(properties: list[dict[str, Any]]) -> tuple[set[str], set[str]]:
@@ -151,11 +190,11 @@ def test_synthneutral_declares_a_companion_for_every_synced_field() -> None:
     synced = {name for name in names if not name.endswith("_provenance")} - SYNTHNEUTRAL_EXEMPT
     assert governed == synced
     items = next(prop for prop in station["properties"] if prop["name"] == "handled_kinds")["items"]["properties"]
-    assert _companions(items)[1] == {"direction"}
+    assert _item_provenance(items)
     edge = next(edge for edge in raw["ontology"]["edges"] if edge["type"] == "HANDLES")
-    assert _companions(edge["properties"])[1] == {"direction"}
+    assert _item_provenance(edge["properties"])
     child = raw["sync"]["endpoints"][0]["childsync"][0]
-    assert {"direction", "direction_provenance"} <= set(child["edgeproperties"])
+    assert {"direction", ITEM_PROVENANCE} <= set(child["edgeproperties"])
 
 
 @pytest.mark.parametrize("path", [PLASTICOS_DESIGN, PLASTICOS_TEST_ONLY], ids=["design", "test_only"])
@@ -166,13 +205,12 @@ def test_plasticos_declares_a_companion_for_every_synced_field(path: Path) -> No
         names, governed = _companions(nodes[label]["properties"])
         assert governed == {name for name in names if not name.endswith("_provenance")} - exempt, label
     items = next(prop for prop in nodes["Facility"]["properties"] if prop["name"] == "processed_polymers")
-    assert _companions(items["items"]["properties"])[1] == {"direction", "form"}
+    assert _item_provenance(items["items"]["properties"])
     edge = next(edge for edge in raw["ontology"]["edges"] if edge["type"] == "PROCESSES")
-    assert _companions(edge["properties"])[1] == {"direction", "form"}
+    assert _item_provenance(edge["properties"])
     child = _endpoint(DomainSpec(**raw), "/v1/sync/facilities").childsync[0]
-    for name in ("direction", "form"):
-        assert {name, provenance_companion(name)} <= set(child.edgeproperties or [])
-        assert {name, provenance_companion(name)} <= set(child.fromrow or [])
+    assert {"direction", "form", ITEM_PROVENANCE} <= set(child.edgeproperties or [])
+    assert child.fromrow == ["direction", "form"]
 
 
 def test_plasticos_test_only_pack_carries_the_design_pack_body_verbatim() -> None:
@@ -195,6 +233,30 @@ def test_precedence_off_leaves_the_cypher_unchanged() -> None:
         "SET n += row.node, n._tenant = $tenant",
     ]
     assert SyncGenerator(spec).query_parameters() == {}
+
+
+def test_a_pack_with_no_provenance_declared_stays_legacy_with_the_flag_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """EIE #419 compatibility: no declared provenance -> byte-identical Cypher, flag on or off."""
+    spec = fx.spec()
+    endpoints = [endpoint for endpoint in spec.sync.endpoints if endpoint.targetnode and not endpoint.targetedge]
+    legacy = [SyncGenerator(spec).generate_sync_query(endpoint, []) for endpoint in endpoints]
+    monkeypatch.setattr(settings, "sync_provenance_precedence_enabled", True)
+    assert [SyncGenerator(spec).generate_sync_query(endpoint, []) for endpoint in endpoints] == legacy
+    assert all("provenance" not in cypher for cypher in legacy)
+
+
+def test_an_undeclared_item_stays_legacy_beside_declared_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw = yaml.safe_load(SYNTHNEUTRAL.read_text())
+    station = next(node for node in raw["ontology"]["nodes"] if node["label"] == "Station")
+    items = next(prop for prop in station["properties"] if prop["name"] == "handled_kinds")["items"]["properties"]
+    items[:] = [prop for prop in items if prop["name"] != ITEM_PROVENANCE]
+    raw["sync"]["endpoints"][0]["childsync"][0]["edgeproperties"] = ["slot_id", "direction"]
+    spec = DomainSpec(**raw)
+    endpoint = _endpoint(spec, "/v1/sync/stations")
+    monkeypatch.setattr(settings, "sync_provenance_precedence_enabled", True)
+    cypher = SyncGenerator(spec).generate_sync_query(endpoint, [])
+    assert "SET rel.slot_id = child_row.slot_id, rel.direction = child_row.direction, rel._tenant = $tenant" in cypher
+    assert "band: CASE WHEN" in cypher  # the declared row fields are still governed
 
 
 def test_node_properties_resolve_precedence_in_the_set(precedence_on: None) -> None:
@@ -222,48 +284,53 @@ def test_node_properties_resolve_precedence_in_the_set(precedence_on: None) -> N
     }
 
 
-def test_line_edge_properties_resolve_precedence_value_before_companion(precedence_on: None) -> None:
+def test_line_edge_values_follow_the_item_provenance(precedence_on: None) -> None:
     spec = _spec(SYNTHNEUTRAL)
     cypher = SyncGenerator(spec).generate_sync_query(_endpoint(spec, "/v1/sync/stations"), [])
     rel_set = next(line.strip() for line in cypher.splitlines() if line.strip().startswith("SET rel."))
-    keep = (
-        "(child_row.direction IS NULL OR (coalesce(child_row.direction_provenance, $provenance_enriched) = "
-        "$provenance_enriched AND rel.direction_provenance = $provenance_observed))"
-    )
+    demoted = DEMOTED.format(stored="rel")
     assert rel_set == (
         "SET rel.slot_id = child_row.slot_id, "
-        f"rel.direction = CASE WHEN {keep} THEN rel.direction ELSE child_row.direction END, "
-        f"rel.direction_provenance = CASE WHEN {keep} THEN rel.direction_provenance "
-        "ELSE coalesce(child_row.direction_provenance, $provenance_enriched) END, "
+        f"rel.direction = CASE WHEN child_row.direction IS NULL OR {demoted} THEN rel.direction "
+        "ELSE child_row.direction END, "
+        f"rel.provenance = CASE WHEN (child_row.direction IS NULL) OR {demoted} THEN rel.provenance "
+        "ELSE coalesce(child_row.provenance, $provenance_enriched) END, "
         "rel._tenant = $tenant"
     )
-    # The edge identity is never governed; the static child node takes no edge key.
+    # The edge identity is never governed; the static child node takes no line key.
     assert "rel.slot_id = CASE" not in cypher
-    assert "ON CREATE SET c += child_row{.*, slot_id: null, direction: null, direction_provenance: null}" in cypher
+    assert "ON CREATE SET c += child_row{.*, slot_id: null, direction: null, provenance: null}" in cypher
 
 
-def test_child_node_properties_resolve_precedence(precedence_on: None) -> None:
+def test_plasticos_line_values_follow_the_item_provenance(precedence_on: None) -> None:
+    spec = _spec(PLASTICOS_DESIGN)
+    cypher = SyncGenerator(spec).generate_sync_query(_endpoint(spec, "/v1/sync/facilities"), [])
+    demoted = DEMOTED.format(stored="rel")
+    assert (
+        f"rel.provenance = CASE WHEN (child_row.direction IS NULL AND child_row.form IS NULL) OR {demoted} "
+        "THEN rel.provenance ELSE coalesce(child_row.provenance, $provenance_enriched) END, rel._tenant = $tenant"
+    ) in cypher
+    assert "rel.line_id = child_row.line_id" in cypher
+
+
+def test_child_node_values_follow_the_item_provenance(precedence_on: None) -> None:
     raw = yaml.safe_load(SYNTHNEUTRAL.read_text())
     kind = next(node for node in raw["ontology"]["nodes"] if node["label"] == "Kind")
     kind["managedby"] = "sync"
-    kind["properties"] += [
-        {"name": "grade", "type": "string"},
-        {"name": "grade_provenance", "type": "enum", "values": ["observed", "enriched"]},
-    ]
+    kind["properties"] += [{"name": "grade", "type": "string"}, {"name": ITEM_PROVENANCE, **ENUM}]
     station = next(node for node in raw["ontology"]["nodes"] if node["label"] == "Station")
     items = next(prop for prop in station["properties"] if prop["name"] == "handled_kinds")["items"]["properties"]
-    items += [
-        {"name": "grade", "type": "string"},
-        {"name": "grade_provenance", "type": "enum", "values": ["observed", "enriched"]},
-    ]
+    items.append({"name": "grade", "type": "string"})
+    child = raw["sync"]["endpoints"][0]["childsync"][0]
+    for key in ("edgeidentity", "edgeproperties"):
+        child.pop(key)
+    raw["gates"] = [gate for gate in raw["gates"] if gate["type"] != "traversal"]
     spec = DomainSpec(**raw)
     cypher = SyncGenerator(spec).generate_sync_query(_endpoint(spec, "/v1/sync/stations"), [])
-    keep = (
-        "(child_row.grade IS NULL OR (coalesce(child_row.grade_provenance, $provenance_enriched) = "
-        "$provenance_enriched AND c.grade_provenance = $provenance_observed))"
-    )
-    assert f"grade: CASE WHEN {keep} THEN c.grade ELSE child_row.grade END" in cypher
-    assert "  SET c += child_row{.*, slot_id: null, direction: null, direction_provenance: null, grade: CASE" in cypher
+    demoted = DEMOTED.format(stored="c")
+    assert f"grade: CASE WHEN child_row.grade IS NULL OR {demoted} THEN c.grade ELSE child_row.grade END" in cypher
+    assert "c.code" not in cypher  # the child id is never governed
+    assert f"provenance: CASE WHEN (child_row.grade IS NULL) OR {demoted}" in cypher
 
 
 def test_match_set_fieldsupdated_resolves_precedence(precedence_on: None) -> None:
@@ -318,12 +385,12 @@ def test_projection_keeps_companions_for_the_write(precedence_on: None) -> None:
                 "station_id": "s1",
                 "band": "A",
                 "band_provenance": "observed",
-                "handled_kinds": [{"code": "k", "slot_id": "1", "direction": "in", "direction_provenance": "enriched"}],
+                "handled_kinds": [{"code": "k", "slot_id": "1", "direction": "in", "provenance": "enriched"}],
             }
         ],
     )
     assert undeclared == {}
     assert rows[0]["node"] == {"station_id": "s1", "band": "A", "band_provenance": "observed"}
     assert rows[0]["children"]["handled_kinds"] == [
-        {"code": "k", "slot_id": "1", "direction": "in", "direction_provenance": "enriched"}
+        {"code": "k", "slot_id": "1", "direction": "in", "provenance": "enriched"}
     ]

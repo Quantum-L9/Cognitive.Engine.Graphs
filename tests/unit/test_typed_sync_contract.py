@@ -69,7 +69,7 @@ def test_a_static_child_is_written_on_create_only() -> None:
     spec = fx.plasticos()
     cypher = SyncGenerator(spec).generate_sync_query(fx.endpoint(spec, "/v1/sync/facilities"), [])
     assert (
-        "  ON CREATE SET c += child_row{.*, line_id: null, direction: null, direction_provenance: null, form: null, form_provenance: null}, c._tenant = $tenant"
+        "  ON CREATE SET c += child_row{.*, line_id: null, direction: null, form: null, provenance: null}, c._tenant = $tenant"
         in cypher
     )
     assert "SET n += row{.*" not in cypher

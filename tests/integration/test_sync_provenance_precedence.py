@@ -13,9 +13,11 @@ Value provenance precedence (#351 revision) executed on Neo4j.
 
 Runs ``handle_sync`` on the PlasticOS design pack's facilities endpoint with
 ``sync_provenance_precedence_enabled`` on, against testcontainers-neo4j. The
-Facility property ``tier`` and the PROCESSES line property ``direction`` are
-each declared beside an ``enum[observed|enriched]`` companion; every case reads
-the stored value and companion back from the graph.
+Facility row field ``tier`` is declared beside ``tier_provenance``; each
+``processed_polymers`` item declares one item-level ``provenance`` (EIE #419),
+stored on its PROCESSES line. Every case reads the stored values and provenance
+back from the graph. The last case runs the synthetic orbital pack, which
+declares no provenance: legacy last-write-wins with the flag on.
 """
 
 from __future__ import annotations
@@ -56,15 +58,15 @@ async def _tier(graph_driver: Any, facility_id: str) -> tuple[Any, Any]:
     return rows[0]["tier"], rows[0]["provenance"]
 
 
-async def _direction(graph_driver: Any, line_id: str) -> tuple[Any, Any]:
+async def _line(graph_driver: Any, line_id: str) -> tuple[Any, Any, Any]:
     rows = await graph_driver.execute_query(
         "MATCH (:Facility)-[r:PROCESSES {line_id: $line}]->(:PolymerFamily) "
-        "RETURN r.direction AS direction, r.direction_provenance AS provenance",
+        "RETURN r.direction AS direction, r.form AS form, r.provenance AS provenance",
         parameters={"line": line_id},
         database=PLASTICOS,
     )
     assert len(rows) == 1
-    return rows[0]["direction"], rows[0]["provenance"]
+    return rows[0]["direction"], rows[0]["form"], rows[0]["provenance"]
 
 
 @pytest.mark.asyncio
@@ -111,23 +113,52 @@ async def test_a_null_never_clears(design_pack_deps, graph_driver, precedence_on
 
 
 @pytest.mark.asyncio
-async def test_line_edge_properties_follow_the_same_precedence(design_pack_deps, graph_driver, precedence_on) -> None:
-    def line(direction: Any, provenance: str | None) -> dict[str, Any]:
-        item: dict[str, Any] = {"code": "HDPE", "line_id": "f-7-1", "direction": direction, "form": "PELLET"}
+async def test_line_values_follow_the_item_provenance(design_pack_deps, graph_driver, precedence_on) -> None:
+    def line(direction: Any, form: Any, provenance: str | None) -> dict[str, Any]:
+        item: dict[str, Any] = {"code": "HDPE", "line_id": "f-7-1", "direction": direction, "form": form}
         if provenance is not None:
-            item["direction_provenance"] = provenance
+            item["provenance"] = provenance
         return _facility("f-7", processed_polymers=[item])
 
-    await _sync(line("out", "enriched"))
-    assert await _direction(graph_driver, "f-7-1") == ("out", "enriched")
-    await _sync(line("in", "observed"))
-    assert await _direction(graph_driver, "f-7-1") == ("in", "observed")
-    await _sync(line("out", "enriched"))
-    assert await _direction(graph_driver, "f-7-1") == ("in", "observed")
-    await _sync(line(None, "observed"))
-    assert await _direction(graph_driver, "f-7-1") == ("in", "observed")
-    await _sync(line("out", "observed"))
-    assert await _direction(graph_driver, "f-7-1") == ("out", "observed")
+    await _sync(line("out", "FLAKE", "enriched"))
+    assert await _line(graph_driver, "f-7-1") == ("out", "FLAKE", "enriched")
+    await _sync(line("in", "PELLET", "observed"))
+    assert await _line(graph_driver, "f-7-1") == ("in", "PELLET", "observed")
+    await _sync(line("out", "FLAKE", "enriched"))
+    assert await _line(graph_driver, "f-7-1") == ("in", "PELLET", "observed")
+    await _sync(line("out", "FLAKE", None))  # no item provenance counts as enriched
+    assert await _line(graph_driver, "f-7-1") == ("in", "PELLET", "observed")
+    await _sync(line(None, "REGRIND", "observed"))  # a null never clears
+    assert await _line(graph_driver, "f-7-1") == ("in", "REGRIND", "observed")
+    await _sync(line("out", None, "observed"))
+    assert await _line(graph_driver, "f-7-1") == ("out", "REGRIND", "observed")
+
+
+@pytest.mark.asyncio
+async def test_an_all_null_item_leaves_the_stored_provenance(design_pack_deps, graph_driver, precedence_on) -> None:
+    item = {"code": "PP", "line_id": "f-9-1", "direction": "out", "form": "FLAKE", "provenance": "enriched"}
+    await _sync(_facility("f-9", processed_polymers=[item]))
+    blank = {"code": "PP", "line_id": "f-9-1", "direction": None, "form": None, "provenance": "observed"}
+    await _sync(_facility("f-9", processed_polymers=[blank]))
+    assert await _line(graph_driver, "f-9-1") == ("out", "FLAKE", "enriched")
+
+
+@pytest.mark.asyncio
+async def test_a_pack_with_no_provenance_stays_last_write_wins_with_the_flag_on(
+    engine_deps, graph_driver, clean_db, precedence_on
+) -> None:
+    from engine.handlers import handle_sync
+
+    orbital = "orbital-logistics"
+    for reliability in (0.9, 0.4):
+        result = await handle_sync(
+            orbital, {"entity_type": "orbital-depots", "batch": [{"depot_id": "9101", "reliability": reliability}]}
+        )
+        assert result.get("status") in ("ok", "success")
+    rows = await graph_driver.execute_query(
+        "MATCH (d:OrbitalDepot {depot_id: '9101'}) RETURN d.reliability AS reliability", database=orbital
+    )
+    assert rows[0]["reliability"] == 0.4
 
 
 @pytest.mark.asyncio

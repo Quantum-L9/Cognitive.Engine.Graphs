@@ -173,15 +173,13 @@ ontology:
         - name: direction
           type: string
           description: in is material entering (buyer acceptance); out is material leaving
-        - name: direction_provenance
-          type: enum
-          values: [observed, enriched]
         - name: form
           type: string
           description: Physical form this line accepts or ships. Blank is not a form.
-        - name: form_provenance
+        - name: provenance
           type: enum
           values: [observed, enriched]
+          description: Provenance of this line's values (#351 revision; EIE #419)
   - label: MaterialIntake
     managedby: api
     queryentity: true
@@ -326,15 +324,13 @@ ontology:
     - name: direction
       type: string
       description: in or out. Blank stays blank and is not buyer acceptance.
-    - name: direction_provenance
-      type: enum
-      values: [observed, enriched]
     - name: form
       type: string
       description: Physical form of this line. Blank is not eligible.
-    - name: form_provenance
+    - name: provenance
       type: enum
       values: [observed, enriched]
+      description: Provenance of this line's values (#351 revision; EIE #419)
   - type: ACCEPTS_FORM
     from: Facility
     to: MaterialForm
@@ -665,14 +661,11 @@ sync:
       edgeproperties:
       - line_id
       - direction
-      - direction_provenance
       - form
-      - form_provenance
+      - provenance
       fromrow:
       - direction
-      - direction_provenance
       - form
-      - form_provenance
   - path: /v1/sync/polymerfamilies
     targetnode: PolymerFamily
     idproperty: code

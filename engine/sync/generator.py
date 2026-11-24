@@ -32,6 +32,7 @@ from engine.config.schema import (
 )
 from engine.config.tenant_mapping import declared_ref_namespace
 from engine.sync.row_contract import (
+    ITEM_PROVENANCE,
     PROVENANCE_ENRICHED,
     PROVENANCE_OBSERVED,
     ChildProjection,
@@ -75,6 +76,39 @@ def _provenance_entries(incoming: str, stored: str, names: frozenset[str]) -> li
                 ),
             )
         )
+    return entries
+
+
+def _item_provenance_entries(incoming: str, stored: str, names: frozenset[str]) -> list[tuple[str, str]]:
+    """Pairs for an item governed by one item-level ``provenance``: each value, then the provenance.
+
+    A value stays when it is null or when the item is enriched (or carries no
+    provenance) over a stored observed item. The provenance moves only when the
+    item writes at least one value.
+    """
+    if not names:
+        return []
+    marker = sanitize_label(ITEM_PROVENANCE)
+    demoted = (
+        f"(coalesce({incoming}.{marker}, $provenance_enriched) = $provenance_enriched "
+        f"AND {stored}.{marker} = $provenance_observed)"
+    )
+    entries: list[tuple[str, str]] = []
+    for name in sorted(names):
+        prop = sanitize_label(name)
+        entries.append(
+            (prop, f"CASE WHEN {incoming}.{prop} IS NULL OR {demoted} THEN {stored}.{prop} ELSE {incoming}.{prop} END")
+        )
+    all_null = " AND ".join(f"{incoming}.{sanitize_label(name)} IS NULL" for name in sorted(names))
+    entries.append(
+        (
+            marker,
+            (
+                f"CASE WHEN ({all_null}) OR {demoted} THEN {stored}.{marker} "
+                f"ELSE coalesce({incoming}.{marker}, $provenance_enriched) END"
+            ),
+        )
+    )
     return entries
 
 
@@ -223,9 +257,11 @@ class SyncGenerator:
         write = "ON CREATE SET" if projection.static else "SET"
         precedence = settings.sync_provenance_precedence_enabled
         edge_routed = frozenset(child.edgeproperties or []) & projection.edge_keys if use_lines else frozenset()
-        node_governed = projection.governed_node - edge_routed if precedence else frozenset()
+        node_governed: frozenset[str] = frozenset()
+        if precedence and ITEM_PROVENANCE not in edge_routed:
+            node_governed = projection.governed_node - edge_routed
         edge_governed = projection.governed_edge if precedence and use_lines else frozenset()
-        node_entries = _provenance_entries("child_row", "c", node_governed)
+        node_entries = _item_provenance_entries("child_row", "c", node_governed)
         merge_node = f"  MERGE (c:{child_label} {{{child_id}: child_row.{child_id}}})"
         header = [
             "WITH n, row",
@@ -248,17 +284,13 @@ class SyncGenerator:
             [f"{name}: null" for name in node_names]
             + [f"{sanitize_label(key)}: {value}" for key, value in node_entries]
         )
-        # A governed edge property and its companion are written by the
-        # precedence expressions (value first: its test reads the stored
-        # companion, which the second assignment then replaces).
-        governed_edge_keys = {sanitize_label(name) for name in edge_governed} | {
-            sanitize_label(provenance_companion(name)) for name in edge_governed
-        }
+        # Governed line properties and the item provenance are written by the
+        # precedence expressions (values first: their test reads the stored
+        # provenance, which the last assignment then replaces).
+        edge_entries = _item_provenance_entries("child_row", "rel", edge_governed)
+        governed_edge_keys = {sanitize_label(key) for key, _ in edge_entries}
         rel_items = [f"rel.{name} = child_row.{name}" for name in names if name not in governed_edge_keys]
-        rel_items.extend(
-            f"rel.{sanitize_label(key)} = {value}"
-            for key, value in _provenance_entries("child_row", "rel", edge_governed)
-        )
+        rel_items.extend(f"rel.{sanitize_label(key)} = {value}" for key, value in edge_entries)
         rel_set = ", ".join(rel_items)
         keyed = f"{keyed_open}{identity_name}: child_row.{identity_name}{keyed_close}"
         absent = f"child_row.{identity_name} IS NULL OR child_row.{identity_name} = ''"

@@ -12,14 +12,15 @@
 #           runtime pack was reachable (CTO decision, campaign A0).
 # composed: Cognitive.Engine.Graphs tests/fixtures/design_packs/plasticos/spec.yaml
 #           @ r4 (#351 provenance revision; same commit as this file)
-#           sha256 166d6ae99bccbce27b0ef8d599558231cebd334dc8c33e6fa40cda1a8f017717
+#           sha256 27c423f46fc034ca967bc3afe1565e8541f3143da794904f296ce5d357784bb2
 #           (bytes below this header verbatim, except its L9_META block, which C-18
 #           requires at the top of the file and which is retagged test-only) + appended blocks.
 #           EIE cartridge counterpart: Enrichment.Inference.Engine
 #           domains/plasticos/spec.yaml (current.json) sha256
 #           dd09cc9ec8fea4a8766b0f3650cfab83a0b0a894d0e499f9f75405f21ae48cfe, unmodified.
-#           r4: both sides declare X_provenance: enum[observed|enriched] beside
-#           each synced non-identity field (#351 revision, 2026-11-24).
+#           r4: both sides declare F_provenance: enum[observed|enriched] beside
+#           each synced non-identity row field and one item-level provenance
+#           per childsync item (#351 revision, EIE #419, 2026-11-24).
 # overlay:  (1) plugins.inference_rules authorizes the one registered rule this
 #           pack can witness (infer_geography_from_postal_code). `plugins` is an
 #           existing DomainSpec key (engine/config/schema.py PluginsSpec); no new
@@ -192,15 +193,13 @@ ontology:
         - name: direction
           type: string
           description: in is material entering (buyer acceptance); out is material leaving
-        - name: direction_provenance
-          type: enum
-          values: [observed, enriched]
         - name: form
           type: string
           description: Physical form this line accepts or ships. Blank is not a form.
-        - name: form_provenance
+        - name: provenance
           type: enum
           values: [observed, enriched]
+          description: Provenance of this line's values (#351 revision; EIE #419)
   - label: MaterialIntake
     managedby: api
     queryentity: true
@@ -345,15 +344,13 @@ ontology:
     - name: direction
       type: string
       description: in or out. Blank stays blank and is not buyer acceptance.
-    - name: direction_provenance
-      type: enum
-      values: [observed, enriched]
     - name: form
       type: string
       description: Physical form of this line. Blank is not eligible.
-    - name: form_provenance
+    - name: provenance
       type: enum
       values: [observed, enriched]
+      description: Provenance of this line's values (#351 revision; EIE #419)
   - type: ACCEPTS_FORM
     from: Facility
     to: MaterialForm
@@ -684,14 +681,11 @@ sync:
       edgeproperties:
       - line_id
       - direction
-      - direction_provenance
       - form
-      - form_provenance
+      - provenance
       fromrow:
       - direction
-      - direction_provenance
       - form
-      - form_provenance
   - path: /v1/sync/polymerfamilies
     targetnode: PolymerFamily
     idproperty: code

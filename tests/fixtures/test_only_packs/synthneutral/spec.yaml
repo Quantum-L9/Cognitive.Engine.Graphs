@@ -15,8 +15,9 @@
 #          traversal hard gate with edge predicates (nullbehavior fail), a
 #          threshold gate with nullbehavior pass, and one scoring dimension.
 # purpose: P05 domain-neutrality witness. See TEST_ONLY.json for sha256.
-# provenance: every synced non-identity property X is declared beside
-#          X_provenance: enum[observed|enriched] (#351 revision, 2026-11-24).
+# provenance: every synced non-identity row field F is declared beside
+#          F_provenance: enum[observed|enriched]; each childsync item declares
+#          one item-level provenance (#351 revision, EIE #419, 2026-11-24).
 # --- end TEST_ONLY header ---
 domain:
   id: synthneutral
@@ -51,7 +52,7 @@ ontology:
         - {name: code, type: string, required: true}
         - {name: slot_id, type: string}
         - {name: direction, type: string}
-        - {name: direction_provenance, type: enum, values: [observed, enriched]}
+        - {name: provenance, type: enum, values: [observed, enriched]}
   - label: Kind
     managedby: static
     taxonomy: true
@@ -75,7 +76,7 @@ ontology:
     properties:
     - {name: slot_id, type: string}
     - {name: direction, type: string}
-    - {name: direction_provenance, type: enum, values: [observed, enriched]}
+    - {name: provenance, type: enum, values: [observed, enriched]}
 matchentities:
   candidate:
   - {label: Station, matchdirection: request_to_station}
@@ -134,7 +135,7 @@ sync:
       edgetype: HANDLES
       edgedirection: parenttochild
       edgeidentity: slot_id
-      edgeproperties: [slot_id, direction, direction_provenance]
+      edgeproperties: [slot_id, direction, provenance]
 # --- TEST_ONLY overlay: capability grants for a staging-mode CEG ---
 # CEG refuses writes in staging without an explicit grant (engine/handlers.py
 # _enforce_capability). Grants are scoped to this tenant only; score:read is
