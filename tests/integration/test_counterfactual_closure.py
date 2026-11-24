@@ -286,12 +286,10 @@ async def test_repeat_outcome_records_one_observation(seed, graph_driver, minima
 async def test_counterfactual_stage_failure_keeps_outcome(
     seed, graph_driver, minimal_domain_spec, monkeypatch, caplog
 ) -> None:
-    """C13 / F10 witness: the outcome survives a generator failure; a replay does not rerun the stage.
+    """C13 / C14 (F10): the outcome survives a generator failure and a replay recovers the stage.
 
-    The stage failure is visible only as a WARNING log ("Counterfactual
-    generation failed"); the response carries no counterfactual status and a
-    replay of the same outcome_id skips the stage (handle_outcomes, owned by
-    the parallel campaign: N7-HANDOFF), so no scenario is ever produced.
+    The failure is visible as a WARNING log only (the outcome payload shape is
+    frozen); a keyed replay reruns the idempotent stage exactly once.
     """
     from engine.handlers import handle_outcomes
     from engine.state import get_state
@@ -309,6 +307,8 @@ async def test_counterfactual_stage_failure_keeps_outcome(
             patch.setattr(CounterfactualGenerator, "generate_for_outcome", _boom)
             first = await handle_outcomes(_DB, _failure_payload(seed, outcome_id))
         replay = await handle_outcomes(_DB, _failure_payload(seed, outcome_id))
+        recovered = await seed.scenarios(outcome_id)
+        again = await handle_outcomes(_DB, _failure_payload(seed, outcome_id))
     finally:
         get_state().reset()
 
@@ -329,5 +329,10 @@ async def test_counterfactual_stage_failure_keeps_outcome(
     assert failures[0].exc_info is not None
     assert "transient counterfactual failure" in str(failures[0].exc_info[1])
     assert replay.get("replayed") is True
-    # F10 (CONDITIONAL C14): the replay path does not recover the failed stage.
-    assert await seed.scenarios(outcome_id) == []
+    # F10 / C14 (N7b): the replay reruns the stage and recovers the scenarios
+    # the failed first write never stored; a further replay adds none.
+    assert len(recovered) == 2
+    assert {s["counterfactual_outcome"] for s in recovered} == {"success"}
+    assert again.get("replayed") is True
+    assert {s["scenario_id"] for s in await seed.scenarios(outcome_id)} == {s["scenario_id"] for s in recovered}
+    assert await _outcome_nodes(graph_driver, outcome_id) == 1
