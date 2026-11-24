@@ -442,6 +442,34 @@ def childsync_edges(domain_spec: DomainSpec, parent_label: str, child: ChildSync
     ]
 
 
+def _edge_routed_node_writes_defect(
+    scope: _EndpointScope, child: ChildSyncSpec, child_node: NodeSpec | None
+) -> str | None:
+    """An edge-routed item provenance governs the line only: it may not also overwrite a synced child node.
+
+    The keyed write nulls edge keys on the child node, so the node can hold no
+    provenance of its own; a non-static child node receiving other item keys
+    would take enriched values over observed ones unguarded.
+    """
+    if child_node is None or child_node.managedby is ManagedByType.STATIC:
+        return None
+    node_props = _properties(child_node)
+    item = _item_properties(scope.props.get(child.field))
+    unguarded = sorted(
+        prop.name
+        for prop in item
+        if prop.name in node_props
+        and not prop.wire_only
+        and prop.name not in {child.targetid, *(child.edgeproperties or [])}
+    )
+    if not unguarded:
+        return None
+    return (
+        f"{scope.where}: childsync {child.field!r} routes item {ITEM_PROVENANCE!r} to edge {child.edgetype}; "
+        f"it may not also write {unguarded} on sync-managed child node {child_node.label} without provenance"
+    )
+
+
 def _item_provenance_store_defect(scope: _EndpointScope, child: ChildSyncSpec, edges: list[EdgeSpec]) -> str | None:
     """A declared item ``provenance`` must reach the line edge or the child node, never be dropped."""
     from engine.config.settings import settings
@@ -450,7 +478,7 @@ def _item_provenance_store_defect(scope: _EndpointScope, child: ChildSyncSpec, e
     # Line edges are written only with buyer_line_identity_enabled; otherwise item keys reach the child node.
     if child.edgeproperties and settings.buyer_line_identity_enabled:
         if ITEM_PROVENANCE in child.edgeproperties and any(item_provenance_declared(e.properties) for e in edges):
-            return None
+            return _edge_routed_node_writes_defect(scope, child, child_node)
         where = f"edgeproperties and on edge {child.edgetype}"
     elif child_node is not None and item_provenance_declared(child_node.properties):
         return None

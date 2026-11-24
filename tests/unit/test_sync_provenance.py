@@ -461,3 +461,23 @@ def test_line_edge_item_provenance_is_refused_when_line_routing_is_off(
             "declared on child node Kind"
         )
     ]
+
+
+def test_an_edge_routed_item_may_not_write_a_synced_child_node_unguarded(precedence_on: None) -> None:
+    raw = _declared_raw()
+    kind = next(node for node in raw["ontology"]["nodes"] if node["label"] == "Kind")
+    kind["managedby"] = "sync"
+    kind["properties"].append({"name": "title", "type": "string"})
+    station = next(node for node in raw["ontology"]["nodes"] if node["label"] == "Station")
+    items = next(prop for prop in station["properties"] if prop["name"] == "handled_kinds")["items"]["properties"]
+    items.append({"name": "title", "type": "string"})
+    spec = DomainSpec(**raw)
+    assert endpoint_shape_defects(spec, _endpoint(spec, "/v1/sync/stations")) == [
+        (
+            "sync /v1/sync/stations: childsync 'handled_kinds' routes item 'provenance' to edge HANDLES; "
+            "it may not also write ['title'] on sync-managed child node Kind without provenance"
+        )
+    ]
+    kind["managedby"] = "static"  # a static child is written on create only: nothing to guard
+    spec = DomainSpec(**raw)
+    assert endpoint_shape_defects(spec, _endpoint(spec, "/v1/sync/stations")) == []
