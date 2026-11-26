@@ -100,6 +100,12 @@ def test_a_utc_offset_is_kept_as_a_fixed_offset_the_driver_serialises(iso: str, 
         ("P1Y2M3DT4H5M6.5S", Duration(years=1, months=2, days=3, hours=4, minutes=5, seconds=6.5)),
         ("P1.5Y", Duration(years=1, months=6)),
         ("PT0.5H", Duration(minutes=30)),
+        # CodeRabbit on #563: the driver truncates fractional days/months; Cypher's own
+        # duration() keeps them (a fractional month spills over at 2 629 746 s).
+        ("P0.5D", Duration(hours=12)),
+        ("P1.5W", Duration(days=10, hours=12)),
+        ("P5M1.5D", Duration(months=5, days=1, hours=12)),
+        ("P0.75M", Duration(days=22, hours=19, minutes=51, seconds=49.5)),
     ],
 )
 def test_every_accepted_iso_duration_becomes_a_native_duration(iso: str, expected: Duration) -> None:
@@ -281,3 +287,10 @@ def test_an_unscoped_freshness_gate_uses_the_compiled_directions_declared_type()
     spec = DomainSpec.model_validate(raw)
     assert "candidate.seen >= date() - duration" in GateCompiler(spec).compile_all_gates("d1")
     assert "candidate.seen >= datetime() - duration" in GateCompiler(spec).compile_all_gates("d2")
+
+
+def test_an_unrepresentable_duration_is_a_row_defect_not_a_crash() -> None:
+    # CodeRabbit on #563: the regex accepts it, the driver's Duration refuses its month count.
+    row = {"depot_id": "d1", "service_window": "P999999999999999999999Y"}
+    assert _defects([row]) == ["row 0 service_window: expected duration, got string (duration out of range)"]
+    assert _contract().project([row])[0][0]["node"]["service_window"] == "P999999999999999999999Y"  # never raises

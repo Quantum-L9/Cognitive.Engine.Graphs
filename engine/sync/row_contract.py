@@ -51,6 +51,7 @@ from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 from neo4j.time import Duration
@@ -565,17 +566,33 @@ def _aware_datetime(value: str) -> datetime | None:
     return parsed if parsed.tzinfo is not None and parsed.utcoffset() is not None else None
 
 
+# Cypher's duration() spills a fractional month over at the average month length.
+_SECONDS_PER_MONTH = Decimal(2_629_746)
+_SECONDS_PER_DAY = Decimal(86_400)
+
+
 def _native_duration(value: str) -> Duration | None:
-    """The ``neo4j.time.Duration`` of an ISO-8601 duration, else None.
+    """The ``neo4j.time.Duration`` of an ISO-8601 duration, else None (malformed or out of range).
 
     Built from the captured units, so every form ``_ISO_DURATION`` accepts
-    (weeks, fractional units) converts; ``Duration.from_iso_format`` refuses both.
+    (weeks, fractional units) converts; ``Duration.from_iso_format`` refuses
+    both, and the driver's constructor truncates a fractional day or month.
+    Fractions follow Cypher's ``duration()``: a fractional month spills into
+    days and seconds at 2 629 746 s, a fractional day stays as seconds.
     """
     match = _ISO_DURATION_UNITS.fullmatch(value)
     if match is None:
         return None
-    units = {unit: float(amount) for unit, amount in match.groupdict().items() if amount is not None}
-    return Duration(**units)
+    unit = {name: Decimal(amount or 0) for name, amount in match.groupdict().items()}
+    months = unit["years"] * 12 + unit["months"]
+    days = unit["weeks"] * 7 + unit["days"]
+    spill_days, spill_seconds = divmod((months % 1) * _SECONDS_PER_MONTH, _SECONDS_PER_DAY)
+    seconds = spill_seconds + (days % 1) * _SECONDS_PER_DAY
+    seconds += unit["hours"] * 3600 + unit["minutes"] * 60 + unit["seconds"]
+    try:
+        return Duration(months=int(months), days=int(days) + int(spill_days), seconds=float(seconds))
+    except (ValueError, OverflowError):  # beyond the driver's (and Neo4j's) range
+        return None
 
 
 def _native_scalar(type_: PropertyType, value: Any) -> Any:
@@ -677,6 +694,8 @@ def _scalar_mismatch(type_: PropertyType, values: list[str] | None, value: Any) 
     if type_ is PropertyType.DATETIME and _native_temporals_enabled() and _aware_datetime(value) is None:
         # D1: a naive datetime names no instant; it is refused, never assumed UTC.
         return f"{got} (timezone-naive ISO-8601 datetime)"
+    if type_ is PropertyType.DURATION and _native_temporals_enabled() and _native_duration(value) is None:
+        return f"{got} (duration out of range)"
     return None
 
 

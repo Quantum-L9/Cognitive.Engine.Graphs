@@ -143,7 +143,8 @@ async def test_synced_datetime_is_native_and_the_buyer_match_scores_it(design_pa
     from chassis.actions import execute_action
     from engine.handlers import handle_match, handle_sync
 
-    synced = await handle_sync(PLASTICOS, {"entity_type": "facilities", "batch": [_facility("dated", 30)]})
+    row = _facility("dated", 30)  # one clock read: the expected value is exactly what was synced
+    synced = await handle_sync(PLASTICOS, {"entity_type": "facilities", "batch": [row]})
     assert synced["status"] == "success"
     assert await _stored_type(graph_driver, "dated", "last_transaction_date") == "ZONED DATETIME NOT NULL"
 
@@ -158,7 +159,7 @@ async def test_synced_datetime_is_native_and_the_buyer_match_scores_it(design_pa
     wire = json.loads(json.dumps(envelope["data"]))
     dated = _by_id(wire)["dated"]
     assert datetime.fromisoformat(dated["candidate"]["last_transaction_date"]) == datetime.fromisoformat(
-        _facility("dated", 30)["last_transaction_date"]
+        row["last_transaction_date"]
     )
 
 
