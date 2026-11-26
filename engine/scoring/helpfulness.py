@@ -18,14 +18,15 @@ Implements the Helpfulness metric H from HopRAG (ACL 2025, §3.3.3 Eq. 3):
 where SIM is the cosine similarity between vertex embedding and query,
 and IMP is the normalized visit count from multi-hop BFS traversal.
 
-Consumes:
-- Pre-computed similarity_score on candidate nodes
-- Pre-computed visit_count_normalized on candidate nodes (from MultiHopTraverser)
-- Alpha parameter from domain-spec or HopRAGConfig
-
-Integrates with:
-- engine.scoring.assembler.ScoringAssembler (via ComputationType.HELPFULNESS dispatch)
-- engine.traversal.multihop.MultiHopTraverser (writes visit counts consumed here)
+Wiring status (SCR-11): dormant. No engine or chassis module imports this one,
+there is no ``ComputationType`` for it (``ScoringAssembler`` cannot dispatch to
+it), and no domain pack can declare it; HopRAG is parked (CEG-KGE-PARK,
+``docs/PARKED_SUBSYSTEMS.md``). ``compile_helpfulness_cypher`` reads
+``similarity_score`` and ``visit_count_normalized`` from candidate nodes, but no
+engine code writes either property: ``engine.traversal.multihop.MultiHopTraverser``
+returns its visit counts in memory and writes nothing to the graph. Inputs to
+``HelpfulnessScorer`` are whatever the caller passes. Pinned as dormant by
+``tests/unit/test_score_numeric_lifecycle.py``.
 """
 
 from __future__ import annotations
