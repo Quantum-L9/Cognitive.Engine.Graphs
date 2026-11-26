@@ -452,6 +452,27 @@ class Settings(BaseSettings):
     # after the domain loads; unknown weight keys are rejected (R1a-DEC-06).
     # Off: only the supplied keys are summed, before the domain loads.
     match_effective_weight_validation: bool = True
+    # CEG scoring audit L7 / SCR-01 (rule Q1): a dimension whose pre-learning
+    # weight (request override, else spec default) is 0 is excluded from the
+    # match: no score term, no projection, no learned-weight multiplier or
+    # penalty. Off: it is compiled with coefficient 0, and a learned weight
+    # below the penalty threshold turns that 0 into a negative coefficient.
+    zero_weight_dimension_excluded_enabled: bool = True
+    # L7 / SCR-07: absent_sources resolves each dimension's source property as
+    # the compilers do (the defaulted candidateprop, structural declarations,
+    # the geodecay longitude, weightedrate's confidence property). Off: only a
+    # declared candidateprop is reported.
+    absent_sources_compiler_resolution_enabled: bool = True
+    # L7 / SCR-08 (rule Q3): weightedrate with a missing confidence property has
+    # an unknown confidence: the dimension takes its declared null strategy
+    # (defaultwhennull under `zero`) instead of coalescing confidence to 1.0.
+    # Off: the legacy coalesce(confidence, 1.0).
+    weightedrate_unknown_confidence_enabled: bool = True
+    # L7 / SCR-09: compilers read a declared numeric 0 as declared
+    # (`x if x is not None else default`, not `x or default`), and
+    # lognormalized treats a candidate value <= -1 (log undefined) as unknown,
+    # like a missing value. Off: the legacy `or` defaults and log(1 + x).
+    scoring_explicit_numeric_defaults_enabled: bool = True
     # RU-004 / CEG-COR-014: legacy resolve raises ValidationError when the CREATE
     # returned no row (source or target not found) instead of reporting
     # `resolved`. Off: `resolved` regardless of the result.

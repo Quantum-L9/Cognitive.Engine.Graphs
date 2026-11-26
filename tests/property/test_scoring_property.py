@@ -69,6 +69,11 @@ def _assemble(rows: list[dict[str, Any]], request: dict[str, float]) -> tuple[Sc
     return assembler, clause
 
 
+def _nonzero(**weights: float) -> list[str]:
+    """SCR-01: the dimensions a request keeps, in spec order (a 0 weight excludes)."""
+    return [name for name, weight in weights.items() if weight]
+
+
 class TestScoringProperties:
     @given(w_rel=unit_weight, w_ports=unit_weight, l_rel=any_learned, l_ports=any_learned)
     @settings(max_examples=150, deadline=None)
@@ -78,10 +83,15 @@ class TestScoringProperties:
         rows = [{"name": "depot_reliability", "weight": l_rel}, {"name": "port_capacity", "weight": l_ports}]
         assembler, clause = _assemble(rows, {"w_reliability": w_rel, "w_ports": w_ports})
         weights = assembler.last_effective_weights
-        assert set(weights) == {"depot_reliability", "port_capacity"}
+        # SCR-01: a dimension with a 0 request weight is excluded, learning or not.
+        active = _nonzero(depot_reliability=w_rel, port_capacity=w_ports)
+        assert list(weights) == active
         assert all(math.isfinite(w) for w in weights.values())
         score_line = clause.splitlines()[-1]
-        assert score_line.startswith("WITH candidate, depot_reliability, port_capacity, CASE WHEN ((")
+        if not active:
+            assert score_line == "WITH candidate, 0.0 AS score"
+            return
+        assert score_line.startswith(f"WITH candidate, {', '.join(active)}, CASE WHEN ((")
         assert score_line.endswith(" END AS score")
         assert "isNaN(" in score_line
 
@@ -101,8 +111,11 @@ class TestScoringProperties:
     def test_request_weights_are_emitted_verbatim_without_learning(self, w_rel: float, w_ports: float) -> None:
         assembler = ScoringAssembler(_SPEC)
         clause, _ = assembler.assemble_scoring_clause(_DIRECTION, {"w_reliability": w_rel, "w_ports": w_ports})
-        assert assembler.last_effective_weights == {"depot_reliability": w_rel, "port_capacity": w_ports}
-        assert f"({cypher_number(w_rel)} * depot_reliability)" in clause
+        requested = {"depot_reliability": w_rel, "port_capacity": w_ports}
+        active = _nonzero(**requested)
+        assert assembler.last_effective_weights == {name: requested[name] for name in active}
+        if "depot_reliability" in active:
+            assert f"({cypher_number(w_rel)} * depot_reliability)" in clause
 
     @given(expr=st.from_regex(re.compile(r"[a-z_]{1,8}(\.[a-z_]{1,8})?"), fullmatch=True))
     @settings(max_examples=50)

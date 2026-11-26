@@ -793,6 +793,46 @@ class ScoringDimensionSpec(BaseModel):
             raise ValueError(msg)
         return self
 
+    @model_validator(mode="after")
+    def validate_numeric_scales(self) -> ScoringDimensionSpec:
+        """SCR-09: refuse a divisor or scale the compiler cannot divide by.
+
+        Under ``scoring_spec_strict_validation_enabled`` (the D3 strict-validation
+        switch; default on): ``maxvalue`` <= 0 where it is a divisor or scale
+        (lognormalized, pricealignment, temporalproximity), ``decayconstant`` <= 0
+        for geodecay, and ``minvalue`` >= ``maxvalue`` for inverselinear (with the
+        compiler defaults 0 and 100 for an undeclared bound).
+        """
+        from engine.config.settings import settings
+
+        if not getattr(settings, "scoring_spec_strict_validation_enabled", True):
+            return self
+        defect = _numeric_scale_defect(self)
+        if defect:
+            msg = f"Scoring dimension {self.name!r}: {defect}"
+            raise ValueError(msg)
+        return self
+
+
+_MAXVALUE_SCALED = frozenset(
+    {ComputationType.LOGNORMALIZED, ComputationType.PRICEALIGNMENT, ComputationType.TEMPORALPROXIMITY}
+)
+
+
+def _numeric_scale_defect(dim: ScoringDimensionSpec) -> str | None:
+    """SCR-09: the first divisor/scale defect of ``dim``, or ``None``."""
+    computation = dim.computation
+    if computation in _MAXVALUE_SCALED and dim.maxvalue is not None and dim.maxvalue <= 0:
+        return f"maxvalue must be > 0 for {computation.value}, got {dim.maxvalue!r}"
+    if computation is ComputationType.GEODECAY and dim.decayconstant is not None and dim.decayconstant <= 0:
+        return f"decayconstant must be > 0 for geodecay, got {dim.decayconstant!r}"
+    if computation is ComputationType.INVERSELINEAR:
+        low = dim.minvalue if dim.minvalue is not None else 0.0
+        high = dim.maxvalue if dim.maxvalue is not None else 100.0
+        if low >= high:
+            return f"inverselinear needs minvalue < maxvalue, got minvalue={low!r}, maxvalue={high!r}"
+    return None
+
 
 class AdaptiveSampleSizeSpec(BaseModel):
     """Adaptive K-parameter configuration (HGKR S2-13).
