@@ -3202,6 +3202,10 @@ def _keyed_outcome_replayed(
     return True
 
 
+_INT64_MIN = -(2**63)
+_INT64_MAX = 2**63 - 1
+
+
 def _preference_history_plan(
     domain_spec: DomainSpec,
     tenant: str,
@@ -3228,12 +3232,25 @@ def _preference_history_plan(
     query_entity_id = payload.get("query_entity_id")
     if not _history_settings.outcome_preference_history_enabled or query_entity_id is None:
         return []
-    if isinstance(query_entity_id, bool) or not isinstance(query_entity_id, str | int) or query_entity_id == "":
+    if (
+        isinstance(query_entity_id, bool)
+        or not isinstance(query_entity_id, str | int)
+        or query_entity_id == ""
+        or (isinstance(query_entity_id, int) and not _INT64_MIN <= query_entity_id <= _INT64_MAX)
+    ):
         raise ValidationError(
-            "query_entity_id must be a non-empty string or an integer", action="outcomes", tenant=tenant
+            "query_entity_id must be a non-empty string or a signed 64-bit integer", action="outcomes", tenant=tenant
         )
     fingerprint = payload.get("fingerprint") or {}
     direction = fingerprint.get("match_direction") if isinstance(fingerprint, dict) else None
+    dimensions = [
+        d
+        for d in domain_spec.scoring.dimensions
+        if d.computation == ComputationType.PREFERENCEATTENTION
+        and (direction is None or not d.matchdirections or direction in d.matchdirections)
+    ]
+    if not dimensions:
+        return []
     query_labels = [
         q.label for q in domain_spec.matchentities.queryentity if direction is None or q.matchdirection == direction
     ]
@@ -3245,14 +3262,6 @@ def _preference_history_plan(
             action="outcomes",
             tenant=tenant,
         )
-    dimensions = [
-        d
-        for d in domain_spec.scoring.dimensions
-        if d.computation == ComputationType.PREFERENCEATTENTION
-        and (direction is None or not d.matchdirections or direction in d.matchdirections)
-    ]
-    if not dimensions:
-        return []
     query_label = sanitize_label(query_labels[0])
     query_id = sanitize_label(_candidate_id_property(domain_spec, query_labels[0]))
     label = sanitize_label(outcome_label)
@@ -3280,37 +3289,101 @@ def _preference_history_plan(
         relation = sanitize_label((metadata.outcome_relation if metadata else None) or feedback.outcome_edge_type)
         success_property = sanitize_label((metadata.success_property if metadata else None) or "outcome_type")
         candidate_community = sanitize_label(dim.candidateprop)
-        outcome_community = sanitize_label(
-            (metadata.outcome_community_property if metadata else None) or dim.candidateprop
-        )
+        # The property the reader reads (_compile_preference_attention): the
+        # declared one, or the legacy community_id with its flag off.
+        if _history_settings.preference_attention_declared_community_enabled:
+            outcome_community = sanitize_label(
+                (metadata.outcome_community_property if metadata else None) or dim.candidateprop
+            )
+        else:
+            outcome_community = "community_id"
         cypher = (
             "MATCH (o:" + label + " {outcome_id: $outcome_id})\n"
             "MATCH (qe:" + query_label + ") WHERE qe." + query_id + " = $query_entity_id\n"
             "OPTIONAL MATCH (c) WHERE " + candidate_predicate + "\n"
             "WITH o, qe, head(collect(c)) AS c\n"
             "MERGE (qe)-[:" + relation + "]->(o)\n"
-            "SET o." + success_property + " = $outcome, o." + outcome_community + " = c." + candidate_community + "\n"
+            # The community is the observation's snapshot: a replay never moves it.
+            "SET o."
+            + success_property
+            + " = $outcome, o."
+            + outcome_community
+            + " = coalesce(o."
+            + outcome_community
+            + ", c."
+            + candidate_community
+            + ")\n"
             "RETURN count(o) AS linked"
         )
         plan.append((dim.name, {"cypher": cypher}))
     return plan
 
 
-async def _write_preference_history(
+class _OutcomeWriteRefused(ExpectedWriteOutcome):
+    """Rolls back the outcome-and-history transaction, carrying the handler error to raise."""
+
+    def __init__(self, error: Exception) -> None:
+        super().__init__(str(error))
+        self.error = error
+
+
+def _preference_claim_cypher(outcome_label: str) -> str:
+    """Bind the outcome to its query entity once; returns the entity it was already bound to."""
+    label = sanitize_label(outcome_label)
+    return (
+        "MATCH (o:" + label + " {outcome_id: $outcome_id})\n"
+        "WITH o, o.query_entity_id AS prior\n"
+        "SET o.query_entity_id = coalesce(prior, $query_entity_id)\n"
+        "RETURN prior"
+    )
+
+
+async def _write_outcome_with_preference_history(
     graph_driver: GraphDriver,
     domain_spec: DomainSpec,
+    tenant: str,
+    *,
+    outcome: tuple[str, dict[str, Any]],
+    keyed: bool,
     plan: list[tuple[str, dict[str, Any]]],
-    parameters: dict[str, Any],
-) -> dict[str, Any]:
-    """Run the preference-history writes; report which dimensions linked the query entity."""
-    linked: list[str] = []
-    for name, statement in plan:
-        rows = await graph_driver.execute_query(
-            cypher=statement["cypher"], parameters=parameters, database=domain_spec.domain.id
-        )
-        if rows and rows[0].get("linked"):
-            linked.append(name)
-    return {"query_entity_id": parameters["query_entity_id"], "linked_dimensions": linked}
+    history: dict[str, Any],
+) -> tuple[list[dict[str, Any]], bool, dict[str, Any]]:
+    """Write the outcome and its preference history in one transaction (L8 item 3).
+
+    All or nothing: a failure rolls the outcome back too, so a retry is a first
+    write and every completion step after it runs once. A keyed replay whose
+    identity differs, or that names a different query entity than the outcome
+    was recorded for, is refused and changes nothing. Returns the outcome rows,
+    whether the write was a replay, and the dimensions linked.
+    """
+    cypher, parameters = outcome
+    claim = _preference_claim_cypher(_outcome_label(domain_spec, tenant, "outcomes", "an outcome write"))
+
+    async def _work(tx: Any) -> tuple[list[dict[str, Any]], bool, list[str]]:
+        rows = await (await tx.run(cypher, parameters)).data()
+        try:
+            replayed = keyed and _keyed_outcome_replayed(rows, parameters, tenant)
+        except (ValidationError, ExecutionError) as exc:
+            raise _OutcomeWriteRefused(exc) from exc
+        [bound] = await (await tx.run(claim, history)).data() or [{"prior": None}]
+        prior = bound.get("prior")
+        if prior is not None and prior != history["query_entity_id"]:
+            raise _OutcomeWriteRefused(
+                ValidationError(
+                    f"outcome_id {parameters['outcome_id']!r} is already recorded for another query entity",
+                    action="outcomes",
+                    tenant=tenant,
+                )
+            )
+        linked = []
+        for name, statement in plan:
+            result = await (await tx.run(statement["cypher"], history)).data()
+            if result and result[0].get("linked"):
+                linked.append(name)
+        return rows, replayed, linked
+
+    rows, replayed, linked = await graph_driver.execute_write(_work, database=domain_spec.domain.id)
+    return rows, replayed, {"query_entity_id": history["query_entity_id"], "linked_dimensions": linked}
 
 
 async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -3379,12 +3452,32 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
                 tenant=tenant,
                 detail=str(exc),
             ) from exc
+    preference_history: dict[str, Any] | None = None
     try:
-        write_rows = await graph_driver.execute_query(
-            cypher=cypher,
-            parameters=parameters,
-            database=domain_spec.domain.id,
-        )
+        if preference_plan:
+            # L8 item 3: outcome and history commit together or not at all.
+            write_rows, replayed, preference_history = await _write_outcome_with_preference_history(
+                graph_driver,
+                domain_spec,
+                tenant,
+                outcome=(cypher, parameters),
+                keyed=keyed,
+                plan=preference_plan,
+                history={
+                    "outcome_id": outcome_id,
+                    "outcome": outcome,
+                    "candidate_id": candidate_id,
+                    "query_entity_id": payload["query_entity_id"],
+                },
+            )
+        else:
+            write_rows = await graph_driver.execute_query(
+                cypher=cypher,
+                parameters=parameters,
+                database=domain_spec.domain.id,
+            )
+    except _OutcomeWriteRefused as refused:
+        raise refused.error from None
     except Exception as exc:
         raise ExecutionError(
             "Outcome write failed",
@@ -3392,29 +3485,8 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
             tenant=tenant,
             detail=str(exc),
         ) from exc
-    replayed = keyed and _keyed_outcome_replayed(write_rows, parameters, tenant)
-    preference_history: dict[str, Any] | None = None
-    if preference_plan:
-        # MERGE: a replay re-links the same edge, it never adds one.
-        try:
-            preference_history = await _write_preference_history(
-                graph_driver,
-                domain_spec,
-                preference_plan,
-                {
-                    "outcome_id": outcome_id,
-                    "outcome": outcome,
-                    "candidate_id": candidate_id,
-                    "query_entity_id": payload["query_entity_id"],
-                },
-            )
-        except Exception as exc:
-            raise ExecutionError(
-                "Outcome recorded, but its preference history could not be written; retry with the same outcome_id",
-                action="outcomes",
-                tenant=tenant,
-                detail=str(exc),
-            ) from exc
+    if not preference_plan:
+        replayed = keyed and _keyed_outcome_replayed(write_rows, parameters, tenant)
 
     # A replay recorded nothing new: the side effects below ran with the first
     # write. Only the feedback loop runs again; its propagation claim makes the

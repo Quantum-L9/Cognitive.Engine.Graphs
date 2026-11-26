@@ -28,7 +28,7 @@ import yaml
 
 from engine.config.schema import DomainSpec
 from engine.config.settings import settings
-from engine.handlers import ValidationError, handle_outcomes, init_dependencies
+from engine.handlers import ExecutionError, ValidationError, handle_outcomes, init_dependencies
 from tests.fixtures.domain_contracts import SYNTHETIC_DOMAINS_ROOT
 
 pytestmark = pytest.mark.unit
@@ -60,23 +60,56 @@ def _spec(raw: dict[str, Any] | None = None) -> DomainSpec:
     return DomainSpec.model_validate(raw if raw is not None else _raw())
 
 
-class _Graph:
-    """Records every statement; answers the outcome write and the history link."""
+class _Result:
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self._rows = rows
 
-    def __init__(self, linked: int = 1) -> None:
+    async def data(self) -> list[dict[str, Any]]:
+        return self._rows
+
+
+class _Graph:
+    """Records every statement, in or out of a transaction; keeps each outcome's bound query entity."""
+
+    def __init__(self, linked: int = 1, fail_history: bool = False) -> None:
         self.calls: list[tuple[str, dict[str, Any], str | None]] = []
+        self.transactions = 0
+        self.bound: dict[str, Any] = {}
         self._linked = linked
+        self._fail_history = fail_history
+
+    def _answer(self, cypher: str, parameters: dict[str, Any]) -> list[dict[str, Any]]:
+        if "CREATE (o:" in cypher:
+            return [{"outcome_id": parameters["outcome_id"]}]
+        if "MERGE (o:" in cypher:
+            return [{"outcome_id": parameters["outcome_id"], "created": True}]
+        if "o.query_entity_id AS prior" in cypher:
+            prior = self.bound.get(parameters["outcome_id"])
+            self.bound.setdefault(parameters["outcome_id"], parameters["query_entity_id"])
+            return [{"prior": prior}]
+        if "MERGE (qe)" in cypher:
+            if self._fail_history:
+                raise RuntimeError("history write lost its connection")
+            return [{"linked": self._linked}]
+        return []
 
     async def execute_query(
         self, cypher: str, parameters: dict[str, Any] | None = None, database: str | None = None, **_: Any
     ) -> list[dict[str, Any]]:
         parameters = parameters or {}
         self.calls.append((cypher, parameters, database))
-        if "CREATE (o:" in cypher:
-            return [{"outcome_id": parameters["outcome_id"]}]
-        if "MERGE (qe)" in cypher:
-            return [{"linked": self._linked}]
-        return []
+        return self._answer(cypher, parameters)
+
+    async def execute_write(self, work: Any, *, database: str | None = None) -> Any:
+        self.transactions += 1
+        graph = self
+
+        class _Tx:
+            async def run(self, cypher: str, parameters: dict[str, Any]) -> _Result:
+                graph.calls.append((cypher, parameters, database))
+                return _Result(graph._answer(cypher, parameters))
+
+        return await work(_Tx())
 
 
 def _wire(spec: DomainSpec, graph: _Graph) -> _Graph:
@@ -119,7 +152,7 @@ async def test_the_outcome_is_linked_from_the_query_entity_in_the_read_shape() -
     assert "MATCH (qe:LaunchWindow) WHERE qe.window_id = $query_entity_id" in cypher
     assert "(c:OrbitalDepot AND c.depot_id = $candidate_id)" in cypher
     assert "MERGE (qe)-[:RESULTED_IN]->(o)" in cypher
-    assert "SET o.outcome_type = $outcome, o.community_id = c.community_id" in cypher
+    assert "SET o.outcome_type = $outcome, o.community_id = coalesce(o.community_id, c.community_id)" in cypher
     assert parameters == {
         "outcome_id": result["outcome_id"],
         "outcome": "success",
@@ -147,11 +180,11 @@ async def test_declared_metadata_names_the_relation_and_both_community_propertie
     await handle_outcomes(TENANT, _payload())
     [(cypher, _params, _db)] = _history(graph)
     assert "MERGE (qe)-[:CHOSE]->(o)" in cypher
-    assert "o.chosen_community = c.community_id" in cypher
+    assert "o.chosen_community = coalesce(o.chosen_community, c.community_id)" in cypher
 
 
 async def test_a_query_entity_that_is_not_in_the_graph_links_nothing() -> None:
-    graph = _wire(_spec(), _Graph(linked=0))
+    _wire(_spec(), _Graph(linked=0))
     result = await handle_outcomes(TENANT, _payload())
     assert result["preference_history"]["linked_dimensions"] == []
 
@@ -174,7 +207,7 @@ async def test_a_pack_without_preference_attention_writes_no_history() -> None:
     assert "preference_history" not in result
 
 
-@pytest.mark.parametrize("bad", ["", True, 1.5, {"id": 1}])
+@pytest.mark.parametrize("bad", ["", True, 1.5, {"id": 1}, 2**63, -(2**63) - 1])
 async def test_a_malformed_query_entity_id_is_refused_before_anything_is_written(bad: Any) -> None:
     graph = _wire(_spec(), _Graph())
     with pytest.raises(ValidationError, match="query_entity_id"):
@@ -204,3 +237,55 @@ async def test_flag_off_the_query_entity_is_ignored(monkeypatch: pytest.MonkeyPa
     result = await handle_outcomes(TENANT, _payload())
     assert _history(graph) == []
     assert "preference_history" not in result
+
+
+async def test_the_outcome_and_its_history_commit_in_one_transaction() -> None:
+    graph = _wire(_spec(), _Graph())
+    await handle_outcomes(TENANT, _payload())
+    assert graph.transactions == 1
+    statements = [c[0] for c in graph.calls]
+    assert any("CREATE (o:" in c for c in statements)
+    assert any("MERGE (qe)" in c for c in statements)
+
+
+async def test_a_history_failure_fails_the_whole_write_so_a_plain_retry_is_a_first_write() -> None:
+    graph = _wire(_spec(), _Graph(fail_history=True))
+    with pytest.raises(ExecutionError, match="Outcome write failed"):
+        await handle_outcomes(TENANT, _payload())
+    # Everything ran in the one transaction that failed (a real driver rolls it back),
+    # so no outcome is left committed without its history and nothing after it ran.
+    assert graph.transactions == 1
+    assert all(database == TENANT for _c, _p, database in graph.calls)
+
+
+async def test_a_replay_naming_another_query_entity_is_refused() -> None:
+    graph = _wire(_spec(), _Graph())
+    await handle_outcomes(TENANT, _payload(outcome_id="out-1"))
+    with pytest.raises(ValidationError, match="already recorded for another query entity"):
+        await handle_outcomes(TENANT, _payload(outcome_id="out-1", query_entity_id="window-2"))
+    # The unchanged replay is accepted and re-links the same entity.
+    result = await handle_outcomes(TENANT, _payload(outcome_id="out-1"))
+    assert result["preference_history"]["query_entity_id"] == "window-1"
+    assert graph.bound == {"out-1": "window-1"}
+
+
+async def test_no_applicable_dimension_needs_no_unambiguous_query_label() -> None:
+    raw = yaml.safe_load((SYNTHETIC_DOMAINS_ROOT / "orbital-logistics" / "spec.yaml").read_text())
+    raw["domain"]["id"] = TENANT
+    raw["matchentities"]["queryentity"].append({"label": "OrbitClass", "matchdirection": DIRECTION})
+    graph = _wire(_spec(raw), _Graph())
+    payload = _payload()
+    payload["fingerprint"] = {}
+    result = await handle_outcomes(TENANT, payload)
+    assert result["status"] == "recorded"
+    assert _history(graph) == []
+
+
+async def test_with_declared_community_off_the_history_writes_the_property_the_reader_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "preference_attention_declared_community_enabled", False)
+    graph = _wire(_spec(_raw(outcome_community_property="chosen_community")), _Graph())
+    await handle_outcomes(TENANT, _payload())
+    [(cypher, _params, _db)] = _history(graph)
+    assert "o.community_id = coalesce(o.community_id, c.community_id)" in cypher

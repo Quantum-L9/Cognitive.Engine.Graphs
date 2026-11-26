@@ -60,6 +60,8 @@
     "query_entity_id": {
       "type": ["string", "integer"],
       "minLength": 1,
+      "minimum": -9223372036854775808,
+      "maximum": 9223372036854775807,
       "description": "Optional, additive (L8 item 3, outcome_preference_history_enabled): the declared id of the query entity this outcome answers, on the fingerprint direction's queryentity label. Given, handle_outcomes also links that entity to the outcome node the way a preference_attention dimension reads it. Omitted: the outcome is written exactly as before."
     },
     "fingerprint": {

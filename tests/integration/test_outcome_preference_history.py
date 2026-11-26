@@ -154,3 +154,23 @@ async def test_flag_off_no_outcome_is_reachable_from_a_query_entity(
     monkeypatch.setattr(settings, "outcome_preference_history_enabled", False)
     await _record("window-1", "depot-a", "success")
     assert await _history(graph) == []  # the defect: preference_attention could never read it
+
+
+async def test_a_replay_naming_another_query_entity_is_refused_and_changes_nothing(graph: GraphDriver) -> None:
+    from engine.handlers import ValidationError
+
+    await _record("window-1", "depot-a", "success", outcome_id="out-bound-1")
+    with pytest.raises(ValidationError, match="already recorded for another query entity"):
+        await _record("window-2", "depot-a", "success", outcome_id="out-bound-1")
+    assert await _history(graph) == [
+        {"window": "window-1", "depot": "depot-a", "outcome_type": "success", "community": 1},
+    ]
+
+
+async def test_a_replay_keeps_the_community_recorded_with_the_outcome(graph: GraphDriver) -> None:
+    await _record("window-1", "depot-a", "success", outcome_id="out-snap-1")
+    moved = {"depot_id": "depot-a", "accepts_hazmat": True, "docking_ports": 4, "reliability": 0.9, "community_id": 7}
+    await handle_sync(TENANT, {"entity_type": "orbital-depots", "batch": [moved]})
+    await _record("window-1", "depot-a", "success", outcome_id="out-snap-1")
+    [row] = await _history(graph)
+    assert row["community"] == 1
