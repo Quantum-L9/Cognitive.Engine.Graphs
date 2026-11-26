@@ -99,7 +99,7 @@ REFUSALS: list[tuple[str, Callable[[dict[str, Any]], None], str]] = [
         _constraint_on_undeclared,
         "undeclared scoring dimension(s): ['not_a_dimension']",
     ),
-    ("preference-attention-without-qe", _attention_without_qe, "no traversal step binds a `qe` node"),
+    ("preference-attention-without-qe", _attention_without_qe, "binds a `qe` node"),
 ]
 
 
@@ -183,6 +183,44 @@ def test_a_qe_prefixed_alias_does_not_count_as_binding_qe() -> None:
     }
     with pytest.raises(ValidationError, match="binds a `qe` node"):
         DomainSpec.model_validate(raw)
+
+
+def test_a_qe_step_scoped_to_another_direction_does_not_bind_qe() -> None:
+    """TraversalAssembler filters steps by matchdirections; the check does the same, per direction."""
+    raw = _raw()
+    raw["scoring"]["dimensions"].append(_attention_dimension())
+    raw["traversal"] = {
+        "steps": [
+            {
+                "name": "query_entity",
+                "pattern": "(qe:DockingWindow)-[:REQUESTS]->(candidate:OrbitalDepot)",
+                "matchdirections": ["some_other_direction"],
+            }
+        ]
+    }
+    with pytest.raises(ValidationError, match="applicable to direction 'window_to_depot' binds a `qe` node"):
+        DomainSpec.model_validate(raw)
+
+
+def test_a_qe_step_scoped_to_the_scoring_direction_binds_qe() -> None:
+    raw = _raw()
+    raw["scoring"]["dimensions"].append(_attention_dimension())
+    raw["traversal"] = {
+        "steps": [
+            {
+                "name": "query_entity",
+                "pattern": "(qe:DockingWindow)-[:REQUESTS]->(candidate:OrbitalDepot)",
+                "matchdirections": ["window_to_depot"],
+            }
+        ]
+    }
+    assert DomainSpec.model_validate(raw).traversal is not None
+
+
+def test_attention_scoped_away_from_every_declared_direction_is_not_checked() -> None:
+    raw = _raw()
+    raw["scoring"]["dimensions"].append({**_attention_dimension(), "matchdirections": ["some_other_direction"]})
+    assert DomainSpec.model_validate(raw).scoring.dimensions[-1].name == "attention"
 
 
 def test_arbitration_constraint_on_a_declared_dimension_is_admitted() -> None:

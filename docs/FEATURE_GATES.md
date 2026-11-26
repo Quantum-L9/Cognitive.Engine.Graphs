@@ -1095,9 +1095,9 @@ with a pydantic `ValidationError` naming the defect:
   resolved and crashed the compiler);
 - a `decision_arbitration.constraints[].dimension` naming an undeclared
   scoring dimension;
-- a `preference_attention` dimension when no traversal step binds a `qe` node
-  (its outcome sample is matched from `qe`; unbound, the subquery matched
-  every node).
+- a `preference_attention` dimension active in a match direction where no
+  traversal step applicable to that direction binds a `qe` node (its outcome
+  sample is matched from `qe`; unbound, the subquery matched every node).
 
 Every committed design pack loads with the flag on. This flag does not touch
 admission withholding: `SCORING_ADMISSION_CHECK_ENABLED` keeps its default

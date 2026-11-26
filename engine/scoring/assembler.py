@@ -972,8 +972,14 @@ class ScoringAssembler:
         if not prop:
             return None
         predicate = f"{owner}.{sanitize_label(prop)} IS NULL"
-        if computation is ComputationType.GEODECAY and dim.candidateprop_lon:
-            predicate = f"{predicate} OR {owner}.{sanitize_label(dim.candidateprop_lon)} IS NULL"
+        if computation is ComputationType.GEODECAY:
+            from engine.config.settings import settings
+
+            # The longitude _compile_geodecay reads: the declaration only while
+            # geodecay_declared_longitude is on, else candidate.lon (RU-037).
+            declared_lon = getattr(dim, "candidateprop_lon", None)
+            lon = declared_lon if settings.geodecay_declared_longitude and declared_lon else "lon"
+            predicate = f"{predicate} OR {owner}.{sanitize_label(lon)} IS NULL"
         return predicate
 
     def _effective_null_strategy(self, dim: ScoringDimensionSpec, base_expr: str, strategy: NullStrategy) -> str | None:

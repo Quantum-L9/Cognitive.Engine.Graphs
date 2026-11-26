@@ -261,6 +261,24 @@ def test_geodecay_guard_checks_both_coordinates() -> None:
     assert expr.startswith("CASE WHEN candidate.lat IS NULL OR candidate.lon IS NULL THEN coalesce($_popmean_geo, 0.1)")
 
 
+def test_geodecay_guard_follows_the_declared_longitude_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Flag off, _compile_geodecay reads candidate.lon whatever is declared; the guard tests the same property."""
+    monkeypatch.setattr(settings, "geodecay_declared_longitude", False)
+    expr, _ = _compiled(
+        _dim(
+            name="geo",
+            source="computed",
+            computation="geodecay",
+            candidateprop="lat",
+            candidateprop_lon="longitude_deg",
+            queryprop="lat",
+            null_strategy="population_mean",
+        )
+    )
+    assert expr.startswith("CASE WHEN candidate.lat IS NULL OR candidate.lon IS NULL THEN ")
+    assert "candidate.longitude_deg IS NULL" not in expr
+
+
 def test_traversalalias_guard_reads_the_alias() -> None:
     expr, _ = _compiled(
         _dim(

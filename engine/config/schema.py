@@ -686,12 +686,20 @@ def _scoring_strict() -> bool:
     return bool(settings.scoring_spec_strict_validation_enabled)
 
 
-def _traversal_binds(traversal: TraversalSpec | None, alias: str) -> bool:
-    """Whether a traversal step pattern declares a node bound to ``alias``."""
+def _traversal_binds(traversal: TraversalSpec | None, alias: str, direction: str) -> bool:
+    """Whether a traversal step applicable to ``direction`` declares a node bound to ``alias``.
+
+    ``TraversalAssembler`` filters steps by ``matchdirections`` exactly so: a
+    step without them applies to every direction.
+    """
     if traversal is None:
         return False
     node_re = re.compile(rf"\(\s*{re.escape(alias)}\s*(?::[A-Za-z_][A-Za-z0-9_]*)?\s*[)\{{]")
-    return any(node_re.search(step.pattern) for step in traversal.steps)
+    return any(
+        node_re.search(step.pattern)
+        for step in traversal.steps
+        if not step.matchdirections or direction in step.matchdirections
+    )
 
 
 class ScoringDimensionMetadata(BaseModel):
@@ -1853,11 +1861,17 @@ class DomainSpec(BaseModel):
         if unknown:
             msg = f"decision_arbitration constraint(s) name undeclared scoring dimension(s): {unknown}"
             raise ValueError(msg)
-        attention = [d.name for d in self.scoring.dimensions if d.computation is ComputationType.PREFERENCEATTENTION]
-        if attention and not _traversal_binds(self.traversal, "qe"):
-            msg = (
-                f"Scoring dimension(s) {attention} use preference_attention, which matches from `qe`, "
-                "but no traversal step binds a `qe` node"
-            )
-            raise ValueError(msg)
+        for direction in self.queryschema.matchdirections:
+            attention = [
+                d.name
+                for d in self.scoring.dimensions
+                if d.computation is ComputationType.PREFERENCEATTENTION
+                and (not d.matchdirections or direction in d.matchdirections)
+            ]
+            if attention and not _traversal_binds(self.traversal, "qe", direction):
+                msg = (
+                    f"Scoring dimension(s) {attention} use preference_attention, which matches from `qe`, "
+                    f"but no traversal step applicable to direction {direction!r} binds a `qe` node"
+                )
+                raise ValueError(msg)
         return self
