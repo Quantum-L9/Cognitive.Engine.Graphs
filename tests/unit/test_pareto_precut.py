@@ -180,13 +180,8 @@ MAIN_FLAG_OFF_CYPHER = (
 @pytest.mark.unit
 @pytest.mark.finding("SI-06")
 class TestFlagOff:
-    async def test_response_is_identical_to_main(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_response_is_identical_to_main(self) -> None:
         assert settings.pareto_precut_enabled is False  # shipped default
-        # The base revision predates the ND-ARB / ND-TIE Cypher (ceg-scoring-audit
-        # L3); with those rollback flags off the query is the base one byte for
-        # byte. TestPrecutUnderCypherArbitration pins the shipped composition.
-        monkeypatch.setattr(settings, "match_arbitration_in_cypher_enabled", False)
-        monkeypatch.setattr(settings, "match_candidate_tiebreak_enabled", False)
         driver = _wire(_spec())
         response = await _match()
         assert _stable(response) == MAIN_FLAG_OFF_RESPONSE
