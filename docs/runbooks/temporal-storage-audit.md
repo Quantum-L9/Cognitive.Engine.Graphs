@@ -33,8 +33,9 @@ Requires Neo4j 5.9+ (type predicate expressions).
 NEO4J_URI=bolt://… NEO4J_USERNAME=… NEO4J_PASSWORD=… DOMAINS_ROOT=/path/to/published/packs \
   python tools/audit_temporal_storage.py plasticos [other-tenant …]
 ```
-The spec comes from the pack root the engine serves (`DOMAINS_ROOT`, or
-`--domains-root`), never from the repository's design packs.
+The spec comes from the pack root the engine serves, with the loader's own
+precedence (`--domains-root`, then `DOMAIN_SPECS_PATH`, then `DOMAINS_ROOT`),
+never from the repository's design packs.
 
 ## Output and exit code
 JSON `{"reports": [{"domain", "database", "checked", "string_valued_total",

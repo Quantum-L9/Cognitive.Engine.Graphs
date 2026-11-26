@@ -14,9 +14,10 @@ Count declared temporal properties stored as STRING in tenant databases (D1).
 
 Read-only: every statement runs in a managed READ transaction
 (``engine/health/temporal_storage_audit.py``); nothing is converted. The spec
-comes from the pack root the engine serves (``DOMAINS_ROOT``), exactly as boot
-resolves it. Exit 0 when no string-valued temporal is found, 2 when any is
-(conversion needs a separate approval), 1 on error.
+comes from the pack root the engine serves, resolved by ``DomainPackLoader``
+exactly as boot resolves it (``DOMAIN_SPECS_PATH``, then ``DOMAINS_ROOT``).
+Exit 0 when no string-valued temporal is found, 2 when any is (conversion
+needs a separate approval), 1 on error.
 
     python tools/audit_temporal_storage.py plasticos [other-tenant ...]
 """
@@ -33,7 +34,6 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from engine.config.loader import DomainNotFoundError, DomainPackLoader, DomainSpecError
-from engine.config.settings import settings
 from engine.graph.driver import GraphDriver
 from engine.health.temporal_storage_audit import audit_temporal_storage
 
@@ -42,7 +42,7 @@ EXIT_ERROR = 1
 EXIT_STRING_VALUED = 2
 
 
-async def _audit(tenants: list[str], domains_root: str) -> list[dict[str, Any]]:
+async def _audit(tenants: list[str], domains_root: str | None) -> list[dict[str, Any]]:
     loader = DomainPackLoader(config_path=domains_root)
     specs = [loader.load_domain(tenant) for tenant in tenants]
     driver = GraphDriver()
@@ -56,7 +56,11 @@ async def _audit(tenants: list[str], domains_root: str) -> list[dict[str, Any]]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Count declared temporals stored as STRING (read-only)")
     parser.add_argument("tenants", nargs="+", help="tenant / domain ids to audit")
-    parser.add_argument("--domains-root", default=str(settings.domains_root), help="pack root (default DOMAINS_ROOT)")
+    parser.add_argument(
+        "--domains-root",
+        default=None,
+        help="pack root (default: the loader's own precedence, DOMAIN_SPECS_PATH then DOMAINS_ROOT)",
+    )
     args = parser.parse_args(argv)
     try:
         reports = asyncio.run(_audit(args.tenants, args.domains_root))

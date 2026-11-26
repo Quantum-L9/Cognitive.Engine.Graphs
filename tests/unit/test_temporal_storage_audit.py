@@ -111,3 +111,19 @@ def test_the_audit_tool_exit_code_reports_conversion_need(monkeypatch: pytest.Mo
     assert tool.main(["plasticos"]) == tool.EXIT_CLEAN
     monkeypatch.setattr(tool, "_audit", dirty)
     assert tool.main(["plasticos", "other"]) == tool.EXIT_STRING_VALUED
+
+
+def test_the_audit_tool_leaves_pack_root_precedence_to_the_loader(monkeypatch: pytest.MonkeyPatch) -> None:
+    # CodeRabbit on #563: a DOMAINS_ROOT default shadowed the loader's DOMAIN_SPECS_PATH alias.
+    from tools import audit_temporal_storage as tool
+
+    seen: list[str | None] = []
+
+    async def record(_tenants: list[str], root: str | None) -> list[dict[str, Any]]:
+        seen.append(root)
+        return [{"conversion_required": False}]
+
+    monkeypatch.setattr(tool, "_audit", record)
+    tool.main(["plasticos"])
+    tool.main(["plasticos", "--domains-root", "/packs"])
+    assert seen == [None, "/packs"]
