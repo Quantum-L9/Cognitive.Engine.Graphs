@@ -177,8 +177,20 @@ class TestScoringSpecExtensions:
         spec = ScoringSpec(dimensions=[], preference_sample_size=50)
         assert spec.preference_sample_size == 50
 
-    def test_preference_sample_size_auto(self) -> None:
-        """K can be 'auto' for adaptive sample size."""
+    def test_preference_sample_size_auto(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """'auto' is never resolved (the compiler binds K as an integer LIMIT).
+
+        D3 (CEG scoring audit L2): refused with scoring_spec_strict_validation_enabled
+        on (default); admitted as before with it off (rollback).
+        """
+        from pydantic import ValidationError
+
+        from engine.config.settings import settings
+
+        assert settings.scoring_spec_strict_validation_enabled is True
+        with pytest.raises(ValidationError, match="preference_sample_size must be an integer"):
+            ScoringSpec(dimensions=[], preference_sample_size="auto")
+        monkeypatch.setattr(settings, "scoring_spec_strict_validation_enabled", False)
         spec = ScoringSpec(dimensions=[], preference_sample_size="auto")
         assert spec.preference_sample_size == "auto"
 

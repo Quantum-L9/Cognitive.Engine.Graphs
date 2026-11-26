@@ -357,6 +357,20 @@ def _spec_with_dimensions(  # type: ignore[no-untyped-def]
     raw["scoring"]["dimensions"] = dimensions
     raw["queryschema"]["fields"] = fields or []
     raw["ontology"]["nodes"][0]["properties"] += candidate_properties or []
+    if any(d.get("computation") == "preference_attention" for d in dimensions):
+        # D3 strict scoring validation: preference_attention matches from `qe`,
+        # so the pack binds it with a traversal step.
+        raw["ontology"]["edges"] = [
+            {
+                "type": "ASKS",
+                "from": "Ask",
+                "to": "Thing",
+                "direction": "DIRECTED",
+                "category": "capability",
+                "managedby": "sync",
+            }
+        ]
+        raw["traversal"] = {"steps": [{"name": "query_entity", "pattern": "(qe:Ask)-[:ASKS]->(candidate:Thing)"}]}
     return DomainSpec.model_validate(raw)
 
 

@@ -320,6 +320,10 @@ def _attention_without_success_value(raw: Raw) -> None:
             "defaultweight": 0.05,
         }
     )
+    # D3 strict scoring validation: preference_attention matches from `qe`.
+    raw["traversal"] = {
+        "steps": [{"name": "query_depot", "pattern": "(candidate:OrbitalDepot)-[:RESUPPLIED_BY]->(qe:OrbitalDepot)"}]
+    }
 
 
 def _traversal_keyword(raw: Raw) -> None:

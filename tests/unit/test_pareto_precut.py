@@ -186,7 +186,17 @@ class TestFlagOff:
         response = await _match()
         assert _stable(response) == MAIN_FLAG_OFF_RESPONSE
         assert driver.calls[0]["parameters"]["top_n"] == 2
-        assert driver.calls[0]["cypher"] == MAIN_FLAG_OFF_CYPHER
+        # D5 (CEG scoring audit L2): under score_clamp_enabled the composite is
+        # clamped to [0, 1]. MAIN_FLAG_OFF_CYPHER stays main's text; the emitted
+        # query differs from it in exactly that one expression.
+        from engine.scoring.assembler import ScoringAssembler
+
+        weighted = "(0.6 * depot_reliability) + (0.3 * port_capacity)"
+        assert MAIN_FLAG_OFF_CYPHER.count(f"{weighted} AS score") == 1
+        expected = MAIN_FLAG_OFF_CYPHER.replace(
+            f"{weighted} AS score", f"{ScoringAssembler._clamp_expression(weighted)} AS score"
+        )
+        assert driver.calls[0]["cypher"] == expected
 
     async def test_flag_on_without_objectives_is_identical_to_flag_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
         no_objectives = arbitration_spec(pareto_config=ParetoConfigSpec())
