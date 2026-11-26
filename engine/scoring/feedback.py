@@ -69,7 +69,9 @@ class OutcomeFeedback:
         Returns dict with:
             - sample_count: number of outcomes analyzed
             - sufficient_data: whether at least MIN_OUTCOMES outcomes were given
-              and at least one dimension has scores from both classes (RU-025)
+              and at least one dimension has scores from both classes (RU-025),
+              each holding at least ``feedback_min_samples_per_class`` scores
+              while ``feedback_per_class_minimum_enabled`` is on (SCR-13)
             - dimension_analysis: per-dimension discriminability
             - proposed_weights: dict of dimension -> proposed weight delta
         """
@@ -83,6 +85,12 @@ class OutcomeFeedback:
             }
 
         positive_class, negative_class = outcome_classes()
+        from engine.config.settings import settings
+
+        # SCR-13: one scored outcome per class is not evidence of discriminability.
+        min_per_class = (
+            int(settings.feedback_min_samples_per_class) if settings.feedback_per_class_minimum_enabled else 1
+        )
 
         # Partition scores by outcome type
         positive_dims: dict[str, list[float]] = defaultdict(list)
@@ -116,8 +124,9 @@ class OutcomeFeedback:
             neg_scores = negative_dims.get(dim, [])
             # RU-025 / CEG-COR-032: discriminability needs both classes. A
             # missing class is no evidence, not a mean of 0.0, so the dimension
-            # is recorded with its counts and gets no proposal.
-            if not pos_scores or not neg_scores:
+            # is recorded with its counts and gets no proposal. SCR-13: nor is a
+            # class below the per-class minimum.
+            if len(pos_scores) < min_per_class or len(neg_scores) < min_per_class:
                 dimension_analysis[dim] = {
                     "positive_mean": round(statistics.mean(pos_scores), 6) if pos_scores else None,
                     "negative_mean": round(statistics.mean(neg_scores), 6) if neg_scores else None,
@@ -150,7 +159,15 @@ class OutcomeFeedback:
             "dimension_analysis": dimension_analysis,
             "proposed_weights": proposed_weights,
         }
-        if not proposed_weights:
+        if min_per_class > 1:
+            result["min_samples_per_class"] = min_per_class
+        if not proposed_weights and min_per_class > 1:
+            result["message"] = (
+                f"No dimension has at least {min_per_class} scored outcomes of each class "
+                f"({positive_class!r} and {negative_class!r}); nothing to compare. "
+                "Collect outcomes with dimension_scores."
+            )
+        elif not proposed_weights:
             result["message"] = (
                 f"No dimension has scored outcomes of both classes ({positive_class!r} and "
                 f"{negative_class!r}); nothing to compare. Collect outcomes with dimension_scores."
