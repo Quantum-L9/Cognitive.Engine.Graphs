@@ -16,6 +16,7 @@ invalid scoring declaration raises a pydantic ``ValidationError`` when the
 ``DomainSpec`` loads; with it off the same declaration is admitted as on main.
 Every committed design pack still loads with the flag on, and
 ``tools/validate_domain.py --dry-run`` reports a refused pack without serving it.
+``cypher_number`` (the numeric-literal guard) refuses non-finite values.
 Built on the synthetic ``orbital-logistics`` pack (``tests/fixtures/domains``).
 """
 
@@ -30,10 +31,14 @@ from typing import Any
 
 import pytest
 import yaml
+from hypothesis import given
+from hypothesis import settings as hypothesis_settings
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from engine.config.schema import DomainSpec
 from engine.config.settings import settings
+from engine.utils.security import cypher_number
 from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT, SYNTHETIC_DOMAINS_ROOT
 from tools import validate_domain
 
@@ -344,3 +349,35 @@ def test_dry_run_cli_text_mode_on_an_empty_root(tmp_path: Path, capsys: pytest.C
     out = capsys.readouterr().out
     assert f"[FAIL] {tmp_path}: no spec.yaml under {tmp_path}" in out
     assert "Result: PACK(S) REFUSED" in out
+
+
+# ── cypher_number: non-finite scalars never reach Cypher (ND-PARAM) ─────────
+
+
+@pytest.mark.parametrize("value", [math.inf, -math.inf, math.nan, "inf", "-inf", "nan", float("1e999")])
+def test_cypher_number_refuses_non_finite(value: object) -> None:
+    with pytest.raises(ValueError, match="finite"):
+        cypher_number(value)
+
+
+@pytest.mark.parametrize(("value", "expected"), [(0, 0.0), (-2, -2.0), ("0.25", 0.25), (1e308, 1e308)])
+def test_cypher_number_accepts_finite(value: object, expected: float) -> None:
+    assert cypher_number(value) == expected
+
+
+def test_cypher_number_still_refuses_non_numeric() -> None:
+    with pytest.raises(ValueError, match="numeric"):
+        cypher_number("1); MATCH (n) DETACH DELETE n //")
+
+
+@given(value=st.floats(allow_nan=False, allow_infinity=False))
+@hypothesis_settings(max_examples=200)
+def test_cypher_number_round_trips_every_finite_float(value: float) -> None:
+    assert cypher_number(value) == value
+    assert cypher_number(repr(value)) == value
+
+
+@given(value=st.sampled_from([math.inf, -math.inf, math.nan]))
+def test_cypher_number_refuses_every_non_finite_float(value: float) -> None:
+    with pytest.raises(ValueError, match="finite"):
+        cypher_number(value)

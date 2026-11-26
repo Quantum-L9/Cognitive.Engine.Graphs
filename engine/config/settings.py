@@ -565,13 +565,6 @@ class Settings(BaseSettings):
     # scoring_admission_check_enabled is unchanged: cross-reference defects
     # (an unbound $_popmean_<dim>) stay under that default-off flag.
     scoring_spec_strict_validation_enabled: bool = True
-    # CEG scoring audit L2 / D3a: null_strategy inherit_prior / population_mean
-    # were dead — each computation coalesces its property first, so the outer
-    # coalesce never saw a null. On: when the dimension's source property is
-    # missing, the dimension takes candidate._prior_<dim> / $_popmean_<dim>
-    # (then defaultwhennull); a present property is unaffected. Restores the
-    # declared option, so it ships ON. Off: the legacy (dead) wrapper.
-    null_strategy_effective_enabled: bool = True
     # RU-039: a pack admission serves must execute for every declared match
     # direction. On: admission_defects also requires TraversalAssembler to
     # assemble each direction and every $parameter in gates, traversal and
