@@ -129,7 +129,8 @@ def dry_run(path: Path) -> tuple[list[dict], int]:
 
     targets = _dry_run_targets(path)
     if not targets:
-        return [{"check": "strict-scoring-dry-run", "status": "FAIL", "message": f"no spec.yaml under {path}"}], 1
+        verdict = {"check": "strict-scoring-dry-run", "status": "FAIL", "spec_path": str(path)}
+        return [{**verdict, "message": f"no spec.yaml under {path}"}], 1
     previous = settings.scoring_spec_strict_validation_enabled
     settings.scoring_spec_strict_validation_enabled = True
     try:

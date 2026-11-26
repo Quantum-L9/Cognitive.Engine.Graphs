@@ -1001,7 +1001,9 @@ class ScoringAssembler:
             fallback = f"coalesce(${sanitize_label(f'_popmean_{dim.name}')}, {default})"
         else:
             return None
-        return f"CASE WHEN {missing} THEN {fallback} ELSE ({base_expr}) END"
+        # A computation can still be null with its stored source present (geodecay
+        # with a null query operand): the legacy outer coalesce is kept there.
+        return f"CASE WHEN {missing} THEN {fallback} ELSE coalesce(({base_expr}), {fallback}) END"
 
     def _apply_cold_start_fallback(self, dim: ScoringDimensionSpec, base_expr: str) -> str:
         """S2-20: Cold-start fallback for preference_attention-type dimensions.

@@ -879,6 +879,17 @@ class ScoringSpec(BaseModel):
     adaptive_sample_size: AdaptiveSampleSizeSpec = Field(default_factory=AdaptiveSampleSizeSpec)
     preference_attention_feedback_blend: float = 0.7  # S2-06: alpha for feedback fusion
 
+    @field_validator("preference_sample_size", mode="before")
+    @classmethod
+    def refuse_non_integer_sample_size(cls, value: Any) -> Any:
+        """D3: judge the declared value before ``int | str`` coerces it (``True`` -> 1, ``16.0`` -> 16)."""
+        if not _scoring_strict():
+            return value
+        if isinstance(value, bool) or not isinstance(value, int):
+            msg = f"preference_sample_size must be an integer, got {value!r} (no value resolves 'auto')"
+            raise ValueError(msg)
+        return value
+
     @model_validator(mode="after")
     def validate_structure(self) -> ScoringSpec:
         """D3: duplicate dimension names and an unresolved sample size are refused (scoring_spec_strict_validation_enabled).

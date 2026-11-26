@@ -197,7 +197,7 @@ def test_inherit_prior_takes_the_prior_when_the_source_is_missing() -> None:
     expr, _ = _compiled(_dim(null_strategy="inherit_prior"))
     assert expr == (
         "CASE WHEN candidate.reliability IS NULL THEN coalesce(candidate._prior_depot_reliability, 0.1) "
-        "ELSE (coalesce(candidate.reliability, 0.1)) END"
+        "ELSE coalesce((coalesce(candidate.reliability, 0.1)), coalesce(candidate._prior_depot_reliability, 0.1)) END"
     )
 
 
@@ -205,16 +205,35 @@ def test_population_mean_takes_the_parameter_when_the_source_is_missing() -> Non
     expr, _ = _compiled(_dim(null_strategy="population_mean"))
     assert expr == (
         "CASE WHEN candidate.reliability IS NULL THEN coalesce($_popmean_depot_reliability, 0.1) "
-        "ELSE (coalesce(candidate.reliability, 0.1)) END"
+        "ELSE coalesce((coalesce(candidate.reliability, 0.1)), coalesce($_popmean_depot_reliability, 0.1)) END"
     )
 
 
 @pytest.mark.parametrize("strategy", ["inherit_prior", "population_mean"])
 def test_a_present_source_keeps_the_computation_value(strategy: str) -> None:
-    """The ELSE branch is the zero-strategy expression, byte for byte."""
+    """The ELSE branch is the zero-strategy expression, byte for byte, coalesced only against a null result."""
     zero, _ = _compiled(_dim())
     expr, _ = _compiled(_dim(null_strategy=strategy))
-    assert expr.endswith(f"ELSE ({zero}) END")
+    assert f"ELSE coalesce(({zero}), coalesce(" in expr
+
+
+def test_a_null_computation_with_its_source_present_still_takes_the_fallback() -> None:
+    """geodecay with a null query operand is null although lat/lon are stored: the fallback still applies."""
+    expr, _ = _compiled(
+        _dim(
+            name="geo",
+            source="computed",
+            computation="geodecay",
+            candidateprop="lat",
+            candidateprop_lon="lon",
+            queryprop="lat",
+            queryprop_lon="lon",
+            null_strategy="inherit_prior",
+        )
+    )
+    else_branch = expr.split(" ELSE ", 1)[1]
+    assert else_branch.startswith("coalesce((1.0 / (1.0 + point.distance(")
+    assert else_branch.endswith(", coalesce(candidate._prior_geo, 0.1)) END")
 
 
 @pytest.mark.parametrize("strategy", ["inherit_prior", "population_mean"])

@@ -157,7 +157,7 @@ def test_zero_defaultweight_is_admitted() -> None:
     assert DomainSpec.model_validate(raw).scoring.dimensions[0].defaultweight == 0.0
 
 
-@pytest.mark.parametrize("size", [0, -3, "16"])
+@pytest.mark.parametrize("size", [0, -3, "16", True, 16.0])
 def test_preference_sample_size_must_be_a_positive_integer(size: Any) -> None:
     raw = _raw()
     raw["scoring"]["preference_sample_size"] = size
@@ -327,3 +327,20 @@ def test_dry_run_with_no_spec_fails(tmp_path: Path) -> None:
     results, code = validate_domain.dry_run(tmp_path)
     assert code == 1
     assert "no spec.yaml" in results[0]["message"]
+
+
+@pytest.mark.parametrize("size", [True, 16.0])
+def test_coercible_sample_sizes_are_admitted_with_the_flag_off(monkeypatch: pytest.MonkeyPatch, size: Any) -> None:
+    monkeypatch.setattr(settings, _FLAG, False)
+    raw = _raw()
+    raw["scoring"]["preference_sample_size"] = size
+    assert DomainSpec.model_validate(raw).scoring.preference_sample_size == int(size)
+
+
+def test_dry_run_cli_text_mode_on_an_empty_root(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        validate_domain.main(["--dry-run", "--root", str(tmp_path), str(tmp_path)])
+    assert excinfo.value.code == 1
+    out = capsys.readouterr().out
+    assert f"[FAIL] {tmp_path}: no spec.yaml under {tmp_path}" in out
+    assert "Result: PACK(S) REFUSED" in out

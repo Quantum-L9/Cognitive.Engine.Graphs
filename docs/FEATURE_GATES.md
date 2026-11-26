@@ -1112,9 +1112,12 @@ operators can check them before deploy. Rollback:
 computation coalesces (or CASE-guards) its own property, so the legacy
 `coalesce((<dimension>), candidate._prior_<dim>, default)` never saw a null and
 both options were dead. On, the dimension compiles to
-`CASE WHEN <source property> IS NULL THEN coalesce(<prior | $_popmean_<dim>>,
-defaultwhennull) ELSE (<dimension>) END`: a missing source property takes the
-declared fallback, a present one is unaffected. Computations without one
+`CASE WHEN <source property> IS NULL THEN <fallback> ELSE coalesce((<dimension>),
+<fallback>) END` with `<fallback>` = `coalesce(<prior | $_popmean_<dim>>,
+defaultwhennull)`: a missing source property takes the declared fallback, a
+present one keeps the computed value (including 0.0), and a computation that is
+still null with its source present (geodecay with a null query operand) takes
+the fallback as before. Computations without one
 stored source property (`customcypher`, `community_bridge`) keep the legacy
 wrapper. Rollback: `NULL_STRATEGY_EFFECTIVE_ENABLED=false`.
 

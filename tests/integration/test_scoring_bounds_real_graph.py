@@ -68,11 +68,20 @@ def _feedback(raw: dict[str, Any]) -> None:
 
 
 @pytest_asyncio.fixture
-async def serve(tmp_path: Path, graph_driver, domain_database) -> AsyncGenerator[Callable[..., None], None]:
-    """Serve a variant of orbital-logistics from a temporary pack root; wipe its database afterwards."""
+async def serve(
+    tmp_path: Path, graph_driver, domain_database, monkeypatch: pytest.MonkeyPatch
+) -> AsyncGenerator[Callable[..., None], None]:
+    """Serve a variant of orbital-logistics from a temporary pack root; wipe its database afterwards.
+
+    Learned weights load only when the operator's global FEEDBACK_ENABLED and the
+    pack's feedbackloop are both on (FEEDBACK-01, ``_feedback_effective``); the
+    global switch is on here, so ``_feedback`` alone decides.
+    """
     from engine.config.loader import DomainPackLoader
     from engine.handlers import init_dependencies
     from engine.state import get_state
+
+    monkeypatch.setattr(settings, "feedback_enabled", True)
 
     def _serve(mutate: Callable[[dict[str, Any]], None] | None = None) -> None:
         pack_dir = tmp_path / _DOMAIN
