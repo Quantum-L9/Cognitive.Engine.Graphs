@@ -98,11 +98,13 @@ migration or changes to native model meaning.
 `range`, `threshold`, `boolean`, `composite`, `enummap`, `exclusion`,
 `selfrange`, `freshness`, `temporalrange`, `traversal`
 
-## Scoring computations (13)
+## Scoring computations (15)
 
 `geodecay`, `lognormalized`, `communitymatch`, `inverselinear`,
 `candidateproperty`, `weightedrate`, `pricealignment`, `temporalproximity`,
-`customcypher`, `traversalalias`, `kge`, `variantdiscovery`, `ensembleconfidence`
+`customcypher`, `traversalalias`, `kge`, `variantdiscovery`, `ensembleconfidence`,
+`preference_attention`, `community_bridge` (the last two are snake_case; source:
+`ComputationType` in `engine/config/schema.py`)
 
 ## Validation checklist
 
