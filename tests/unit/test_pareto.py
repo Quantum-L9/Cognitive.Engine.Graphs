@@ -267,3 +267,72 @@ class TestWeightVectorNdcg:
         assert [wv.weights for wv in with_history] != [wv.weights for wv in without_history]
         # The best-NDCG vector leans on the predictive dimension.
         assert with_history[0].weights["a"] > with_history[0].weights["b"]
+
+
+@pytest.mark.unit
+class TestFrontIsIndependentOfInputOrder:
+    """SC-004 / ND-TIE (ceg-scoring-audit L3): the compared dimensions never come from one row.
+
+    ``compute_pareto_front`` used to compare only ``candidates[0]``'s keys, so
+    with heterogeneous keys the front depended on which row Cypher returned
+    first. Under ``pareto_front_declared_dimensions_enabled`` it compares the
+    declared ``dimension_names`` when given, else the union of every row's keys.
+    """
+
+    @staticmethod
+    def _rows() -> list[ParetoCandidate]:
+        return [
+            ParetoCandidate(candidate_id="narrow", dimension_scores={"a": 0.9}),
+            ParetoCandidate(candidate_id="wide", dimension_scores={"a": 0.5, "b": 0.9}),
+            ParetoCandidate(candidate_id="low", dimension_scores={"a": 0.4, "b": 0.8}),
+        ]
+
+    def test_flag_ships_on(self) -> None:
+        from engine.config.settings import settings
+
+        assert settings.pareto_front_declared_dimensions_enabled is True
+
+    def test_union_front_is_the_same_for_every_permutation(self) -> None:
+        import itertools
+
+        fronts = set()
+        for perm in itertools.permutations(self._rows()):
+            front = compute_pareto_front(list(perm))
+            fronts.add(frozenset(c.candidate_id for c in front.non_dominated))
+            assert front.dimension_names == ["a", "b"]
+        assert fronts == {frozenset({"narrow", "wide"})}
+
+    def test_declared_dimensions_front_is_the_same_for_every_permutation(self) -> None:
+        import itertools
+
+        fronts = set()
+        for perm in itertools.permutations(self._rows()):
+            front = compute_pareto_front(list(perm), dimension_names=["a"])
+            fronts.add(frozenset(c.candidate_id for c in front.non_dominated))
+            assert front.dimension_names == ["a"]
+        assert fronts == {frozenset({"narrow"})}
+
+    def test_partition_order_follows_input_order(self) -> None:
+        rows = self._rows()
+        front = compute_pareto_front(list(reversed(rows)))
+        assert [c.candidate_id for c in front.non_dominated] == ["wide", "narrow"]
+        assert [c.candidate_id for c in front.dominated] == ["low"]
+
+    def test_flag_off_restores_first_row_dimensions(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "pareto_front_declared_dimensions_enabled", False)
+        rows = self._rows()
+        assert compute_pareto_front(rows).dimension_names == ["a"]
+        assert compute_pareto_front(list(reversed(rows))).dimension_names == ["a", "b"]
+
+    def test_arbitration_filter_compares_the_declared_objectives(self) -> None:
+        from engine.scoring.pareto_integrator import apply_pareto_filter
+
+        rows = [
+            {"candidate": {"entity_id": "narrow"}, "score": 0.9, "dimension_scores": {"a": 0.9}},
+            {"candidate": {"entity_id": "wide"}, "score": 0.5, "dimension_scores": {"a": 0.5, "b": 0.9}},
+        ]
+        forward = apply_pareto_filter(rows, ["a", "b"])
+        backward = apply_pareto_filter(list(reversed(rows)), ["a", "b"])
+        assert sorted(forward["nondominated"]) == sorted(backward["nondominated"])

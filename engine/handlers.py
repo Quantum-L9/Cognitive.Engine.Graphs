@@ -512,6 +512,37 @@ _WEIGHT_CEILING = 1.0
 _WEIGHT_SUM_TOLERANCE = 1e-9
 
 
+def _strict_request_weight(key: str, val: Any, tenant: str) -> float:
+    """SC-003: a request weight is a finite real number in [0, 1], nothing coerced.
+
+    ``float()`` used to accept ``"0.5"`` and ``True``; ``nan`` compared false
+    against both bounds and passed. Under ``match_request_weight_strict_enabled``
+    a ``str``, ``bool``, ``None``, container, non-finite or out-of-range value is
+    refused here.
+    """
+    if isinstance(val, bool) or not isinstance(val, (int, float)):
+        msg = f"Weight '{key}' is not a valid number (got {type(val).__name__})"
+        raise ValidationError(msg, action="match", tenant=tenant)
+    number = float(val)
+    if not math.isfinite(number):
+        msg = f"Weight '{key}' is not a finite number"
+        raise ValidationError(msg, action="match", tenant=tenant)
+    if number < _WEIGHT_FLOOR or number > _WEIGHT_CEILING:
+        msg = f"Weight '{key}' = {number} is outside allowed range [{_WEIGHT_FLOOR}, {_WEIGHT_CEILING}]"
+        raise ValidationError(msg, action="match", tenant=tenant)
+    return number
+
+
+def _request_weights_mapping(raw: Any, tenant: str) -> dict[str, Any]:
+    """SC-003: the request's ``weights`` as a mapping; absent / ``None`` is ``{}``."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        msg = f"weights must be a mapping of weight key to number, got {type(raw).__name__}"
+        raise ValidationError(msg, action="match", tenant=tenant)
+    return raw
+
+
 def _validate_match_weights(
     weights: dict[str, float],
     tenant: str,
@@ -528,12 +559,18 @@ def _validate_match_weights(
     supplied keys alone; a key no active dimension declares
     (``known_weightkeys``) is rejected (R1a-DEC-06).
     """
+    from engine.config.settings import settings as _weight_settings
+
+    strict = bool(_weight_settings.match_request_weight_strict_enabled)
     for key, val in weights.items():
-        try:
-            w = float(val)
-        except (TypeError, ValueError) as exc:
-            msg = f"Weight '{key}' is not a valid number"
-            raise ValidationError(msg, action="match", tenant=tenant) from exc
+        if strict:
+            w = _strict_request_weight(key, val, tenant)
+        else:
+            try:
+                w = float(val)
+            except (TypeError, ValueError) as exc:
+                msg = f"Weight '{key}' is not a valid number"
+                raise ValidationError(msg, action="match", tenant=tenant) from exc
         if w < _WEIGHT_FLOOR or w > _WEIGHT_CEILING:
             msg = f"Weight '{key}' = {w} is outside allowed range [{_WEIGHT_FLOOR}, {_WEIGHT_CEILING}]"
             raise ValidationError(msg, action="match", tenant=tenant)
@@ -547,6 +584,9 @@ def _validate_match_weights(
     source = weights if effective_weights is None else effective_weights
     weight_sum = 0.0
     for key, val in source.items():
+        if strict:
+            weight_sum += _strict_request_weight(key, val, tenant)
+            continue
         try:
             number = float(val)
         except (TypeError, ValueError) as exc:
@@ -587,6 +627,74 @@ def _candidate_id_property(domain_spec: DomainSpec, label: str) -> str:
                 if prop.required:
                     return prop.name
     return _FALLBACK_CANDIDATE_ID_PROPERTY
+
+
+def _declared_candidate_identity(domain_spec: DomainSpec, label: str) -> str | None:
+    """ND-TIE: the candidate identity property the pack declares, or None.
+
+    Same resolution as ``_candidate_id_property`` (the sync endpoint's
+    ``idproperty`` for this label, else the node's first ``required`` property)
+    without the ``entity_id`` convention fallback: a tie-break orders on a
+    property the domain declared, never on one the engine assumed.
+    """
+    if domain_spec.sync:
+        for endpoint in domain_spec.sync.endpoints:
+            if endpoint.targetnode == label and endpoint.idproperty:
+                return endpoint.idproperty
+    for node in domain_spec.ontology.nodes:
+        if node.label == label:
+            for prop in node.properties:
+                if prop.required:
+                    return prop.name
+    return None
+
+
+def _arbitration_constraint_cypher(
+    domain_spec: DomainSpec,
+    active_dimensions: list[str],
+) -> tuple[str, str, dict[str, Any]]:
+    """ND-ARB (D4): ``decision_arbitration.constraints`` as Cypher, before the cut.
+
+    Returns ``(hard_predicate, soft_factor, params)``:
+
+    * ``hard_predicate`` — ``NOT coalesce(<dim> < $t, false)`` per hard
+      constraint, ANDed; the caller attaches it as the scoring ``WITH``'s
+      ``WHERE``. A null dimension (or one that does not compare) is not below
+      the threshold, exactly as ``apply_constraint_penalties`` skips it.
+    * ``soft_factor`` — ``(CASE WHEN coalesce(<dim> < $t, false) THEN $p ELSE
+      1.0 END)`` per soft constraint, multiplied; the caller rescales ``score``.
+    * ``params`` — thresholds and penalties, bound as parameters (C-9).
+
+    A constraint on a dimension that is not active for this direction has no
+    alias in scope and no value, so it is not compiled (Python skipped it).
+    Empty strings when arbitration is disabled or nothing applies.
+    """
+    arbitration = domain_spec.decision_arbitration
+    if not arbitration.enabled or not arbitration.constraints:
+        return "", "", {}
+    active = set(active_dimensions)
+    hard: list[str] = []
+    soft: list[str] = []
+    params: dict[str, Any] = {}
+    for constraint in arbitration.constraints:
+        if constraint.dimension not in active:
+            continue
+        alias = sanitize_label(constraint.dimension)
+        if constraint.hard:
+            name = sanitize_label(f"arb_hard_threshold_{len(hard)}")
+            params[name] = float(constraint.threshold)
+            hard.append(f"NOT coalesce({alias} < ${sanitize_label(name)}, false)")
+        else:
+            index = len(soft)
+            threshold = sanitize_label(f"arb_soft_threshold_{index}")
+            penalty = sanitize_label(f"arb_soft_penalty_{index}")
+            params[threshold] = float(constraint.threshold)
+            params[penalty] = float(constraint.penalty)
+            soft.append(
+                f"(CASE WHEN coalesce({alias} < ${sanitize_label(threshold)}, false) "
+                f"THEN ${sanitize_label(penalty)} ELSE 1.0 END)"
+            )
+    return " AND ".join(hard), " * ".join(soft), params
 
 
 def _namespaced_entity_ref(value: Any) -> str | None:
@@ -817,6 +925,7 @@ def _apply_pareto_precut(
     id_property: str,
     top_n: int,
     pool_limit: int,
+    constraints_applied: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """SI-06: decision arbitration on the fetched pool, before the ``top_n`` cut.
 
@@ -831,7 +940,10 @@ def _apply_pareto_precut(
         {"dimension": c.dimension, "threshold": c.threshold, "hard": c.hard, "penalty": c.penalty}
         for c in arbitration.constraints
     ]
-    if constraint_dicts:
+    # ND-ARB: ``constraints_applied`` means the match Cypher already applied them
+    # (match_arbitration_in_cypher_enabled); the dormant SI-06 front reorder of
+    # the pool is a recorded known exception to D4 and stays as it was.
+    if constraint_dicts and not constraints_applied:
         results = apply_constraint_penalties(results, constraint_dicts)
     objectives = arbitration.pareto_config.objectives
     return pareto_precut(
@@ -896,9 +1008,15 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     from engine.config.settings import settings
 
-    # W1-02: Validate user-supplied weights are in [0, 1] and sum to <= 1.0
+    # W1-02: Validate user-supplied weights are in [0, 1] and sum to <= 1.0.
+    # SC-003: under match_request_weight_strict_enabled the check no longer
+    # depends on score_clamp_enabled, and weights must be a mapping.
+    strict_weights = bool(settings.match_request_weight_strict_enabled)
+    if strict_weights:
+        weights = _request_weights_mapping(weights, tenant)
+    validate_weights = bool(weights) and (strict_weights or settings.score_clamp_enabled)
     effective_weight_check = bool(settings.match_effective_weight_validation)
-    if weights and settings.score_clamp_enabled and not effective_weight_check:
+    if validate_weights and not effective_weight_check:
         _validate_match_weights(weights, tenant)
 
     domain_spec = domain_loader.load_domain(tenant)
@@ -906,7 +1024,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # RU-009 / CEG-COR-018: validate the weights scoring will actually apply for
     # this direction (one merge, in the assembler), not only the supplied keys.
-    if weights and settings.score_clamp_enabled and effective_weight_check:
+    if validate_weights and effective_weight_check:
         weight_merge = ScoringAssembler(domain_spec)
         _validate_match_weights(
             weights,
@@ -1013,6 +1131,19 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         dim_aliases = [sanitize_label(name) for name in scoring_assembler.last_active_dimension_names]
         dim_map = ", ".join(f"{alias}: {alias}" for alias in dim_aliases)
         dim_projection = f"{{{dim_map}}} AS dimension_scores"
+    # ND-TIE (D4): score ties break on the declared candidate identity, never on
+    # elementId or Neo4j's row order; the path collapse orders a candidate's paths
+    # by their projected dimensions after score, so `head(collect(...))` is a
+    # function of the paths, not of their traversal order.
+    tiebreak = bool(_match_settings.match_candidate_tiebreak_enabled)
+    final_order = "ORDER BY score DESC"
+    collapse_order = "ORDER BY score DESC"
+    if tiebreak:
+        identity = _declared_candidate_identity(domain_spec, candidate_labels[0])
+        if identity is not None:
+            final_order += f", candidate.{sanitize_label(identity)} ASC"
+        if project_dimensions:
+            collapse_order += "".join(f", dimension_scores.{alias} DESC" for alias in dim_aliases)
     # RU-036 / CEG-COR-007: one row per candidate (its best-scoring path) before
     # ORDER BY / LIMIT, so top_n counts distinct candidates (R2-DEC-05 option A).
     if _match_settings.match_collapse_traversal_rows:
@@ -1029,7 +1160,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             return_line = "RETURN candidate, best.score AS score\n"
         return_line = (
             row_projection
-            + "ORDER BY score DESC\n"
+            + f"{collapse_order}\n"
             + f"WITH candidate, head(collect({best_row})) AS best\n"
             + return_line
         )
@@ -1053,6 +1184,19 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         from engine.scoring.pareto_integrator import precut_pool_limit
 
         fetch_limit = precut_pool_limit(top_n)
+    # ND-ARB (D4): arbitration constraints sit between the scoring WITH and every
+    # ORDER BY / LIMIT, so the cut ranks only admissible, penalised scores.
+    arbitration_in_cypher = bool(_match_settings.match_arbitration_in_cypher_enabled)
+    arbitration_clause = ""
+    arbitration_params: dict[str, Any] = {}
+    if arbitration_in_cypher:
+        active_dims = scoring_assembler.last_active_dimension_names
+        hard_predicate, soft_factor, arbitration_params = _arbitration_constraint_cypher(domain_spec, active_dims)
+        if hard_predicate:
+            arbitration_clause += f"WHERE {hard_predicate}\n"
+        if soft_factor:
+            passthrough = "".join(f", {sanitize_label(name)}" for name in active_dims)
+            arbitration_clause += f"WITH candidate{passthrough}, score * {soft_factor} AS score\n"
     cypher = (
         f"MATCH (candidate:{sanitize_label(candidate_labels[0])})\n"
         + "\n".join(traversal_clauses)
@@ -1060,8 +1204,9 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         + gate_row_boundary
         + f"WHERE {where_clause}\n"
         + f"{scoring_clause}\n"
+        + arbitration_clause
         + return_line
-        + "ORDER BY score DESC\n"
+        + f"{final_order}\n"
         + "LIMIT $top_n"
     )
 
@@ -1073,6 +1218,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             "top_n": fetch_limit,
             **gate_compiler.last_query_params,
             **scoring_assembler.last_query_params,
+            **arbitration_params,
         }
         results = await graph_driver.execute_query(
             cypher=cypher,
@@ -1096,6 +1242,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             id_property=_candidate_id_property(domain_spec, candidate_labels[0]),
             top_n=top_n,
             pool_limit=fetch_limit,
+            constraints_applied=arbitration_in_cypher,
         )
 
     # Build Pareto candidates from results and compute front metadata
@@ -1155,7 +1302,10 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 for c in domain_spec.decision_arbitration.constraints
             ]
 
-            if constraint_dicts:
+            # ND-ARB: under match_arbitration_in_cypher_enabled the query already
+            # rejected and penalised before ORDER BY / LIMIT; re-applying here
+            # would drop or re-score rows after the cut.
+            if constraint_dicts and not arbitration_in_cypher:
                 results = apply_constraint_penalties(list(results), constraint_dicts)
 
             # Spec-driven Pareto filter using declared objectives

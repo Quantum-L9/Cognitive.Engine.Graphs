@@ -135,9 +135,30 @@ def _dominates(
 # ── Core Pareto front computation ────────────────────────────────────────────
 
 
+def _front_dimensions(candidates: list[ParetoCandidate], dimension_names: list[str] | None) -> list[str]:
+    """The dimensions dominance compares, independent of candidate order.
+
+    SC-004: under ``pareto_front_declared_dimensions_enabled`` the declared
+    ``dimension_names`` when given, else the sorted union of every candidate's
+    keys. Off: ``candidates[0]``'s keys, the historical (order-dependent) choice.
+    """
+    from engine.config.settings import settings
+
+    if not settings.pareto_front_declared_dimensions_enabled:
+        return sorted(candidates[0].dimension_scores.keys())
+    if dimension_names is not None:
+        return list(dict.fromkeys(dimension_names))
+    keys: set[str] = set()
+    for cand in candidates:
+        keys.update(cand.dimension_scores.keys())
+    return sorted(keys)
+
+
 def compute_pareto_front(
     candidates: list[ParetoCandidate],
     directions: Mapping[str, str] | None = None,
+    *,
+    dimension_names: list[str] | None = None,
 ) -> ParetoFront:
     """Compute the rank-0 Pareto front via O(n² · d) pairwise dominance.
 
@@ -148,6 +169,10 @@ def compute_pareto_front(
     directions : Mapping[str, str] | None
         Optional per-dimension ``"minimize"`` / ``"maximize"``. ``None``
         (default) maximises every dimension.
+    dimension_names : list[str] | None
+        SC-004: the dimensions to compare (the declared objectives / active
+        dimensions). ``None`` compares the union of every candidate's keys.
+        A key a candidate lacks keeps the historical ``0.0`` fill.
 
     Returns
     -------
@@ -162,7 +187,7 @@ def compute_pareto_front(
             front_size=0,
         )
 
-    dims = sorted(candidates[0].dimension_scores.keys())
+    dims = _front_dimensions(candidates, dimension_names)
     n = len(candidates)
 
     dominated_flags = [False] * n
