@@ -10,190 +10,115 @@ status: active
 --- /L9_META ---
 
 tests/performance/test_query_latency.py
-Performance benchmarks for match query latency.
-Tests p50/p95/p99 latency against Neo4j with seeded graph data.
-Requires: pytest-benchmark or manual timing.
+Match latency, measured on the engine's own path (Contract 17, TEST_PATTERNS:
+p95 match latency < 200 ms).
 
-Uses the real engine APIs:
-  GateCompiler.compile_all_gates(match_direction) / compile_relaxed(match_direction)
-  TraversalAssembler.assemble_traversal(match_direction)
-  ScoringAssembler.assemble_scoring_clause(match_direction, weights) -> (clause, meta)
-The compiled query binds every gate queryparam and scoring queryprop, mirroring
-the parameter backfill performed by handle_match.
+The timed call is ``handle_match`` itself: request validation, parameter
+resolution, gate/traversal/scoring compilation, the Cypher the engine emits and
+its result shaping. The graph is written by ``handle_sync`` (no hand-seeded
+nodes, no hand-assembled query). Two shapes on the synthetic orbital-logistics
+pack, each at CANDIDATES synced depots:
 
-Runs on the synthetic orbital-logistics pack (ADR-112 Stage 4, A16) plus its
-SERVES_ORBIT traversal gate (tests/fixtures/orbital_match), so the strict chain
-still carries an EXISTS traversal alongside the pack's boolean and threshold gates.
+* the pack as declared (boolean + threshold gates, two scoring dimensions);
+* the pack plus its SERVES_ORBIT traversal gate (tests/fixtures/orbital_match),
+  so the strict chain carries an EXISTS subquery over synced taxonomy edges.
 """
 
 from __future__ import annotations
 
+import math
 import statistics
 import time
+from typing import Any
 
 import pytest
 import structlog
 
-from engine.gates.compiler import GateCompiler
-from engine.scoring.assembler import ScoringAssembler
-from engine.traversal.assembler import TraversalAssembler
-from tests.fixtures.orbital_match import DIRECTION, orbit_gated
+from tests.fixtures.orbital_match import DIRECTION, ORBITAL, orbit_gated, serve
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.performance
 
 logger = structlog.get_logger(__name__)
 
-
-def _full_match_params(domain_spec, tenant: str) -> dict:
-    """Bind all queryschema fields + scoring queryprops, like handle_match does."""
-    params: dict = {
-        "tenant": tenant,
-        "orbit_class": "GEO",
-        "min_ports": 2,
-    }
-    # Backfill any remaining queryschema fields and scoring queryprops with null,
-    # mirroring the engine's parameter backfill in handle_match.
-    for field in domain_spec.queryschema.fields:
-        params.setdefault(field.name, None)
-    for dim in domain_spec.scoring.dimensions:
-        queryprop = getattr(dim, "queryprop", None)
-        if queryprop:
-            params.setdefault(queryprop, None)
-    return params
+CANDIDATES = 200  # synced depots, every one of which passes the gates
+TOP_N = 25
+WARMUP = 5
+ITERATIONS = 50
+P95_BOUND_MS = 200.0  # docs/contracts/TEST_PATTERNS.md
 
 
-@pytest.mark.performance
-class TestMatchQueryLatency:
-    """Benchmark end-to-end match query execution latency."""
+def _depots(served_orbits: list[str] | None = None) -> list[dict[str, Any]]:
+    rows = []
+    for i in range(CANDIDATES):
+        row: dict[str, Any] = {
+            "depot_id": f"bench-{i:04d}",
+            "accepts_hazmat": True,
+            "docking_ports": 2 + i % 6,
+            "reliability": round(0.5 + (i % 50) / 100, 2),
+        }
+        if served_orbits is not None:
+            row["served_orbits"] = served_orbits
+        rows.append(row)
+    return rows
 
-    async def _seed_matchable_depots(self, graph_driver, db: str, tenant: str) -> None:
-        """Seed depots that satisfy the strict gate chain + SERVES_ORBIT traversal."""
-        await graph_driver.execute_query(
-            """
-            UNWIND $batch AS row
-            MERGE (d:OrbitalDepot {depot_id: row.depot_id})
-            SET d += row, d.tenant = $tenant, d.updated_at = datetime()
-            MERGE (o:OrbitClass {class_code: 'GEO'})
-            MERGE (d)-[:SERVES_ORBIT]->(o)
-            """,
-            parameters={
-                "batch": [
-                    {
-                        "depot_id": 9001 + i,
-                        "name": f"Bench Depot {i}",
-                        "accepts_hazmat": True,
-                        "docking_ports": 4,
-                        "reliability": 0.9,
-                        "lat": 34.05,
-                        "lon": -118.24,
-                    }
-                    for i in range(3)
-                ],
-                "tenant": tenant,
-            },
-            database=db,
-        )
 
-    @pytest.mark.asyncio
-    async def test_strict_match_latency_under_100ms(self, graph_driver, seeded_graph, domain_spec):
-        """
-        Strict match query should complete within 100ms p95 on a
-        small seeded graph. Realistic cold-cache benchmark.
-        """
-        db = seeded_graph["database"]
-        tenant = seeded_graph["tenant"]
-        await self._seed_matchable_depots(graph_driver, db, tenant)
-        domain_spec = orbit_gated(domain_spec)
+async def _sync(entity_type: str, batch: list[dict[str, Any]]) -> None:
+    from engine.handlers import handle_sync
 
-        gate_compiler = GateCompiler(domain_spec)
-        scoring_assembler = ScoringAssembler(domain_spec)
-        traversal_assembler = TraversalAssembler(domain_spec)
+    result = await handle_sync(ORBITAL, {"entity_type": entity_type, "batch": batch})
+    assert result["status"] == "success"
 
-        direction = DIRECTION
-        where_clause = gate_compiler.compile_all_gates(direction)
-        traversal_clauses = traversal_assembler.assemble_traversal(direction)
-        weights = {d.weightkey: d.defaultweight for d in domain_spec.scoring.dimensions}
-        scoring_clause, _pareto_meta = scoring_assembler.assemble_scoring_clause(direction, weights)
 
-        # Build the full Cypher query. The traversal step already introduces
-        # `candidate`, so anchor the tenant filter in the WHERE clause.
-        traversal_block = "\n".join(traversal_clauses) if traversal_clauses else "MATCH (candidate:OrbitalDepot)"
-        cypher = f"""
-        {traversal_block}
-        WHERE candidate.tenant = $tenant AND {where_clause}
-        {scoring_clause}
-        RETURN candidate.depot_id AS fid, candidate.name AS name, score
-        ORDER BY score DESC
-        LIMIT 10
-        """
+async def _p95_ms(payload: dict[str, Any]) -> tuple[float, dict[str, Any]]:
+    """Warm up, then time ITERATIONS calls of handle_match; returns (p95 ms, last result)."""
+    from engine.handlers import handle_match
 
-        query_params = _full_match_params(domain_spec, tenant)
+    result: dict[str, Any] = {}
+    for _ in range(WARMUP):
+        result = await handle_match(ORBITAL, payload)
+    latencies: list[float] = []
+    for _ in range(ITERATIONS):
+        start = time.perf_counter()
+        result = await handle_match(ORBITAL, payload)
+        latencies.append((time.perf_counter() - start) * 1000)
+    ordered = sorted(latencies)
+    p95 = ordered[math.ceil(0.95 * len(ordered)) - 1]  # nearest-rank p95
+    logger.info(
+        "handle_match_latency",
+        candidates=CANDIDATES,
+        top_n=TOP_N,
+        n=ITERATIONS,
+        p50_ms=round(statistics.median(latencies), 1),
+        p95_ms=round(p95, 1),
+        max_ms=round(ordered[-1], 1),
+    )
+    return p95, result
 
-        # Warmup
-        results = await graph_driver.execute_query(cypher, parameters=query_params, database=db)
-        assert results, "Seeded depots should pass the strict gate chain"
 
-        # Benchmark: 50 iterations
-        latencies: list[float] = []
-        for _ in range(50):
-            t0 = time.perf_counter()
-            await graph_driver.execute_query(cypher, parameters=query_params, database=db)
-            elapsed_ms = (time.perf_counter() - t0) * 1000
-            latencies.append(elapsed_ms)
+@pytest.mark.asyncio
+async def test_handle_match_p95_under_200ms_on_the_declared_pack(engine_deps, clean_db):
+    await _sync("orbital-depots", _depots())
 
-        p50 = statistics.median(latencies)
-        p95 = sorted(latencies)[int(len(latencies) * 0.95)]
-        p99 = sorted(latencies)[int(len(latencies) * 0.99)]
-        avg = statistics.mean(latencies)
+    p95, result = await _p95_ms({"query": {"min_ports": 2}, "match_direction": DIRECTION, "top_n": TOP_N})
 
-        logger.info(
-            "match_query_latency",
-            n=50,
-            depots=len(seeded_graph["depot_ids"]),
-            avg_ms=round(avg, 1),
-            p50_ms=round(p50, 1),
-            p95_ms=round(p95, 1),
-            p99_ms=round(p99, 1),
-        )
+    assert len(result["candidates"]) == TOP_N  # the timed query did the full work, not an empty match
+    assert p95 < P95_BOUND_MS, f"handle_match p95 {p95:.1f} ms at {CANDIDATES} candidates exceeds {P95_BOUND_MS} ms"
 
-        assert p95 < 100, f"p95 latency {p95:.1f}ms exceeds 100ms target"
 
-    @pytest.mark.asyncio
-    async def test_relaxed_match_latency_under_200ms(self, graph_driver, seeded_graph, domain_spec):
-        """
-        Relaxed match (fewer hard gates, more scoring penalties) should
-        complete within 200ms p95. Relaxed queries scan more candidates.
-        """
-        db = seeded_graph["database"]
-        tenant = seeded_graph["tenant"]
+@pytest.mark.asyncio
+async def test_handle_match_p95_under_200ms_with_a_traversal_gate(engine_deps, graph_driver, domain_spec, clean_db):
+    serve(graph_driver, orbit_gated(domain_spec))
+    await _sync("orbit-classes", [{"class_code": "GEO"}, {"class_code": "LEO"}])
+    await _sync("orbital-depots", _depots(served_orbits=["GEO"]))
 
-        gate_compiler = GateCompiler(domain_spec)
-        direction = DIRECTION
-        where_clause = gate_compiler.compile_relaxed(direction)
+    payload = {"query": {"min_ports": 2, "orbit_class": "GEO"}, "match_direction": DIRECTION, "top_n": TOP_N}
+    p95, result = await _p95_ms(payload)
 
-        cypher = f"""
-        MATCH (candidate:OrbitalDepot {{tenant: $tenant}})
-        WHERE {where_clause}
-        RETURN candidate.depot_id AS fid, candidate.name AS name
-        ORDER BY candidate.name
-        LIMIT 25
-        """
+    assert len(result["candidates"]) == TOP_N
+    assert p95 < P95_BOUND_MS, f"handle_match p95 {p95:.1f} ms at {CANDIDATES} candidates exceeds {P95_BOUND_MS} ms"
 
-        query_params = _full_match_params(domain_spec, tenant)
+    from engine.handlers import handle_match
 
-        # Warmup
-        await graph_driver.execute_query(cypher, parameters=query_params, database=db)
-
-        latencies: list[float] = []
-        for _ in range(50):
-            t0 = time.perf_counter()
-            await graph_driver.execute_query(cypher, parameters=query_params, database=db)
-            elapsed_ms = (time.perf_counter() - t0) * 1000
-            latencies.append(elapsed_ms)
-
-        p95 = sorted(latencies)[int(len(latencies) * 0.95)]
-        avg = statistics.mean(latencies)
-
-        logger.info("relaxed_match_latency", avg_ms=round(avg, 1), p95_ms=round(p95, 1))
-
-        assert p95 < 200, f"p95 latency {p95:.1f}ms exceeds 200ms target"
+    # The traversal gate is live: no depot serves LEO, so nothing passes.
+    leo = await handle_match(ORBITAL, {**payload, "query": {"min_ports": 2, "orbit_class": "LEO"}})
+    assert leo["candidates"] == []
