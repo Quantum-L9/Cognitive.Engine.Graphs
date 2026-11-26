@@ -34,6 +34,12 @@ Rules the policy holds, each tested in ``tests/unit/test_evidence_priority.py``:
 * Missing provenance, non-admitted or negative evidence, stale or conflicting
   evidence, and unsupported relationship types abstain with ``score: None``.
   Nothing is zero-filled.
+* A malformed evidence edge is not absent evidence (SCR-06). When the read
+  reports malformed edges (``EvidenceRead.malformed``), every entity in the
+  cohort carries ``malformed_evidence_count``, and an entity abstains with
+  ``malformed_evidence`` when its only evidence is malformed or when a
+  malformed edge may share its identity with a valid one (an edge without a
+  readable ``evidence_ref`` may share any).
 
 The module is pure: it reads no graph, loads no domain pack and never touches
 the match path (``handle_match``, ``GateCompiler``, ``TraversalAssembler``,
@@ -108,8 +114,26 @@ class EvidenceObservation(BaseModel):
     conflicted: bool = False
 
 
+class MalformedEvidence(BaseModel):
+    """An evidence edge the reader found but could not turn into an ``EvidenceObservation``.
+
+    ``evidence_ref`` is the edge's identity when it is a non-empty string, else
+    ``None`` (unknown: it may be any identity).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    entity_ref: str
+    relationship_type: str
+    evidence_ref: str | None = None
+
+
 class EvidenceRead(BaseModel):
-    """What one evidence read returned, and whether it came from a connected graph."""
+    """What one evidence read returned, and whether it came from a connected graph.
+
+    ``malformed`` holds the edges the reader found but could not read (SCR-06);
+    a reader that does not report them leaves it empty.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -117,6 +141,7 @@ class EvidenceRead(BaseModel):
     database: str
     source_revision: str | None = None
     observations: tuple[EvidenceObservation, ...] = Field(default_factory=tuple)
+    malformed: tuple[MalformedEvidence, ...] = Field(default_factory=tuple)
 
 
 class EvidenceBinding(Protocol):
@@ -219,14 +244,35 @@ def _contribution(observation: EvidenceObservation, approved_relevance: Mapping[
     return product if product > 0.0 else None
 
 
+def _shares_identity(
+    malformed: Sequence[MalformedEvidence],
+    observations: Sequence[EvidenceObservation],
+    *,
+    identity_per_type: bool,
+) -> bool:
+    """Whether any malformed edge may carry the identity of a readable observation."""
+    valid = {(o.relationship_type if identity_per_type else "", o.evidence_ref) for o in observations}
+    for edge in malformed:
+        if edge.evidence_ref is None:
+            return True
+        if (edge.relationship_type if identity_per_type else "", edge.evidence_ref) in valid:
+            return True
+    return False
+
+
 def _score_entity(
     entity_ref: str,
     observations: Sequence[EvidenceObservation],
     approved_relevance: Mapping[str, float],
     *,
     identity_per_type: bool,
+    malformed: Sequence[MalformedEvidence] = (),
 ) -> dict[str, Any]:
     """Score one entity, or return its abstention."""
+    if malformed and (
+        not observations or _shares_identity(malformed, observations, identity_per_type=identity_per_type)
+    ):
+        return _abstain(entity_ref, "malformed_evidence")
     if not observations:
         return _abstain(entity_ref, "no_evidence")
 
@@ -291,11 +337,23 @@ def score_cohort(
     for observation in read.observations:
         if observation.entity_ref in by_entity:
             by_entity[observation.entity_ref].append(observation)
+    malformed_by_entity: dict[str, list[MalformedEvidence]] = {ref: [] for ref in request.entity_refs}
+    for edge in read.malformed:
+        if edge.entity_ref in malformed_by_entity:
+            malformed_by_entity[edge.entity_ref].append(edge)
 
     scored: list[dict[str, Any]] = []
     abstained: list[dict[str, Any]] = []
     for entity_ref, observations in by_entity.items():
-        outcome = _score_entity(entity_ref, observations, approved_relevance, identity_per_type=identity_per_type)
+        outcome = _score_entity(
+            entity_ref,
+            observations,
+            approved_relevance,
+            identity_per_type=identity_per_type,
+            malformed=malformed_by_entity[entity_ref],
+        )
+        if read.malformed:
+            outcome["malformed_evidence_count"] = len(malformed_by_entity[entity_ref])
         (abstained if outcome["score"] is None else scored).append(outcome)
 
     scored.sort(key=lambda item: (-item["score"], item["entity_ref"]))

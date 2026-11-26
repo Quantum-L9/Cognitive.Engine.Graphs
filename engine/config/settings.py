@@ -409,6 +409,21 @@ class Settings(BaseSettings):
     # tenant `score:read` grant, a -reviewed/-production spec with relevance and
     # declared evidence types, and evidence_identity_per_type_enabled. §29.
     remote_score_enabled: bool = False
+    # SCR-06 (L8): the score evidence reader reports the edges it cannot parse;
+    # an entity whose only evidence is malformed, or whose malformed edge may
+    # share an identity with a valid one, abstains with `malformed_evidence`,
+    # and every entity carries `malformed_evidence_count`. Off: a malformed edge
+    # is dropped and its entity can read as `no_evidence`. FEATURE_GATES §39a.
+    score_malformed_evidence_abstention_enabled: bool = True
+    # SCR-13 (L8): admin score_feedback proposes a nudge for a dimension only
+    # when each outcome class holds at least feedback_min_samples_per_class
+    # scored outcomes. Off: one sample per class is enough. FEATURE_GATES §39a.
+    feedback_per_class_minimum_enabled: bool = True
+    feedback_min_samples_per_class: int = Field(default=5, ge=1)
+    # SCR-05 (L8): a GATE hop whose status carries no information (PENDING,
+    # DELEGATED, unknown) maps to trust 0.5, the value a symmetric Bayesian
+    # update treats as uninformative. Off: 0.60. Dormant module. §39a.
+    hop_trust_neutral_uninformative_enabled: bool = True
 
     # Correctness remediation lane A (plan 0d84ec8, RU-001..RU-060)
     # Each flag ships on (a correctness fix); off restores the pre-fix behaviour.
