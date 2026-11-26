@@ -435,9 +435,12 @@ class TestArbitrationZeroScorePresent:
         kept = apply_constraint_penalties(candidates, [{"dimension": "d", "threshold": 0.5, "hard": False}])
         assert kept[0]["score"] == 0.5
 
-    def test_absent_dimension_still_skips_constraint(self):
-        """Preserved: a dimension absent everywhere does not trigger the constraint."""
+    def test_absent_dimension_skips_constraint_rollback_path(self, monkeypatch):
+        """Rollback path (``arbitration_unknown_fails_constraint_enabled=False``; rule Q2 reverses this, see tests/unit/test_pareto_constraint_unknown.py): a dimension absent everywhere does not trigger the constraint."""
+        from engine.config.settings import settings
         from engine.scoring.pareto_integrator import apply_constraint_penalties
+
+        monkeypatch.setattr(settings, "arbitration_unknown_fails_constraint_enabled", False)
 
         candidates = [{"other": 0.1, "score": 1.0}]
         kept = apply_constraint_penalties(candidates, [{"dimension": "d", "threshold": 0.5, "hard": True}])
@@ -460,12 +463,13 @@ class TestArbitrationZeroScorePresent:
         cands = build_pareto_candidates(results, ["risk"])
         assert cands[0].dimension_scores["risk"] == 0.0
 
-    def test_flag_off_restores_legacy_truthiness(self, monkeypatch):
-        """C-21: arbitration_zero_score_present=False restores the `or` fall-through."""
+    def test_flag_off_restores_legacy_truthiness_rollback_path(self, monkeypatch):
+        """Rollback path (``arbitration_unknown_fails_constraint_enabled=False``; rule Q2 reverses this, see tests/unit/test_pareto_constraint_unknown.py): C-21: arbitration_zero_score_present=False restores the `or` fall-through."""
         from engine.config.settings import settings
         from engine.scoring.pareto_integrator import apply_constraint_penalties, build_pareto_candidates
 
         monkeypatch.setattr(settings, "arbitration_zero_score_present", False)
+        monkeypatch.setattr(settings, "arbitration_unknown_fails_constraint_enabled", False)
         candidates = [
             {"candidate": {"entity_id": "a"}, "d": 0.0, "score": 0.9},
             {"candidate": {"entity_id": "b"}, "d": 0.2, "score": 0.8},
@@ -573,9 +577,12 @@ class TestArbitrationObjectiveDirection:
 
 
 class TestArbitrationNonNumericValues:
-    def test_constraint_treats_non_numeric_score_as_absent(self):
-        """A non-numeric dimension value skips the constraint, like an absent one."""
+    def test_constraint_treats_non_numeric_score_as_absent_rollback_path(self, monkeypatch):
+        """Rollback path (``arbitration_unknown_fails_constraint_enabled=False``; rule Q2 reverses this, see tests/unit/test_pareto_constraint_unknown.py): a non-numeric dimension value skips the constraint, like an absent one."""
+        from engine.config.settings import settings
         from engine.scoring.pareto_integrator import apply_constraint_penalties
+
+        monkeypatch.setattr(settings, "arbitration_unknown_fails_constraint_enabled", False)
 
         candidates = [
             {"candidate": {"entity_id": "junk"}, "dimension_scores": {"d": "n/a"}, "score": 1.0},
@@ -586,11 +593,13 @@ class TestArbitrationNonNumericValues:
         assert [r["candidate"]["entity_id"] for r in kept] == ["junk"]
         assert kept[0]["score"] == 1.0
 
-    def test_constraint_non_numeric_score_legacy_mode(self, monkeypatch):
+    def test_constraint_non_numeric_score_legacy_mode_rollback_path(self, monkeypatch):
+        """Rollback path (``arbitration_unknown_fails_constraint_enabled=False``; rule Q2 reverses this, see tests/unit/test_pareto_constraint_unknown.py): legacy truthiness mode skips a non-numeric value."""
         from engine.config.settings import settings
         from engine.scoring.pareto_integrator import apply_constraint_penalties
 
         monkeypatch.setattr(settings, "arbitration_zero_score_present", False)
+        monkeypatch.setattr(settings, "arbitration_unknown_fails_constraint_enabled", False)
         candidates = [{"dimension_scores": {"d": "n/a"}, "score": 1.0}]
         kept = apply_constraint_penalties(candidates, [{"dimension": "d", "threshold": 0.5, "hard": False}])
         assert kept[0]["score"] == 1.0
