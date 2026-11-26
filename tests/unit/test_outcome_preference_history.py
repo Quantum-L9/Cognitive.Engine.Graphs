@@ -376,3 +376,15 @@ async def test_two_dimensions_sharing_a_success_property_and_value_both_link() -
     response = await handle_outcomes(TENANT, _payload())
     assert len(_history(graph)) == 2
     assert response["preference_history"]["linked_dimensions"] == ["launch_preference", "launch_preference_b"]
+
+
+@pytest.mark.parametrize("missing", ["", "   ", None])
+async def test_a_missing_or_empty_success_value_is_refused_before_anything_is_written(missing: Any) -> None:
+    raw = _raw()
+    raw["scoring"]["dimensions"][-1]["metadata"]["success_value"] = missing
+    if missing is None:
+        del raw["scoring"]["dimensions"][-1]["metadata"]["success_value"]
+    graph = _wire(_spec(raw), _Graph())
+    with pytest.raises(ValidationError, match="no non-empty success_value"):
+        await handle_outcomes(TENANT, _payload())
+    assert graph.calls == []

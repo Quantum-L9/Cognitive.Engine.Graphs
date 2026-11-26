@@ -3292,7 +3292,16 @@ def _preference_history_plan(
             )
         relation = sanitize_label((metadata.outcome_relation if metadata else None) or feedback.outcome_edge_type)
         success_property = sanitize_label((metadata.success_property if metadata else None) or "outcome_type")
-        success_value = (metadata.success_value if metadata else None) or "success"
+        # The reader (_compile_preference_attention) compares the stored value with
+        # the declared success_value exactly and never defaults it; neither does this.
+        success_value = metadata.success_value if metadata else None
+        if not isinstance(success_value, str) or not success_value.strip():
+            raise ValidationError(
+                f"preference_attention dimension {dim.name!r} declares no non-empty success_value, "
+                "so no stored outcome could match the value its reader compares against",
+                action="outcomes",
+                tenant=tenant,
+            )
         if success_value in ("failure", "partial"):
             raise ValidationError(
                 f"preference_attention dimension {dim.name!r} declares success_value {success_value!r}, "
