@@ -201,10 +201,16 @@ class TestFlagOff:
         # No pool expansion: top_n is bound to the requested value, not 4 x top_n.
         assert call["parameters"]["top_n"] == 2
         cypher = call["cypher"]
-        # The cut is the query's own final LIMIT $top_n, applied once.
-        assert cypher.rstrip().splitlines()[-1] == "LIMIT $top_n"
+        # The cut is the query's own final LIMIT $top_n, applied once: no
+        # earlier LIMIT narrows the candidates before it.
+        lines = cypher.rstrip().splitlines()
+        assert lines[-1] == "LIMIT $top_n"
         assert cypher.count("$top_n") == 1
-        assert "ORDER BY" in cypher
+        assert sum(line.lstrip().startswith("LIMIT") for line in lines) == 1
+        assert " LIMIT " not in cypher
+        # The final ordering, just before the cut, is by descending score first
+        # (any tie-break keys after it belong to the ordering contract, L3/D4).
+        assert lines[-2].startswith("ORDER BY score DESC")
         # Rows are returned in the driver's score order: a > b, and the
         # non-dominated but lower-scoring d is not promoted into the cut.
         assert _ids(response) == ["a", "b"]
