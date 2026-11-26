@@ -66,10 +66,16 @@ def _attention(metadata: dict[str, Any] | None) -> dict[str, Any]:
 _DECLARED = {"success_value": "docked", "outcome_community_property": "docking_cluster"}
 
 
+_QE_STEP = {"name": "query_depot", "pattern": "(candidate:OrbitalDepot)-[:RESUPPLIED_BY]->(qe:OrbitalDepot)"}
+
+
 def _raw(extra_dimension: dict[str, Any]) -> dict[str, Any]:
     raw = yaml.safe_load((SYNTHETIC_DOMAINS_ROOT / _DOMAIN / "spec.yaml").read_text(encoding="utf-8"))
     raw = copy.deepcopy(raw)
     raw["scoring"]["dimensions"].append(extra_dimension)
+    # preference_attention matches its outcome sample from `qe`; strict scoring
+    # validation (D3) refuses it unless a traversal step binds `qe`.
+    raw["traversal"] = {"steps": [_QE_STEP]}
     return raw
 
 
