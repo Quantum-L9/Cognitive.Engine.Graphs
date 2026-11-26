@@ -46,6 +46,9 @@ pytestmark = pytest.mark.unit
 
 def _settings(**overrides: Any) -> Settings:
     # l9_env pinned to dev so a local .env cannot select prod; no credential is needed.
+    # The timeout flag is pinned on unless a test sets it, so an exported
+    # NEO4J_QUERY_TIMEOUT_ENABLED cannot turn an enabled-path test into a flag-off one.
+    overrides.setdefault("neo4j_query_timeout_enabled", True)
     return Settings(l9_env="dev", **overrides)
 
 
@@ -156,7 +159,7 @@ def test_query_timeout_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     # The code defaults, not whatever a developer exported.
     monkeypatch.delenv("NEO4J_QUERY_TIMEOUT_S", raising=False)
     monkeypatch.delenv("NEO4J_QUERY_TIMEOUT_ENABLED", raising=False)
-    s = _settings()
+    s = Settings(l9_env="dev")  # not _settings(): that helper pins the flag
     assert s.neo4j_query_timeout_enabled is True
     assert s.neo4j_query_timeout_s == 25.0
     assert 0 < s.neo4j_query_timeout_s < 30
