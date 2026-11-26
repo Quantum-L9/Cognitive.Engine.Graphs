@@ -90,7 +90,11 @@ async def _sync(tenant: str, batch: list[dict[str, Any]]) -> None:
 
 
 def _by_id(result: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return {row["candidate"]["depot_id"]: row["candidate"] for row in result.get("candidates", [])}
+    rows = [row["candidate"] for row in result.get("candidates", [])]
+    ids = [c["depot_id"] for c in rows]
+    # A leaked foreign "shared" row must fail here, not be overwritten by the dict below.
+    assert len(ids) == len(set(ids)), f"duplicate candidate ids: {sorted(ids)}"
+    return {c["depot_id"]: c for c in rows}
 
 
 async def _seed() -> None:
