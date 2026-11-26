@@ -1000,14 +1000,28 @@ class ScoringAssembler:
             return None
         predicate = f"{owner}.{sanitize_label(prop)} IS NULL"
         if dim.computation is ComputationType.GEODECAY:
-            from engine.config.settings import settings
-
-            # The longitude _compile_geodecay reads: the declaration only while
-            # geodecay_declared_longitude is on, else candidate.lon (RU-037).
-            declared_lon = getattr(dim, "candidateprop_lon", None)
-            lon = declared_lon if settings.geodecay_declared_longitude and declared_lon else "lon"
+            lon = self._geodecay_source_longitude(dim)
+            if lon is None:
+                return None
             predicate = f"{predicate} OR {owner}.{sanitize_label(lon)} IS NULL"
         return predicate
+
+    @staticmethod
+    def _geodecay_source_longitude(dim: ScoringDimensionSpec) -> str | None:
+        """The longitude _compile_geodecay reads (RU-037); ``None`` when the compiler refuses it.
+
+        Resolved through the same ``declared()`` call: a blank declaration is
+        absent, the legacy ``lon`` applies with geodecay_declared_longitude off.
+        """
+        from engine.config.settings import settings
+        from engine.config.structural_vocabulary import UndeclaredStructuralPropertyError, declared
+
+        if not settings.geodecay_declared_longitude:
+            return "lon"
+        try:
+            return declared(getattr(dim, "candidateprop_lon", None), "longitude", dim.name)
+        except UndeclaredStructuralPropertyError:
+            return None
 
     def _effective_null_strategy(self, dim: ScoringDimensionSpec, base_expr: str, strategy: NullStrategy) -> str | None:
         """D3a: substitute the declared fallback when the source property is missing.

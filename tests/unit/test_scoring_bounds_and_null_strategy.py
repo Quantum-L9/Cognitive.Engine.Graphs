@@ -308,6 +308,25 @@ def test_geodecay_guard_follows_the_declared_longitude_flag(monkeypatch: pytest.
     assert "candidate.longitude_deg IS NULL" not in expr
 
 
+def test_geodecay_guard_treats_a_blank_declared_longitude_as_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A whitespace candidateprop_lon resolves like the compiler: absent, so (rollback flag off) candidate.lon."""
+    monkeypatch.setattr(settings, "geodecay_declared_longitude", True)
+    monkeypatch.setattr(settings, "declared_structural_properties_required_enabled", False)
+    expr, _ = _compiled(
+        _dim(
+            name="geo",
+            source="computed",
+            computation="geodecay",
+            candidateprop="lat",
+            candidateprop_lon="   ",
+            queryprop="lat",
+            null_strategy="population_mean",
+        )
+    )
+    assert expr.startswith("CASE WHEN candidate.lat IS NULL OR candidate.lon IS NULL THEN ")
+    assert "longitude: candidate.lon}" in expr
+
+
 @pytest.mark.parametrize(
     ("computation", "extra", "legacy_prop"),
     [
