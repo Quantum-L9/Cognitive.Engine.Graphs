@@ -62,6 +62,28 @@ def _write_pack(root: Path) -> None:
             "metadata": {"success_value": "success", "success_property": "outcome_type"},
         }
     )
+    # #567's strict validation: a preference_attention dimension needs a traversal step
+    # that binds `qe`, here the queryentity label the producer links outcomes from.
+    raw["ontology"]["edges"].append(
+        {
+            "type": "CONSIDERED",
+            "from": "LaunchWindow",
+            "to": "OrbitalDepot",
+            "direction": "DIRECTED",
+            "category": "transaction",
+            "managedby": "api",
+        }
+    )
+    raw["traversal"] = {
+        "steps": [
+            {
+                "name": "bind_query_window",
+                "pattern": "(qe:LaunchWindow)-[:CONSIDERED]->(candidate:OrbitalDepot)",
+                "required": False,
+                "matchdirections": [DIRECTION],
+            }
+        ]
+    }
     (root / TENANT).mkdir()
     (root / TENANT / "spec.yaml").write_text(yaml.safe_dump(raw, sort_keys=False))
 
