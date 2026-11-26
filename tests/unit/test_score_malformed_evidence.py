@@ -149,6 +149,26 @@ async def test_the_reader_reports_a_malformed_edge_with_its_identity(monkeypatch
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("missing", [{"evidence_ref": ""}, {"evidence_ref": None}, "absent"])
+async def test_an_edge_without_an_evidence_ref_is_malformed_with_unknown_identity(
+    missing: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "score_malformed_evidence_abstention_enabled", True)
+    unreadable = _row(A)
+    if missing == "absent":
+        del unreadable["props"]["evidence_ref"]
+    else:
+        unreadable["props"].update(missing)
+    read = await _binding([_row(A), unreadable]).read(database="it-tenant", entity_refs=[A])
+    assert [o.evidence_ref for o in read.observations] == ["evidence:1"]
+    assert read.malformed == (_bad(A, None),)
+    request = parse_score_request({"entity_refs": [A], "top_n": 1})
+    [row] = score_cohort(request, read, RELEVANCE, identity_per_type=True)["abstained"]
+    # It may be evidence:1, so the valid edge alone does not score the entity.
+    assert row["detail"] == "malformed_evidence"
+
+
+@pytest.mark.asyncio
 async def test_flag_off_the_reader_drops_malformed_edges_as_before(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "score_malformed_evidence_abstention_enabled", False)
     read = await _binding([_row(A, polarity="sideways")]).read(database="it-tenant", entity_refs=[A])

@@ -252,6 +252,11 @@ class GraphEvidenceBinding:
         malformed = []
         for row in rows:
             observation = _observation(row, now)
+            # An edge without a readable evidence_ref parses (as ""), but its
+            # identity is unknown: with tracking on it is malformed, not an
+            # observation that could never share a valid edge's identity.
+            if observation is not None and track_malformed and not observation.evidence_ref:
+                observation = None
             if observation is None:
                 logger.warning("Skipping malformed evidence edge in tenant database %s", database)
                 if track_malformed:
