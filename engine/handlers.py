@@ -649,9 +649,19 @@ def _declared_candidate_identity(domain_spec: DomainSpec, label: str) -> str | N
     return None
 
 
+def _unbound_param_name(base: str, taken: set[str]) -> str:
+    """``base``, or ``base`` plus ``_`` suffixes, whichever no other parameter already uses."""
+    name = sanitize_label(base)
+    while name in taken:
+        name = sanitize_label(f"{name}_")
+    taken.add(name)
+    return name
+
+
 def _arbitration_constraint_cypher(
     domain_spec: DomainSpec,
     active_dimensions: list[str],
+    reserved_params: set[str] | None = None,
 ) -> tuple[str, str, dict[str, Any]]:
     """ND-ARB (D4): ``decision_arbitration.constraints`` as Cypher, before the cut.
 
@@ -663,7 +673,9 @@ def _arbitration_constraint_cypher(
       the threshold, exactly as ``apply_constraint_penalties`` skips it.
     * ``soft_factor`` — ``(CASE WHEN coalesce(<dim> < $t, false) THEN $p ELSE
       1.0 END)`` per soft constraint, multiplied; the caller rescales ``score``.
-    * ``params`` — thresholds and penalties, bound as parameters (C-9).
+    * ``params`` — thresholds and penalties, bound as parameters (C-9). A name
+      in ``reserved_params`` (query, derived, gate and scoring parameters) is
+      never reused, so an arbitration value cannot overwrite a request value.
 
     A constraint on a dimension that is not active for this direction has no
     alias in scope and no value, so it is not compiled (Python skipped it).
@@ -673,6 +685,7 @@ def _arbitration_constraint_cypher(
     if not arbitration.enabled or not arbitration.constraints:
         return "", "", {}
     active = set(active_dimensions)
+    taken = set(reserved_params or ())
     hard: list[str] = []
     soft: list[str] = []
     params: dict[str, Any] = {}
@@ -681,13 +694,13 @@ def _arbitration_constraint_cypher(
             continue
         alias = sanitize_label(constraint.dimension)
         if constraint.hard:
-            name = sanitize_label(f"arb_hard_threshold_{len(hard)}")
+            name = _unbound_param_name(f"arb_hard_threshold_{len(hard)}", taken)
             params[name] = float(constraint.threshold)
             hard.append(f"NOT coalesce({alias} < ${sanitize_label(name)}, false)")
         else:
             index = len(soft)
-            threshold = sanitize_label(f"arb_soft_threshold_{index}")
-            penalty = sanitize_label(f"arb_soft_penalty_{index}")
+            threshold = _unbound_param_name(f"arb_soft_threshold_{index}", taken)
+            penalty = _unbound_param_name(f"arb_soft_penalty_{index}", taken)
             params[threshold] = float(constraint.threshold)
             params[penalty] = float(constraint.penalty)
             soft.append(
@@ -1191,7 +1204,15 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     arbitration_params: dict[str, Any] = {}
     if arbitration_in_cypher:
         active_dims = scoring_assembler.last_active_dimension_names
-        hard_predicate, soft_factor, arbitration_params = _arbitration_constraint_cypher(domain_spec, active_dims)
+        reserved = {
+            *resolved_query,
+            *gate_compiler.last_query_params,
+            *scoring_assembler.last_query_params,
+            "top_n",
+        }
+        hard_predicate, soft_factor, arbitration_params = _arbitration_constraint_cypher(
+            domain_spec, active_dims, reserved
+        )
         if hard_predicate:
             arbitration_clause += f"WHERE {hard_predicate}\n"
         if soft_factor:

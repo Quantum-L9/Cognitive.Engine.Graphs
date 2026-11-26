@@ -241,3 +241,28 @@ class TestDeclaredIdentityResolution:
 
         spec = _spec().model_copy(update={"sync": None})
         assert _declared_candidate_identity(spec, "OrbitalDepot") == "depot_id"
+
+
+class TestParameterNamespace:
+    async def test_arbitration_params_never_overwrite_a_declared_query_field(self) -> None:
+        from engine.config.schema import QueryFieldSpec
+
+        spec = _spec(HARD, SOFT)
+        fields = [
+            *spec.queryschema.fields,
+            QueryFieldSpec(name="arb_hard_threshold_0", type="float"),
+            QueryFieldSpec(name="arb_soft_penalty_0", type="float"),
+        ]
+        spec = spec.model_copy(update={"queryschema": spec.queryschema.model_copy(update={"fields": fields})})
+        driver = _wire(spec)
+        query = {"arb_hard_threshold_0": 0.99, "arb_soft_penalty_0": 0.77}
+        await handle_match(DOMAIN, {"query": query, "match_direction": DIRECTION, "top_n": 3})
+        cypher, params = driver.calls[0]["cypher"], driver.calls[0]["parameters"]
+        # The caller's values are untouched; the constraint binds its own names.
+        assert params["arb_hard_threshold_0"] == 0.99
+        assert params["arb_soft_penalty_0"] == 0.77
+        assert "depot_reliability < $arb_hard_threshold_0_," in cypher
+        assert params["arb_hard_threshold_0_"] == 0.5
+        assert "THEN $arb_soft_penalty_0_ ELSE" in cypher
+        assert params["arb_soft_penalty_0_"] == 0.25
+        assert params["arb_soft_threshold_0"] == 0.4
