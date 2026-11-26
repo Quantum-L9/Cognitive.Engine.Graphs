@@ -103,6 +103,7 @@ independently of the code default.
 | Monoculture Weighted Contribution | `MONOCULTURE_WEIGHTED_CONTRIBUTION` (`monoculture_weighted_contribution`) | `True` | unset | active (correctness, RU-032); the monoculture confidence check measures `weight × value` per dimension; dimensional agreement and the returned `dimension_scores` stay raw; off restores raw-value monoculture |
 | Query Defaults Before Derived | `QUERY_DEFAULTS_BEFORE_DERIVED` (`query_defaults_before_derived`) | `True` | unset | active (correctness, RU-016); match applies declared `queryschema` defaults before resolving derived parameters (caller values win); off restores resolve-then-backfill |
 | Match Effective Weight Validation | `MATCH_EFFECTIVE_WEIGHT_VALIDATION` (`match_effective_weight_validation`) | `True` | unset | active (correctness, RU-009; requires `SCORE_CLAMP_ENABLED`); the ≤ 1.0 ceiling is checked on the merged per-dimension weights scoring will apply, and unknown weight keys are rejected; off restores the supplied-keys-only sum |
+| Strict Request Weights | `MATCH_REQUEST_WEIGHT_STRICT_ENABLED` (`match_request_weight_strict_enabled`) | `True` | unset | active (hardening, SC-003 / D3); request `weights` must be a mapping of finite numbers in [0, 1], checked whatever `SCORE_CLAMP_ENABLED` says — see §36b |
 | Resolve Requires Created Edge | `RESOLVE_REQUIRES_CREATED_EDGE` (`resolve_requires_created_edge`) | `True` | unset | active (correctness, RU-004); legacy `resolve` raises a ValidationError when no `RESOLVED_FROM` edge was created; off restores an unconditional `resolved` |
 | Outcome Map JSON Encoding | `OUTCOME_MAP_JSON_ENCODING` (`outcome_map_json_encoding`) | `True` | unset | active (correctness, RU-005); `outcomes` stores `fingerprint.dimension_weights` as sorted-key JSON that counterfactual generation decodes (legacy repr strings read as empty, never eval'd); off restores the `str(dict)` writer |
 | Health Probe Domain Count Only | `HEALTH_PROBE_DOMAIN_COUNT_ONLY` (`health_probe_domain_count_only`) | `True` | unset | active (hardening, RU-013); `health` for a tenant without a pack reports `<N> domain packs`, not the loaded domain ids; off restores the id list |
@@ -510,6 +511,48 @@ way is not repaired by re-applying the file; it needs an operator-run repair.
 - Unset `POSTGRES_DSN` (or `PACKET_STORE_ENABLED=false`). Both pools are
   soft dependencies — the engine runs unaffected, audit flush/packet
   persistence simply no-op with a warning.
+
+---
+
+## 36b. Strict Request Weights (ceg-scoring-audit L3: SC-003 request part)
+
+**State**: Active (hardening; rollback switch)
+**Flag**: `MATCH_REQUEST_WEIGHT_STRICT_ENABLED` (`match_request_weight_strict_enabled`, default `True`)
+
+Before this flag, the match request-weight check (W1-02) ran only while
+`score_clamp_enabled` was on. It coerced each value with `float()`, so `"0.5"`
+and `True` passed. On the supplied-keys path it let `nan` through, because
+`nan < 0` and `nan > 1` are both false.
+
+With the flag on (`_strict_request_weight`, `_request_weights_mapping`,
+`engine/handlers.py`):
+
+* `weights` must be a mapping. An absent or `None` value is `{}`, and a list,
+  string or number is refused.
+* Each value must be an `int` or `float`: not `bool`, `str`, `None` or a
+  container. It must also be finite, which covers an `int` too large for a
+  float, and lie in [0, 1].
+* The effective sum keeps its 1.0 ceiling (`match_effective_weight_validation`).
+* The check runs whether `score_clamp_enabled` is on or off, on both the
+  effective-weight path and the supplied-keys path.
+* A refused request raises `ValidationError` before any query is sent.
+
+### Validation
+
+`tests/unit/test_match_request_weight_validation.py` covers the following:
+
+* str, bool, list, `None`, ±inf, `nan`, `10**400`, negative and >1 values are
+  refused, under clamp on and off and on both validation paths.
+* Non-mapping `weights` are refused.
+* Valid weights (`0`, `0.3`, `1`, …) are accepted, and empty or absent weights
+  are accepted.
+* The sum ceiling holds without the clamp.
+* Rollback restores the previous behaviour.
+
+### Rollback
+
+Set `MATCH_REQUEST_WEIGHT_STRICT_ENABLED=false`. The check returns to the
+clamp-gated `float()` coercion.
 
 ---
 
