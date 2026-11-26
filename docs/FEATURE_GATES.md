@@ -55,7 +55,6 @@ independently of the code default.
 | Pareto Pre-cut Arbitration | `PARETO_PRECUT_ENABLED` (`pareto_precut_enabled`) | `False` | unset | dormant (opt-in, SI-06); with declared `decision_arbitration` objectives, match orders a bounded pool by Pareto front before the `top_n` cut; see §36 |
 | Arbitration Constraints in Cypher | `MATCH_ARBITRATION_IN_CYPHER_ENABLED` (`match_arbitration_in_cypher_enabled`) | `True` | unset | active (hardening, ND-ARB / D4); `decision_arbitration` hard constraints are a `WHERE` and soft penalties rescale `score` in the match Cypher, before `ORDER BY` / `LIMIT`; no Python post-cut pass — see §36a |
 | Match Identity Tie-break | `MATCH_CANDIDATE_TIEBREAK_ENABLED` (`match_candidate_tiebreak_enabled`) | `True` | unset | active (hardening, ND-TIE / D4); final `ORDER BY` breaks score ties on the declared candidate identity, path collapse ordered by projected dimensions — see §36a |
-| Strict Request Weights | `MATCH_REQUEST_WEIGHT_STRICT_ENABLED` (`match_request_weight_strict_enabled`) | `True` | unset | active (hardening, SC-003 / D3); request `weights` must be a mapping of finite numbers in [0, 1], checked whatever `SCORE_CLAMP_ENABLED` says — see §36a |
 | Pareto Declared Dimensions | `PARETO_FRONT_DECLARED_DIMENSIONS_ENABLED` (`pareto_front_declared_dimensions_enabled`) | `True` | unset | active (hardening, SC-004); `compute_pareto_front` compares declared dimensions (else the key union), so the front does not depend on row order — see §36a |
 | Domain Strict Validation | `DOMAIN_STRICT_VALIDATION` | `True` | `True` | active |
 | Native Domain Approval Receipts | `DOMAIN_PACK_RECEIPTS_ENABLED` | `False` | unchanged | dormant; immutable native revision/receipt admission, no warm-cache fallback; see the native publisher runbook, `docs/runbooks/domain-pack-publish.md` |
@@ -402,7 +401,7 @@ and arbitration returns to metadata over the cut list.
 
 ---
 
-## 36a. Match Ordering and Request Weights (ceg-scoring-audit L3: ND-ARB, ND-TIE, SC-003, SC-004)
+## 36a. Match Ordering (ceg-scoring-audit L3: ND-ARB, ND-TIE, SC-004)
 
 **State**: Active (hardening; every flag defaults `True` and is a rollback switch)
 
@@ -457,17 +456,6 @@ WITH candidate, d1, d2, score * (CASE WHEN coalesce(d2 < $arb_soft_threshold_0, 
   the order in which they were traversed.
 * With score ties, top-k is prefix-stable: top-1 is a prefix of top-3.
 
-### `match_request_weight_strict_enabled` (SC-003 request part, D3)
-
-The request's `weights` must be a mapping (`None` / absent is `{}`). Each value
-must be an `int` or `float` (not `bool`, `str`, `None` or a container), finite,
-and within [0, 1]. The effective sum keeps its 1.0 ceiling. The check runs
-whether `score_clamp_enabled` is on or off, on both the effective-weight path
-(`match_effective_weight_validation`) and the supplied-keys path. A refused
-request raises `ValidationError` before any query is sent. Before this flag,
-`float()` coercion accepted `"0.5"` and `True`, the supplied-keys path let `nan`
-through, and turning the clamp off skipped the check entirely.
-
 ### `pareto_front_declared_dimensions_enabled` (SC-004)
 
 `compute_pareto_front` used to compare only the first candidate's keys, so with
@@ -482,9 +470,6 @@ the historical `0.0` fill.
   (WHERE and score rescale before `ORDER BY` / `LIMIT`, parameters, the identity
   tie-break, the ordered collapse, inactive-dimension scope, no Python
   re-arbitration, and flags off reproducing the legacy composition).
-- `tests/unit/test_match_request_weight_validation.py`: str, bool, list, `None`,
-  ±inf, `nan`, negative and >1 values refused under clamp on and off and under
-  both validation paths; valid weights accepted; rollback.
 - `tests/unit/test_pareto.py::TestFrontIsIndependentOfInputOrder` and
   `tests/unit/test_pareto_precut.py`.
 - `tests/integration/test_match_arbitration_order.py`, against Neo4j through
@@ -495,8 +480,8 @@ the historical `0.0` fill.
 ### Rollback
 
 Set any flag to `false`. Arbitration then returns to the post-cut Python pass,
-ordering to `ORDER BY score DESC`, request weights to the clamp-gated `float()`
-check, and the Pareto front to the first row's keys. Each flag is independent.
+ordering to `ORDER BY score DESC`, and the Pareto front to the first row's keys.
+Each flag is independent.
 
 ---
 

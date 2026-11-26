@@ -142,10 +142,6 @@ class Settings(BaseSettings):
     # candidate identity, and the per-candidate path collapse orders by the
     # projected dimensions after score. Off restores ORDER BY score DESC alone.
     match_candidate_tiebreak_enabled: bool = True
-    # SC-003 request part (L3, D3): request weights must be a mapping of finite
-    # numbers in [0, 1] (no str / bool / list / None / nan / inf), checked whatever
-    # score_clamp_enabled says. Off restores the clamp-gated float() coercion.
-    match_request_weight_strict_enabled: bool = True
     # SC-004 (L3): compute_pareto_front compares the declared dimension names when
     # given, else the union of every candidate's keys, never the first row's keys
     # alone. Off restores candidates[0]'s keys (input-order dependent).

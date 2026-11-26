@@ -512,41 +512,6 @@ _WEIGHT_CEILING = 1.0
 _WEIGHT_SUM_TOLERANCE = 1e-9
 
 
-def _strict_request_weight(key: str, val: Any, tenant: str) -> float:
-    """SC-003: a request weight is a finite real number in [0, 1], nothing coerced.
-
-    ``float()`` used to accept ``"0.5"`` and ``True``; ``nan`` compared false
-    against both bounds and passed. Under ``match_request_weight_strict_enabled``
-    a ``str``, ``bool``, ``None``, container, non-finite or out-of-range value is
-    refused here.
-    """
-    if isinstance(val, bool) or not isinstance(val, (int, float)):
-        msg = f"Weight '{key}' is not a valid number (got {type(val).__name__})"
-        raise ValidationError(msg, action="match", tenant=tenant)
-    try:
-        number = float(val)
-    except OverflowError as exc:  # an int too large for a float is not a weight in [0, 1]
-        msg = f"Weight '{key}' is not a finite number"
-        raise ValidationError(msg, action="match", tenant=tenant) from exc
-    if not math.isfinite(number):
-        msg = f"Weight '{key}' is not a finite number"
-        raise ValidationError(msg, action="match", tenant=tenant)
-    if number < _WEIGHT_FLOOR or number > _WEIGHT_CEILING:
-        msg = f"Weight '{key}' = {number} is outside allowed range [{_WEIGHT_FLOOR}, {_WEIGHT_CEILING}]"
-        raise ValidationError(msg, action="match", tenant=tenant)
-    return number
-
-
-def _request_weights_mapping(raw: Any, tenant: str) -> dict[str, Any]:
-    """SC-003: the request's ``weights`` as a mapping; absent / ``None`` is ``{}``."""
-    if raw is None:
-        return {}
-    if not isinstance(raw, dict):
-        msg = f"weights must be a mapping of weight key to number, got {type(raw).__name__}"
-        raise ValidationError(msg, action="match", tenant=tenant)
-    return raw
-
-
 def _validate_match_weights(
     weights: dict[str, float],
     tenant: str,
@@ -563,18 +528,12 @@ def _validate_match_weights(
     supplied keys alone; a key no active dimension declares
     (``known_weightkeys``) is rejected (R1a-DEC-06).
     """
-    from engine.config.settings import settings as _weight_settings
-
-    strict = bool(_weight_settings.match_request_weight_strict_enabled)
     for key, val in weights.items():
-        if strict:
-            w = _strict_request_weight(key, val, tenant)
-        else:
-            try:
-                w = float(val)
-            except (TypeError, ValueError) as exc:
-                msg = f"Weight '{key}' is not a valid number"
-                raise ValidationError(msg, action="match", tenant=tenant) from exc
+        try:
+            w = float(val)
+        except (TypeError, ValueError) as exc:
+            msg = f"Weight '{key}' is not a valid number"
+            raise ValidationError(msg, action="match", tenant=tenant) from exc
         if w < _WEIGHT_FLOOR or w > _WEIGHT_CEILING:
             msg = f"Weight '{key}' = {w} is outside allowed range [{_WEIGHT_FLOOR}, {_WEIGHT_CEILING}]"
             raise ValidationError(msg, action="match", tenant=tenant)
@@ -588,9 +547,6 @@ def _validate_match_weights(
     source = weights if effective_weights is None else effective_weights
     weight_sum = 0.0
     for key, val in source.items():
-        if strict:
-            weight_sum += _strict_request_weight(key, val, tenant)
-            continue
         try:
             number = float(val)
         except (TypeError, ValueError) as exc:
@@ -1042,15 +998,9 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     from engine.config.settings import settings
 
-    # W1-02: Validate user-supplied weights are in [0, 1] and sum to <= 1.0.
-    # SC-003: under match_request_weight_strict_enabled the check no longer
-    # depends on score_clamp_enabled, and weights must be a mapping.
-    strict_weights = bool(settings.match_request_weight_strict_enabled)
-    if strict_weights:
-        weights = _request_weights_mapping(weights, tenant)
-    validate_weights = bool(weights) and (strict_weights or settings.score_clamp_enabled)
+    # W1-02: Validate user-supplied weights are in [0, 1] and sum to <= 1.0
     effective_weight_check = bool(settings.match_effective_weight_validation)
-    if validate_weights and not effective_weight_check:
+    if weights and settings.score_clamp_enabled and not effective_weight_check:
         _validate_match_weights(weights, tenant)
 
     domain_spec = domain_loader.load_domain(tenant)
@@ -1058,7 +1008,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     # RU-009 / CEG-COR-018: validate the weights scoring will actually apply for
     # this direction (one merge, in the assembler), not only the supplied keys.
-    if validate_weights and effective_weight_check:
+    if weights and settings.score_clamp_enabled and effective_weight_check:
         weight_merge = ScoringAssembler(domain_spec)
         _validate_match_weights(
             weights,
