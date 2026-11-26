@@ -441,8 +441,11 @@ WITH candidate, d1, d2,
     caused by an unknown value.
   * The count is a number on the Python pass. In Cypher it is `null`: rows the
     `WHERE` removed never reach Python, and the count is not guessed.
-  * With `score_clamp_enabled`, a missing source is clamped to `0.0` before
-    arbitration and judged as `0.0`.
+  * A dimension whose stored source is null counts as unknown, even after the
+    scoring `WITH` has defaulted it (`defaultwhennull`) or the clamp has
+    turned it into `0.0`. The predicate also tests the row's absent-source list
+    (`$arb_unknown_dim_N IN <absent_sources>`), and the Python pass reads the
+    row's `absent_sources`. So a `0.0` threshold cannot pass a missing value.
   * Flag off restores the old behaviour: `coalesce(d < $t, false)`, where an
     unknown value passes.
 * **A penalty never raises a score** (same flag; SCR-04). The penalised score is

@@ -28,6 +28,7 @@ tests/integration/test_match_arbitration_order.py.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -78,11 +79,17 @@ def _wire(spec: DomainSpec, rows: list[dict[str, Any]] | None = None) -> Driver:
     return driver
 
 
-async def _cypher(spec: DomainSpec) -> tuple[str, dict[str, Any]]:
+# The absent-source term each constraint carries (TestAbsentSourceIsUnknown);
+# stripped by default so the composition tests read the rest of the predicate.
+_ABSENT_TERM = re.compile(r" OR \$arb_unknown_dim_\d+ IN \[x IN \[.*?\] WHERE x IS NOT NULL \| x\]")
+
+
+async def _cypher(spec: DomainSpec, *, keep_absent: bool = False) -> tuple[str, dict[str, Any]]:
     driver = _wire(spec)
     await handle_match(DOMAIN, {"query": {}, "match_direction": DIRECTION, "top_n": 3})
     call = driver.calls[0]
-    return call["cypher"], call["parameters"]
+    cypher = call["cypher"] if keep_absent else _ABSENT_TERM.sub("", call["cypher"])
+    return cypher, call["parameters"]
 
 
 def _row(depot_id: str, score: float, reliability: float, ports: float) -> dict[str, Any]:
@@ -314,7 +321,7 @@ class TestParameterNamespace:
         # The caller's values are untouched; the constraint binds its own names.
         assert params["arb_hard_threshold_0"] == 0.99
         assert params["arb_soft_penalty_0"] == 0.77
-        assert "depot_reliability < $arb_hard_threshold_0_1)" in cypher
+        assert "depot_reliability < $arb_hard_threshold_0_1 OR" in cypher
         assert params["arb_hard_threshold_0_1"] == 0.5
         assert "THEN $arb_soft_penalty_0_1 ELSE" in cypher
         assert params["arb_soft_penalty_0_1"] == 0.25
@@ -353,3 +360,16 @@ class TestUnknownValueFailsTheConstraint:
             "WITH candidate, depot_reliability, port_capacity, score * (CASE WHEN coalesce(port_capacity < "
             "$arb_soft_threshold_0, false) THEN $arb_soft_penalty_0 ELSE 1.0 END) AS score\n"
         ) in cypher
+
+
+class TestAbsentSourceIsUnknown:
+    """Codex review on #573: the scoring WITH defaults a missing source (and the
+    clamp maps null / NaN to 0.0), so the alias alone cannot show it is unknown.
+    The constraint also tests the row's absent-source list."""
+
+    async def test_absent_source_marker_fails_the_constraint(self) -> None:
+        cypher, params = await _cypher(_spec(HARD, SOFT), keep_absent=True)
+        assert "OR depot_reliability < $arb_hard_threshold_0 OR $arb_unknown_dim_0 IN [x IN [" in cypher
+        assert "OR port_capacity < $arb_soft_threshold_0 OR $arb_unknown_dim_1 IN [x IN [" in cypher
+        assert params["arb_unknown_dim_0"] == "depot_reliability"
+        assert params["arb_unknown_dim_1"] == "port_capacity"

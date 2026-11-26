@@ -261,7 +261,14 @@ def apply_constraint_penalties(
 
 
 def _known_dimension_value(candidate: dict[str, Any], dim: str) -> float | None:
-    """The constrained value as a finite-or-infinite float, or None when unknown (SCR-03)."""
+    """The constrained value as a finite-or-infinite float, or None when unknown (SCR-03).
+
+    A dimension the row lists in ``absent_sources`` is unknown whatever its
+    value: its stored source was null and the score is a default or a clamp.
+    """
+    absent = candidate.get("absent_sources")
+    if isinstance(absent, list) and dim in absent:
+        return None
     raw = _lookup_dimension_score(candidate, dim)
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
         return None

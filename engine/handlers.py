@@ -639,6 +639,7 @@ def _arbitration_constraint_cypher(
     domain_spec: DomainSpec,
     active_dimensions: list[str],
     reserved_params: set[str] | None = None,
+    absent_sources_expr: str = "[]",
 ) -> tuple[str, str, dict[str, Any]]:
     """ND-ARB (D4): ``decision_arbitration.constraints`` as Cypher, before the cut.
 
@@ -647,9 +648,11 @@ def _arbitration_constraint_cypher(
     * ``hard_predicate`` — per hard constraint, ANDed; the caller attaches it
       as the scoring ``WITH``'s ``WHERE``. Under
       ``arbitration_unknown_fails_constraint_enabled`` (SCR-03, rule Q2) it is
-      ``NOT (<dim> IS NULL OR isNaN(<dim>) OR <dim> < $t)``: an unknown value
-      fails (a null comparison is null and ``NaN < t`` is false in Cypher, so
-      both are tested explicitly). Off: ``NOT coalesce(<dim> < $t, false)``,
+      ``NOT (<dim> IS NULL OR isNaN(<dim>) OR <dim> < $t OR $name IN <absent>)``:
+      an unknown value fails (a null comparison is null and ``NaN < t`` is false
+      in Cypher, so both are tested explicitly; ``absent_sources_expr`` names the
+      dimensions whose stored source is null, which the scoring WITH has already
+      defaulted or clamped, so a 0.0 threshold cannot pass them). Off: ``NOT coalesce(<dim> < $t, false)``,
       where an unknown passes.
     * ``soft_factor`` — ``(CASE WHEN <fails> THEN $p ELSE 1.0 END)`` per soft
       constraint, multiplied, with ``<fails>`` the same test; the caller
@@ -671,10 +674,15 @@ def _arbitration_constraint_cypher(
 
     unknown_fails = bool(_arb_settings.arbitration_unknown_fails_constraint_enabled)
 
-    def fails(alias: str, threshold: str) -> str:
-        if unknown_fails:
-            return f"{alias} IS NULL OR isNaN({alias}) OR {alias} < ${sanitize_label(threshold)}"
-        return f"coalesce({alias} < ${sanitize_label(threshold)}, false)"
+    def fails(alias: str, threshold: str, dimension: str) -> str:
+        if not unknown_fails:
+            return f"coalesce({alias} < ${sanitize_label(threshold)}, false)"
+        test = f"{alias} IS NULL OR isNaN({alias}) OR {alias} < ${sanitize_label(threshold)}"
+        if absent_sources_expr != "[]":
+            marker = _unbound_param_name(f"arb_unknown_dim_{len(hard) + len(soft)}", taken)
+            params[marker] = dimension
+            test += f" OR ${sanitize_label(marker)} IN {absent_sources_expr}"
+        return test
 
     hard: list[str] = []
     soft: list[str] = []
@@ -686,14 +694,16 @@ def _arbitration_constraint_cypher(
         if constraint.hard:
             name = _unbound_param_name(f"arb_hard_threshold_{len(hard)}", taken)
             params[name] = float(constraint.threshold)
-            hard.append(f"NOT ({fails(alias, name)})" if unknown_fails else f"NOT {fails(alias, name)}")
+            test = fails(alias, name, constraint.dimension)
+            hard.append(f"NOT ({test})" if unknown_fails else f"NOT {test}")
         else:
             index = len(soft)
             threshold = _unbound_param_name(f"arb_soft_threshold_{index}", taken)
             penalty = _unbound_param_name(f"arb_soft_penalty_{index}", taken)
             params[threshold] = float(constraint.threshold)
             params[penalty] = float(constraint.penalty)
-            soft.append(f"(CASE WHEN {fails(alias, threshold)} THEN ${sanitize_label(penalty)} ELSE 1.0 END)")
+            test = fails(alias, threshold, constraint.dimension)
+            soft.append(f"(CASE WHEN {test} THEN ${sanitize_label(penalty)} ELSE 1.0 END)")
     return " AND ".join(hard), " * ".join(soft), params
 
 
@@ -1235,7 +1245,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             "top_n",
         }
         hard_predicate, soft_factor, arbitration_params = _arbitration_constraint_cypher(
-            domain_spec, active_dims, reserved
+            domain_spec, active_dims, reserved, absent_expr if project_dimensions else "[]"
         )
         if hard_predicate:
             arbitration_clause += f"WHERE {hard_predicate}\n"

@@ -99,3 +99,15 @@ class TestRollback:
     def test_penalty_multiplies(self) -> None:
         kept = apply_constraint_penalties([_row({"quality": 0.1}, score=-0.4)], [SOFT])
         assert kept[0]["score"] == pytest.approx(-0.2)
+
+
+def test_absent_source_is_unknown_even_when_its_default_meets_the_threshold() -> None:
+    """Codex review on #573: a missing source already defaulted/clamped to 0.0
+    must not satisfy a 0.0 threshold; ``absent_sources`` keeps the absence."""
+    zero = {"dimension": "quality", "threshold": 0.0, "hard": True, "penalty": 0.5}
+    stats: dict[str, int] = {}
+    absent = {**_row({"quality": 0.0}), "absent_sources": ["quality"]}
+    present = _row({"quality": 0.0})
+    kept = apply_constraint_penalties([absent, present], [zero], stats=stats)
+    assert kept == [present]
+    assert stats == {"unknown_rejected": 1}
