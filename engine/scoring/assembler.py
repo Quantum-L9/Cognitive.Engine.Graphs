@@ -944,6 +944,12 @@ class ScoringAssembler:
         ComputationType.VARIANTDISCOVERY: "variant_discovery_score",
         ComputationType.ENSEMBLECONFIDENCE: "ensemble_confidence",
     }
+    # Computations whose source property resolves through structural_vocabulary.declared().
+    _STRUCTURAL_SOURCE_KIND: dict[ComputationType, str] = {
+        ComputationType.GEODECAY: "latitude",
+        ComputationType.COMMUNITYMATCH: "community",
+        ComputationType.PREFERENCEATTENTION: "community",
+    }
     _ALIAS_SOURCED: frozenset[ComputationType] = frozenset(
         {
             ComputationType.TRAVERSALALIAS,
@@ -970,6 +976,16 @@ class ScoringAssembler:
             return None
         if computation is ComputationType.KGE:
             prop = dim.candidateprop or ("kge_score" if dim.alias else None)
+        elif computation in self._STRUCTURAL_SOURCE_KIND:
+            # The property the compiler resolves: the declaration, else (with
+            # declared_structural_properties_required_enabled off) the former
+            # default; flag on, an undeclared one is refused by the compiler.
+            from engine.config.structural_vocabulary import UndeclaredStructuralPropertyError, declared
+
+            try:
+                prop = declared(dim.candidateprop, self._STRUCTURAL_SOURCE_KIND[computation], dim.name)
+            except UndeclaredStructuralPropertyError:
+                return None
         else:
             prop = dim.candidateprop or self._DEFAULT_SOURCE_PROPERTY.get(computation)
         if not prop:

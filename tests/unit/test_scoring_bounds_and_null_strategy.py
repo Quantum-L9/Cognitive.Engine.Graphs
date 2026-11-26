@@ -292,6 +292,39 @@ def test_geodecay_guard_follows_the_declared_longitude_flag(monkeypatch: pytest.
     assert "candidate.longitude_deg IS NULL" not in expr
 
 
+@pytest.mark.parametrize(
+    ("computation", "extra", "legacy_prop"),
+    [
+        ("communitymatch", {"source": "computed"}, "community_id"),
+        ("geodecay", {"source": "computed", "candidateprop_lon": "lon"}, "lat"),
+    ],
+)
+def test_omitted_structural_property_guards_the_legacy_default_with_the_rollback_flag(
+    monkeypatch: pytest.MonkeyPatch, computation: str, extra: dict[str, Any], legacy_prop: str
+) -> None:
+    """declared_structural_properties_required_enabled off: the compiler reads the former default; so does the guard."""
+    monkeypatch.setattr(settings, "declared_structural_properties_required_enabled", False)
+    dim = _dim(name="structural", computation=computation, null_strategy="inherit_prior", **extra)
+    dim.pop("candidateprop")
+    expr, _ = _compiled(dim)
+    assert expr.startswith(f"CASE WHEN candidate.{legacy_prop} IS NULL")
+    assert f"candidate.{legacy_prop}" in expr.split(" ELSE ", 1)[1]
+
+
+def test_communitymatch_guard_reads_its_declared_property() -> None:
+    expr, _ = _compiled(
+        _dim(
+            name="community",
+            source="computed",
+            computation="communitymatch",
+            candidateprop="cluster",
+            queryprop="cluster",
+            null_strategy="population_mean",
+        )
+    )
+    assert expr.startswith("CASE WHEN candidate.cluster IS NULL THEN coalesce($_popmean_community, 0.1)")
+
+
 def test_traversalalias_guard_reads_the_alias() -> None:
     expr, _ = _compiled(
         _dim(
