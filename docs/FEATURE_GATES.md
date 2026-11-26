@@ -78,7 +78,7 @@ independently of the code default.
 | Relationship Evidence Sync | `RELATIONSHIP_SYNC_ENABLED` (`relationship_sync_enabled`) | `True` | unset | active; `sync` to a `targetedge` endpoint writes typed evidence edges; requires Neo4j Enterprise 5.7+ — see §28 |
 | Relationship Sync Audit On Commit | `RELATIONSHIP_SYNC_AUDIT_ON_COMMIT_ENABLED` (`relationship_sync_audit_on_commit_enabled`) | `True` | unset | active (hardening); refused/rolled-back batches leave no success audit record — see §28 |
 | Observed Association Required | `OBSERVED_ASSOCIATION_REQUIRED` (`observed_association_required`) | `False` | unset | staged (D-9, #386); a present `observed_association` is always checked; on, an observed row on an `observedfrom` endpoint must carry one — see §28 |
-| Evidence Identity Per Type | `EVIDENCE_IDENTITY_PER_TYPE_ENABLED` (`evidence_identity_per_type_enabled`) | `False` | unset | dormant; score dedupes on `(relationship_type, evidence_ref)` — see §28 |
+| Evidence Identity Per Type | `EVIDENCE_IDENTITY_PER_TYPE_ENABLED` (`evidence_identity_per_type_enabled`) | `True` | unset | active; score dedupes on `(relationship_type, evidence_ref)`; `false` restores `evidence_ref` alone — see §28 |
 | Domain Database Provisioning | `AUTO_CREATE_DOMAIN_DATABASE` (`auto_create_domain_database`) | `False` | unset | dormant; create the tenant domain database on first use — see §14 |
 | Health API (admin health_* subactions) | `HEALTH_API_ENABLED` (`health_api_enabled`) | `True` | unset | active (operator decision 2026-11-15); AI-readiness assess/report surface for EIE's enrichment trigger — see §15 |
 | Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; seven packs whose gates do not compile to executable, faithful Cypher — see §16 |
@@ -120,6 +120,7 @@ independently of the code default.
 | Learned Weight Auto Apply | `LEARNED_WEIGHT_AUTO_APPLY_ENABLED` (`learned_weight_auto_apply_enabled`) | `False` | unset | dormant (operator decision, issue #462 Decision 1); off: a recalculation is an unapplied candidate and `DimensionWeight.weight` is not written; on: approved automatic recalculation, each write recorded; the only switch that writes a weight — see §34 |
 | Drift Requires Both Windows | `DRIFT_REQUIRES_BOTH_WINDOWS` (`drift_requires_both_windows`) | `True` | unset | active (correctness); outcomes `metadata.drift` raises no alert unless both a recent and a baseline distribution exist; `false` restores the one-sided divergence (RU-029 / CEG-COR-118) |
 | Drift Canonical Signals | `DRIFT_CANONICAL_SIGNALS_ENABLED` (`drift_canonical_signals_enabled`) | `False` | unset | dormant (correctness, SI-29); score-distribution drift has one canonical signal (`calibration.score_distribution_drift`) that `ScoreCalibrator.detect_score_drift` and `hgkr_utils.check_score_drift` delegate to, and `DriftDetector` results are labelled `outcome_dimension_mix` — see §4 |
+| Neo4j Driver Bounds | `NEO4J_QUERY_TIMEOUT_ENABLED` (`neo4j_query_timeout_enabled`), `NEO4J_QUERY_TIMEOUT_S` | `True`, `25` | unset | active (hardening, D8); every query, read and write carries a server-enforced transaction timeout in (0, 30) s, and the driver pool comes from `neo4j_pool_size` / `neo4j_max_connection_lifetime` / `neo4j_connection_acquisition_timeout` — see "Neo4j Driver Bounds" |
 | Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
 | Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
 | Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
@@ -279,11 +280,29 @@ Guard: `tests/architecture/test_parked_subsystems_guard.py` fails if
 
 ## 4. Score Calibration (W2-01)
 
-**State**: Active
+**State**: Active (spec echo)
 **Admin Subaction**: `calibration_run`
 
-Score calibration runs against the domain spec's `calibration.pairs` section.
-No feature flag needed — available whenever calibration pairs are defined.
+`calibration_run` is a **spec echo** (D6, 2026-11-26): it returns the domain
+spec's `calibration.pairs` — each pair's label, nodes and expected range — and
+the `weight_set`, with status `calibration_spec_loaded` (or
+`no_calibration_spec` when none is declared). It computes no score and
+verifies nothing; the response message says so ("No scores were computed or
+verified"). Payload keys and statuses are unchanged. No feature flag.
+
+The checks themselves are library functions in `engine/scoring/calibration.py`
+that no admin subaction calls:
+
+- `ScoreCalibrator.run_calibration(pairs, actual_scores)` — pass/fail per pair
+  against caller-supplied scores. Zero pairs is **not** a pass
+  (`overall_pass` False): nothing checked is no evidence.
+- `ScoreCalibrator.forward_simulate(abstract, concrete)` — NDCG@k
+  (k = `len(concrete)`) with the ideal DCG taken from the abstract ranking's top
+  k relevances, Kendall-tau on common items, and misranked pairs; `diverged`
+  when NDCG < 0.95. Before D6 the ideal was the concrete list's own relevances
+  re-sorted, so `[a,b,c,d]` vs `[d]` scored 1.0.
+
+Tests: `tests/unit/test_wave2_calibration.py`, `tests/unit/test_wave2_handlers.py`.
 
 ### Canonical drift signals (`drift_canonical_signals_enabled`, default `False`) — SI-29
 
@@ -805,6 +824,43 @@ whether or not the flag is on.
 
 ---
 
+## Neo4j Driver Bounds (D8 / ND-DRIVER)
+
+**Flags**: `neo4j_query_timeout_enabled` (`NEO4J_QUERY_TIMEOUT_ENABLED`, default
+`True`) and `neo4j_query_timeout_s` (`NEO4J_QUERY_TIMEOUT_S`, default `25`).
+
+`GraphDriver.connect()` hard-coded its pool (50 connections, 3600 s lifetime,
+60 s acquisition) and ignored the declared settings, and no statement carried a
+transaction timeout, so a slow query held a pooled connection for as long as the
+server let it run — past the 30 s `TransportHeader.timeout_ms` caller budget.
+
+- **Pool** (always): `max_connection_pool_size`, `max_connection_lifetime` and
+  `connection_acquisition_timeout` come from `neo4j_pool_size`,
+  `neo4j_max_connection_lifetime` and `neo4j_connection_acquisition_timeout`.
+  The defaults (50 / 3600 / 60) equal the former literals.
+- **Timeout** (flag on, default — hardening that restores the bounded-request
+  invariant): `execute_query`, `execute_read` and both forms of
+  `execute_write` run under a server-enforced transaction timeout of
+  `neo4j_query_timeout_s` (a `neo4j.Query` timeout, or `unit_of_work(timeout=)`
+  on the managed transaction function). A transaction function the caller
+  already decorated with its own `unit_of_work(timeout=)` keeps it. Commands
+  on the `system` database (provisioning's `CREATE DATABASE ... WAIT`, which
+  carries its own WAIT bound) are not bounded.
+- **Validation**: `Settings` refuses `neo4j_query_timeout_s` outside the open
+  interval (0, 30), so the server gives up before the caller's budget does.
+- **Failure**: the server terminates the statement and the driver raises its
+  transaction-timeout error (`Neo.ClientError.Transaction.TransactionTimedOut*`),
+  which handlers report as `ExecutionError`; the connection returns to the pool.
+  A client error, it does not count against the circuit breaker.
+
+Out of scope: a per-request deadline derived from the request header.
+
+Rollback: `NEO4J_QUERY_TIMEOUT_ENABLED=false` — statements are sent bare and
+the server's `db.transaction.timeout` applies. Tests:
+`tests/unit/test_driver_bounds.py`, `tests/integration/test_query_timeout.py`.
+
+---
+
 ## 22. Health Commercial Mode (HEALTH-02 / COMM-01 / COMM-02) and batch ceilings (BATCH-01 / BATCH-02)
 
 **State**: Dormant
@@ -1285,7 +1341,7 @@ the key (Quantum-L9/Enrichment.Inference.Engine), then set the flag. Endpoints
 without `observedfrom` are unchanged in both states. Tests:
 `tests/unit/test_observed_association_provenance.py`.
 
-### Evidence identity per type (`evidence_identity_per_type_enabled`, default `False`)
+### Evidence identity per type (`evidence_identity_per_type_enabled`, default `True`)
 
 On: `handle_score` dedupes on `(relationship_type, evidence_ref)`, the identity
 this sync writes, so one `evidence_ref` under two types is not

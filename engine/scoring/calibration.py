@@ -407,7 +407,6 @@ class ScoreCalibrator:
                 for p in cal_spec.pairs
             ],
             "message": (
-                "Calibration spec loaded: declared pairs and expected ranges only. "
-                "No scores were computed or verified."
+                "Calibration spec loaded: declared pairs and expected ranges only. No scores were computed or verified."
             ),
         }

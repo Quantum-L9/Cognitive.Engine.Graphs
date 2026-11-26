@@ -69,7 +69,7 @@ boot.py (lifecycle — plus handlers.py, ONLY files importing chassis)
 | query_schema | QuerySchemaSpec | Input parameters |
 | traversal | TraversalSpec | Path patterns, hop limits |
 | gates | list[GateSpec] | Hard filters (10 types) |
-| scoring | ScoringSpec | Soft rank (13 computations) |
+| scoring | ScoringSpec | Soft rank (15 computations) |
 | sync | SyncSpec | Ingestion endpoints |
 | gds_jobs | GDSSpec | Algorithm scheduling |
 | kge | KGESpec | Embedding config |

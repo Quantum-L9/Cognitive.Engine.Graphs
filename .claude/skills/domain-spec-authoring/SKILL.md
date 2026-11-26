@@ -39,7 +39,7 @@ Symlinked `spec.yaml` files are rejected by the loader.
    - `queryschema` — input parameter definitions
    - `traversal` — path patterns, hops bounded (max 10)
    - `gates` — filters using the 10 gate types
-   - `scoring` — ranking dimensions using the 13 computation types
+   - `scoring` — ranking dimensions using the 15 computation types
    - `sync` — entity ingestion endpoints
    - `compliance` — PII fields and handling mode, if applicable
 5. **Validate**:
