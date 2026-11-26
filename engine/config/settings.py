@@ -424,6 +424,12 @@ class Settings(BaseSettings):
     # DELEGATED, unknown) maps to trust 0.5, the value a symmetric Bayesian
     # update treats as uninformative. Off: 0.60. Dormant module. §38a.
     hop_trust_neutral_uninformative_enabled: bool = True
+    # L8 item 3: an outcome whose payload names `query_entity_id` is also linked
+    # the way `preference_attention` reads it — (query entity)-[outcome_relation]
+    # ->(outcome), the outcome under the dimension's success property, the
+    # candidate's community copied onto it. Off: only (candidate)-[:RESULTED_IN]
+    # ->(outcome), which preference_attention never reads. FEATURE_GATES §38a.
+    outcome_preference_history_enabled: bool = True
 
     # Correctness remediation lane A (plan 0d84ec8, RU-001..RU-060)
     # Each flag ships on (a correctness fix); off restores the pre-fix behaviour.
