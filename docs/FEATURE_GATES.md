@@ -838,8 +838,8 @@ server let it run — past the 30 s `TransportHeader.timeout_ms` caller budget.
   `connection_acquisition_timeout` come from `neo4j_pool_size`,
   `neo4j_max_connection_lifetime` and `neo4j_connection_acquisition_timeout`.
   The defaults (50 / 3600 / 60) equal the former literals.
-- **Timeout** (flag on, default — hardening that restores the bounded-request
-  invariant): `execute_query`, `execute_read` and both forms of
+- **Timeout** (flag on, default — hardening that bounds each statement's
+  server-side execution; a transaction bound, not a request deadline): `execute_query`, `execute_read` and both forms of
   `execute_write` run under a server-enforced transaction timeout of
   `neo4j_query_timeout_s` (a `neo4j.Query` timeout, or `unit_of_work(timeout=)`
   on the managed transaction function). A transaction function the caller

@@ -59,8 +59,8 @@ class Settings(BaseSettings):
     # its pool (50 / 3600 s / 60 s) and ignored the three settings above, and no
     # query carried a transaction timeout, so a slow statement held a pooled
     # connection past the 30 s TransportHeader.timeout_ms caller budget. The pool
-    # now comes from those settings. On (default; restores the bounded-request
-    # invariant): every query, read and write runs under a server-enforced
+    # now comes from those settings. On (default; hardening that bounds each
+    # statement's server-side execution): every query, read and write runs under a server-enforced
     # transaction timeout of neo4j_query_timeout_s, validated to (0, 30) so the
     # execution bound alone is shorter than the caller budget. It is a
     # transaction bound, not a request deadline: connection acquisition (up to
