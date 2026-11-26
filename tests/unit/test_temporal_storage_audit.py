@@ -162,3 +162,13 @@ def test_a_reused_relationship_type_is_audited_per_declared_endpoints() -> None:
         "MATCH (:Facility)-[e:TRANSACTED_WITH]->(:Facility)",
         "MATCH (:Facility)-[e:TRANSACTED_WITH]->(:BuyerDemand)",
     ]  # the string-declared Facility->SupplyOpportunity edge is never counted as a stale temporal
+
+
+@pytest.mark.parametrize(("argv", "code"), [([], 1), (["plasticos", "--no-such-flag"], 1), (["--help"], 0)])
+def test_argument_errors_exit_1_not_the_conversion_status(argv: list[str], code: int) -> None:
+    # CodeRabbit on #565: argparse exits 2 on a bad argument, which is this tool's "strings found".
+    from tools import audit_temporal_storage as tool
+
+    with pytest.raises(SystemExit) as raised:
+        tool.main(argv)
+    assert raised.value.code == code

@@ -29,7 +29,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -53,8 +53,16 @@ async def _audit(tenants: list[str], domains_root: str | None) -> list[dict[str,
         await driver.close()
 
 
+class _Parser(argparse.ArgumentParser):
+    """argparse exits 2 on a bad argument; here 2 means "strings found", so a usage error is 1."""
+
+    def error(self, message: str) -> NoReturn:
+        self.print_usage(sys.stderr)
+        self.exit(EXIT_ERROR, f"{self.prog}: error: {message}\n")
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Count declared temporals stored as STRING (read-only)")
+    parser = _Parser(description="Count declared temporals stored as STRING (read-only)")
     parser.add_argument("tenants", nargs="+", help="tenant / domain ids to audit")
     parser.add_argument(
         "--domains-root",
