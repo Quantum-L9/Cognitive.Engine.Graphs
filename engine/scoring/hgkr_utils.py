@@ -151,6 +151,9 @@ class DriftCheckResult:
     post_scores: list[float]
     job_name: str
     threshold: float = 0.05
+    # SCR-12: ``computed`` or ``insufficient_data`` under
+    # ``drift_insufficient_data_status_enabled``; None with the flag off.
+    status: str | None = None
 
     @property
     def summary(self) -> str:
@@ -185,8 +188,16 @@ def check_score_drift(
     against ``threshold`` and the KS statistic against its canonical
     threshold), so a shift in shape that keeps the mean is drift too. Off: the
     mean shift alone.
+
+    SCR-12: with ``drift_insufficient_data_status_enabled`` on, ``status``
+    carries the signal's ``computed`` / ``insufficient_data`` in both SI-29
+    states (a sample with no finite value is insufficient, never a verdict).
+    Off: ``status`` is None.
     """
     from engine.config.settings import settings
+    from engine.scoring.calibration import STATUS_COMPUTED, STATUS_INSUFFICIENT_DATA
+
+    report_status = settings.drift_insufficient_data_status_enabled
 
     if settings.drift_canonical_signals_enabled:
         from engine.scoring.calibration import score_distribution_drift
@@ -207,6 +218,7 @@ def check_score_drift(
             post_scores=post_scores,
             job_name=job_name,
             threshold=threshold,
+            status=signal.status if report_status else None,
         )
 
     def _finite(values: list[float]) -> list[float]:
@@ -224,6 +236,7 @@ def check_score_drift(
             post_scores=post_scores,
             job_name=job_name,
             threshold=threshold,
+            status=STATUS_INSUFFICIENT_DATA if report_status else None,
         )
 
     pre_mean = sum(finite_pre) / len(finite_pre)
@@ -247,6 +260,7 @@ def check_score_drift(
         post_scores=post_scores,
         job_name=job_name,
         threshold=threshold,
+        status=STATUS_COMPUTED if report_status else None,
     )
 
 
