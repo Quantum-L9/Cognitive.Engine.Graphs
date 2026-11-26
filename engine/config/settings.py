@@ -69,6 +69,13 @@ class Settings(BaseSettings):
     # db.transaction.timeout applies).
     neo4j_query_timeout_enabled: bool = True
     neo4j_query_timeout_s: float = Field(default=25.0, gt=0, lt=30)
+    # D6 / SC-002 (FEATURE_GATES §4): ScoreCalibrator.run_calibration reported
+    # zero pairs as a pass, and forward_simulate took its ideal DCG from the
+    # concrete ranking's own relevances re-sorted, so [a,b,c,d] vs [d] scored
+    # NDCG 1.0. On (default; hardening that restores the documented invariant):
+    # zero pairs is not a pass and NDCG is NDCG@k over the abstract ranking's
+    # top-k relevances. Off: both behave exactly as before.
+    calibration_ndcg_abstract_basis_enabled: bool = True
 
     # CEG-007: there was a `redis_url` here, and a redis service in both compose
     # files, and a redis dependency in requirements — and no `import redis`

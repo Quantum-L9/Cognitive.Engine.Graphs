@@ -35,6 +35,13 @@ from engine.config.schema import CalibrationPair, DomainSpec
 logger = logging.getLogger(__name__)
 
 
+def _abstract_basis() -> bool:
+    """D6 flag ``calibration_ndcg_abstract_basis_enabled``: zero pairs fail and NDCG uses the abstract ideal."""
+    from engine.config.settings import settings
+
+    return settings.calibration_ndcg_abstract_basis_enabled
+
+
 def _dcg(relevances: list[float]) -> float:
     """Compute Discounted Cumulative Gain for a relevance list."""
     return sum(rel / math.log2(i + 2) for i, rel in enumerate(relevances))
@@ -209,7 +216,8 @@ class ScoreCalibrator:
         Returns:
             CalibrationReport with pass/fail per pair and overall status.
             D6: zero pairs is not a pass — with nothing checked there is no
-            evidence the scores satisfy the spec, so ``overall_pass`` is False.
+            evidence the scores satisfy the spec, so ``overall_pass`` is False
+            (flag ``calibration_ndcg_abstract_basis_enabled``; off: a pass).
         """
         results: list[CalibrationResult] = []
         for pair in calibration_pairs:
@@ -248,7 +256,7 @@ class ScoreCalibrator:
             passed=passed_count,
             failed=len(results) - passed_count,
             results=results,
-            overall_pass=bool(results) and passed_count == len(results),
+            overall_pass=passed_count == len(results) and (bool(results) or not _abstract_basis()),
         )
 
     def forward_simulate(
@@ -265,7 +273,8 @@ class ScoreCalibrator:
         not from re-sorting the concrete list's own relevances. Re-sorting
         made any ranking that omitted or displaced the abstract top items
         its own ideal, so ``[a,b,c,d]`` vs ``[d]`` scored 1.0 and was not
-        reported diverged.
+        reported diverged. Flag ``calibration_ndcg_abstract_basis_enabled``;
+        off restores the re-sorted basis.
 
         Args:
             abstract_ranking: Ideal ordering by domain author (most preferred first).
@@ -280,7 +289,10 @@ class ScoreCalibrator:
         # NDCG: relevance based on position in abstract ranking
         # float() of int arithmetic (list length minus list index): cannot raise.
         relevances_actual = [float(n - abstract_pos[cid]) if cid in abstract_pos else 0.0 for cid in concrete_ranking]
-        ideal_relevances = [float(n - i) for i in range(min(n, len(concrete_ranking)))]
+        if _abstract_basis():
+            ideal_relevances = [float(n - i) for i in range(min(n, len(concrete_ranking)))]
+        else:
+            ideal_relevances = sorted(relevances_actual, reverse=True)
         idcg = _dcg(ideal_relevances)
         ndcg = min(1.0, _dcg(relevances_actual) / idcg) if idcg > 0 else 0.0
 

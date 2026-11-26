@@ -121,6 +121,7 @@ independently of the code default.
 | Drift Requires Both Windows | `DRIFT_REQUIRES_BOTH_WINDOWS` (`drift_requires_both_windows`) | `True` | unset | active (correctness); outcomes `metadata.drift` raises no alert unless both a recent and a baseline distribution exist; `false` restores the one-sided divergence (RU-029 / CEG-COR-118) |
 | Drift Canonical Signals | `DRIFT_CANONICAL_SIGNALS_ENABLED` (`drift_canonical_signals_enabled`) | `False` | unset | dormant (correctness, SI-29); score-distribution drift has one canonical signal (`calibration.score_distribution_drift`) that `ScoreCalibrator.detect_score_drift` and `hgkr_utils.check_score_drift` delegate to, and `DriftDetector` results are labelled `outcome_dimension_mix` — see §4 |
 | Neo4j Driver Bounds | `NEO4J_QUERY_TIMEOUT_ENABLED` (`neo4j_query_timeout_enabled`), `NEO4J_QUERY_TIMEOUT_S` | `True`, `25` | unset | active (hardening, D8); every query, read and write carries a server-enforced transaction timeout in (0, 30) s, and the driver pool comes from `neo4j_pool_size` / `neo4j_max_connection_lifetime` / `neo4j_connection_acquisition_timeout` — see "Neo4j Driver Bounds" |
+| Calibration NDCG Abstract Basis | `CALIBRATION_NDCG_ABSTRACT_BASIS_ENABLED` (`calibration_ndcg_abstract_basis_enabled`) | `True` | unset | active (hardening, D6); `run_calibration` with zero pairs is not a pass and `forward_simulate` NDCG uses the abstract ranking's top-k ideal; `false` restores both legacy behaviours exactly — see §4 |
 | Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
 | Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
 | Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
@@ -301,6 +302,13 @@ that no admin subaction calls:
   k relevances, Kendall-tau on common items, and misranked pairs; `diverged`
   when NDCG < 0.95. Before D6 the ideal was the concrete list's own relevances
   re-sorted, so `[a,b,c,d]` vs `[d]` scored 1.0.
+
+Both D6 corrections are behind one flag,
+`calibration_ndcg_abstract_basis_enabled` (`CALIBRATION_NDCG_ABSTRACT_BASIS_ENABLED`),
+default `True` (hardening that restores the documented invariant, CONTRACT-21).
+Rollback: `false` restores both exactly as before (zero pairs is a pass; the
+ideal DCG is the concrete list re-sorted). The flag does not touch
+`calibration_run`, whose honest echo message carries no score either way.
 
 Tests: `tests/unit/test_wave2_calibration.py`, `tests/unit/test_wave2_handlers.py`.
 

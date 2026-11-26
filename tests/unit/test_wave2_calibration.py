@@ -357,3 +357,59 @@ class TestCalibrationReport:
         report = calibrator.generate_calibration_report("test_domain")
 
         assert report["status"] == "no_calibration_spec"
+
+
+@pytest.mark.unit
+class TestCalibrationAbstractBasisFlag:
+    """D6 behind ``calibration_ndcg_abstract_basis_enabled`` (CONTRACT-21): on by default, off reproduces main."""
+
+    @pytest.fixture
+    def flag_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "calibration_ndcg_abstract_basis_enabled", False)
+
+    def test_flag_defaults_on(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import Settings
+
+        monkeypatch.delenv("CALIBRATION_NDCG_ABSTRACT_BASIS_ENABLED", raising=False)
+        assert Settings.model_fields["calibration_ndcg_abstract_basis_enabled"].default is True
+        assert Settings(l9_env="dev").calibration_ndcg_abstract_basis_enabled is True
+
+    @pytest.mark.usefixtures("flag_off")
+    def test_flag_off_zero_pairs_is_a_pass_as_on_main(self):
+        report = ScoreCalibrator(_make_domain_spec()).run_calibration([], {})
+        assert report.overall_pass is True
+        assert report.total_pairs == 0
+
+    @pytest.mark.usefixtures("flag_off")
+    def test_flag_off_still_fails_a_failing_pair(self):
+        pairs = [CalibrationPair(node_a="A", node_b="B", expected_score_min=0.5, expected_score_max=0.7)]
+        report = ScoreCalibrator(_make_domain_spec()).run_calibration(pairs, {("A", "B"): 0.1})
+        assert report.overall_pass is False
+
+    @pytest.mark.usefixtures("flag_off")
+    def test_flag_off_ideal_is_the_concrete_list_re_sorted_as_on_main(self):
+        calibrator = ScoreCalibrator(_make_domain_spec())
+        single = calibrator.forward_simulate(["a", "b", "c", "d"], ["d"])
+        assert single.ndcg == pytest.approx(1.0, abs=1e-6)
+        assert single.diverged is False
+        # main: relevances [0, 0, 4], ideal re-sorted [4, 0, 0] -> DCG 4/log2(4) = 2 over IDCG 4.
+        displaced = calibrator.forward_simulate(["a", "b", "c", "d"], ["x", "y", "a"])
+        assert displaced.ndcg == pytest.approx(0.5, abs=1e-6)
+
+    @pytest.mark.usefixtures("flag_off")
+    def test_flag_off_leaves_perfect_and_reversed_rankings_unchanged(self):
+        calibrator = ScoreCalibrator(_make_domain_spec())
+        assert calibrator.forward_simulate(["A", "B", "C"], ["A", "B", "C"]).ndcg == pytest.approx(1.0, abs=1e-6)
+        assert calibrator.forward_simulate(["A", "B", "C"], ["C", "B", "A"]).kendall_tau == pytest.approx(-1.0)
+
+    def test_flag_on_and_off_differ_exactly_where_d6_says(self, monkeypatch: pytest.MonkeyPatch):
+        from engine.config.settings import settings
+
+        calibrator = ScoreCalibrator(_make_domain_spec())
+        on = calibrator.forward_simulate(["a", "b", "c", "d"], ["d"]).ndcg
+        monkeypatch.setattr(settings, "calibration_ndcg_abstract_basis_enabled", False)
+        off = calibrator.forward_simulate(["a", "b", "c", "d"], ["d"]).ndcg
+        assert on == pytest.approx(0.25, abs=1e-6)
+        assert off == pytest.approx(1.0, abs=1e-6)
