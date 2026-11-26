@@ -283,7 +283,12 @@ class TestScoreDrift:
         assert report.drift_detected is True
         assert report.delta_mean > 0.4
 
-    def test_empty_baseline(self):
+    def test_empty_baseline(self, monkeypatch: pytest.MonkeyPatch):
+        # Rollback-path check (SCR-12): drift_insufficient_data_status_enabled off is main
+        # exactly; the flag-on contract is owned by test_drift_insufficient_data_status.py.
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "drift_insufficient_data_status_enabled", False)
         spec = _make_domain_spec()
         calibrator = ScoreCalibrator(spec)
         report = calibrator.detect_score_drift([], [0.5, 0.6])
@@ -291,7 +296,12 @@ class TestScoreDrift:
         assert report.drift_detected is True
         assert report.ks_statistic == 1.0
 
-    def test_empty_current(self):
+    def test_empty_current(self, monkeypatch: pytest.MonkeyPatch):
+        # Rollback-path check (SCR-12): drift_insufficient_data_status_enabled off is main
+        # exactly; the flag-on contract is owned by test_drift_insufficient_data_status.py.
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "drift_insufficient_data_status_enabled", False)
         spec = _make_domain_spec()
         calibrator = ScoreCalibrator(spec)
         report = calibrator.detect_score_drift([0.5, 0.6], [])
