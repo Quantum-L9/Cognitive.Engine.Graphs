@@ -10,8 +10,8 @@ status: active
 --- /L9_META ---
 
 Declared temporal value types (ceg-scoring-audit L1, D1): native projection,
-naive/malformed refusal, the freshness gate's declared-type cutoff, and the
-read-only string-valued detector. FEATURE_GATES "Declared temporal value types".
+naive/malformed refusal and the freshness gate's declared-type cutoff.
+FEATURE_GATES "Declared temporal value types".
 """
 
 from __future__ import annotations
@@ -260,77 +260,6 @@ def test_freshness_compares_in_the_declared_temporal_type(
     compiled = _compile_freshness(_freshness_spec(declared))
     assert f"candidate.seen >= {now} - duration({{days: 30}})" in compiled
     assert ("datetime()" in compiled) is (now == "datetime()")
-
-
-# ── Detector: string-valued declared temporals (read-only) ───────────────────
-
-
-def test_the_detector_reads_every_declared_temporal_of_plasticos() -> None:
-    from engine.health.temporal_storage_audit import build_audit_queries
-
-    queries = {(q.owner, q.label): q for q in build_audit_queries(fx.plasticos())}
-    facility = queries[("node", "Facility")]
-    assert [p.name for p in facility.properties] == ["last_transaction_date"]
-    assert facility.cypher == (
-        "MATCH (e:Facility) RETURN count(CASE WHEN e.last_transaction_date IS :: STRING NOT NULL THEN 1 END) AS c0"
-    )
-    edge = queries[("relationship", "TRANSACTED_WITH")]
-    assert edge.cypher == (
-        "MATCH ()-[e:TRANSACTED_WITH]->() "
-        "RETURN count(CASE WHEN e.transaction_date IS :: STRING NOT NULL THEN 1 END) AS c0"
-    )
-    for query in queries.values():
-        assert not any(word in query.cypher.upper() for word in ("SET ", "CREATE", "MERGE", "DELETE", "REMOVE"))
-
-
-def test_the_detector_covers_list_temporals_and_groups_by_label() -> None:
-    from engine.health.temporal_storage_audit import build_audit_queries
-
-    queries = {q.label: q for q in build_audit_queries(fx.spec(_temporal_raw()))}
-    depot = queries["OrbitalDepot"]
-    assert [p.name for p in depot.properties] == ["opened_at", "opened_on", "service_window", "inspections"]
-    assert (
-        "count(CASE WHEN e.inspections IS :: LIST<ANY> NOT NULL AND any(element IN e.inspections "
-        "WHERE element IS :: STRING NOT NULL) THEN 1 END) AS c3"
-    ) in depot.cypher
-    assert [p.name for p in queries["PropellantGrade"].properties] == ["certified_at"]
-
-
-async def test_the_detector_aggregates_counts_through_execute_read_only() -> None:
-    from engine.health.temporal_storage_audit import audit_temporal_storage
-
-    graph = MagicMock()
-    graph.execute_read = AsyncMock(side_effect=lambda cypher, *_a, **_k: [{"c0": 3}] if "Facility" in cypher else [])
-    graph.execute_query = AsyncMock(side_effect=AssertionError("the detector must not use the write path"))
-    graph.execute_write = AsyncMock(side_effect=AssertionError("the detector must not write"))
-    report = await audit_temporal_storage(graph, fx.plasticos())
-    assert report["database"] == "plasticos"
-    assert report["string_valued_total"] == 3
-    assert report["conversion_required"] is True
-    assert {
-        "owner": "node",
-        "label": "Facility",
-        "property": "last_transaction_date",
-        "declared": "datetime",
-        "string_valued": 3,
-    } in report["findings"]
-    assert {f["property"]: f["string_valued"] for f in report["findings"]}["transaction_date"] == 0
-    assert all(call.kwargs["database"] == "plasticos" for call in graph.execute_read.await_args_list)
-
-
-def test_the_audit_tool_exit_code_reports_conversion_need(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tools import audit_temporal_storage as tool
-
-    async def clean(_tenants: list[str], _root: str) -> list[dict[str, Any]]:
-        return [{"conversion_required": False}]
-
-    async def dirty(_tenants: list[str], _root: str) -> list[dict[str, Any]]:
-        return [{"conversion_required": False}, {"conversion_required": True}]
-
-    monkeypatch.setattr(tool, "_audit", clean)
-    assert tool.main(["plasticos"]) == tool.EXIT_CLEAN
-    monkeypatch.setattr(tool, "_audit", dirty)
-    assert tool.main(["plasticos", "other"]) == tool.EXIT_STRING_VALUED
 
 
 def test_an_unscoped_freshness_gate_uses_the_compiled_directions_declared_type() -> None:

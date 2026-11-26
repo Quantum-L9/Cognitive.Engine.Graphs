@@ -1357,12 +1357,8 @@ that crashed `deflate_egress` with a raw `TypeError` (ND-SERIAL); a stored
 | `egress_value_normalisation_enabled` | `deflate_egress` (`engine/packet/chassis_contract.py`) first runs `normalise_egress_values` on `engine_data`, **in place**, so the response packet and the dict `chassis/actions.py` returns carry the same values: Neo4j temporals → `iso_format()` (nanoseconds and offset kept), Python temporals → `isoformat()`, `timedelta` → ISO duration. A non-finite float, or any value with no JSON form, raises `EgressValueError` (a `ValueError`) naming its path (`data.candidates[0].candidate.rate_per_ton`), never the value | A temporal or a non-finite float crashes egress (legacy) |
 | `freshness_gate_declared_temporal_enabled` | A freshness gate whose `candidateprop` every applicable candidate label declares `date` compiles `candidate.p >= date() - duration({days: N})`; `datetime`-declared, undeclared (`updated_at`) or mixed keep `datetime()` | Always `datetime()`: a native `Date` compares null and fails every candidate |
 
-No historical data is converted. `tools/audit_temporal_storage.py <tenant>...`
-(`engine/health/temporal_storage_audit.py`) counts, per tenant database, the
-stored values of every declared temporal (node and relationship, scalar and
-`list<temporal>`) that are still `STRING`, through `GraphDriver.execute_read`
-(a READ transaction: the server refuses any write). Exit 0 when none, 2 when
-any — conversion then needs a separate approval. Relationship-endpoint
+No historical data is converted (D1); the read-only audit of string-valued
+declared temporals is `docs/runbooks/temporal-storage-audit.md`. Relationship-endpoint
 (`targetedge`) rows write only the fixed evidence keys of §28, never declared
 edge properties, so their `expires_at` (an offset-bearing ISO string, already
 refused when naive) is outside this section.

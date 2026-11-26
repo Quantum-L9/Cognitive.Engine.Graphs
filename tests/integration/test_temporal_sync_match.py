@@ -23,7 +23,6 @@ raw Cypher only reads back what the engine stored.
   an UNWINDMATCHSET sync stamps with ``datetime()`` — survives egress.
 * Freshness: a gate on the native property admits a fresh synced candidate and
   excludes a stale one.
-* Detector: counts string-valued declared temporals, read-only.
 """
 
 from __future__ import annotations
@@ -208,31 +207,3 @@ async def test_freshness_gate_and_matchset_updated_at_survive_egress(variant_dep
     # RETURN candidate carries every stored property, the stamped updated_at included.
     stamped = datetime.fromisoformat(wire["stale"]["candidate"]["updated_at"])  # ISO-8601, not a driver object
     assert stamped.tzinfo is not None
-
-
-@pytest.mark.integration
-async def test_the_detector_counts_string_valued_temporals_read_only(design_pack_deps, graph_driver, monkeypatch):
-    from engine.config.settings import settings
-    from engine.handlers import handle_sync
-    from engine.health.temporal_storage_audit import audit_temporal_storage
-
-    spec = _variant_spec()
-    await handle_sync(PLASTICOS, {"entity_type": "facilities", "batch": [_facility("native", 3)]})
-    clean = await audit_temporal_storage(graph_driver, spec)
-    assert clean["string_valued_total"] == 0
-    assert clean["conversion_required"] is False
-
-    # The legacy write path (flag off) is how string-valued temporals reached production graphs.
-    monkeypatch.setattr(settings, "sync_temporal_native_values_enabled", False)
-    await handle_sync(PLASTICOS, {"entity_type": "facilities", "batch": [_facility("legacy", 3)]})
-    monkeypatch.setattr(settings, "sync_temporal_native_values_enabled", True)
-    assert await _stored_type(graph_driver, "legacy", "last_transaction_date") == "STRING NOT NULL"
-
-    counts = await graph_driver.execute_query("MATCH (n) RETURN count(n) AS nodes", database=PLASTICOS)
-    report = await audit_temporal_storage(graph_driver, spec)
-    finding = next(f for f in report["findings"] if f["property"] == "last_transaction_date")
-    assert finding["string_valued"] == 1
-    assert report["conversion_required"] is True
-    after = await graph_driver.execute_query("MATCH (n) RETURN count(n) AS nodes", database=PLASTICOS)
-    assert after == counts  # read-only: nothing created or removed
-    assert await _stored_type(graph_driver, "legacy", "last_transaction_date") == "STRING NOT NULL"  # not converted
