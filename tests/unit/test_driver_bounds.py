@@ -27,15 +27,19 @@ drives a real server).
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 from neo4j import Query, unit_of_work
+from neo4j.exceptions import ClientError, Neo4jError, TransientError
 from pydantic import ValidationError
 
 from engine.config.settings import Settings
+from engine.graph.circuit_breaker import BreakerState
 from engine.graph.driver import GraphDriver
+from engine.handlers import ExecutionError
 
 pytestmark = pytest.mark.unit
 
@@ -66,6 +70,8 @@ class _Tx:
 
     async def run(self, cypher: Any, parameters: Any = None) -> _Result:
         self._recorder.tx_runs.append(cypher)
+        if self._recorder.fail_with is not None:
+            raise self._recorder.fail_with
         return _Result()
 
 
@@ -82,6 +88,8 @@ class _Session:
 
     async def run(self, statement: Any, parameters: Any = None) -> _Result:
         self._recorder.runs.append((statement, self._database))
+        if self._recorder.fail_with is not None and self._database != "system":
+            raise self._recorder.fail_with
         return _Result()
 
     async def _managed(self, kind: str, func: Any, *args: Any, **kwargs: Any) -> Any:
@@ -101,6 +109,7 @@ class _Recorder:
         self.runs: list[tuple[Any, str]] = []
         self.tx_runs: list[Any] = []
         self.tx_functions: list[tuple[str, float | None, Any]] = []
+        self.fail_with: Exception | None = None
 
 
 class _FakeAsyncDriver:
@@ -248,3 +257,102 @@ async def test_system_database_administrative_command_is_not_bounded() -> None:
         assert await driver.ensure_database("plasticos") is True
 
     assert recorder.runs == [("CREATE DATABASE `plasticos` IF NOT EXISTS WAIT", "system")]
+
+
+# ── A terminated statement surfaces as the engine's typed ExecutionError ───
+
+
+def _server_error(code: str) -> Neo4jError:
+    """The error the neo4j driver raises for a server failure with ``code``.
+
+    ``Neo4jError.hydrate`` is how the driver itself builds these from a server
+    FAILURE message (it picks the subclass from the code); it warns that it is
+    internal, which is expected here.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        return Neo4jError.hydrate(code=code, message="The transaction has been terminated.")
+
+
+CLIENT_CONFIGURED_TIMEOUT = "Neo.ClientError.Transaction.TransactionTimedOutClientConfiguration"
+SERVER_CONFIGURED_TIMEOUT = "Neo.ClientError.Transaction.TransactionTimedOut"
+LEGACY_TRANSIENT_TIMEOUT = "Neo.TransientError.Transaction.TransactionTimedOut"
+
+
+async def _calls(driver: GraphDriver) -> list[Any]:
+    async def _caller_tx(tx: Any) -> None:
+        await tx.run("RETURN 2")
+
+    return [
+        lambda: driver.execute_query("RETURN 1", database="plasticos"),
+        lambda: driver.execute_read("RETURN 1", database="plasticos"),
+        lambda: driver.execute_write(cypher="RETURN 1", database="plasticos"),
+        lambda: driver.execute_write(_caller_tx, database="plasticos"),
+    ]
+
+
+@pytest.mark.parametrize("code", [CLIENT_CONFIGURED_TIMEOUT, SERVER_CONFIGURED_TIMEOUT, LEGACY_TRANSIENT_TIMEOUT])
+@pytest.mark.asyncio
+async def test_transaction_timeout_raises_execution_error_with_driver_cause(code: str) -> None:
+    recorder = _Recorder()
+    with patch("engine.config.settings.settings", _settings(neo4j_query_timeout_s=3.0)):
+        driver = await _connected(recorder)
+        for call in await _calls(driver):
+            recorder.fail_with = _server_error(code)
+            with pytest.raises(ExecutionError) as raised:
+                await call()
+            error = raised.value
+            assert isinstance(error.__cause__, Neo4jError)
+            assert error.__cause__ is recorder.fail_with
+            assert error.__cause__.code == code
+            assert error.action == "graph_query"
+            assert error.tenant == "plasticos"
+            assert error.detail == code
+            assert "neo4j_query_timeout_s=3" in str(error)
+
+
+@pytest.mark.asyncio
+async def test_neo4j_5_timeout_codes_are_client_errors_and_never_open_the_breaker() -> None:
+    """Neo4j 5 reports both timeout codes as ClientError, which the shared breaker does not count."""
+    assert isinstance(_server_error(CLIENT_CONFIGURED_TIMEOUT), ClientError)
+    assert isinstance(_server_error(SERVER_CONFIGURED_TIMEOUT), ClientError)
+    assert isinstance(_server_error(LEGACY_TRANSIENT_TIMEOUT), TransientError)
+
+    recorder = _Recorder()
+    with patch("engine.config.settings.settings", _settings()):
+        driver = await _connected(recorder)
+        for _ in range(driver.circuit_breaker.failure_threshold + 2):
+            recorder.fail_with = _server_error(CLIENT_CONFIGURED_TIMEOUT)
+            with pytest.raises(ExecutionError):
+                await driver.execute_query("RETURN 1", database="plasticos")
+        assert driver.circuit_breaker.state == BreakerState.CLOSED
+
+        recorder.fail_with = None
+        assert await driver.execute_query("RETURN 1", database="plasticos") == [{"ok": 1}]
+
+
+@pytest.mark.asyncio
+async def test_flag_off_server_timeout_is_still_typed_and_names_the_server_bound() -> None:
+    recorder = _Recorder()
+    with patch("engine.config.settings.settings", _settings(neo4j_query_timeout_enabled=False)):
+        driver = await _connected(recorder)
+        recorder.fail_with = _server_error(SERVER_CONFIGURED_TIMEOUT)
+        with pytest.raises(ExecutionError, match="db.transaction.timeout") as raised:
+            await driver.execute_query("RETURN 1", database="plasticos")
+    assert raised.value.__cause__ is recorder.fail_with
+
+
+@pytest.mark.parametrize(
+    "code",
+    ["Neo.ClientError.Statement.SyntaxError", "Neo.TransientError.Transaction.DeadlockDetected"],
+)
+@pytest.mark.asyncio
+async def test_non_timeout_server_errors_pass_through_unchanged(code: str) -> None:
+    recorder = _Recorder()
+    with patch("engine.config.settings.settings", _settings()):
+        driver = await _connected(recorder)
+        recorder.fail_with = _server_error(code)
+        with pytest.raises(Neo4jError) as raised:
+            await driver.execute_query("RETURN 1", database="plasticos")
+    assert raised.value is recorder.fail_with
+    assert not isinstance(raised.value, ExecutionError)

@@ -848,10 +848,14 @@ server let it run — past the 30 s `TransportHeader.timeout_ms` caller budget.
   carries its own WAIT bound) are not bounded.
 - **Validation**: `Settings` refuses `neo4j_query_timeout_s` outside the open
   interval (0, 30), so the server gives up before the caller's budget does.
-- **Failure**: the server terminates the statement and the driver raises its
-  transaction-timeout error (`Neo.ClientError.Transaction.TransactionTimedOut*`),
-  which handlers report as `ExecutionError`; the connection returns to the pool.
-  A client error, it does not count against the circuit breaker.
+- **Failure**: the server terminates the statement and `GraphDriver` raises the
+  engine's typed `ExecutionError` (action `graph_query`, tenant = the database),
+  whose `__cause__` is the neo4j driver's transaction-timeout error
+  (`Neo.ClientError.Transaction.TransactionTimedOut` or
+  `...TransactionTimedOutClientConfiguration`; the driver has no dedicated
+  class, so the code is matched). The connection returns to the pool. A
+  `ClientError` on Neo4j 5, it does not count against the circuit breaker. Any
+  other server error leaves the driver unchanged.
 
 Out of scope: a per-request deadline derived from the request header.
 

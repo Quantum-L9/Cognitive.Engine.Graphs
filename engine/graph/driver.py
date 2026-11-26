@@ -120,6 +120,19 @@ def _bounded_transaction(func: Any, timeout: float | None) -> Any:
     return unit_of_work(metadata=getattr(func, "metadata", None), timeout=timeout)(func)
 
 
+# D8: the server codes for a transaction terminated by its timeout. Both are
+# ClientError on Neo4j 5 (TransactionTimedOutClientConfiguration for the timeout
+# this driver sends, TransactionTimedOut for db.transaction.timeout); 4.x sent the
+# latter as a TransientError. The driver has no dedicated class, so match the code.
+_TRANSACTION_TIMEOUT_CODE_MARKER = ".Transaction.TransactionTimedOut"
+
+
+def _is_transaction_timeout(exc: Exception) -> bool:
+    if not isinstance(exc, neo4j_exceptions.Neo4jError):
+        return False
+    return _TRANSACTION_TIMEOUT_CODE_MARKER in (exc.code or "")
+
+
 def _looks_like_absent_database(exc: Exception) -> bool:
     message = str(exc).casefold()
     return any(marker in message for marker in _DATABASE_ABSENT_MARKERS)
@@ -314,7 +327,7 @@ class GraphDriver:
         try:
             return await self._circuit_breaker.call(query, cypher, parameters, database)
         except Exception as exc:
-            raise self._translate_absent_database(exc, database) from exc
+            raise self._translate_query_failure(exc, database) from exc
 
     async def _raw_execute_read(
         self,
@@ -396,7 +409,7 @@ class GraphDriver:
                 absent, self._raw_execute_read, cypher, parameters, database
             )
         except Exception as exc:
-            raise self._translate_absent_database(exc, database) from exc
+            raise self._translate_query_failure(exc, database) from exc
         return records
 
     @staticmethod
@@ -480,6 +493,33 @@ class GraphDriver:
             database=database,
             **kwargs,
         )
+
+    @classmethod
+    def _translate_query_failure(cls, exc: Exception, database: str) -> Exception:
+        """The exception a failed statement leaves the driver as.
+
+        An absent tenant database becomes ``DatabaseNotProvisionedError``. D8: a
+        statement the server terminated at its transaction timeout becomes the
+        engine's typed ``ExecutionError`` (action ``graph_query``, tenant = the
+        database, which is named after the domain id), with the neo4j error as
+        ``__cause__``. The breaker has already classified the raw error by then:
+        a timeout is a ``ClientError`` and does not count. Anything else passes
+        through unchanged.
+        """
+        translated = cls._translate_absent_database(exc, database)
+        if translated is not exc or not _is_transaction_timeout(exc):
+            return translated
+        # Imported here: engine.handlers imports this module.
+        from engine.config.settings import settings
+        from engine.handlers import ExecutionError
+
+        bound = (
+            f"neo4j_query_timeout_s={settings.neo4j_query_timeout_s:g}"
+            if settings.neo4j_query_timeout_enabled
+            else "the server's db.transaction.timeout"
+        )
+        msg = f"Neo4j terminated the query on database {database!r} at its transaction timeout ({bound})"
+        return ExecutionError(msg, action="graph_query", tenant=database, detail=getattr(exc, "code", None))
 
     @staticmethod
     def _translate_absent_database(exc: Exception, database: str) -> Exception:
@@ -668,4 +708,4 @@ class GraphDriver:
                 **kwargs,
             )
         except Exception as exc:
-            raise self._translate_absent_database(exc, database) from exc
+            raise self._translate_query_failure(exc, database) from exc

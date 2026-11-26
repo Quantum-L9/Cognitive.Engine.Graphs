@@ -10,8 +10,10 @@ status: active
 --- /L9_META ---
 
 D8 / ND-DRIVER against a real Neo4j: a statement that runs past
-``neo4j_query_timeout_s`` is terminated by the server, surfaces as the server's
-transaction-timeout error, and gives its pooled connection back.
+``neo4j_query_timeout_s`` is terminated by the server, leaves ``GraphDriver`` as
+the engine's typed ``ExecutionError`` whose ``__cause__`` is the neo4j driver's
+transaction-timeout error (``Neo.ClientError.Transaction.TransactionTimedOut*``),
+and gives its pooled connection back.
 
 The driver under test is a fresh ``GraphDriver`` with a one-connection pool, so
 a connection the timed-out statement kept would make the follow-up query wait
@@ -29,11 +31,12 @@ from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
-from neo4j.exceptions import Neo4jError
+from neo4j.exceptions import ClientError
 
 from engine.config.settings import Settings
 from engine.graph.circuit_breaker import BreakerState
 from engine.graph.driver import GraphDriver
+from engine.handlers import ExecutionError
 
 pytestmark = pytest.mark.integration
 
@@ -69,17 +72,17 @@ async def bounded_driver(neo4j_container: dict[str, str]) -> AsyncGenerator[Grap
             await driver.close()
 
 
-def _is_transaction_timeout(exc: BaseException) -> bool:
-    code = getattr(exc, "code", None) or ""
-    return isinstance(exc, Neo4jError) and "Transaction.TransactionTimedOut" in code
-
-
 async def _assert_times_out(call: Any) -> float:
     started = time.monotonic()
-    with pytest.raises(Neo4jError) as raised:
+    with pytest.raises(ExecutionError) as raised:
         await call()
     elapsed = time.monotonic() - started
-    assert _is_transaction_timeout(raised.value), f"expected a server transaction timeout, got {raised.value!r}"
+    cause = raised.value.__cause__
+    # Neo4j 5 reports a client-configured timeout as a ClientError (Neo4j status codes).
+    assert isinstance(cause, ClientError), f"expected the driver's timeout error as __cause__, got {cause!r}"
+    assert cause.code.startswith("Neo.ClientError.Transaction.TransactionTimedOut"), cause.code
+    assert raised.value.action == "graph_query"
+    assert raised.value.tenant == "neo4j"
     # Terminated near the bound, far below the busy loop's natural runtime and
     # below the 30 s caller budget the setting is validated against.
     assert elapsed < TIMEOUT_S + 10, f"statement ran {elapsed:.1f}s against a {TIMEOUT_S}s bound"
