@@ -289,11 +289,15 @@ def test_an_unscoped_freshness_gate_uses_the_compiled_directions_declared_type()
     assert "candidate.seen >= datetime() - duration" in GateCompiler(spec).compile_all_gates("d2")
 
 
-def test_an_unrepresentable_duration_is_a_row_defect_not_a_crash() -> None:
-    # CodeRabbit on #563: the regex accepts it, the driver's Duration refuses its month count.
-    row = {"depot_id": "d1", "service_window": "P999999999999999999999Y"}
+# CodeRabbit on #563: the regex accepts these; the driver refuses the 22-digit year count, and
+# 29+ digits overflow Decimal's default precision (InvalidOperation) before the driver is reached.
+@pytest.mark.parametrize(
+    "iso", ["P" + "9" * 21 + "Y", "P" + "9" * 29 + "Y", "P" + "9" * 50 + "D", "PT" + "9" * 40 + "S"]
+)
+def test_an_unrepresentable_duration_is_a_row_defect_not_a_crash(iso: str) -> None:
+    row = {"depot_id": "d1", "service_window": iso}
     assert _defects([row]) == ["row 0 service_window: expected duration, got string (duration out of range)"]
-    assert _contract().project([row])[0][0]["node"]["service_window"] == "P999999999999999999999Y"  # never raises
+    assert _contract().project([row])[0][0]["node"]["service_window"] == iso  # never raises
 
 
 def test_freshness_keeps_datetime_when_a_selected_label_does_not_declare_the_property() -> None:

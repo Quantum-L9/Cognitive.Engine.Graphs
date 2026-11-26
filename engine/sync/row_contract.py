@@ -584,14 +584,14 @@ def _native_duration(value: str) -> Duration | None:
     if match is None:
         return None
     unit = {name: Decimal(amount or 0) for name, amount in match.groupdict().items()}
-    months = unit["years"] * 12 + unit["months"]
-    days = unit["weeks"] * 7 + unit["days"]
-    spill_days, spill_seconds = divmod((months % 1) * _SECONDS_PER_MONTH, _SECONDS_PER_DAY)
-    seconds = spill_seconds + (days % 1) * _SECONDS_PER_DAY
-    seconds += unit["hours"] * 3600 + unit["minutes"] * 60 + unit["seconds"]
     try:
+        months = unit["years"] * 12 + unit["months"]
+        days = unit["weeks"] * 7 + unit["days"]
+        spill_days, spill_seconds = divmod((months % 1) * _SECONDS_PER_MONTH, _SECONDS_PER_DAY)
+        seconds = spill_seconds + (days % 1) * _SECONDS_PER_DAY
+        seconds += unit["hours"] * 3600 + unit["minutes"] * 60 + unit["seconds"]
         return Duration(months=int(months), days=int(days) + int(spill_days), seconds=float(seconds))
-    except (ValueError, OverflowError):  # beyond the driver's (and Neo4j's) range
+    except (ArithmeticError, ValueError):  # beyond Decimal precision, or the driver's (and Neo4j's) range
         return None
 
 
