@@ -10,145 +10,162 @@ status: active
 --- /L9_META ---
 
 tests/integration/test_multi_tenant.py
-Integration tests for multi-tenant isolation in the L9 Graph Cognitive Engine.
-Validates that tenants cannot see each other's data at the graph level.
+Multi-tenant isolation, the way production isolates (Contract 3).
 
-Note: Tenant resolution is now a chassis responsibility. These tests focus on
-graph-level isolation only.
+A tenant resolves to its own domain pack, and every handler query runs in that
+pack's database (``database=domain_spec.domain.id``). Isolation is therefore a
+property of the engine's routing, not of a ``tenant`` property a test writes by
+hand. Two tenants here are two copies of the synthetic orbital-logistics pack
+under different domain ids, so labels, ids and Cypher are identical and only the
+database differs: a leak cannot hide behind a label mismatch.
+
+Every graph state is written by ``handle_sync`` and read by ``handle_match``;
+raw Cypher only provisions and wipes the two databases.
 """
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+from pathlib import Path
+from typing import Any
+
 import pytest
+import pytest_asyncio
+import yaml
+
+from tests.fixtures.domain_contracts import SYNTHETIC_DOMAINS_ROOT
+
+pytestmark = pytest.mark.integration
+
+ALPHA = "orbital-alpha"
+BETA = "orbital-beta"
+DIRECTION = "window_to_depot"
 
 
-@pytest.mark.integration
-class TestGraphLevelTenantIsolation:
-    """Verify Neo4j queries are tenant-scoped — no cross-tenant data leakage."""
+def _write_tenant_packs(root: Path) -> None:
+    """Two copies of orbital-logistics whose only difference is the domain id (and so the database)."""
+    source = yaml.safe_load((SYNTHETIC_DOMAINS_ROOT / "orbital-logistics" / "spec.yaml").read_text())
+    for tenant in (ALPHA, BETA):
+        raw = dict(source)
+        raw["domain"] = {**source["domain"], "id": tenant}
+        (root / tenant).mkdir()
+        (root / tenant / "spec.yaml").write_text(yaml.safe_dump(raw, sort_keys=False))
 
-    @pytest.mark.asyncio
-    async def test_tenant_a_cannot_see_tenant_b_depots(self, graph_driver):
-        """Depots created by tenant_a are invisible to tenant_b queries."""
-        db = "neo4j"
 
+@pytest_asyncio.fixture
+async def two_tenants(graph_driver, tmp_path: Path) -> AsyncGenerator[None, None]:
+    from engine.config.loader import DomainPackLoader
+    from engine.handlers import init_dependencies
+    from engine.state import get_state
+
+    _write_tenant_packs(tmp_path)
+    for tenant in (ALPHA, BETA):
         await graph_driver.execute_query(
-            """
-            MERGE (f:OrbitalDepot {depot_id: 8001})
-            SET f.name = 'TenantA-Only', f.tenant = 'tenant_a'
-            """,
-            database=db,
+            cypher=f"CREATE DATABASE `{tenant}` IF NOT EXISTS WAIT", parameters={}, database="system"
         )
-        await graph_driver.execute_query(
-            """
-            MERGE (f:OrbitalDepot {depot_id: 8002})
-            SET f.name = 'TenantB-Only', f.tenant = 'tenant_b'
-            """,
-            database=db,
-        )
+    # IF NOT EXISTS keeps whatever a reused server or an interrupted run left behind:
+    # start every test from an empty graph, not only end it with one.
+    await _wipe(graph_driver)
+    get_state().reset()
+    init_dependencies(graph_driver, DomainPackLoader(config_path=str(tmp_path)))
+    yield
+    get_state().reset()
+    await _wipe(graph_driver)
 
-        results_a = await graph_driver.execute_query(
-            "MATCH (f:OrbitalDepot {tenant: 'tenant_a'}) RETURN f.depot_id AS fid",
-            database=db,
-        )
-        results_b = await graph_driver.execute_query(
-            "MATCH (f:OrbitalDepot {tenant: 'tenant_b'}) RETURN f.depot_id AS fid",
-            database=db,
-        )
 
-        ids_a = {r["fid"] for r in results_a}
-        ids_b = {r["fid"] for r in results_b}
+async def _wipe(graph_driver: Any) -> None:
+    for tenant in (ALPHA, BETA):
+        await graph_driver.execute_write(cypher="MATCH (n) DETACH DELETE n", parameters={}, database=tenant)
 
-        assert 8001 in ids_a
-        assert 8002 not in ids_a, "Tenant A must not see Tenant B data"
-        assert 8002 in ids_b
-        assert 8001 not in ids_b, "Tenant B must not see Tenant A data"
 
-        # Cleanup
-        await graph_driver.execute_query(
-            "MATCH (f:OrbitalDepot) WHERE f.depot_id IN [8001, 8002] DETACH DELETE f",
-            database=db,
-        )
+def _depot(depot_id: str, reliability: float) -> dict[str, Any]:
+    return {"depot_id": depot_id, "accepts_hazmat": True, "docking_ports": 4, "reliability": reliability}
 
-    @pytest.mark.asyncio
-    async def test_exclusion_edges_respect_tenant_scope(self, graph_driver):
-        """EXCLUDED_FROM edges only apply within the same tenant context."""
-        db = "neo4j"
 
-        await graph_driver.execute_query(
-            """
-            MERGE (a:OrbitalDepot {depot_id: 8010, tenant: 'tenant_x', name: 'X-Alpha'})
-            MERGE (b:OrbitalDepot {depot_id: 8011, tenant: 'tenant_x', name: 'X-Beta'})
-            MERGE (c:OrbitalDepot {depot_id: 8012, tenant: 'tenant_y', name: 'Y-Gamma'})
-            MERGE (a)-[:EXCLUDED_FROM]->(b)
-            """,
-            database=db,
-        )
+async def _sync(tenant: str, batch: list[dict[str, Any]]) -> None:
+    from engine.handlers import handle_sync
 
-        # Tenant X: depot 8010 excluded from 8011
-        results_x = await graph_driver.execute_query(
-            """
-            MATCH (f:OrbitalDepot {tenant: 'tenant_x'})
-            WHERE NOT EXISTS {
-                MATCH (excluder:OrbitalDepot {depot_id: 8010})-[:EXCLUDED_FROM]->(f)
-            }
-            RETURN f.depot_id AS fid
-            """,
-            database=db,
-        )
-        fids_x = {r["fid"] for r in results_x}
-        assert 8010 in fids_x
-        assert 8011 not in fids_x, "8011 should be excluded by 8010"
+    result = await handle_sync(tenant, {"entity_type": "orbital-depots", "batch": batch})
+    assert result["status"] == "success"
 
-        # Tenant Y: unaffected by Tenant X exclusions
-        results_y = await graph_driver.execute_query(
-            """
-            MATCH (f:OrbitalDepot {tenant: 'tenant_y'})
-            RETURN f.depot_id AS fid
-            """,
-            database=db,
-        )
-        fids_y = {r["fid"] for r in results_y}
-        assert 8012 in fids_y, "Tenant Y data must be unaffected by Tenant X exclusions"
 
-        await graph_driver.execute_query(
-            "MATCH (f:OrbitalDepot) WHERE f.depot_id IN [8010, 8011, 8012] DETACH DELETE f",
-            database=db,
-        )
+def _by_id(result: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    rows = [row["candidate"] for row in result.get("candidates", [])]
+    ids = [c["depot_id"] for c in rows]
+    # A leaked foreign "shared" row must fail here, not be overwritten by the dict below.
+    assert len(ids) == len(set(ids)), f"duplicate candidate ids: {sorted(ids)}"
+    return {c["depot_id"]: c for c in rows}
 
-    @pytest.mark.asyncio
-    async def test_sync_batch_scoped_to_tenant(self, graph_driver):
-        """Batch UNWIND/MERGE sets tenant property and doesn't leak across tenants."""
-        db = "neo4j"
-        batch = [
-            {"depot_id": 8020, "name": "SyncTest-A"},
-            {"depot_id": 8021, "name": "SyncTest-B"},
-        ]
 
-        await graph_driver.execute_query(
-            """
-            UNWIND $batch AS row
-            MERGE (f:OrbitalDepot {depot_id: row.depot_id})
-            SET f += row, f.tenant = $tenant
-            """,
-            parameters={"batch": batch, "tenant": "sync_tenant"},
-            database=db,
-        )
+async def _seed() -> None:
+    # The same depot id in both tenants, with different values, plus one depot each.
+    await _sync(ALPHA, [_depot("shared", 0.91), _depot("alpha-only", 0.80)])
+    await _sync(BETA, [_depot("shared", 0.42), _depot("beta-only", 0.70)])
 
-        # Verify tenant property set
-        results = await graph_driver.execute_query(
-            "MATCH (f:OrbitalDepot {tenant: 'sync_tenant'}) RETURN f.depot_id AS fid",
-            database=db,
-        )
-        assert len(results) == 2
 
-        # Verify other tenants don't see it
-        results_other = await graph_driver.execute_query(
-            "MATCH (f:OrbitalDepot {tenant: 'other_tenant'}) RETURN count(f) AS cnt",
-            database=db,
-        )
-        assert results_other[0]["cnt"] == 0
+def _legacy(**extra: Any) -> dict[str, Any]:
+    return {"query": {"min_ports": 2}, "match_direction": DIRECTION, "top_n": 25, **extra}
 
-        await graph_driver.execute_query(
-            "MATCH (f:OrbitalDepot {tenant: 'sync_tenant'}) DETACH DELETE f",
-            database=db,
-        )
+
+async def test_each_tenant_matches_only_its_own_synced_candidates(two_tenants):
+    from engine.handlers import handle_match
+
+    await _seed()
+
+    alpha = _by_id(await handle_match(ALPHA, _legacy()))
+    beta = _by_id(await handle_match(BETA, _legacy()))
+
+    assert set(alpha) == {"shared", "alpha-only"}
+    assert set(beta) == {"shared", "beta-only"}
+    # Same id, different tenants: each sees its own write, never the other's.
+    assert alpha["shared"]["reliability"] == pytest.approx(0.91)
+    assert beta["shared"]["reliability"] == pytest.approx(0.42)
+    # handle_sync stamps the writing tenant on every node it writes.
+    assert {c["_tenant"] for c in alpha.values()} == {ALPHA}
+    assert {c["_tenant"] for c in beta.values()} == {BETA}
+
+
+async def test_a_sync_into_one_tenant_never_reaches_the_other(two_tenants):
+    from engine.handlers import handle_match
+
+    await _seed()
+    await _sync(ALPHA, [_depot("late-alpha", 0.99)])
+
+    assert "late-alpha" in _by_id(await handle_match(ALPHA, _legacy()))
+    assert set(_by_id(await handle_match(BETA, _legacy()))) == {"shared", "beta-only"}
+
+
+@pytest.mark.parametrize("key", ["tenant", "domain", "domain_id", "database"])
+async def test_a_legacy_payload_naming_the_other_tenant_cannot_redirect_the_query(two_tenants, key):
+    from engine.handlers import handle_match
+
+    await _seed()
+
+    alpha = _by_id(await handle_match(ALPHA, _legacy(**{key: BETA})))
+
+    assert set(alpha) == {"shared", "alpha-only"}
+    assert alpha["shared"]["reliability"] == pytest.approx(0.91)
+
+
+def _match_request(domain: str) -> dict[str, Any]:
+    return {
+        "contract_version": "1.0.0-draft",
+        "domain": domain,
+        "query_id": "isolation-1",
+        "direction": DIRECTION,
+        "query_entity_ref": "orbital.launch.window:1",
+        "query": {"facts": {"min_ports": 2}, "evidence_summary": []},
+        "top_n": 25,
+        "projection_version": "1.0.0",
+        "policy_ref": {"id": "orbital.match-policy", "version": "1.0.0"},
+    }
+
+
+async def test_a_contract_request_naming_the_other_domain_is_refused(two_tenants):
+    from engine.handlers import ValidationError, handle_match
+
+    await _seed()
+    assert set(_by_id(await handle_match(ALPHA, _match_request(ALPHA)))) == {"shared", "alpha-only"}
+    smuggled = _match_request(BETA)
+    with pytest.raises(ValidationError, match="is not the admitted domain"):
+        await handle_match(ALPHA, smuggled)
