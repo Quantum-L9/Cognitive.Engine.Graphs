@@ -1,16 +1,14 @@
 """
 Score quality benchmark suite (W5-03).
 
-Validates that the scoring assembler produces meaningfully different scores
-for "good" and "bad" candidate-query pairs using synthetic test data.
-All tests run without Neo4j by testing the Cypher expression structure
-and using a simple numeric evaluator for score expressions.
+Asserts the Cypher the scoring assembler emits for the benchmark spec (no
+Neo4j). The former Python re-implementation of the scoring math was removed
+(CEG scoring audit L2): it tested itself, not the engine, and bounded scores
+at 1.5 although the engine clamps to [0, 1].
 """
 
 from __future__ import annotations
 
-import math
-import statistics
 
 import pytest
 
@@ -35,7 +33,7 @@ from engine.config.schema import (
     ScoringSpec,
 )
 from engine.scoring.assembler import ScoringAssembler
-from tests.fixtures.benchmark_data import BAD_PAIRS, GOOD_PAIRS, BenchmarkPair
+from tests.fixtures.benchmark_data import BAD_PAIRS, GOOD_PAIRS
 
 pytestmark = pytest.mark.unit
 
@@ -134,59 +132,6 @@ def _build_benchmark_spec() -> DomainSpec:
     )
 
 
-def _simulate_score(pair: BenchmarkPair, spec: DomainSpec) -> float:
-    """Simulate a score for a benchmark pair using Python-side math.
-
-    This mirrors the Cypher expressions the ScoringAssembler would generate,
-    applied to the synthetic candidate/query data.
-    """
-    cand = pair.candidate_props
-    query = pair.query_params
-    weights = {"w_geo": 0.30, "w_structural": 0.30, "w_community": 0.20, "w_density": 0.20}
-
-    # Geo decay: 1 / (1 + distance / k)
-    k = 50000.0
-    lat1, lon1 = math.radians(cand["lat"]), math.radians(cand["lon"])
-    lat2, lon2 = math.radians(query["lat"]), math.radians(query["lon"])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-    distance_m = 2 * 6371000 * math.asin(math.sqrt(a))
-    geo_score = 1.0 / (1.0 + distance_m / k)
-
-    # Structural: candidateproperty (rate)
-    structural_score = cand.get("rate", 0.0)
-
-    # Community match
-    if cand.get("community_id") is None or query.get("community_id") is None:
-        community_score = 0.5
-    elif cand["community_id"] == query["community_id"]:
-        community_score = 1.5
-    else:
-        community_score = 0.2
-
-    # Log normalized density
-    density = cand.get("density", 0.0)
-    density_score = math.log(1 + density) / math.log(1 + 100.0)
-
-    # Clamp each to [0, 1]
-    def clamp(v):
-        return max(0.0, min(1.0, v))
-
-    geo_score = clamp(geo_score)
-    structural_score = clamp(structural_score)
-    community_score = clamp(community_score)
-    density_score = clamp(density_score)
-
-    total = (
-        weights["w_geo"] * geo_score
-        + weights["w_structural"] * structural_score
-        + weights["w_community"] * community_score
-        + weights["w_density"] * density_score
-    )
-    return total
-
-
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -206,45 +151,29 @@ class TestScoreBenchmark:
         assert "WITH" in clause
         assert "score" in clause
 
-    def test_good_pairs_score_higher_than_bad(self, spec):
-        """Average good-pair score must exceed average bad-pair score."""
-        good_scores = [_simulate_score(p, spec) for p in GOOD_PAIRS]
-        bad_scores = [_simulate_score(p, spec) for p in BAD_PAIRS]
+    def test_every_dimension_and_the_composite_are_clamped(self, spec):
+        """W1-02 + D5: each dimension and the weighted total are bounded to [0, 1] in the emitted Cypher.
 
-        good_avg = statistics.mean(good_scores)
-        bad_avg = statistics.mean(bad_scores)
+        The declared communitymatch bias (1.5) exceeds 1.0; the dimension clamp
+        cuts it, so no candidate's score can exceed 1.0. The former test-local
+        re-implementation of the scoring math allowed scores up to 1.5.
+        """
+        assembler = ScoringAssembler(spec)
+        clause, _ = assembler.assemble_scoring_clause("buyer_to_seller", {})
+        dims_line, score_line = clause.splitlines()
+        for name in ("geo_proximity", "structural", "community", "density_score"):
+            assert f" END AS {name}" in dims_line
+        assert dims_line.count("WHEN isNaN(") == 4
+        weighted = "(0.3 * geo_proximity) + (0.3 * structural) + (0.2 * community) + (0.2 * density_score)"
+        assert score_line.endswith(f"{ScoringAssembler._clamp_expression(weighted)} AS score")
 
-        assert good_avg > bad_avg, f"Good avg ({good_avg:.4f}) must exceed bad avg ({bad_avg:.4f})"
-
-    def test_score_separation(self, spec):
-        """Separation between good and bad averages must be > 0.20."""
-        good_scores = [_simulate_score(p, spec) for p in GOOD_PAIRS]
-        bad_scores = [_simulate_score(p, spec) for p in BAD_PAIRS]
-
-        separation = statistics.mean(good_scores) - statistics.mean(bad_scores)
-        assert separation > 0.20, f"Score separation {separation:.4f} is below 0.20 threshold"
-
-    def test_score_variance(self, spec):
-        """Score distribution should have meaningful variance (std > 0.05)."""
-        all_scores = [_simulate_score(p, spec) for p in GOOD_PAIRS + BAD_PAIRS]
-        std = statistics.stdev(all_scores)
-        assert std > 0.05, f"Score std {std:.4f} is below 0.05 — scores lack discrimination"
-
-    def test_distribution_moments(self, spec):
-        """Verify distribution properties: mean, std, skew."""
-        all_scores = [_simulate_score(p, spec) for p in GOOD_PAIRS + BAD_PAIRS]
-        mean = statistics.mean(all_scores)
-        std = statistics.stdev(all_scores)
-
-        # Mean should be reasonable (not 0 or 1)
-        assert 0.1 < mean < 0.9, f"Mean score {mean:.4f} is unreasonably extreme"
-        assert std > 0.0, "Score std must be positive"
-
-    def test_good_scores_bounded(self, spec):
-        """All scores should be in valid range [0, ~1.0]."""
+    def test_benchmark_pairs_reference_only_declared_properties(self, spec):
+        """The synthetic pairs exercise the declared candidate properties and query fields."""
+        declared = {p.name for n in spec.ontology.nodes for p in n.properties}
+        fields = {f.name for f in spec.queryschema.fields}
         for pair in GOOD_PAIRS + BAD_PAIRS:
-            score = _simulate_score(pair, spec)
-            assert 0.0 <= score <= 1.5, f"Score {score:.4f} out of bounds for pair {pair.label}"
+            assert set(pair.candidate_props) <= declared, pair.label
+            assert set(pair.query_params) <= fields, pair.label
 
     def test_clamp_expression(self):
         """ScoringAssembler._clamp_expression wraps correctly."""
