@@ -183,7 +183,8 @@ async def test_a_replay_naming_another_query_entity_is_refused_and_changes_nothi
 
     await _record("window-1", "depot-a", "success", outcome_id="out-bound-1")
     with pytest.raises(ValidationError, match="already recorded for another query entity"):
-        await _record("window-2", "depot-a", "success", outcome_id="out-bound-1")
+        # Same match identity, only the query entity changes.
+        await _record("window-2", "depot-a", "success", outcome_id="out-bound-1", match_id="window-1:depot-a")
     assert await _history(graph) == [
         {"window": "window-1", "depot": "depot-a", "outcome_type": "success", "community": 1},
     ]

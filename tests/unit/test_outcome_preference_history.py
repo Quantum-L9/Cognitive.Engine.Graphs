@@ -174,12 +174,16 @@ async def test_the_outcome_is_linked_from_the_query_entity_in_the_read_shape() -
     assert "MATCH (qe:LaunchWindow) WHERE qe.window_id = $query_entity_id" in cypher
     assert "(c:OrbitalDepot AND c.depot_id = $candidate_id)" in cypher
     assert "MERGE (qe)-[:RESULTED_IN]->(o)" in cypher
-    assert "SET o.outcome_type = $outcome, o.community_id = coalesce(o.community_id, c.community_id)" in cypher
+    assert (
+        "SET o.outcome_type = CASE WHEN $outcome = 'success' THEN $success_value ELSE $outcome END, "
+        "o.community_id = coalesce(o.community_id, c.community_id)"
+    ) in cypher
     assert parameters == {
         "outcome_id": result["outcome_id"],
         "outcome": "success",
         "candidate_id": "depot-1",
         "query_entity_id": "window-1",
+        "success_value": "success",
     }
     assert result["preference_history"] == {"query_entity_id": "window-1", "linked_dimensions": ["launch_preference"]}
     # The outcome node itself is written first, unchanged.
@@ -311,3 +315,18 @@ async def test_with_declared_community_off_the_history_writes_the_property_the_r
     await handle_outcomes(TENANT, _payload())
     [(cypher, _params, _db)] = _history(graph)
     assert "o.community_id = coalesce(o.community_id, c.community_id)" in cypher
+
+
+async def test_a_success_is_stored_as_the_declared_success_value() -> None:
+    graph = _wire(_spec(_raw(success_value="approved")), _Graph())
+    await handle_outcomes(TENANT, _payload())
+    [(_cypher, parameters, _db)] = _history(graph)
+    assert parameters["success_value"] == "approved"
+
+
+@pytest.mark.parametrize("bad", ["failure", "partial"])
+async def test_a_success_value_naming_a_non_success_is_refused_before_anything_is_written(bad: str) -> None:
+    graph = _wire(_spec(_raw(success_value=bad)), _Graph())
+    with pytest.raises(ValidationError, match="not a success"):
+        await handle_outcomes(TENANT, _payload())
+    assert graph.calls == []

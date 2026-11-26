@@ -3288,6 +3288,14 @@ def _preference_history_plan(
             )
         relation = sanitize_label((metadata.outcome_relation if metadata else None) or feedback.outcome_edge_type)
         success_property = sanitize_label((metadata.success_property if metadata else None) or "outcome_type")
+        success_value = (metadata.success_value if metadata else None) or "success"
+        if success_value in ("failure", "partial"):
+            raise ValidationError(
+                f"preference_attention dimension {dim.name!r} declares success_value {success_value!r}, "
+                "an outcome that is not a success; its history would count non-successes",
+                action="outcomes",
+                tenant=tenant,
+            )
         candidate_community = sanitize_label(dim.candidateprop)
         # The property the reader reads (_compile_preference_attention): the
         # declared one, or the legacy default with its flag off.
@@ -3307,9 +3315,11 @@ def _preference_history_plan(
             "WITH o, qe, head(collect(c)) AS c\n"
             "MERGE (qe)-[:" + relation + "]->(o)\n"
             # The community is the observation's snapshot: a replay never moves it.
+            # A success is stored as the dimension's declared success_value, the
+            # value the reader compares against; other outcomes as themselves.
             "SET o."
             + success_property
-            + " = $outcome, o."
+            + " = CASE WHEN $outcome = 'success' THEN $success_value ELSE $outcome END, o."
             + outcome_community
             + " = coalesce(o."
             + outcome_community
@@ -3318,7 +3328,7 @@ def _preference_history_plan(
             + ")\n"
             "RETURN count(o) AS linked"
         )
-        plan.append((dim.name, {"cypher": cypher}))
+        plan.append((dim.name, {"cypher": cypher, "params": {"success_value": success_value}}))
     return plan
 
 
@@ -3380,7 +3390,7 @@ async def _write_outcome_with_preference_history(
             )
         linked = []
         for name, statement in plan:
-            result = await (await tx.run(statement["cypher"], history)).data()
+            result = await (await tx.run(statement["cypher"], {**history, **statement["params"]})).data()
             if result and result[0].get("linked"):
                 linked.append(name)
         return rows, replayed, linked
