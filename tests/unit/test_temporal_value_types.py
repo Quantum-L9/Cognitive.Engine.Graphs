@@ -1,0 +1,355 @@
+"""
+--- L9_META ---
+l9_schema: 1
+origin: engine-specific
+engine: graph
+layer: [test]
+tags: [test, unit, sync, contract, temporal, gates]
+owner: engine-team
+status: active
+--- /L9_META ---
+
+Declared temporal value types (ceg-scoring-audit L1, operator decision D1).
+
+* ``SyncRowContract.project`` writes a declared ``datetime`` / ``date`` /
+  ``duration`` as the Python value the Neo4j driver stores as a native
+  ``DateTime`` / ``Date`` / ``Duration`` — never the ISO string, which every
+  temporal comparison and ``duration.inDays`` in the compiled match query
+  rejects (ND-TEMPORAL-SYNC).
+* Ingress refuses a malformed or timezone-naive temporal with a typed
+  ``SyncRowRejectedError`` before any Cypher; non-finite floats stay refused.
+* The freshness gate compares a ``date``-declared property against ``date()``,
+  a ``datetime``-declared one against ``datetime()``.
+
+``SYNC_TEMPORAL_NATIVE_VALUES_ENABLED`` / ``FRESHNESS_GATE_DECLARED_TEMPORAL_ENABLED``
+off restore the legacy behaviour (FEATURE_GATES "Declared temporal value types").
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterator
+from datetime import UTC, date, datetime, timedelta, timezone
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+import yaml
+from neo4j.time import Duration
+
+from engine.config.schema import DomainSpec
+from engine.config.settings import settings
+from engine.handlers import SyncRowRejectedError, handle_sync, init_dependencies
+from engine.state import get_state
+from engine.sync.row_contract import SyncRowContract
+from tests.fixtures import typed_sync as fx
+
+pytestmark = pytest.mark.unit
+
+
+def _temporal_raw() -> dict[str, Any]:
+    raw = fx.orbital_raw()
+    fx.node_props(raw, "OrbitalDepot").extend(
+        [
+            {"name": "opened_at", "type": "datetime"},
+            {"name": "opened_on", "type": "date"},
+            {"name": "service_window", "type": "duration"},
+            {"name": "inspections", "type": "list", "items": {"type": "date"}},
+            {"name": "throughput", "type": "float"},
+        ]
+    )
+    depot = fx.depot_props(raw)
+    depot["stocked_grades"]["items"]["properties"].append({"name": "certified_at", "type": "datetime"})
+    fx.node_props(raw, "PropellantGrade").append({"name": "certified_at", "type": "datetime"})
+    return raw
+
+
+def _contract(raw: dict[str, Any] | None = None) -> SyncRowContract:
+    spec = fx.spec(raw if raw is not None else _temporal_raw())
+    return SyncRowContract.from_spec(spec, fx.endpoint(spec, fx.DEPOTS))
+
+
+def _defects(rows: list[Any]) -> list[str]:
+    return _contract().defects(rows, refuse_undeclared=False)
+
+
+# ── Projection: native temporal values ────────────────────────────────────────
+
+
+def test_declared_temporals_project_to_driver_native_values() -> None:
+    row = {
+        "depot_id": "d1",
+        "opened_at": "2026-11-11T09:00:00Z",
+        "opened_on": "2026-11-11",
+        "service_window": "PT36H",
+        "inspections": ["2026-01-02", "2026-03-04"],
+    }
+    rows, dropped = _contract().project([row])
+    node = rows[0]["node"]
+    assert dropped == {}
+    assert node["opened_at"] == datetime(2026, 11, 11, 9, 0, tzinfo=UTC)
+    assert isinstance(node["opened_at"], datetime)
+    assert node["opened_at"].tzinfo is not None  # the driver stores an aware datetime as DateTime
+    assert type(node["opened_on"]) is date  # never a datetime: Cypher Date, not LocalDateTime
+    assert node["opened_on"] == date(2026, 11, 11)
+    assert isinstance(node["service_window"], Duration)
+    assert node["service_window"] == Duration(hours=36)
+    assert node["inspections"] == [date(2026, 1, 2), date(2026, 3, 4)]
+    assert node["depot_id"] == "d1"  # non-temporal values are untouched
+
+
+def test_a_utc_offset_is_preserved_not_normalised_away() -> None:
+    rows, _ = _contract().project([{"depot_id": "d1", "opened_at": "2026-11-11T09:00:00+02:00"}])
+    value = rows[0]["node"]["opened_at"]
+    assert value.utcoffset() == timedelta(hours=2)
+    assert value == datetime(2026, 11, 11, 7, 0, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("iso", "expected"),
+    [
+        ("P2W", Duration(days=14)),
+        ("P1Y2M3DT4H5M6.5S", Duration(years=1, months=2, days=3, hours=4, minutes=5, seconds=6.5)),
+        ("P1.5Y", Duration(years=1, months=6)),
+        ("PT0.5H", Duration(minutes=30)),
+    ],
+)
+def test_every_accepted_iso_duration_becomes_a_native_duration(iso: str, expected: Duration) -> None:
+    assert _defects([{"depot_id": "d1", "service_window": iso}]) == []
+    rows, _ = _contract().project([{"depot_id": "d1", "service_window": iso}])
+    assert rows[0]["node"]["service_window"] == expected
+
+
+def test_childsync_item_temporals_are_native_too() -> None:
+    row = {"depot_id": "d1", "stocked_grades": [{"grade_code": "LOX", "certified_at": "2026-02-01T00:00:00Z"}]}
+    rows, _ = _contract().project([row])
+    item = rows[0]["children"]["stocked_grades"][0]
+    assert item == {"grade_code": "LOX", "certified_at": datetime(2026, 2, 1, tzinfo=UTC)}
+
+
+def test_null_and_absent_temporals_are_not_invented() -> None:
+    rows, _ = _contract().project([{"depot_id": "d1", "opened_at": None}])
+    assert rows[0]["node"] == {"depot_id": "d1", "opened_at": None}
+
+
+def test_plasticos_last_transaction_date_projects_to_a_native_datetime() -> None:
+    spec = fx.plasticos()
+    contract = SyncRowContract.from_spec(spec, fx.endpoint(spec, "/v1/sync/facilities"))
+    row = {"facility_id": "f1", "name": "F", "last_transaction_date": "2026-11-20T12:00:00Z"}
+    assert contract.defects([row], refuse_undeclared=False) == []
+    rows, _ = contract.project([row])
+    assert rows[0]["node"]["last_transaction_date"] == datetime(2026, 11, 20, 12, tzinfo=UTC)
+
+
+# ── Ingress: malformed, naive and non-finite values are refused ──────────────
+
+
+def test_a_timezone_naive_datetime_is_refused_without_echoing_it() -> None:
+    defects = _defects([{"depot_id": "d1", "opened_at": "2026-11-11T09:00:00"}])
+    assert defects == ["row 0 opened_at: expected datetime, got string (timezone-naive ISO-8601 datetime)"]
+    assert not any("2026-11-11" in defect for defect in defects)
+
+
+def test_a_date_only_string_is_not_a_datetime() -> None:
+    # date.fromisoformat-shaped input parses as a naive midnight: refused, not guessed into UTC.
+    assert _defects([{"depot_id": "d1", "opened_at": "2026-11-11"}]) == [
+        "row 0 opened_at: expected datetime, got string (timezone-naive ISO-8601 datetime)"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "reason"),
+    [
+        ("opened_at", "yesterday", "string (not an ISO-8601 datetime)"),
+        ("opened_on", "11/11/2026", "string (not an ISO-8601 date)"),
+        ("service_window", "36 hours", "string (not an ISO-8601 duration)"),
+        ("opened_at", 1731315600, "int"),
+    ],
+)
+def test_malformed_temporals_are_refused(key: str, value: Any, reason: str) -> None:
+    declared = {"opened_at": "datetime", "opened_on": "date", "service_window": "duration"}[key]
+    assert _defects([{"depot_id": "d1", key: value}]) == [f"row 0 {key}: expected {declared}, got {reason}"]
+
+
+def test_a_naive_datetime_inside_a_childsync_item_is_refused() -> None:
+    row = {"depot_id": "d1", "stocked_grades": [{"grade_code": "LOX", "certified_at": "2026-02-01T00:00:00"}]}
+    assert _defects([row]) == [
+        "row 0 stocked_grades[0].certified_at: expected datetime, got string (timezone-naive ISO-8601 datetime)"
+    ]
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("-inf"), float("nan")])
+def test_non_finite_floats_are_still_refused(value: float) -> None:
+    assert _defects([{"depot_id": "d1", "throughput": value}]) == [
+        "row 0 throughput: expected float, got float (non-finite)"
+    ]
+
+
+def test_flag_off_restores_the_legacy_string_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "sync_temporal_native_values_enabled", False)
+    row = {"depot_id": "d1", "opened_at": "2026-11-11T09:00:00", "opened_on": "2026-11-11"}
+    assert _defects([row]) == []  # naive accepted, as before
+    rows, _ = _contract().project([row])
+    assert rows[0]["node"] == row  # stored as the strings the row carried
+
+
+# ── handle_sync: the engine's own write path binds native values ─────────────
+
+
+@pytest.fixture
+def driver() -> Iterator[MagicMock]:
+    get_state().reset()
+    mock = MagicMock()
+    mock.execute_query = AsyncMock(return_value=[])
+    mock.execute_write = AsyncMock()
+    loader = MagicMock()
+    loader.load_domain.return_value = fx.spec(_temporal_raw())
+    init_dependencies(mock, loader)
+    yield mock
+    get_state().reset()
+
+
+async def test_handle_sync_binds_native_temporals_into_the_write(driver: MagicMock) -> None:
+    batch = [{"depot_id": "d1", "opened_at": "2026-11-11T09:00:00Z", "opened_on": "2026-11-11"}]
+    result = await handle_sync("orbital-logistics", {"entity_type": "orbital-depots", "batch": batch})
+    assert result["status"] == "success"
+    bound = driver.execute_query.await_args.kwargs["parameters"]["batch"][0]["node"]
+    assert bound["opened_at"] == datetime(2026, 11, 11, 9, tzinfo=UTC)
+    assert type(bound["opened_on"]) is date
+    assert batch[0]["opened_at"] == "2026-11-11T09:00:00Z"  # the caller's row is not mutated
+
+
+async def test_handle_sync_refuses_a_naive_datetime_before_any_cypher(driver: MagicMock) -> None:
+    batch = [{"depot_id": "d1", "opened_at": "2026-11-11T09:00:00"}]
+    with pytest.raises(SyncRowRejectedError) as raised:
+        await handle_sync("orbital-logistics", {"entity_type": "orbital-depots", "batch": batch})
+    assert "timezone-naive" in str(raised.value)
+    driver.execute_query.assert_not_awaited()
+
+
+# ── Freshness gate: compared in the declared temporal type ───────────────────
+
+
+def _freshness_spec(prop_type: str | None, *, prop: str = "seen") -> DomainSpec:
+    raw = yaml.safe_load(
+        """
+domain: {id: freshness-check, name: Freshness check, version: 0.1.0}
+ontology:
+  nodes:
+    - {label: Widget, managedby: sync, candidate: true, properties: [{name: widget_id, type: string, required: true}]}
+    - {label: Ask, managedby: api, queryentity: true, properties: [{name: ask_id, type: string, required: true}]}
+  edges: []
+matchentities:
+  candidate: [{label: Widget, matchdirection: d1}]
+  queryentity: [{label: Ask, matchdirection: d1}]
+queryschema: {matchdirections: [d1], fields: []}
+gates: []
+scoring: {dimensions: []}
+"""
+    )
+    if prop_type is not None:
+        raw["ontology"]["nodes"][0]["properties"].append({"name": prop, "type": prop_type})
+    raw["gates"] = [{"name": "fresh", "type": "freshness", "candidateprop": prop, "maxagedays": 30}]
+    return DomainSpec.model_validate(raw)
+
+
+def _compile_freshness(spec: DomainSpec) -> str:
+    from engine.gates.compiler import GateCompiler
+
+    return GateCompiler(spec).compile(spec.gates[0])
+
+
+def test_a_date_declared_freshness_property_is_compared_against_date() -> None:
+    compiled = _compile_freshness(_freshness_spec("date"))
+    assert "candidate.seen >= date() - duration({days: 30})" in compiled
+    assert "datetime()" not in compiled  # Date >= DateTime is null in Cypher: every candidate failed
+
+
+def test_a_datetime_declared_freshness_property_is_compared_against_datetime() -> None:
+    assert "candidate.seen >= datetime() - duration({days: 30})" in _compile_freshness(_freshness_spec("datetime"))
+
+
+def test_an_undeclared_freshness_property_keeps_datetime() -> None:
+    # updated_at is stamped by datetime() in the sync generator; never declared.
+    assert "datetime() - duration({days: 30})" in _compile_freshness(_freshness_spec(None))
+
+
+def test_freshness_flag_off_restores_the_datetime_comparison(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "freshness_gate_declared_temporal_enabled", False)
+    assert "candidate.seen >= datetime() - duration({days: 30})" in _compile_freshness(_freshness_spec("date"))
+
+
+def test_fixed_offset_timezone_is_kept_for_the_driver() -> None:
+    # The driver serialises datetime.timezone offsets natively (neo4j-python-driver 5.8+).
+    rows, _ = _contract().project([{"depot_id": "d1", "opened_at": "2026-11-11T09:00:00-05:00"}])
+    assert rows[0]["node"]["opened_at"].tzinfo == timezone(timedelta(hours=-5))
+
+
+# ── Detector: string-valued declared temporals (read-only) ───────────────────
+
+
+def test_the_detector_reads_every_declared_temporal_of_plasticos() -> None:
+    from engine.health.temporal_storage_audit import build_audit_queries
+
+    queries = {(q.owner, q.label): q for q in build_audit_queries(fx.plasticos())}
+    facility = queries[("node", "Facility")]
+    assert [p.name for p in facility.properties] == ["last_transaction_date"]
+    assert facility.cypher == (
+        "MATCH (e:Facility) RETURN count(CASE WHEN e.last_transaction_date IS :: STRING NOT NULL THEN 1 END) AS c0"
+    )
+    edge = queries[("relationship", "TRANSACTED_WITH")]
+    assert edge.cypher == (
+        "MATCH ()-[e:TRANSACTED_WITH]->() "
+        "RETURN count(CASE WHEN e.transaction_date IS :: STRING NOT NULL THEN 1 END) AS c0"
+    )
+    for query in queries.values():
+        assert not any(word in query.cypher.upper() for word in ("SET ", "CREATE", "MERGE", "DELETE", "REMOVE"))
+
+
+def test_the_detector_covers_list_temporals_and_groups_by_label() -> None:
+    from engine.health.temporal_storage_audit import build_audit_queries
+
+    queries = {q.label: q for q in build_audit_queries(fx.spec(_temporal_raw()))}
+    depot = queries["OrbitalDepot"]
+    assert [p.name for p in depot.properties] == ["opened_at", "opened_on", "service_window", "inspections"]
+    assert (
+        "count(CASE WHEN e.inspections IS :: LIST<ANY> NOT NULL AND any(element IN e.inspections "
+        "WHERE element IS :: STRING NOT NULL) THEN 1 END) AS c3"
+    ) in depot.cypher
+    assert [p.name for p in queries["PropellantGrade"].properties] == ["certified_at"]
+
+
+async def test_the_detector_aggregates_counts_through_execute_read_only() -> None:
+    from engine.health.temporal_storage_audit import audit_temporal_storage
+
+    graph = MagicMock()
+    graph.execute_read = AsyncMock(side_effect=lambda cypher, *_a, **_k: [{"c0": 3}] if "Facility" in cypher else [])
+    graph.execute_query = AsyncMock(side_effect=AssertionError("the detector must not use the write path"))
+    graph.execute_write = AsyncMock(side_effect=AssertionError("the detector must not write"))
+    report = await audit_temporal_storage(graph, fx.plasticos())
+    assert report["database"] == "plasticos"
+    assert report["string_valued_total"] == 3
+    assert report["conversion_required"] is True
+    assert {
+        "owner": "node",
+        "label": "Facility",
+        "property": "last_transaction_date",
+        "declared": "datetime",
+        "string_valued": 3,
+    } in report["findings"]
+    assert {f["property"]: f["string_valued"] for f in report["findings"]}["transaction_date"] == 0
+    assert all(call.kwargs["database"] == "plasticos" for call in graph.execute_read.await_args_list)
+
+
+def test_the_audit_tool_exit_code_reports_conversion_need(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tools import audit_temporal_storage as tool
+
+    async def clean(_tenants: list[str], _root: str) -> list[dict[str, Any]]:
+        return [{"conversion_required": False}]
+
+    async def dirty(_tenants: list[str], _root: str) -> list[dict[str, Any]]:
+        return [{"conversion_required": False}, {"conversion_required": True}]
+
+    monkeypatch.setattr(tool, "_audit", clean)
+    assert tool.main(["plasticos"]) == tool.EXIT_CLEAN
+    monkeypatch.setattr(tool, "_audit", dirty)
+    assert tool.main(["plasticos", "other"]) == tool.EXIT_STRING_VALUED

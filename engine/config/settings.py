@@ -386,6 +386,20 @@ class Settings(BaseSettings):
     # and no evidence edge is written, whatever the tenant spec declares; node
     # sync is unaffected either way. See docs/FEATURE_GATES.md §28.
     relationship_sync_enabled: bool = True
+    # ceg-scoring-audit L1 (D1): declared temporal value types. On (hardening:
+    # restores the declared type): node sync projects a declared datetime / date
+    # / duration to the driver-native value (Neo4j DateTime / Date / Duration)
+    # and refuses a timezone-naive datetime at ingress. Off: the ISO strings are
+    # stored as sent and a naive datetime is accepted. See docs/FEATURE_GATES.md
+    # "Declared temporal value types".
+    sync_temporal_native_values_enabled: bool = True
+    # D1 / ND-SERIAL: deflate_egress normalises Neo4j and Python temporals in
+    # engine_data to ISO-8601 once, in place, and raises EgressValueError for a
+    # non-finite float. Off: a temporal or Infinity crashes egress (legacy).
+    egress_value_normalisation_enabled: bool = True
+    # D1: a freshness gate on a date-declared property compares against date();
+    # off: always datetime(), which is null (fails) against a native Date.
+    freshness_gate_declared_temporal_enabled: bool = True
     # T05: a targetedge sync buffers its compliance mutation record only after the
     # write committed (checks still run first), so a refused or rolled-back batch
     # leaves no 'Sync ... batch_size=N' success entry. Off: recorded before the write.

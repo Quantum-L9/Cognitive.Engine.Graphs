@@ -34,7 +34,12 @@ This module owns three things, all domain-neutral:
   "children": {<childsync field>: [<item with only writable properties>]}}``.
 
 Values are never coerced: a JSON string is not parsed into a list, ``"high"``
-is not a float. Defects name the row, the field path, the declared type and the
+is not a float. The one declared conversion is temporal (D1,
+``sync_temporal_native_values_enabled``): a ``datetime`` / ``date`` /
+``duration`` arrives as an ISO-8601 string (JSON has no temporal type) and the
+projection writes the driver-native value, so Neo4j stores a ``DateTime`` /
+``Date`` / ``Duration`` the compiled match query can compare; ingress refuses a
+timezone-naive ``datetime``. Defects name the row, the field path, the declared type and the
 actual JSON type, never the value (a value may be PII).
 """
 
@@ -47,6 +52,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
+
+from neo4j.time import Duration
 
 from engine.config.schema import (
     SHAPE_TYPES,
@@ -533,7 +540,78 @@ _ISO_DURATION = re.compile(
     r"(?:T(?=\d)(?:\d+(?:\.\d+)?H)?(?:\d+(?:\.\d+)?M)?(?:\d+(?:\.\d+)?S)?)?"
 )
 
+# The same grammar as ``_ISO_DURATION``, with every unit captured.
+_ISO_DURATION_UNITS = re.compile(
+    r"P(?!$)(?:(?P<years>\d+(?:\.\d+)?)Y)?(?:(?P<months>\d+(?:\.\d+)?)M)?(?:(?P<weeks>\d+(?:\.\d+)?)W)?"
+    r"(?:(?P<days>\d+(?:\.\d+)?)D)?"
+    r"(?:T(?=\d)(?:(?P<hours>\d+(?:\.\d+)?)H)?(?:(?P<minutes>\d+(?:\.\d+)?)M)?(?:(?P<seconds>\d+(?:\.\d+)?)S)?)?"
+)
+
 _MISSING = object()
+
+
+def _native_temporals_enabled() -> bool:
+    from engine.config.settings import settings
+
+    return settings.sync_temporal_native_values_enabled
+
+
+def _aware_datetime(value: str) -> datetime | None:
+    """An ISO-8601 datetime with an offset, else None (malformed or naive)."""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None and parsed.utcoffset() is not None else None
+
+
+def _native_duration(value: str) -> Duration | None:
+    """The ``neo4j.time.Duration`` of an ISO-8601 duration, else None.
+
+    Built from the captured units, so every form ``_ISO_DURATION`` accepts
+    (weeks, fractional units) converts; ``Duration.from_iso_format`` refuses both.
+    """
+    match = _ISO_DURATION_UNITS.fullmatch(value)
+    if match is None:
+        return None
+    units = {unit: float(amount) for unit, amount in match.groupdict().items() if amount is not None}
+    return Duration(**units)
+
+
+def _native_scalar(type_: PropertyType, value: Any) -> Any:
+    """The driver-native value of one declared temporal; anything else, or a non-conforming value, unchanged.
+
+    A value that does not conform reaches here only with
+    ``sync_row_type_validation_enabled`` off (legacy pass-through): it is
+    written as sent, never guessed.
+    """
+    if not isinstance(value, str):
+        return value
+    parsed: datetime | date | Duration | None
+    if type_ is PropertyType.DATETIME:
+        parsed = _aware_datetime(value)
+    elif type_ is PropertyType.DATE:
+        try:
+            parsed = date.fromisoformat(value)
+        except ValueError:
+            parsed = None
+    elif type_ is PropertyType.DURATION:
+        parsed = _native_duration(value)
+    else:
+        return value
+    return value if parsed is None else parsed
+
+
+def native_value(decl: PropertySpec | ItemSpec, value: Any) -> Any:
+    """``value`` as the projection writes it: declared temporals (and lists of them) driver-native."""
+    if value is None or not _native_temporals_enabled():
+        return value
+    if decl.type is PropertyType.LIST:
+        items = getattr(decl, "items", None)
+        if items is None or items.type in SHAPE_TYPES or not isinstance(value, list):
+            return value
+        return [_native_scalar(items.type, element) for element in value]
+    return _native_scalar(decl.type, value)
 
 
 # JSON type names in the vocabulary declarations use; bool before int (bool is an int).
@@ -594,7 +672,12 @@ def _scalar_mismatch(type_: PropertyType, values: list[str] | None, value: Any) 
     if rule is None or not rule[0](value):  # shapes are dispatched before scalars
         return got
     _accepts, valid, what = rule
-    return None if valid(value, values) else f"{got} ({what})"
+    if not valid(value, values):
+        return f"{got} ({what})"
+    if type_ is PropertyType.DATETIME and _native_temporals_enabled() and _aware_datetime(value) is None:
+        # D1: a naive datetime names no instant; it is refused, never assumed UTC.
+        return f"{got} (timezone-naive ISO-8601 datetime)"
+    return None
 
 
 @dataclass
@@ -693,6 +776,10 @@ def _check_map(at: _At, properties: list[PropertySpec], value: dict[str, Any]) -
             at.walk.undeclared_key(at.row, f"{at.path}.{key}", counted_as=f"{at.counted_as}.{key}", value=value[key])
 
 
+def _native_member(decl: PropertySpec | None, value: Any) -> Any:
+    return value if decl is None else native_value(decl, value)
+
+
 @dataclass(frozen=True)
 class ChildProjection:
     """One childsync block: which item keys reach the child node, and whether it is static."""
@@ -767,6 +854,7 @@ class ChildProjection:
             keep = self.writable | self.edge_keys
             source = parent or {}
             fill = {key: source[key] for key in self.fromrow if key in source}
+        declared = {prop.name: prop for prop in _item_properties(self.item)}
         projected: list[dict[str, Any]] = []
         for item in items or []:
             if not isinstance(item, dict):
@@ -775,7 +863,7 @@ class ChildProjection:
             for key, value in fill.items():
                 if key not in row:
                     row[key] = value
-            projected.append(row)
+            projected.append({key: _native_member(declared.get(key), value) for key, value in row.items()})
         return projected
 
 
@@ -923,12 +1011,13 @@ class SyncRowContract:
         an explicit null still removes one). ``children`` keeps, per childsync
         field, each item's properties the child node declares. An omitted child
         field is null and does not replace keyed relationships; a present list does.
+        Declared temporals are written driver-native (``native_value``).
         """
         dropped = self._walk(batch, refuse_undeclared=False).undeclared
         stored = self.stored
         rows = [
             {
-                "node": {key: value for key, value in row.items() if key in stored},
+                "node": {key: native_value(self.properties[key], value) for key, value in row.items() if key in stored},
                 "children": {
                     child.field: None if child.field not in row else child.project(row[child.field], row)
                     for child in self.children
