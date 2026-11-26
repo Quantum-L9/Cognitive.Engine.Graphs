@@ -1518,7 +1518,7 @@ Tests: `tests/unit/test_scoring_bounds_and_null_strategy.py`,
 
 ## 37. temporalproximity reads declared auxiliary signals (CEG-FEEDBACK-1)
 
-### `temporalproximity_declared_signals_enabled` (default `False`)
+### `temporalproximity_declared_signals_enabled` (default `True` since SC-001, 2026-11-26)
 
 `ScoringAssembler._compile_temporalproximity` scored
 `0.6 * recency + 0.25 * candidate.touch_count_30d / 30 + 0.15 * candidate.is_accelerating`,
@@ -1560,14 +1560,29 @@ candidates within that dimension is unchanged; its contribution to the
 weighted total grows. Off: the legacy text, byte for byte, and `metadata` on a
 `temporalproximity` dimension is accepted but not read.
 
-The flag stays default `False` (decision D2); activation is a later, separate
-decision. `tests/integration/test_temporalproximity_rescale_fixtures.py`
-records, on the committed `temporalproximity` packs synced through the engine,
-the legacy and declared recency per candidate (`value_declared = value_legacy /
-0.6` while no auxiliary signal is declared) and the composite ranking under
-each, as evidence for that decision.
+**Default `True` (SC-001, audit L5; operator instruction 2026-11-26 to fully
+close the finding, superseding D2's deferral of activation).** The declared
+path is what every pack now compiles: scoring reads no property a pack did not
+declare, so a value an older writer left in `is_accelerating` /
+`touch_count_30d` (a boolean, a string) no longer enters the score or the
+compiled Cypher. On the committed packs (no auxiliary signal declared) each
+`temporalproximity` value is its legacy value divided by 0.6, so a candidate
+dated today scores recency 1.0 instead of 0.6 and a candidate `maxvalue` days
+old scores `exp(-1)` instead of `0.6 * exp(-1)`. The order of candidates
+within the dimension is unchanged. The dimension's contribution to the
+composite grows by the same factor, so for `plasticos` (recency weight 0.1) a
+dated candidate's composite rises by up to 0.04 and dated candidates gain on
+undated ones. `tests/integration/test_temporalproximity_rescale_fixtures.py`
+records the legacy and declared recency per candidate and the composite
+ranking under each.
+
+**Rollback:** `TEMPORALPROXIMITY_DECLARED_SIGNALS_ENABLED=false` restores the
+legacy compiler, its text byte for byte (no age floor; `metadata` accepted and
+not read). It is kept only as this rollback.
 
 Tests: `tests/unit/test_temporalproximity_declared_signals.py`,
+`tests/integration/test_temporalproximity_default.py` (default settings,
+`handle_sync` then `handle_match` on `plasticos`),
 `tests/integration/test_temporalproximity_rescale_fixtures.py`.
 
 ## 35. Production pack root required (issue #400 A4/A5)
