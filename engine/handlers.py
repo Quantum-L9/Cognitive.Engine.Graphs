@@ -3202,6 +3202,117 @@ def _keyed_outcome_replayed(
     return True
 
 
+def _preference_history_plan(
+    domain_spec: DomainSpec,
+    tenant: str,
+    payload: dict[str, Any],
+    outcome_label: str,
+) -> list[tuple[str, dict[str, Any]]]:
+    """The writes that put one outcome in the shape ``preference_attention`` reads (L8, item 3).
+
+    ``preference_attention`` reads ``(qe)-[:<outcome_relation>]->(o:<outcome
+    node>)`` with ``o.<success_property>`` and ``o.<outcome community property>``;
+    the outcome writer links only ``(candidate)-[:RESULTED_IN]->(o)``. With
+    ``outcome_preference_history_enabled`` and a payload ``query_entity_id``,
+    each ``preference_attention`` dimension of the outcome's direction gets one
+    statement: ``MERGE`` the query entity's edge to the outcome node, store the
+    outcome under the dimension's success property and copy the candidate's
+    declared community onto the outcome. Labels and properties pass
+    ``sanitize_label``; every value is a parameter. Validated before the
+    outcome is written, so a refusal writes nothing. Empty when the flag is
+    off, the payload names no query entity or the pack has no such dimension.
+    """
+    from engine.config.schema import ComputationType
+    from engine.config.settings import settings as _history_settings
+
+    query_entity_id = payload.get("query_entity_id")
+    if not _history_settings.outcome_preference_history_enabled or query_entity_id is None:
+        return []
+    if isinstance(query_entity_id, bool) or not isinstance(query_entity_id, str | int) or query_entity_id == "":
+        raise ValidationError(
+            "query_entity_id must be a non-empty string or an integer", action="outcomes", tenant=tenant
+        )
+    fingerprint = payload.get("fingerprint") or {}
+    direction = fingerprint.get("match_direction") if isinstance(fingerprint, dict) else None
+    query_labels = [
+        q.label for q in domain_spec.matchentities.queryentity if direction is None or q.matchdirection == direction
+    ]
+    query_labels = list(dict.fromkeys(query_labels))
+    if len(query_labels) != 1:
+        raise ValidationError(
+            "query_entity_id needs one query entity label: name a declared fingerprint.match_direction "
+            f"(found {len(query_labels)} candidate labels)",
+            action="outcomes",
+            tenant=tenant,
+        )
+    dimensions = [
+        d
+        for d in domain_spec.scoring.dimensions
+        if d.computation == ComputationType.PREFERENCEATTENTION
+        and (direction is None or not d.matchdirections or direction in d.matchdirections)
+    ]
+    if not dimensions:
+        return []
+    query_label = sanitize_label(query_labels[0])
+    query_id = sanitize_label(_candidate_id_property(domain_spec, query_labels[0]))
+    label = sanitize_label(outcome_label)
+    candidate_predicate = _declared_id_predicate(domain_spec, "c", "candidate_id", direction)
+    if candidate_predicate is None:
+        candidate_predicate = "c." + _FALLBACK_CANDIDATE_ID_PROPERTY + " = $candidate_id"
+    feedback = domain_spec.feedbackloop
+    plan: list[tuple[str, dict[str, Any]]] = []
+    for dim in dimensions:
+        metadata = dim.metadata
+        declared_node = metadata.outcome_node if metadata else None
+        if declared_node is not None and declared_node != outcome_label:
+            raise ValidationError(
+                f"preference_attention dimension {dim.name!r} reads outcome node {declared_node!r}, "
+                f"but outcomes are written as {outcome_label!r}",
+                action="outcomes",
+                tenant=tenant,
+            )
+        if not dim.candidateprop:
+            raise ValidationError(
+                f"preference_attention dimension {dim.name!r} declares no candidateprop (its community property)",
+                action="outcomes",
+                tenant=tenant,
+            )
+        relation = sanitize_label((metadata.outcome_relation if metadata else None) or feedback.outcome_edge_type)
+        success_property = sanitize_label((metadata.success_property if metadata else None) or "outcome_type")
+        candidate_community = sanitize_label(dim.candidateprop)
+        outcome_community = sanitize_label(
+            (metadata.outcome_community_property if metadata else None) or dim.candidateprop
+        )
+        cypher = (
+            "MATCH (o:" + label + " {outcome_id: $outcome_id})\n"
+            "MATCH (qe:" + query_label + ") WHERE qe." + query_id + " = $query_entity_id\n"
+            "OPTIONAL MATCH (c) WHERE " + candidate_predicate + "\n"
+            "WITH o, qe, head(collect(c)) AS c\n"
+            "MERGE (qe)-[:" + relation + "]->(o)\n"
+            "SET o." + success_property + " = $outcome, o." + outcome_community + " = c." + candidate_community + "\n"
+            "RETURN count(o) AS linked"
+        )
+        plan.append((dim.name, {"cypher": cypher}))
+    return plan
+
+
+async def _write_preference_history(
+    graph_driver: GraphDriver,
+    domain_spec: DomainSpec,
+    plan: list[tuple[str, dict[str, Any]]],
+    parameters: dict[str, Any],
+) -> dict[str, Any]:
+    """Run the preference-history writes; report which dimensions linked the query entity."""
+    linked: list[str] = []
+    for name, statement in plan:
+        rows = await graph_driver.execute_query(
+            cypher=statement["cypher"], parameters=parameters, database=domain_spec.domain.id
+        )
+        if rows and rows[0].get("linked"):
+            linked.append(name)
+    return {"query_entity_id": parameters["query_entity_id"], "linked_dimensions": linked}
+
+
 async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Write the domain's outcome node (feedbackloop.outcome_node_label) with match fingerprint and RESULTED_IN edge."""
     graph_driver, domain_loader = _require_deps()
@@ -3234,6 +3345,10 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
 
     # R5: Extract match fingerprint from payload
     fingerprint = payload.get("fingerprint", {})
+    # L8 item 3: the preference history is validated before anything is written.
+    preference_plan = _preference_history_plan(
+        domain_spec, tenant, payload, _outcome_label(domain_spec, tenant, "outcomes", "an outcome write")
+    )
     try:
         cypher, parameters = _build_outcome_write(
             domain_spec,
@@ -3278,6 +3393,28 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
             detail=str(exc),
         ) from exc
     replayed = keyed and _keyed_outcome_replayed(write_rows, parameters, tenant)
+    preference_history: dict[str, Any] | None = None
+    if preference_plan:
+        # MERGE: a replay re-links the same edge, it never adds one.
+        try:
+            preference_history = await _write_preference_history(
+                graph_driver,
+                domain_spec,
+                preference_plan,
+                {
+                    "outcome_id": outcome_id,
+                    "outcome": outcome,
+                    "candidate_id": candidate_id,
+                    "query_entity_id": payload["query_entity_id"],
+                },
+            )
+        except Exception as exc:
+            raise ExecutionError(
+                "Outcome recorded, but its preference history could not be written; retry with the same outcome_id",
+                action="outcomes",
+                tenant=tenant,
+                detail=str(exc),
+            ) from exc
 
     # A replay recorded nothing new: the side effects below ran with the first
     # write. Only the feedback loop runs again; its propagation claim makes the
@@ -3308,6 +3445,8 @@ async def handle_outcomes(tenant: str, payload: dict[str, Any]) -> dict[str, Any
         compliance.log_outcome(tenant=tenant, outcome_id=outcome_id, outcome=outcome)
 
     response: dict[str, Any] = {"status": "recorded", "outcome_id": outcome_id}
+    if preference_history is not None:
+        response["preference_history"] = preference_history
     if replayed:
         response["replayed"] = True
         logger.info("Outcome replay tenant=%s outcome_id=%s", tenant, outcome_id)

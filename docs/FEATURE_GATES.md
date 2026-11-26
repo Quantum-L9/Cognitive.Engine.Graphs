@@ -105,6 +105,7 @@ independently of the code default.
 | Match Effective Weight Validation | `MATCH_EFFECTIVE_WEIGHT_VALIDATION` (`match_effective_weight_validation`) | `True` | unset | active (correctness, RU-009; requires `SCORE_CLAMP_ENABLED`); the ≤ 1.0 ceiling is checked on the merged per-dimension weights scoring will apply, and unknown weight keys are rejected; off restores the supplied-keys-only sum |
 | Resolve Requires Created Edge | `RESOLVE_REQUIRES_CREATED_EDGE` (`resolve_requires_created_edge`) | `True` | unset | active (correctness, RU-004); legacy `resolve` raises a ValidationError when no `RESOLVED_FROM` edge was created; off restores an unconditional `resolved` |
 | Outcome Map JSON Encoding | `OUTCOME_MAP_JSON_ENCODING` (`outcome_map_json_encoding`) | `True` | unset | active (correctness, RU-005); `outcomes` stores `fingerprint.dimension_weights` as sorted-key JSON that counterfactual generation decodes (legacy repr strings read as empty, never eval'd); off restores the `str(dict)` writer |
+| Outcome Preference History | `OUTCOME_PREFERENCE_HISTORY_ENABLED` (`outcome_preference_history_enabled`) | `True` | unset | active; an outcome naming `query_entity_id` is written where `preference_attention` reads — see §30a |
 | Health Probe Domain Count Only | `HEALTH_PROBE_DOMAIN_COUNT_ONLY` (`health_probe_domain_count_only`) | `True` | unset | active (hardening, RU-013); `health` for a tenant without a pack reports `<N> domain packs`, not the loaded domain ids; off restores the id list |
 | Sync Count From Write Result | `SYNC_COUNT_FROM_WRITE_RESULT` (`sync_count_from_write_result`) | `True` | unset | active (correctness, RU-060); `UNWINDMATCHSET` sync returns `count(n) AS synced_count` and the response adds `unmatched_count`; `UNWINDMERGE` unchanged; off restores `synced_count = len(batch)` |
 | Admin Tenant-bound Domain | `ADMIN_TENANT_BOUND_DOMAIN` (`admin_tenant_bound_domain`) | `True` | unset | active (hardening, RU-003); every domain-bearing admin subaction rejects a `domain_id` other than the packet tenant before any load or query; `evaluate` matches as the tenant; off restores the caller-chosen `domain_id` |
@@ -2259,6 +2260,28 @@ Turning this on is the operator's decision, and does not route `enrich` from
 Gate: ownership of the action name with EIE is unchanged.
 
 Tests: `tests/unit/test_enrich_gate.py`, `tests/integration/test_enrich_gate.py`.
+
+## 30a. Outcome preference history (L8 item 3, 2026-11-26)
+
+Operator decision 2026-11-26 ("go with recommendations"), producer side of the
+`preference_attention` defect: the scorer reads
+`(qe)-[:<outcome_relation>]->(o:<outcome node>)` with `o.<success_property>`
+and `o.<outcome community property>` (`engine/scoring/assembler.py`
+`_compile_preference_attention`), while `handle_outcomes` wrote only
+`(candidate)-[:RESULTED_IN]->(o)` with `o.outcome` and no community, so no
+recorded outcome could reach the score.
+
+| Flag (env var) | Default | On | Off |
+|---|---|---|---|
+| `outcome_preference_history_enabled` (`OUTCOME_PREFERENCE_HISTORY_ENABLED`) | `true` | `handle_outcomes` with a payload `query_entity_id` (non-empty string or integer) also writes, for each `preference_attention` dimension of the outcome's direction (`fingerprint.match_direction`, or the pack's only query entity label): `MERGE (qe)-[:<metadata.outcome_relation, default feedbackloop.outcome_edge_type>]->(o)` from the direction's declared `queryentity` node matched on its declared id, `o.<metadata.success_property, default outcome_type> = <outcome>` and `o.<metadata.outcome_community_property, default candidateprop> = <candidate's candidateprop>`. A malformed id, an ambiguous query entity label, or a dimension whose `metadata.outcome_node` is not the label outcomes are written under is refused before anything is written; a query entity absent from the graph links nothing. A replay re-MERGEs the same edge. The response carries `preference_history: {query_entity_id, linked_dimensions}` | Only `(candidate)-[:RESULTED_IN]->(o)` with `o.outcome`: `preference_attention` never reads a recorded outcome |
+
+Not covered by this flag: the reader side. `handle_match` does not bind `qe` to
+the request's query entity (traversal patterns refuse `$params` and braces), so
+until a declared query-entity binding exists the scorer still cannot select
+this history by requester.
+
+Tests: `tests/unit/test_outcome_preference_history.py`,
+`tests/integration/test_outcome_preference_history.py`.
 
 ## 34. Feedback weight governance and the retired boost_factor (CEG-462)
 
