@@ -53,6 +53,10 @@ independently of the code default.
 | Pareto Ensemble | `PARETO_ENABLED` | `True` | `True` | active |
 | Pareto Weight Discovery | `PARETO_WEIGHT_DISCOVERY_ENABLED` | `False` | `True` | active (opt-in) |
 | Pareto Pre-cut Arbitration | `PARETO_PRECUT_ENABLED` (`pareto_precut_enabled`) | `False` | unset | dormant (opt-in, SI-06); with declared `decision_arbitration` objectives, match orders a bounded pool by Pareto front before the `top_n` cut; see §36 |
+| Arbitration Constraints in Cypher | `MATCH_ARBITRATION_IN_CYPHER_ENABLED` (`match_arbitration_in_cypher_enabled`) | `True` | unset | active (hardening, ND-ARB / D4); `decision_arbitration` hard constraints are a `WHERE` and soft penalties rescale `score` in the match Cypher, before `ORDER BY` / `LIMIT`; no Python post-cut pass — see §36a |
+| Match Identity Tie-break | `MATCH_CANDIDATE_TIEBREAK_ENABLED` (`match_candidate_tiebreak_enabled`) | `True` | unset | active (hardening, ND-TIE / D4); final `ORDER BY` breaks score ties on the declared candidate identity, path collapse ordered by projected dimensions — see §36a |
+| Strict Request Weights | `MATCH_REQUEST_WEIGHT_STRICT_ENABLED` (`match_request_weight_strict_enabled`) | `True` | unset | active (hardening, SC-003 / D3); request `weights` must be a mapping of finite numbers in [0, 1], checked whatever `SCORE_CLAMP_ENABLED` says — see §36a |
+| Pareto Declared Dimensions | `PARETO_FRONT_DECLARED_DIMENSIONS_ENABLED` (`pareto_front_declared_dimensions_enabled`) | `True` | unset | active (hardening, SC-004); `compute_pareto_front` compares declared dimensions (else the key union), so the front does not depend on row order — see §36a |
 | Domain Strict Validation | `DOMAIN_STRICT_VALIDATION` | `True` | `True` | active |
 | Native Domain Approval Receipts | `DOMAIN_PACK_RECEIPTS_ENABLED` | `False` | unchanged | dormant; immutable native revision/receipt admission, no warm-cache fallback; see the native publisher runbook, `docs/runbooks/domain-pack-publish.md` |
 | Pack Root Required in Prod | `DOMAINS_ROOT_REQUIRED_IN_PROD` (`domains_root_required_in_prod`) | `True` | unset | active (hardening); under `L9_ENV=prod` the pack loader refuses an unset, relative, missing, non-directory or unreadable `DOMAINS_ROOT` — see §35 |
@@ -346,7 +350,10 @@ with at least one `pareto_config.objectives` entry:
    pool is the same score-ordered, LIMIT-bounded query, so memory and the
    O(n² · d) front sort are bounded by 1000 rows.
 2. **Constraints.** `decision_arbitration.constraints` (hard reject / soft
-   penalty) apply to the whole pool, as they applied to the cut list before.
+   penalty) apply to the whole pool. Under `match_arbitration_in_cypher_enabled`
+   (default on, §36a) they are part of the pool query itself, before its
+   `LIMIT`, and are not re-applied in Python; with that flag off the Python pass
+   applies them to the fetched pool, as it applied them to the cut list before.
 3. **Order.** A fast non-dominated sort (`engine.scoring.pareto.non_dominated_ranks`)
    assigns each row a front rank over the declared objectives, honouring
    `direction: minimize` while `arbitration_objective_direction` is on. Rows are
@@ -368,9 +375,15 @@ with at least one `pareto_config.objectives` entry:
 `returned`, `cut_count`, `front_ranks` (rank per returned candidate, `null` when
 unranked) and `unranked_ids`.
 
-**Pool-boundary note.** Membership of the pool itself is the Cypher score order;
-rows tied on score at the pool boundary are subject to Neo4j's tie order, exactly
-as rows tied at the `top_n` boundary are with the flag off.
+**Pool-boundary note.** Membership of the pool itself is the Cypher score order.
+Under `match_candidate_tiebreak_enabled` (default on, §36a) rows tied on score at
+the pool boundary are ordered by the declared candidate identity, exactly as rows
+tied at the `top_n` boundary are with the flag off; with it off they are subject
+to Neo4j's tie order.
+
+**Known exception to D4.** The pre-cut front reorder is a Python stage after the
+pool query. It stays dormant (default off) and is recorded as the one exception
+to "arbitration before `ORDER BY` / `LIMIT` in Cypher" (ceg-scoring-audit D4).
 
 ### Validation
 
@@ -386,6 +399,100 @@ as rows tied at the `top_n` boundary are with the flag off.
 
 Set `PARETO_PRECUT_ENABLED=false` (the default). The query binds `$top_n = top_n`
 and arbitration returns to metadata over the cut list.
+
+---
+
+## 36a. Match Ordering and Request Weights (ceg-scoring-audit L3: ND-ARB, ND-TIE, SC-003, SC-004)
+
+**State**: Active (hardening; every flag defaults `True` and is a rollback switch)
+
+Gate-then-score in Cypher (CLAUDE.md design principle 2) did not hold for
+`decision_arbitration` constraints: `handle_match` cut to `top_n` in Cypher and
+then applied hard / soft constraints in Python to the cut list. A hard-rejected
+candidate took a `top_n` slot an admissible one lost (`top_n=1` could return
+nothing), and a soft penalty re-scored rows without re-ranking them, so rank was
+not monotone in the returned score. Score ties were broken by Neo4j's row order.
+
+### `match_arbitration_in_cypher_enabled` (ND-ARB, D4)
+
+The constraints compile into the match query right after the scoring `WITH`,
+before every `ORDER BY` / `LIMIT` (`_arbitration_constraint_cypher`,
+`engine/handlers.py`):
+
+```cypher
+WITH candidate, d1, d2, (w1 * d1) + (w2 * d2) AS score
+WHERE NOT coalesce(d1 < $arb_hard_threshold_0, false)
+WITH candidate, d1, d2, score * (CASE WHEN coalesce(d2 < $arb_soft_threshold_0, false)
+                                      THEN $arb_soft_penalty_0 ELSE 1.0 END) AS score
+```
+
+* A hard constraint removes the row when the dimension is below its threshold.
+  A `null` dimension (or one that does not compare) is not below the threshold:
+  the same rule `apply_constraint_penalties` applies when it skips a missing
+  value.
+* Each failing soft constraint multiplies `score` by its `penalty`, in declared
+  order. That is the Python multiplication, now ranked.
+* A constraint on a dimension that is inactive for the direction is not compiled.
+  The scoring `WITH` binds no such alias, and Python skipped it as missing.
+* Thresholds and penalties are `$params`. Dimension aliases pass `sanitize_label`.
+* Python applies no post-cut constraint pass. The dormant SI-06 pre-cut (§36)
+  does not re-apply constraints to its pool either. The Pareto filter still
+  writes `pareto.arbitration` metadata over the returned rows.
+
+### `match_candidate_tiebreak_enabled` (ND-TIE, D4)
+
+* The final `ORDER BY` is `score DESC, candidate.<identity> ASC`. `<identity>`
+  is the pack's declared candidate identity: the sync endpoint's `idproperty`
+  for the candidate label, else the node's first `required` property
+  (`_declared_candidate_identity`). It is never `elementId`. A pack that declares
+  neither keeps `ORDER BY score DESC` alone. The engine does not invent an
+  identity.
+* The per-candidate path collapse (RU-036) orders a candidate's paths by
+  `score DESC` and then each projected dimension `DESC`, in declared order,
+  before `head(collect(...))`. The kept path then depends on the paths, not on
+  the order in which they were traversed.
+* With score ties, top-k is prefix-stable: top-1 is a prefix of top-3.
+
+### `match_request_weight_strict_enabled` (SC-003 request part, D3)
+
+The request's `weights` must be a mapping (`None` / absent is `{}`). Each value
+must be an `int` or `float` (not `bool`, `str`, `None` or a container), finite,
+and within [0, 1]. The effective sum keeps its 1.0 ceiling. The check runs
+whether `score_clamp_enabled` is on or off, on both the effective-weight path
+(`match_effective_weight_validation`) and the supplied-keys path. A refused
+request raises `ValidationError` before any query is sent. Before this flag,
+`float()` coercion accepted `"0.5"` and `True`, the supplied-keys path let `nan`
+through, and turning the clamp off skipped the check entirely.
+
+### `pareto_front_declared_dimensions_enabled` (SC-004)
+
+`compute_pareto_front` used to compare only the first candidate's keys, so with
+heterogeneous keys the front depended on row order. It now compares
+`dimension_names` when given (`apply_pareto_filter` passes the declared
+objectives), else the sorted union of every candidate's keys. A missing key keeps
+the historical `0.0` fill.
+
+### Validation
+
+- `tests/unit/test_match_ordering_constraints.py`: the composition contract
+  (WHERE and score rescale before `ORDER BY` / `LIMIT`, parameters, the identity
+  tie-break, the ordered collapse, inactive-dimension scope, no Python
+  re-arbitration, and flags off reproducing the legacy composition).
+- `tests/unit/test_match_request_weight_validation.py`: str, bool, list, `None`,
+  ±inf, `nan`, negative and >1 values refused under clamp on and off and under
+  both validation paths; valid weights accepted; rollback.
+- `tests/unit/test_pareto.py::TestFrontIsIndependentOfInputOrder` and
+  `tests/unit/test_pareto_precut.py`.
+- `tests/integration/test_match_arbitration_order.py`, against Neo4j through
+  `handle_sync` then `handle_match`: rank is monotone in returned score under
+  soft penalties, `top_n=1` returns an admissible candidate when a higher-scored
+  one is hard-rejected, and tied scores give prefix-stable top-k.
+
+### Rollback
+
+Set any flag to `false`. Arbitration then returns to the post-cut Python pass,
+ordering to `ORDER BY score DESC`, request weights to the clamp-gated `float()`
+check, and the Pareto front to the first row's keys. Each flag is independent.
 
 ---
 

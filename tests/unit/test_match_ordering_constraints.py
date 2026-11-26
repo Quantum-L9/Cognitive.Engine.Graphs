@@ -241,4 +241,3 @@ class TestDeclaredIdentityResolution:
 
         spec = _spec().model_copy(update={"sync": None})
         assert _declared_candidate_identity(spec, "OrbitalDepot") == "depot_id"
-
