@@ -3109,6 +3109,9 @@ def _build_outcome_write(
 
 _OUTCOME_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}$")
 _OUTCOME_STORED_FIELDS = ("match_id", "candidate_id", "outcome", "tenant")
+# Properties the outcome writer and the replay check own; a preference-history
+# SET on one of them would corrupt the outcome's identity or its replay binding.
+_PREFERENCE_RESERVED_OUTCOME_FIELDS = frozenset((*_OUTCOME_STORED_FIELDS, "outcome_id", "query_entity_id"))
 
 
 def _validated_outcome_id(value: Any, tenant: str) -> str:
@@ -3270,6 +3273,7 @@ def _preference_history_plan(
         candidate_predicate = "c." + _FALLBACK_CANDIDATE_ID_PROPERTY + " = $candidate_id"
     feedback = domain_spec.feedbackloop
     plan: list[tuple[str, dict[str, Any]]] = []
+    success_declarations: dict[str, tuple[str, str]] = {}
     for dim in dimensions:
         metadata = dim.metadata
         declared_node = metadata.outcome_node if metadata else None
@@ -3296,6 +3300,22 @@ def _preference_history_plan(
                 action="outcomes",
                 tenant=tenant,
             )
+        if success_property in _PREFERENCE_RESERVED_OUTCOME_FIELDS:
+            raise ValidationError(
+                f"preference_attention dimension {dim.name!r} declares success_property {success_property!r}, "
+                "an outcome identity field the history must not overwrite",
+                action="outcomes",
+                tenant=tenant,
+            )
+        prior = success_declarations.setdefault(success_property, (dim.name, success_value))
+        if prior[1] != success_value:
+            raise ValidationError(
+                f"preference_attention dimensions {prior[0]!r} and {dim.name!r} both store success_property "
+                f"{success_property!r} but declare different success_values ({prior[1]!r}, {success_value!r}); "
+                "one would overwrite the other",
+                action="outcomes",
+                tenant=tenant,
+            )
         candidate_community = sanitize_label(dim.candidateprop)
         # The property the reader reads (_compile_preference_attention): the
         # declared one, or the legacy default with its flag off.
@@ -3308,6 +3328,13 @@ def _preference_history_plan(
             from engine.config.structural_vocabulary import _LEGACY_DEFAULTS
 
             outcome_community = _LEGACY_DEFAULTS["community"]
+        if outcome_community in _PREFERENCE_RESERVED_OUTCOME_FIELDS or outcome_community == success_property:
+            raise ValidationError(
+                f"preference_attention dimension {dim.name!r} stores its community in {outcome_community!r}, "
+                "an outcome identity field or its own success property",
+                action="outcomes",
+                tenant=tenant,
+            )
         cypher = (
             "MATCH (o:" + label + " {outcome_id: $outcome_id})\n"
             "MATCH (qe:" + query_label + ") WHERE qe." + query_id + " = $query_entity_id\n"

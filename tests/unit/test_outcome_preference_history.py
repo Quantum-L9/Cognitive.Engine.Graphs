@@ -330,3 +330,49 @@ async def test_a_success_value_naming_a_non_success_is_refused_before_anything_i
     with pytest.raises(ValidationError, match="not a success"):
         await handle_outcomes(TENANT, _payload())
     assert graph.calls == []
+
+
+@pytest.mark.parametrize("reserved", ["outcome", "match_id", "candidate_id", "tenant", "outcome_id", "query_entity_id"])
+async def test_a_success_property_naming_an_outcome_identity_field_is_refused_before_anything_is_written(
+    reserved: str,
+) -> None:
+    graph = _wire(_spec(_raw(success_property=reserved)), _Graph())
+    with pytest.raises(ValidationError, match="outcome identity field"):
+        await handle_outcomes(TENANT, _payload())
+    assert graph.calls == []
+
+
+async def test_a_community_property_naming_an_outcome_identity_field_is_refused_before_anything_is_written() -> None:
+    graph = _wire(_spec(_raw(outcome_community_property="match_id")), _Graph())
+    with pytest.raises(ValidationError, match="outcome identity field"):
+        await handle_outcomes(TENANT, _payload())
+    assert graph.calls == []
+
+
+def _with_second_dimension(raw: dict[str, Any], **metadata: Any) -> dict[str, Any]:
+    raw["scoring"]["dimensions"].append(
+        {
+            "name": "launch_preference_b",
+            "source": "computed",
+            "computation": "preference_attention",
+            "candidateprop": "community_id",
+            "weightkey": "w_preference_b",
+            "defaultweight": 0.0,
+            "metadata": {"success_value": "success", "success_property": "outcome_type", **metadata},
+        }
+    )
+    return raw
+
+
+async def test_two_dimensions_sharing_a_success_property_with_different_values_are_refused() -> None:
+    graph = _wire(_spec(_with_second_dimension(_raw(), success_value="approved")), _Graph())
+    with pytest.raises(ValidationError, match="different success_values"):
+        await handle_outcomes(TENANT, _payload())
+    assert graph.calls == []
+
+
+async def test_two_dimensions_sharing_a_success_property_and_value_both_link() -> None:
+    graph = _wire(_spec(_with_second_dimension(_raw())), _Graph())
+    response = await handle_outcomes(TENANT, _payload())
+    assert len(_history(graph)) == 2
+    assert response["preference_history"]["linked_dimensions"] == ["launch_preference", "launch_preference_b"]
