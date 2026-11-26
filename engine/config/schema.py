@@ -803,15 +803,20 @@ class ScoringDimensionSpec(BaseModel):
         for geodecay, and ``minvalue`` >= ``maxvalue`` for inverselinear (with the
         compiler defaults 0 and 100 for an undeclared bound).
         """
-        from engine.config.settings import settings
-
-        if not getattr(settings, "scoring_spec_strict_validation_enabled", True):
+        if not _strict_scales():
             return self
         defect = _numeric_scale_defect(self)
         if defect:
             msg = f"Scoring dimension {self.name!r}: {defect}"
             raise ValueError(msg)
         return self
+
+
+def _strict_scales() -> bool:
+    """SCR-09 refusals follow the D3 strict-validation switch (#567); on where it is not declared."""
+    from engine.config.settings import settings
+
+    return bool(getattr(settings, "scoring_spec_strict_validation_enabled", True))
 
 
 _MAXVALUE_SCALED = frozenset(

@@ -104,6 +104,7 @@ independently of the code default.
 | Monoculture Weighted Contribution | `MONOCULTURE_WEIGHTED_CONTRIBUTION` (`monoculture_weighted_contribution`) | `True` | unset | active (correctness, RU-032); the monoculture confidence check measures `weight × value` per dimension; dimensional agreement and the returned `dimension_scores` stay raw; off restores raw-value monoculture |
 | Query Defaults Before Derived | `QUERY_DEFAULTS_BEFORE_DERIVED` (`query_defaults_before_derived`) | `True` | unset | active (correctness, RU-016); match applies declared `queryschema` defaults before resolving derived parameters (caller values win); off restores resolve-then-backfill |
 | Match Effective Weight Validation | `MATCH_EFFECTIVE_WEIGHT_VALIDATION` (`match_effective_weight_validation`) | `True` | unset | active (correctness, RU-009; requires `SCORE_CLAMP_ENABLED`); the ≤ 1.0 ceiling is checked on the merged per-dimension weights scoring will apply, and unknown weight keys are rejected; off restores the supplied-keys-only sum |
+| Scoring Compiler Defaults (L7) | `ZERO_WEIGHT_DIMENSION_EXCLUDED_ENABLED`, `ABSENT_SOURCES_COMPILER_RESOLUTION_ENABLED`, `WEIGHTEDRATE_UNKNOWN_CONFIDENCE_ENABLED`, `SCORING_EXPLICIT_NUMERIC_DEFAULTS_ENABLED` | `True` (each) | unset | active (correctness, CEG scoring audit L7 SCR-01/07/08/09); a 0 pre-learning weight excludes its dimension, `absent_sources` resolves the property each compiler reads, weightedrate with a missing confidence takes its null strategy, compilers read a declared numeric 0 as declared and a lognormalized value <= -1 as unknown; each flag off restores its legacy behaviour. See "Scoring compiler defaults" before §38 |
 | Resolve Requires Created Edge | `RESOLVE_REQUIRES_CREATED_EDGE` (`resolve_requires_created_edge`) | `True` | unset | active (correctness, RU-004); legacy `resolve` raises a ValidationError when no `RESOLVED_FROM` edge was created; off restores an unconditional `resolved` |
 | Outcome Map JSON Encoding | `OUTCOME_MAP_JSON_ENCODING` (`outcome_map_json_encoding`) | `True` | unset | active (correctness, RU-005); `outcomes` stores `fingerprint.dimension_weights` as sorted-key JSON that counterfactual generation decodes (legacy repr strings read as empty, never eval'd); off restores the `str(dict)` writer |
 | Health Probe Domain Count Only | `HEALTH_PROBE_DOMAIN_COUNT_ONLY` (`health_probe_domain_count_only`) | `True` | unset | active (hardening, RU-013); `health` for a tenant without a pack reports `<N> domain packs`, not the loaded domain ids; off restores the id list |
@@ -2419,6 +2420,33 @@ never run, so turning it off is the prior behaviour.
 Requires the Neo4j Graph Data Science plugin. Tests:
 `tests/unit/test_gds_node_similarity.py`,
 `tests/integration/test_gds_node_similarity.py`.
+
+## Scoring compiler defaults (CEG scoring audit L7)
+
+Operator decisions 2026-11-26 ("go with recommendations"), rules Q1 and Q3.
+Four switches in `engine/config/settings.py`, all default `True`; each one off
+restores its legacy behaviour exactly. Tests:
+`tests/unit/test_scoring_compiler_defaults.py` (compiled Cypher, both flag
+states) and `tests/integration/test_scoring_compiler_defaults_real_graph.py`
+(values through `handle_sync` + `handle_match` on Neo4j).
+
+| Flag (env) | Item | On | Off (legacy) |
+|---|---|---|---|
+| `zero_weight_dimension_excluded_enabled` (`ZERO_WEIGHT_DIMENSION_EXCLUDED_ENABLED`) | SCR-01, rule Q1 | A dimension whose pre-learning weight (the request override for its `weightkey`, else its `defaultweight`) is 0 is excluded from the match like a dimension scoped to another direction: no score term, not in `dimension_scores`, `absent_sources` or `last_effective_weights`, and no learned-weight multiplier or penalty reaches it. The match weight-ceiling check still validates the request as supplied | Compiled with coefficient 0; a learned weight below `penalty_threshold` turned that 0 into `-penalty_factor`, subtracting from a dimension the request had switched off |
+| `absent_sources_compiler_resolution_enabled` (`ABSENT_SOURCES_COMPILER_RESOLUTION_ENABLED`) | SCR-07 | `absent_sources` tests the property each compiler reads, through the same resolution as the null-strategy guard: the defaulted `candidateprop` (`value`, `rate`, `price_per_unit`, `last_activity_date`), structural declarations, both geodecay coordinates, and weightedrate's confidence property. Only candidate-held sources are reported | Only a declared `candidateprop` was reported, so a defaulted property was never absent |
+| `weightedrate_unknown_confidence_enabled` (`WEIGHTEDRATE_UNKNOWN_CONFIDENCE_ENABLED`) | SCR-08, rule Q3 | A missing confidence property (`queryprop`, else `confidence`) is unknown: under `null_strategy: zero` the dimension scores `defaultwhennull`; `inherit_prior` / `population_mean` substitute their fallback (the guard tests the confidence property beside the rate) | `coalesce(confidence, 1.0)`: an unknown confidence counted as full confidence |
+| `scoring_explicit_numeric_defaults_enabled` (`SCORING_EXPLICIT_NUMERIC_DEFAULTS_ENABLED`) | SCR-09 | `decayconstant`, `minvalue` and `maxvalue` are read as declared (`x if x is not None else default`): an inverselinear range `[-10, 0]` keeps its 0. A lognormalized candidate value <= -1 (where `log(1 + x)` is undefined) is unknown: the null-strategy guard tests it beside the null, and under `zero` the dimension clamp reads the -Infinity / NaN as 0.0 | `x or default`: a declared 0 became the default; a value <= -1 reached `log` |
+
+**Load-time refusals (SCR-09).** Under `scoring_spec_strict_validation_enabled`
+(the D3 strict-validation switch, scoring audit L2; read as on where a tree
+does not declare it) `ScoringDimensionSpec` refuses `maxvalue <= 0` for
+lognormalized, pricealignment and temporalproximity (a divisor or scale),
+`decayconstant <= 0` for geodecay, and `minvalue >= maxvalue` for
+inverselinear, with the compiler defaults 0 and 100 for an undeclared bound.
+Every committed design and synthetic pack loads unchanged.
+
+communitymatch's documented constants (0.5 for a null side, 0.2 for a
+mismatch, §32) are unchanged.
 
 ## 38. Buyer line identity (G02)
 
