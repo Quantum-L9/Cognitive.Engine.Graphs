@@ -58,7 +58,7 @@ independently of the code default.
 | Pack Root Required in Prod | `DOMAINS_ROOT_REQUIRED_IN_PROD` (`domains_root_required_in_prod`) | `True` | unset | active (hardening); under `L9_ENV=prod` the pack loader refuses an unset, relative, missing, non-directory or unreadable `DOMAINS_ROOT` — see §35 |
 | Production Domain Stage | `DOMAIN_PRODUCTION_STAGE_REQUIRED` | `False` | unchanged | dormant; production legacy admission requires reviewed/production; publisher/receipt mode always enforce stage |
 | Score Clamping | `SCORE_CLAMP_ENABLED` | `True` | `True` | active; a null dimension clamps to `0.0` as well (Stage 2, see §20) |
-| Effective Null Strategy | `NULL_STRATEGY_EFFECTIVE_ENABLED` (`null_strategy_effective_enabled`) | `True` | unset | active (CEG scoring audit L2, operator decision D3a 2026-11-26): `null_strategy` `inherit_prior` / `population_mean` take effect when the source property is missing; with `SCORE_CLAMP_ENABLED` the composite score is clamped to [0, 1] too (D5). Off: the legacy wrapper — see "Scoring bounds and effective null strategies" before §37 |
+| Effective Null Strategy / Finite Learned Weights | `NULL_STRATEGY_EFFECTIVE_ENABLED` (`null_strategy_effective_enabled`); `LEARNED_WEIGHT_FINITE_READ_ENABLED` (`learned_weight_finite_read_enabled`) | `True`; `True` | unset | active (CEG scoring audit L2, operator decision D3a 2026-11-26): `null_strategy` `inherit_prior` / `population_mean` take effect when the source property is missing; with `SCORE_CLAMP_ENABLED` the composite score is clamped to [0, 1] too, and non-finite learned weights are ignored on read (D5). Off: the legacy wrapper — see "Scoring bounds and effective null strategies" before §37 |
 | Strict Null Gates | `STRICT_NULL_GATES` | `True` | `True` | active |
 | Param Strict Mode | `PARAM_STRICT_MODE` | `True` | `True` | active |
 | LLM Security (ValidatedLLMClient) | `LLM_PROVIDER` | `openai` (implicit) | `openai` | active — fully implemented, requires `OPENAI_API_KEY` |
@@ -1509,7 +1509,8 @@ is clamped to [0, 1] like each dimension, so a learned-weight penalty still
 subtracts inside the range and floors at 0.0. Learned `DimensionWeight.weight`
 values that are not finite numbers (`NaN`, `±Infinity`, non-numeric) are
 ignored on read with a logged reason; the dimension scores with its request or
-spec weight (no new flag: restoring the [0, 1] invariant).
+spec weight. `LEARNED_WEIGHT_FINITE_READ_ENABLED` (default `True`) gates this
+filter; `false` restores the legacy reader.
 
 Tests: `tests/unit/test_scoring_bounds_and_null_strategy.py`,
 `tests/property/test_scoring_property.py`,

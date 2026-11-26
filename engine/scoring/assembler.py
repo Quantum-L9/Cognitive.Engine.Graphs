@@ -152,7 +152,10 @@ class ScoringAssembler:
             loaded = {r["name"]: r["weight"] for r in results if r.get("name") and r.get("weight") is not None}
         else:
             loaded = {r["name"]: r["weight"] for r in results if r.get("name") and r.get("weight")}
-        self._learned_weights = self._finite_learned_weights(loaded, domain_id)
+        if settings.learned_weight_finite_read_enabled:
+            self._learned_weights = self._finite_learned_weights(loaded, domain_id)
+        else:
+            self._learned_weights = loaded
         logger.info(
             "Loaded %d learned dimension weights for domain %s",
             len(self._learned_weights),

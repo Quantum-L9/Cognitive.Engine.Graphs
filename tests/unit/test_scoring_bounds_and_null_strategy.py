@@ -145,6 +145,21 @@ async def test_non_finite_or_non_numeric_learned_weight_is_ignored_with_a_reason
         assert any("Ignoring learned weight for dimension depot_reliability" in r.message for r in caplog.records)
 
 
+@pytest.mark.asyncio
+async def test_finite_read_flag_off_restores_the_legacy_reader(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Rollback: with the filter off a non-finite learned weight is loaded as before."""
+    monkeypatch.setattr(settings, "learned_weight_finite_read_enabled", False)
+    assembler = ScoringAssembler(
+        _spec(feedback=True), graph_driver=_RowsDriver([{"name": "port_capacity", "weight": "x"}])
+    )  # type: ignore[arg-type]
+    loaded = await assembler.load_learned_weights()
+    assert loaded == {"port_capacity": "x"}
+
+
+def test_finite_read_flag_defaults_on() -> None:
+    assert type(settings).model_fields["learned_weight_finite_read_enabled"].default is True
+
+
 # ── D3a: effective null strategies ───────────────────────────────────────────
 
 

@@ -144,6 +144,12 @@ class Settings(BaseSettings):
     # (then defaultwhennull); a present property is unaffected. Restores the
     # declared option, so it ships ON. Off: the legacy (dead) wrapper.
     null_strategy_effective_enabled: bool = True
+    # CEG scoring audit L2 / D5: a learned DimensionWeight.weight that is not a
+    # finite number (NaN, +/-Infinity, a bool or a string) was emitted into the
+    # score expression. On: such a weight is ignored on read with a logged
+    # reason and the dimension scores with its request / spec weight. Restores
+    # the [0, 1] score invariant, so it ships ON. Off: the legacy reader.
+    learned_weight_finite_read_enabled: bool = True
     strict_null_gates: bool = True  # W1-03: reject gates with null-resolved params
     max_hop_hard_cap: int = 10  # W1-04: maximum hops for traversal patterns
     param_strict_mode: bool = True  # W1-05: raise on derived parameter resolution failures
