@@ -97,6 +97,24 @@ def test_a_malformed_edge_with_no_readable_ref_may_share_any_identity_and_abstai
     assert rows[A]["detail"] == "malformed_evidence"
 
 
+def test_under_per_type_identity_an_unknown_ref_only_collides_with_its_own_type() -> None:
+    rows = _by_ref(_score([_obs(A, "evidence:1")], [_bad(A, None, edge="TENDED_BY")]))
+    assert rows[A]["score"] == 80.0
+    assert rows[A]["malformed_evidence_count"] == 1
+
+
+def test_under_ref_only_identity_an_unknown_ref_may_be_any_identity() -> None:
+    read = EvidenceRead(
+        connected=True,
+        database="it-tenant",
+        observations=(_obs(A, "evidence:1"),),
+        malformed=(_bad(A, None, edge="TENDED_BY"),),
+    )
+    request = parse_score_request({"entity_refs": [A], "top_n": 1})
+    [row] = score_cohort(request, read, RELEVANCE, identity_per_type=False)["abstained"]
+    assert row["detail"] == "malformed_evidence"
+
+
 def test_a_malformed_edge_with_a_distinct_identity_is_counted_and_the_entity_still_scores() -> None:
     rows = _by_ref(_score([_obs(A, "evidence:1")], [_bad(A, "evidence:2")]))
     assert rows[A]["score"] == 80.0

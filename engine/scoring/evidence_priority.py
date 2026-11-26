@@ -254,7 +254,10 @@ def _shares_identity(
     valid = {(o.relationship_type if identity_per_type else "", o.evidence_ref) for o in observations}
     for edge in malformed:
         if edge.evidence_ref is None:
-            return True
+            # Unknown ref: it may be any identity of its own relationship type.
+            if not identity_per_type or any(o.relationship_type == edge.relationship_type for o in observations):
+                return True
+            continue
         if (edge.relationship_type if identity_per_type else "", edge.evidence_ref) in valid:
             return True
     return False
