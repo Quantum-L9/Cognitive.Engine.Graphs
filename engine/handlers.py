@@ -3212,7 +3212,7 @@ def _preference_history_plan(
 
     ``preference_attention`` reads ``(qe)-[:<outcome_relation>]->(o:<outcome
     node>)`` with ``o.<success_property>`` and ``o.<outcome community property>``;
-    the outcome writer links only ``(candidate)-[:RESULTED_IN]->(o)``. With
+    the outcome writer links only the candidate to ``o``. With
     ``outcome_preference_history_enabled`` and a payload ``query_entity_id``,
     each ``preference_attention`` dimension of the outcome's direction gets one
     statement: ``MERGE`` the query entity's edge to the outcome node, store the
