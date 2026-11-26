@@ -121,6 +121,7 @@ independently of the code default.
 | Drift Requires Both Windows | `DRIFT_REQUIRES_BOTH_WINDOWS` (`drift_requires_both_windows`) | `True` | unset | active (correctness); outcomes `metadata.drift` raises no alert unless both a recent and a baseline distribution exist; `false` restores the one-sided divergence (RU-029 / CEG-COR-118) |
 | Drift Canonical Signals | `DRIFT_CANONICAL_SIGNALS_ENABLED` (`drift_canonical_signals_enabled`) | `False` | unset | dormant (correctness, SI-29); score-distribution drift has one canonical signal (`calibration.score_distribution_drift`) that `ScoreCalibrator.detect_score_drift` and `hgkr_utils.check_score_drift` delegate to, and `DriftDetector` results are labelled `outcome_dimension_mix` — see §4 |
 | Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
+| Scoring Spec Strict Validation / Effective Null Strategy | `SCORING_SPEC_STRICT_VALIDATION_ENABLED` (`scoring_spec_strict_validation_enabled`); `NULL_STRATEGY_EFFECTIVE_ENABLED` (`null_strategy_effective_enabled`) | `True`; `True` | unset | active (CEG scoring audit L2, operator decisions D3 / D3a 2026-11-26): the schema refuses structurally invalid scoring declarations at load; `null_strategy` `inherit_prior` / `population_mean` take effect when the source property is missing. Off: legacy (rollback) — see §16 "Scoring spec strict validation" |
 | Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
 | Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
 | Gate Null Operands From Predicate | `GATE_NULL_OPERANDS_FROM_PREDICATE` (`gate_null_operands_from_predicate`) | `True` | unset | active; a gate's `nullbehavior` applies to exactly the operands its predicate tests (range FAIL rejects NULL bounds; temporalrange null-handles its window per side) — see §21 |
@@ -1076,6 +1077,58 @@ Rollback: `SCORING_ADMISSION_CHECK_ENABLED=false` (gate-only admission, the
 previous wording of the withholding reason), or
 `UNVALIDATED_DOMAIN_PACKS_ENABLED=true` to serve every validated pack.
 
+### Scoring spec strict validation (CEG scoring audit L2, D3 / D3a)
+
+`SCORING_SPEC_STRICT_VALIDATION_ENABLED` (default `True` — operator decision
+D3, option A, 2026-11-26) refuses structurally invalid scoring declarations at
+the schema owner (`engine/config/schema.py`), so the `DomainSpec` fails to load
+with a pydantic `ValidationError` naming the defect:
+
+- a `defaultweight` that is non-finite (`.nan`, `.inf`) or negative;
+- a non-finite `defaultwhennull`;
+- two scoring dimensions with the same `name` (the name is the Cypher alias
+  and the learned-weight key, so the second silently shadowed the first);
+- an unknown key on a scoring dimension (`extra="forbid"` semantics);
+- `aggregation: multiplicative` (never compiled: the score is always the
+  additive weighted sum);
+- `preference_sample_size` that is not a positive integer (`auto` was never
+  resolved and crashed the compiler);
+- a `decision_arbitration.constraints[].dimension` naming an undeclared
+  scoring dimension;
+- a `preference_attention` dimension when no traversal step binds a `qe` node
+  (its outcome sample is matched from `qe`; unbound, the subquery matched
+  every node).
+
+Every committed design pack loads with the flag on. This flag does not touch
+admission withholding: `SCORING_ADMISSION_CHECK_ENABLED` keeps its default
+(`False`), and cross-reference defects such as an unbound `$_popmean_<dim>`
+stay under it. `tools/validate_domain.py --dry-run <pack-or-root>` reports,
+without serving anything, which published packs this flag would refuse, so
+operators can check them before deploy. Rollback:
+`SCORING_SPEC_STRICT_VALIDATION_ENABLED=false` (such packs load as before).
+
+`NULL_STRATEGY_EFFECTIVE_ENABLED` (default `True`, decision D3a) makes
+`null_strategy: inherit_prior` and `population_mean` take effect. Each
+computation coalesces (or CASE-guards) its own property, so the legacy
+`coalesce((<dimension>), candidate._prior_<dim>, default)` never saw a null and
+both options were dead. On, the dimension compiles to
+`CASE WHEN <source property> IS NULL THEN coalesce(<prior | $_popmean_<dim>>,
+defaultwhennull) ELSE (<dimension>) END`: a missing source property takes the
+declared fallback, a present one is unaffected. Computations without one
+stored source property (`customcypher`, `community_bridge`) keep the legacy
+wrapper. Rollback: `NULL_STRATEGY_EFFECTIVE_ENABLED=false`.
+
+Also in this lane (no new flag): `cypher_number` refuses `inf` / `-inf` /
+`nan`; learned `DimensionWeight.weight` values that are not finite numbers are
+ignored on read with a logged reason; and, under `SCORE_CLAMP_ENABLED`
+(default `True`, decision D5), the composite `score` is clamped to [0, 1] like
+each dimension, so a learned-weight penalty still subtracts inside the range
+and floors at 0.0.
+
+Tests: `tests/unit/test_scoring_spec_strict_validation.py`,
+`tests/unit/test_scoring_bounds_and_null_strategy.py`,
+`tests/integration/test_scoring_bounds_real_graph.py`.
+
 ### Full-match admission (RU-039)
 
 `ADMISSION_CHECKS_FULL_MATCH` (default `False` — owner decision 2026-10-29:
@@ -1509,7 +1562,10 @@ On: a `temporalproximity` dimension declares its auxiliary signals in
 Recency takes the weight the declared signals leave, `1 - frequency_weight -
 acceleration_weight`, so an undeclared signal contributes nothing and a
 dimension declaring none is pure recency decay over [0, 1] (renormalised, not
-capped). Every weight and the scale bind as query parameters
+capped). A candidate date in the future has a negative age; the declared path
+floors the age at 0 days (decision D2, 2026-11-26), so a future date scores the
+same recency as a fresh one and never more (`exp` of a positive exponent
+exceeded 1.0). The legacy path is not floored. Every weight and the scale bind as query parameters
 (`tp_recency_w_<dim>`, `tp_freq_w_<dim>`, `tp_freq_scale_<dim>`,
 `tp_accel_w_<dim>`); property names pass `sanitize_label`. The compiler
 refuses a weight or scale declared without its property and auxiliary weights
@@ -1526,7 +1582,15 @@ candidates within that dimension is unchanged; its contribution to the
 weighted total grows. Off: the legacy text, byte for byte, and `metadata` on a
 `temporalproximity` dimension is accepted but not read.
 
-Tests: `tests/unit/test_temporalproximity_declared_signals.py`.
+The flag stays default `False` (decision D2); activation is a later, separate
+decision. `tests/integration/test_temporalproximity_rescale_fixtures.py`
+records, on the committed `temporalproximity` packs synced through the engine,
+the legacy and declared recency per candidate (`value_declared = value_legacy /
+0.6` while no auxiliary signal is declared) and the composite ranking under
+each, as evidence for that decision.
+
+Tests: `tests/unit/test_temporalproximity_declared_signals.py`,
+`tests/integration/test_temporalproximity_rescale_fixtures.py`.
 
 ## 35. Production pack root required (issue #400 A4/A5)
 

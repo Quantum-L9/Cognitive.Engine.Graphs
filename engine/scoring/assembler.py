@@ -16,6 +16,7 @@ Compiles scoring dimensions into Cypher WITH clause with weighted aggregation.
 from __future__ import annotations
 
 import logging
+import math
 import re
 from typing import Any
 
@@ -148,17 +149,45 @@ class ScoringAssembler:
         )
         if settings.learned_weight_renormalization:
             # RU-023: a learned 0.0 is a weight (it takes the penalty branch), not absence.
-            self._learned_weights = {
-                r["name"]: r["weight"] for r in results if r.get("name") and r.get("weight") is not None
-            }
+            loaded = {r["name"]: r["weight"] for r in results if r.get("name") and r.get("weight") is not None}
         else:
-            self._learned_weights = {r["name"]: r["weight"] for r in results if r.get("name") and r.get("weight")}
+            loaded = {r["name"]: r["weight"] for r in results if r.get("name") and r.get("weight")}
+        self._learned_weights = self._finite_learned_weights(loaded, domain_id)
         logger.info(
             "Loaded %d learned dimension weights for domain %s",
             len(self._learned_weights),
             domain_id,
         )
         return self._learned_weights
+
+    @staticmethod
+    def _finite_learned_weights(loaded: dict[str, Any], domain_id: str) -> dict[str, float]:
+        """D5: keep only finite numeric learned weights; each one ignored is logged with its reason.
+
+        A NaN or infinite DimensionWeight.weight cannot be emitted as a Cypher
+        literal (``cypher_number`` refuses it) and has no meaning as a
+        multiplier; the dimension then scores with its request / spec weight.
+        """
+        kept: dict[str, float] = {}
+        for name, raw in loaded.items():
+            if isinstance(raw, bool) or not isinstance(raw, int | float):
+                logger.warning(
+                    "Ignoring learned weight for dimension %s in domain %s: not a number (%s)",
+                    name,
+                    domain_id,
+                    type(raw).__name__,
+                )
+                continue
+            if not math.isfinite(raw):
+                logger.warning(
+                    "Ignoring learned weight for dimension %s in domain %s: non-finite value %r",
+                    name,
+                    domain_id,
+                    raw,
+                )
+                continue
+            kept[name] = float(raw)
+        return kept
 
     def assemble_scoring_clause(
         self,
@@ -246,6 +275,11 @@ class ScoringAssembler:
         self._last_effective_weights = effective_weights
         all_exprs = ", ".join(dimension_exprs)
         score_expr = self._build_score_expression(weight_exprs)
+        if settings.score_clamp_enabled and weight_exprs:
+            # D5: the composite is bounded to [0, 1] too. A learned-weight
+            # penalty is a negative coefficient, so the weighted sum can fall
+            # below 0; it subtracts inside the range and floors at 0.0.
+            score_expr = self._clamp_expression(score_expr)
 
         if all_exprs:
             dim_names_passthrough = ", ".join(active_dim_names)
@@ -634,7 +668,10 @@ class ScoringAssembler:
             raise ValueError(msg)
         recency_key = f"tp_recency_w_{safe_dim}"
         self._query_params[recency_key] = max(0.0, 1.0 - aux_weight)
-        recency = f"${recency_key} * exp(-1.0 * duration.inDays(candidate.{date_prop}, datetime()).days / {decay_days})"
+        # D2: a future date has a negative age; it is floored at 0 days so it
+        # never outscores a fresh one (exp of a positive exponent exceeds 1.0).
+        age = f"duration.inDays(candidate.{date_prop}, datetime()).days"
+        recency = f"${recency_key} * exp(-1.0 * CASE WHEN {age} < 0 THEN 0 ELSE {age} END / {decay_days})"
         body = " + ".join([recency, *terms])
         return f"CASE WHEN candidate.{date_prop} IS NULL THEN {default} ELSE ({body}) END"
 
@@ -874,9 +911,15 @@ class ScoringAssembler:
         - INHERIT_PRIOR: carry forward candidate's last known score for dimension
         - POPULATION_MEAN: substitute the population mean score
         """
+        from engine.config.settings import settings
+
         strategy = getattr(dim, "null_strategy", NullStrategy.ZERO)
         if strategy == NullStrategy.ZERO:
             return base_expr  # No change — coalesce(..., 0.0) already handles this
+        if settings.null_strategy_effective_enabled:
+            effective = self._effective_null_strategy(dim, base_expr, strategy)
+            if effective is not None:
+                return effective
         if strategy == NullStrategy.INHERIT_PRIOR:
             prop_name = sanitize_label(f"_prior_{dim.name}")
             return f"coalesce(({base_expr}), candidate.{prop_name}, {cypher_number(dim.defaultwhennull)})"
@@ -885,6 +928,74 @@ class ScoringAssembler:
             param = sanitize_label(f"_popmean_{dim.name}")
             return f"coalesce(({base_expr}), ${param}, {cypher_number(dim.defaultwhennull)})"
         return base_expr
+
+    # Source property a computation reads when the dimension declares no candidateprop.
+    _DEFAULT_SOURCE_PROPERTY: dict[ComputationType, str] = {
+        ComputationType.LOGNORMALIZED: "value",
+        ComputationType.INVERSELINEAR: "value",
+        ComputationType.CANDIDATEPROPERTY: "value",
+        ComputationType.WEIGHTEDRATE: "rate",
+        ComputationType.PRICEALIGNMENT: "price_per_unit",
+        ComputationType.TEMPORALPROXIMITY: "last_activity_date",
+        ComputationType.TRAVERSALALIAS: "score",
+        ComputationType.VARIANTDISCOVERY: "variant_discovery_score",
+        ComputationType.ENSEMBLECONFIDENCE: "ensemble_confidence",
+    }
+    _ALIAS_SOURCED: frozenset[ComputationType] = frozenset(
+        {
+            ComputationType.TRAVERSALALIAS,
+            ComputationType.KGE,
+            ComputationType.VARIANTDISCOVERY,
+            ComputationType.ENSEMBLECONFIDENCE,
+        }
+    )
+
+    def _source_missing_predicate(self, dim: ScoringDimensionSpec) -> str | None:
+        """Cypher predicate true when the dimension's stored source property is missing.
+
+        ``None`` when the computation has no single stored source (customcypher,
+        community_bridge, an aliasless kge without candidateprop): the legacy
+        wrapper is kept for those.
+        """
+        computation = dim.computation
+        if computation in (ComputationType.CUSTOMCYPHER, ComputationType.COMMUNITYBRIDGE):
+            return None
+        owner = "candidate"
+        if computation in self._ALIAS_SOURCED and dim.alias:
+            owner = sanitize_label(dim.alias)
+        elif computation is ComputationType.TRAVERSALALIAS:
+            return None
+        if computation is ComputationType.KGE:
+            prop = dim.candidateprop or ("kge_score" if dim.alias else None)
+        else:
+            prop = dim.candidateprop or self._DEFAULT_SOURCE_PROPERTY.get(computation)
+        if not prop:
+            return None
+        predicate = f"{owner}.{sanitize_label(prop)} IS NULL"
+        if computation is ComputationType.GEODECAY and dim.candidateprop_lon:
+            predicate = f"{predicate} OR {owner}.{sanitize_label(dim.candidateprop_lon)} IS NULL"
+        return predicate
+
+    def _effective_null_strategy(self, dim: ScoringDimensionSpec, base_expr: str, strategy: NullStrategy) -> str | None:
+        """D3a: substitute the declared fallback when the source property is missing.
+
+        Every computation coalesces (or CASE-guards) its own property, so the
+        legacy ``coalesce((base), fallback)`` never saw a null and the option
+        was dead. The guard tests the stored property itself: missing → the
+        prior / population mean (then ``defaultwhennull``); present → the
+        computation's value, unchanged.
+        """
+        missing = self._source_missing_predicate(dim)
+        if missing is None:
+            return None
+        default = cypher_number(dim.defaultwhennull)
+        if strategy == NullStrategy.INHERIT_PRIOR:
+            fallback = f"coalesce(candidate.{sanitize_label(f'_prior_{dim.name}')}, {default})"
+        elif strategy == NullStrategy.POPULATION_MEAN:
+            fallback = f"coalesce(${sanitize_label(f'_popmean_{dim.name}')}, {default})"
+        else:
+            return None
+        return f"CASE WHEN {missing} THEN {fallback} ELSE ({base_expr}) END"
 
     def _apply_cold_start_fallback(self, dim: ScoringDimensionSpec, base_expr: str) -> str:
         """S2-20: Cold-start fallback for preference_attention-type dimensions.

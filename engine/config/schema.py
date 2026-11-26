@@ -15,6 +15,8 @@ Defines the contract every spec.yaml must satisfy.
 
 from __future__ import annotations
 
+import math
+import re
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -677,6 +679,21 @@ class GateSpec(BaseModel):
     edgepredicates: list[EdgePredicateSpec] | None = None
 
 
+def _scoring_strict() -> bool:
+    """D3 rollback switch, read at validation time."""
+    from engine.config.settings import settings
+
+    return bool(settings.scoring_spec_strict_validation_enabled)
+
+
+def _traversal_binds(traversal: TraversalSpec | None, alias: str) -> bool:
+    """Whether a traversal step pattern declares a node bound to ``alias``."""
+    if traversal is None:
+        return False
+    node_re = re.compile(rf"\(\s*{re.escape(alias)}\s*(?::[A-Za-z_][A-Za-z0-9_]*)?\s*[)\{{]")
+    return any(node_re.search(step.pattern) for step in traversal.steps)
+
+
 class ScoringDimensionMetadata(BaseModel):
     """Computation-specific declarations of a scoring dimension (``metadata:``).
 
@@ -778,6 +795,42 @@ class ScoringDimensionSpec(BaseModel):
     # Computation-specific declarations (preference_attention, community_bridge).
     metadata: ScoringDimensionMetadata | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def refuse_unknown_keys(cls, data: Any) -> Any:
+        """D3 (scoring_spec_strict_validation_enabled): a scoring dimension key the model does not declare is refused.
+
+        ``extra="forbid"`` semantics, applied under the rollback flag instead of
+        ``model_config`` so the flag can restore the legacy (ignored) behaviour.
+        """
+        if not isinstance(data, dict) or not _scoring_strict():
+            return data
+        unknown = sorted(str(key) for key in data if key not in cls.model_fields)
+        if unknown:
+            name = data.get("name", "?")
+            msg = f"Scoring dimension {name!r}: unknown key(s) {', '.join(unknown)}"
+            raise ValueError(msg)
+        return data
+
+    @model_validator(mode="after")
+    def validate_structural_values(self) -> ScoringDimensionSpec:
+        """D3: refuse values the scoring compiler cannot honour (scoring_spec_strict_validation_enabled)."""
+        if not _scoring_strict():
+            return self
+        if not math.isfinite(self.defaultweight) or self.defaultweight < 0.0:
+            msg = f"Scoring dimension {self.name!r}: defaultweight must be finite and >= 0, got {self.defaultweight!r}"
+            raise ValueError(msg)
+        if not math.isfinite(self.defaultwhennull):
+            msg = f"Scoring dimension {self.name!r}: defaultwhennull must be finite, got {self.defaultwhennull!r}"
+            raise ValueError(msg)
+        if self.aggregation is ScoringAggregation.MULTIPLICATIVE:
+            msg = (
+                f"Scoring dimension {self.name!r}: aggregation 'multiplicative' is not implemented "
+                "(the score is always the additive weighted sum)"
+            )
+            raise ValueError(msg)
+        return self
+
     @model_validator(mode="after")
     def validate_metadata_keys(self) -> ScoringDimensionSpec:
         """Refuse a metadata key the dimension's computation does not read."""
@@ -817,6 +870,30 @@ class ScoringSpec(BaseModel):
     )
     adaptive_sample_size: AdaptiveSampleSizeSpec = Field(default_factory=AdaptiveSampleSizeSpec)
     preference_attention_feedback_blend: float = 0.7  # S2-06: alpha for feedback fusion
+
+    @model_validator(mode="after")
+    def validate_structure(self) -> ScoringSpec:
+        """D3: duplicate dimension names and an unresolved sample size are refused (scoring_spec_strict_validation_enabled).
+
+        A dimension name is its Cypher alias and its learned-weight key, so a
+        second declaration silently shadows the first. ``preference_sample_size``
+        is bound as an integer ``LIMIT``; ``auto`` (or any string) is never resolved.
+        """
+        if not _scoring_strict():
+            return self
+        names = [dim.name for dim in self.dimensions]
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            msg = f"Duplicate scoring dimension name(s): {duplicates}"
+            raise ValueError(msg)
+        size = self.preference_sample_size
+        if isinstance(size, bool) or not isinstance(size, int):
+            msg = f"preference_sample_size must be an integer, got {size!r} (no value resolves 'auto')"
+            raise ValueError(msg)
+        if size < 1:
+            msg = f"preference_sample_size must be >= 1, got {size}"
+            raise ValueError(msg)
+        return self
 
 
 class SoftSignalSpec(BaseModel):
@@ -1759,4 +1836,30 @@ class DomainSpec(BaseModel):
 
         validate_tenant_mapping(self)
 
+        return self
+
+    @model_validator(mode="after")
+    def validate_scoring_references(self) -> DomainSpec:
+        """D3: scoring references the compiler cannot resolve (scoring_spec_strict_validation_enabled).
+
+        An arbitration constraint naming an undeclared dimension constrains
+        nothing; ``preference_attention`` matches from ``qe``, so a pack whose
+        traversal binds no ``qe`` node fails every match that scores it.
+        """
+        if not _scoring_strict():
+            return self
+        declared = {dim.name for dim in self.scoring.dimensions}
+        unknown = sorted(
+            {c.dimension for c in self.decision_arbitration.constraints if c.dimension not in declared}
+        )
+        if unknown:
+            msg = f"decision_arbitration constraint(s) name undeclared scoring dimension(s): {unknown}"
+            raise ValueError(msg)
+        attention = [d.name for d in self.scoring.dimensions if d.computation is ComputationType.PREFERENCEATTENTION]
+        if attention and not _traversal_binds(self.traversal, "qe"):
+            msg = (
+                f"Scoring dimension(s) {attention} use preference_attention, which matches from `qe`, "
+                "but no traversal step binds a `qe` node"
+            )
+            raise ValueError(msg)
         return self

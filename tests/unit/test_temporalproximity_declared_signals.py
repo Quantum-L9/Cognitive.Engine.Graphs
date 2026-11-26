@@ -111,10 +111,40 @@ def test_undeclared_signals_contribute_nothing_and_recency_takes_full_weight() -
     assert "is_accelerating" not in expr
     assert expr == (
         "CASE WHEN candidate.last_seen IS NULL THEN 0.0 ELSE ("
-        "$tp_recency_w_depot_freshness * exp(-1.0 * duration.inDays(candidate.last_seen, datetime()).days / 45.0)"
+        "$tp_recency_w_depot_freshness * exp(-1.0 * CASE WHEN "
+        "duration.inDays(candidate.last_seen, datetime()).days < 0 THEN 0 ELSE "
+        "duration.inDays(candidate.last_seen, datetime()).days END / 45.0)"
         ") END"
     )
     assert params == {"tp_recency_w_depot_freshness": 1.0}
+
+
+# ── D2 (operator decision 2026-11-26): the declared path floors a negative age ─
+
+_AGE = "duration.inDays(candidate.last_seen, datetime()).days"
+
+
+@pytest.mark.usefixtures("declared")
+def test_declared_recency_floors_a_future_date_at_age_zero() -> None:
+    """A future date's negative age is floored at 0, so its decay is exp(0) = 1.0 — the fresh score, never more."""
+    expr, _params = _compile(_dimension())
+    assert f"exp(-1.0 * CASE WHEN {_AGE} < 0 THEN 0 ELSE {_AGE} END / 45.0)" in expr
+    # No unfloored age reaches exp(): every age occurrence sits inside the floor.
+    assert expr.count(_AGE) == 2
+    assert f"exp(-1.0 * {_AGE}" not in expr
+
+
+@pytest.mark.usefixtures("declared")
+def test_declared_floor_applies_with_auxiliary_signals_declared() -> None:
+    expr, _params = _compile(_dimension({"frequency_property": "dock_count"}))
+    assert f"CASE WHEN {_AGE} < 0 THEN 0 ELSE {_AGE} END" in expr
+
+
+def test_legacy_path_has_no_floor_and_matches_main_byte_for_byte() -> None:
+    """D2: the legacy path stays byte-for-byte (FEATURE_GATES §37); ``_LEGACY`` is main's text at 21dc906."""
+    expr, _params = _compile(_dimension())
+    assert expr == _LEGACY
+    assert "< 0 THEN 0" not in expr
 
 
 @pytest.mark.usefixtures("declared")
