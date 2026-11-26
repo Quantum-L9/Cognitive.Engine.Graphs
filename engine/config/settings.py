@@ -424,6 +424,11 @@ class Settings(BaseSettings):
     # DELEGATED, unknown) maps to trust 0.5, the value a symmetric Bayesian
     # update treats as uninformative. Off: 0.60. Dormant module. §38a.
     hop_trust_neutral_uninformative_enabled: bool = True
+    # SCR-11 (L8): ImportanceScorer.compute raises for a vertex absent from
+    # visit_counts (as documented) and the importance Cypher scores its
+    # default when $total_visits is null or <= 0. Off: an unknown vertex scores
+    # 0.0 and the division is unguarded. Dormant module. §38a.
+    importance_strict_inputs_enabled: bool = True
 
     # Correctness remediation lane A (plan 0d84ec8, RU-001..RU-060)
     # Each flag ships on (a correctness fix); off restores the pre-fix behaviour.
