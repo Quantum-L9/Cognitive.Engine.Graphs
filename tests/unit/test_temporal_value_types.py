@@ -294,3 +294,21 @@ def test_an_unrepresentable_duration_is_a_row_defect_not_a_crash() -> None:
     row = {"depot_id": "d1", "service_window": "P999999999999999999999Y"}
     assert _defects([row]) == ["row 0 service_window: expected duration, got string (duration out of range)"]
     assert _contract().project([row])[0][0]["node"]["service_window"] == "P999999999999999999999Y"  # never raises
+
+
+def test_freshness_keeps_datetime_when_a_selected_label_does_not_declare_the_property() -> None:
+    # CodeRabbit on #563: Widget declares `seen: date`, Gadget (same direction) declares nothing.
+    raw = _freshness_spec("date").model_dump(mode="json", by_alias=True, exclude_none=True)
+    raw["ontology"]["nodes"].append(
+        {
+            "label": "Gadget",
+            "managedby": "sync",
+            "candidate": True,
+            "properties": [{"name": "gadget_id", "type": "string"}],
+        }
+    )
+    raw["matchentities"]["candidate"].append({"label": "Gadget", "matchdirection": "d1"})
+    from engine.gates.compiler import GateCompiler
+
+    compiled = GateCompiler(DomainSpec.model_validate(raw)).compile_all_gates("d1")
+    assert "candidate.seen >= datetime() - duration" in compiled

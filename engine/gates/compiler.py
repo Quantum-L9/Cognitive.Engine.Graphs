@@ -785,8 +785,15 @@ class GateCompiler:
         # direction); otherwise every direction the gate applies to.
         directions = {self._direction} if self._direction else set(self._exclusion_directions(gate, candidates))
         labels = {c.label for c in candidates if c.matchdirection in directions}
-        declared = {p.type.value for node in nodes if node.label in labels for p in node.properties if p.name == prop}
-        return "date()" if declared == {"date"} else "datetime()"
+        # One declared type per selected label; a label that does not declare it counts as undeclared.
+        declared = {
+            label: next(
+                (p.type.value for node in nodes if node.label == label for p in node.properties if p.name == prop),
+                None,
+            )
+            for label in labels
+        }
+        return "date()" if declared and set(declared.values()) == {"date"} else "datetime()"
 
     def _compile_temporal_range(self, gate: GateSpec) -> str:
         """
