@@ -55,6 +55,7 @@ independently of the code default.
 | Pareto Pre-cut Arbitration | `PARETO_PRECUT_ENABLED` (`pareto_precut_enabled`) | `False` | unset | dormant (opt-in, SI-06); with declared `decision_arbitration` objectives, match orders a bounded pool by Pareto front before the `top_n` cut; see §36 |
 | Arbitration Constraints in Cypher | `MATCH_ARBITRATION_IN_CYPHER_ENABLED` (`match_arbitration_in_cypher_enabled`) | `True` | unset | active (hardening, ND-ARB / D4); `decision_arbitration` hard constraints are a `WHERE` and soft penalties rescale `score` in the match Cypher, before `ORDER BY` / `LIMIT`; no Python post-cut pass — see §36a |
 | Match Identity Tie-break | `MATCH_CANDIDATE_TIEBREAK_ENABLED` (`match_candidate_tiebreak_enabled`) | `True` | unset | active (hardening, ND-TIE / D4); final `ORDER BY` breaks score ties on the declared candidate identity, path collapse ordered by projected dimensions — see §36a |
+| Arbitration Unknown Fails Constraint | `ARBITRATION_UNKNOWN_FAILS_CONSTRAINT_ENABLED` (`arbitration_unknown_fails_constraint_enabled`) | `True` | unset | active (hardening, SCR-03 / SCR-04, rule Q2); a missing / null / non-numeric / NaN constrained value fails the constraint (hard rejects, soft penalises) and a penalty never raises a score — see §36a |
 | Pareto Declared Dimensions | `PARETO_FRONT_DECLARED_DIMENSIONS_ENABLED` (`pareto_front_declared_dimensions_enabled`) | `True` | unset | active (hardening, SC-004); `compute_pareto_front` compares declared dimensions (else the key union), so the front does not depend on row order — see §36a |
 | Domain Strict Validation | `DOMAIN_STRICT_VALIDATION` | `True` | `True` | active |
 | Native Domain Approval Receipts | `DOMAIN_PACK_RECEIPTS_ENABLED` | `False` | unchanged | dormant; immutable native revision/receipt admission, no warm-cache fallback; see the native publisher runbook, `docs/runbooks/domain-pack-publish.md` |
@@ -420,19 +421,39 @@ before every `ORDER BY` / `LIMIT` (`_arbitration_constraint_cypher`,
 
 ```cypher
 WITH candidate, d1, d2, (w1 * d1) + (w2 * d2) AS score
-WHERE NOT coalesce(d1 < $arb_hard_threshold_0, false)
-WITH candidate, d1, d2, score * (CASE WHEN coalesce(d2 < $arb_soft_threshold_0, false)
-                                      THEN $arb_soft_penalty_0 ELSE 1.0 END) AS score
+WHERE NOT (d1 IS NULL OR isNaN(d1) OR d1 < $arb_hard_threshold_0)
+WITH candidate, d1, d2,
+     CASE WHEN score * F < score THEN score * F ELSE score END AS score
+// F = (CASE WHEN d2 IS NULL OR isNaN(d2) OR d2 < $arb_soft_threshold_0
+//           THEN $arb_soft_penalty_0 ELSE 1.0 END)
 ```
 
 * A hard constraint removes the row when the dimension is below its threshold.
-  A `null` dimension (or one that does not compare) is not below the threshold:
-  the same rule `apply_constraint_penalties` applies when it skips a missing
-  value.
+* **An unknown value fails** (`arbitration_unknown_fails_constraint_enabled`,
+  default `True`; SCR-03, operator rule Q2). A missing, `null`, non-numeric or
+  `NaN` value does not satisfy a constraint. Under a hard constraint the
+  candidate is rejected; under a soft one the penalty applies. In Cypher a
+  comparison with `null` is `null`, and `NaN < t` is `false`, so both cases are
+  tested explicitly. The Python pass (`apply_constraint_penalties`, used with
+  `match_arbitration_in_cypher_enabled` off and by the dormant pre-cut) applies
+  the same rule.
+  * `pareto.arbitration.unknown_rejected` reports how many hard rejections were
+    caused by an unknown value.
+  * The count is a number on the Python pass. In Cypher it is `null`: rows the
+    `WHERE` removed never reach Python, and the count is not guessed.
+  * With `score_clamp_enabled`, a missing source is clamped to `0.0` before
+    arbitration and judged as `0.0`.
+  * Flag off restores the old behaviour: `coalesce(d < $t, false)`, where an
+    unknown value passes.
+* **A penalty never raises a score** (same flag; SCR-04). The penalised score is
+  `min(score, score * penalty)`, which matters for a negative score (reachable
+  only with the clamp off). A `null` score passes through unchanged. Flag off
+  restores plain multiplication.
 * Each failing soft constraint multiplies `score` by its `penalty`, in declared
   order. That is the Python multiplication, now ranked.
-* A constraint on a dimension that is inactive for the direction is not compiled.
-  The scoring `WITH` binds no such alias, and Python skipped it as missing.
+* A constraint on a dimension that is inactive for the direction is skipped in
+  both passes. Every candidate lacks that value, so "unknown fails" would
+  otherwise reject them all.
 * Thresholds and penalties are `$params`. Dimension aliases pass `sanitize_label`.
 * Python applies no post-cut constraint pass. The dormant SI-06 pre-cut (§36)
   does not re-apply constraints to its pool either. The Pareto filter still

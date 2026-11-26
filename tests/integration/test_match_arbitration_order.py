@@ -118,3 +118,26 @@ async def test_tied_scores_give_prefix_stable_top_k(engine_deps, graph_driver, d
     assert top1 == top3[:1]
     for _ in range(3):
         assert _ids(await _match(top_n=3)) == top3
+
+
+@pytest.mark.asyncio
+async def test_soft_penalty_never_raises_a_negative_score(
+    engine_deps, graph_driver, domain_spec, clean_db, monkeypatch
+):
+    """SCR-04: with the clamp off a stored negative reliability scores below zero.
+
+    ``score * penalty`` would raise it (-0.2523 * 0.25 = -0.0631, above -0.2523);
+    under ``arbitration_unknown_fails_constraint_enabled`` the score is
+    ``min(score, score * penalty)`` and stays -0.2523.
+    """
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "score_clamp_enabled", False)
+    soft = ArbitrationConstraintSpec(dimension="port_capacity", threshold=0.6, hard=False, penalty=0.25)
+    await _sync([_depot("negative", -0.50, 2), _depot("positive", 0.50, 2)])
+    serve(graph_driver, _arbitrated(domain_spec, soft))
+
+    rows = {row["candidate"]["depot_id"]: row["score"] for row in await _match(top_n=2)}
+
+    assert rows["negative"] == pytest.approx(-0.30 + 0.0477, abs=1e-3)  # unpenalised
+    assert rows["positive"] == pytest.approx((0.30 + 0.0477) * 0.25, abs=1e-3)  # penalised

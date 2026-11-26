@@ -141,7 +141,7 @@ class TestDimensionProjection:
         driver = _wire(_spec(decision_arbitration=arbitration))
         await _match()
         cypher, params = driver.calls[0]["cypher"], driver.calls[0]["parameters"]
-        where = re.search(r"\nWHERE NOT coalesce\((\w+) < \$(\w+), false\)\n", cypher)
+        where = re.search(r"\nWHERE NOT \((\w+) IS NULL OR isNaN\(\1\) OR \1 < \$(\w+)\)\n", cypher)
         assert where is not None
         assert where.group(1) == "depot_reliability"
         assert "depot_reliability" in (_returned_dimension_aliases(cypher) or [])

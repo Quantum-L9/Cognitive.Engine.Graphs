@@ -142,6 +142,12 @@ class Settings(BaseSettings):
     # candidate identity, and the per-candidate path collapse orders by the
     # projected dimensions after score. Off restores ORDER BY score DESC alone.
     match_candidate_tiebreak_enabled: bool = True
+    # SCR-03 / SCR-04 (ceg-scoring-audit, rule Q2): an unknown constrained value
+    # (missing, null, non-numeric, NaN) fails a decision_arbitration constraint
+    # (hard: rejected; soft: penalised), and a soft penalty never raises a score
+    # (min(score, score * penalty); a null score passes through). Both the Cypher
+    # and the Python pass. Off restores "unknown passes" and plain multiplication.
+    arbitration_unknown_fails_constraint_enabled: bool = True
     # SC-004 (L3): compute_pareto_front compares the declared dimension names when
     # given, else the union of every candidate's keys, never the first row's keys
     # alone. Off restores candidates[0]'s keys (input-order dependent).
