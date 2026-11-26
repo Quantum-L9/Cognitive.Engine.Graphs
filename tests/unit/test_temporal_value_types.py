@@ -331,3 +331,24 @@ def test_the_audit_tool_exit_code_reports_conversion_need(monkeypatch: pytest.Mo
     assert tool.main(["plasticos"]) == tool.EXIT_CLEAN
     monkeypatch.setattr(tool, "_audit", dirty)
     assert tool.main(["plasticos", "other"]) == tool.EXIT_STRING_VALUED
+
+
+def test_an_unscoped_freshness_gate_uses_the_compiled_directions_declared_type() -> None:
+    # Codex review on #563: date in d1, datetime in d2 must not fall back to datetime() for d1.
+    raw = _freshness_spec("date").model_dump(mode="json", by_alias=True, exclude_none=True)
+    raw["ontology"]["nodes"].append(
+        {
+            "label": "Gadget",
+            "managedby": "sync",
+            "candidate": True,
+            "properties": [{"name": "seen", "type": "datetime"}],
+        }
+    )
+    raw["matchentities"]["candidate"].append({"label": "Gadget", "matchdirection": "d2"})
+    raw["matchentities"]["queryentity"].append({"label": "Ask", "matchdirection": "d2"})
+    raw["queryschema"]["matchdirections"] = ["d1", "d2"]
+    from engine.gates.compiler import GateCompiler
+
+    spec = DomainSpec.model_validate(raw)
+    assert "candidate.seen >= date() - duration" in GateCompiler(spec).compile_all_gates("d1")
+    assert "candidate.seen >= datetime() - duration" in GateCompiler(spec).compile_all_gates("d2")

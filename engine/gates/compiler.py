@@ -762,7 +762,7 @@ class GateCompiler:
         )
 
     def _freshness_now(self, gate: GateSpec, prop: str) -> str:
-        """``date()`` when every candidate label the gate applies to declares ``prop`` a ``date``.
+        """``date()`` when every candidate label of the compiled direction declares ``prop`` a ``date``.
 
         A native Neo4j ``Date`` compared with a ``DateTime`` is null, so the
         legacy ``datetime()`` cutoff failed every date-declared candidate (D1).
@@ -781,7 +781,9 @@ class GateCompiler:
         nodes = getattr(ontology, "nodes", None)
         if not isinstance(candidates, list) or not isinstance(nodes, list):
             return "datetime()"  # not a validated DomainSpec (a test double)
-        directions = set(self._exclusion_directions(gate, candidates))
+        # The direction being compiled when there is one (an unscoped gate is compiled once per
+        # direction); otherwise every direction the gate applies to.
+        directions = {self._direction} if self._direction else set(self._exclusion_directions(gate, candidates))
         labels = {c.label for c in candidates if c.matchdirection in directions}
         declared = {p.type.value for node in nodes if node.label in labels for p in node.properties if p.name == prop}
         return "date()" if declared == {"date"} else "datetime()"
