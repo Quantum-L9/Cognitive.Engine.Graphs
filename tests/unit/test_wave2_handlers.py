@@ -93,6 +93,10 @@ class TestCalibrationRunSubaction:
 
         assert result["status"] == "calibration_spec_loaded"
         assert result["total_pairs"] == 1
+        # D6: calibration_run is a spec echo; its response must not claim verification.
+        assert "No scores were computed or verified" in result["message"]
+        assert "verify scores" not in result["message"]
+        assert result["pairs"][0]["expected_range"] == [0.3, 0.7]
 
 
 @pytest.mark.unit

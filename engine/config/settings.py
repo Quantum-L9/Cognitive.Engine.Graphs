@@ -55,6 +55,17 @@ class Settings(BaseSettings):
     neo4j_pool_size: int = 50
     neo4j_max_connection_lifetime: int = 3600
     neo4j_connection_acquisition_timeout: int = 60
+    # D8 (FEATURE_GATES "Neo4j Driver Bounds"): GraphDriver.connect() hard-coded
+    # its pool (50 / 3600 s / 60 s) and ignored the three settings above, and no
+    # query carried a transaction timeout, so a slow statement held a pooled
+    # connection past the 30 s TransportHeader.timeout_ms caller budget. The pool
+    # now comes from those settings. On (default; restores the bounded-request
+    # invariant): every query, read and write runs under a server-enforced
+    # transaction timeout of neo4j_query_timeout_s, which must lie in (0, 30) so
+    # the server gives up before the caller's budget does. Off: no driver-side
+    # timeout (the server's db.transaction.timeout applies).
+    neo4j_query_timeout_enabled: bool = True
+    neo4j_query_timeout_s: float = Field(default=25.0, gt=0, lt=30)
 
     # CEG-007: there was a `redis_url` here, and a redis service in both compose
     # files, and a redis dependency in requirements — and no `import redis`

@@ -15,6 +15,7 @@ Tests calibration report, forward simulation NDCG, Kendall-tau, drift detection.
 
 from __future__ import annotations
 
+import math
 from unittest.mock import MagicMock
 
 import pytest
@@ -100,12 +101,20 @@ class TestRunCalibration:
         assert report.results[0].actual_score is None
         assert report.results[0].diff == -1.0
 
-    def test_empty_pairs(self):
+    def test_empty_pairs_is_not_a_pass(self):
+        """D6 / SC-002: nothing checked is no evidence the scores satisfy the spec."""
         spec = _make_domain_spec()
         calibrator = ScoreCalibrator(spec)
         report = calibrator.run_calibration([], {})
-        assert report.overall_pass is True
+        assert report.overall_pass is False
         assert report.total_pairs == 0
+        assert report.passed == 0
+        assert report.failed == 0
+
+    def test_empty_pairs_with_scores_supplied_is_not_a_pass(self):
+        """Scores without any declared pair to check them against still pass nothing."""
+        report = ScoreCalibrator(_make_domain_spec()).run_calibration([], {("A", "B"): 0.5})
+        assert report.overall_pass is False
 
     def test_score_above_max(self):
         pairs = [
@@ -181,6 +190,73 @@ class TestForwardSimulation:
 
         assert report.ndcg == pytest.approx(1.0, abs=0.001)
         assert report.diverged is False
+
+
+def _ndcg_at_k_from_first_principles(abstract: list[str], concrete: list[str]) -> float:
+    """NDCG@k, k = len(concrete): graded relevance n - position in the abstract ranking.
+
+    Computed independently of engine code: the ideal DCG is the DCG of the
+    abstract ranking's own top-k relevances.
+    """
+    n = len(abstract)
+    relevance = {cid: n - i for i, cid in enumerate(abstract)}
+    dcg = sum(relevance.get(cid, 0) / math.log2(rank + 2) for rank, cid in enumerate(concrete))
+    ideal = sorted(relevance.values(), reverse=True)[: len(concrete)]
+    idcg = sum(rel / math.log2(rank + 2) for rank, rel in enumerate(ideal))
+    return dcg / idcg
+
+
+@pytest.mark.unit
+class TestForwardSimulationIdealBasis:
+    """D6 / SC-002: the ideal DCG comes from the abstract ranking, not from re-sorting the concrete list."""
+
+    def test_single_low_relevance_item_is_diverged(self):
+        """[a,b,c,d] vs [d]: re-sorting [d]'s own relevances made it its own ideal (NDCG 1.0)."""
+        report = ScoreCalibrator(_make_domain_spec()).forward_simulate(["a", "b", "c", "d"], ["d"])
+
+        # d has relevance 1, the abstract top-1 has relevance 4: NDCG@1 = 1/4.
+        assert report.ndcg == pytest.approx(0.25, abs=1e-6)
+        assert report.ndcg < 1.0
+        assert report.diverged is True
+
+    def test_irrelevant_items_ahead_of_the_top_item(self):
+        abstract = ["a", "b", "c", "d"]
+        concrete = ["x", "y", "a"]
+        report = ScoreCalibrator(_make_domain_spec()).forward_simulate(abstract, concrete)
+
+        # DCG  = 4 / log2(4) = 2.0
+        # IDCG = 4 / log2(2) + 3 / log2(3) + 2 / log2(4) = 4 + 1.892789 + 1 = 6.892789
+        expected = 2.0 / (4.0 + 3.0 / math.log2(3) + 1.0)
+        assert expected == pytest.approx(_ndcg_at_k_from_first_principles(abstract, concrete), abs=1e-12)
+        assert expected == pytest.approx(0.2902, abs=1e-4)
+        assert report.ndcg == pytest.approx(expected, abs=1e-6)
+        assert report.diverged is True
+
+    def test_correct_prefix_is_a_perfect_ndcg_at_k(self):
+        """The abstract top-2 in order is the ideal at k=2: not diverged."""
+        report = ScoreCalibrator(_make_domain_spec()).forward_simulate(["a", "b", "c", "d"], ["a", "b"])
+        assert report.ndcg == pytest.approx(1.0, abs=1e-6)
+        assert report.diverged is False
+
+    def test_swapped_prefix_scores_below_one(self):
+        abstract = ["a", "b", "c", "d"]
+        concrete = ["b", "a"]
+        report = ScoreCalibrator(_make_domain_spec()).forward_simulate(abstract, concrete)
+        assert report.ndcg == pytest.approx(_ndcg_at_k_from_first_principles(abstract, concrete), abs=1e-6)
+        assert report.ndcg < 1.0
+
+    def test_concrete_longer_than_abstract(self):
+        """k beyond the abstract list: the ideal holds only the n abstract relevances."""
+        abstract = ["a", "b"]
+        concrete = ["a", "b", "x", "y"]
+        report = ScoreCalibrator(_make_domain_spec()).forward_simulate(abstract, concrete)
+        assert report.ndcg == pytest.approx(1.0, abs=1e-6)
+        assert report.diverged is False
+
+    def test_no_overlap_is_zero(self):
+        report = ScoreCalibrator(_make_domain_spec()).forward_simulate(["a", "b"], ["x", "y"])
+        assert report.ndcg == 0.0
+        assert report.diverged is True
 
 
 @pytest.mark.unit
@@ -259,6 +335,20 @@ class TestCalibrationReport:
         assert report["status"] == "calibration_spec_loaded"
         assert report["total_pairs"] == 1
         assert report["weight_set"] == "default"
+
+    def test_report_is_an_honest_spec_echo(self):
+        """D6: the report echoes the declaration; its message never claims scores were verified."""
+        cal = CalibrationSpec(
+            pairs=[CalibrationPair(node_a="A", node_b="B", expected_score_min=0.3, expected_score_max=0.7, label="ab")],
+            weight_set="default",
+        )
+        report = ScoreCalibrator(_make_domain_spec(calibration=cal)).generate_calibration_report("test_domain")
+
+        assert set(report) == {"domain_id", "status", "total_pairs", "weight_set", "pairs", "message"}
+        assert report["pairs"] == [{"label": "ab", "node_a": "A", "node_b": "B", "expected_range": [0.3, 0.7]}]
+        message = report["message"]
+        assert "No scores were computed or verified" in message
+        assert "Run calibration_run to verify" not in message
 
     def test_empty_pairs_in_spec(self):
         cal = CalibrationSpec(pairs=[])

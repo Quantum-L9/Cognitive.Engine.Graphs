@@ -20,7 +20,7 @@ import os
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from neo4j import AsyncDriver, AsyncGraphDatabase
+from neo4j import AsyncDriver, AsyncGraphDatabase, Query, unit_of_work
 from neo4j import exceptions as neo4j_exceptions
 
 from engine.graph.circuit_breaker import BreakerState, CircuitBreaker
@@ -86,6 +86,38 @@ def _provision_inside_breaker() -> bool:
     from engine.config.settings import settings
 
     return settings.neo4j_provision_inside_breaker
+
+
+def _query_timeout() -> float | None:
+    """D8: the transaction timeout every engine query carries, or None when the flag is off.
+
+    ``neo4j_query_timeout_s`` is validated to (0, 30) by ``Settings``, so the
+    server abandons a statement before the 30 s TransportHeader caller budget.
+    """
+    from engine.config.settings import settings
+
+    if not settings.neo4j_query_timeout_enabled:
+        return None
+    return float(settings.neo4j_query_timeout_s)
+
+
+def _bounded_statement(cypher: str, timeout: float | None) -> str | Query:
+    """The statement ``session.run`` receives: a timed ``Query``, or the bare text when unbounded."""
+    if timeout is None:
+        return cypher
+    return Query(cypher, timeout=timeout)
+
+
+def _bounded_transaction(func: Any, timeout: float | None) -> Any:
+    """A transaction function carrying ``timeout``, unless it is unbounded or already configured.
+
+    A function the caller decorated with ``neo4j.unit_of_work(timeout=...)``
+    keeps its own timeout; its metadata is carried over either way.
+    ``unit_of_work`` wraps rather than mutates, so the caller's function is untouched.
+    """
+    if timeout is None or getattr(func, "timeout", None) is not None:
+        return func
+    return unit_of_work(metadata=getattr(func, "metadata", None), timeout=timeout)(func)
 
 
 def _looks_like_absent_database(exc: Exception) -> bool:
@@ -206,13 +238,16 @@ class GraphDriver:
                 logger.warning("Driver already connected")
                 return
 
+            # D8: the pool comes from the declared settings, not literals.
+            from engine.config.settings import settings
+
             logger.info(f"Connecting to Neo4j at {self.uri}")
             self._driver = AsyncGraphDatabase.driver(
                 self.uri,
                 auth=(self.username, self.password),
-                max_connection_lifetime=3600,
-                max_connection_pool_size=50,
-                connection_acquisition_timeout=60,
+                max_connection_lifetime=settings.neo4j_max_connection_lifetime,
+                max_connection_pool_size=settings.neo4j_pool_size,
+                connection_acquisition_timeout=settings.neo4j_connection_acquisition_timeout,
             )
 
             # Verify connectivity
@@ -244,11 +279,18 @@ class GraphDriver:
         parameters: dict[str, Any] | None = None,
         database: str = "neo4j",
     ) -> list[Any]:
-        """Execute Cypher query without circuit breaker (internal)."""
+        """Execute Cypher query without circuit breaker (internal).
+
+        D8: the statement carries the configured transaction timeout, except on
+        the ``system`` database, where only administrative commands run (the
+        provisioning ``CREATE DATABASE ... WAIT`` waits on the DBMS, not on a
+        domain statement, and has its own WAIT bound).
+        """
         driver = self.get_driver()
+        statement = _bounded_statement(cypher, None if database == "system" else _query_timeout())
 
         async with driver.session(database=database) as session:
-            result = await session.run(cypher, parameters or {})
+            result = await session.run(statement, parameters or {})
             records: list[Any] = await result.data()
             return records
 
@@ -291,7 +333,7 @@ class GraphDriver:
         from neo4j import READ_ACCESS
 
         async with driver.session(database=database, default_access_mode=READ_ACCESS) as session:
-            records: list[Any] = await session.execute_read(_read)
+            records: list[Any] = await session.execute_read(_bounded_transaction(_read, _query_timeout()))
             return records
 
     async def _classified(
@@ -564,9 +606,10 @@ class GraphDriver:
         if transaction_function is None and cypher is None:
             raise ValueError("execute_write requires a transaction function or cypher=")
 
+        timeout = _query_timeout()
         async with driver.session(database=database) as session:
             if transaction_function is not None:
-                return await session.execute_write(transaction_function, *args, **kwargs)
+                return await session.execute_write(_bounded_transaction(transaction_function, timeout), *args, **kwargs)
 
             async def _run_statement(tx: Any) -> dict[str, Any]:
                 result = await tx.run(cypher, parameters or {})
@@ -584,7 +627,7 @@ class GraphDriver:
                     "labels_added": counters.labels_added,
                 }
 
-            return await session.execute_write(_run_statement)
+            return await session.execute_write(_bounded_transaction(_run_statement, timeout))
 
     @_unwrap_breaker_outcomes
     async def execute_write(
