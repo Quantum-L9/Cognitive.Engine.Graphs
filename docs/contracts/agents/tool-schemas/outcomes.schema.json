@@ -58,11 +58,11 @@
       "description": "Optional replay key (outcome_idempotency_enabled, FEEDBACK-IDEMP-01): a replay with the same id records nothing new and propagates at most once; a replay with different match_id, candidate_id or outcome is refused. Omitted: the server mints an id, and a retry cannot be recognised."
     },
     "query_entity_id": {
-      "type": ["string", "integer"],
+      "type": ["string", "integer", "null"],
       "minLength": 1,
       "minimum": -9223372036854775808,
       "maximum": 9223372036854775807,
-      "description": "Optional, additive (L8 item 3, outcome_preference_history_enabled): the declared id of the query entity this outcome answers, on the fingerprint direction's queryentity label. Given, handle_outcomes also links that entity to the outcome node the way a preference_attention dimension reads it. Omitted: the outcome is written exactly as before."
+      "description": "Optional, additive (L8 item 3, outcome_preference_history_enabled): the declared id of the query entity this outcome answers, on the fingerprint direction's queryentity label. Given, handle_outcomes also links that entity to the outcome node the way a preference_attention dimension reads it. Omitted or null: the outcome is written exactly as before."
     },
     "fingerprint": {
       "type": "object",

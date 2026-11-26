@@ -151,8 +151,20 @@ one transaction. A malformed id (empty, boolean, or an integer outside signed
 does not write raises `ValidationError` before anything is written; a keyed
 replay naming another query entity raises `ValidationError` and changes
 nothing; a query entity absent from the graph links nothing; the response adds
-`preference_history: {query_entity_id, linked_dimensions}`. Omitted, or flag
-off: unchanged.
+`preference_history: {query_entity_id, linked_dimensions}`. Omitted, null, or
+flag off: unchanged.
+
+```python
+# WRONG: two query entity labels and no direction to choose one; refused before any write
+{"match_id": "m-1", "candidate_id": "depot-1", "outcome": "success",
+ "query_entity_id": "window-1"}
+
+# RIGHT: fingerprint.match_direction names the direction whose queryentity label
+# (here LaunchWindow) holds the entity with window_id "window-1"
+{"match_id": "m-1", "candidate_id": "depot-1", "outcome": "success",
+ "fingerprint": {"match_direction": "window_to_depot"},
+ "query_entity_id": "window-1"}
+```
 
 RU-006 (`OUTCOME_SCHEMA_UNIFIED`, default on, R1a-DEC-02): `handle_outcomes` is
 the canonical outcome writer. It creates one `feedbackloop.outcome_node_label`
