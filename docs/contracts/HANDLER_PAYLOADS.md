@@ -135,7 +135,21 @@ class OutcomesPayload(BaseModel):
     outcome: Literal["success", "failure", "partial"]
     value: Any | None = None
     fingerprint: OutcomeFingerprint = OutcomeFingerprint()
+    query_entity_id: str | int | None = None  # L8 item 3: optional, additive
 ```
+
+`query_entity_id` (optional, additive; `OUTCOME_PREFERENCE_HISTORY_ENABLED`,
+default on, FEATURE_GATES §30a): the declared id of the query entity the
+outcome answers, on the `fingerprint.match_direction`'s `queryentity` label (or
+the pack's only one). Given, and the pack declares a `preference_attention`
+dimension for that direction, `handle_outcomes` also `MERGE`s
+`(qe)-[:<outcome_relation>]->(o)`, stores the outcome under the dimension's
+`success_property` and copies the candidate's community onto `o`, so the
+dimension can read the history. A malformed id, an ambiguous label, or a
+dimension reading an outcome node the writer does not write raises
+`ValidationError` before anything is written; a query entity absent from the
+graph links nothing; the response adds `preference_history:
+{query_entity_id, linked_dimensions}`. Omitted, or flag off: unchanged.
 
 RU-006 (`OUTCOME_SCHEMA_UNIFIED`, default on, R1a-DEC-02): `handle_outcomes` is
 the canonical outcome writer. It creates one `feedbackloop.outcome_node_label`
