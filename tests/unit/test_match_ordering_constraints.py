@@ -103,9 +103,13 @@ class TestShippedDefaults:
 class TestHardConstraintIsAWhereBeforeTheCut:
     async def test_hard_constraint_filters_the_scoring_rows(self) -> None:
         cypher, params = await _cypher(_spec(HARD))
-        scoring_with = "(0.6 * depot_reliability) + (0.3 * port_capacity) AS score\n"
-        hard_where = "WHERE NOT coalesce(depot_reliability < $arb_hard_threshold_0, false)\n"
-        assert scoring_with + hard_where in cypher
+        lines = cypher.split("\n")
+        where_at = lines.index("WHERE NOT coalesce(depot_reliability < $arb_hard_threshold_0, false)")
+        # The WHERE belongs to the scoring WITH that binds `score`, whatever the
+        # composite expression is (lane L2 owns it): structure, not text.
+        scoring_with = lines[where_at - 1]
+        assert scoring_with.startswith("WITH candidate, ")
+        assert scoring_with.endswith(" AS score")
         assert params["arb_hard_threshold_0"] == 0.5
 
     async def test_hard_where_precedes_every_order_by_and_the_limit(self) -> None:
