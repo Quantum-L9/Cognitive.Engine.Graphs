@@ -50,7 +50,8 @@ def _bounded_settings(**overrides: Any) -> Settings:
         "neo4j_connection_acquisition_timeout": 5,
     }
     values.update(overrides)
-    return Settings(neo4j_password="test-pw", api_secret_key="test-key", **values)
+    # l9_env pinned to dev so a local .env cannot select prod; no credential is needed.
+    return Settings(l9_env="dev", **values)
 
 
 @pytest_asyncio.fixture

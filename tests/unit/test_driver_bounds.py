@@ -41,7 +41,8 @@ pytestmark = pytest.mark.unit
 
 
 def _settings(**overrides: Any) -> Settings:
-    return Settings(neo4j_password="test-pw", api_secret_key="test-key", **overrides)
+    # l9_env pinned to dev so a local .env cannot select prod; no credential is needed.
+    return Settings(l9_env="dev", **overrides)
 
 
 class _Result:
@@ -121,7 +122,7 @@ async def _connected(recorder: _Recorder) -> GraphDriver:
         recorder.driver_kwargs = dict(kwargs)
         return _FakeAsyncDriver(recorder)
 
-    driver = GraphDriver(uri="bolt://fake:7687", username="u", password="p")
+    driver = GraphDriver(uri="bolt://fake:7687")
     with patch("engine.graph.driver.AsyncGraphDatabase.driver", side_effect=_factory):
         await driver.connect()
     return driver
@@ -172,11 +173,11 @@ async def test_driver_pool_is_built_from_settings() -> None:
         neo4j_connection_acquisition_timeout=9,
     )
     with patch("engine.config.settings.settings", overrides):
-        await _connected(recorder)
+        driver = await _connected(recorder)
     assert recorder.driver_kwargs["max_connection_pool_size"] == 7
     assert recorder.driver_kwargs["max_connection_lifetime"] == 123
     assert recorder.driver_kwargs["connection_acquisition_timeout"] == 9
-    assert recorder.driver_kwargs["auth"] == ("u", "p")
+    assert recorder.driver_kwargs["auth"] == (driver.username, driver.password)
 
 
 # ── Transaction timeout on every query ──────────────────────────────────────
