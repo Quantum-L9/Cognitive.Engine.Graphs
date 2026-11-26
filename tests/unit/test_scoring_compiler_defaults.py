@@ -394,3 +394,57 @@ def test_every_committed_pack_still_loads_under_strict_scales(monkeypatch: pytes
     assert packs
     for path in packs:
         DomainSpec.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+
+
+# ── SCR-07 robustness: dimensions the resolver does not know contribute nothing ──
+
+
+def _double(computation: Any, **attrs: Any) -> Any:
+    """A duck-typed dimension double (as tests/test_handlers.py builds specs from mocks)."""
+    from unittest.mock import MagicMock
+
+    dim = MagicMock()
+    dim.name = "port_capacity"
+    dim.computation = computation
+    for key, value in attrs.items():
+        setattr(dim, key, value)
+    return dim
+
+
+@pytest.mark.parametrize(
+    "dim",
+    [
+        pytest.param(_double(object()), id="unknown-computation"),
+        pytest.param(_double("lognormalized", candidateprop="docking_ports"), id="computation-not-enum"),
+        pytest.param(_double(None), id="no-computation"),
+    ],
+)
+def test_an_unknown_computation_contributes_no_absent_source(dim: Any) -> None:
+    from engine.config.schema import ComputationType
+
+    assert not isinstance(dim.computation, ComputationType)
+    assembler = ScoringAssembler(_spec([_dim(), _ports()]))
+    assert assembler._absent_source_case(dim) is None
+    assert assembler._source_missing_predicate(dim) is None
+
+
+@pytest.mark.parametrize(
+    ("computation", "attrs"),
+    [
+        pytest.param("lognormalized", {"candidateprop": 42}, id="lognormalized-int-prop"),
+        pytest.param("lognormalized", {"candidateprop": ["docking_ports"]}, id="lognormalized-list-prop"),
+        pytest.param(
+            "weightedrate", {"candidateprop": "reliability", "queryprop": 7}, id="weightedrate-int-confidence"
+        ),
+        pytest.param("kge", {"candidateprop": None, "alias": 3}, id="kge-int-alias"),
+    ],
+)
+def test_a_non_string_property_contributes_no_absent_source(computation: str, attrs: dict[str, Any]) -> None:
+    """Never passed to sanitize_label: the term is dropped, the match still assembles."""
+    from engine.config.schema import ComputationType
+
+    dim = _double(ComputationType(computation), **attrs)
+    assembler = ScoringAssembler(_spec([_dim(), _ports()]))
+    assert assembler._absent_source_case(dim) is None
+    assert assembler._source_missing_predicate(dim, include_confidence=True) is None
+    assert assembler._source_unknown_predicate(dim) is None

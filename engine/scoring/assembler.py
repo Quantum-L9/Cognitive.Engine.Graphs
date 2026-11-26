@@ -348,7 +348,7 @@ class ScoringAssembler:
         name = dim.name
         if not isinstance(name, str) or sanitize_label(name) != name:
             return None
-        if self._source_owner(dim) != "candidate":
+        if not isinstance(dim.computation, ComputationType) or self._source_owner(dim) != "candidate":
             return None
         predicate = self._source_missing_predicate(dim, include_confidence=True)
         if predicate is None:
@@ -1040,8 +1040,11 @@ class ScoringAssembler:
         computation = dim.computation
         if computation in (ComputationType.CUSTOMCYPHER, ComputationType.COMMUNITYBRIDGE):
             return None
-        if computation in self._ALIAS_SOURCED and dim.alias:
-            return sanitize_label(dim.alias)
+        alias: Any = dim.alias  # Any: duck-typed dimension doubles reach here too
+        if computation in self._ALIAS_SOURCED and alias is not None and not isinstance(alias, str):
+            return None  # an alias that is not a name: the source cannot be resolved
+        if computation in self._ALIAS_SOURCED and alias:
+            return sanitize_label(alias)
         if computation is ComputationType.TRAVERSALALIAS:
             return None
         return "candidate"
@@ -1072,14 +1075,19 @@ class ScoringAssembler:
         community_bridge, an aliasless kge without candidateprop): the legacy
         wrapper is kept for those.
         """
+        computation: Any = dim.computation  # Any: duck-typed dimension doubles reach here too
+        if not isinstance(computation, ComputationType):
+            # Same rule as _compile_dimension: an unknown computation has no
+            # resolved source (it logs and falls back there), so no guard here.
+            return None
         owner = self._source_owner(dim)
         prop = self._source_property(dim) if owner else None
-        if not owner or not prop:
+        if not owner or not isinstance(prop, str) or not prop:
             return None
         predicate = f"{owner}.{sanitize_label(prop)} IS NULL"
         if dim.computation is ComputationType.GEODECAY:
             lon = self._geodecay_source_longitude(dim)
-            if lon is None:
+            if not isinstance(lon, str) or not lon:
                 return None
             predicate = f"{predicate} OR {owner}.{sanitize_label(lon)} IS NULL"
         if dim.computation is ComputationType.WEIGHTEDRATE:
@@ -1091,8 +1099,10 @@ class ScoringAssembler:
             if include_confidence is None:
                 include_confidence = settings.weightedrate_unknown_confidence_enabled
             if include_confidence:
-                conf = sanitize_label(self._weightedrate_confidence_property(dim))
-                predicate = f"{predicate} OR {owner}.{conf} IS NULL"
+                conf: Any = self._weightedrate_confidence_property(dim)
+                if not isinstance(conf, str):
+                    return None
+                predicate = f"{predicate} OR {owner}.{sanitize_label(conf)} IS NULL"
         return predicate
 
     def _source_unknown_predicate(self, dim: ScoringDimensionSpec) -> str | None:
@@ -1104,7 +1114,7 @@ class ScoringAssembler:
         if dim.computation is not ComputationType.LOGNORMALIZED or self._source_owner(dim) != "candidate":
             return None
         prop = self._source_property(dim)
-        return f"candidate.{sanitize_label(prop)} <= -1" if prop else None
+        return f"candidate.{sanitize_label(prop)} <= -1" if isinstance(prop, str) and prop else None
 
     @staticmethod
     def _geodecay_source_longitude(dim: ScoringDimensionSpec) -> str | None:
