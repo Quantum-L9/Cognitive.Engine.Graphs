@@ -63,10 +63,17 @@ async def two_tenants(graph_driver, tmp_path: Path) -> AsyncGenerator[None, None
         await graph_driver.execute_query(
             cypher=f"CREATE DATABASE `{tenant}` IF NOT EXISTS WAIT", parameters={}, database="system"
         )
+    # IF NOT EXISTS keeps whatever a reused server or an interrupted run left behind:
+    # start every test from an empty graph, not only end it with one.
+    await _wipe(graph_driver)
     get_state().reset()
     init_dependencies(graph_driver, DomainPackLoader(config_path=str(tmp_path)))
     yield
     get_state().reset()
+    await _wipe(graph_driver)
+
+
+async def _wipe(graph_driver: Any) -> None:
     for tenant in (ALPHA, BETA):
         await graph_driver.execute_write(cypher="MATCH (n) DETACH DELETE n", parameters={}, database=tenant)
 
