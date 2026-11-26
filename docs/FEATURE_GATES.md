@@ -79,6 +79,9 @@ independently of the code default.
 | Relationship Sync Audit On Commit | `RELATIONSHIP_SYNC_AUDIT_ON_COMMIT_ENABLED` (`relationship_sync_audit_on_commit_enabled`) | `True` | unset | active (hardening); refused/rolled-back batches leave no success audit record — see §28 |
 | Observed Association Required | `OBSERVED_ASSOCIATION_REQUIRED` (`observed_association_required`) | `False` | unset | staged (D-9, #386); a present `observed_association` is always checked; on, an observed row on an `observedfrom` endpoint must carry one — see §28 |
 | Evidence Identity Per Type | `EVIDENCE_IDENTITY_PER_TYPE_ENABLED` (`evidence_identity_per_type_enabled`) | `False` | unset | dormant; score dedupes on `(relationship_type, evidence_ref)` — see §28 |
+| Malformed Evidence Abstention | `SCORE_MALFORMED_EVIDENCE_ABSTENTION_ENABLED` (`score_malformed_evidence_abstention_enabled`) | `True` | unset | active; a malformed evidence edge is never absent evidence — see §38a |
+| Feedback Per-Class Minimum | `FEEDBACK_PER_CLASS_MINIMUM_ENABLED` (`feedback_per_class_minimum_enabled`), `FEEDBACK_MIN_SAMPLES_PER_CLASS` (`feedback_min_samples_per_class`, `5`) | `True` | unset | active; score_feedback proposes only with the minimum in each class — see §38a |
+| Uninformative Neutral Hop Trust | `HOP_TRUST_NEUTRAL_UNINFORMATIVE_ENABLED` (`hop_trust_neutral_uninformative_enabled`) | `True` | unset | dormant module (no engine caller); neutral hop trust 0.5 — see §38a |
 | Domain Database Provisioning | `AUTO_CREATE_DOMAIN_DATABASE` (`auto_create_domain_database`) | `False` | unset | dormant; create the tenant domain database on first use — see §14 |
 | Health API (admin health_* subactions) | `HEALTH_API_ENABLED` (`health_api_enabled`) | `True` | unset | active (operator decision 2026-11-15); AI-readiness assess/report surface for EIE's enrichment trigger — see §15 |
 | Unvalidated Domain Packs | `UNVALIDATED_DOMAIN_PACKS_ENABLED` (`unvalidated_domain_packs_enabled`) | `False` | unset | dormant; seven packs whose gates do not compile to executable, faithful Cypher — see §16 |
@@ -2400,6 +2403,28 @@ Off: the relationship is unkeyed, `fromrow` keys are undeclared, and
 non-empty form, on the same relationship as the polymer.
 
 Tests: `tests/unit/test_buyer_line_identity.py`.
+
+## 38a. Second-audit scoring fixes (L8, 2026-11-26)
+
+Operator decision 2026-11-26 ("go with recommendations"). Each flag ships on (a
+correctness fix); off restores the behaviour before the fix.
+
+| Flag (env var) | Default | Finding | On | Off |
+|---|---|---|---|---|
+| `score_malformed_evidence_abstention_enabled` (`SCORE_MALFORMED_EVIDENCE_ABSTENTION_ENABLED`) | `true` | SCR-06 | `GraphEvidenceBinding.read` reports every stamped evidence edge it cannot turn into an observation in `EvidenceRead.malformed`, with its identity (`relationship_type`, and `evidence_ref` when it is a non-empty string, else unknown). `score_cohort` then abstains an entity with detail `malformed_evidence` (reason `insufficient_evidence`, `score: null`) when its only evidence is malformed, or when a malformed edge may share an identity with a readable one (same identity under `evidence_identity_per_type_enabled`; an unknown ref may be any). A malformed edge under its own identity is counted and the entity scores on its readable evidence. When the read reports any malformed edge, every entity in the result carries `malformed_evidence_count`. Live through `handle_score_remote` (behind `REMOTE_SCORE_ENABLED`) | The edge is skipped with a warning: an entity whose only evidence is malformed reads as `no_evidence`, and a valid edge scores although an unreadable one may be the same evidence |
+| `feedback_per_class_minimum_enabled` (`FEEDBACK_PER_CLASS_MINIMUM_ENABLED`) with `feedback_min_samples_per_class` (`FEEDBACK_MIN_SAMPLES_PER_CLASS`, default `5`, `>= 1`) | `true` | SCR-13 | `OutcomeFeedback.compute_feedback` (admin `score_feedback`, over outcomes `handle_outcomes` recorded) proposes a nudge for a dimension only when each class (success and failure) holds at least the minimum of scored outcomes. A dimension below it is reported with `positive_count` / `negative_count` and no nudge; the result names `min_samples_per_class` and, with no proposal, says so. `MIN_OUTCOMES` (10 in total) still applies first | One scored outcome per class is enough: nine successes and one failure produce a weight proposal |
+| `hop_trust_neutral_uninformative_enabled` (`HOP_TRUST_NEUTRAL_UNINFORMATIVE_ENABLED`) | `true` | SCR-05 | `hop_trust_from_entry` maps PENDING, DELEGATED and unknown statuses to `TRUST_NEUTRAL = 0.5`, the value `bayesian_update`'s symmetric likelihood treats as uninformative, and the timeout penalty degrades a completed hop down to it (25 s of a 30 s timeout: 0.65; at the timeout: 0.5). Dormant: no engine caller | `TRUST_NEUTRAL_LEGACY = 0.60`, which raises every belief it updates (0.5 becomes 0.6) |
+
+SCR-11 (docstrings, no flag): `engine/scoring/helpfulness.py` now states that
+it is dormant — no `ComputationType` dispatches to it, nothing imports it, and
+no engine code writes the `similarity_score` / `visit_count_normalized`
+properties it reads.
+
+Tests: `tests/unit/test_score_malformed_evidence.py`,
+`tests/integration/test_score_malformed_evidence.py`,
+`tests/unit/test_feedback_per_class_minimum.py`,
+`tests/integration/test_feedback_per_class_minimum.py`,
+`tests/unit/test_hop_trust_neutral.py`.
 
 ## 39. Value provenance precedence (#351 revision, 2026-11-24)
 

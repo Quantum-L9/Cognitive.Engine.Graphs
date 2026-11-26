@@ -413,16 +413,16 @@ class Settings(BaseSettings):
     # an entity whose only evidence is malformed, or whose malformed edge may
     # share an identity with a valid one, abstains with `malformed_evidence`,
     # and every entity carries `malformed_evidence_count`. Off: a malformed edge
-    # is dropped and its entity can read as `no_evidence`. FEATURE_GATES §39a.
+    # is dropped and its entity can read as `no_evidence`. FEATURE_GATES §38a.
     score_malformed_evidence_abstention_enabled: bool = True
     # SCR-13 (L8): admin score_feedback proposes a nudge for a dimension only
     # when each outcome class holds at least feedback_min_samples_per_class
-    # scored outcomes. Off: one sample per class is enough. FEATURE_GATES §39a.
+    # scored outcomes. Off: one sample per class is enough. FEATURE_GATES §38a.
     feedback_per_class_minimum_enabled: bool = True
     feedback_min_samples_per_class: int = Field(default=5, ge=1)
     # SCR-05 (L8): a GATE hop whose status carries no information (PENDING,
     # DELEGATED, unknown) maps to trust 0.5, the value a symmetric Bayesian
-    # update treats as uninformative. Off: 0.60. Dormant module. §39a.
+    # update treats as uninformative. Off: 0.60. Dormant module. §38a.
     hop_trust_neutral_uninformative_enabled: bool = True
 
     # Correctness remediation lane A (plan 0d84ec8, RU-001..RU-060)
