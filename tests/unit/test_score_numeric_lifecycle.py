@@ -67,7 +67,7 @@ from tests.fixtures.orbital_match import DIRECTION, ORBITAL
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[2]
-IMPORTANCE_BLOB = "4c94c36ee037470429dd2e1f728f2d3b486b9373"
+IMPORTANCE_BLOB = "c4f34dd517d9b41cc3947928183664e8eae529ab"  # SCR-11 (L8): docstrings, strict inputs
 DORMANT_MODULES = (
     "engine.scoring.belief_propagation",
     "engine.scoring.importance",

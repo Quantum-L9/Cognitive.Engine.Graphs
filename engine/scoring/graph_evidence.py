@@ -49,6 +49,7 @@ from engine.scoring.evidence_priority import (
     EvidenceObservation,
     EvidenceRead,
     EvidenceUnavailableError,
+    MalformedEvidence,
     approved_relevance_map,
 )
 from engine.sync.generator import RELATIONSHIP_EVIDENCE_SCHEMA
@@ -147,6 +148,16 @@ def _observation(row: dict[str, Any], now: datetime) -> EvidenceObservation | No
         return None
 
 
+def _malformed(row: dict[str, Any]) -> MalformedEvidence:
+    """The identity of an edge that did not parse; an unreadable ``evidence_ref`` is unknown (``None``)."""
+    ref = row["props"].get("evidence_ref")
+    return MalformedEvidence(
+        entity_ref=row["entity_ref"],
+        relationship_type=row["relationship_type"],
+        evidence_ref=ref if isinstance(ref, str) and ref else None,
+    )
+
+
 def _single_revision(rows: Sequence[dict[str, Any]]) -> str | None:
     """The source revision when every read edge reports the same one; never invented."""
     revisions = {row["props"].get("source_revision") for row in rows}
@@ -231,12 +242,25 @@ class GraphEvidenceBinding:
             msg = f"more than {MAX_EVIDENCE_EDGES} evidence edges for this cohort; refusing a truncated read"
             raise EvidenceUnavailableError(msg)
 
+        from engine.config.settings import settings
+
+        # SCR-06: a malformed edge is reported, so its entity abstains instead of
+        # reading as having no evidence. Off: the edge is dropped (legacy).
+        track_malformed = bool(settings.score_malformed_evidence_abstention_enabled)
         now = datetime.now(tz=UTC)
         observations = []
+        malformed = []
         for row in rows:
             observation = _observation(row, now)
+            # An edge without a readable evidence_ref parses (as ""), but its
+            # identity is unknown: with tracking on it is malformed, not an
+            # observation that could never share a valid edge's identity.
+            if observation is not None and track_malformed and not observation.evidence_ref:
+                observation = None
             if observation is None:
                 logger.warning("Skipping malformed evidence edge in tenant database %s", database)
+                if track_malformed:
+                    malformed.append(_malformed(row))
                 continue
             observations.append(observation)
         return EvidenceRead(
@@ -244,4 +268,5 @@ class GraphEvidenceBinding:
             database=database,
             source_revision=_single_revision(rows),
             observations=tuple(observations),
+            malformed=tuple(malformed),
         )

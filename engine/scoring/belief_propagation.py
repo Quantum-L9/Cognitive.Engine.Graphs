@@ -36,8 +36,20 @@ import math
 # ── Trust tier constants ───────────────────────────────────────────────────────
 
 TRUST_ENTAILMENT = 0.95  # Status: COMPLETED
-TRUST_NEUTRAL = 0.60  # Status: PENDING, DELEGATED
+# Status: PENDING, DELEGATED, unknown. 0.5 is the value ``bayesian_update``
+# treats as uninformative (SCR-05): a hop that says nothing moves no belief.
+TRUST_NEUTRAL = 0.5
+# The former neutral tier, which raised every belief it touched; restored only
+# while ``hop_trust_neutral_uninformative_enabled`` is off.
+TRUST_NEUTRAL_LEGACY = 0.60
 TRUST_CONTRADICTION = 0.10  # Status: FAILED, TIMEOUT
+
+
+def _neutral_trust() -> float:
+    """The neutral tier: uninformative (0.5), or the legacy 0.60 with the flag off."""
+    from engine.config.settings import settings
+
+    return TRUST_NEUTRAL if settings.hop_trust_neutral_uninformative_enabled else TRUST_NEUTRAL_LEGACY
 
 
 # ── Bayesian update (core primitive) ──────────────────────────────────────────
@@ -176,16 +188,22 @@ def hop_trust_from_entry(
 
     Mapping:
         COMPLETED  → 0.95 (entailment tier), degraded by timeout proximity
-        PENDING    → 0.60 (neutral tier)
-        DELEGATED  → 0.60 (neutral tier)
+        PENDING    → 0.5 (neutral tier: uninformative)
+        DELEGATED  → 0.5 (neutral tier: uninformative)
         FAILED     → 0.10 (contradiction tier)
         TIMEOUT    → 0.10 (contradiction tier)
-        unknown    → 0.60 (neutral tier)
+        unknown    → 0.5 (neutral tier: uninformative)
+
+    The neutral tier is 0.60 while ``hop_trust_neutral_uninformative_enabled``
+    is off (SCR-05): under the symmetric likelihood of ``bayesian_update`` that
+    value is evidence *for* the hypothesis, so a hop with no information raised
+    the chain's belief.
 
     Timeout Penalty:
         If the hop completed but duration_ms / timeout_ms exceeds 0.5, trust
-        degrades linearly from 0.95 down to 0.60 as the hop approaches its
-        timeout — a hop that barely finished is weaker evidence than a fast one.
+        degrades linearly from 0.95 down to the neutral tier as the hop
+        approaches its timeout — a hop that barely finished is weaker evidence
+        than a fast one, and one that finished at its timeout is no evidence.
 
     Args:
         status:      HopEntry.status
@@ -199,24 +217,25 @@ def hop_trust_from_entry(
         >>> hop_trust_from_entry("COMPLETED", 1000, 30000)
         0.95
         >>> round(hop_trust_from_entry("COMPLETED", 25000, 30000), 4)
-        0.7167
+        0.65
         >>> hop_trust_from_entry("FAILED", 5000, 30000)
         0.1
     """
+    neutral = _neutral_trust()
     if status == "COMPLETED":
         base_trust = TRUST_ENTAILMENT
     elif status in {"FAILED", "TIMEOUT"}:
         base_trust = TRUST_CONTRADICTION
     else:
         # PENDING, DELEGATED, and any unrecognized status
-        base_trust = TRUST_NEUTRAL
+        base_trust = neutral
 
     # Timeout proximity penalty (COMPLETED only)
     if status == "COMPLETED" and duration_ms > 0 and timeout_ms > 0:
         proximity = duration_ms / timeout_ms
         if proximity > 0.5:
             penalty_factor = (proximity - 0.5) / 0.5  # 0.0 → 1.0
-            degraded = TRUST_ENTAILMENT - penalty_factor * (TRUST_ENTAILMENT - TRUST_NEUTRAL)
-            return max(TRUST_NEUTRAL, degraded)
+            degraded = TRUST_ENTAILMENT - penalty_factor * (TRUST_ENTAILMENT - neutral)
+            return max(neutral, degraded)
 
     return base_trust

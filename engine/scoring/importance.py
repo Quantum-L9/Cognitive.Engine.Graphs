@@ -19,14 +19,21 @@ where C_count is a dictionary mapping vertex IDs to visit counts
 accumulated during multi-hop BFS traversal. Vertices visited more
 frequently from different reasoning paths are considered more important.
 
-Consumes:
-- Visit count data from MultiHopTraverser BFS results
-- Candidate node property `visit_count` (written by traverser)
+Wiring status (SCR-11): dormant. No engine or chassis module imports this one,
+there is no ``ComputationType`` for it (``ScoringAssembler`` cannot dispatch to
+it), and no domain pack can declare it; HopRAG is parked (CEG-KGE-PARK,
+``docs/PARKED_SUBSYSTEMS.md``). ``engine.traversal.multihop.MultiHopTraverser``
+returns visit counts in memory and writes no ``visit_count`` property, so
+``compile_importance_cypher`` reads a property no engine code writes; the
+in-memory ``ImportanceScorer`` takes whatever counts its caller passes.
+``engine.scoring.helpfulness`` does not import it either. Pinned as dormant by
+``tests/unit/test_score_numeric_lifecycle.py``.
 
-Integrates with:
-- engine.scoring.assembler.ScoringAssembler (via ComputationType.IMPORTANCE dispatch)
-- engine.scoring.helpfulness.HelpfulnessScorer (provides IMP component)
-- engine.traversal.multihop.MultiHopTraverser (produces visit counts)
+With ``importance_strict_inputs_enabled`` (default on) ``compute`` raises for a
+vertex that is not in ``visit_counts``, as documented, and the Cypher expression
+scores ``default_when_null`` when ``$total_visits`` is null or not positive
+instead of dividing by it. Off: an unknown vertex scores 0.0 and the division
+is unguarded.
 """
 
 from __future__ import annotations
@@ -37,6 +44,13 @@ from dataclasses import dataclass
 from engine.utils.security import cypher_number, sanitize_label
 
 logger = logging.getLogger(__name__)
+
+
+def _strict_inputs() -> bool:
+    """SCR-11: reject an unknown vertex and guard the Cypher division (``importance_strict_inputs_enabled``)."""
+    from engine.config.settings import settings
+
+    return bool(settings.importance_strict_inputs_enabled)
 
 
 @dataclass(frozen=True)
@@ -84,10 +98,15 @@ class ImportanceScorer:
             ImportanceResult with normalized score.
 
         Raises:
-            ValueError: If visit_counts is empty or vertex_id not found.
+            ValueError: If visit_counts is empty or vertex_id not found (the
+                latter only with ``importance_strict_inputs_enabled``; off, an
+                unknown vertex scores 0.0).
         """
         if not visit_counts:
             msg = "visit_counts must be non-empty"
+            raise ValueError(msg)
+        if _strict_inputs() and vertex_id not in visit_counts:
+            msg = f"vertex_id {vertex_id!r} is not in visit_counts"
             raise ValueError(msg)
 
         count = visit_counts.get(vertex_id, 0)
@@ -177,7 +196,9 @@ def compile_importance_cypher(
     """Generate Cypher expression for Importance scoring dimension.
 
     The total_visits value is passed as a query parameter ($total_visits)
-    since it requires aggregation across all candidates.
+    since it requires aggregation across all candidates. With
+    ``importance_strict_inputs_enabled`` a null or non-positive
+    ``$total_visits`` scores ``default_when_null`` instead of dividing by it.
 
     Args:
         visit_count_prop: Node property name for raw visit count.
@@ -189,7 +210,14 @@ def compile_importance_cypher(
     """
     visit_count_prop = sanitize_label(visit_count_prop)
     total_visits_param = sanitize_label(total_visits_param)
+    default = cypher_number(default_when_null)
+    if _strict_inputs():
+        return (
+            f"CASE WHEN candidate.{visit_count_prop} IS NULL OR ${total_visits_param} IS NULL "
+            f"OR ${total_visits_param} <= 0 THEN {default} "
+            f"ELSE toFloat(candidate.{visit_count_prop}) / ${total_visits_param} END"
+        )
     return (
-        f"CASE WHEN candidate.{visit_count_prop} IS NULL THEN {cypher_number(default_when_null)} "
+        f"CASE WHEN candidate.{visit_count_prop} IS NULL THEN {default} "
         f"ELSE toFloat(candidate.{visit_count_prop}) / ${total_visits_param} END"
     )

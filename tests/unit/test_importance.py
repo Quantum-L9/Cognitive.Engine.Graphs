@@ -61,8 +61,20 @@ class TestImportanceScorer:
         assert r2.score == pytest.approx(0.3, abs=1e-9)
         assert r3.score == pytest.approx(0.2, abs=1e-9)
 
-    def test_missing_vertex_zero_importance(self) -> None:
-        """Vertex not in visit_counts should have importance 0.0."""
+    def test_missing_vertex_raises_as_documented(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SCR-11: a vertex not in visit_counts raises ValueError, as the docstring says."""
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "importance_strict_inputs_enabled", True)
+        scorer = ImportanceScorer()
+        with pytest.raises(ValueError, match="'v_missing' is not in visit_counts"):
+            scorer.compute("v_missing", {"v1": 5, "v2": 3})
+
+    def test_missing_vertex_zero_importance_with_strict_inputs_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Rollback: with importance_strict_inputs_enabled off, an unknown vertex scores 0.0."""
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "importance_strict_inputs_enabled", False)
         scorer = ImportanceScorer()
         counts = {"v1": 5, "v2": 3}
         result = scorer.compute("v_missing", counts)
@@ -169,3 +181,23 @@ class TestCompileImportanceCypher:
     def test_expression_is_string(self) -> None:
         """Expression should be a string."""
         assert isinstance(compile_importance_cypher(), str)
+
+    def test_division_is_guarded_against_a_null_or_non_positive_total(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SCR-11: no division by a null, zero or negative $total_visits."""
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "importance_strict_inputs_enabled", True)
+        expr = compile_importance_cypher(default_when_null=0.25)
+        assert expr == (
+            "CASE WHEN candidate.visit_count IS NULL OR $total_visits IS NULL "
+            "OR $total_visits <= 0 THEN 0.25 "
+            "ELSE toFloat(candidate.visit_count) / $total_visits END"
+        )
+
+    def test_division_is_unguarded_with_strict_inputs_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        monkeypatch.setattr(settings, "importance_strict_inputs_enabled", False)
+        assert compile_importance_cypher() == (
+            "CASE WHEN candidate.visit_count IS NULL THEN 0.0 ELSE toFloat(candidate.visit_count) / $total_visits END"
+        )
