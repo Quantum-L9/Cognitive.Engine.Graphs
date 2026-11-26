@@ -959,6 +959,34 @@ class ScoringAssembler:
         }
     )
 
+    def _source_owner(self, dim: ScoringDimensionSpec) -> str | None:
+        """The variable holding the dimension's source property; ``None`` when there is none."""
+        computation = dim.computation
+        if computation in (ComputationType.CUSTOMCYPHER, ComputationType.COMMUNITYBRIDGE):
+            return None
+        if computation in self._ALIAS_SOURCED and dim.alias:
+            return sanitize_label(dim.alias)
+        if computation is ComputationType.TRAVERSALALIAS:
+            return None
+        return "candidate"
+
+    def _source_property(self, dim: ScoringDimensionSpec) -> str | None:
+        """The stored property the compiler reads for the dimension, if a single one exists."""
+        computation = dim.computation
+        if computation is ComputationType.KGE:
+            return dim.candidateprop or ("kge_score" if dim.alias else None)
+        if computation in self._STRUCTURAL_SOURCE_KIND:
+            # The property the compiler resolves: the declaration, else (with
+            # declared_structural_properties_required_enabled off) the former
+            # default; flag on, an undeclared one is refused by the compiler.
+            from engine.config.structural_vocabulary import UndeclaredStructuralPropertyError, declared
+
+            try:
+                return declared(dim.candidateprop, self._STRUCTURAL_SOURCE_KIND[computation], dim.name)
+            except UndeclaredStructuralPropertyError:
+                return None
+        return dim.candidateprop or self._DEFAULT_SOURCE_PROPERTY.get(computation)
+
     def _source_missing_predicate(self, dim: ScoringDimensionSpec) -> str | None:
         """Cypher predicate true when the dimension's stored source property is missing.
 
@@ -966,40 +994,34 @@ class ScoringAssembler:
         community_bridge, an aliasless kge without candidateprop): the legacy
         wrapper is kept for those.
         """
-        computation = dim.computation
-        if computation in (ComputationType.CUSTOMCYPHER, ComputationType.COMMUNITYBRIDGE):
-            return None
-        owner = "candidate"
-        if computation in self._ALIAS_SOURCED and dim.alias:
-            owner = sanitize_label(dim.alias)
-        elif computation is ComputationType.TRAVERSALALIAS:
-            return None
-        if computation is ComputationType.KGE:
-            prop = dim.candidateprop or ("kge_score" if dim.alias else None)
-        elif computation in self._STRUCTURAL_SOURCE_KIND:
-            # The property the compiler resolves: the declaration, else (with
-            # declared_structural_properties_required_enabled off) the former
-            # default; flag on, an undeclared one is refused by the compiler.
-            from engine.config.structural_vocabulary import UndeclaredStructuralPropertyError, declared
-
-            try:
-                prop = declared(dim.candidateprop, self._STRUCTURAL_SOURCE_KIND[computation], dim.name)
-            except UndeclaredStructuralPropertyError:
-                return None
-        else:
-            prop = dim.candidateprop or self._DEFAULT_SOURCE_PROPERTY.get(computation)
-        if not prop:
+        owner = self._source_owner(dim)
+        prop = self._source_property(dim) if owner else None
+        if not owner or not prop:
             return None
         predicate = f"{owner}.{sanitize_label(prop)} IS NULL"
-        if computation is ComputationType.GEODECAY:
-            from engine.config.settings import settings
-
-            # The longitude _compile_geodecay reads: the declaration only while
-            # geodecay_declared_longitude is on, else candidate.lon (RU-037).
-            declared_lon = getattr(dim, "candidateprop_lon", None)
-            lon = declared_lon if settings.geodecay_declared_longitude and declared_lon else "lon"
+        if dim.computation is ComputationType.GEODECAY:
+            lon = self._geodecay_source_longitude(dim)
+            if lon is None:
+                return None
             predicate = f"{predicate} OR {owner}.{sanitize_label(lon)} IS NULL"
         return predicate
+
+    @staticmethod
+    def _geodecay_source_longitude(dim: ScoringDimensionSpec) -> str | None:
+        """The longitude _compile_geodecay reads (RU-037); ``None`` when the compiler refuses it.
+
+        Resolved through the same ``declared()`` call: a blank declaration is
+        absent, the legacy ``lon`` applies with geodecay_declared_longitude off.
+        """
+        from engine.config.settings import settings
+        from engine.config.structural_vocabulary import UndeclaredStructuralPropertyError, declared
+
+        if not settings.geodecay_declared_longitude:
+            return "lon"
+        try:
+            return declared(getattr(dim, "candidateprop_lon", None), "longitude", dim.name)
+        except UndeclaredStructuralPropertyError:
+            return None
 
     def _effective_null_strategy(self, dim: ScoringDimensionSpec, base_expr: str, strategy: NullStrategy) -> str | None:
         """D3a: substitute the declared fallback when the source property is missing.

@@ -48,10 +48,26 @@ def _raw() -> dict[str, Any]:
     return copy.deepcopy(raw)
 
 
+def _declare_producers(raw: dict[str, Any], dims: list[dict[str, Any]]) -> None:
+    """Declare what each dimension's null option reads, as a real pack must.
+
+    population_mean reads the `_popmean_<dim>` query parameter and inherit_prior
+    the `_prior_<dim>` candidate property; strict scoring validation refuses an
+    option whose input the pack does not declare (ND-PARAM, #567).
+    """
+    depot = next(node for node in raw["ontology"]["nodes"] if node["label"] == "OrbitalDepot")
+    for dim in dims:
+        if dim.get("null_strategy") == "population_mean":
+            raw["queryschema"]["fields"].append({"name": f"_popmean_{dim['name']}", "type": "float"})
+        if dim.get("null_strategy") == "inherit_prior":
+            depot["properties"].append({"name": f"_prior_{dim['name']}", "type": "float"})
+
+
 def _spec(*, feedback: bool = False, dims: list[dict[str, Any]] | None = None) -> DomainSpec:
     raw = _raw()
     if dims is not None:
         raw["scoring"]["dimensions"] = dims
+        _declare_producers(raw, dims)
     if feedback:
         raw["feedbackloop"] = {**raw.get("feedbackloop", {}), "enabled": True, "signal_weights": {"enabled": True}}
     return DomainSpec.model_validate(raw)
@@ -290,6 +306,25 @@ def test_geodecay_guard_follows_the_declared_longitude_flag(monkeypatch: pytest.
     )
     assert expr.startswith("CASE WHEN candidate.lat IS NULL OR candidate.lon IS NULL THEN ")
     assert "candidate.longitude_deg IS NULL" not in expr
+
+
+def test_geodecay_guard_treats_a_blank_declared_longitude_as_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A whitespace candidateprop_lon resolves like the compiler: absent, so (rollback flag off) candidate.lon."""
+    monkeypatch.setattr(settings, "geodecay_declared_longitude", True)
+    monkeypatch.setattr(settings, "declared_structural_properties_required_enabled", False)
+    expr, _ = _compiled(
+        _dim(
+            name="geo",
+            source="computed",
+            computation="geodecay",
+            candidateprop="lat",
+            candidateprop_lon="   ",
+            queryprop="lat",
+            null_strategy="population_mean",
+        )
+    )
+    assert expr.startswith("CASE WHEN candidate.lat IS NULL OR candidate.lon IS NULL THEN ")
+    assert "longitude: candidate.lon}" in expr
 
 
 @pytest.mark.parametrize(
