@@ -295,3 +295,18 @@ def test_no_committed_pack_declares_the_legacy_auxiliary_properties() -> None:
         text = (DESIGN_PACKS_ROOT / pack / "spec.yaml").read_text(encoding="utf-8")
         assert "touch_count_30d" not in text
         assert "is_accelerating" not in text
+
+
+def test_the_served_committed_temporalproximity_pack_is_plasticos() -> None:
+    """D2 evidence coverage: tests/integration/test_temporalproximity_rescale_fixtures.py records every served pack.
+
+    legal-discovery and research-agent declare temporalproximity but are dormant
+    (not served); a pack that becomes served must be added to that fixture.
+    """
+    served: list[str] = []
+    for path in sorted(DESIGN_PACKS_ROOT.glob("*/spec.yaml")):
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        uses = any(d.get("computation") == "temporalproximity" for d in raw["scoring"]["dimensions"])
+        if uses and raw["domain"].get("activation") != "dormant":
+            served.append(path.parent.name)
+    assert served == ["plasticos"]

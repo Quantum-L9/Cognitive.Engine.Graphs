@@ -1849,9 +1849,7 @@ class DomainSpec(BaseModel):
         if not _scoring_strict():
             return self
         declared = {dim.name for dim in self.scoring.dimensions}
-        unknown = sorted(
-            {c.dimension for c in self.decision_arbitration.constraints if c.dimension not in declared}
-        )
+        unknown = sorted({c.dimension for c in self.decision_arbitration.constraints if c.dimension not in declared})
         if unknown:
             msg = f"decision_arbitration constraint(s) name undeclared scoring dimension(s): {unknown}"
             raise ValueError(msg)

@@ -9,7 +9,6 @@ at 1.5 although the engine clamps to [0, 1].
 
 from __future__ import annotations
 
-
 import pytest
 
 from engine.config.schema import (

@@ -94,7 +94,11 @@ REFUSALS: list[tuple[str, Callable[[dict[str, Any]], None], str]] = [
     ("unknown-dimension-key", _set_first("weight_key", "w_typo"), "unknown key(s) weight_key"),
     ("aggregation-multiplicative", _set_first("aggregation", "multiplicative"), "aggregation 'multiplicative'"),
     ("preference-sample-size-auto", _sample_size_auto, "preference_sample_size must be an integer"),
-    ("arbitration-undeclared-dimension", _constraint_on_undeclared, "undeclared scoring dimension(s): ['not_a_dimension']"),
+    (
+        "arbitration-undeclared-dimension",
+        _constraint_on_undeclared,
+        "undeclared scoring dimension(s): ['not_a_dimension']",
+    ),
     ("preference-attention-without-qe", _attention_without_qe, "no traversal step binds a `qe` node"),
 ]
 
@@ -164,7 +168,9 @@ def test_preference_sample_size_must_be_a_positive_integer(size: Any) -> None:
 def test_preference_attention_is_admitted_when_traversal_binds_qe() -> None:
     raw = _raw()
     raw["scoring"]["dimensions"].append(_attention_dimension())
-    raw["traversal"] = {"steps": [{"name": "query_entity", "pattern": "(qe:DockingWindow)-[:REQUESTS]->(candidate:OrbitalDepot)"}]}
+    raw["traversal"] = {
+        "steps": [{"name": "query_entity", "pattern": "(qe:DockingWindow)-[:REQUESTS]->(candidate:OrbitalDepot)"}]
+    }
     spec = DomainSpec.model_validate(raw)
     assert [d.name for d in spec.scoring.dimensions][-1] == "attention"
 
@@ -172,7 +178,9 @@ def test_preference_attention_is_admitted_when_traversal_binds_qe() -> None:
 def test_a_qe_prefixed_alias_does_not_count_as_binding_qe() -> None:
     raw = _raw()
     raw["scoring"]["dimensions"].append(_attention_dimension())
-    raw["traversal"] = {"steps": [{"name": "query_entity", "pattern": "(qex:DockingWindow)-[:REQUESTS]->(candidate:OrbitalDepot)"}]}
+    raw["traversal"] = {
+        "steps": [{"name": "query_entity", "pattern": "(qex:DockingWindow)-[:REQUESTS]->(candidate:OrbitalDepot)"}]
+    }
     with pytest.raises(ValidationError, match="binds a `qe` node"):
         DomainSpec.model_validate(raw)
 

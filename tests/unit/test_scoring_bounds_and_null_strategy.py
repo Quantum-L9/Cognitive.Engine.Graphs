@@ -233,9 +233,16 @@ def test_the_legacy_wrapper_was_dead() -> None:
 
 def test_lognormalized_guard_reads_its_declared_property() -> None:
     expr, _ = _compiled(
-        _dim(name="port_capacity", candidateprop="docking_ports", computation="lognormalized", null_strategy="inherit_prior")
+        _dim(
+            name="port_capacity",
+            candidateprop="docking_ports",
+            computation="lognormalized",
+            null_strategy="inherit_prior",
+        )
     )
-    assert expr.startswith("CASE WHEN candidate.docking_ports IS NULL THEN coalesce(candidate._prior_port_capacity, 0.1)")
+    assert expr.startswith(
+        "CASE WHEN candidate.docking_ports IS NULL THEN coalesce(candidate._prior_port_capacity, 0.1)"
+    )
 
 
 def test_geodecay_guard_checks_both_coordinates() -> None:
@@ -256,16 +263,27 @@ def test_geodecay_guard_checks_both_coordinates() -> None:
 
 def test_traversalalias_guard_reads_the_alias() -> None:
     expr, _ = _compiled(
-        _dim(name="via", source="traversalalias", computation="traversalalias", alias="orbit", candidateprop="tier",
-             null_strategy="inherit_prior")
+        _dim(
+            name="via",
+            source="traversalalias",
+            computation="traversalalias",
+            alias="orbit",
+            candidateprop="tier",
+            null_strategy="inherit_prior",
+        )
     )
     assert expr.startswith("CASE WHEN orbit.tier IS NULL THEN coalesce(candidate._prior_via, 0.1)")
 
 
 def test_customcypher_keeps_the_legacy_wrapper() -> None:
     expr, _ = _compiled(
-        _dim(name="custom", source="computed", computation="customcypher", expression="candidate.reliability * 0.5",
-             null_strategy="inherit_prior")
+        _dim(
+            name="custom",
+            source="computed",
+            computation="customcypher",
+            expression="candidate.reliability * 0.5",
+            null_strategy="inherit_prior",
+        )
     )
     assert expr == "coalesce((candidate.reliability * 0.5), candidate._prior_custom, 0.1)"
 
