@@ -152,7 +152,10 @@ async def _exercise(driver: GraphDriver) -> None:
 # ── Settings contract ───────────────────────────────────────────────────────
 
 
-def test_query_timeout_defaults() -> None:
+def test_query_timeout_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The code defaults, not whatever a developer exported.
+    monkeypatch.delenv("NEO4J_QUERY_TIMEOUT_S", raising=False)
+    monkeypatch.delenv("NEO4J_QUERY_TIMEOUT_ENABLED", raising=False)
     s = _settings()
     assert s.neo4j_query_timeout_enabled is True
     assert s.neo4j_query_timeout_s == 25.0

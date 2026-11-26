@@ -87,7 +87,8 @@ pipeline produced it. Stages advance `seed → discovered → inferred → propo
 
 YAML keys are the Python field names — there are no Pydantic aliases (NAME-001
 is a banned pattern). Gate type and scoring computation identifiers are flatcase
-(`temporalrange`, `geodecay`); many native structural keys are also flatcase
+(`temporalrange`, `geodecay`), except the two snake_case computations
+`preference_attention` and `community_bridge`; many native structural keys are also flatcase
 (`matchentities`, `queryschema`, `candidateprop`, `idproperty`). Copy the live
 schema spellings, not presumed snake_case replacements. Preserve the schema's
 existing edge input keys `from` and `to`; this guide does not authorize a naming

@@ -33,5 +33,9 @@ return self._clamp_expression(expr)  # Wraps in CASE WHEN > 1.0 THEN 1.0 ...
 
 The engine declares no scoring dimensions and no default weights of its own:
 do not add a weight to Settings. Weights belong to the domain pack, and a
-domain's default dimension weights must sum to ≤ 1.0 per match direction,
-checked when the spec loads (`docs/contracts/SCORING_WEIGHT_CEILING.md`).
+domain's default dimension weights must sum to ≤ 1.0 per match direction
+(`docs/contracts/SCORING_WEIGHT_CEILING.md`). The check runs when the spec
+loads only while `domain_strict_validation` is on (the default); unscoped
+dimensions count toward every direction's sum only while
+`weight_ceiling_includes_unscoped` is on (the default). Do not rely on the
+check when either flag is off.

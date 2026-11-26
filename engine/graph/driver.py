@@ -91,8 +91,11 @@ def _provision_inside_breaker() -> bool:
 def _query_timeout() -> float | None:
     """D8: the transaction timeout every engine query carries, or None when the flag is off.
 
-    ``neo4j_query_timeout_s`` is validated to (0, 30) by ``Settings``, so the
-    server abandons a statement before the 30 s TransportHeader caller budget.
+    ``neo4j_query_timeout_s`` is validated to (0, 30) by ``Settings``, so one
+    statement's execution bound is shorter than the 30 s TransportHeader caller
+    budget. It bounds the transaction only: connection acquisition and the
+    driver's managed-transaction retries are outside it, so it is not a
+    per-request deadline.
     """
     from engine.config.settings import settings
 

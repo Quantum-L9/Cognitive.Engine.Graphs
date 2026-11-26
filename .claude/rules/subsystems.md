@@ -27,7 +27,7 @@ All handlers: `async def handle_*(tenant: str, payload: dict) -> dict`
 | get_domain | Return specific domain spec |
 | init_schema | Initialize Neo4j schema |
 | trigger_gds | Manual GDS algorithm run |
-| calibration_run | Score calibration vs expected ranges |
+| calibration_run | Spec echo: returns the declared calibration pairs and expected ranges; computes and verifies no score (FEATURE_GATES §4) |
 | score_feedback | Compute weight adjustment proposal |
 | apply_weight_proposal | Apply proposed weight change |
 | health_assess | AI-readiness assessment for one entity (`engine/health/api.py`) |

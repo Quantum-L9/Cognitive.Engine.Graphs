@@ -61,9 +61,12 @@ class Settings(BaseSettings):
     # connection past the 30 s TransportHeader.timeout_ms caller budget. The pool
     # now comes from those settings. On (default; restores the bounded-request
     # invariant): every query, read and write runs under a server-enforced
-    # transaction timeout of neo4j_query_timeout_s, which must lie in (0, 30) so
-    # the server gives up before the caller's budget does. Off: no driver-side
-    # timeout (the server's db.transaction.timeout applies).
+    # transaction timeout of neo4j_query_timeout_s, validated to (0, 30) so the
+    # execution bound alone is shorter than the caller budget. It is a
+    # transaction bound, not a request deadline: connection acquisition (up to
+    # neo4j_connection_acquisition_timeout) and the driver's managed-transaction
+    # retries are outside it. Off: no driver-side timeout (the server's
+    # db.transaction.timeout applies).
     neo4j_query_timeout_enabled: bool = True
     neo4j_query_timeout_s: float = Field(default=25.0, gt=0, lt=30)
 

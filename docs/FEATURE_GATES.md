@@ -847,7 +847,14 @@ server let it run — past the 30 s `TransportHeader.timeout_ms` caller budget.
   on the `system` database (provisioning's `CREATE DATABASE ... WAIT`, which
   carries its own WAIT bound) are not bounded.
 - **Validation**: `Settings` refuses `neo4j_query_timeout_s` outside the open
-  interval (0, 30), so the server gives up before the caller's budget does.
+  interval (0, 30), so one transaction's execution bound is shorter than the
+  30 s caller budget.
+- **What it does not bound**: it is a transaction timeout, not a request
+  deadline. Connection acquisition before the transaction starts (up to
+  `neo4j_connection_acquisition_timeout`), and the driver's retries of a
+  managed read or write transaction after a transient error (up to its
+  `max_transaction_retry_time`), are outside it. A request can therefore still
+  exceed the caller's 30 s budget.
 - **Failure**: the server terminates the statement and `GraphDriver` raises the
   engine's typed `ExecutionError` (action `graph_query`, tenant = the database),
   whose `__cause__` is the neo4j driver's transaction-timeout error
