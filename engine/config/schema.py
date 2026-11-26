@@ -932,7 +932,7 @@ class ScoringSpec(BaseModel):
         dead = []
         if self.adaptive_sample_size != AdaptiveSampleSizeSpec():
             dead.append("adaptive_sample_size")
-        if self.preference_attention_feedback_blend != _UNREAD_FEEDBACK_BLEND:
+        if not math.isclose(self.preference_attention_feedback_blend, _UNREAD_FEEDBACK_BLEND):
             dead.append("preference_attention_feedback_blend")
         if dead:
             msg = f"scoring: {_dead_option_defect(dead)}"
@@ -1437,7 +1437,7 @@ class ParetoObjectiveSpec(BaseModel):
     @model_validator(mode="after")
     def refuse_unread_weight_hint(self) -> ParetoObjectiveSpec:
         """ND-DEAD: the Pareto front reads dimension and direction only (scoring_spec_strict_validation_enabled)."""
-        if _scoring_strict() and self.weight_hint != 1.0:
+        if _scoring_strict() and not math.isclose(self.weight_hint, 1.0):
             msg = f"Pareto objective {self.dimension!r}: {_dead_option_defect(['weight_hint'])}"
             raise ValueError(msg)
         return self
