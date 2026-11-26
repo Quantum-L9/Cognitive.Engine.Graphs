@@ -9,20 +9,9 @@ owner: engine-team
 status: active
 --- /L9_META ---
 
-Declared temporal value types (ceg-scoring-audit L1, operator decision D1).
-
-* ``SyncRowContract.project`` writes a declared ``datetime`` / ``date`` /
-  ``duration`` as the Python value the Neo4j driver stores as a native
-  ``DateTime`` / ``Date`` / ``Duration`` — never the ISO string, which every
-  temporal comparison and ``duration.inDays`` in the compiled match query
-  rejects (ND-TEMPORAL-SYNC).
-* Ingress refuses a malformed or timezone-naive temporal with a typed
-  ``SyncRowRejectedError`` before any Cypher; non-finite floats stay refused.
-* The freshness gate compares a ``date``-declared property against ``date()``,
-  a ``datetime``-declared one against ``datetime()``.
-
-``SYNC_TEMPORAL_NATIVE_VALUES_ENABLED`` / ``FRESHNESS_GATE_DECLARED_TEMPORAL_ENABLED``
-off restore the legacy behaviour (FEATURE_GATES "Declared temporal value types").
+Declared temporal value types (ceg-scoring-audit L1, D1): native projection,
+naive/malformed refusal, the freshness gate's declared-type cutoff, and the
+read-only string-valued detector. FEATURE_GATES "Declared temporal value types".
 """
 
 from __future__ import annotations
@@ -97,11 +86,11 @@ def test_declared_temporals_project_to_driver_native_values() -> None:
     assert node["depot_id"] == "d1"  # non-temporal values are untouched
 
 
-def test_a_utc_offset_is_preserved_not_normalised_away() -> None:
-    rows, _ = _contract().project([{"depot_id": "d1", "opened_at": "2026-11-11T09:00:00+02:00"}])
-    value = rows[0]["node"]["opened_at"]
-    assert value.utcoffset() == timedelta(hours=2)
-    assert value == datetime(2026, 11, 11, 7, 0, tzinfo=UTC)
+@pytest.mark.parametrize(("iso", "hours"), [("2026-11-11T09:00:00+02:00", 2), ("2026-11-11T09:00:00-05:00", -5)])
+def test_a_utc_offset_is_kept_as_a_fixed_offset_the_driver_serialises(iso: str, hours: int) -> None:
+    value = _contract().project([{"depot_id": "d1", "opened_at": iso}])[0][0]["node"]["opened_at"]
+    assert value.tzinfo == timezone(timedelta(hours=hours))  # driver 5.8+: datetime.timezone is native
+    assert value == datetime(2026, 11, 11, 9 - hours, 0, tzinfo=UTC)
 
 
 @pytest.mark.parametrize(
@@ -143,17 +132,12 @@ def test_plasticos_last_transaction_date_projects_to_a_native_datetime() -> None
 # ── Ingress: malformed, naive and non-finite values are refused ──────────────
 
 
-def test_a_timezone_naive_datetime_is_refused_without_echoing_it() -> None:
-    defects = _defects([{"depot_id": "d1", "opened_at": "2026-11-11T09:00:00"}])
+# A date-only string parses as a naive midnight: refused, never guessed into UTC.
+@pytest.mark.parametrize("naive", ["2026-11-11T09:00:00", "2026-11-11"])
+def test_a_timezone_naive_datetime_is_refused_without_echoing_it(naive: str) -> None:
+    defects = _defects([{"depot_id": "d1", "opened_at": naive}])
     assert defects == ["row 0 opened_at: expected datetime, got string (timezone-naive ISO-8601 datetime)"]
     assert not any("2026-11-11" in defect for defect in defects)
-
-
-def test_a_date_only_string_is_not_a_datetime() -> None:
-    # date.fromisoformat-shaped input parses as a naive midnight: refused, not guessed into UTC.
-    assert _defects([{"depot_id": "d1", "opened_at": "2026-11-11"}]) == [
-        "row 0 opened_at: expected datetime, got string (timezone-naive ISO-8601 datetime)"
-    ]
 
 
 @pytest.mark.parametrize(
@@ -258,30 +242,24 @@ def _compile_freshness(spec: DomainSpec) -> str:
     return GateCompiler(spec).compile(spec.gates[0])
 
 
-def test_a_date_declared_freshness_property_is_compared_against_date() -> None:
-    compiled = _compile_freshness(_freshness_spec("date"))
-    assert "candidate.seen >= date() - duration({days: 30})" in compiled
-    assert "datetime()" not in compiled  # Date >= DateTime is null in Cypher: every candidate failed
-
-
-def test_a_datetime_declared_freshness_property_is_compared_against_datetime() -> None:
-    assert "candidate.seen >= datetime() - duration({days: 30})" in _compile_freshness(_freshness_spec("datetime"))
-
-
-def test_an_undeclared_freshness_property_keeps_datetime() -> None:
-    # updated_at is stamped by datetime() in the sync generator; never declared.
-    assert "datetime() - duration({days: 30})" in _compile_freshness(_freshness_spec(None))
-
-
-def test_freshness_flag_off_restores_the_datetime_comparison(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "freshness_gate_declared_temporal_enabled", False)
-    assert "candidate.seen >= datetime() - duration({days: 30})" in _compile_freshness(_freshness_spec("date"))
-
-
-def test_fixed_offset_timezone_is_kept_for_the_driver() -> None:
-    # The driver serialises datetime.timezone offsets natively (neo4j-python-driver 5.8+).
-    rows, _ = _contract().project([{"depot_id": "d1", "opened_at": "2026-11-11T09:00:00-05:00"}])
-    assert rows[0]["node"]["opened_at"].tzinfo == timezone(timedelta(hours=-5))
+# Date >= DateTime is null in Cypher, so a datetime() cutoff failed every date-declared candidate;
+# undeclared (updated_at, stamped by datetime()) and datetime-declared keep datetime().
+@pytest.mark.parametrize(
+    ("declared", "flag", "now"),
+    [
+        ("date", True, "date()"),
+        ("datetime", True, "datetime()"),
+        (None, True, "datetime()"),
+        ("date", False, "datetime()"),
+    ],
+)
+def test_freshness_compares_in_the_declared_temporal_type(
+    declared: str | None, flag: bool, now: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "freshness_gate_declared_temporal_enabled", flag)
+    compiled = _compile_freshness(_freshness_spec(declared))
+    assert f"candidate.seen >= {now} - duration({{days: 30}})" in compiled
+    assert ("datetime()" in compiled) is (now == "datetime()")
 
 
 # ── Detector: string-valued declared temporals (read-only) ───────────────────
