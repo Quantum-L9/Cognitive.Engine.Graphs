@@ -439,6 +439,11 @@ class Settings(BaseSettings):
     # after the domain loads; unknown weight keys are rejected (R1a-DEC-06).
     # Off: only the supplied keys are summed, before the domain loads.
     match_effective_weight_validation: bool = True
+    # SC-003 request part (ceg-scoring-audit L3, D3): request weights must be a
+    # mapping of finite numbers in [0, 1] (no str / bool / list / None / nan / inf),
+    # checked whatever score_clamp_enabled says. Off restores the clamp-gated
+    # float() coercion.
+    match_request_weight_strict_enabled: bool = True
     # RU-004 / CEG-COR-014: legacy resolve raises ValidationError when the CREATE
     # returned no row (source or target not found) instead of reporting
     # `resolved`. Off: `resolved` regardless of the result.
