@@ -50,7 +50,7 @@ def test_the_detector_reads_every_declared_temporal_of_plasticos() -> None:
     )
     edge = queries[("relationship", "TRANSACTED_WITH")]
     assert edge.cypher == (
-        "MATCH ()-[e:TRANSACTED_WITH]->() "
+        "MATCH (:Facility)-[e:TRANSACTED_WITH]->(:Facility) "
         "RETURN count(CASE WHEN e.transaction_date IS :: STRING NOT NULL THEN 1 END) AS c0"
     )
     for query in queries.values():
@@ -71,7 +71,9 @@ def test_the_detector_covers_list_temporals_skips_non_temporals_and_groups_by_la
 
 async def test_the_detector_aggregates_counts_through_execute_read_only() -> None:
     graph = MagicMock()
-    graph.execute_read = AsyncMock(side_effect=lambda cypher, *_a, **_k: [{"c0": 3}] if "Facility" in cypher else [])
+    graph.execute_read = AsyncMock(
+        side_effect=lambda cypher, *_a, **_k: [{"c0": 3}] if cypher.startswith("MATCH (e:Facility)") else []
+    )
     graph.execute_query = AsyncMock(side_effect=AssertionError("the detector must not use the write path"))
     graph.execute_write = AsyncMock(side_effect=AssertionError("the detector must not write"))
     report = await audit_temporal_storage(graph, fx.plasticos())
@@ -83,8 +85,11 @@ async def test_the_detector_aggregates_counts_through_execute_read_only() -> Non
         "label": "Facility",
         "property": "last_transaction_date",
         "declared": "datetime",
+        "endpoints": None,
         "string_valued": 3,
     } in report["findings"]
+    edge = next(f for f in report["findings"] if f["property"] == "transaction_date")
+    assert edge["endpoints"] == "Facility->Facility"
     assert {f["property"]: f["string_valued"] for f in report["findings"]}["transaction_date"] == 0
     assert all(call.kwargs["database"] == "plasticos" for call in graph.execute_read.await_args_list)
 
@@ -127,3 +132,33 @@ def test_the_audit_tool_leaves_pack_root_precedence_to_the_loader(monkeypatch: p
     tool.main(["plasticos"])
     tool.main(["plasticos", "--domains-root", "/packs"])
     assert seen == [None, "/packs"]
+
+
+def test_a_reused_relationship_type_is_audited_per_declared_endpoints() -> None:
+    # Codex on #565: one type, different from/to pairs, different property types.
+    import yaml
+
+    from engine.config.schema import DomainSpec
+    from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT
+
+    raw = yaml.safe_load((DESIGN_PACKS_ROOT / "plasticos/spec.yaml").read_text())
+    base = {"type": "TRANSACTED_WITH", "from": "Facility", "direction": "DIRECTED", "category": "transaction"}
+    raw["ontology"]["edges"] += [
+        {
+            **base,
+            "to": "SupplyOpportunity",
+            "managedby": "sync",
+            "properties": [{"name": "transaction_date", "type": "string"}],
+        },
+        {
+            **base,
+            "to": "BuyerDemand",
+            "managedby": "sync",
+            "properties": [{"name": "transaction_date", "type": "date"}],
+        },
+    ]
+    edges = [q for q in build_audit_queries(DomainSpec.model_validate(raw)) if q.owner == "relationship"]
+    assert [q.cypher.split(" RETURN ")[0] for q in edges] == [
+        "MATCH (:Facility)-[e:TRANSACTED_WITH]->(:Facility)",
+        "MATCH (:Facility)-[e:TRANSACTED_WITH]->(:BuyerDemand)",
+    ]  # the string-declared Facility->SupplyOpportunity edge is never counted as a stale temporal

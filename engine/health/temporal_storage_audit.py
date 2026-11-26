@@ -45,11 +45,14 @@ class TemporalProperty:
     name: str
     declared: str  # the declared type, e.g. "datetime" or "list<date>"
     is_list: bool
+    # A relationship's declared (from, to) labels: one type may be declared for several
+    # endpoint pairs, each with its own property types, so each pair is audited apart.
+    endpoints: tuple[str, str] | None = None
 
 
 @dataclass(frozen=True)
 class AuditQuery:
-    """One read-only statement: every declared temporal of one label or relationship type."""
+    """One read-only statement: every declared temporal of one label, or of one relationship declaration."""
 
     owner: str
     label: str
@@ -69,15 +72,17 @@ def _temporal(prop: PropertySpec) -> tuple[bool, bool]:
 def declared_temporal_properties(domain_spec: DomainSpec) -> list[TemporalProperty]:
     """Every storable temporal the spec declares, in declaration order."""
     found: list[TemporalProperty] = []
-    owners: list[tuple[str, str, list[PropertySpec]]] = [
-        ("node", node.label, node.properties) for node in domain_spec.ontology.nodes
+    owners: list[tuple[str, str, list[PropertySpec], tuple[str, str] | None]] = [
+        ("node", node.label, node.properties, None) for node in domain_spec.ontology.nodes
     ]
-    owners.extend(("relationship", edge.type, edge.properties) for edge in domain_spec.ontology.edges)
-    for owner, label, properties in owners:
+    owners.extend(
+        ("relationship", edge.type, edge.properties, (edge.from_, edge.to)) for edge in domain_spec.ontology.edges
+    )
+    for owner, label, properties, endpoints in owners:
         for prop in properties:
             temporal, is_list = _temporal(prop)
             if temporal:
-                found.append(TemporalProperty(owner, label, prop.name, prop.declared_type, is_list))
+                found.append(TemporalProperty(owner, label, prop.name, prop.declared_type, is_list, endpoints))
     return found
 
 
@@ -92,15 +97,19 @@ def _string_count(variable: str, prop: TemporalProperty, alias: str) -> str:
 
 
 def build_audit_queries(domain_spec: DomainSpec) -> list[AuditQuery]:
-    """One aggregate read per label / relationship type that declares a temporal."""
-    grouped: dict[tuple[str, str], list[TemporalProperty]] = {}
+    """One aggregate read per label, and per relationship declaration (type + endpoints), with a temporal."""
+    grouped: dict[tuple[str, str, tuple[str, str] | None], list[TemporalProperty]] = {}
     for prop in declared_temporal_properties(domain_spec):
-        grouped.setdefault((prop.owner, prop.label), []).append(prop)
+        grouped.setdefault((prop.owner, prop.label, prop.endpoints), []).append(prop)
     queries: list[AuditQuery] = []
-    for (owner, label), props in grouped.items():
-        # Label / type from the tenant's own spec, through sanitize_label (CYPHER_SAFETY).
+    for (owner, label, endpoints), props in grouped.items():
+        # Labels / type from the tenant's own spec, through sanitize_label (CYPHER_SAFETY).
         safe = sanitize_label(label)
-        pattern = "MATCH (e:" + safe + ")" if owner == "node" else "MATCH ()-[e:" + safe + "]->()"
+        if endpoints is None:
+            pattern = "MATCH (e:" + safe + ")"
+        else:
+            source, target = (sanitize_label(end) for end in endpoints)
+            pattern = "MATCH (:" + source + ")-[e:" + safe + "]->(:" + target + ")"
         counts = ", ".join(_string_count("e", prop, f"c{index}") for index, prop in enumerate(props))
         queries.append(AuditQuery(owner, label, f"{pattern} RETURN {counts}", tuple(props)))
     return queries
@@ -118,6 +127,7 @@ def summarise(domain_spec: DomainSpec, results: list[tuple[AuditQuery, list[dict
                     "label": prop.label,
                     "property": prop.name,
                     "declared": prop.declared,
+                    "endpoints": "->".join(prop.endpoints) if prop.endpoints else None,
                     "string_valued": int(row.get(f"c{index}") or 0),
                 }
             )

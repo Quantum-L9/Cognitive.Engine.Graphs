@@ -26,7 +26,9 @@ runs through `GraphDriver.execute_read`, a managed READ transaction: the server
 refuses any write and the tenant database is never provisioned. Labels and
 property names come from the tenant's own spec through `sanitize_label`.
 
-Requires Neo4j 5.9+ (type predicate expressions).
+Requires Neo4j 5.10+ (type predicate expressions with `NOT NULL`, `ANY` and `LIST<…>`).
+A relationship type declared for several endpoint pairs is audited once per pair,
+constrained to both declared labels.
 
 ## Command
 ```bash
@@ -40,7 +42,8 @@ never from the repository's design packs.
 ## Output and exit code
 JSON `{"reports": [{"domain", "database", "checked", "string_valued_total",
 "conversion_required", "findings": [{"owner", "label", "property", "declared",
-"string_valued"}]}]}`.
+"endpoints", "string_valued"}]}]}` (`endpoints` is `"From->To"` for a relationship,
+`null` for a node).
 
 | Exit | Meaning | Next step |
 |---|---|---|
