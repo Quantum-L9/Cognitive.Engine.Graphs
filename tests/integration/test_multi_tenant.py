@@ -155,5 +155,6 @@ async def test_a_contract_request_naming_the_other_domain_is_refused(two_tenants
 
     await _seed()
     assert set(_by_id(await handle_match(ALPHA, _match_request(ALPHA)))) == {"shared", "alpha-only"}
+    smuggled = _match_request(BETA)
     with pytest.raises(ValidationError, match="is not the admitted domain"):
-        await handle_match(ALPHA, _match_request(BETA))
+        await handle_match(ALPHA, smuggled)
