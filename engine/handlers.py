@@ -3290,13 +3290,16 @@ def _preference_history_plan(
         success_property = sanitize_label((metadata.success_property if metadata else None) or "outcome_type")
         candidate_community = sanitize_label(dim.candidateprop)
         # The property the reader reads (_compile_preference_attention): the
-        # declared one, or the legacy community_id with its flag off.
+        # declared one, or the legacy default with its flag off.
         if _history_settings.preference_attention_declared_community_enabled:
             outcome_community = sanitize_label(
                 (metadata.outcome_community_property if metadata else None) or dim.candidateprop
             )
         else:
-            outcome_community = "community_id"
+            # The legacy name the reader falls back to, from the one table that holds it.
+            from engine.config.structural_vocabulary import _LEGACY_DEFAULTS
+
+            outcome_community = _LEGACY_DEFAULTS["community"]
         cypher = (
             "MATCH (o:" + label + " {outcome_id: $outcome_id})\n"
             "MATCH (qe:" + query_label + ") WHERE qe." + query_id + " = $query_entity_id\n"
