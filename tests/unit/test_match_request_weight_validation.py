@@ -49,6 +49,8 @@ MALFORMED: list[tuple[str, Any]] = [
     ("nan", math.nan),
     ("negative", -0.1),
     ("above_one", 1.5),
+    ("huge_int", 10**400),  # float() overflows; must still be a ValidationError
+    ("int_above_one", 2),
 ]
 
 

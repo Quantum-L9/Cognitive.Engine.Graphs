@@ -335,4 +335,16 @@ class TestFrontIsIndependentOfInputOrder:
         ]
         forward = apply_pareto_filter(rows, ["a", "b"])
         backward = apply_pareto_filter(list(reversed(rows)), ["a", "b"])
-        assert sorted(forward["nondominated"]) == sorted(backward["nondominated"])
+        assert sorted(forward["nondominated"]) == sorted(backward["nondominated"]) == ["narrow", "wide"]
+
+    def test_arbitration_filter_ignores_undeclared_keys(self) -> None:
+        # Both rows carry `b`, but only `a` is a declared objective: narrow
+        # dominates wide on `a`. Union selection would keep wide (b 0.9 > 0.1).
+        from engine.scoring.pareto_integrator import apply_pareto_filter
+
+        rows = [
+            {"candidate": {"entity_id": "narrow"}, "score": 0.9, "dimension_scores": {"a": 0.9, "b": 0.1}},
+            {"candidate": {"entity_id": "wide"}, "score": 0.5, "dimension_scores": {"a": 0.5, "b": 0.9}},
+        ]
+        for ordered in (rows, list(reversed(rows))):
+            assert apply_pareto_filter(ordered, ["a"])["nondominated"] == ["narrow"]

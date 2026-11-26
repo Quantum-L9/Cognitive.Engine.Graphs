@@ -523,7 +523,11 @@ def _strict_request_weight(key: str, val: Any, tenant: str) -> float:
     if isinstance(val, bool) or not isinstance(val, (int, float)):
         msg = f"Weight '{key}' is not a valid number (got {type(val).__name__})"
         raise ValidationError(msg, action="match", tenant=tenant)
-    number = float(val)
+    try:
+        number = float(val)
+    except OverflowError as exc:  # an int too large for a float is not a weight in [0, 1]
+        msg = f"Weight '{key}' is not a finite number"
+        raise ValidationError(msg, action="match", tenant=tenant) from exc
     if not math.isfinite(number):
         msg = f"Weight '{key}' is not a finite number"
         raise ValidationError(msg, action="match", tenant=tenant)
