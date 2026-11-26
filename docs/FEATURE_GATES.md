@@ -442,11 +442,15 @@ WITH candidate, d1, d2, score * (CASE WHEN coalesce(d2 < $arb_soft_threshold_0, 
 ### `match_candidate_tiebreak_enabled` (ND-TIE, D4)
 
 * The final `ORDER BY` is `score DESC, candidate.<identity> ASC`. `<identity>`
-  is the pack's declared candidate identity: the sync endpoint's `idproperty`
-  for the candidate label, else the node's first `required` property
-  (`_declared_candidate_identity`). It is never `elementId`. A pack that declares
-  neither keeps `ORDER BY score DESC` alone. The engine does not invent an
-  identity.
+  is the `idproperty` of the sync endpoint whose `targetnode` is the direction's
+  candidate label (`_declared_candidate_identity`). It is never `elementId`,
+  never a `required` property and never `entity_id`.
+* **No declared identity, or conflicting endpoints.** If no sync endpoint for the
+  candidate label declares an `idproperty`, or its endpoints declare different
+  ones, the pack is still served (not withheld). The query keeps
+  `ORDER BY score DESC` alone, so **score ties are unordered** (Neo4j row order).
+  One warning is logged per pack revision and direction, naming the pack, the
+  direction, the label and the conflicting values.
 * The per-candidate path collapse (RU-036) orders a candidate's paths by
   `score DESC` and then each projected dimension `DESC`, in declared order,
   before `head(collect(...))`. The kept path then depends on the paths, not on

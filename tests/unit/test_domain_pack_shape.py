@@ -341,7 +341,9 @@ async def _capture_match(domain_id: str, direction: str, query: dict[str, object
         await handle_match(domain_id, {"query": query, "match_direction": direction, "top_n": 5})
     finally:
         get_state().reset()
-    match_calls = [c for c in calls if "ORDER BY score DESC\nLIMIT $top_n" in c[0]]
+    # The match query: ranked by score, cut by $top_n. Any declared tie-break key
+    # may follow `score DESC` (ND-TIE, ceg-scoring-audit L3).
+    match_calls = [c for c in calls if "ORDER BY score DESC" in c[0] and c[0].endswith("\nLIMIT $top_n")]
     assert len(match_calls) == 1, calls
     return match_calls[0]
 

@@ -224,23 +224,70 @@ class TestRollback:
 
 
 class TestDeclaredIdentityResolution:
-    def test_no_declared_identity_resolves_to_none(self) -> None:
-        from engine.handlers import _declared_candidate_identity
+    """CTO answer (L3): the identity is the candidate label's sync ``idproperty``.
 
-        spec = _spec()
-        spec = spec.model_copy(update={"sync": None})
-        nodes = [
-            n.model_copy(update={"properties": [p.model_copy(update={"required": False}) for p in n.properties]})
-            for n in spec.ontology.nodes
+    Exactly one distinct value: tie-break on it. None, or endpoints that
+    disagree: no tie-break key, one warning per pack revision and direction,
+    and the pack is still served (not withheld).
+    """
+
+    @staticmethod
+    def _with_endpoints(spec: DomainSpec, *idproperties: str | None) -> DomainSpec:
+        base = next(e for e in spec.sync.endpoints if e.targetnode == "OrbitalDepot")
+        others = [e for e in spec.sync.endpoints if e.targetnode != "OrbitalDepot"]
+        depots = [
+            base.model_copy(update={"idproperty": prop, "path": f"/v1/sync/orbital-depots-{i}"})
+            for i, prop in enumerate(idproperties)
         ]
-        spec = spec.model_copy(update={"ontology": spec.ontology.model_copy(update={"nodes": nodes})})
-        assert _declared_candidate_identity(spec, "OrbitalDepot") is None
+        return spec.model_copy(update={"sync": spec.sync.model_copy(update={"endpoints": [*others, *depots]})})
 
-    def test_required_property_is_the_identity_without_a_sync_endpoint(self) -> None:
+    @pytest.fixture(autouse=True)
+    def _fresh_warning_cache(self) -> None:
+        from engine.handlers import _warn_unordered_ties
+
+        _warn_unordered_ties.cache_clear()
+
+    def test_one_declared_idproperty_is_the_identity(self) -> None:
         from engine.handlers import _declared_candidate_identity
 
-        spec = _spec().model_copy(update={"sync": None})
-        assert _declared_candidate_identity(spec, "OrbitalDepot") == "depot_id"
+        assert _declared_candidate_identity(_spec(), "OrbitalDepot") == "depot_id"
+        # Two endpoints agreeing on the same idproperty are still one identity.
+        agreeing = self._with_endpoints(_spec(), "depot_id", "depot_id")
+        assert _declared_candidate_identity(agreeing, "OrbitalDepot") == "depot_id"
+
+    def test_no_sync_idproperty_resolves_to_none(self) -> None:
+        from engine.handlers import _declared_candidate_identity
+
+        # depot_id is a required ontology property, but only a sync idproperty
+        # declares identity: no required-property or entity_id fallback.
+        assert _declared_candidate_identity(_spec().model_copy(update={"sync": None}), "OrbitalDepot") is None
+
+    def test_conflicting_idproperties_resolve_to_none(self) -> None:
+        from engine.handlers import _declared_candidate_identity
+
+        conflicting = self._with_endpoints(_spec(), "depot_id", "reliability")
+        assert _declared_candidate_identity(conflicting, "OrbitalDepot") is None
+
+    @pytest.mark.parametrize("case", ["none", "conflicting"])
+    async def test_unresolved_identity_orders_by_score_alone_and_warns_once(
+        self, case: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        spec = (
+            _spec().model_copy(update={"sync": None})
+            if case == "none"
+            else self._with_endpoints(_spec(), "depot_id", "reliability")
+        )
+        with caplog.at_level("WARNING", logger="engine.handlers"):
+            first, _ = await _cypher(spec)
+            second, _ = await _cypher(spec)
+        assert first.endswith("ORDER BY score DESC\nLIMIT $top_n")
+        assert second == first
+        warnings = [r for r in caplog.records if "score ties are unordered" in r.getMessage()]
+        assert len(warnings) == 1
+        assert "orbital-logistics" in warnings[0].getMessage()
+        assert DIRECTION in warnings[0].getMessage()
+        if case == "conflicting":
+            assert "depot_id, reliability" in warnings[0].getMessage()
 
 
 class TestParameterNamespace:
@@ -261,8 +308,8 @@ class TestParameterNamespace:
         # The caller's values are untouched; the constraint binds its own names.
         assert params["arb_hard_threshold_0"] == 0.99
         assert params["arb_soft_penalty_0"] == 0.77
-        assert "depot_reliability < $arb_hard_threshold_0_," in cypher
-        assert params["arb_hard_threshold_0_"] == 0.5
-        assert "THEN $arb_soft_penalty_0_ ELSE" in cypher
-        assert params["arb_soft_penalty_0_"] == 0.25
+        assert "depot_reliability < $arb_hard_threshold_0_1," in cypher
+        assert params["arb_hard_threshold_0_1"] == 0.5
+        assert "THEN $arb_soft_penalty_0_1 ELSE" in cypher
+        assert params["arb_soft_penalty_0_1"] == 0.25
         assert params["arb_soft_threshold_0"] == 0.4

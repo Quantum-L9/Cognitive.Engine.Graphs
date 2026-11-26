@@ -634,30 +634,47 @@ def _candidate_id_property(domain_spec: DomainSpec, label: str) -> str:
 
 
 def _declared_candidate_identity(domain_spec: DomainSpec, label: str) -> str | None:
-    """ND-TIE: the candidate identity property the pack declares, or None.
+    """ND-TIE: the candidate identity the pack declares for ``label``, or None.
 
-    Same resolution as ``_candidate_id_property`` (the sync endpoint's
-    ``idproperty`` for this label, else the node's first ``required`` property)
-    without the ``entity_id`` convention fallback: a tie-break orders on a
-    property the domain declared, never on one the engine assumed.
+    The identity is the ``idproperty`` of the sync endpoint(s) whose
+    ``targetnode`` is ``label`` (the key the engine MERGEs on). Exactly one
+    distinct ``idproperty`` is the identity. None declared, or endpoints that
+    disagree, resolve to None: the tie-break is then omitted, never guessed
+    (no ``required``-property or ``entity_id`` fallback), and the pack is not
+    refused. The existing resolvers (``engine.resolution.similarity`` /
+    ``engine.causal.identity``) fall back silently and cannot report either case.
     """
+    declared: list[str] = []
     if domain_spec.sync:
         for endpoint in domain_spec.sync.endpoints:
-            if endpoint.targetnode == label and endpoint.idproperty:
-                return endpoint.idproperty
-    for node in domain_spec.ontology.nodes:
-        if node.label == label:
-            for prop in node.properties:
-                if prop.required:
-                    return prop.name
-    return None
+            if endpoint.targetnode == label and endpoint.idproperty and endpoint.idproperty not in declared:
+                declared.append(endpoint.idproperty)
+    return declared[0] if len(declared) == 1 else None
+
+
+@functools.lru_cache(maxsize=256)
+def _warn_unordered_ties(
+    domain_id: str, domain_version: str, direction: str, label: str, declared: tuple[str, ...]
+) -> None:
+    """One warning per pack revision and direction: score ties are left unordered."""
+    reason = "conflicting sync idproperty values " + ", ".join(declared) if declared else "no sync idproperty"
+    logger.warning(
+        "match %s@%s direction %s: candidate label %s has %s; score ties are unordered (ND-TIE)",
+        domain_id,
+        domain_version,
+        direction,
+        label,
+        reason,
+    )
 
 
 def _unbound_param_name(base: str, taken: set[str]) -> str:
-    """``base``, or ``base`` plus ``_`` suffixes, whichever no other parameter already uses."""
+    """``base``, else ``base_1``, ``base_2`` ..., the first no other parameter already uses."""
     name = sanitize_label(base)
+    suffix = 0
     while name in taken:
-        name = sanitize_label(f"{name}_")
+        suffix += 1
+        name = sanitize_label(f"{base}_{suffix}")
     taken.add(name)
     return name
 
@@ -1159,6 +1176,23 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         identity = _declared_candidate_identity(domain_spec, candidate_labels[0])
         if identity is not None:
             final_order += f", candidate.{sanitize_label(identity)} ASC"
+        else:
+            declared_ids = tuple(
+                sorted(
+                    {
+                        e.idproperty
+                        for e in (domain_spec.sync.endpoints if domain_spec.sync else [])
+                        if e.targetnode == candidate_labels[0] and e.idproperty
+                    }
+                )
+            )
+            _warn_unordered_ties(
+                domain_spec.domain.id,
+                str(domain_spec.domain.version),
+                match_direction,
+                candidate_labels[0],
+                declared_ids,
+            )
         if project_dimensions:
             collapse_order += "".join(f", dimension_scores.{alias} DESC" for alias in dim_aliases)
     # RU-036 / CEG-COR-007: one row per candidate (its best-scoring path) before

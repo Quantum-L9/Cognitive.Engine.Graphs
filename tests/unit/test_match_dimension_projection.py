@@ -44,6 +44,11 @@ GRAPH_ROWS: list[dict[str, Any]] = [
 ]
 
 
+# `ORDER BY score DESC`, then optionally the declared identity tie-break (ND-TIE,
+# ceg-scoring-audit L3), then the `$top_n` cut that ends the query.
+_TIEBREAK_TAIL = r"(, candidate\.\w+ ASC)?\nLIMIT \$top_n\Z"
+
+
 def _returned_dimension_aliases(cypher: str) -> list[str] | None:
     """Aliases inside the RETURN's `{...} AS dimension_scores` map, or None when not projected."""
     match = re.search(r"\{([^{}]*)\} AS dimension_scores", cypher)
@@ -102,7 +107,7 @@ class TestDimensionProjection:
             "RETURN candidate, score, {depot_reliability: depot_reliability, "
             "port_capacity: port_capacity} AS dimension_scores, " in cypher
         )
-        assert cypher.endswith("AS absent_sources\nORDER BY score DESC\nLIMIT $top_n")
+        assert re.search(r"AS absent_sources\nORDER BY score DESC" + _TIEBREAK_TAIL, cypher)
 
     async def test_pareto_front_excludes_dominated_rows(self) -> None:
         _wire(_spec())
@@ -112,7 +117,10 @@ class TestDimensionProjection:
         assert "d2" not in pareto["non_dominated_ids"]
         assert set(pareto["non_dominated_ids"]) == {"d1", "d3"}
 
-    async def test_hard_arbitration_constraint_removes_violator(self) -> None:
+    async def test_hard_arbitration_constraint_removes_violator(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The Python arbitration pass (the rollback path of ND-ARB, ceg-scoring-audit
+        # L3) reads the projected values: the violator is dropped.
+        monkeypatch.setattr(settings, "match_arbitration_in_cypher_enabled", False)
         arbitration = DecisionArbitrationSpec(
             enabled=True,
             constraints=[ArbitrationConstraintSpec(dimension="depot_reliability", threshold=0.5, hard=True)],
@@ -122,6 +130,23 @@ class TestDimensionProjection:
         ids = [c["candidate"]["depot_id"] for c in result["candidates"]]
         assert "d3" not in ids  # reliability 0.2 < 0.5
         assert ids == ["d1", "d2"]
+
+    async def test_hard_arbitration_constraint_filters_the_projected_dimension_in_cypher(self) -> None:
+        # Shipped default (ND-ARB / D4): the constraint is a WHERE on the same
+        # dimension alias the RETURN projects, placed before ORDER BY / LIMIT.
+        arbitration = DecisionArbitrationSpec(
+            enabled=True,
+            constraints=[ArbitrationConstraintSpec(dimension="depot_reliability", threshold=0.5, hard=True)],
+        )
+        driver = _wire(_spec(decision_arbitration=arbitration))
+        await _match()
+        cypher, params = driver.calls[0]["cypher"], driver.calls[0]["parameters"]
+        where = re.search(r"\nWHERE NOT coalesce\((\w+) < \$(\w+), false\)\n", cypher)
+        assert where is not None
+        assert where.group(1) == "depot_reliability"
+        assert "depot_reliability" in (_returned_dimension_aliases(cypher) or [])
+        assert params[where.group(2)] == 0.5
+        assert where.start() < cypher.index("ORDER BY") < cypher.index("LIMIT $top_n")
 
     async def test_single_dominant_dimension_gets_monoculture_flag(self) -> None:
         rows = [
@@ -149,10 +174,11 @@ class TestDimensionProjection:
             "WITH candidate, score, {depot_reliability: depot_reliability, "
             "port_capacity: port_capacity} AS dimension_scores, " in cypher
         )
-        assert cypher.endswith(
+        tail = (
             "RETURN candidate, best.score AS score, best.dimension_scores AS dimension_scores, "
-            "best.absent_sources AS absent_sources\nORDER BY score DESC\nLIMIT $top_n"
+            "best.absent_sources AS absent_sources\nORDER BY score DESC"
         )
+        assert re.search(re.escape(tail) + _TIEBREAK_TAIL, cypher)
 
     async def test_zero_active_dimensions_emit_an_empty_map(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings, "match_collapse_traversal_rows", False)
@@ -168,7 +194,7 @@ class TestDimensionProjection:
         driver = _wire(_spec())
         result = await _match()
         cypher = driver.calls[0]["cypher"]
-        assert "\nRETURN candidate, score\nORDER BY score DESC\nLIMIT $top_n" in cypher
+        assert re.search(r"\nRETURN candidate, score\nORDER BY score DESC" + _TIEBREAK_TAIL, cypher)
         assert "dimension_scores" not in cypher
         # The defect the flag restores: no dimension data, so nothing is dominated.
         assert set(result["pareto"]["non_dominated_ids"]) == {"d1", "d2", "d3"}
