@@ -1097,12 +1097,19 @@ with a pydantic `ValidationError` naming the defect:
   scoring dimension;
 - a `preference_attention` dimension active in a match direction where no
   traversal step applicable to that direction binds a `qe` node (its outcome
-  sample is matched from `qe`; unbound, the subquery matched every node).
+  sample is matched from `qe`; unbound, the subquery matched every node);
+- a non-default value for an option no engine code reads: `normalization`,
+  `edge_type_strategy`, `entity_types`, `adaptive_sample_size`,
+  `preference_attention_feedback_blend`, Pareto `weight_hint`, arbitration
+  `optimization_method` and `policy_weights`;
+- an option whose input nothing produces (the producer rules under "Scoring
+  admission" above): `population_mean` without a `_popmean_<dim>` queryschema
+  field or derived parameter, `inherit_prior` / `structural_similarity`
+  without the candidate property they read.
 
 Every committed design pack loads with the flag on. This flag does not touch
 admission withholding: `SCORING_ADMISSION_CHECK_ENABLED` keeps its default
-(`False`), and cross-reference defects such as an unbound `$_popmean_<dim>`
-stay under it. `tools/validate_domain.py --dry-run <pack-or-root>` reports,
+(`False`). `tools/validate_domain.py --dry-run <pack-or-root>` reports,
 without serving anything, which published packs this flag would refuse, so
 operators can check them before deploy. Rollback:
 `SCORING_SPEC_STRICT_VALIDATION_ENABLED=false` (such packs load as before).

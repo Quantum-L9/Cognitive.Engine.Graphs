@@ -88,6 +88,23 @@ def _attention_without_qe(raw: dict[str, Any]) -> None:
     raw["scoring"]["dimensions"].append(_attention_dimension())
 
 
+def _set_scoring(key: str, value: Any) -> Callable[[dict[str, Any]], None]:
+    def mutate(raw: dict[str, Any]) -> None:
+        raw["scoring"][key] = value
+
+    return mutate
+
+
+def _set_arbitration(**values: Any) -> Callable[[dict[str, Any]], None]:
+    def mutate(raw: dict[str, Any]) -> None:
+        raw["decision_arbitration"] = values
+
+    return mutate
+
+
+_DEAD = "are declared but not read by any engine code"
+
+
 # (case id, mutation, message fragment the refusal names)
 REFUSALS: list[tuple[str, Callable[[dict[str, Any]], None], str]] = [
     ("defaultweight-nan", _set_first("defaultweight", math.nan), "defaultweight must be finite and >= 0"),
@@ -105,6 +122,32 @@ REFUSALS: list[tuple[str, Callable[[dict[str, Any]], None], str]] = [
         "undeclared scoring dimension(s): ['not_a_dimension']",
     ),
     ("preference-attention-without-qe", _attention_without_qe, "binds a `qe` node"),
+    # ND-DEAD: declared options no engine code reads (a non-default value is refused).
+    ("dead-normalization", _set_first("normalization", "minmax"), f"normalization {_DEAD}"),
+    ("dead-edge-type-strategy", _set_first("edge_type_strategy", {"STOCKS": "communitymatch"}), _DEAD),
+    ("dead-entity-types", _set_first("entity_types", ["OrbitalDepot"]), f"entity_types {_DEAD}"),
+    ("dead-adaptive-sample-size", _set_scoring("adaptive_sample_size", {"enabled": True}), _DEAD),
+    ("dead-feedback-blend", _set_scoring("preference_attention_feedback_blend", 0.5), _DEAD),
+    (
+        "dead-weight-hint",
+        _set_arbitration(pareto_config={"objectives": [{"dimension": "depot_reliability", "weight_hint": 0.5}]}),
+        f"weight_hint {_DEAD}",
+    ),
+    ("dead-optimization-method", _set_arbitration(optimization_method="weighted_sum"), _DEAD),
+    ("dead-policy-weights", _set_arbitration(policy_weights={"balanced": {"depot_reliability": 1.0}}), _DEAD),
+    # ND-PARAM: an option whose input nothing produces.
+    ("unproduced-population-mean", _set_first("null_strategy", "population_mean"), "'_popmean_depot_reliability'"),
+    (
+        "unproduced-cold-start-population-mean",
+        _set_first("cold_start_fallback", "population_mean"),
+        "'_popmean_depot_reliability'",
+    ),
+    ("unproduced-inherit-prior", _set_first("null_strategy", "inherit_prior"), "'_prior_depot_reliability'"),
+    (
+        "unproduced-structural-similarity",
+        _set_first("cold_start_fallback", "structural_similarity"),
+        "'shared_neighbor_score'",
+    ),
 ]
 
 
@@ -381,3 +424,65 @@ def test_cypher_number_round_trips_every_finite_float(value: float) -> None:
 def test_cypher_number_refuses_every_non_finite_float(value: float) -> None:
     with pytest.raises(ValueError, match="finite"):
         cypher_number(value)
+
+
+# ── ND-PARAM: a declared producer admits the option ─────────────────────────
+
+
+def _candidate_property(raw: dict[str, Any], name: str) -> None:
+    depot = next(node for node in raw["ontology"]["nodes"] if node["label"] == "OrbitalDepot")
+    depot["properties"].append({"name": name, "type": "float"})
+
+
+@pytest.mark.parametrize("option", ["null_strategy", "cold_start_fallback"])
+@pytest.mark.parametrize("producer", ["queryschema", "derived"])
+def test_population_mean_with_a_declared_parameter_is_admitted(option: str, producer: str) -> None:
+    raw = _raw()
+    raw["scoring"]["dimensions"][0][option] = "population_mean"
+    if producer == "queryschema":
+        raw["queryschema"]["fields"].append({"name": "_popmean_depot_reliability", "type": "float"})
+    else:
+        raw["derivedparameters"] = [{"name": "_popmean_depot_reliability", "expression": "0.5", "type": "float"}]
+    assert DomainSpec.model_validate(raw).scoring.dimensions[0].name == "depot_reliability"
+
+
+def test_inherit_prior_with_its_candidate_property_is_admitted() -> None:
+    raw = _raw()
+    raw["scoring"]["dimensions"][0]["null_strategy"] = "inherit_prior"
+    _candidate_property(raw, "_prior_depot_reliability")
+    assert DomainSpec.model_validate(raw).scoring.dimensions[0].null_strategy.value == "inherit_prior"
+
+
+def test_structural_similarity_with_its_candidate_property_is_admitted() -> None:
+    raw = _raw()
+    raw["scoring"]["dimensions"][0]["cold_start_fallback"] = "structural_similarity"
+    _candidate_property(raw, "shared_neighbor_score")
+    spec = DomainSpec.model_validate(raw)
+    assert spec.scoring.dimensions[0].cold_start_fallback.value == "structural_similarity"
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("normalization", None),
+        ("edge_type_strategy", {}),
+        ("entity_types", []),
+    ],
+)
+def test_dead_dimension_options_at_their_default_are_admitted(key: str, value: Any) -> None:
+    """A pack that declares an unread option at its default value is unaffected."""
+    raw = _raw()
+    raw["scoring"]["dimensions"][0][key] = value
+    assert DomainSpec.model_validate(raw).domain.id == _DOMAIN
+
+
+def test_dead_options_at_their_defaults_are_admitted() -> None:
+    raw = _raw()
+    raw["scoring"]["preference_attention_feedback_blend"] = 0.7
+    raw["scoring"]["adaptive_sample_size"] = {"enabled": False}
+    raw["decision_arbitration"] = {
+        "optimization_method": "pareto",
+        "policy_weights": {},
+        "pareto_config": {"objectives": [{"dimension": "depot_reliability", "weight_hint": 1.0}]},
+    }
+    assert DomainSpec.model_validate(raw).domain.id == _DOMAIN

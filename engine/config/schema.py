@@ -679,6 +679,15 @@ class GateSpec(BaseModel):
     edgepredicates: list[EdgePredicateSpec] | None = None
 
 
+# ND-DEAD (CEG scoring audit L2): declared options no engine code reads. A value
+# other than the default promised behaviour the engine never delivered.
+_UNREAD_FEEDBACK_BLEND = 0.7
+
+
+def _dead_option_defect(keys: list[str]) -> str:
+    return f"option(s) {', '.join(keys)} are declared but not read by any engine code; remove them"
+
+
 def _scoring_strict() -> bool:
     """D3 rollback switch, read at validation time."""
     from engine.config.settings import settings
@@ -837,6 +846,14 @@ class ScoringDimensionSpec(BaseModel):
                 "(the score is always the additive weighted sum)"
             )
             raise ValueError(msg)
+        dead = [
+            key
+            for key, unset in (("normalization", None), ("edge_type_strategy", {}), ("entity_types", []))
+            if getattr(self, key) != unset
+        ]
+        if dead:
+            msg = f"Scoring dimension {self.name!r}: {_dead_option_defect(dead)}"
+            raise ValueError(msg)
         return self
 
     @model_validator(mode="after")
@@ -911,6 +928,14 @@ class ScoringSpec(BaseModel):
             raise ValueError(msg)
         if size < 1:
             msg = f"preference_sample_size must be >= 1, got {size}"
+            raise ValueError(msg)
+        dead = []
+        if self.adaptive_sample_size != AdaptiveSampleSizeSpec():
+            dead.append("adaptive_sample_size")
+        if self.preference_attention_feedback_blend != _UNREAD_FEEDBACK_BLEND:
+            dead.append("preference_attention_feedback_blend")
+        if dead:
+            msg = f"scoring: {_dead_option_defect(dead)}"
             raise ValueError(msg)
         return self
 
@@ -1409,6 +1434,14 @@ class ParetoObjectiveSpec(BaseModel):
     direction: str = Field(default="maximize", description="maximize or minimize")
     weight_hint: float = Field(default=1.0, ge=0.0, le=1.0, description="Initial weight hint")
 
+    @model_validator(mode="after")
+    def refuse_unread_weight_hint(self) -> ParetoObjectiveSpec:
+        """ND-DEAD: the Pareto front reads dimension and direction only (scoring_spec_strict_validation_enabled)."""
+        if _scoring_strict() and self.weight_hint != 1.0:
+            msg = f"Pareto objective {self.dimension!r}: {_dead_option_defect(['weight_hint'])}"
+            raise ValueError(msg)
+        return self
+
 
 class ParetoConfigSpec(BaseModel):
     """Pareto-specific configuration."""
@@ -1493,6 +1526,21 @@ class DecisionArbitrationSpec(BaseModel):
         default_factory=dict,
         description="Named weight policies, e.g. {'balanced': {'geo': 0.5, 'price': 0.5}}",
     )
+
+    @model_validator(mode="after")
+    def refuse_unread_options(self) -> DecisionArbitrationSpec:
+        """ND-DEAD: optimization_method and policy_weights have no reader (scoring_spec_strict_validation_enabled)."""
+        if not _scoring_strict():
+            return self
+        dead = [
+            key
+            for key, unset in (("optimization_method", "pareto"), ("policy_weights", {}))
+            if getattr(self, key) != unset
+        ]
+        if dead:
+            msg = f"decision_arbitration: {_dead_option_defect(dead)}"
+            raise ValueError(msg)
+        return self
 
 
 class FeatureCatalogEntry(BaseModel):
@@ -1651,6 +1699,44 @@ def missing_edge_property_reason(spec: DomainSpec, gate: GateSpec) -> str | None
                 + predicate.property
                 + " requires a string property of edge "
                 + edge_type
+            )
+    return None
+
+
+def _no_producer(spec: DomainSpec, dim: ScoringDimensionSpec) -> str | None:
+    """ND-PARAM: a null / cold-start option whose input nothing produces (the FEATURE_GATES §16 producer rules).
+
+    ``population_mean`` reads ``$_popmean_<dim>``, bound only when the pack
+    declares it as a queryschema field or derived parameter; ``inherit_prior``
+    reads ``candidate._prior_<dim>`` and ``structural_similarity`` reads
+    ``candidate.shared_neighbor_score``, written by sync only when a candidate
+    node declares them. Without a producer the option silently does nothing.
+    """
+    params = {f.name for f in spec.queryschema.fields} | {p.name for p in spec.derivedparameters}
+    labels = {entity.label for entity in spec.matchentities.candidate}
+    props = {p.name for n in spec.ontology.nodes if n.candidate or n.label in labels for p in n.properties}
+    needs: list[tuple[str, str, set[str], str]] = []
+    if (
+        dim.null_strategy is NullStrategy.POPULATION_MEAN
+        or dim.cold_start_fallback is ColdStartFallback.POPULATION_MEAN
+    ):
+        needs.append(("population_mean", "_popmean_" + dim.name, params, "query parameter"))
+    if dim.null_strategy is NullStrategy.INHERIT_PRIOR:
+        needs.append(("inherit_prior", "_prior_" + dim.name, props, "candidate property"))
+    if dim.cold_start_fallback is ColdStartFallback.STRUCTURAL_SIMILARITY:
+        needs.append(("structural_similarity", "shared_neighbor_score", props, "candidate property"))
+    for option, name, declared_names, kind in needs:
+        if name not in declared_names:
+            return (
+                "Scoring dimension "
+                + repr(dim.name)
+                + ": "
+                + option
+                + " reads the "
+                + kind
+                + " "
+                + repr(name)
+                + ", which the pack does not declare"
             )
     return None
 
@@ -1885,4 +1971,7 @@ class DomainSpec(BaseModel):
                     f"but no traversal step applicable to direction {direction!r} binds a `qe` node"
                 )
                 raise ValueError(msg)
+        unproduced = [defect for dim in self.scoring.dimensions if (defect := _no_producer(self, dim)) is not None]
+        if unproduced:
+            raise ValueError("; ".join(unproduced))
         return self

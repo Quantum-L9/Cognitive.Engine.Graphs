@@ -454,16 +454,25 @@ class TestEdgeCategoryConfig:
 class TestEntityTypeTracking:
     """S2-12: entity_types field on ScoringDimensionSpec."""
 
-    def test_entity_types_field_exists(self) -> None:
-        dim = ScoringDimensionSpec(
-            name="test",
-            source=ScoringSource.CANDIDATEPROPERTY,
-            computation=ComputationType.CANDIDATEPROPERTY,
-            candidateprop="value",
-            weightkey="w_test",
-            defaultweight=0.5,
-            entity_types=["Facility", "Equipment"],
-        )
+    def test_entity_types_field_exists(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No engine code reads entity_types (ND-DEAD): refused with strict scoring on, kept with it off."""
+        from pydantic import ValidationError
+
+        from engine.config.settings import settings
+
+        kwargs = {
+            "name": "test",
+            "source": ScoringSource.CANDIDATEPROPERTY,
+            "computation": ComputationType.CANDIDATEPROPERTY,
+            "candidateprop": "value",
+            "weightkey": "w_test",
+            "defaultweight": 0.5,
+            "entity_types": ["Facility", "Equipment"],
+        }
+        with pytest.raises(ValidationError, match="entity_types are declared but not read"):
+            ScoringDimensionSpec(**kwargs)
+        monkeypatch.setattr(settings, "scoring_spec_strict_validation_enabled", False)
+        dim = ScoringDimensionSpec(**kwargs)
         assert dim.entity_types == ["Facility", "Equipment"]
 
     def test_entity_types_defaults_empty(self) -> None:
@@ -842,12 +851,16 @@ class TestAggregationValidation:
 class TestPreferenceAttentionFeedback:
     """S2-06: Preference attention x convergence loop feedback."""
 
-    def test_feedback_blend_field_exists(self) -> None:
-        """ScoringSpec should have preference_attention_feedback_blend."""
-        spec = ScoringSpec(
-            dimensions=[],
-            preference_attention_feedback_blend=0.5,
-        )
+    def test_feedback_blend_field_exists(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """No engine code reads the blend (ND-DEAD): refused with strict scoring on, kept with it off."""
+        from pydantic import ValidationError
+
+        from engine.config.settings import settings
+
+        with pytest.raises(ValidationError, match="preference_attention_feedback_blend are declared but not read"):
+            ScoringSpec(dimensions=[], preference_attention_feedback_blend=0.5)
+        monkeypatch.setattr(settings, "scoring_spec_strict_validation_enabled", False)
+        spec = ScoringSpec(dimensions=[], preference_attention_feedback_blend=0.5)
         assert spec.preference_attention_feedback_blend == 0.5
 
     def test_feedback_blend_default(self) -> None:

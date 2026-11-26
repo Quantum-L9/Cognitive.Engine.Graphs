@@ -443,6 +443,10 @@ class TestScoringAdmission:
         monkeypatch.setattr(loader_module.settings, "dormant_domain_packs_enabled", False)
         # The check ships off (owner decision 2026-10-29); this class tests it on.
         monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", True)
+        # ND-PARAM: strict scoring validation refuses options without a producer
+        # at load; these admission defects are its rollback (flag-off) path
+        # (tests/unit/test_scoring_spec_strict_validation.py covers the refusal).
+        monkeypatch.setattr(loader_module.settings, "scoring_spec_strict_validation_enabled", False)
 
     def test_community_bridge_without_query_field_names_the_parameter(self) -> None:
         from engine.config.loader import withholding_reason
