@@ -297,7 +297,10 @@ class TestFlagOn:
         driver = _wire(_spec(constrained))
         response = await _match(top_n=2)
         cypher = driver.calls[0]["cypher"]
-        assert "WHERE NOT (depot_reliability IS NULL OR isNaN(depot_reliability) OR depot_reliability < $arb_hard_threshold_0)" in cypher
+        assert (
+            "WHERE NOT (depot_reliability IS NULL OR isNaN(depot_reliability) OR depot_reliability < $arb_hard_threshold_0)"
+            in cypher
+        )
         assert driver.calls[0]["parameters"]["arb_hard_threshold_0"] == 0.5
         assert _ids(response) == ["a", "d"]
         assert response["pareto"]["arbitration"]["precut"]["pool_size"] == 4
