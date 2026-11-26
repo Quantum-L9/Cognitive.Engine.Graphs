@@ -156,14 +156,17 @@ flag off: unchanged.
 
 ```python
 # WRONG: two query entity labels and no direction to choose one; refused before any write
-{"match_id": "m-1", "candidate_id": "depot-1", "outcome": "success",
- "query_entity_id": "window-1"}
+{"match_id": "m-1", "candidate_id": "depot-1", "outcome": "success", "query_entity_id": "window-1"}
 
 # RIGHT: fingerprint.match_direction names the direction whose queryentity label
 # (here LaunchWindow) holds the entity with window_id "window-1"
-{"match_id": "m-1", "candidate_id": "depot-1", "outcome": "success",
- "fingerprint": {"match_direction": "window_to_depot"},
- "query_entity_id": "window-1"}
+{
+    "match_id": "m-1",
+    "candidate_id": "depot-1",
+    "outcome": "success",
+    "fingerprint": {"match_direction": "window_to_depot"},
+    "query_entity_id": "window-1",
+}
 ```
 
 RU-006 (`OUTCOME_SCHEMA_UNIFIED`, default on, R1a-DEC-02): `handle_outcomes` is
