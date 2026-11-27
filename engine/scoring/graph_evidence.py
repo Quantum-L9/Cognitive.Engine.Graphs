@@ -100,14 +100,12 @@ _TRANSACTION_TIMEOUT_CODE_PREFIX = "Neo.ClientError.Transaction.TransactionTimed
 _POOL_ACQUISITION_TIMEOUT_PREFIX = "failed to obtain a connection from the pool"
 
 
-def _is_graph_outage(exc: Exception) -> bool:
-    """Whether ``exc`` means the graph could not answer, as opposed to a wrong question.
+# How far an ExecutionError's ``__cause__`` chain is followed (cycle-guarded too).
+_MAX_CAUSE_DEPTH = 8
 
-    Connection loss, session expiry, transient server errors (which include an
-    unavailable database), timeouts and an open circuit are outages: the score
-    is ``blocked``. Malformed Cypher, type errors, authorization failures and
-    programming errors are not, and propagate so they stay visible.
-    """
+
+def _is_raw_outage(exc: BaseException) -> bool:
+    """The classification of a raw driver or breaker error (see :func:`_is_graph_outage`)."""
     if isinstance(exc, CircuitOpenError | ServiceUnavailable | SessionExpired | TransientError | TimeoutError):
         return True
     if not isinstance(exc, ClientError):
@@ -115,6 +113,47 @@ def _is_graph_outage(exc: Exception) -> bool:
     return (exc.code or "").startswith(_TRANSACTION_TIMEOUT_CODE_PREFIX) or str(exc).startswith(
         _POOL_ACQUISITION_TIMEOUT_PREFIX
     )
+
+
+def _translated_outage(exc: Exception) -> bool:
+    """Whether ``exc`` is the engine's ``ExecutionError`` wrapping an outage (CEG-A04).
+
+    ``GraphDriver`` translates a server transaction timeout into ``ExecutionError``
+    with the neo4j error as ``__cause__``. Only that wrapper is unwrapped, and only
+    a cause that passes :func:`_is_raw_outage` makes it an outage: an
+    ``ExecutionError`` caused by malformed Cypher, a type or an authorization error
+    still propagates.
+    """
+    # Imported here: engine.handlers imports this module.
+    from engine.handlers import ExecutionError
+
+    if not isinstance(exc, ExecutionError):
+        return False
+    seen: set[int] = set()
+    cause = exc.__cause__
+    while cause is not None and id(cause) not in seen and len(seen) < _MAX_CAUSE_DEPTH:
+        if _is_raw_outage(cause):
+            return True
+        seen.add(id(cause))
+        cause = cause.__cause__
+    return False
+
+
+def _is_graph_outage(exc: Exception) -> bool:
+    """Whether ``exc`` means the graph could not answer, as opposed to a wrong question.
+
+    Connection loss, session expiry, transient server errors (which include an
+    unavailable database), timeouts and an open circuit are outages: the score
+    is ``blocked``. Malformed Cypher, type errors, authorization failures and
+    programming errors are not, and propagate so they stay visible. With
+    ``score_malformed_evidence_abstention_enabled`` an outage the driver
+    translated into ``ExecutionError`` is recognised through its cause chain.
+    """
+    if _is_raw_outage(exc):
+        return True
+    from engine.config.settings import settings
+
+    return bool(settings.score_malformed_evidence_abstention_enabled) and _translated_outage(exc)
 
 
 def _admission(status: Any) -> Literal["admitted", "inferred_unverified"]:
@@ -159,8 +198,22 @@ def _malformed(row: dict[str, Any]) -> MalformedEvidence:
 
 
 def _single_revision(rows: Sequence[dict[str, Any]]) -> str | None:
-    """The source revision when every read edge reports the same one; never invented."""
-    revisions = {row["props"].get("source_revision") for row in rows}
+    """The source revision when every read edge reports the same one; never invented.
+
+    CEG-A08: with ``score_malformed_evidence_abstention_enabled`` a revision that
+    is not a string (a foreign writer's list, a number) counts as unknown, so it
+    makes the cohort's revision unknown instead of failing the read on an
+    unhashable value. Off: the raw values are compared (legacy).
+    """
+    from engine.config.settings import settings
+
+    if settings.score_malformed_evidence_abstention_enabled:
+        revisions: set[Any] = set()
+        for row in rows:
+            revision = row["props"].get("source_revision")
+            revisions.add(revision if isinstance(revision, str) else None)
+    else:
+        revisions = {row["props"].get("source_revision") for row in rows}
     if len(revisions) == 1:
         revision = revisions.pop()
         return revision if isinstance(revision, str) else None
