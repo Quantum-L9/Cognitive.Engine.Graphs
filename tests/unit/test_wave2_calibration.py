@@ -56,6 +56,15 @@ class TestCalibrationPairModel:
         assert pair.label == "test_pair"
 
 
+@pytest.fixture(autouse=True)
+def _abstract_basis_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the D6 flag on, so a CALIBRATION_NDCG_ABSTRACT_BASIS_ENABLED in the
+    environment cannot flip the flag-on contract; the flag-off tests set it off."""
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "calibration_ndcg_abstract_basis_enabled", True)
+
+
 @pytest.mark.unit
 class TestRunCalibration:
     """Test ScoreCalibrator.run_calibration()."""
