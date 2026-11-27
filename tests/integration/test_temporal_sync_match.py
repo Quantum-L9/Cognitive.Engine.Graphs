@@ -138,11 +138,31 @@ async def _stored_type(graph_driver, facility_id: str, prop: str) -> str:
     return str(rows[0]["t"])
 
 
+# temporalproximity recency for a candidate `days` old, by FEATURE_GATES §37: off, the legacy
+# 0.6 * exp(-days / 180) (+ 0 + 0); on, the declared signals alone, exp(-days / 180).
+# Each case pins the flag, so the expectation never depends on its default.
+DECLARED_SIGNALS = pytest.mark.parametrize("declared_signals", [False, True], ids=["legacy", "declared-signals"])
+
+
+def _recency(days: int, *, declared_signals: bool) -> float:
+    return math.exp(-days / 180) if declared_signals else 0.6 * math.exp(-days / 180)
+
+
+def _pin_declared_signals(monkeypatch: pytest.MonkeyPatch, declared_signals: bool) -> None:
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "temporalproximity_declared_signals_enabled", declared_signals)
+
+
+@DECLARED_SIGNALS
 @pytest.mark.integration
-async def test_synced_datetime_is_native_and_the_buyer_match_scores_it(design_pack_deps, graph_driver):
+async def test_synced_datetime_is_native_and_the_buyer_match_scores_it(
+    design_pack_deps, graph_driver, monkeypatch, declared_signals
+):
     from chassis.actions import execute_action
     from engine.handlers import handle_match, handle_sync
 
+    _pin_declared_signals(monkeypatch, declared_signals)
     input_row = _facility("dated", 30)  # one clock read: the expected value is exactly what was synced
     synced = await handle_sync(PLASTICOS, {"entity_type": "facilities", "batch": [input_row]})
     assert synced["status"] == "success"
@@ -150,8 +170,9 @@ async def test_synced_datetime_is_native_and_the_buyer_match_scores_it(design_pa
 
     result = await handle_match(PLASTICOS, _match_payload())
     row = _by_id(result)["dated"]
-    # Legacy temporalproximity (FEATURE_GATES §37 off): 0.6 * exp(-days / 180) + 0 + 0.
-    assert row["dimension_scores"]["recency"] == pytest.approx(0.6 * math.exp(-30 / 180), abs=1e-6)
+    assert row["dimension_scores"]["recency"] == pytest.approx(
+        _recency(30, declared_signals=declared_signals), abs=1e-6
+    )
 
     # The chassis path: handler -> deflate_egress -> the dict the HTTP layer serialises.
     envelope = await execute_action("match", _match_payload(), PLASTICOS, "trace-temporal-1")
@@ -177,10 +198,15 @@ async def test_a_naive_datetime_is_refused_and_nothing_is_written(design_pack_de
     assert rows[0]["n"] == 0
 
 
+@DECLARED_SIGNALS
 @pytest.mark.integration
-async def test_freshness_gate_and_matchset_updated_at_survive_egress(variant_deps, graph_driver):
+async def test_freshness_gate_and_matchset_updated_at_survive_egress(
+    variant_deps, graph_driver, monkeypatch, declared_signals
+):
     from chassis.actions import execute_action
     from engine.handlers import handle_match, handle_sync
+
+    _pin_declared_signals(monkeypatch, declared_signals)
 
     batch = [_facility("fresh", 10), _facility("stale", 200)]
     assert (await handle_sync(PLASTICOS, {"entity_type": "facilities", "batch": batch}))["status"] == "success"
@@ -199,7 +225,9 @@ async def test_freshness_gate_and_matchset_updated_at_survive_egress(variant_dep
 
     after = _by_id(await handle_match(PLASTICOS, _match_payload()))
     assert set(after) == {"fresh", "stale"}
-    assert after["stale"]["dimension_scores"]["recency"] == pytest.approx(0.6 * math.exp(-5 / 180), abs=1e-6)
+    assert after["stale"]["dimension_scores"]["recency"] == pytest.approx(
+        _recency(5, declared_signals=declared_signals), abs=1e-6
+    )
 
     envelope = await execute_action("match", _match_payload(), PLASTICOS, "trace-temporal-2")
     assert envelope["status"] == "success"
