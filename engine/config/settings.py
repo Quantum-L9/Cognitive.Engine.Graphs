@@ -985,8 +985,10 @@ class Settings(BaseSettings):
     # sync drops them), so recency was capped at 0.6. On: only the auxiliary
     # signals the dimension declares in metadata contribute, recency takes the
     # remaining weight (1.0 when none is declared) and the frequency term is
-    # clamped to [0, 1]. Off (default, C-21): the legacy fixed 0.6/0.25/0.15.
-    temporalproximity_declared_signals_enabled: bool = False
+    # clamped to [0, 1]. Default on since SC-001 (audit L5, operator 2026-11-26):
+    # hardening that stops scoring reading undeclared properties. Off is the
+    # documented rollback only: the legacy fixed 0.6/0.25/0.15, text unchanged.
+    temporalproximity_declared_signals_enabled: bool = True
 
     # CEG-ENRICH-GATE: CEG's local `enrich` action (handle_enrich) runs
     # `MATCH (n:<label>) SET n.<prop> = <expr>` — a second writer of node

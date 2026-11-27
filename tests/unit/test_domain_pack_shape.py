@@ -462,7 +462,7 @@ def test_served_scoring_inputs_discriminate_within_unit_range(
 
 def test_plasticos_recency_uses_the_declared_180_day_horizon() -> None:
     expression = _dimension_expression("plasticos", "recency")
-    assert "duration.inDays(candidate.last_transaction_date, datetime()).days / 180.0" in expression
+    assert "/ 180.0)" in expression  # the horizon, in both the declared (default) and legacy forms
     assert "/ 90.0" not in expression
 
 

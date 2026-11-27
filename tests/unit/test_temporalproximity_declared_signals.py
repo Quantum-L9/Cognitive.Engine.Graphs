@@ -19,6 +19,10 @@ no pack declares, so a pack's recency score was capped at 0.6. With
 recency takes the remaining weight, and an undeclared signal contributes
 nothing. Off keeps the legacy text byte for byte. Built on the synthetic
 ``orbital-logistics`` pack (``tests/fixtures/domains``).
+
+SC-001 (audit L5, operator instruction 2026-11-26): the declared path is the
+default. The legacy compiler is reachable only as the documented rollback
+(flag ``False``), and the legacy tests below select it explicitly.
 """
 
 from __future__ import annotations
@@ -26,13 +30,14 @@ from __future__ import annotations
 import copy
 import re
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 import yaml
 from pydantic import ValidationError
 
 from engine.config.schema import DomainSpec
-from engine.config.settings import settings
+from engine.config.settings import Settings, settings
 from engine.scoring.assembler import ScoringAssembler
 from tests.fixtures.domain_contracts import DESIGN_PACKS_ROOT, SYNTHETIC_DOMAINS_ROOT
 
@@ -88,13 +93,21 @@ def declared(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "temporalproximity_declared_signals_enabled", True)
 
 
+@pytest.fixture
+def legacy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The documented rollback: the flag explicitly off."""
+    monkeypatch.setattr(settings, "temporalproximity_declared_signals_enabled", False)
+
+
 # ── Flag off: the legacy compiler, unchanged ────────────────────────────────
 
 
-def test_flag_defaults_off() -> None:
-    assert type(settings).model_fields["temporalproximity_declared_signals_enabled"].default is False
+def test_flag_defaults_on() -> None:
+    """SC-001: the declared-signal compiler is the default; ``False`` is the rollback."""
+    assert type(settings).model_fields["temporalproximity_declared_signals_enabled"].default is True
 
 
+@pytest.mark.usefixtures("legacy")
 def test_flag_off_compiles_the_legacy_text_and_ignores_metadata() -> None:
     expr, params = _compile(_dimension({"frequency_property": "dock_count"}))
     assert expr == _LEGACY
@@ -140,6 +153,7 @@ def test_declared_floor_applies_with_auxiliary_signals_declared() -> None:
     assert f"CASE WHEN {_AGE} < 0 THEN 0 ELSE {_AGE} END" in expr
 
 
+@pytest.mark.usefixtures("legacy")
 def test_legacy_path_has_no_floor_and_matches_main_byte_for_byte() -> None:
     """D2: the legacy path stays byte-for-byte (FEATURE_GATES §37); ``_LEGACY`` is main's text at 21dc906."""
     expr, _params = _compile(_dimension())
@@ -310,3 +324,32 @@ def test_the_served_committed_temporalproximity_pack_is_plasticos() -> None:
         if uses and raw["domain"].get("activation") != "dormant":
             served.append(path.parent.name)
     assert served == ["plasticos"]
+
+
+def test_default_settings_compile_committed_packs_with_no_hardcoded_property(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SC-001: under a freshly constructed default ``Settings``, every committed
+    temporalproximity dimension compiles on the declared path. Nothing the pack
+    did not declare is read, and the legacy fixed weights are gone."""
+    monkeypatch.delenv("TEMPORALPROXIMITY_DECLARED_SIGNALS_ENABLED", raising=False)
+    defaults = Settings(l9_env="dev")
+    assert defaults.temporalproximity_declared_signals_enabled is True
+
+    dims = _committed_temporalproximity()
+    assert dims
+    with patch("engine.config.settings.settings", defaults):
+        for spec_path in sorted(DESIGN_PACKS_ROOT.glob("*/spec.yaml")):
+            spec = DomainSpec.model_validate(yaml.safe_load(spec_path.read_text(encoding="utf-8")))
+            for dim in spec.scoring.dimensions:
+                if dim.computation.value != "temporalproximity":
+                    continue
+                assembler = ScoringAssembler(spec)
+                expr = assembler._compile_dimension(dim)
+                assert "touch_count_30d" not in expr, spec_path.parent.name
+                assert "is_accelerating" not in expr, spec_path.parent.name
+                for legacy_weight in ("0.6 *", "0.25 *", "0.15 *"):
+                    assert legacy_weight not in expr, spec_path.parent.name
+                assert f"$tp_recency_w_{dim.name}" in expr
+                # No auxiliary signal is declared in a committed pack: recency carries the whole weight.
+                assert assembler.last_query_params[f"tp_recency_w_{dim.name}"] == 1.0

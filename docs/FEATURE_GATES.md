@@ -59,6 +59,7 @@ independently of the code default.
 | Production Domain Stage | `DOMAIN_PRODUCTION_STAGE_REQUIRED` | `False` | unchanged | dormant; production legacy admission requires reviewed/production; publisher/receipt mode always enforce stage |
 | Score Clamping | `SCORE_CLAMP_ENABLED` | `True` | `True` | active; a null dimension clamps to `0.0` as well (Stage 2, see §20) |
 | Effective Null Strategy / Finite Learned Weights | `NULL_STRATEGY_EFFECTIVE_ENABLED` (`null_strategy_effective_enabled`); `LEARNED_WEIGHT_FINITE_READ_ENABLED` (`learned_weight_finite_read_enabled`) | `True`; `True` | unset | active (CEG scoring audit L2, operator decision D3a 2026-11-26): `null_strategy` `inherit_prior` / `population_mean` take effect when the source property is missing; with `SCORE_CLAMP_ENABLED` the composite score is clamped to [0, 1] too, and non-finite learned weights are ignored on read (D5). Off: the legacy wrapper — see "Scoring bounds and effective null strategies" before §37 |
+| Temporalproximity Declared Signals | `TEMPORALPROXIMITY_DECLARED_SIGNALS_ENABLED` (`temporalproximity_declared_signals_enabled`) | `True` | unset | active (SC-001, audit L5, operator decision 2026-11-27): `temporalproximity` reads only the auxiliary signals a dimension declares in `metadata`; recency is pure decay over [0, 1], future dates floored to fresh. On the committed packs each value is the legacy value / 0.6. `false` restores the legacy compiler byte for byte (rollback only) — see §37 |
 | Strict Null Gates | `STRICT_NULL_GATES` | `True` | `True` | active |
 | Param Strict Mode | `PARAM_STRICT_MODE` | `True` | `True` | active |
 | LLM Security (ValidatedLLMClient) | `LLM_PROVIDER` | `openai` (implicit) | `openai` | active — fully implemented, requires `OPENAI_API_KEY` |
@@ -1518,7 +1519,7 @@ Tests: `tests/unit/test_scoring_bounds_and_null_strategy.py`,
 
 ## 37. temporalproximity reads declared auxiliary signals (CEG-FEEDBACK-1)
 
-### `temporalproximity_declared_signals_enabled` (default `False`)
+### `temporalproximity_declared_signals_enabled` (default `True` since SC-001, 2026-11-26)
 
 `ScoringAssembler._compile_temporalproximity` scored
 `0.6 * recency + 0.25 * candidate.touch_count_30d / 30 + 0.15 * candidate.is_accelerating`,
@@ -1560,14 +1561,29 @@ candidates within that dimension is unchanged; its contribution to the
 weighted total grows. Off: the legacy text, byte for byte, and `metadata` on a
 `temporalproximity` dimension is accepted but not read.
 
-The flag stays default `False` (decision D2); activation is a later, separate
-decision. `tests/integration/test_temporalproximity_rescale_fixtures.py`
-records, on the committed `temporalproximity` packs synced through the engine,
-the legacy and declared recency per candidate (`value_declared = value_legacy /
-0.6` while no auxiliary signal is declared) and the composite ranking under
-each, as evidence for that decision.
+**Default `True` (SC-001, audit L5; operator instruction 2026-11-26 to fully
+close the finding, superseding D2's deferral of activation).** The declared
+path is what every pack now compiles: scoring reads no property a pack did not
+declare, so a value an older writer left in `is_accelerating` /
+`touch_count_30d` (a boolean, a string) no longer enters the score or the
+compiled Cypher. On the committed packs (no auxiliary signal declared) each
+`temporalproximity` value is its legacy value divided by 0.6, so a candidate
+dated today scores recency 1.0 instead of 0.6 and a candidate `maxvalue` days
+old scores `exp(-1)` instead of `0.6 * exp(-1)`. The order of candidates
+within the dimension is unchanged. The dimension's contribution to the
+composite grows by the same factor, so for `plasticos` (recency weight 0.1) a
+dated candidate's composite rises by up to 0.04 and dated candidates gain on
+undated ones. `tests/integration/test_temporalproximity_rescale_fixtures.py`
+records the legacy and declared recency per candidate and the composite
+ranking under each.
+
+**Rollback:** `TEMPORALPROXIMITY_DECLARED_SIGNALS_ENABLED=false` restores the
+legacy compiler, its text byte for byte (no age floor; `metadata` accepted and
+not read). It is kept only as this rollback.
 
 Tests: `tests/unit/test_temporalproximity_declared_signals.py`,
+`tests/integration/test_temporalproximity_default.py` (default settings,
+`handle_sync` then `handle_match` on `plasticos`),
 `tests/integration/test_temporalproximity_rescale_fixtures.py`.
 
 ## 35. Production pack root required (issue #400 A4/A5)
