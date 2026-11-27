@@ -76,6 +76,14 @@ class Settings(BaseSettings):
     # zero pairs is not a pass and NDCG is NDCG@k over the abstract ranking's
     # top-k relevances. Off: both behave exactly as before.
     calibration_ndcg_abstract_basis_enabled: bool = True
+    # SCR-12 (FEATURE_GATES §4): ScoreCalibrator.detect_score_drift and
+    # hgkr_utils.check_score_drift dropped ScoreDriftSignal.status and disagreed
+    # on a sample with no finite value (drift True / ks 1.0 versus no drift). On
+    # (default; hardening): both report status insufficient_data with
+    # drift_detected False and zeroed statistics whenever either sample has no
+    # finite value, in both drift_canonical_signals_enabled states, and status
+    # computed otherwise. Off: main exactly, status None.
+    drift_insufficient_data_status_enabled: bool = True
 
     # CEG-007: there was a `redis_url` here, and a redis service in both compose
     # files, and a redis dependency in requirements — and no `import redis`

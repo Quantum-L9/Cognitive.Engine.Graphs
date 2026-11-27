@@ -82,6 +82,10 @@ class TestFlagOffIsLegacy:
     @pytest.fixture(autouse=True)
     def _off(self, monkeypatch) -> None:
         monkeypatch.setattr(settings, FLAG, False)
+        # Rollback-path checks (SCR-12): with drift_insufficient_data_status_enabled
+        # off every field is main's; the flag-on contract is owned by
+        # tests/unit/test_drift_insufficient_data_status.py.
+        monkeypatch.setattr(settings, "drift_insufficient_data_status_enabled", False)
 
     def test_default_is_off(self) -> None:
         assert type(settings).model_fields[FLAG].default is False

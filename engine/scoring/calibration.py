@@ -80,6 +80,9 @@ class DriftReport:
     ks_statistic: float
     historical_mean: float
     current_mean: float
+    # SCR-12: ``computed`` or ``insufficient_data`` under
+    # ``drift_insufficient_data_status_enabled``; None with the flag off.
+    status: str | None = None
 
 
 @dataclass
@@ -338,8 +341,34 @@ class ScoreCalibrator:
         SI-29: with ``drift_canonical_signals_enabled`` on, this delegates to
         :func:`score_distribution_drift`; an empty sample is then reported as
         no drift (``ks_statistic`` 0.0) rather than as drift. Off: legacy.
+
+        SCR-12: with ``drift_insufficient_data_status_enabled`` on, a sample
+        with no finite value is ``status`` ``insufficient_data`` (no drift,
+        statistics 0.0) in both SI-29 states, as in ``check_score_drift``, and
+        any other result is ``computed``; statistics are computed on the finite
+        values only (CEG-A09). Off: ``status`` is None and the raw samples are
+        measured, as on main.
         """
         from engine.config.settings import settings
+
+        report_status = settings.drift_insufficient_data_status_enabled
+        if report_status:
+            # CEG-A09: measure only the finite values, the filter check_score_drift
+            # and score_distribution_drift apply, so a NaN, inf or None neither
+            # becomes a NaN statistic labelled computed nor raises TypeError.
+            baseline_scores = _finite_samples(baseline_scores)
+            current_scores = _finite_samples(current_scores)
+        if report_status and not (baseline_scores and current_scores):
+            # SCR-12: no finite value on one side is no evidence either way.
+            return DriftReport(
+                drift_detected=False,
+                delta_mean=0.0,
+                ks_statistic=0.0,
+                historical_mean=0.0,
+                current_mean=0.0,
+                status=STATUS_INSUFFICIENT_DATA,
+            )
+        computed = STATUS_COMPUTED if report_status else None
 
         if settings.drift_canonical_signals_enabled:
             signal = score_distribution_drift(baseline_scores, current_scores)
@@ -349,6 +378,7 @@ class ScoreCalibrator:
                 ks_statistic=signal.ks_statistic,
                 historical_mean=signal.baseline_mean,
                 current_mean=signal.current_mean,
+                status=signal.status if report_status else None,
             )
 
         if not baseline_scores or not current_scores:
@@ -385,6 +415,7 @@ class ScoreCalibrator:
             ks_statistic=round(ks_stat, 6),
             historical_mean=round(hist_mean, 6),
             current_mean=round(curr_mean, 6),
+            status=computed,
         )
 
     def generate_calibration_report(self, domain_id: str) -> dict[str, Any]:
