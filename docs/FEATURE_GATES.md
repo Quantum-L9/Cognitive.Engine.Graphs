@@ -441,21 +441,34 @@ WITH candidate, d1, d2,
     caused by an unknown value.
   * The count is a number on the Python pass. In Cypher it is `null`: rows the
     `WHERE` removed never reach Python, and the count is not guessed.
-  * Knownness is judged on the dimension's **raw candidate property**, not on
-    its score (CEG-A07). By the time arbitration runs, the scoring `WITH` has
-    defaulted a missing source (`defaultwhennull`), and the clamp has turned
-    null and NaN into `0.0`. Each constraint therefore also tests
-    `toFloatOrNull(candidate.<p>) IS NULL OR isNaN(toFloatOrNull(candidate.<p>))`
-    for each property the dimension reads: its `candidateprop`, plus the
-    longitude property for `geodecay`.
-    * A missing, null, NaN, boolean or non-numeric stored value is unknown. A
-      numeric string parses, so it counts as known.
+  * Knownness is judged on the dimension's **stored source**, not on its score
+    (CEG-A07). By the time arbitration runs, the scoring `WITH` has defaulted a
+    missing source (`defaultwhennull`), and the clamp has turned null and NaN
+    into `0.0`. The source is the one the scoring compiler resolves
+    (CEG-01/02, fourth external audit): `ScoringAssembler._source_missing_predicate`
+    and its resolved properties, never a second reconstruction. That is the
+    declared `candidateprop`, or the compiler's default when it is omitted
+    (`value`, `rate`, `price_per_unit`, `last_activity_date`, …), plus the
+    longitude for `geodecay` and the confidence for `weightedrate`.
+    * Every constraint ORs in that missing predicate: a null source is unknown.
+    * A **numeric** operand is also tested with
+      `toFloatOrNull(<p>) IS NULL OR isNaN(toFloatOrNull(<p>))`: a NaN, boolean
+      or non-numeric stored value is unknown, a numeric string parses and is
+      known.
+    * A **temporal** (`temporalproximity`) or **categorical**
+      (`communitymatch`, `preference_attention`) operand is known when it is
+      non-null: a native DateTime or a string community id is never coerced
+      to a float.
     * The result is the same whatever `score_clamp_enabled` and
       `match_dimension_projection` say.
     * A stored `0.0` is known and passes a `0.0` threshold.
-    * The Python pass applies the same rule to the returned candidate node.
-    * A dimension that declares no `candidateprop` is judged on its score
-      alone.
+    * The Python pass applies the same rule to the returned candidate node
+      (`source_properties` numeric, `presence_properties` temporal/categorical).
+    * A dimension with no single stored source (`customcypher`,
+      `community_bridge`) is judged on its score alone.
+    * Depends on #569, which adds the resolver: merge #569 before #573.
+    * Tests: `tests/unit/test_arbitration_typed_sources.py`,
+      `tests/integration/test_match_arbitration_typed_sources.py`.
   * Flag off restores the old behaviour: `coalesce(d < $t, false)`, where an
     unknown value passes.
 * **A penalty never raises a score** (same flag; SCR-04). The penalised score is

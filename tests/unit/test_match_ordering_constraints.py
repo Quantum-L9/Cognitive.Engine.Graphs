@@ -81,7 +81,10 @@ def _wire(spec: DomainSpec, rows: list[dict[str, Any]] | None = None) -> Driver:
 
 # The raw-source term each constraint carries (TestRawSourceIsUnknown);
 # stripped by default so the composition tests read the rest of the predicate.
-_ABSENT_TERM = re.compile(r" OR toFloatOrNull\(candidate\.\w+\) IS NULL OR isNaN\(toFloatOrNull\(candidate\.\w+\)\)")
+# CEG-01/02: the resolver's missing predicate, then the numeric parse / NaN test.
+_ABSENT_TERM = re.compile(
+    r" OR candidate\.\w+ IS NULL OR toFloatOrNull\(candidate\.\w+\) IS NULL OR isNaN\(toFloatOrNull\(candidate\.\w+\)\)"
+)
 
 
 async def _cypher(spec: DomainSpec, *, keep_absent: bool = False) -> tuple[str, dict[str, Any]]:
@@ -369,7 +372,10 @@ class TestRawSourceIsUnknown:
     unknown. The constraint tests the dimension's raw candidate property itself,
     whatever ``score_clamp_enabled`` and ``match_dimension_projection`` say."""
 
-    RAW = "toFloatOrNull(candidate.reliability) IS NULL OR isNaN(toFloatOrNull(candidate.reliability))"
+    RAW = (
+        "candidate.reliability IS NULL"
+        " OR toFloatOrNull(candidate.reliability) IS NULL OR isNaN(toFloatOrNull(candidate.reliability))"
+    )
 
     @pytest.mark.parametrize("projection", [True, False], ids=["projection_on", "projection_off"])
     @pytest.mark.parametrize("clamp", [True, False], ids=["clamp_on", "clamp_off"])
@@ -383,10 +389,14 @@ class TestRawSourceIsUnknown:
 
     async def test_raw_source_test_is_in_the_soft_factor(self) -> None:
         cypher, _ = await _cypher(_spec(SOFT), keep_absent=True)
-        raw = "toFloatOrNull(candidate.docking_ports) IS NULL OR isNaN(toFloatOrNull(candidate.docking_ports))"
+        raw = (
+            "candidate.docking_ports IS NULL"
+            " OR toFloatOrNull(candidate.docking_ports) IS NULL OR isNaN(toFloatOrNull(candidate.docking_ports))"
+        )
         assert f"OR port_capacity < $arb_soft_threshold_0 OR {raw} THEN $arb_soft_penalty_0" in cypher
 
     async def test_flag_off_has_no_raw_source_test(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings, "arbitration_unknown_fails_constraint_enabled", False)
         cypher, _ = await _cypher(_spec(HARD, SOFT), keep_absent=True)
         assert "toFloatOrNull(" not in cypher
+        assert "candidate.reliability IS NULL OR" not in cypher
