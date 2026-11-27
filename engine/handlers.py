@@ -22,7 +22,7 @@ import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 from neo4j.exceptions import ConstraintError
 
@@ -649,12 +649,16 @@ def _arbitration_constraint_cypher(
       ``arbitration_unknown_fails_constraint_enabled`` (SCR-03, rule Q2) it is
       ``NOT (<dim> IS NULL OR isNaN(<dim>) OR <dim> < $t OR <raw unknown>)``:
       an unknown value fails. A null comparison is null and ``NaN < t`` is false
-      in Cypher, so both are tested explicitly. ``<raw unknown>`` (CEG-A07) tests
-      the dimension's raw candidate properties (``_dimension_source_properties``)
-      with ``toFloatOrNull(p) IS NULL OR isNaN(toFloatOrNull(p))``: the scoring
-      WITH has already defaulted a missing source and the clamp maps null / NaN
-      to 0.0, so only the raw property says whether the value is known. It does
-      not depend on ``score_clamp_enabled`` or ``match_dimension_projection``.
+      in Cypher, so both are tested explicitly. ``<raw unknown>`` (CEG-A07,
+      CEG-01/02) is the scoring compiler's own source resolution
+      (``_dimension_sources``): its "source missing" predicate over the
+      properties it reads (a default property when ``candidateprop`` is
+      omitted), plus ``toFloatOrNull(p) IS NULL OR isNaN(toFloatOrNull(p))`` for
+      numeric operands only. A temporal or categorical source is known when it
+      is non-null. The scoring WITH has already defaulted a missing source and
+      the clamp maps null / NaN to 0.0, so only the source says whether the
+      value is known. It does not depend on ``score_clamp_enabled`` or
+      ``match_dimension_projection``.
       Off: ``NOT coalesce(<dim> < $t, false)``, where an unknown passes.
     * ``soft_factor`` — ``(CASE WHEN <fails> THEN $p ELSE 1.0 END)`` per soft
       constraint, multiplied, with ``<fails>`` the same test; the caller
@@ -680,8 +684,11 @@ def _arbitration_constraint_cypher(
         if not unknown_fails:
             return f"coalesce({alias} < ${sanitize_label(threshold)}, false)"
         test = f"{alias} IS NULL OR isNaN({alias}) OR {alias} < ${sanitize_label(threshold)}"
-        for prop in _dimension_source_properties(domain_spec, dimension):
-            raw = f"toFloatOrNull(candidate.{sanitize_label(prop)})"
+        sources = _dimension_sources(domain_spec, dimension)
+        if sources.missing_predicate:
+            test += f" OR {sources.missing_predicate}"
+        for owner, prop in sources.numeric:
+            raw = f"toFloatOrNull({sanitize_label(owner)}.{sanitize_label(prop)})"
             test += f" OR {raw} IS NULL OR isNaN({raw})"
         return test
 
@@ -969,29 +976,51 @@ def _apply_pareto_precut(
     return ordered, meta
 
 
-def _dimension_source_properties(domain_spec: DomainSpec, dimension: str) -> list[str]:
-    """CEG-A07: the raw candidate properties a dimension reads, sanitized.
+class _DimensionSources(NamedTuple):
+    """CEG-01/02: a dimension's sources as the scoring compiler resolves them."""
 
-    The same resolution the assembler uses for ``absent_sources``
-    (``ScoringAssembler._absent_source_case``): ``candidateprop``, plus the
-    longitude property for ``geodecay``. A dimension declaring no
-    ``candidateprop`` has none, and its knownness rests on the alias alone.
+    missing_predicate: str | None
+    numeric: list[tuple[str, str]]  # (owner, property): unknown when null, NaN or not a number
+    presence: list[tuple[str, str]]  # (owner, property): unknown only when null
+
+
+# Computations whose stored source is not a number: a datetime, a community id.
+_NON_NUMERIC_SOURCE = frozenset({"temporalproximity", "communitymatch", "preference_attention"})
+
+
+def _dimension_sources(domain_spec: DomainSpec, dimension: str) -> _DimensionSources:
+    """CEG-01/02: knownness inputs taken from the scoring compiler, not reconstructed.
+
+    ``missing_predicate`` is ``ScoringAssembler._source_missing_predicate`` (the
+    property the compiler reads, its default when ``candidateprop`` is omitted,
+    the geodecay longitude, the weightedrate confidence). The resolved
+    properties are split by operand type: numeric ones are also tested for NaN
+    and parseability; a temporal or categorical one only for presence. A
+    dimension with no single stored source (customcypher, community_bridge)
+    has none, and its knownness rests on the alias alone.
     """
     from engine.config.schema import ComputationType
-    from engine.config.settings import settings as _src_settings
+    from engine.scoring.assembler import ScoringAssembler
 
-    for dim in domain_spec.scoring.dimensions:
-        if dim.name != dimension:
-            continue
-        prop = dim.candidateprop
-        if not isinstance(prop, str) or not prop:
-            return []
-        props = [sanitize_label(prop)]
-        if dim.computation == ComputationType.GEODECAY:
-            declared = dim.candidateprop_lon if _src_settings.geodecay_declared_longitude else None
-            props.append(sanitize_label(declared or "lon"))
-        return props
-    return []
+    empty = _DimensionSources(None, [], [])
+    dim = next((d for d in domain_spec.scoring.dimensions if d.name == dimension), None)
+    if dim is None:
+        return empty
+    assembler = ScoringAssembler(domain_spec)
+    missing = assembler._source_missing_predicate(dim)
+    owner = assembler._source_owner(dim)
+    prop = assembler._source_property(dim) if owner else None
+    if missing is None or not owner or not isinstance(prop, str) or not prop:
+        return empty
+    props = [prop]
+    if dim.computation is ComputationType.GEODECAY:
+        lon = assembler._geodecay_source_longitude(dim)
+        if isinstance(lon, str) and lon:
+            props.append(lon)
+    pairs = [(owner, p) for p in props]
+    if str(dim.computation) in _NON_NUMERIC_SOURCE:
+        return _DimensionSources(missing, [], pairs)
+    return _DimensionSources(missing, pairs, [])
 
 
 def _unknown_fails_constraint() -> bool:
@@ -1017,7 +1046,13 @@ def _arbitration_constraint_dicts(
             "threshold": c.threshold,
             "hard": c.hard,
             "penalty": c.penalty,
-            "source_properties": _dimension_source_properties(domain_spec, c.dimension),
+            # CEG-01/02: the Python pass sees candidate-held sources only.
+            "source_properties": [
+                p for o, p in _dimension_sources(domain_spec, c.dimension).numeric if o == "candidate"
+            ],
+            "presence_properties": [
+                p for o, p in _dimension_sources(domain_spec, c.dimension).presence if o == "candidate"
+            ],
         }
         for c in domain_spec.decision_arbitration.constraints
         if keep is None or c.dimension in keep

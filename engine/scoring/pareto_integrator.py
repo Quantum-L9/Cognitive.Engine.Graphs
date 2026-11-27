@@ -280,15 +280,28 @@ def _raw_source_known(candidate: dict[str, Any], prop: str) -> bool:
     return not math.isnan(float(raw))
 
 
+def _raw_source_present(candidate: dict[str, Any], prop: str) -> bool:
+    """CEG-01/02: a temporal or categorical source is known when it is stored (non-null)."""
+    node = candidate.get("candidate")
+    return isinstance(node, dict) and node.get(prop) is not None
+
+
 def _known_dimension_value(
-    candidate: dict[str, Any], dim: str, source_properties: list[str] | None = None
+    candidate: dict[str, Any],
+    dim: str,
+    source_properties: list[str] | None = None,
+    presence_properties: list[str] | None = None,
 ) -> float | None:
     """The constrained value as a finite-or-infinite float, or None when unknown (SCR-03).
 
-    CEG-A07: when the dimension reads raw candidate properties, each must be a
-    known number; the dimension score alone may be a default or a clamp.
+    CEG-A07: when the dimension reads raw numeric candidate properties, each
+    must be a known number; CEG-01/02: a temporal or categorical one
+    (``presence_properties``) must be non-null. The dimension score alone may
+    be a default or a clamp.
     """
     if source_properties and not all(_raw_source_known(candidate, p) for p in source_properties):
+        return None
+    if presence_properties and not all(_raw_source_present(candidate, p) for p in presence_properties):
         return None
     raw = _lookup_dimension_score(candidate, dim)
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
@@ -310,7 +323,9 @@ def _apply_constraints_unknown_fails(
         for constraint in constraints:
             dim = constraint.get("dimension", "")
             threshold = float(constraint.get("threshold", 0.0))
-            value = _known_dimension_value(candidate, dim, constraint.get("source_properties"))
+            value = _known_dimension_value(
+                candidate, dim, constraint.get("source_properties"), constraint.get("presence_properties")
+            )
             if value is not None and value >= threshold:
                 continue
             if constraint.get("hard", False):
