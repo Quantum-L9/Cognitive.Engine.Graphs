@@ -876,25 +876,18 @@ class ScoringDimensionSpec(BaseModel):
         """SCR-09: refuse a divisor or scale the compiler cannot divide by.
 
         Under ``scoring_spec_strict_validation_enabled`` (the D3 strict-validation
-        switch; default on): ``maxvalue`` <= 0 where it is a divisor or scale
+        switch, ``_scoring_strict``; default on): ``maxvalue`` <= 0 where it is a divisor or scale
         (lognormalized, pricealignment, temporalproximity), ``decayconstant`` <= 0
         for geodecay, and ``minvalue`` >= ``maxvalue`` for inverselinear (with the
         compiler defaults 0 and 100 for an undeclared bound).
         """
-        if not _strict_scales():
+        if not _scoring_strict():
             return self
         defect = _numeric_scale_defect(self)
         if defect:
             msg = f"Scoring dimension {self.name!r}: {defect}"
             raise ValueError(msg)
         return self
-
-
-def _strict_scales() -> bool:
-    """SCR-09 refusals follow the D3 strict-validation switch (#567); on where it is not declared."""
-    from engine.config.settings import settings
-
-    return bool(getattr(settings, "scoring_spec_strict_validation_enabled", True))
 
 
 _MAXVALUE_SCALED = frozenset(

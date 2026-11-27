@@ -32,7 +32,6 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from engine.config import schema
 from engine.config.schema import DomainSpec, ScoringDimensionSpec
 from engine.config.settings import settings
 from engine.scoring.assembler import ScoringAssembler
@@ -42,21 +41,12 @@ pytestmark = pytest.mark.unit
 
 _DOMAIN = "orbital-logistics"
 _DIRECTION = "window_to_depot"
-# The D3 strict-validation switch (#567). On a tree without #567 the setting is
-# not declared and the SCR-09 refusals read it as on (engine.config.schema._strict_scales).
+# The D3 strict-validation switch (#567): SCR-09 refusals follow it.
 _STRICT = "scoring_spec_strict_validation_enabled"
 
 
 def _set_strict(monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
-    """Set the strict switch, declared (#567) or not (the schema helper then stands in for it)."""
-    if _STRICT in type(settings).model_fields:
-        monkeypatch.setattr(settings, _STRICT, value)
-    else:
-        monkeypatch.setattr(schema, "_strict_scales", lambda: value)
-
-
-def test_scale_refusals_follow_the_strict_switch() -> None:
-    assert schema._strict_scales() is bool(getattr(settings, _STRICT, True))
+    monkeypatch.setattr(settings, _STRICT, value)
 
 
 def _raw() -> dict[str, Any]:
@@ -448,3 +438,14 @@ def test_a_non_string_property_contributes_no_absent_source(computation: str, at
     assert assembler._absent_source_case(dim) is None
     assert assembler._source_missing_predicate(dim, include_confidence=True) is None
     assert assembler._source_unknown_predicate(dim) is None
+
+
+def test_strict_flag_off_really_disables_the_scale_refusals_on_a_pack(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CEG-A06: the declared #567 flag is the rollback; with it off the pack loads with the unusable scale."""
+    dims = [_dim(), _ports(maxvalue=0.0)]
+    _set_strict(monkeypatch, True)
+    with pytest.raises(ValidationError, match="maxvalue must be > 0 for lognormalized"):
+        _spec(dims)
+    _set_strict(monkeypatch, False)
+    assert _spec(dims).scoring.dimensions[1].maxvalue == 0.0
+    assert type(settings).model_fields[_STRICT].default is True
