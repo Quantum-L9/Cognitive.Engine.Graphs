@@ -20,7 +20,7 @@ The fake driver below behaves like Neo4j for the RETURN this suite reads:
 rows ordered by ``score DESC`` and truncated to the bound ``$top_n``.
 
 Module-level imports name only symbols that predate SI-06, so the scenario can
-be replayed against the base revision to record ``MAIN_FLAG_OFF_RESPONSE``.
+be replayed against the base revision to record ``MAIN_FLAG_OFF_CANDIDATES``.
 """
 
 from __future__ import annotations
@@ -108,85 +108,69 @@ def _ids(response: dict[str, Any]) -> list[str]:
     return [c["candidate"]["depot_id"] for c in response["candidates"]]
 
 
-# handle_match's response for this scenario (top_n=2) recorded on the base
-# revision 8224b333 (origin/main before SI-06), minus query_id and
-# execution_time_ms, and the Cypher it sent. The flag-off path must reproduce
-# both exactly.
-MAIN_FLAG_OFF_RESPONSE: dict[str, Any] = {
-    "candidates": [
-        {
-            "candidate": {"depot_id": "a"},
-            "dimension_scores": {"depot_reliability": 0.9, "port_capacity": 0.9},
-            "eligible": True,
-            "failed_gates": [],
-            "feature_contributions": [
-                {"contribution": 0.9, "evidence_refs": [], "feature_id": "depot_reliability"},
-                {"contribution": 0.9, "evidence_refs": [], "feature_id": "port_capacity"},
-            ],
-            "missing_evidence": [],
-            "rank": 1,
-            "score": 0.9,
-            "score_scale": "0_to_1",
-        },
-        {
-            "candidate": {"depot_id": "b"},
-            "dimension_scores": {"depot_reliability": 0.8, "port_capacity": 0.8},
-            "eligible": True,
-            "failed_gates": [],
-            "feature_contributions": [
-                {"contribution": 0.8, "evidence_refs": [], "feature_id": "depot_reliability"},
-                {"contribution": 0.8, "evidence_refs": [], "feature_id": "port_capacity"},
-            ],
-            "missing_evidence": [],
-            "rank": 2,
-            "score": 0.8,
-            "score_scale": "0_to_1",
-        },
-    ],
-    "direction": "window_to_depot",
-    "match_direction": "window_to_depot",
-    "pareto": {
-        "arbitration": {"frontsize": 1, "nondominated_ids": ["a"], "pruned_pct": 50.0, "trimmed_ids": []},
-        "dimension_names": ["depot_reliability", "port_capacity"],
-        "front_size": 1,
-        "non_dominated_ids": ["a"],
-        "total_candidates": 2,
-    },
-    "scoring_meta": {"normalization_applied": False, "raw_max": 0.9, "raw_min": 0.8, "weights_used": {}},
-    "status": "success",
-    "total_candidates": 2,
-}
+def _flag_off_contract(response: dict[str, Any]) -> list[dict[str, Any]]:
+    """What pareto_precut_enabled off promises about the response, and nothing else.
 
-MAIN_FLAG_OFF_CYPHER = (
-    "MATCH (candidate:OrbitalDepot)\n"
-    "\n"
-    "WITH *\n"
-    "WHERE ((candidate.accepts_hazmat IS NOT NULL AND (candidate.accepts_hazmat = true))) AND ((candidate.docking_ports IS NOT NULL AND $min_ports IS NOT NULL AND (candidate.docking_ports >= $min_ports)))\n"
-    "WITH candidate, CASE WHEN (coalesce(candidate.reliability, 0.0)) IS NULL THEN 0.0 WHEN isNaN((coalesce(candidate.reliability, 0.0))) THEN 0.0 WHEN (coalesce(candidate.reliability, 0.0)) < 0.0 THEN 0.0 WHEN (coalesce(candidate.reliability, 0.0)) > 1.0 THEN 1.0 ELSE (coalesce(candidate.reliability, 0.0)) END AS depot_reliability, CASE WHEN (log(1 + coalesce(candidate.docking_ports, 0)) / log(1 + 1000.0)) IS NULL THEN 0.0 WHEN isNaN((log(1 + coalesce(candidate.docking_ports, 0)) / log(1 + 1000.0))) THEN 0.0 WHEN (log(1 + coalesce(candidate.docking_ports, 0)) / log(1 + 1000.0)) < 0.0 THEN 0.0 WHEN (log(1 + coalesce(candidate.docking_ports, 0)) / log(1 + 1000.0)) > 1.0 THEN 1.0 ELSE (log(1 + coalesce(candidate.docking_ports, 0)) / log(1 + 1000.0)) END AS port_capacity\n"
-    "WITH candidate, depot_reliability, port_capacity, (0.6 * depot_reliability) + (0.3 * port_capacity) AS score\n"
-    "WITH candidate, score, {depot_reliability: depot_reliability, port_capacity: port_capacity} AS dimension_scores, "
-    "[x IN [CASE WHEN candidate.reliability IS NULL THEN $absent_src_depot_reliability ELSE NULL END, "
-    "CASE WHEN candidate.docking_ports IS NULL THEN $absent_src_port_capacity ELSE NULL END] WHERE x IS NOT NULL | x] "
-    "AS absent_sources\n"
-    "ORDER BY score DESC\n"
-    "WITH candidate, head(collect({score: score, dimension_scores: dimension_scores, absent_sources: absent_sources})) AS best\n"
-    "RETURN candidate, best.score AS score, best.dimension_scores AS dimension_scores, "
-    "best.absent_sources AS absent_sources\n"
-    "ORDER BY score DESC\n"
-    "LIMIT $top_n"
-)
+    Each candidate's id, its position, its score and its dimension_scores as
+    the driver returned them. Annotation fields other contracts own
+    (confidence_flag, feature_contributions, missing_evidence, rank, ...) are
+    deliberately not compared here: they change with those contracts.
+    """
+    return [
+        {"id": c["candidate"]["depot_id"], "score": c["score"], "dimension_scores": c["dimension_scores"]}
+        for c in response["candidates"]
+    ]
+
+
+# The flag-off contract of handle_match's response for this scenario (top_n=2),
+# as recorded on the base revision 8224b333 (origin/main before SI-06).
+MAIN_FLAG_OFF_CANDIDATES: list[dict[str, Any]] = [
+    {"id": "a", "score": 0.9, "dimension_scores": {"depot_reliability": 0.9, "port_capacity": 0.9}},
+    {"id": "b", "score": 0.8, "dimension_scores": {"depot_reliability": 0.8, "port_capacity": 0.8}},
+]
 
 
 @pytest.mark.unit
 @pytest.mark.finding("SI-06")
 class TestFlagOff:
     async def test_response_is_identical_to_main(self) -> None:
+        """Flag off: main's candidates, scores and dimension scores, from a query that keeps the flag-off shape.
+
+        The Cypher is asserted structurally (CTO directive, scoring audit): the
+        composite score expression (L2, D5 clamp) and the ORDER BY text (L3, D4)
+        belong to other contracts and are not pinned here. What flag-off
+        promises is pinned: the candidate pool is the requested top_n (no
+        pool expansion), the cut is the query's own LIMIT $top_n, and the
+        returned rows keep the driver's score order (no Pareto front reorder,
+        no precut receipt).
+        """
         assert settings.pareto_precut_enabled is False  # shipped default
         driver = _wire(_spec())
         response = await _match()
-        assert _stable(response) == MAIN_FLAG_OFF_RESPONSE
-        assert driver.calls[0]["parameters"]["top_n"] == 2
-        assert driver.calls[0]["cypher"] == MAIN_FLAG_OFF_CYPHER
+        assert _flag_off_contract(response) == MAIN_FLAG_OFF_CANDIDATES
+        assert response["status"] == "success"
+        assert response["total_candidates"] == 2
+
+        assert len(driver.calls) == 1
+        call = driver.calls[0]
+        # No pool expansion: top_n is bound to the requested value, not 4 x top_n.
+        assert call["parameters"]["top_n"] == 2
+        cypher = call["cypher"]
+        # The cut is the query's own final LIMIT $top_n, applied once: no
+        # earlier LIMIT narrows the candidates before it.
+        lines = cypher.rstrip().splitlines()
+        assert lines[-1] == "LIMIT $top_n"
+        assert cypher.count("$top_n") == 1
+        assert sum(line.lstrip().startswith("LIMIT") for line in lines) == 1
+        assert " LIMIT " not in cypher
+        # The final ordering, just before the cut, is by descending score first
+        # (any tie-break keys after it belong to the ordering contract, L3/D4).
+        assert lines[-2].startswith("ORDER BY score DESC")
+        # Rows are returned in the driver's score order: a > b, and the
+        # non-dominated but lower-scoring d is not promoted into the cut.
+        assert _ids(response) == ["a", "b"]
+        assert [c["score"] for c in response["candidates"]] == [0.9, 0.8]
+        assert "precut" not in response["pareto"]["arbitration"]
 
     async def test_flag_on_without_objectives_is_identical_to_flag_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
         no_objectives = arbitration_spec(pareto_config=ParetoConfigSpec())
