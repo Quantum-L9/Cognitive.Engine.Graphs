@@ -242,37 +242,33 @@ class ScoringAssembler:
         learned = self._learned_weights or {}
         sw_spec = self.domain_spec.feedbackloop.signal_weights if learned else None
 
+        scored_names: list[str] = []  # dimensions with a score term, in weight_entries order
         for dim in self.scoring_spec.dimensions:
-            if not self._dimension_scored(dim, match_direction, weights):
+            role = self._dimension_role(dim, match_direction, weights)
+            if role is None:
                 continue
-            expr = self._compile_dimension(dim)
-            # W1-02: clamp each dimension expression to [0.0, 1.0] when enabled
-            if settings.score_clamp_enabled:
-                expr = self._clamp_expression(expr)
             alias = sanitize_label(dim.name)
-            dimension_exprs.append(f"{expr} AS {alias}")
-            weight = self._request_weight(dim, weights)
-            pre_learning = weight
-            penalised = False
-            # Convergence loop: multiply spec weight by learned adjustment factor
-            if dim.name in learned and sw_spec is not None:
-                learned_w = learned[dim.name]
-                # Negative penalty: when learned weight < penalty_threshold,
-                # apply negative penalty instead of just reduced weight.
-                # Implements "primitive subtraction" from Lippl et al.
-                penalised = learned_w < sw_spec.penalty_threshold
-                weight = -abs(sw_spec.penalty_factor) if penalised else weight * learned_w
-                learned_multiplier_applied = learned_multiplier_applied or not penalised
+            dimension_exprs.append(f"{self._clamped_dimension(dim)} AS {alias}")
+            active_dim_names.append(dim.name)
+            if role == "observed":
+                # CEG-R02: a 0-weight dimension an arbitration constraint names is
+                # compiled and projected for the constraint, with no score term and
+                # no learned-weight multiplier or penalty.
+                continue
+            pre_learning = self._request_weight(dim, weights)
+            weight, penalised, multiplied = self._learned_coefficient(dim.name, pre_learning, learned, sw_spec)
+            learned_multiplier_applied = learned_multiplier_applied or multiplied
             if not penalised:
                 rescalable[len(weight_entries)] = pre_learning
             weight_entries.append((weight, alias))
-            active_dim_names.append(dim.name)
+            scored_names.append(dim.name)
 
         if settings.learned_weight_renormalization and learned_multiplier_applied:
             self._renormalize_learned(weight_entries, rescalable)
         weight_exprs = [f"({cypher_number(w)} * {a})" for w, a in weight_entries]
         # RU-032: the monoculture check reads the coefficients actually emitted.
-        effective_weights = {name: w for name, (w, _a) in zip(active_dim_names, weight_entries, strict=True)}
+        coefficients = {name: w for name, (w, _a) in zip(scored_names, weight_entries, strict=True)}
+        effective_weights = {name: coefficients.get(name, 0.0) for name in active_dim_names}
 
         self._last_active_dims = list(active_dim_names)
         self._last_effective_weights = effective_weights
@@ -372,21 +368,55 @@ class ScoringAssembler:
             for i in rescalable:
                 weight_entries[i] = (weight_entries[i][0] * scale, weight_entries[i][1])
 
-    def _dimension_scored(self, dim: ScoringDimensionSpec, match_direction: str, weights: dict[str, float]) -> bool:
-        """Whether ``dim`` takes part in the score for this direction and request.
+    def _clamped_dimension(self, dim: ScoringDimensionSpec) -> str:
+        """The dimension's compiled expression, clamped to [0.0, 1.0] under score_clamp_enabled (W1-02)."""
+        from engine.config.settings import settings
 
-        Scoped to another direction: no. SCR-01 (rule Q1, under
+        expr = self._compile_dimension(dim)
+        return self._clamp_expression(expr) if settings.score_clamp_enabled else expr
+
+    @staticmethod
+    def _learned_coefficient(name: str, weight: Any, learned: dict[str, float], sw_spec: Any) -> tuple[Any, bool, bool]:
+        """Convergence loop: (coefficient, penalised, multiplier applied) for one dimension.
+
+        A learned weight below ``penalty_threshold`` replaces the coefficient by
+        ``-penalty_factor`` ("primitive subtraction", Lippl et al.); otherwise the
+        request / spec weight is multiplied by the learned adjustment factor.
+        """
+        if name not in learned or sw_spec is None:
+            return weight, False, False
+        learned_w = learned[name]
+        if learned_w < sw_spec.penalty_threshold:
+            return -abs(sw_spec.penalty_factor), True, False
+        return weight * learned_w, False, True
+
+    def _dimension_role(self, dim: ScoringDimensionSpec, match_direction: str, weights: dict[str, float]) -> str | None:
+        """How ``dim`` takes part in this direction and request: ``scored``, ``observed`` or ``None`` (excluded).
+
+        Scoped to another direction: excluded. SCR-01 (rule Q1, under
         ``zero_weight_dimension_excluded_enabled``): a 0 pre-learning weight
-        (request override, else spec default) excludes it, so learning cannot
-        give it a coefficient (penalty or multiplier).
+        (request override, else spec default) removes it from ranking, so
+        learning cannot give it a coefficient (penalty or multiplier). CEG-R02:
+        it never disables a declared decision_arbitration constraint, so a
+        0-weight dimension a constraint names is ``observed``: compiled and
+        projected for the constraint, with no score term.
         """
         from engine.config.settings import settings
 
         if dim.matchdirections and match_direction not in dim.matchdirections:
-            return False
-        return not (
+            return None
+        if not (
             settings.zero_weight_dimension_excluded_enabled and self._is_zero_weight(self._request_weight(dim, weights))
-        )
+        ):
+            return "scored"
+        return "observed" if dim.name in self._arbitration_constrained_dimensions() else None
+
+    def _arbitration_constrained_dimensions(self) -> set[str]:
+        """Dimensions an enabled decision_arbitration names in a (hard or soft) constraint."""
+        arbitration = getattr(self.domain_spec, "decision_arbitration", None)
+        if arbitration is None or not getattr(arbitration, "enabled", False):
+            return set()
+        return {c.dimension for c in getattr(arbitration, "constraints", None) or [] if isinstance(c.dimension, str)}
 
     @staticmethod
     def _is_zero_weight(weight: Any) -> bool:
