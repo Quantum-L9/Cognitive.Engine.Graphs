@@ -441,11 +441,21 @@ WITH candidate, d1, d2,
     caused by an unknown value.
   * The count is a number on the Python pass. In Cypher it is `null`: rows the
     `WHERE` removed never reach Python, and the count is not guessed.
-  * A dimension whose stored source is null counts as unknown, even after the
-    scoring `WITH` has defaulted it (`defaultwhennull`) or the clamp has
-    turned it into `0.0`. The predicate also tests the row's absent-source list
-    (`$arb_unknown_dim_N IN <absent_sources>`), and the Python pass reads the
-    row's `absent_sources`. So a `0.0` threshold cannot pass a missing value.
+  * Knownness is judged on the dimension's **raw candidate property**, not on
+    its score (CEG-A07). By the time arbitration runs, the scoring `WITH` has
+    defaulted a missing source (`defaultwhennull`), and the clamp has turned
+    null and NaN into `0.0`. Each constraint therefore also tests
+    `toFloatOrNull(candidate.<p>) IS NULL OR isNaN(toFloatOrNull(candidate.<p>))`
+    for each property the dimension reads: its `candidateprop`, plus the
+    longitude property for `geodecay`.
+    * A missing, null, NaN, boolean or non-numeric stored value is unknown. A
+      numeric string parses, so it counts as known.
+    * The result is the same whatever `score_clamp_enabled` and
+      `match_dimension_projection` say.
+    * A stored `0.0` is known and passes a `0.0` threshold.
+    * The Python pass applies the same rule to the returned candidate node.
+    * A dimension that declares no `candidateprop` is judged on its score
+      alone.
   * Flag off restores the old behaviour: `coalesce(d < $t, false)`, where an
     unknown value passes.
 * **A penalty never raises a score** (same flag; SCR-04). The penalised score is

@@ -101,13 +101,23 @@ class TestRollback:
         assert kept[0]["score"] == pytest.approx(-0.2)
 
 
-def test_absent_source_is_unknown_even_when_its_default_meets_the_threshold() -> None:
-    """Codex review on #573: a missing source already defaulted/clamped to 0.0
-    must not satisfy a 0.0 threshold; ``absent_sources`` keeps the absence."""
-    zero = {"dimension": "quality", "threshold": 0.0, "hard": True, "penalty": 0.5}
+@pytest.mark.parametrize(
+    ("label", "raw"),
+    [("missing", None), ("nan", math.nan), ("string", "n/a"), ("bool", True), ("absent_key", ...)],
+    ids=["missing", "nan", "string", "bool", "absent_key"],
+)
+def test_raw_source_unknown_fails_even_when_the_score_meets_the_threshold(label: str, raw: Any) -> None:
+    """CEG-A07: the dimension score is 0.0 (defaulted / clamped) and meets a 0.0
+    threshold; the raw candidate property decides knownness."""
+    zero = {"dimension": "quality", "threshold": 0.0, "hard": True, "penalty": 0.5, "source_properties": ["q"]}
     stats: dict[str, int] = {}
-    absent = {**_row({"quality": 0.0}), "absent_sources": ["quality"]}
-    present = _row({"quality": 0.0})
-    kept = apply_constraint_penalties([absent, present], [zero], stats=stats)
-    assert kept == [present]
+    unknown = _row({"quality": 0.0})
+    if raw is not ...:
+        unknown["candidate"]["q"] = raw
+    known_zero = _row({"quality": 0.0})
+    known_zero["candidate"]["q"] = 0.0
+    numeric_string = _row({"quality": 0.0})
+    numeric_string["candidate"]["q"] = "0.0"  # toFloatOrNull parses it, so it is known
+    kept = apply_constraint_penalties([unknown, known_zero, numeric_string], [zero], stats=stats)
+    assert kept == [known_zero, numeric_string]
     assert stats == {"unknown_rejected": 1}

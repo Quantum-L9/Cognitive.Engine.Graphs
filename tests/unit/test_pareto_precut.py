@@ -280,7 +280,12 @@ class TestFlagOn:
         constrained = arbitration_spec(
             constraints=[ArbitrationConstraintSpec(dimension="depot_reliability", threshold=0.5, hard=True)]
         )
-        _wire(_spec(constrained))
+        # The raw source is stored, as on a real node (CEG-A07 judges knownness on it).
+        stored = [
+            {**r, "candidate": {**r["candidate"], "reliability": r["dims"]["depot_reliability"], "docking_ports": 10}}
+            for r in ROWS
+        ]
+        _wire(_spec(constrained), stored)
         response = await _match(top_n=2)
         # d (reliability 0.2) is rejected; b is the best of what remains.
         assert _ids(response) == ["a", "b"]

@@ -125,7 +125,12 @@ class TestDimensionProjection:
             enabled=True,
             constraints=[ArbitrationConstraintSpec(dimension="depot_reliability", threshold=0.5, hard=True)],
         )
-        _wire(_spec(decision_arbitration=arbitration))
+        # The raw source is stored, as on a real node (CEG-A07 judges knownness on it).
+        stored = [
+            {**r, "candidate": {**r["candidate"], "reliability": r["dims"]["depot_reliability"], "docking_ports": 10}}
+            for r in GRAPH_ROWS
+        ]
+        _wire(_spec(decision_arbitration=arbitration), stored)
         result = await _match()
         ids = [c["candidate"]["depot_id"] for c in result["candidates"]]
         assert "d3" not in ids  # reliability 0.2 < 0.5

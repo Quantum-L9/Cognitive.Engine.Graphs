@@ -260,14 +260,35 @@ def apply_constraint_penalties(
     return filtered
 
 
-def _known_dimension_value(candidate: dict[str, Any], dim: str) -> float | None:
+def _raw_source_known(candidate: dict[str, Any], prop: str) -> bool:
+    """CEG-A07: the candidate's stored source is a number, as ``toFloatOrNull`` reads it.
+
+    Missing, None, NaN, bool and any non-numeric value are unknown; a numeric
+    string parses, matching the Cypher pass.
+    """
+    node = candidate.get("candidate")
+    raw = node.get(prop) if isinstance(node, dict) else None
+    if raw is None or isinstance(raw, bool):
+        return False
+    if isinstance(raw, str):
+        try:
+            raw = float(raw)
+        except ValueError:
+            return False
+    if not isinstance(raw, (int, float)):
+        return False
+    return not math.isnan(float(raw))
+
+
+def _known_dimension_value(
+    candidate: dict[str, Any], dim: str, source_properties: list[str] | None = None
+) -> float | None:
     """The constrained value as a finite-or-infinite float, or None when unknown (SCR-03).
 
-    A dimension the row lists in ``absent_sources`` is unknown whatever its
-    value: its stored source was null and the score is a default or a clamp.
+    CEG-A07: when the dimension reads raw candidate properties, each must be a
+    known number; the dimension score alone may be a default or a clamp.
     """
-    absent = candidate.get("absent_sources")
-    if isinstance(absent, list) and dim in absent:
+    if source_properties and not all(_raw_source_known(candidate, p) for p in source_properties):
         return None
     raw = _lookup_dimension_score(candidate, dim)
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
@@ -289,7 +310,7 @@ def _apply_constraints_unknown_fails(
         for constraint in constraints:
             dim = constraint.get("dimension", "")
             threshold = float(constraint.get("threshold", 0.0))
-            value = _known_dimension_value(candidate, dim)
+            value = _known_dimension_value(candidate, dim, constraint.get("source_properties"))
             if value is not None and value >= threshold:
                 continue
             if constraint.get("hard", False):

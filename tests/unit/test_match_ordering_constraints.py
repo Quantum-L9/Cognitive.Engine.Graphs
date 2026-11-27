@@ -79,9 +79,9 @@ def _wire(spec: DomainSpec, rows: list[dict[str, Any]] | None = None) -> Driver:
     return driver
 
 
-# The absent-source term each constraint carries (TestAbsentSourceIsUnknown);
+# The raw-source term each constraint carries (TestRawSourceIsUnknown);
 # stripped by default so the composition tests read the rest of the predicate.
-_ABSENT_TERM = re.compile(r" OR \$arb_unknown_dim_\d+ IN \[x IN \[.*?\] WHERE x IS NOT NULL \| x\]")
+_ABSENT_TERM = re.compile(r" OR toFloatOrNull\(candidate\.\w+\) IS NULL OR isNaN\(toFloatOrNull\(candidate\.\w+\)\)")
 
 
 async def _cypher(spec: DomainSpec, *, keep_absent: bool = False) -> tuple[str, dict[str, Any]]:
@@ -94,7 +94,8 @@ async def _cypher(spec: DomainSpec, *, keep_absent: bool = False) -> tuple[str, 
 
 def _row(depot_id: str, score: float, reliability: float, ports: float) -> dict[str, Any]:
     return {
-        "candidate": {"depot_id": depot_id},
+        # Raw source properties are stored: the Python pass judges knownness on them (CEG-A07).
+        "candidate": {"depot_id": depot_id, "reliability": reliability, "docking_ports": 5},
         "score": score,
         "dimension_scores": {"depot_reliability": reliability, "port_capacity": ports},
         "absent_sources": [],
@@ -362,14 +363,30 @@ class TestUnknownValueFailsTheConstraint:
         ) in cypher
 
 
-class TestAbsentSourceIsUnknown:
-    """Codex review on #573: the scoring WITH defaults a missing source (and the
-    clamp maps null / NaN to 0.0), so the alias alone cannot show it is unknown.
-    The constraint also tests the row's absent-source list."""
+class TestRawSourceIsUnknown:
+    """CEG-A07 (CTO REMEDIATE #573): the scoring WITH defaults a missing source
+    and the clamp maps null / NaN to 0.0, so the alias cannot show the value is
+    unknown. The constraint tests the dimension's raw candidate property itself,
+    whatever ``score_clamp_enabled`` and ``match_dimension_projection`` say."""
 
-    async def test_absent_source_marker_fails_the_constraint(self) -> None:
-        cypher, params = await _cypher(_spec(HARD, SOFT), keep_absent=True)
-        assert "OR depot_reliability < $arb_hard_threshold_0 OR $arb_unknown_dim_0 IN [x IN [" in cypher
-        assert "OR port_capacity < $arb_soft_threshold_0 OR $arb_unknown_dim_1 IN [x IN [" in cypher
-        assert params["arb_unknown_dim_0"] == "depot_reliability"
-        assert params["arb_unknown_dim_1"] == "port_capacity"
+    RAW = "toFloatOrNull(candidate.reliability) IS NULL OR isNaN(toFloatOrNull(candidate.reliability))"
+
+    @pytest.mark.parametrize("projection", [True, False], ids=["projection_on", "projection_off"])
+    @pytest.mark.parametrize("clamp", [True, False], ids=["clamp_on", "clamp_off"])
+    async def test_raw_source_test_is_in_the_hard_predicate(
+        self, projection: bool, clamp: bool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(settings, "match_dimension_projection", projection)
+        monkeypatch.setattr(settings, "score_clamp_enabled", clamp)
+        cypher, _ = await _cypher(_spec(HARD), keep_absent=True)
+        assert f"OR depot_reliability < $arb_hard_threshold_0 OR {self.RAW})" in cypher
+
+    async def test_raw_source_test_is_in_the_soft_factor(self) -> None:
+        cypher, _ = await _cypher(_spec(SOFT), keep_absent=True)
+        raw = "toFloatOrNull(candidate.docking_ports) IS NULL OR isNaN(toFloatOrNull(candidate.docking_ports))"
+        assert f"OR port_capacity < $arb_soft_threshold_0 OR {raw} THEN $arb_soft_penalty_0" in cypher
+
+    async def test_flag_off_has_no_raw_source_test(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(settings, "arbitration_unknown_fails_constraint_enabled", False)
+        cypher, _ = await _cypher(_spec(HARD, SOFT), keep_absent=True)
+        assert "toFloatOrNull(" not in cypher

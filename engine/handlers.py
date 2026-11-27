@@ -639,7 +639,6 @@ def _arbitration_constraint_cypher(
     domain_spec: DomainSpec,
     active_dimensions: list[str],
     reserved_params: set[str] | None = None,
-    absent_sources_expr: str = "[]",
 ) -> tuple[str, str, dict[str, Any]]:
     """ND-ARB (D4): ``decision_arbitration.constraints`` as Cypher, before the cut.
 
@@ -648,12 +647,15 @@ def _arbitration_constraint_cypher(
     * ``hard_predicate`` — per hard constraint, ANDed; the caller attaches it
       as the scoring ``WITH``'s ``WHERE``. Under
       ``arbitration_unknown_fails_constraint_enabled`` (SCR-03, rule Q2) it is
-      ``NOT (<dim> IS NULL OR isNaN(<dim>) OR <dim> < $t OR $name IN <absent>)``:
-      an unknown value fails (a null comparison is null and ``NaN < t`` is false
-      in Cypher, so both are tested explicitly; ``absent_sources_expr`` names the
-      dimensions whose stored source is null, which the scoring WITH has already
-      defaulted or clamped, so a 0.0 threshold cannot pass them). Off: ``NOT coalesce(<dim> < $t, false)``,
-      where an unknown passes.
+      ``NOT (<dim> IS NULL OR isNaN(<dim>) OR <dim> < $t OR <raw unknown>)``:
+      an unknown value fails. A null comparison is null and ``NaN < t`` is false
+      in Cypher, so both are tested explicitly. ``<raw unknown>`` (CEG-A07) tests
+      the dimension's raw candidate properties (``_dimension_source_properties``)
+      with ``toFloatOrNull(p) IS NULL OR isNaN(toFloatOrNull(p))``: the scoring
+      WITH has already defaulted a missing source and the clamp maps null / NaN
+      to 0.0, so only the raw property says whether the value is known. It does
+      not depend on ``score_clamp_enabled`` or ``match_dimension_projection``.
+      Off: ``NOT coalesce(<dim> < $t, false)``, where an unknown passes.
     * ``soft_factor`` — ``(CASE WHEN <fails> THEN $p ELSE 1.0 END)`` per soft
       constraint, multiplied, with ``<fails>`` the same test; the caller
       rescales ``score``.
@@ -678,10 +680,9 @@ def _arbitration_constraint_cypher(
         if not unknown_fails:
             return f"coalesce({alias} < ${sanitize_label(threshold)}, false)"
         test = f"{alias} IS NULL OR isNaN({alias}) OR {alias} < ${sanitize_label(threshold)}"
-        if absent_sources_expr != "[]":
-            marker = _unbound_param_name(f"arb_unknown_dim_{len(hard) + len(soft)}", taken)
-            params[marker] = dimension
-            test += f" OR ${sanitize_label(marker)} IN {absent_sources_expr}"
+        for prop in _dimension_source_properties(domain_spec, dimension):
+            raw = f"toFloatOrNull(candidate.{sanitize_label(prop)})"
+            test += f" OR {raw} IS NULL OR isNaN({raw})"
         return test
 
     hard: list[str] = []
@@ -968,6 +969,31 @@ def _apply_pareto_precut(
     return ordered, meta
 
 
+def _dimension_source_properties(domain_spec: DomainSpec, dimension: str) -> list[str]:
+    """CEG-A07: the raw candidate properties a dimension reads, sanitized.
+
+    The same resolution the assembler uses for ``absent_sources``
+    (``ScoringAssembler._absent_source_case``): ``candidateprop``, plus the
+    longitude property for ``geodecay``. A dimension declaring no
+    ``candidateprop`` has none, and its knownness rests on the alias alone.
+    """
+    from engine.config.schema import ComputationType
+    from engine.config.settings import settings as _src_settings
+
+    for dim in domain_spec.scoring.dimensions:
+        if dim.name != dimension:
+            continue
+        prop = dim.candidateprop
+        if not isinstance(prop, str) or not prop:
+            return []
+        props = [sanitize_label(prop)]
+        if dim.computation == ComputationType.GEODECAY:
+            declared = dim.candidateprop_lon if _src_settings.geodecay_declared_longitude else None
+            props.append(sanitize_label(declared or "lon"))
+        return props
+    return []
+
+
 def _unknown_fails_constraint() -> bool:
     from engine.config.settings import settings as _arb_settings
 
@@ -986,7 +1012,13 @@ def _arbitration_constraint_dicts(
     """
     keep = set(active_dimensions) if active_dimensions is not None and _unknown_fails_constraint() else None
     return [
-        {"dimension": c.dimension, "threshold": c.threshold, "hard": c.hard, "penalty": c.penalty}
+        {
+            "dimension": c.dimension,
+            "threshold": c.threshold,
+            "hard": c.hard,
+            "penalty": c.penalty,
+            "source_properties": _dimension_source_properties(domain_spec, c.dimension),
+        }
         for c in domain_spec.decision_arbitration.constraints
         if keep is None or c.dimension in keep
     ]
@@ -1245,7 +1277,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             "top_n",
         }
         hard_predicate, soft_factor, arbitration_params = _arbitration_constraint_cypher(
-            domain_spec, active_dims, reserved, absent_expr if project_dimensions else "[]"
+            domain_spec, active_dims, reserved
         )
         if hard_predicate:
             arbitration_clause += f"WHERE {hard_predicate}\n"
