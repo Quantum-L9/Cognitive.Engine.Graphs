@@ -14,11 +14,15 @@ CEG-A04 and CEG-A08 on a real graph, through the Gate-routed ``handle_score_remo
 (FEATURE_GATES §38a, ``score_malformed_evidence_abstention_enabled``):
 
 - A04: a read the server terminates at its transaction timeout answers
-  ``blocked``, never an error. The server bound is ``db.transaction.timeout``
-  (dynamic in Neo4j 5), set to 1 s for the test and restored after; the read is
-  a slow statement on the real driver in place of the evidence query, so the
-  timeout comes from Neo4j itself. With #564's driver the same timeout arrives
-  translated (``ExecutionError`` from the neo4j error); this test holds either way.
+  ``blocked``, never an error. Requires #564: its driver gives every engine
+  query the client transaction timeout ``neo4j_query_timeout_s`` (default 25 s),
+  which takes precedence over the server's ``db.transaction.timeout``, and
+  translates the timeout into ``ExecutionError``. The test pins that timeout to
+  1 s on the settings the registered driver reads per call. Without #564 there is
+  no client timeout, so the server's ``db.transaction.timeout`` (dynamic in
+  Neo4j 5) is also set to 1 s and restored after. The read is a statement that
+  cannot finish, on the real driver in place of the evidence query, so the
+  timeout comes from Neo4j itself.
 - A08: an evidence edge a foreign writer stored with ``source_revision`` as a
   list does not fail the cohort read; the revision is reported unknown.
 
@@ -53,9 +57,13 @@ EDGE = "TENDED_BY"
 CAVE = "creamery.cave:201"
 OTHER = "creamery.cave:202"
 AFFINEUR = "creamery.affineur:8"
+TIMEOUT_S = 1.0
 TIMEOUT = "1s"
-# Far more work than one second of execution on any test server.
-SLOW_CYPHER = "UNWIND range(1, 2000000000) AS i WITH i WHERE i % 7 = 3 RETURN count(i) AS c"
+# 4 * 10^18 rows: no server completes it, so only the transaction timeout ends it.
+SLOW_CYPHER = (
+    "UNWIND range(1, 2000000000) AS i UNWIND range(1, 2000000000) AS j "
+    "WITH i + j AS k WHERE k % 7 = 3 RETURN count(k) AS c"
+)
 
 
 def _write_pack(root: Path) -> None:
@@ -101,8 +109,17 @@ async def graph(
 
 
 @pytest_asyncio.fixture
-async def server_timeout(graph: GraphDriver) -> AsyncGenerator[GraphDriver, None]:
-    """``db.transaction.timeout`` at 1 s for the test, then the server's own value again."""
+async def server_timeout(graph: GraphDriver, monkeypatch: pytest.MonkeyPatch) -> AsyncGenerator[GraphDriver, None]:
+    """Every read the handler issues runs under a 1 s transaction timeout.
+
+    #564's client timeout (read from ``settings`` on each call by the driver the
+    handler is wired with) is pinned to 1 s, since it overrides the server's
+    default. The server's ``db.transaction.timeout`` is set to 1 s as well, for a
+    driver without a client timeout, and restored after.
+    """
+    if "neo4j_query_timeout_s" in type(settings).model_fields:
+        monkeypatch.setattr(settings, "neo4j_query_timeout_enabled", True)
+        monkeypatch.setattr(settings, "neo4j_query_timeout_s", TIMEOUT_S)
     rows = await graph.execute_query(
         "SHOW SETTINGS YIELD name, value WHERE name = 'db.transaction.timeout' RETURN value", database="system"
     )
