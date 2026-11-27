@@ -751,14 +751,6 @@ def _bindable_parameters(spec: DomainSpec) -> set[str]:
     return names
 
 
-def _candidate_properties(spec: DomainSpec) -> set[str]:
-    """Properties the pack declares on a candidate node; sync writes them (``SET n += row``)."""
-    labels = {entity.label for entity in spec.matchentities.candidate}
-    return {
-        prop.name for node in spec.ontology.nodes if node.candidate or node.label in labels for prop in node.properties
-    }
-
-
 def _no_producer_defect(dim: object, *, candidate_properties: set[str]) -> str | None:
     """A declared HGKR option whose input the engine never produces and the pack does not declare (R1b-DEC-01 A).
 
@@ -803,9 +795,18 @@ def _scoring_defects(spec: DomainSpec, *, check_producers: bool, reported: set[s
 
 
 def _producer_defects(spec: DomainSpec) -> list[str]:
-    """``_no_producer_defect`` for every scoring dimension, in declaration order."""
-    candidate_properties = _candidate_properties(spec)
-    producers = (_no_producer_defect(dim, candidate_properties=candidate_properties) for dim in spec.scoring.dimensions)
+    """``_no_producer_defect`` for every scoring dimension, in declaration order.
+
+    CEG-R01: the producer must be declared on the candidate of each direction
+    the dimension scores (``dimension_candidate_properties``; the legacy union
+    with ``scoring_spec_strict_validation_enabled`` off).
+    """
+    from engine.config.schema import dimension_candidate_properties
+
+    producers = (
+        _no_producer_defect(dim, candidate_properties=dimension_candidate_properties(spec, dim))
+        for dim in spec.scoring.dimensions
+    )
     return [producer for producer in producers if producer is not None]
 
 

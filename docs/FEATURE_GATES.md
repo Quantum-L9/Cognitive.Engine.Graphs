@@ -1108,6 +1108,13 @@ with a pydantic `ValidationError` naming the defect:
   admission" above): `population_mean` without a `_popmean_<dim>` queryschema
   field or derived parameter, `inherit_prior` / `structural_similarity`
   without the candidate property they read.
+  The candidate property counts only where the dimension scores (CEG-R01):
+  it must be declared on each candidate label of every match direction the
+  dimension applies to (`matchdirections`, else every declared direction); a
+  declaration on another direction's candidate is not a producer. The
+  loader's admission producer check (`SCORING_ADMISSION_CHECK_ENABLED`)
+  applies the same rule; with this flag off both use the former union over
+  every candidate node.
 
 Every committed design pack loads with the flag on. This flag does not touch
 admission withholding: `SCORING_ADMISSION_CHECK_ENABLED` keeps its default

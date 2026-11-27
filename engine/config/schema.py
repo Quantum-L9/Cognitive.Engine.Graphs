@@ -1741,6 +1741,41 @@ def missing_edge_property_reason(spec: DomainSpec, gate: GateSpec) -> str | None
     return None
 
 
+def scoring_candidate_labels(spec: DomainSpec, direction: str) -> list[str]:
+    """The candidate label(s) ``handle_match`` scores in ``direction``.
+
+    ``handle_match`` takes the ``matchentities.candidate`` entries declared for
+    the direction and matches ``(candidate:<first label>)``; a direction with
+    none is refused there. The producer checks read the same selection
+    (CEG-R01 / CEG-06), so what they validate is what the match reads.
+    """
+    return [entity.label for entity in spec.matchentities.candidate if entity.matchdirection == direction][:1]
+
+
+def dimension_candidate_properties(spec: DomainSpec, dim: ScoringDimensionSpec) -> set[str]:
+    """Candidate properties that ``dim`` can read in every match direction it applies to (CEG-R01).
+
+    Under ``scoring_spec_strict_validation_enabled``: for each direction the
+    dimension scores (``matchdirections``, else every declared direction), the
+    properties declared on the candidate label ``handle_match`` scores there
+    (``scoring_candidate_labels``); the result is their intersection, so a
+    producer declared on another direction's candidate does not count. A
+    direction with no candidate label contributes nothing (``handle_match``
+    refuses it). Off: the legacy union over every candidate node.
+    """
+    if not _scoring_strict():
+        labels = {entity.label for entity in spec.matchentities.candidate}
+        return {p.name for n in spec.ontology.nodes if n.candidate or n.label in labels for p in n.properties}
+    declared = {node.label: {p.name for p in node.properties} for node in spec.ontology.nodes}
+    directions = dim.matchdirections or list(spec.queryschema.matchdirections)
+    per_direction = [
+        set.intersection(*(declared.get(label, set()) for label in labels))
+        for labels in (scoring_candidate_labels(spec, direction) for direction in directions)
+        if labels
+    ]
+    return set.intersection(*per_direction) if per_direction else set()
+
+
 def _no_producer(spec: DomainSpec, dim: ScoringDimensionSpec) -> str | None:
     """ND-PARAM: a null / cold-start option whose input nothing produces (the FEATURE_GATES §16 producer rules).
 
@@ -1751,8 +1786,7 @@ def _no_producer(spec: DomainSpec, dim: ScoringDimensionSpec) -> str | None:
     node declares them. Without a producer the option silently does nothing.
     """
     params = {f.name for f in spec.queryschema.fields} | {p.name for p in spec.derivedparameters}
-    labels = {entity.label for entity in spec.matchentities.candidate}
-    props = {p.name for n in spec.ontology.nodes if n.candidate or n.label in labels for p in n.properties}
+    props = dimension_candidate_properties(spec, dim)
     needs: list[tuple[str, str, set[str], str]] = []
     if (
         dim.null_strategy is NullStrategy.POPULATION_MEAN
