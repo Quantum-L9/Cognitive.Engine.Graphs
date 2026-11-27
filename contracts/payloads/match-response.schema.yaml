@@ -102,6 +102,18 @@ properties:
           type:
           - string
           - 'null'
+        confidence_flag:
+          description: W2-03 confidence flags in check order (monoculture, then
+            low_dimensional_agreement); an empty array means the checks ran and
+            none fired. Absent when the checks are off. CONFIDENCE_FLAG_LIST_ENABLED.
+          type: array
+          items:
+            type: string
+            enum:
+            - monoculture
+            - low_dimensional_agreement
+            - ensemble_divergence
+          uniqueItems: true
   total_candidates:
     type: integer
     minimum: 0
