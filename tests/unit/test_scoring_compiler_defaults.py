@@ -498,3 +498,27 @@ def test_an_unconstrained_zero_weight_dimension_is_still_excluded() -> None:
     clause, _ = assembler.assemble_scoring_clause(_DIRECTION, {"w_ports": 0.0})
     assert "port_capacity" not in clause
     assert assembler.last_active_dimension_names == ["depot_reliability"]
+
+
+def test_a_zero_weight_pareto_objective_is_projected_without_a_score_term() -> None:
+    """CEG-R02 (Pareto): an arbitration objective reads the dimension, so a 0 weight keeps it observed."""
+    raw = _raw()
+    raw["scoring"]["dimensions"] = [_dim(), _ports()]
+    raw["decision_arbitration"] = {
+        "enabled": True,
+        "pareto_config": {"objectives": [{"dimension": "port_capacity"}]},
+    }
+    assembler = ScoringAssembler(DomainSpec.model_validate(raw))
+    clause, _ = assembler.assemble_scoring_clause(_DIRECTION, {"w_ports": 0.0})
+    assert "AS port_capacity" in clause
+    assert assembler.last_effective_weights == {"depot_reliability": 0.6, "port_capacity": 0.0}
+    assert "* port_capacity)" not in clause.splitlines()[-1]
+
+
+def test_a_disabled_arbitrations_objective_does_not_keep_the_dimension() -> None:
+    raw = _raw()
+    raw["scoring"]["dimensions"] = [_dim(), _ports()]
+    raw["decision_arbitration"] = {"enabled": False, "pareto_config": {"objectives": [{"dimension": "port_capacity"}]}}
+    assembler = ScoringAssembler(DomainSpec.model_validate(raw))
+    clause, _ = assembler.assemble_scoring_clause(_DIRECTION, {"w_ports": 0.0})
+    assert "port_capacity" not in clause

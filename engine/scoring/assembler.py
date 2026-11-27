@@ -251,9 +251,9 @@ class ScoringAssembler:
             dimension_exprs.append(f"{self._clamped_dimension(dim)} AS {alias}")
             active_dim_names.append(dim.name)
             if role == "observed":
-                # CEG-R02: a 0-weight dimension an arbitration constraint names is
-                # compiled and projected for the constraint, with no score term and
-                # no learned-weight multiplier or penalty.
+                # CEG-R02: a 0-weight dimension an arbitration constraint or Pareto
+                # objective names is compiled and projected for it, with no score
+                # term and no learned-weight multiplier or penalty.
                 continue
             pre_learning = self._request_weight(dim, weights)
             weight, penalised, multiplied = self._learned_coefficient(dim.name, pre_learning, learned, sw_spec)
@@ -397,9 +397,10 @@ class ScoringAssembler:
         ``zero_weight_dimension_excluded_enabled``): a 0 pre-learning weight
         (request override, else spec default) removes it from ranking, so
         learning cannot give it a coefficient (penalty or multiplier). CEG-R02:
-        it never disables a declared decision_arbitration constraint, so a
-        0-weight dimension a constraint names is ``observed``: compiled and
-        projected for the constraint, with no score term.
+        it never disables declared decision arbitration, so a 0-weight
+        dimension an arbitration constraint or Pareto objective names is
+        ``observed``: compiled and projected for the constraint and the front,
+        with no score term.
         """
         from engine.config.settings import settings
 
@@ -409,14 +410,19 @@ class ScoringAssembler:
             settings.zero_weight_dimension_excluded_enabled and self._is_zero_weight(self._request_weight(dim, weights))
         ):
             return "scored"
-        return "observed" if dim.name in self._arbitration_constrained_dimensions() else None
+        return "observed" if dim.name in self._arbitration_read_dimensions() else None
 
-    def _arbitration_constrained_dimensions(self) -> set[str]:
-        """Dimensions an enabled decision_arbitration names in a (hard or soft) constraint."""
+    def _arbitration_read_dimensions(self) -> set[str]:
+        """Dimensions an enabled decision_arbitration reads: its constraints and its Pareto objectives (CEG-R02)."""
         arbitration = getattr(self.domain_spec, "decision_arbitration", None)
         if arbitration is None or not getattr(arbitration, "enabled", False):
             return set()
-        return {c.dimension for c in getattr(arbitration, "constraints", None) or [] if isinstance(c.dimension, str)}
+        pareto = getattr(arbitration, "pareto_config", None)
+        named = [
+            *(getattr(c, "dimension", None) for c in getattr(arbitration, "constraints", None) or []),
+            *(getattr(o, "dimension", None) for o in getattr(pareto, "objectives", None) or []),
+        ]
+        return {name for name in named if isinstance(name, str)}
 
     @staticmethod
     def _is_zero_weight(weight: Any) -> bool:
