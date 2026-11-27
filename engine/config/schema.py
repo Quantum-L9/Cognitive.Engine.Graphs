@@ -15,6 +15,8 @@ Defines the contract every spec.yaml must satisfy.
 
 from __future__ import annotations
 
+import math
+import re
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -677,6 +679,38 @@ class GateSpec(BaseModel):
     edgepredicates: list[EdgePredicateSpec] | None = None
 
 
+# ND-DEAD (CEG scoring audit L2): declared options no engine code reads. A value
+# other than the default promised behaviour the engine never delivered.
+_UNREAD_FEEDBACK_BLEND = 0.7
+
+
+def _dead_option_defect(keys: list[str]) -> str:
+    return f"option(s) {', '.join(keys)} are declared but not read by any engine code; remove them"
+
+
+def _scoring_strict() -> bool:
+    """D3 rollback switch, read at validation time."""
+    from engine.config.settings import settings
+
+    return bool(settings.scoring_spec_strict_validation_enabled)
+
+
+def _traversal_binds(traversal: TraversalSpec | None, alias: str, direction: str) -> bool:
+    """Whether a traversal step applicable to ``direction`` declares a node bound to ``alias``.
+
+    ``TraversalAssembler`` filters steps by ``matchdirections`` exactly so: a
+    step without them applies to every direction.
+    """
+    if traversal is None:
+        return False
+    node_re = re.compile(rf"\(\s*{re.escape(alias)}\s*(?::[A-Za-z_][A-Za-z0-9_]*)?\s*[)\{{]")
+    return any(
+        node_re.search(step.pattern)
+        for step in traversal.steps
+        if not step.matchdirections or direction in step.matchdirections
+    )
+
+
 class ScoringDimensionMetadata(BaseModel):
     """Computation-specific declarations of a scoring dimension (``metadata:``).
 
@@ -778,6 +812,50 @@ class ScoringDimensionSpec(BaseModel):
     # Computation-specific declarations (preference_attention, community_bridge).
     metadata: ScoringDimensionMetadata | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def refuse_unknown_keys(cls, data: Any) -> Any:
+        """D3 (scoring_spec_strict_validation_enabled): a scoring dimension key the model does not declare is refused.
+
+        ``extra="forbid"`` semantics, applied under the rollback flag instead of
+        ``model_config`` so the flag can restore the legacy (ignored) behaviour.
+        """
+        if not isinstance(data, dict) or not _scoring_strict():
+            return data
+        unknown = sorted(str(key) for key in data if key not in cls.model_fields)
+        if unknown:
+            name = data.get("name", "?")
+            msg = f"Scoring dimension {name!r}: unknown key(s) {', '.join(unknown)}"
+            raise ValueError(msg)
+        return data
+
+    @model_validator(mode="after")
+    def validate_structural_values(self) -> ScoringDimensionSpec:
+        """D3: refuse values the scoring compiler cannot honour (scoring_spec_strict_validation_enabled)."""
+        if not _scoring_strict():
+            return self
+        if not math.isfinite(self.defaultweight) or self.defaultweight < 0.0:
+            msg = f"Scoring dimension {self.name!r}: defaultweight must be finite and >= 0, got {self.defaultweight!r}"
+            raise ValueError(msg)
+        if not math.isfinite(self.defaultwhennull):
+            msg = f"Scoring dimension {self.name!r}: defaultwhennull must be finite, got {self.defaultwhennull!r}"
+            raise ValueError(msg)
+        if self.aggregation is ScoringAggregation.MULTIPLICATIVE:
+            msg = (
+                f"Scoring dimension {self.name!r}: aggregation 'multiplicative' is not implemented "
+                "(the score is always the additive weighted sum)"
+            )
+            raise ValueError(msg)
+        dead = [
+            key
+            for key, unset in (("normalization", None), ("edge_type_strategy", {}), ("entity_types", []))
+            if getattr(self, key) != unset
+        ]
+        if dead:
+            msg = f"Scoring dimension {self.name!r}: {_dead_option_defect(dead)}"
+            raise ValueError(msg)
+        return self
+
     @model_validator(mode="after")
     def validate_metadata_keys(self) -> ScoringDimensionSpec:
         """Refuse a metadata key the dimension's computation does not read."""
@@ -792,6 +870,44 @@ class ScoringDimensionSpec(BaseModel):
             )
             raise ValueError(msg)
         return self
+
+    @model_validator(mode="after")
+    def validate_numeric_scales(self) -> ScoringDimensionSpec:
+        """SCR-09: refuse a divisor or scale the compiler cannot divide by.
+
+        Under ``scoring_spec_strict_validation_enabled`` (the D3 strict-validation
+        switch, ``_scoring_strict``; default on): ``maxvalue`` <= 0 where it is a divisor or scale
+        (lognormalized, pricealignment, temporalproximity), ``decayconstant`` <= 0
+        for geodecay, and ``minvalue`` >= ``maxvalue`` for inverselinear (with the
+        compiler defaults 0 and 100 for an undeclared bound).
+        """
+        if not _scoring_strict():
+            return self
+        defect = _numeric_scale_defect(self)
+        if defect:
+            msg = f"Scoring dimension {self.name!r}: {defect}"
+            raise ValueError(msg)
+        return self
+
+
+_MAXVALUE_SCALED = frozenset(
+    {ComputationType.LOGNORMALIZED, ComputationType.PRICEALIGNMENT, ComputationType.TEMPORALPROXIMITY}
+)
+
+
+def _numeric_scale_defect(dim: ScoringDimensionSpec) -> str | None:
+    """SCR-09: the first divisor/scale defect of ``dim``, or ``None``."""
+    computation = dim.computation
+    if computation in _MAXVALUE_SCALED and dim.maxvalue is not None and dim.maxvalue <= 0:
+        return f"maxvalue must be > 0 for {computation.value}, got {dim.maxvalue!r}"
+    if computation is ComputationType.GEODECAY and dim.decayconstant is not None and dim.decayconstant <= 0:
+        return f"decayconstant must be > 0 for geodecay, got {dim.decayconstant!r}"
+    if computation is ComputationType.INVERSELINEAR:
+        low = dim.minvalue if dim.minvalue is not None else 0.0
+        high = dim.maxvalue if dim.maxvalue is not None else 100.0
+        if low >= high:
+            return f"inverselinear needs minvalue < maxvalue, got minvalue={low!r}, maxvalue={high!r}"
+    return None
 
 
 class AdaptiveSampleSizeSpec(BaseModel):
@@ -817,6 +933,49 @@ class ScoringSpec(BaseModel):
     )
     adaptive_sample_size: AdaptiveSampleSizeSpec = Field(default_factory=AdaptiveSampleSizeSpec)
     preference_attention_feedback_blend: float = 0.7  # S2-06: alpha for feedback fusion
+
+    @field_validator("preference_sample_size", mode="before")
+    @classmethod
+    def refuse_non_integer_sample_size(cls, value: Any) -> Any:
+        """D3: judge the declared value before ``int | str`` coerces it (``True`` -> 1, ``16.0`` -> 16)."""
+        if not _scoring_strict():
+            return value
+        if isinstance(value, bool) or not isinstance(value, int):
+            msg = f"preference_sample_size must be an integer, got {value!r} (no value resolves 'auto')"
+            raise ValueError(msg)
+        return value
+
+    @model_validator(mode="after")
+    def validate_structure(self) -> ScoringSpec:
+        """D3: duplicate dimension names and an unresolved sample size are refused (scoring_spec_strict_validation_enabled).
+
+        A dimension name is its Cypher alias and its learned-weight key, so a
+        second declaration silently shadows the first. ``preference_sample_size``
+        is bound as an integer ``LIMIT``; ``auto`` (or any string) is never resolved.
+        """
+        if not _scoring_strict():
+            return self
+        names = [dim.name for dim in self.dimensions]
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            msg = f"Duplicate scoring dimension name(s): {duplicates}"
+            raise ValueError(msg)
+        size = self.preference_sample_size
+        if isinstance(size, bool) or not isinstance(size, int):
+            msg = f"preference_sample_size must be an integer, got {size!r} (no value resolves 'auto')"
+            raise ValueError(msg)
+        if size < 1:
+            msg = f"preference_sample_size must be >= 1, got {size}"
+            raise ValueError(msg)
+        dead = []
+        if self.adaptive_sample_size != AdaptiveSampleSizeSpec():
+            dead.append("adaptive_sample_size")
+        if not math.isclose(self.preference_attention_feedback_blend, _UNREAD_FEEDBACK_BLEND):
+            dead.append("preference_attention_feedback_blend")
+        if dead:
+            msg = f"scoring: {_dead_option_defect(dead)}"
+            raise ValueError(msg)
+        return self
 
 
 class SoftSignalSpec(BaseModel):
@@ -1313,6 +1472,14 @@ class ParetoObjectiveSpec(BaseModel):
     direction: str = Field(default="maximize", description="maximize or minimize")
     weight_hint: float = Field(default=1.0, ge=0.0, le=1.0, description="Initial weight hint")
 
+    @model_validator(mode="after")
+    def refuse_unread_weight_hint(self) -> ParetoObjectiveSpec:
+        """ND-DEAD: the Pareto front reads dimension and direction only (scoring_spec_strict_validation_enabled)."""
+        if _scoring_strict() and not math.isclose(self.weight_hint, 1.0):
+            msg = f"Pareto objective {self.dimension!r}: {_dead_option_defect(['weight_hint'])}"
+            raise ValueError(msg)
+        return self
+
 
 class ParetoConfigSpec(BaseModel):
     """Pareto-specific configuration."""
@@ -1397,6 +1564,21 @@ class DecisionArbitrationSpec(BaseModel):
         default_factory=dict,
         description="Named weight policies, e.g. {'balanced': {'geo': 0.5, 'price': 0.5}}",
     )
+
+    @model_validator(mode="after")
+    def refuse_unread_options(self) -> DecisionArbitrationSpec:
+        """ND-DEAD: optimization_method and policy_weights have no reader (scoring_spec_strict_validation_enabled)."""
+        if not _scoring_strict():
+            return self
+        dead = [
+            key
+            for key, unset in (("optimization_method", "pareto"), ("policy_weights", {}))
+            if getattr(self, key) != unset
+        ]
+        if dead:
+            msg = f"decision_arbitration: {_dead_option_defect(dead)}"
+            raise ValueError(msg)
+        return self
 
 
 class FeatureCatalogEntry(BaseModel):
@@ -1555,6 +1737,78 @@ def missing_edge_property_reason(spec: DomainSpec, gate: GateSpec) -> str | None
                 + predicate.property
                 + " requires a string property of edge "
                 + edge_type
+            )
+    return None
+
+
+def scoring_candidate_labels(spec: DomainSpec, direction: str) -> list[str]:
+    """The candidate label(s) ``handle_match`` scores in ``direction``.
+
+    ``handle_match`` takes the ``matchentities.candidate`` entries declared for
+    the direction and matches ``(candidate:<first label>)``; a direction with
+    none is refused there. The producer checks read the same selection
+    (CEG-R01 / CEG-06), so what they validate is what the match reads.
+    """
+    return [entity.label for entity in spec.matchentities.candidate if entity.matchdirection == direction][:1]
+
+
+def dimension_candidate_properties(spec: DomainSpec, dim: ScoringDimensionSpec) -> set[str]:
+    """Candidate properties that ``dim`` can read in every match direction it applies to (CEG-R01).
+
+    Under ``scoring_spec_strict_validation_enabled``: for each direction the
+    dimension scores (``matchdirections``, else every declared direction), the
+    properties declared on the candidate label ``handle_match`` scores there
+    (``scoring_candidate_labels``); the result is their intersection, so a
+    producer declared on another direction's candidate does not count. A
+    direction with no candidate label contributes nothing (``handle_match``
+    refuses it). Off: the legacy union over every candidate node.
+    """
+    if not _scoring_strict():
+        labels = {entity.label for entity in spec.matchentities.candidate}
+        return {p.name for n in spec.ontology.nodes if n.candidate or n.label in labels for p in n.properties}
+    declared = {node.label: {p.name for p in node.properties} for node in spec.ontology.nodes}
+    directions = dim.matchdirections or list(spec.queryschema.matchdirections)
+    per_direction = [
+        set.intersection(*(declared.get(label, set()) for label in labels))
+        for labels in (scoring_candidate_labels(spec, direction) for direction in directions)
+        if labels
+    ]
+    return set.intersection(*per_direction) if per_direction else set()
+
+
+def _no_producer(spec: DomainSpec, dim: ScoringDimensionSpec) -> str | None:
+    """ND-PARAM: a null / cold-start option whose input nothing produces (the FEATURE_GATES §16 producer rules).
+
+    ``population_mean`` reads ``$_popmean_<dim>``, bound only when the pack
+    declares it as a queryschema field or derived parameter; ``inherit_prior``
+    reads ``candidate._prior_<dim>`` and ``structural_similarity`` reads
+    ``candidate.shared_neighbor_score``, written by sync only when a candidate
+    node declares them. Without a producer the option silently does nothing.
+    """
+    params = {f.name for f in spec.queryschema.fields} | {p.name for p in spec.derivedparameters}
+    props = dimension_candidate_properties(spec, dim)
+    needs: list[tuple[str, str, set[str], str]] = []
+    if (
+        dim.null_strategy is NullStrategy.POPULATION_MEAN
+        or dim.cold_start_fallback is ColdStartFallback.POPULATION_MEAN
+    ):
+        needs.append(("population_mean", "_popmean_" + dim.name, params, "query parameter"))
+    if dim.null_strategy is NullStrategy.INHERIT_PRIOR:
+        needs.append(("inherit_prior", "_prior_" + dim.name, props, "candidate property"))
+    if dim.cold_start_fallback is ColdStartFallback.STRUCTURAL_SIMILARITY:
+        needs.append(("structural_similarity", "shared_neighbor_score", props, "candidate property"))
+    for option, name, declared_names, kind in needs:
+        if name not in declared_names:
+            return (
+                "Scoring dimension "
+                + repr(dim.name)
+                + ": "
+                + option
+                + " reads the "
+                + kind
+                + " "
+                + repr(name)
+                + ", which the pack does not declare"
             )
     return None
 
@@ -1759,4 +2013,37 @@ class DomainSpec(BaseModel):
 
         validate_tenant_mapping(self)
 
+        return self
+
+    @model_validator(mode="after")
+    def validate_scoring_references(self) -> DomainSpec:
+        """D3: scoring references the compiler cannot resolve (scoring_spec_strict_validation_enabled).
+
+        An arbitration constraint naming an undeclared dimension constrains
+        nothing; ``preference_attention`` matches from ``qe``, so a pack whose
+        traversal binds no ``qe`` node fails every match that scores it.
+        """
+        if not _scoring_strict():
+            return self
+        declared = {dim.name for dim in self.scoring.dimensions}
+        unknown = sorted({c.dimension for c in self.decision_arbitration.constraints if c.dimension not in declared})
+        if unknown:
+            msg = f"decision_arbitration constraint(s) name undeclared scoring dimension(s): {unknown}"
+            raise ValueError(msg)
+        for direction in self.queryschema.matchdirections:
+            attention = [
+                d.name
+                for d in self.scoring.dimensions
+                if d.computation is ComputationType.PREFERENCEATTENTION
+                and (not d.matchdirections or direction in d.matchdirections)
+            ]
+            if attention and not _traversal_binds(self.traversal, "qe", direction):
+                msg = (
+                    f"Scoring dimension(s) {attention} use preference_attention, which matches from `qe`, "
+                    f"but no traversal step applicable to direction {direction!r} binds a `qe` node"
+                )
+                raise ValueError(msg)
+        unproduced = [defect for dim in self.scoring.dimensions if (defect := _no_producer(self, dim)) is not None]
+        if unproduced:
+            raise ValueError("; ".join(unproduced))
         return self

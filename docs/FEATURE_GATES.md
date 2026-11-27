@@ -61,6 +61,7 @@ independently of the code default.
 | Effective Null Strategy / Finite Learned Weights | `NULL_STRATEGY_EFFECTIVE_ENABLED` (`null_strategy_effective_enabled`); `LEARNED_WEIGHT_FINITE_READ_ENABLED` (`learned_weight_finite_read_enabled`) | `True`; `True` | unset | active (CEG scoring audit L2, operator decision D3a 2026-11-26): `null_strategy` `inherit_prior` / `population_mean` take effect when the source property is missing; with `SCORE_CLAMP_ENABLED` the composite score is clamped to [0, 1] too, and non-finite learned weights are ignored on read (D5). Off: the legacy wrapper — see "Scoring bounds and effective null strategies" before §37 |
 | Strict Null Gates | `STRICT_NULL_GATES` | `True` | `True` | active |
 | Param Strict Mode | `PARAM_STRICT_MODE` | `True` | `True` | active |
+| Scoring Compiler Defaults (L7) | `ZERO_WEIGHT_DIMENSION_EXCLUDED_ENABLED`, `ABSENT_SOURCES_COMPILER_RESOLUTION_ENABLED`, `WEIGHTEDRATE_UNKNOWN_CONFIDENCE_ENABLED`, `SCORING_EXPLICIT_NUMERIC_DEFAULTS_ENABLED` | `True` (each) | unset | active (correctness, CEG scoring audit L7 SCR-01/07/08/09); a 0 pre-learning weight excludes its dimension, `absent_sources` resolves the property each compiler reads, weightedrate with a missing confidence takes its null strategy, compilers read a declared numeric 0 as declared and a lognormalized value <= -1 as unknown; each flag off restores its legacy behaviour. See "Scoring compiler defaults" before §38 |
 | LLM Security (ValidatedLLMClient) | `LLM_PROVIDER` | `openai` (implicit) | `openai` | active — fully implemented, requires `OPENAI_API_KEY` |
 | PacketStore Persistence | `PACKET_STORE_ENABLED` (`packet_store_enabled`), `PACKET_STORE_DSN` (`packet_store_dsn`) | `False` | `True` | active (opt-in; read through `Settings` since PERSIST-01 — see §7) |
 | Health Commercial Mode | `HEALTH_COMMERCIAL_MODE_ENABLED` (`health_commercial_mode_enabled`), `HEALTH_ENTITLED_TIER` | `False`, `seed` | unset | dormant; tier entitlements, upgrade prompts and conversion events — see §22 |
@@ -122,6 +123,7 @@ independently of the code default.
 | Drift Requires Both Windows | `DRIFT_REQUIRES_BOTH_WINDOWS` (`drift_requires_both_windows`) | `True` | unset | active (correctness); outcomes `metadata.drift` raises no alert unless both a recent and a baseline distribution exist; `false` restores the one-sided divergence (RU-029 / CEG-COR-118) |
 | Drift Canonical Signals | `DRIFT_CANONICAL_SIGNALS_ENABLED` (`drift_canonical_signals_enabled`) | `False` | unset | dormant (correctness, SI-29); score-distribution drift has one canonical signal (`calibration.score_distribution_drift`) that `ScoreCalibrator.detect_score_drift` and `hgkr_utils.check_score_drift` delegate to, and `DriftDetector` results are labelled `outcome_dimension_mix` — see §4 |
 | Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
+| Scoring Spec Strict Validation | `SCORING_SPEC_STRICT_VALIDATION_ENABLED` (`scoring_spec_strict_validation_enabled`) | `True` | unset | active (CEG scoring audit L2, operator decision D3 2026-11-26): the schema refuses structurally invalid scoring declarations at load. Off: legacy loading (rollback) — see §16 "Scoring spec strict validation" |
 | Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
 | Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
 | Gate Null Operands From Predicate | `GATE_NULL_OPERANDS_FROM_PREDICATE` (`gate_null_operands_from_predicate`) | `True` | unset | active; a gate's `nullbehavior` applies to exactly the operands its predicate tests (range FAIL rejects NULL bounds; temporalrange null-handles its window per side) — see §21 |
@@ -1076,6 +1078,55 @@ its dimensions declare their operands and it is served.
 Rollback: `SCORING_ADMISSION_CHECK_ENABLED=false` (gate-only admission, the
 previous wording of the withholding reason), or
 `UNVALIDATED_DOMAIN_PACKS_ENABLED=true` to serve every validated pack.
+
+### Scoring spec strict validation (CEG scoring audit L2, D3)
+
+`SCORING_SPEC_STRICT_VALIDATION_ENABLED` (default `True` — operator decision
+D3, option A, 2026-11-26) refuses structurally invalid scoring declarations at
+the schema owner (`engine/config/schema.py`), so the `DomainSpec` fails to load
+with a pydantic `ValidationError` naming the defect:
+
+- a `defaultweight` that is non-finite (`.nan`, `.inf`) or negative;
+- a non-finite `defaultwhennull`;
+- two scoring dimensions with the same `name` (the name is the Cypher alias
+  and the learned-weight key, so the second silently shadowed the first);
+- an unknown key on a scoring dimension (`extra="forbid"` semantics);
+- `aggregation: multiplicative` (never compiled: the score is always the
+  additive weighted sum);
+- `preference_sample_size` that is not a positive integer (`auto` was never
+  resolved and crashed the compiler);
+- a `decision_arbitration.constraints[].dimension` naming an undeclared
+  scoring dimension;
+- a `preference_attention` dimension active in a match direction where no
+  traversal step applicable to that direction binds a `qe` node (its outcome
+  sample is matched from `qe`; unbound, the subquery matched every node);
+- a non-default value for an option no engine code reads: `normalization`,
+  `edge_type_strategy`, `entity_types`, `adaptive_sample_size`,
+  `preference_attention_feedback_blend`, Pareto `weight_hint`, arbitration
+  `optimization_method` and `policy_weights`;
+- an option whose input nothing produces (the producer rules under "Scoring
+  admission" above): `population_mean` without a `_popmean_<dim>` queryschema
+  field or derived parameter, `inherit_prior` / `structural_similarity`
+  without the candidate property they read.
+  The candidate property counts only where the dimension scores (CEG-R01):
+  it must be declared on each candidate label of every match direction the
+  dimension applies to (`matchdirections`, else every declared direction); a
+  declaration on another direction's candidate is not a producer. The
+  loader's admission producer check (`SCORING_ADMISSION_CHECK_ENABLED`)
+  applies the same rule; with this flag off both use the former union over
+  every candidate node.
+
+Every committed design pack loads with the flag on. This flag does not touch
+admission withholding: `SCORING_ADMISSION_CHECK_ENABLED` keeps its default
+(`False`). `tools/validate_domain.py --dry-run <pack-or-root>` reports,
+without serving anything, which published packs this flag would refuse, so
+operators can check them before deploy. Rollback:
+`SCORING_SPEC_STRICT_VALIDATION_ENABLED=false` (such packs load as before).
+
+Also in this lane (no new flag): `cypher_number` refuses `inf` / `-inf` /
+`nan`, which Python renders as identifiers Cypher cannot parse as numbers.
+
+Tests: `tests/unit/test_scoring_spec_strict_validation.py`.
 
 ### Full-match admission (RU-039)
 
@@ -2419,6 +2470,33 @@ never run, so turning it off is the prior behaviour.
 Requires the Neo4j Graph Data Science plugin. Tests:
 `tests/unit/test_gds_node_similarity.py`,
 `tests/integration/test_gds_node_similarity.py`.
+
+## Scoring compiler defaults (CEG scoring audit L7)
+
+Operator decisions 2026-11-26 ("go with recommendations"), rules Q1 and Q3.
+Four switches in `engine/config/settings.py`, all default `True`; each one off
+restores its legacy behaviour exactly. Tests:
+`tests/unit/test_scoring_compiler_defaults.py` (compiled Cypher, both flag
+states) and `tests/integration/test_scoring_compiler_defaults_real_graph.py`
+(values through `handle_sync` + `handle_match` on Neo4j).
+
+| Flag (env) | Item | On | Off (legacy) |
+|---|---|---|---|
+| `zero_weight_dimension_excluded_enabled` (`ZERO_WEIGHT_DIMENSION_EXCLUDED_ENABLED`) | SCR-01, rule Q1 | A dimension whose pre-learning weight (the request override for its `weightkey`, else its `defaultweight`) is 0 is excluded from the match like a dimension scoped to another direction: no score term, not in `dimension_scores`, `absent_sources` or `last_effective_weights`, and no learned-weight multiplier or penalty reaches it. The match weight-ceiling check still validates the request as supplied | Compiled with coefficient 0; a learned weight below `penalty_threshold` turned that 0 into `-penalty_factor`, subtracting from a dimension the request had switched off |
+| `absent_sources_compiler_resolution_enabled` (`ABSENT_SOURCES_COMPILER_RESOLUTION_ENABLED`) | SCR-07 | `absent_sources` tests the property each compiler reads, through the same resolution as the null-strategy guard: the defaulted `candidateprop` (`value`, `rate`, `price_per_unit`, `last_activity_date`), structural declarations, both geodecay coordinates, and weightedrate's confidence property. Only candidate-held sources are reported | Only a declared `candidateprop` was reported, so a defaulted property was never absent |
+| `weightedrate_unknown_confidence_enabled` (`WEIGHTEDRATE_UNKNOWN_CONFIDENCE_ENABLED`) | SCR-08, rule Q3 | A missing confidence property (`queryprop`, else `confidence`) is unknown: under `null_strategy: zero` the dimension scores `defaultwhennull`; `inherit_prior` / `population_mean` substitute their fallback (the guard tests the confidence property beside the rate) | `coalesce(confidence, 1.0)`: an unknown confidence counted as full confidence |
+| `scoring_explicit_numeric_defaults_enabled` (`SCORING_EXPLICIT_NUMERIC_DEFAULTS_ENABLED`) | SCR-09 | `decayconstant`, `minvalue` and `maxvalue` are read as declared (`x if x is not None else default`): an inverselinear range `[-10, 0]` keeps its 0. A lognormalized candidate value <= -1 (where `log(1 + x)` is undefined) is unknown: the null-strategy guard tests it beside the null, and under `zero` the dimension clamp reads the -Infinity / NaN as 0.0 | `x or default`: a declared 0 became the default; a value <= -1 reached `log` |
+
+**Load-time refusals (SCR-09).** Under `scoring_spec_strict_validation_enabled`
+(the D3 strict-validation switch, scoring audit L2; read as on where a tree
+does not declare it) `ScoringDimensionSpec` refuses `maxvalue <= 0` for
+lognormalized, pricealignment and temporalproximity (a divisor or scale),
+`decayconstant <= 0` for geodecay, and `minvalue >= maxvalue` for
+inverselinear, with the compiler defaults 0 and 100 for an undeclared bound.
+Every committed design and synthetic pack loads unchanged.
+
+communitymatch's documented constants (0.5 for a null side, 0.2 for a
+mismatch, §32) are unchanged.
 
 ## 38. Buyer line identity (G02)
 

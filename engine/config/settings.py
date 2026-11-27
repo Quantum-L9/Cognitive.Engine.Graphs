@@ -150,6 +150,27 @@ class Settings(BaseSettings):
     # reason and the dimension scores with its request / spec weight. Restores
     # the [0, 1] score invariant, so it ships ON. Off: the legacy reader.
     learned_weight_finite_read_enabled: bool = True
+    # CEG scoring audit L7 / SCR-01 (rule Q1): a dimension whose pre-learning
+    # weight (request override, else spec default) is 0 is excluded from the
+    # match: no score term, no projection, no learned-weight multiplier or
+    # penalty. Off: it is compiled with coefficient 0, and a learned weight
+    # below the penalty threshold turns that 0 into a negative coefficient.
+    zero_weight_dimension_excluded_enabled: bool = True
+    # L7 / SCR-07: absent_sources resolves each dimension's source property as
+    # the compilers do (the defaulted candidateprop, structural declarations,
+    # the geodecay longitude, weightedrate's confidence property). Off: only a
+    # declared candidateprop is reported.
+    absent_sources_compiler_resolution_enabled: bool = True
+    # L7 / SCR-08 (rule Q3): weightedrate with a missing confidence property has
+    # an unknown confidence: the dimension takes its declared null strategy
+    # (defaultwhennull under `zero`) instead of coalescing confidence to 1.0.
+    # Off: the legacy coalesce(confidence, 1.0).
+    weightedrate_unknown_confidence_enabled: bool = True
+    # L7 / SCR-09: compilers read a declared numeric 0 as declared
+    # (`x if x is not None else default`, not `x or default`), and
+    # lognormalized treats a candidate value <= -1 (log undefined) as unknown,
+    # like a missing value. Off: the legacy `or` defaults and log(1 + x).
+    scoring_explicit_numeric_defaults_enabled: bool = True
     strict_null_gates: bool = True  # W1-03: reject gates with null-resolved params
     max_hop_hard_cap: int = 10  # W1-04: maximum hops for traversal patterns
     param_strict_mode: bool = True  # W1-05: raise on derived parameter resolution failures
@@ -566,6 +587,18 @@ class Settings(BaseSettings):
     # decision 2026-10-29): freight-matching keeps being served as on main
     # until the operator enables withholding.
     scoring_admission_check_enabled: bool = False
+    # CEG scoring audit L2 / D3 (operator decision 2026-11-26, option A): a
+    # structurally invalid scoring declaration is refused at the schema owner
+    # when the DomainSpec loads — a non-finite or negative defaultweight, a
+    # non-finite defaultwhennull, duplicate dimension names, an unknown key on
+    # a scoring dimension, aggregation: multiplicative (never compiled),
+    # preference_sample_size: auto (never resolved), an arbitration constraint
+    # naming an undeclared dimension, and preference_attention when no
+    # traversal step binds `qe`. Hardening that restores the declared scoring
+    # contract, so it ships ON. Off: such packs load as before (rollback).
+    # scoring_admission_check_enabled is unchanged: cross-reference defects
+    # (an unbound $_popmean_<dim>) stay under that default-off flag.
+    scoring_spec_strict_validation_enabled: bool = True
     # RU-039: a pack admission serves must execute for every declared match
     # direction. On: admission_defects also requires TraversalAssembler to
     # assemble each direction and every $parameter in gates, traversal and

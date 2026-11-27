@@ -243,7 +243,7 @@ class ScoringAssembler:
         sw_spec = self.domain_spec.feedbackloop.signal_weights if learned else None
 
         for dim in self.scoring_spec.dimensions:
-            if dim.matchdirections and match_direction not in dim.matchdirections:
+            if not self._dimension_scored(dim, match_direction, weights):
                 continue
             expr = self._compile_dimension(dim)
             # W1-02: clamp each dimension expression to [0.0, 1.0] when enabled
@@ -316,6 +316,10 @@ class ScoringAssembler:
 
     def _absent_source_case(self, dim: ScoringDimensionSpec) -> str | None:
         """One list element: the dimension name when its stored source is null."""
+        from engine.config.settings import settings
+
+        if settings.absent_sources_compiler_resolution_enabled:
+            return self._absent_source_case_resolved(dim)
         prop = dim.candidateprop
         name = dim.name
         if not isinstance(prop, str) or not prop or not isinstance(name, str):
@@ -334,6 +338,25 @@ class ScoringAssembler:
         self._query_params["absent_src_" + sanitize_label(name)] = name
         return f"CASE WHEN {predicate} THEN $absent_src_{sanitize_label(name)} ELSE NULL END"
 
+    def _absent_source_case_resolved(self, dim: ScoringDimensionSpec) -> str | None:
+        """SCR-07: the absent-source element over the property the compiler reads.
+
+        Same resolution as the null-strategy guard (``_source_missing_predicate``),
+        secondary properties included. Only candidate-held sources are reported:
+        a traversal alias is out of scope where ``absent_sources`` is projected.
+        """
+        name = dim.name
+        if not isinstance(name, str) or sanitize_label(name) != name:
+            return None
+        if not isinstance(dim.computation, ComputationType) or self._source_owner(dim) != "candidate":
+            return None
+        predicate = self._source_missing_predicate(dim, include_confidence=True)
+        if predicate is None:
+            return None
+        param = sanitize_label("absent_src_" + name)
+        self._query_params[param] = name
+        return f"CASE WHEN {predicate} THEN ${param} ELSE NULL END"
+
     @staticmethod
     def _renormalize_learned(weight_entries: list[tuple[float, str]], rescalable: dict[int, float]) -> None:
         """RU-023 / CEG-COR-083 (C-22): rescale the non-penalised coefficients in place.
@@ -348,6 +371,27 @@ class ScoringAssembler:
             scale = pre_sum / post_sum
             for i in rescalable:
                 weight_entries[i] = (weight_entries[i][0] * scale, weight_entries[i][1])
+
+    def _dimension_scored(self, dim: ScoringDimensionSpec, match_direction: str, weights: dict[str, float]) -> bool:
+        """Whether ``dim`` takes part in the score for this direction and request.
+
+        Scoped to another direction: no. SCR-01 (rule Q1, under
+        ``zero_weight_dimension_excluded_enabled``): a 0 pre-learning weight
+        (request override, else spec default) excludes it, so learning cannot
+        give it a coefficient (penalty or multiplier).
+        """
+        from engine.config.settings import settings
+
+        if dim.matchdirections and match_direction not in dim.matchdirections:
+            return False
+        return not (
+            settings.zero_weight_dimension_excluded_enabled and self._is_zero_weight(self._request_weight(dim, weights))
+        )
+
+    @staticmethod
+    def _is_zero_weight(weight: Any) -> bool:
+        """SCR-01: a numeric (not bool) weight equal to zero."""
+        return isinstance(weight, (int, float)) and not isinstance(weight, bool) and not weight
 
     @staticmethod
     def _request_weight(dim: ScoringDimensionSpec, weights: dict[str, float]) -> Any:
@@ -446,7 +490,7 @@ class ScoringAssembler:
         from engine.config.settings import settings
         from engine.config.structural_vocabulary import declared, required
 
-        k = cypher_number(dim.decayconstant or 50000.0)
+        k = cypher_number(self._declared_number(dim.decayconstant, 50000.0))
         lat_prop = sanitize_label(
             declared(dim.candidateprop, "latitude", f"scoring {dim.name!r} (geodecay) declares no candidateprop")
         )
@@ -471,8 +515,24 @@ class ScoringAssembler:
             f") / {k})"
         )
 
+    @staticmethod
+    def _declared_number(value: float | None, default: float) -> float:
+        """SCR-09: a declared number, else ``default``; a declared 0 stays 0.
+
+        Off (``scoring_explicit_numeric_defaults_enabled``): the legacy
+        ``value or default``, which replaced a declared 0 by the default.
+        """
+        from engine.config.settings import settings
+
+        if settings.scoring_explicit_numeric_defaults_enabled:
+            return value if value is not None else default
+        return value or default
+
     def _compile_lognormalized(self, dim: ScoringDimensionSpec) -> str:
-        max_val = cypher_number(dim.maxvalue or 1000.0)
+        # SCR-09: log(1 + x) is undefined for x <= -1. Such a value is unknown:
+        # the null-strategy guard tests it (_source_unknown_predicate), and under
+        # null_strategy `zero` the dimension clamp reads the -Infinity / NaN as 0.0.
+        max_val = cypher_number(self._declared_number(dim.maxvalue, 1000.0))
         prop = sanitize_label(dim.candidateprop or "value")
         return f"log(1 + coalesce(candidate.{prop}, 0)) / log(1 + {max_val})"
 
@@ -530,8 +590,8 @@ class ScoringAssembler:
         )
 
     def _compile_inverselinear(self, dim: ScoringDimensionSpec) -> str:
-        min_val = cypher_number(dim.minvalue or 0.0)
-        max_val = cypher_number(dim.maxvalue or 100.0)
+        min_val = cypher_number(self._declared_number(dim.minvalue, 0.0))
+        max_val = cypher_number(self._declared_number(dim.maxvalue, 100.0))
         prop = sanitize_label(dim.candidateprop or "value")
         return f"1.0 - (coalesce(candidate.{prop}, {max_val}) - {min_val}) / ({max_val} - {min_val})"
 
@@ -542,10 +602,26 @@ class ScoringAssembler:
         return f"coalesce(candidate.{prop}, {default})"
 
     def _compile_weightedrate(self, dim: ScoringDimensionSpec) -> str:
+        from engine.config.settings import settings
+
         rate_prop = sanitize_label(dim.candidateprop or "rate")
-        confidence_prop = sanitize_label(dim.queryprop or "confidence")
+        confidence_prop = sanitize_label(self._weightedrate_confidence_property(dim))
         default = float(dim.defaultwhennull)
+        if settings.weightedrate_unknown_confidence_enabled:
+            # SCR-08 (rule Q3): a missing confidence is unknown, not 1.0. Under
+            # null_strategy `zero` the dimension scores defaultwhennull; the
+            # other strategies substitute through the null-strategy guard,
+            # whose predicate tests the confidence property too.
+            return (
+                f"CASE WHEN candidate.{confidence_prop} IS NULL THEN {default} "
+                f"ELSE coalesce(candidate.{rate_prop}, {default}) * candidate.{confidence_prop} END"
+            )
         return f"coalesce(candidate.{rate_prop}, {default}) * coalesce(candidate.{confidence_prop}, 1.0)"
+
+    @staticmethod
+    def _weightedrate_confidence_property(dim: ScoringDimensionSpec) -> str:
+        """The candidate property weightedrate reads as confidence (``queryprop``, else ``confidence``)."""
+        return dim.queryprop or "confidence"
 
     def _compile_pricealignment(self, dim: ScoringDimensionSpec) -> str:
         """Log-ratio distance preferred over linear for multi-order-of-magnitude pricing.
@@ -563,7 +639,7 @@ class ScoringAssembler:
 
         cand_prop = sanitize_label(dim.candidateprop or "price_per_unit")
         query_prop = sanitize_label(dim.queryprop or "target_price")
-        tau = cypher_number(dim.maxvalue or 2.0)  # tolerance: 2.0 = ~7.4x ratio scores 0
+        tau = cypher_number(self._declared_number(dim.maxvalue, 2.0))  # tolerance: 2.0 = ~7.4x ratio scores 0
         default = float(dim.defaultwhennull)
         if settings.pricealignment_float_division:
             ratio = f"toFloat(candidate.{cand_prop}) / toFloat(${query_prop})"
@@ -595,7 +671,7 @@ class ScoringAssembler:
         if settings.temporalproximity_declared_signals_enabled:
             return self._compile_temporalproximity_declared(dim)
         date_prop = sanitize_label(dim.candidateprop or "last_activity_date")
-        decay_days = cypher_number(dim.maxvalue or 90.0)
+        decay_days = cypher_number(self._declared_number(dim.maxvalue, 90.0))
         default = float(dim.defaultwhennull)
         # Weights for 3 signals
         w1, w2, w3 = 0.6, 0.25, 0.15
@@ -634,7 +710,7 @@ class ScoringAssembler:
                 raise ValueError(msg)
 
         date_prop = sanitize_label(dim.candidateprop or "last_activity_date")
-        decay_days = cypher_number(dim.maxvalue or 90.0)
+        decay_days = cypher_number(self._declared_number(dim.maxvalue, 90.0))
         default = float(dim.defaultwhennull)
         safe_dim = sanitize_label(dim.name)
 
@@ -964,8 +1040,11 @@ class ScoringAssembler:
         computation = dim.computation
         if computation in (ComputationType.CUSTOMCYPHER, ComputationType.COMMUNITYBRIDGE):
             return None
-        if computation in self._ALIAS_SOURCED and dim.alias:
-            return sanitize_label(dim.alias)
+        alias: Any = dim.alias  # Any: duck-typed dimension doubles reach here too
+        if computation in self._ALIAS_SOURCED and alias is not None and not isinstance(alias, str):
+            return None  # an alias that is not a name: the source cannot be resolved
+        if computation in self._ALIAS_SOURCED and alias:
+            return sanitize_label(alias)
         if computation is ComputationType.TRAVERSALALIAS:
             return None
         return "candidate"
@@ -987,24 +1066,55 @@ class ScoringAssembler:
                 return None
         return dim.candidateprop or self._DEFAULT_SOURCE_PROPERTY.get(computation)
 
-    def _source_missing_predicate(self, dim: ScoringDimensionSpec) -> str | None:
+    def _source_missing_predicate(
+        self, dim: ScoringDimensionSpec, *, include_confidence: bool | None = None
+    ) -> str | None:
         """Cypher predicate true when the dimension's stored source property is missing.
 
         ``None`` when the computation has no single stored source (customcypher,
         community_bridge, an aliasless kge without candidateprop): the legacy
         wrapper is kept for those.
         """
+        computation: Any = dim.computation  # Any: duck-typed dimension doubles reach here too
+        if not isinstance(computation, ComputationType):
+            # Same rule as _compile_dimension: an unknown computation has no
+            # resolved source (it logs and falls back there), so no guard here.
+            return None
         owner = self._source_owner(dim)
         prop = self._source_property(dim) if owner else None
-        if not owner or not prop:
+        if not owner or not isinstance(prop, str) or not prop:
             return None
         predicate = f"{owner}.{sanitize_label(prop)} IS NULL"
         if dim.computation is ComputationType.GEODECAY:
             lon = self._geodecay_source_longitude(dim)
-            if lon is None:
+            if not isinstance(lon, str) or not lon:
                 return None
             predicate = f"{predicate} OR {owner}.{sanitize_label(lon)} IS NULL"
+        if dim.computation is ComputationType.WEIGHTEDRATE:
+            # SCR-07 / SCR-08: weightedrate's secondary source. The null-strategy
+            # guard tests it while an unknown confidence is unknown (SCR-08);
+            # absent_sources always reports it (include_confidence=True).
+            from engine.config.settings import settings
+
+            if include_confidence is None:
+                include_confidence = settings.weightedrate_unknown_confidence_enabled
+            if include_confidence:
+                conf: Any = self._weightedrate_confidence_property(dim)
+                if not isinstance(conf, str):
+                    return None
+                predicate = f"{predicate} OR {owner}.{sanitize_label(conf)} IS NULL"
         return predicate
+
+    def _source_unknown_predicate(self, dim: ScoringDimensionSpec) -> str | None:
+        """SCR-09: a stored source value the computation cannot read (lognormalized x <= -1)."""
+        from engine.config.settings import settings
+
+        if not settings.scoring_explicit_numeric_defaults_enabled:
+            return None
+        if dim.computation is not ComputationType.LOGNORMALIZED or self._source_owner(dim) != "candidate":
+            return None
+        prop = self._source_property(dim)
+        return f"candidate.{sanitize_label(prop)} <= -1" if isinstance(prop, str) and prop else None
 
     @staticmethod
     def _geodecay_source_longitude(dim: ScoringDimensionSpec) -> str | None:
@@ -1035,6 +1145,9 @@ class ScoringAssembler:
         missing = self._source_missing_predicate(dim)
         if missing is None:
             return None
+        unknown = self._source_unknown_predicate(dim)
+        if unknown is not None:
+            missing = f"{missing} OR {unknown}"
         default = cypher_number(dim.defaultwhennull)
         if strategy == NullStrategy.INHERIT_PRIOR:
             fallback = f"coalesce(candidate.{sanitize_label(f'_prior_{dim.name}')}, {default})"

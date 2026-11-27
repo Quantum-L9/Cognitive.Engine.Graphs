@@ -269,8 +269,10 @@ def test_lognormalized_guard_reads_its_declared_property() -> None:
             null_strategy="inherit_prior",
         )
     )
+    # SCR-09 (L7): a value <= -1 is unknown to log(1 + x), tested beside the null.
     assert expr.startswith(
-        "CASE WHEN candidate.docking_ports IS NULL THEN coalesce(candidate._prior_port_capacity, 0.1)"
+        "CASE WHEN candidate.docking_ports IS NULL OR candidate.docking_ports <= -1 "
+        "THEN coalesce(candidate._prior_port_capacity, 0.1)"
     )
 
 

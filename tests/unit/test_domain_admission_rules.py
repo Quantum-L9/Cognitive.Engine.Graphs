@@ -320,6 +320,10 @@ def _attention_without_success_value(raw: Raw) -> None:
             "defaultweight": 0.05,
         }
     )
+    # D3 strict scoring validation: preference_attention matches from `qe`.
+    raw["traversal"] = {
+        "steps": [{"name": "query_depot", "pattern": "(candidate:OrbitalDepot)-[:RESUPPLIED_BY]->(qe:OrbitalDepot)"}]
+    }
 
 
 def _traversal_keyword(raw: Raw) -> None:
@@ -451,8 +455,16 @@ CASES: list[Case] = [
         "ADM-DEFECT-SCORING-PRODUCER",
         "inherit-prior",
         lambda raw: _dimension(raw, "depot_reliability").update(null_strategy="inherit_prior"),
+        # ND-PARAM: with strict scoring validation on the schema refuses this at
+        # load; the admission defect is the rollback (flag-off) path.
+        settings={"scoring_spec_strict_validation_enabled": False},
     ),
-    Case("ADM-DEFECT-SCORING-PRODUCER", "structural-similarity", _structural_similarity),
+    Case(
+        "ADM-DEFECT-SCORING-PRODUCER",
+        "structural-similarity",
+        _structural_similarity,
+        settings={"scoring_spec_strict_validation_enabled": False},
+    ),
     Case("ADM-DEFECT-SCORING-METADATA", "attention-without-success-value", _attention_without_success_value),
     # With the metadata rule off the same dimension reaches the scoring compiler, which refuses it.
     Case(
@@ -465,6 +477,7 @@ CASES: list[Case] = [
         "ADM-DEFECT-SCORING-COMPILES",
         "unbound-parameter",
         lambda raw: _dimension(raw, "depot_reliability").update(null_strategy="population_mean"),
+        settings={"scoring_spec_strict_validation_enabled": False},
     ),
     Case("ADM-DEFECT-MATCH-DIRECTION", "traversal-refused", _traversal_keyword),
     Case("ADM-DEFECT-MATCH-DIRECTION", "unbound-gate-parameter", _unbound_gate_parameter),

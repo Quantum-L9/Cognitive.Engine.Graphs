@@ -159,7 +159,9 @@ def test_dormant_modules_have_no_production_caller_and_are_not_imported() -> Non
 
 
 def test_assembler_null_clause_clamps_null_and_keeps_a_zero_weight(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Rollback of SCR-01: with the exclusion off a 0 weight is compiled with coefficient 0."""
     monkeypatch.setattr(settings, "score_clamp_enabled", True)
+    monkeypatch.setattr(settings, "zero_weight_dimension_excluded_enabled", False)
     assembler = ScoringAssembler(_spec())
     clause, _meta = assembler.assemble_scoring_clause(DIRECTION, {"w_ports": 0.0})
     assert "WHEN (log(1 + coalesce(candidate.docking_ports, 0)) / log(1 + 1000.0)) IS NULL THEN 0.0" in clause
@@ -167,6 +169,19 @@ def test_assembler_null_clause_clamps_null_and_keeps_a_zero_weight(monkeypatch: 
     assert "(0.0 * port_capacity)" in clause
     # Independent arithmetic: a zero property is log(1+0)/log(1+1000) = 0, not a missing score.
     assert math.log(1 + 0) / math.log(1 + 1000.0) == 0.0
+
+
+def test_assembler_excludes_a_zero_weight_dimension_and_clamps_the_rest(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SCR-01 (rule Q1): a 0 request weight excludes the dimension; the others are still clamped."""
+    monkeypatch.setattr(settings, "score_clamp_enabled", True)
+    monkeypatch.setattr(settings, "zero_weight_dimension_excluded_enabled", True)
+    assembler = ScoringAssembler(_spec())
+    clause, _meta = assembler.assemble_scoring_clause(DIRECTION, {"w_ports": 0.0})
+    assert "port_capacity" not in clause
+    assert "candidate.docking_ports" not in clause
+    assert "isNaN" in clause
+    assert "port_capacity" not in assembler.last_effective_weights
+    assert "port_capacity" not in assembler.last_active_dimension_names
 
 
 @pytest.mark.asyncio
