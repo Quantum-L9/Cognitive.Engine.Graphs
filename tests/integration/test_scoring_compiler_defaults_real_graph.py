@@ -226,3 +226,92 @@ async def test_flag_off_missing_confidence_is_read_as_one(serve, monkeypatch: py
     await _sync([_depot("unknown", reliability=0.8)])
     rows = await _match()
     assert rows["unknown"]["dimension_scores"]["rate_quality"] == pytest.approx(0.8)
+
+
+# ── CEG-R02: a 0 weight never disables a declared arbitration constraint ─────
+
+
+def _reliability_constraint(*, hard: bool) -> Callable[[dict[str, Any]], None]:
+    def mutate(raw: dict[str, Any]) -> None:
+        raw["decision_arbitration"] = {
+            "enabled": True,
+            "constraints": [{"dimension": "depot_reliability", "threshold": 0.6, "hard": hard, "penalty": 0.5}],
+        }
+
+    return mutate
+
+
+_RISKY = _depot("risky", reliability=0.55, confidence=1.0, docking_ports=900)
+_SAFE = _depot("safe", reliability=0.90, confidence=1.0, docking_ports=10)
+
+
+@pytest.mark.parametrize("weights", [None, {"w_reliability": 0.0}], ids=["default-weights", "reliability-weight-0"])
+async def test_a_hard_constraint_holds_whatever_the_request_weight(serve, weights: dict[str, float] | None) -> None:
+    serve(_reliability_constraint(hard=True))
+    await _sync([_RISKY, _SAFE])
+    rows = await _match(weights=weights)
+    assert set(rows) == {"safe"}
+    assert rows["safe"]["dimension_scores"]["depot_reliability"] == pytest.approx(0.90)
+
+
+async def test_a_zero_weight_constrained_dimension_does_not_rank(serve) -> None:
+    serve(_reliability_constraint(hard=True))
+    await _sync([_SAFE])
+    row = (await _match(weights={"w_reliability": 0.0}))["safe"]
+    assert row["score"] == pytest.approx(0.3 * _ports(10) + 0.1 * 0.90, abs=1e-9)
+
+
+@pytest.mark.parametrize("weights", [None, {"w_reliability": 0.0}], ids=["default-weights", "reliability-weight-0"])
+async def test_a_soft_constraint_penalises_whatever_the_request_weight(serve, weights: dict[str, float] | None) -> None:
+    serve(_reliability_constraint(hard=False))
+    await _sync([_RISKY, _SAFE])
+    rows = await _match(weights=weights)
+    w_rel = 0.6 if weights is None else 0.0
+    unpenalised = w_rel * 0.55 + 0.3 * _ports(900) + 0.1 * 0.55
+    assert set(rows) == {"risky", "safe"}
+    assert rows["risky"]["score"] == pytest.approx(0.5 * unpenalised, abs=1e-9)
+    assert rows["safe"]["score"] == pytest.approx(w_rel * 0.90 + 0.3 * _ports(10) + 0.1 * 0.90, abs=1e-9)
+
+
+async def _ranked_ids(*, weights: dict[str, float] | None, top_n: int) -> list[str]:
+    from engine.handlers import handle_match
+
+    payload: dict[str, Any] = {"query": {}, "match_direction": _DIRECTION, "top_n": top_n}
+    if weights is not None:
+        payload["weights"] = weights
+    result = await handle_match(_DOMAIN, payload)
+    return [row["candidate"]["depot_id"] for row in result["candidates"]]
+
+
+@pytest.mark.parametrize("weights", [None, {"w_reliability": 0.0}], ids=["default-weights", "reliability-weight-0"])
+async def test_a_soft_penalty_orders_and_cuts_after_it_applies(serve, weights: dict[str, float] | None) -> None:
+    """The penalised candidate ranks below the unpenalised one, and top_n=1 returns the latter.
+
+    With w_reliability 0, risky leads before the penalty (0.350 vs 0.194) and
+    trails after it (0.175). Requires #566 (MATCH_ARBITRATION_IN_CYPHER_ENABLED:
+    soft penalties in the score expression before ORDER BY / LIMIT); without
+    it the penalty is applied after the cut and never re-sorted. Validated on
+    the campaign coordinator's combined stack, like the other campaign
+    integration tests.
+    """
+    serve(_reliability_constraint(hard=False))
+    await _sync([_RISKY, _SAFE])
+    assert await _ranked_ids(weights=weights, top_n=20) == ["safe", "risky"]
+    assert await _ranked_ids(weights=weights, top_n=1) == ["safe"]
+
+
+def _pareto_objective(raw: dict[str, Any]) -> None:
+    raw["decision_arbitration"] = {
+        "enabled": True,
+        "pareto_config": {"objectives": [{"dimension": "depot_reliability"}, {"dimension": "port_capacity"}]},
+    }
+
+
+async def test_a_zero_weight_pareto_objective_is_read_from_the_graph(serve) -> None:
+    """CEG-R02 (Pareto): the front reads the 0-weight objective's real value; it does not rank."""
+    serve(_pareto_objective)
+    await _sync([_RISKY, _SAFE])
+    rows = await _match(weights={"w_reliability": 0.0})
+    assert rows["safe"]["dimension_scores"]["depot_reliability"] == pytest.approx(0.90)
+    assert rows["risky"]["dimension_scores"]["depot_reliability"] == pytest.approx(0.55)
+    assert rows["safe"]["score"] == pytest.approx(0.3 * _ports(10) + 0.1 * 0.90, abs=1e-9)
