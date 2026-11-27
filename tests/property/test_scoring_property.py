@@ -1,157 +1,121 @@
 """
-Property-based tests for scoring (W5-05).
+Property-based tests for scoring (W5-05; rewritten by CEG scoring audit L2).
 
-Uses Hypothesis to generate random valid weight vectors and verify
-that assembled score expressions maintain [0, 1] bounds and idempotency.
+Every property drives repository code: ``ScoringAssembler`` assembles the
+scoring clause from generated request and learned weights (``cypher_number``'s
+own properties live with its non-finite refusal, in
+``tests/unit/test_scoring_spec_strict_validation.py``). The earlier cases asserted
+properties of their own generators and of a test-local ``clamp`` and so could
+not fail on any change to the engine.
 """
 
 from __future__ import annotations
 
+import asyncio
+import copy
+import math
+import re
+from typing import Any
+
 import pytest
-from hypothesis import assume, given, settings
+import yaml
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from engine.config.schema import DomainSpec
 from engine.scoring.assembler import ScoringAssembler
+from engine.utils.security import cypher_number
+from tests.fixtures.domain_contracts import SYNTHETIC_DOMAINS_ROOT
 
 pytestmark = pytest.mark.unit
 
-# ---------------------------------------------------------------------------
-# Custom strategies
-# ---------------------------------------------------------------------------
+_DIRECTION = "window_to_depot"
+_RAW = yaml.safe_load((SYNTHETIC_DOMAINS_ROOT / "orbital-logistics" / "spec.yaml").read_text(encoding="utf-8"))
 
 
-@st.composite
-def weight_vector(draw, min_dims: int = 1, max_dims: int = 8):
-    """Generate a valid weight vector: each in [0, 1], sum <= 1.0."""
-    n = draw(st.integers(min_value=min_dims, max_value=max_dims))
-    if n == 0:
-        return []
-
-    # Generate n weights, then normalize so sum <= 1.0
-    raw = [draw(st.floats(min_value=0.01, max_value=1.0, allow_nan=False, allow_infinity=False)) for _ in range(n)]
-    total = sum(raw)
-    if total > 0:
-        factor = draw(st.floats(min_value=0.1, max_value=1.0, allow_nan=False, allow_infinity=False))
-        normalized = [w / total * factor for w in raw]
-    else:
-        normalized = [1.0 / n for _ in range(n)]
-
-    return normalized
+def _spec(feedback: bool) -> DomainSpec:
+    raw = copy.deepcopy(_RAW)
+    if feedback:
+        raw["feedbackloop"] = {**raw.get("feedbackloop", {}), "enabled": True, "signal_weights": {"enabled": True}}
+    return DomainSpec.model_validate(raw)
 
 
-@st.composite
-def clamped_score(draw):
-    """Generate a score in [0, 1]."""
-    return draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False))
+_SPEC = _spec(feedback=False)
+_FEEDBACK_SPEC = _spec(feedback=True)
 
 
-# ---------------------------------------------------------------------------
-# Property tests
-# ---------------------------------------------------------------------------
+class _RowsDriver:
+    """A fixed DimensionWeight read (unit tier: no Neo4j)."""
+
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self.rows = rows
+
+    async def execute_query(self, cypher: str, parameters: dict[str, Any], database: str) -> list[dict[str, Any]]:
+        return self.rows
+
+
+unit_weight = st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False)
+any_learned = st.one_of(
+    st.floats(allow_nan=True, allow_infinity=True),
+    st.floats(min_value=-5.0, max_value=5.0, allow_nan=False, allow_infinity=False),
+    st.none(),
+)
+
+
+def _assemble(rows: list[dict[str, Any]], request: dict[str, float]) -> tuple[ScoringAssembler, str]:
+    assembler = ScoringAssembler(_FEEDBACK_SPEC, graph_driver=_RowsDriver(rows))  # type: ignore[arg-type]
+    asyncio.run(assembler.load_learned_weights())
+    clause, _ = assembler.assemble_scoring_clause(_DIRECTION, request)
+    return assembler, clause
 
 
 class TestScoringProperties:
-    """Property-based tests for scoring invariants."""
+    @given(w_rel=unit_weight, w_ports=unit_weight, l_rel=any_learned, l_ports=any_learned)
+    @settings(max_examples=150, deadline=None)
+    def test_emitted_coefficients_are_finite_and_the_composite_is_clamped(
+        self, w_rel: float, w_ports: float, l_rel: Any, l_ports: Any
+    ) -> None:
+        rows = [{"name": "depot_reliability", "weight": l_rel}, {"name": "port_capacity", "weight": l_ports}]
+        assembler, clause = _assemble(rows, {"w_reliability": w_rel, "w_ports": w_ports})
+        weights = assembler.last_effective_weights
+        assert set(weights) == {"depot_reliability", "port_capacity"}
+        assert all(math.isfinite(w) for w in weights.values())
+        score_line = clause.splitlines()[-1]
+        assert score_line.startswith("WITH candidate, depot_reliability, port_capacity, CASE WHEN ((")
+        assert score_line.endswith(" END AS score")
+        assert "isNaN(" in score_line
 
-    @given(weights=weight_vector())
-    @settings(max_examples=100, deadline=5000)
-    def test_weight_vector_sums_le_one(self, weights):
-        """For any valid weight vector, sum <= 1.0."""
-        assert sum(weights) <= 1.0 + 1e-9, f"Weight sum {sum(weights)} exceeds 1.0"
+    @given(w_rel=unit_weight, w_ports=unit_weight, l_rel=any_learned, l_ports=any_learned)
+    @settings(max_examples=150, deadline=None)
+    def test_learning_never_raises_the_positive_weight_sum(
+        self, w_rel: float, w_ports: float, l_rel: Any, l_ports: Any
+    ) -> None:
+        """RU-023: positive coefficients sum to at most the request weights' sum; a penalty is negative."""
+        rows = [{"name": "depot_reliability", "weight": l_rel}, {"name": "port_capacity", "weight": l_ports}]
+        assembler, _ = _assemble(rows, {"w_reliability": w_rel, "w_ports": w_ports})
+        positive = sum(w for w in assembler.last_effective_weights.values() if w > 0)
+        assert positive <= w_rel + w_ports + 1e-9
 
-    @given(weights=weight_vector())
-    @settings(max_examples=100, deadline=5000)
-    def test_each_weight_in_unit_interval(self, weights):
-        """Each weight is in [0, 1]."""
-        for i, w in enumerate(weights):
-            assert 0.0 <= w <= 1.0 + 1e-9, f"Weight[{i}] = {w} out of [0, 1]"
+    @given(w_rel=unit_weight, w_ports=unit_weight)
+    @settings(max_examples=100, deadline=None)
+    def test_request_weights_are_emitted_verbatim_without_learning(self, w_rel: float, w_ports: float) -> None:
+        assembler = ScoringAssembler(_SPEC)
+        clause, _ = assembler.assemble_scoring_clause(_DIRECTION, {"w_reliability": w_rel, "w_ports": w_ports})
+        assert assembler.last_effective_weights == {"depot_reliability": w_rel, "port_capacity": w_ports}
+        assert f"({cypher_number(w_rel)} * depot_reliability)" in clause
 
-    @given(score=st.floats(min_value=-10.0, max_value=10.0, allow_nan=False, allow_infinity=False))
-    @settings(max_examples=100)
-    def test_clamp_bounds(self, score):
-        """Clamped scores must be in [0.0, 1.0]."""
-
-        def clamp(v):
-            return max(0.0, min(1.0, v))
-
-        result = clamp(score)
-        assert 0.0 <= result <= 1.0
-
-    @given(score=st.floats(min_value=-10.0, max_value=10.0, allow_nan=False, allow_infinity=False))
-    @settings(max_examples=100)
-    def test_clamp_idempotent(self, score):
-        """clamp(clamp(x)) == clamp(x) — idempotency property."""
-
-        def clamp(v):
-            return max(0.0, min(1.0, v))
-
-        assert clamp(clamp(score)) == clamp(score)
-
-    @given(weights=weight_vector(), scores=st.lists(clamped_score(), min_size=1, max_size=8))
-    @settings(max_examples=100, deadline=5000)
-    def test_weighted_sum_bounded_by_weight_sum(self, weights, scores):
-        """Weighted sum of clamped scores <= sum of weights (since each score <= 1)."""
-        n = min(len(weights), len(scores))
-        assume(n > 0)
-
-        weighted_sum = sum(weights[i] * scores[i] for i in range(n))
-        weight_total = sum(weights[:n])
-
-        assert weighted_sum <= weight_total + 1e-9, f"Weighted sum {weighted_sum} exceeds weight total {weight_total}"
-
-    def test_clamp_expression_cypher_structure(self):
-        """ScoringAssembler._clamp_expression produces valid CASE structure."""
-        expr = ScoringAssembler._clamp_expression("candidate.rate")
-        assert expr.startswith("CASE WHEN")
-        assert "< 0.0 THEN 0.0" in expr
-        assert "> 1.0 THEN 1.0" in expr
-        assert expr.endswith("END")
-        # Balanced parens
-        assert expr.count("(") == expr.count(")")
-
-    def test_build_score_expression_empty(self):
-        """Empty weight list returns '0.0'."""
-        from engine.config.schema import (
-            DomainMetadata,
-            DomainSpec,
-            EdgeCategory,
-            EdgeDirection,
-            EdgeSpec,
-            ManagedByType,
-            MatchEntitiesSpec,
-            MatchEntitySpec,
-            NodeSpec,
-            OntologySpec,
-            QuerySchemaSpec,
-            ScoringSpec,
+    @given(expr=st.from_regex(re.compile(r"[a-z_]{1,8}(\.[a-z_]{1,8})?"), fullmatch=True))
+    @settings(max_examples=50)
+    def test_clamp_expression_wraps_any_operand(self, expr: str) -> None:
+        clamped = ScoringAssembler._clamp_expression(expr)
+        assert clamped == (
+            f"CASE WHEN ({expr}) IS NULL THEN 0.0 WHEN isNaN(({expr})) THEN 0.0 "
+            f"WHEN ({expr}) < 0.0 THEN 0.0 WHEN ({expr}) > 1.0 THEN 1.0 ELSE ({expr}) END"
         )
+        assert clamped.count("(") == clamped.count(")")
 
-        spec = DomainSpec(
-            domain=DomainMetadata(id="empty", name="Empty", version="1.0.0"),
-            ontology=OntologySpec(
-                nodes=[
-                    NodeSpec(label="N", candidate=True),
-                    NodeSpec(label="Q", queryentity=True),
-                ],
-                edges=[
-                    EdgeSpec(
-                        type="R",
-                        **{"from": "N"},
-                        to="Q",
-                        direction=EdgeDirection.DIRECTED,
-                        category=EdgeCategory.CAPABILITY,
-                        managedby=ManagedByType.SYNC,
-                    ),
-                ],
-            ),
-            matchentities=MatchEntitiesSpec(
-                candidate=[MatchEntitySpec(label="N", matchdirection="fwd")],
-                queryentity=[MatchEntitySpec(label="Q", matchdirection="fwd")],
-            ),
-            queryschema=QuerySchemaSpec(matchdirections=["fwd"], fields=[]),
-            gates=[],
-            scoring=ScoringSpec(dimensions=[]),
-        )
-        assembler = ScoringAssembler(spec)
-        clause, _ = assembler.assemble_scoring_clause("fwd", {})
-        assert "0.0" in clause
+    def test_empty_scoring_emits_a_zero_score(self) -> None:
+        raw = copy.deepcopy(_RAW)
+        raw["scoring"]["dimensions"] = []
+        clause, _ = ScoringAssembler(DomainSpec.model_validate(raw)).assemble_scoring_clause(_DIRECTION, {})
+        assert clause == "WITH candidate, 0.0 AS score"
