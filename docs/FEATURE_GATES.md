@@ -122,7 +122,7 @@ independently of the code default.
 | Drift Canonical Signals | `DRIFT_CANONICAL_SIGNALS_ENABLED` (`drift_canonical_signals_enabled`) | `False` | unset | dormant (correctness, SI-29); score-distribution drift has one canonical signal (`calibration.score_distribution_drift`) that `ScoreCalibrator.detect_score_drift` and `hgkr_utils.check_score_drift` delegate to, and `DriftDetector` results are labelled `outcome_dimension_mix` — see §4 |
 | Neo4j Driver Bounds | `NEO4J_QUERY_TIMEOUT_ENABLED` (`neo4j_query_timeout_enabled`), `NEO4J_QUERY_TIMEOUT_S` | `True`, `25` | unset | active (hardening, D8); every query, read and write carries a server-enforced transaction timeout in (0, 30) s, and the driver pool comes from `neo4j_pool_size` / `neo4j_max_connection_lifetime` / `neo4j_connection_acquisition_timeout` — see "Neo4j Driver Bounds" |
 | Calibration NDCG Abstract Basis | `CALIBRATION_NDCG_ABSTRACT_BASIS_ENABLED` (`calibration_ndcg_abstract_basis_enabled`) | `True` | unset | active (hardening, D6); `run_calibration` with zero pairs is not a pass and `forward_simulate` NDCG uses the abstract ranking's top-k ideal; `false` restores both legacy behaviours exactly — see §4 |
-| Drift Insufficient-Data Status | `DRIFT_INSUFFICIENT_DATA_STATUS_ENABLED` (`drift_insufficient_data_status_enabled`) | `True` | unset | active (hardening, SCR-12); `detect_score_drift` and `check_score_drift` report `status` `insufficient_data` (no drift, statistics 0.0) when either sample has no finite value, `computed` otherwise, in both SI-29 states; `false` restores main (status `None`) — see §4 |
+| Drift Insufficient-Data Status | `DRIFT_INSUFFICIENT_DATA_STATUS_ENABLED` (`drift_insufficient_data_status_enabled`) | `True` | unset | active (hardening, SCR-12); `detect_score_drift` and `check_score_drift` report `status` `insufficient_data` (no drift, statistics 0.0) when either sample has no finite value, `computed` otherwise, measured on finite values only, in both SI-29 states; `false` restores main (status `None`) — see §4 |
 | Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
 | Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
 | Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
@@ -349,9 +349,15 @@ Any other result is `computed`. Samples with finite data keep each detector's
 existing verdict and values: the SI-29 flag still decides whether the shape
 (KS) or the mean alone counts, so this flag adds no new drift claim.
 
-Off: every pre-existing field is main's, and `status` is `None`. Tests:
-`tests/unit/test_drift_insufficient_data_status.py` (empty and all-NaN samples,
-drift, no drift, both functions, both SI-29 states, both states of this flag).
+A sample that mixes finite values with NaN, ±inf or `None` is measured on its
+finite values only, the filter `check_score_drift` and the SI-29 signal already
+apply (CEG-A09): before this, the legacy `detect_score_drift` path returned NaN
+statistics labelled `computed`, or raised `TypeError` on `None`.
+
+Off: every pre-existing field is main's, the raw samples are measured as on
+main, and `status` is `None`. Tests:
+`tests/unit/test_drift_insufficient_data_status.py` (empty, all-NaN and mixed
+finite/NaN/inf/`None` samples, drift, no drift, both functions, both SI-29 states, both states of this flag).
 
 ---
 
