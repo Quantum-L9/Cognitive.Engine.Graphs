@@ -245,10 +245,14 @@ def apply_confidence_flags(candidate: dict[str, Any], flags: list[str], detail: 
     dimensional agreement). Under ``confidence_flag_list_enabled`` the candidate
     always carries ``confidence_flag`` as ``list[str]`` (``[]`` when no check
     fired); off, the historical shape: absent, a bare string, or a list of two.
-    ``confidence_detail`` is written only when a flag is.
+    ``confidence_detail`` is written only when a flag is; in list mode a clean
+    result also removes a detail left by an earlier annotation.
     """
     if settings.confidence_flag_list_enabled:
         candidate["confidence_flag"] = list(flags)
+        if not flags:
+            # A re-annotated candidate that is now clean drops the detail of an earlier run.
+            candidate.pop("confidence_detail", None)
     elif flags:
         candidate["confidence_flag"] = flags[0] if len(flags) == 1 else flags
     if flags:

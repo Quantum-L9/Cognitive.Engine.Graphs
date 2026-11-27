@@ -85,6 +85,15 @@ class TestAnnotateCandidates:
             assert isinstance(row["confidence_flag"], list)
             assert all(isinstance(f, str) for f in row["confidence_flag"])
 
+    def test_clean_reannotation_drops_stale_detail(self) -> None:
+        row = {"dimension_scores": {"geo": 0.95, "structural": 0.05}}
+        _checker().annotate_candidates([row])
+        assert row["confidence_flag"] == [FLAG_MONOCULTURE, FLAG_LOW_DIMENSIONAL_AGREEMENT]
+        row["dimension_scores"] = {"geo": 0.4, "structural": 0.6}
+        _checker().annotate_candidates([row])
+        assert row["confidence_flag"] == []
+        assert "confidence_detail" not in row
+
     def test_flag_off_restores_string_list_or_absent(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings, "confidence_flag_list_enabled", False)
         rows = [
