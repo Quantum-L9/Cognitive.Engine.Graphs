@@ -11,12 +11,15 @@ status: active
 
 Score calibration framework — seL4-inspired forward simulation.
 
-Verifies that the concrete scoring implementation satisfies the abstract
-calibration spec defined by the domain author. Reports pass/fail per
-calibration pair, NDCG ranking quality, Kendall-tau correlation, and
-distribution drift (simplified KS test).
+Library checks of a concrete scoring outcome against the abstract
+calibration spec defined by the domain author: pass/fail per calibration pair
+(``run_calibration``, given the caller's actual scores), NDCG ranking quality
+and Kendall-tau correlation (``forward_simulate``), and distribution drift
+(simplified KS test).
 
-This is a MANUAL verification tool — it does NOT auto-adjust weights.
+This is a MANUAL verification tool — it does NOT auto-adjust weights. The
+``calibration_run`` admin subaction does not call these checks: it returns
+``generate_calibration_report``, an echo of the declared spec (D6).
 """
 
 from __future__ import annotations
@@ -30,6 +33,13 @@ from typing import Any
 from engine.config.schema import CalibrationPair, DomainSpec
 
 logger = logging.getLogger(__name__)
+
+
+def _abstract_basis() -> bool:
+    """D6 flag ``calibration_ndcg_abstract_basis_enabled``: zero pairs fail and NDCG uses the abstract ideal."""
+    from engine.config.settings import settings
+
+    return settings.calibration_ndcg_abstract_basis_enabled
 
 
 def _dcg(relevances: list[float]) -> float:
@@ -205,6 +215,9 @@ class ScoreCalibrator:
 
         Returns:
             CalibrationReport with pass/fail per pair and overall status.
+            D6: zero pairs is not a pass — with nothing checked there is no
+            evidence the scores satisfy the spec, so ``overall_pass`` is False
+            (flag ``calibration_ndcg_abstract_basis_enabled``; off: a pass).
         """
         results: list[CalibrationResult] = []
         for pair in calibration_pairs:
@@ -243,7 +256,7 @@ class ScoreCalibrator:
             passed=passed_count,
             failed=len(results) - passed_count,
             results=results,
-            overall_pass=passed_count == len(results),
+            overall_pass=passed_count == len(results) and (bool(results) or not _abstract_basis()),
         )
 
     def forward_simulate(
@@ -254,6 +267,14 @@ class ScoreCalibrator:
         """Compare abstract intent vs concrete scoring ranking.
 
         Computes NDCG and Kendall-tau to quantify ranking divergence.
+
+        D6: NDCG is NDCG@k with k = ``len(concrete_ranking)`` and the ideal
+        DCG taken from the abstract ranking itself (its top k relevances),
+        not from re-sorting the concrete list's own relevances. Re-sorting
+        made any ranking that omitted or displaced the abstract top items
+        its own ideal, so ``[a,b,c,d]`` vs ``[d]`` scored 1.0 and was not
+        reported diverged. Flag ``calibration_ndcg_abstract_basis_enabled``;
+        off restores the re-sorted basis.
 
         Args:
             abstract_ranking: Ideal ordering by domain author (most preferred first).
@@ -268,7 +289,10 @@ class ScoreCalibrator:
         # NDCG: relevance based on position in abstract ranking
         # float() of int arithmetic (list length minus list index): cannot raise.
         relevances_actual = [float(n - abstract_pos[cid]) if cid in abstract_pos else 0.0 for cid in concrete_ranking]
-        ideal_relevances = sorted(relevances_actual, reverse=True)
+        if _abstract_basis():
+            ideal_relevances = [float(n - i) for i in range(min(n, len(concrete_ranking)))]
+        else:
+            ideal_relevances = sorted(relevances_actual, reverse=True)
         idcg = _dcg(ideal_relevances)
         ndcg = min(1.0, _dcg(relevances_actual) / idcg) if idcg > 0 else 0.0
 
@@ -364,10 +388,12 @@ class ScoreCalibrator:
         )
 
     def generate_calibration_report(self, domain_id: str) -> dict[str, Any]:
-        """Generate a summary calibration report dict for a domain.
+        """Echo the domain spec's calibration declaration for the admin API.
 
-        Reads calibration pairs from the domain spec and returns a structured
-        report suitable for admin API responses.
+        D6: this is a spec echo. It lists the declared pairs and expected
+        ranges; it computes no score and verifies nothing, and the message
+        says so. The status key ``calibration_spec_loaded`` and the payload
+        keys are unchanged.
         """
         cal_spec = self.domain_spec.calibration
         if not cal_spec or not cal_spec.pairs:
@@ -392,5 +418,7 @@ class ScoreCalibrator:
                 }
                 for p in cal_spec.pairs
             ],
-            "message": "Calibration spec loaded. Run calibration_run to verify scores.",
+            "message": (
+                "Calibration spec loaded: declared pairs and expected ranges only. No scores were computed or verified."
+            ),
         }

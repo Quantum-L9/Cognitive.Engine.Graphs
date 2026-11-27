@@ -55,6 +55,27 @@ class Settings(BaseSettings):
     neo4j_pool_size: int = 50
     neo4j_max_connection_lifetime: int = 3600
     neo4j_connection_acquisition_timeout: int = 60
+    # D8 (FEATURE_GATES "Neo4j Driver Bounds"): GraphDriver.connect() hard-coded
+    # its pool (50 / 3600 s / 60 s) and ignored the three settings above, and no
+    # query carried a transaction timeout, so a slow statement held a pooled
+    # connection past the 30 s TransportHeader.timeout_ms caller budget. The pool
+    # now comes from those settings. On (default; hardening that bounds each
+    # statement's server-side execution): every query, read and write runs under a server-enforced
+    # transaction timeout of neo4j_query_timeout_s, validated to (0, 30) so the
+    # execution bound alone is shorter than the caller budget. It is a
+    # transaction bound, not a request deadline: connection acquisition (up to
+    # neo4j_connection_acquisition_timeout) and the driver's managed-transaction
+    # retries are outside it. Off: no driver-side timeout (the server's
+    # db.transaction.timeout applies).
+    neo4j_query_timeout_enabled: bool = True
+    neo4j_query_timeout_s: float = Field(default=25.0, gt=0, lt=30)
+    # D6 / SC-002 (FEATURE_GATES §4): ScoreCalibrator.run_calibration reported
+    # zero pairs as a pass, and forward_simulate took its ideal DCG from the
+    # concrete ranking's own relevances re-sorted, so [a,b,c,d] vs [d] scored
+    # NDCG 1.0. On (default; hardening that restores the documented invariant):
+    # zero pairs is not a pass and NDCG is NDCG@k over the abstract ranking's
+    # top-k relevances. Off: both behave exactly as before.
+    calibration_ndcg_abstract_basis_enabled: bool = True
 
     # CEG-007: there was a `redis_url` here, and a redis service in both compose
     # files, and a redis dependency in requirements — and no `import redis`

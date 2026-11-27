@@ -31,6 +31,11 @@ return self._clamp_expression(expr)  # Wraps in CASE WHEN > 1.0 THEN 1.0 ...
 
 ## Weight Ceiling
 
-If adding a new default weight to Settings, the total sum MUST remain ≤ 1.0.
-Current sum: 0.85 (structural 0.30 + geo 0.25 + reinforcement 0.20 + freshness 0.10).
-Reduce existing defaults to make room.
+The engine declares no scoring dimensions and no default weights of its own:
+do not add a weight to Settings. Weights belong to the domain pack, and a
+domain's default dimension weights must sum to ≤ 1.0 per match direction
+(`docs/contracts/SCORING_WEIGHT_CEILING.md`). The check runs when the spec
+loads only while `domain_strict_validation` is on (the default); unscoped
+dimensions count toward every direction's sum only while
+`weight_ceiling_includes_unscoped` is on (the default). Do not rely on the
+check when either flag is off.

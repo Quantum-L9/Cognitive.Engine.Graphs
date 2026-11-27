@@ -203,3 +203,11 @@ Generated from `environment/ide/policy.json` in the governance clone by `ops/scr
 > neutral synthetic root (ADR-112) and takes no product pack. A deployment
 > serves only packs an operator publishes into its mounted pack root
 > (`docs/runbooks/domain-pack-publish.md`).
+
+> **2026-11-26 correction (additive; append-only):** the scoring engine has 15
+> computation types, not 13. `ComputationType` (`engine/config/schema.py`) adds
+> `preference_attention` and `community_bridge` to the thirteen named
+> elsewhere; read "13 computation types" in Project Structure above as 15. The
+> `calibration` noted beside it is a spec echo: the `calibration_run` admin
+> subaction returns the declared pairs and expected ranges and verifies no
+> score (`docs/FEATURE_GATES.md` §4).
