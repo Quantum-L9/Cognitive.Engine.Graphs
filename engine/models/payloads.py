@@ -30,6 +30,8 @@ from typing import TYPE_CHECKING, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
+from engine.scoring.confidence import CONFIDENCE_FLAGS
+
 if TYPE_CHECKING:
     from engine.config.schema import DomainSpec
 
@@ -306,6 +308,20 @@ class MatchCandidate(BaseModel):
     feature_contributions: list[FeatureContribution]
     missing_evidence: list[str]
     explanation: str | None = None
+    # SCR-13 / CEG-11: W2-03 flags in check order; [] when the checks ran clean.
+    confidence_flag: list[str] = Field(default_factory=list)
+
+    @field_validator("confidence_flag")
+    @classmethod
+    def _confidence_flags(cls, values: list[str]) -> list[str]:
+        unknown = [v for v in values if v not in CONFIDENCE_FLAGS]
+        if unknown:
+            msg = f"unknown confidence_flag values {unknown}; allowed {list(CONFIDENCE_FLAGS)}"
+            raise ValueError(msg)
+        if len(set(values)) != len(values):
+            msg = "confidence_flag values must be unique"
+            raise ValueError(msg)
+        return values
 
     @model_validator(mode="after")
     def eligible_rank_rule(self) -> MatchCandidate:

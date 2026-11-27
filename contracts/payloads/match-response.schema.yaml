@@ -105,7 +105,9 @@ properties:
         confidence_flag:
           description: W2-03 confidence flags in check order (monoculture, then
             low_dimensional_agreement); an empty array means the checks ran and
-            none fired. Absent when the checks are off. CONFIDENCE_FLAG_LIST_ENABLED.
+            none fired. Absent when the checks are off. The contract is array-only;
+            the CONFIDENCE_FLAG_LIST_ENABLED=false rollback restores the pre-contract
+            legacy shape (absent, bare string or pair), which is outside this contract.
           type: array
           items:
             type: string

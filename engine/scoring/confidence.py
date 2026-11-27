@@ -33,6 +33,8 @@ logger = logging.getLogger(__name__)
 FLAG_MONOCULTURE = "monoculture"
 FLAG_ENSEMBLE_DIVERGENCE = "ensemble_divergence"
 FLAG_LOW_DIMENSIONAL_AGREEMENT = "low_dimensional_agreement"  # S2-07
+# The published `confidence_flag` vocabulary, in check order (match-response schema enum).
+CONFIDENCE_FLAGS: tuple[str, ...] = (FLAG_MONOCULTURE, FLAG_LOW_DIMENSIONAL_AGREEMENT, FLAG_ENSEMBLE_DIVERGENCE)
 
 
 def _finite_contribution(value: object) -> float | None:

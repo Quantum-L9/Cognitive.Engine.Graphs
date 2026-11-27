@@ -51,7 +51,9 @@ class MatchResponse(BaseModel):
 > otherwise the flags in check order (`monoculture`, then `low_dimensional_agreement`).
 > `confidence_detail` appears only beside a non-empty list. Both producers (weighted and raw
 > monoculture) share this shape. With the checks off the key is absent. Off, the historical
-> shape returns: absent for none, a bare string for one flag, a list for two. See
+> shape returns: absent for none, a bare string for one flag, a list for two. That
+> rollback shape is outside the published contract: the draft schema and the native
+> `MatchCandidate` model are array-only (default `[]`). See
 > `docs/FEATURE_GATES.md` §39a.
 >
 > ```python
