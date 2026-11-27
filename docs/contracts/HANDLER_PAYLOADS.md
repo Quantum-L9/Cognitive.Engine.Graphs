@@ -149,8 +149,8 @@ dimension can read the history. The outcome and its history are written in
 one transaction. A malformed id (empty, boolean, or an integer outside signed
 64-bit), an ambiguous label, or a dimension reading an outcome node the writer
 does not write raises `ValidationError` before anything is written; a keyed
-replay naming another query entity raises `ValidationError` and changes
-nothing; a query entity absent from the graph links nothing; the response adds
+replay naming another query entity, or naming one for an outcome first
+recorded without one, raises `ValidationError` and changes nothing; a query entity absent from the graph links nothing; the response adds
 `preference_history: {query_entity_id, linked_dimensions}`. Omitted, null, or
 flag off: unchanged.
 

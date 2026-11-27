@@ -190,6 +190,34 @@ async def test_a_replay_naming_another_query_entity_is_refused_and_changes_nothi
     ]
 
 
+async def test_a_replay_cannot_add_a_query_entity_to_an_outcome_recorded_without_one(graph: GraphDriver) -> None:
+    from engine.handlers import ValidationError
+
+    async def _counts() -> dict[str, Any]:
+        [row] = await graph.execute_query(
+            "MATCH (o:DockingResult {outcome_id: 'out-unbound-1'}) "
+            "OPTIONAL MATCH (qe:LaunchWindow)-[r:RESULTED_IN]->(o) "
+            "RETURN count(DISTINCT o) AS outcomes, count(r) AS links, o.query_entity_id AS bound, "
+            "o.outcome_type AS outcome_type",
+            database=TENANT,
+        )
+        return row
+
+    first = {"outcome_id": "out-unbound-1", "match_id": "window-1:depot-a", "query_entity_id": None}
+    await _record("window-1", "depot-a", "success", **first)
+    before = await _counts()
+    assert before == {"outcomes": 1, "links": 0, "bound": None, "outcome_type": None}
+
+    with pytest.raises(ValidationError, match="recorded without a query entity"):
+        await _record("window-2", "depot-a", "success", **first | {"query_entity_id": "window-2"})
+    assert await _counts() == before
+    assert await _history(graph) == []
+
+    replay = await _record("window-1", "depot-a", "success", **first)
+    assert "preference_history" not in replay
+    assert await _counts() == before
+
+
 async def test_a_replay_keeps_the_community_recorded_with_the_outcome(graph: GraphDriver) -> None:
     await _record("window-1", "depot-a", "success", outcome_id="out-snap-1")
     moved = {"depot_id": "depot-a", "accepts_hazmat": True, "docking_ports": 4, "reliability": 0.9, "community_id": 7}

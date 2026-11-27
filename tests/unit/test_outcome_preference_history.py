@@ -97,6 +97,7 @@ class _Graph:
         self.calls: list[tuple[str, dict[str, Any], str | None]] = []
         self.transactions = 0
         self.bound: dict[str, Any] = {}
+        self.outcomes: dict[str, dict[str, Any]] = {}
         self._linked = linked
         self._fail_history = fail_history
 
@@ -104,7 +105,13 @@ class _Graph:
         if "CREATE (o:" in cypher:
             return [{"outcome_id": parameters["outcome_id"]}]
         if "MERGE (o:" in cypher:
-            return [{"outcome_id": parameters["outcome_id"], "created": True}]
+            # The keyed writer: the first write creates, a later one replays the stored identity.
+            created = parameters["outcome_id"] not in self.outcomes
+            stored = self.outcomes.setdefault(parameters["outcome_id"], dict(parameters))
+            row = {"outcome_id": parameters["outcome_id"], "created": created}
+            return [
+                row | {f"stored_{name}": stored.get(name) for name in ("match_id", "candidate_id", "outcome", "tenant")}
+            ]
         if "o.query_entity_id AS prior" in cypher:
             prior = self.bound.get(parameters["outcome_id"])
             self.bound.setdefault(parameters["outcome_id"], parameters["query_entity_id"])
@@ -131,7 +138,13 @@ class _Graph:
                 graph.calls.append((cypher, parameters, database))
                 return _Result(graph._answer(cypher, parameters))
 
-        return await work(_Tx())
+        # A refused or failed transaction rolls back: the binding and outcomes it wrote vanish.
+        bound, outcomes = dict(self.bound), dict(self.outcomes)
+        try:
+            return await work(_Tx())
+        except BaseException:
+            self.bound, self.outcomes = bound, outcomes
+            raise
 
 
 def _wire(spec: DomainSpec, graph: _Graph) -> _Graph:
@@ -388,3 +401,22 @@ async def test_a_missing_or_empty_success_value_is_refused_before_anything_is_wr
     with pytest.raises(ValidationError, match="no non-empty success_value"):
         await handle_outcomes(TENANT, _payload())
     assert graph.calls == []
+
+
+async def test_a_replay_cannot_add_a_query_entity_to_an_outcome_recorded_without_one() -> None:
+    graph = _wire(_spec(), _Graph())
+    first = _payload(outcome_id="out-1")
+    del first["query_entity_id"]
+    await handle_outcomes(TENANT, first)
+    assert graph.bound == {}
+
+    with pytest.raises(ValidationError, match="recorded without a query entity"):
+        await handle_outcomes(TENANT, _payload(outcome_id="out-1", query_entity_id="window-2"))
+    assert graph.bound == {}
+    assert _history(graph) == []
+
+    # Replaying it as it was first written is still accepted and writes no history.
+    result = await handle_outcomes(TENANT, first)
+    assert "preference_history" not in result
+    assert graph.bound == {}
+    assert _history(graph) == []

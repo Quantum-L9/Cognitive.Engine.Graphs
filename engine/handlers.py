@@ -3424,6 +3424,18 @@ async def _write_outcome_with_preference_history(
                     tenant=tenant,
                 )
             )
+        if replayed and prior is None:
+            # "No query entity" is part of the observation: an outcome first
+            # recorded without one cannot gain one on replay. The claim above is
+            # rolled back with the transaction, so nothing changes.
+            raise _OutcomeWriteRefused(
+                ValidationError(
+                    f"outcome_id {parameters['outcome_id']!r} was recorded without a query entity; "
+                    "a replay cannot add one",
+                    action="outcomes",
+                    tenant=tenant,
+                )
+            )
         linked = []
         for name, statement in plan:
             result = await (await tx.run(statement["cypher"], {**history, **statement["params"]})).data()
