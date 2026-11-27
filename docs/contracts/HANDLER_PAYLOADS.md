@@ -52,7 +52,7 @@ class MatchResponse(BaseModel):
 > `confidence_detail` appears only beside a non-empty list. Both producers (weighted and raw
 > monoculture) share this shape. With the checks off the key is absent. Off, the historical
 > shape returns: absent for none, a bare string for one flag, a list for two. See
-> `docs/FEATURE_GATES.md` §38b.
+> `docs/FEATURE_GATES.md` §39a.
 
 > SI-06 (`PARETO_PRECUT_ENABLED`, default off): when on and the tenant's pack declares
 > `decision_arbitration` (`enabled: true`, at least one `pareto_config.objectives` entry),
