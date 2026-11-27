@@ -552,3 +552,30 @@ def test_an_unscoped_dimension_needs_its_producer_in_every_direction() -> None:
     launch = next(n for n in raw["ontology"]["nodes"] if n["label"] == "LaunchWindow")
     launch["properties"].append({"name": "_prior_depot_reliability", "type": "float"})
     DomainSpec.model_validate(raw)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("direction", ["window_to_depot", "depot_to_window"])
+async def test_the_producer_check_reads_the_label_handle_match_scores(direction: str) -> None:
+    """CEG-06: the validator's candidate label for a direction is the one handle_match MATCHes."""
+    from unittest.mock import MagicMock
+
+    from engine.config.schema import scoring_candidate_labels
+    from engine.handlers import handle_match, init_dependencies
+
+    spec = DomainSpec.model_validate(_second_direction(prior_on="OrbitalDepot"))
+    calls: list[str] = []
+
+    class _Driver:
+        async def execute_query(self, *, cypher: str, parameters: dict[str, Any], database: str) -> list[Any]:
+            calls.append(cypher)
+            return []
+
+    loader = MagicMock()
+    loader.load_domain.return_value = spec
+    loader.list_domains.return_value = [_DOMAIN]
+    init_dependencies(_Driver(), loader)  # type: ignore[arg-type]
+    await handle_match(_DOMAIN, {"query": {"min_ports": 1}, "match_direction": direction, "top_n": 5})
+    match_lines = [line for cypher in calls for line in cypher.splitlines() if line.startswith("MATCH (candidate:")]
+    assert match_lines, calls
+    assert scoring_candidate_labels(spec, direction) == [match_lines[-1].removeprefix("MATCH (candidate:").rstrip(")")]

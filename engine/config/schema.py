@@ -1703,29 +1703,38 @@ def missing_edge_property_reason(spec: DomainSpec, gate: GateSpec) -> str | None
     return None
 
 
+def scoring_candidate_labels(spec: DomainSpec, direction: str) -> list[str]:
+    """The candidate label(s) ``handle_match`` scores in ``direction``.
+
+    ``handle_match`` takes the ``matchentities.candidate`` entries declared for
+    the direction and matches ``(candidate:<first label>)``; a direction with
+    none is refused there. The producer checks read the same selection
+    (CEG-R01 / CEG-06), so what they validate is what the match reads.
+    """
+    return [entity.label for entity in spec.matchentities.candidate if entity.matchdirection == direction][:1]
+
+
 def dimension_candidate_properties(spec: DomainSpec, dim: ScoringDimensionSpec) -> set[str]:
     """Candidate properties that ``dim`` can read in every match direction it applies to (CEG-R01).
 
     Under ``scoring_spec_strict_validation_enabled``: for each direction the
     dimension scores (``matchdirections``, else every declared direction), the
-    properties declared on *each* candidate label of that direction
-    (``matchentities.candidate``, else nodes flagged ``candidate`` for it); the
-    result is their intersection, so a producer declared on another
-    direction's candidate does not count. A direction with no candidate label
-    contributes nothing. Off: the legacy union over every candidate node.
+    properties declared on the candidate label ``handle_match`` scores there
+    (``scoring_candidate_labels``); the result is their intersection, so a
+    producer declared on another direction's candidate does not count. A
+    direction with no candidate label contributes nothing (``handle_match``
+    refuses it). Off: the legacy union over every candidate node.
     """
     if not _scoring_strict():
         labels = {entity.label for entity in spec.matchentities.candidate}
         return {p.name for n in spec.ontology.nodes if n.candidate or n.label in labels for p in n.properties}
     declared = {node.label: {p.name for p in node.properties} for node in spec.ontology.nodes}
     directions = dim.matchdirections or list(spec.queryschema.matchdirections)
-    per_direction: list[set[str]] = []
-    for direction in directions:
-        labels = {e.label for e in spec.matchentities.candidate if e.matchdirection == direction} or {
-            n.label for n in spec.ontology.nodes if n.candidate and n.matchdirection in (direction, None)
-        }
-        if labels:
-            per_direction.append(set.intersection(*(declared.get(label, set()) for label in labels)))
+    per_direction = [
+        set.intersection(*(declared.get(label, set()) for label in labels))
+        for labels in (scoring_candidate_labels(spec, direction) for direction in directions)
+        if labels
+    ]
     return set.intersection(*per_direction) if per_direction else set()
 
 
