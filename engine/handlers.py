@@ -3109,9 +3109,30 @@ def _build_outcome_write(
 
 _OUTCOME_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}$")
 _OUTCOME_STORED_FIELDS = ("match_id", "candidate_id", "outcome", "tenant")
-# Properties the outcome writer and the replay check own; a preference-history
-# SET on one of them would corrupt the outcome's identity or its replay binding.
-_PREFERENCE_RESERVED_OUTCOME_FIELDS = frozenset((*_OUTCOME_STORED_FIELDS, "outcome_id", "query_entity_id"))
+# CEG-03: every property an outcome writer (both forms of _build_outcome_write), the
+# replay binding or the propagation claim owns on the outcome node. A preference-history
+# SET on one would corrupt the observation, so the history write set may name none.
+_PREFERENCE_RESERVED_OUTCOME_FIELDS = frozenset(
+    (
+        *_OUTCOME_STORED_FIELDS,
+        "outcome_id",
+        "value",
+        "created_at",
+        "domain_id",
+        "active_dimensions",
+        "dimension_weights",
+        "gates_passed",
+        "match_direction",
+        "candidate_count",
+        "dimension_scores",
+        "was_selected",
+        "_created_by_request",
+        "query_entity_id",
+        "query_entity_label",
+        "_propagation_lock",
+        "propagated_at",
+    )
+)
 
 
 def _validated_outcome_id(value: Any, tenant: str) -> str:
@@ -3273,7 +3294,25 @@ def _preference_history_plan(
         candidate_predicate = "c." + _FALLBACK_CANDIDATE_ID_PROPERTY + " = $candidate_id"
     feedback = domain_spec.feedbackloop
     plan: list[tuple[str, dict[str, Any]]] = []
-    success_declarations: dict[str, tuple[str, str]] = {}
+    # CEG-03: the complete history write set, property -> (dimension, role, value or source),
+    # so no two dimensions write one property differently.
+    write_set: dict[str, tuple[str, str, str]] = {}
+
+    def _claim(prop: str, name: str, role: str, source: str) -> None:
+        prior = write_set.setdefault(prop, (name, role, source))
+        if prior[1:] == (role, source):
+            return
+        if prior[1] == role == "success":
+            detail = f"declare different success_values ({prior[2]!r}, {source!r}); one would overwrite the other"
+        else:
+            detail = f"would both write it (as {prior[1]} from {prior[2]!r} and as {role} from {source!r})"
+        raise ValidationError(
+            f"preference_attention dimensions {prior[0]!r} and {name!r} both store {role if prior[1] == role else 'outcome'} "
+            f"property {prop!r} but {detail}",
+            action="outcomes",
+            tenant=tenant,
+        )
+
     for dim in dimensions:
         metadata = dim.metadata
         declared_node = metadata.outcome_node if metadata else None
@@ -3316,15 +3355,6 @@ def _preference_history_plan(
                 action="outcomes",
                 tenant=tenant,
             )
-        prior = success_declarations.setdefault(success_property, (dim.name, success_value))
-        if prior[1] != success_value:
-            raise ValidationError(
-                f"preference_attention dimensions {prior[0]!r} and {dim.name!r} both store success_property "
-                f"{success_property!r} but declare different success_values ({prior[1]!r}, {success_value!r}); "
-                "one would overwrite the other",
-                action="outcomes",
-                tenant=tenant,
-            )
         candidate_community = sanitize_label(dim.candidateprop)
         # The property the reader reads (_compile_preference_attention): the
         # declared one, or the legacy default with its flag off.
@@ -3344,6 +3374,8 @@ def _preference_history_plan(
                 action="outcomes",
                 tenant=tenant,
             )
+        _claim(success_property, dim.name, "success", success_value)
+        _claim(outcome_community, dim.name, "community", candidate_community)
         cypher = (
             "MATCH (o:" + label + " {outcome_id: $outcome_id})\n"
             "MATCH (qe:" + query_label + ") WHERE qe." + query_id + " = $query_entity_id\n"
@@ -3364,7 +3396,8 @@ def _preference_history_plan(
             + ")\n"
             "RETURN count(o) AS linked"
         )
-        plan.append((dim.name, {"cypher": cypher, "params": {"success_value": success_value}}))
+        params = {"success_value": success_value, "query_entity_label": query_label}
+        plan.append((dim.name, {"cypher": cypher, "params": params}))
     return plan
 
 
@@ -3377,13 +3410,19 @@ class _OutcomeWriteRefused(ExpectedWriteOutcome):
 
 
 def _preference_claim_cypher(outcome_label: str) -> str:
-    """Bind the outcome to its query entity once; returns the entity it was already bound to."""
+    """Bind the outcome to its resolved query entity once; returns the one it was already bound to.
+
+    CEG-04: the binding is the resolved graph identity, the query entity's label
+    for the outcome's direction together with its declared id, so one local id
+    under another label is another entity.
+    """
     label = sanitize_label(outcome_label)
     return (
         "MATCH (o:" + label + " {outcome_id: $outcome_id})\n"
-        "WITH o, o.query_entity_id AS prior\n"
-        "SET o.query_entity_id = coalesce(prior, $query_entity_id)\n"
-        "RETURN prior"
+        "WITH o, o.query_entity_id AS prior, o.query_entity_label AS prior_label\n"
+        "SET o.query_entity_id = coalesce(prior, $query_entity_id),\n"
+        "    o.query_entity_label = CASE WHEN prior IS NULL THEN $query_entity_label ELSE prior_label END\n"
+        "RETURN prior, prior_label"
     )
 
 
@@ -3407,6 +3446,9 @@ async def _write_outcome_with_preference_history(
     """
     cypher, parameters = outcome
     claim = _preference_claim_cypher(_outcome_label(domain_spec, tenant, "outcomes", "an outcome write"))
+    # CEG-04: the resolved query entity (its label for this direction, every plan
+    # statement carries the same one) is part of the binding, not only its local id.
+    binding = {**history, "query_entity_label": plan[0][1]["params"]["query_entity_label"]}
 
     async def _work(tx: Any) -> tuple[list[dict[str, Any]], bool, list[str]]:
         rows = await (await tx.run(cypher, parameters)).data()
@@ -3414,9 +3456,12 @@ async def _write_outcome_with_preference_history(
             replayed = keyed and _keyed_outcome_replayed(rows, parameters, tenant)
         except (ValidationError, ExecutionError) as exc:
             raise _OutcomeWriteRefused(exc) from exc
-        [bound] = await (await tx.run(claim, history)).data() or [{"prior": None}]
+        [bound] = await (await tx.run(claim, binding)).data() or [{"prior": None}]
         prior = bound.get("prior")
-        if prior is not None and prior != history["query_entity_id"]:
+        if prior is not None and (prior, bound.get("prior_label")) != (
+            binding["query_entity_id"],
+            binding["query_entity_label"],
+        ):
             raise _OutcomeWriteRefused(
                 ValidationError(
                     f"outcome_id {parameters['outcome_id']!r} is already recorded for another query entity",

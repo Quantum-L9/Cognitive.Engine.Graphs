@@ -113,9 +113,12 @@ class _Graph:
                 row | {f"stored_{name}": stored.get(name) for name in ("match_id", "candidate_id", "outcome", "tenant")}
             ]
         if "o.query_entity_id AS prior" in cypher:
+            # The binding is the resolved query entity: its label and its id (CEG-04).
             prior = self.bound.get(parameters["outcome_id"])
-            self.bound.setdefault(parameters["outcome_id"], parameters["query_entity_id"])
-            return [{"prior": prior}]
+            self.bound.setdefault(
+                parameters["outcome_id"], (parameters["query_entity_label"], parameters["query_entity_id"])
+            )
+            return [{"prior": prior[1] if prior else None, "prior_label": prior[0] if prior else None}]
         if "MERGE (qe)" in cypher:
             if self._fail_history:
                 raise RuntimeError("history write lost its connection")
@@ -197,6 +200,7 @@ async def test_the_outcome_is_linked_from_the_query_entity_in_the_read_shape() -
         "candidate_id": "depot-1",
         "query_entity_id": "window-1",
         "success_value": "success",
+        "query_entity_label": "LaunchWindow",
     }
     assert result["preference_history"] == {"query_entity_id": "window-1", "linked_dimensions": ["launch_preference"]}
     # The outcome node itself is written first, unchanged.
@@ -305,7 +309,7 @@ async def test_a_replay_naming_another_query_entity_is_refused() -> None:
     # The unchanged replay is accepted and re-links the same entity.
     result = await handle_outcomes(TENANT, _payload(outcome_id="out-1"))
     assert result["preference_history"]["query_entity_id"] == "window-1"
-    assert graph.bound == {"out-1": "window-1"}
+    assert graph.bound == {"out-1": ("LaunchWindow", "window-1")}
 
 
 async def test_no_applicable_dimension_needs_no_unambiguous_query_label() -> None:
@@ -420,3 +424,105 @@ async def test_a_replay_cannot_add_a_query_entity_to_an_outcome_recorded_without
     assert "preference_history" not in result
     assert graph.bound == {}
     assert _history(graph) == []
+
+
+# ── CEG-03: the history write set never touches a property the outcome owns ────
+
+
+def _assigned_outcome_properties(cypher: str) -> set[str]:
+    import re
+
+    assigned = set(re.findall(r"\bo\.([A-Za-z_][A-Za-z0-9_]*)\s*=", cypher))
+    for pattern in re.findall(r"(?:CREATE|MERGE) \(o:\w+ \{(.*?)\}\)", cypher, re.S):
+        assigned |= set(re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*:", pattern))
+    return assigned
+
+
+@pytest.mark.parametrize("keyed", [False, True], ids=["create", "keyed-merge"])
+def test_every_property_an_outcome_writer_sets_is_reserved(keyed: bool) -> None:
+    from engine.handlers import _PREFERENCE_RESERVED_OUTCOME_FIELDS, _build_outcome_write
+
+    cypher, _ = _build_outcome_write(
+        _spec(),
+        TENANT,
+        outcome_id="out-1",
+        match_id="m-1",
+        candidate_id="depot-1",
+        outcome="success",
+        value=None,
+        fingerprint={"match_direction": DIRECTION},
+        create_resulted_in=True,
+        keyed=keyed,
+    )
+    assigned = _assigned_outcome_properties(cypher)
+    assert {"outcome_id", "created_at"} <= assigned
+    assert assigned <= _PREFERENCE_RESERVED_OUTCOME_FIELDS
+
+
+@pytest.mark.parametrize("owned", ["created_at", "value", "domain_id", "match_direction", "propagated_at"])
+async def test_a_success_property_naming_any_outcome_owned_property_is_refused(owned: str) -> None:
+    graph = _wire(_spec(_raw(success_property=owned, success_value="won")), _Graph())
+    with pytest.raises(ValidationError, match="outcome identity field"):
+        await handle_outcomes(TENANT, _payload())
+    assert graph.calls == []
+
+
+def _dimension(name: str, **metadata: Any) -> dict[str, Any]:
+    return {
+        "name": name,
+        "source": "computed",
+        "computation": "preference_attention",
+        "candidateprop": metadata.pop("candidateprop", "community_id"),
+        "weightkey": f"w_{name}",
+        "defaultweight": 0.0,
+        "metadata": {"success_value": "success", "success_property": "outcome_type", **metadata},
+    }
+
+
+async def test_one_dimensions_community_property_cannot_be_anothers_success_property() -> None:
+    raw = _raw()
+    raw["scoring"]["dimensions"].append(_dimension("other", success_property="cluster_seen"))
+    raw["scoring"]["dimensions"][-2]["metadata"]["outcome_community_property"] = "cluster_seen"
+    graph = _wire(_spec(raw), _Graph())
+    with pytest.raises(ValidationError, match="would both write it"):
+        await handle_outcomes(TENANT, _payload())
+    assert graph.calls == []
+
+
+async def test_one_community_property_fed_from_two_candidate_properties_is_refused() -> None:
+    raw = _raw()
+    nodes = {n["label"]: n for n in raw["ontology"]["nodes"]}
+    nodes["OrbitalDepot"]["properties"].append({"name": "region_id", "type": "int"})
+    raw["scoring"]["dimensions"].append(
+        _dimension("by_region", candidateprop="region_id", outcome_community_property="community_id")
+    )
+    graph = _wire(_spec(raw), _Graph())
+    with pytest.raises(ValidationError, match="would both write it"):
+        await handle_outcomes(TENANT, _payload())
+    assert graph.calls == []
+
+
+async def test_two_dimensions_with_disjoint_write_sets_both_link() -> None:
+    raw = _raw()
+    nodes = {n["label"]: n for n in raw["ontology"]["nodes"]}
+    nodes["OrbitalDepot"]["properties"].append({"name": "region_id", "type": "int"})
+    raw["scoring"]["dimensions"].append(
+        _dimension("by_region", candidateprop="region_id", success_property="region_outcome", success_value="won")
+    )
+    graph = _wire(_spec(raw), _Graph())
+    result = await handle_outcomes(TENANT, _payload())
+    assert result["preference_history"]["linked_dimensions"] == ["launch_preference", "by_region"]
+    assert len(_history(graph)) == 2
+
+
+# ── CEG-04: the binding is the resolved query entity, not its local id ─────────
+
+
+async def test_a_replay_whose_query_entity_resolves_under_another_label_is_refused() -> None:
+    graph = _wire(_spec(), _Graph())
+    await handle_outcomes(TENANT, _payload(outcome_id="out-1"))
+    # The same local id bound under another label: another entity.
+    graph.bound["out-1"] = ("OrbitClass", "window-1")
+    with pytest.raises(ValidationError, match="already recorded for another query entity"):
+        await handle_outcomes(TENANT, _payload(outcome_id="out-1"))
+    assert graph.bound["out-1"] == ("OrbitClass", "window-1")
