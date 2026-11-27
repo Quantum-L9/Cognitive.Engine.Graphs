@@ -167,3 +167,66 @@ def test_flag_off_sufficient_data_values_are_unchanged(monkeypatch: pytest.Monke
         assert getattr(off_result, field) == getattr(on_result, field)
     assert off_report.status is None
     assert off_result.status is None
+
+
+# ── CEG-A09: mixed finite / invalid samples (flag on) ────────────────────────
+# A sample with some finite values and some NaN, inf or None is measured on its
+# finite values only, the filter ``check_score_drift`` and the canonical signal
+# already apply. It is never a NaN statistic labelled ``computed`` and never a
+# TypeError.
+
+MIXED_CASES = [
+    pytest.param([0.2, _NAN], [0.3], id="nan-in-baseline"),
+    pytest.param([0.2, None], [0.3], id="none-in-baseline"),
+    pytest.param([0.2, 0.25], [0.8, _INF, None, -_INF, 0.9], id="mixed-current"),
+    pytest.param([0.2, _NAN, 0.3, None], [0.2, _INF, 0.3], id="mixed-both-stable"),
+]
+ALL_INVALID_CASES = [
+    pytest.param([None, _NAN], [0.3], id="all-invalid-baseline"),
+    pytest.param([0.3], [None, _INF, -_INF], id="all-invalid-current"),
+]
+
+
+def _finite_only(values: list[Any]) -> list[float]:
+    return [float(v) for v in values if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)]
+
+
+@pytest.mark.parametrize(("baseline", "current"), MIXED_CASES)
+def test_mixed_samples_are_computed_on_their_finite_values(
+    canonical: bool, baseline: list[Any], current: list[Any]
+) -> None:
+    report, result = _both(baseline, current)
+    expected_report = _calibrator().detect_score_drift(_finite_only(baseline), _finite_only(current))
+    for field in ("drift_detected", "delta_mean", "ks_statistic", "historical_mean", "current_mean"):
+        assert getattr(report, field) == getattr(expected_report, field), field
+    for value in (report.delta_mean, report.ks_statistic, report.historical_mean, report.current_mean):
+        assert math.isfinite(value)
+    assert report.status == result.status == STATUS_COMPUTED
+    assert report.drift_detected == result.drift_detected
+    assert report.delta_mean == pytest.approx(result.delta_mean, abs=1e-6)
+
+
+@pytest.mark.parametrize(("baseline", "current"), ALL_INVALID_CASES)
+def test_all_invalid_samples_are_insufficient_by_both(canonical: bool, baseline: list[Any], current: list[Any]) -> None:
+    report, result = _both(baseline, current)
+    assert report.status == result.status == STATUS_INSUFFICIENT_DATA
+    assert report.drift_detected is result.drift_detected is False
+    assert (report.delta_mean, report.ks_statistic, report.historical_mean, report.current_mean) == (0.0,) * 4
+
+
+@pytest.mark.parametrize(("baseline", "current"), [*MIXED_CASES, *ALL_INVALID_CASES])
+def test_no_nan_statistic_is_ever_labelled_computed(canonical: bool, baseline: list[Any], current: list[Any]) -> None:
+    report = _calibrator().detect_score_drift(list(baseline), list(current))
+    stats = (report.delta_mean, report.ks_statistic, report.historical_mean, report.current_mean)
+    assert all(math.isfinite(v) for v in stats), (report.status, stats)
+
+
+@pytest.mark.usefixtures("status_off")
+def test_flag_off_canonical_off_mixed_samples_stay_mains(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Rollback-path check: off, the legacy detector runs on the raw samples as main does."""
+    monkeypatch.setattr(settings, "drift_canonical_signals_enabled", False)
+    nan_report = _calibrator().detect_score_drift([0.2, _NAN], [0.3])
+    assert math.isnan(nan_report.historical_mean)
+    assert nan_report.status is None
+    with pytest.raises(TypeError):
+        _calibrator().detect_score_drift([0.2, None], [0.3])  # type: ignore[list-item]

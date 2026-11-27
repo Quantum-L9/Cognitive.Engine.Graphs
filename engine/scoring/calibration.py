@@ -345,12 +345,20 @@ class ScoreCalibrator:
         SCR-12: with ``drift_insufficient_data_status_enabled`` on, a sample
         with no finite value is ``status`` ``insufficient_data`` (no drift,
         statistics 0.0) in both SI-29 states, as in ``check_score_drift``, and
-        any other result is ``computed``. Off: ``status`` is None.
+        any other result is ``computed``; statistics are computed on the finite
+        values only (CEG-A09). Off: ``status`` is None and the raw samples are
+        measured, as on main.
         """
         from engine.config.settings import settings
 
         report_status = settings.drift_insufficient_data_status_enabled
-        if report_status and not (_finite_samples(baseline_scores) and _finite_samples(current_scores)):
+        if report_status:
+            # CEG-A09: measure only the finite values, the filter check_score_drift
+            # and score_distribution_drift apply, so a NaN, inf or None neither
+            # becomes a NaN statistic labelled computed nor raises TypeError.
+            baseline_scores = _finite_samples(baseline_scores)
+            current_scores = _finite_samples(current_scores)
+        if report_status and not (baseline_scores and current_scores):
             # SCR-12: no finite value on one side is no evidence either way.
             return DriftReport(
                 drift_detected=False,
