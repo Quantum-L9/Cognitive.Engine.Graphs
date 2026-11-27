@@ -208,9 +208,17 @@ async def test_confidence_and_pareto_reach_match_for_null_zero_and_nan(monkeypat
     # finite depot dominates the NaN row rather than sharing a front with it.
     front = set(result["pareto"]["non_dominated_ids"])
     assert front == {"finite"}
-    assert by_id["poison"]["confidence_flag"] == "monoculture"
+    assert by_id["poison"]["confidence_flag"] == ["monoculture"]
     # A null component is not a contribution. The remaining finite one is the whole score.
-    assert by_id["missing"].get("confidence_flag") == "monoculture"
+    assert by_id["missing"].get("confidence_flag") == ["monoculture"]
+
+    # SCR-13 / L10 rollback: flag off restores the bare-string shape for one flag.
+    monkeypatch.setattr(settings, "confidence_flag_list_enabled", False)
+    legacy = await handle_match(ORBITAL, {"query": {"min_ports": 1}, "match_direction": DIRECTION, "top_n": 10})
+    legacy_by_id = {row["candidate"]["depot_id"]: row for row in legacy["candidates"]}
+    assert legacy_by_id["poison"]["confidence_flag"] == "monoculture"
+    assert legacy_by_id["missing"].get("confidence_flag") == "monoculture"
+    monkeypatch.setattr(settings, "confidence_flag_list_enabled", True)
 
     monkeypatch.setattr(settings, "pareto_enabled", False)
     monkeypatch.setattr(settings, "confidence_check_enabled", False)
