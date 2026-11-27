@@ -32,14 +32,23 @@ class TestDecisionArbitrationSpec:
         assert spec.constraints == []
         assert spec.pareto_config.objectives == []
 
-    def test_full_config(self):
+    def test_full_config(self, monkeypatch):
+        """weight_hint and policy_weights have no reader (ND-DEAD): refused with strict scoring on, kept off."""
+        from pydantic import ValidationError
+
         from engine.config.schema import (
             ArbitrationConstraintSpec,
             DecisionArbitrationSpec,
             ParetoConfigSpec,
             ParetoObjectiveSpec,
         )
+        from engine.config.settings import settings
 
+        with pytest.raises(ValidationError, match="weight_hint are declared but not read"):
+            ParetoObjectiveSpec(dimension="price_alignment", direction="maximize", weight_hint=0.8)
+        with pytest.raises(ValidationError, match="policy_weights are declared but not read"):
+            DecisionArbitrationSpec(policy_weights={"balanced": {"structural": 1.0}})
+        monkeypatch.setattr(settings, "scoring_spec_strict_validation_enabled", False)
         spec = DecisionArbitrationSpec(
             enabled=True,
             optimization_method="pareto",

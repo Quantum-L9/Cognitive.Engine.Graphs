@@ -52,8 +52,14 @@ def _make_settings(**overrides: Any) -> Settings:
 
 @pytest.fixture(autouse=True)
 def _relax_strict_validation() -> Generator[None, None, None]:
-    """Disable strict validation — plasticos spec has pre-existing weight sum >1.0."""
-    s = _make_settings(domain_strict_validation=False)
+    """Disable strict validation — plasticos spec has pre-existing weight sum >1.0.
+
+    The archived spec also declares ``aggregation: multiplicative``, which D3
+    (CEG scoring audit L2) refuses with ``scoring_spec_strict_validation_enabled``
+    on; these tests pin that flag off explicitly — the rollback scenario for an
+    older real pack. ``TestArchivedSpecUnderStrictScoring`` pins the refusal.
+    """
+    s = _make_settings(domain_strict_validation=False, scoring_spec_strict_validation_enabled=False)
     with patch(_SETTINGS_TARGET, s):
         yield
 
@@ -74,6 +80,23 @@ def plasticos_spec_data() -> dict:
 def plasticos_spec(plasticos_spec_data: dict) -> DomainSpec:
     """Parse the plasticos domain spec into a DomainSpec model."""
     return DomainSpec(**plasticos_spec_data)
+
+
+class TestArchivedSpecUnderStrictScoring:
+    """D3: an older real pack can trip strict scoring validation; the rollback flag covers it."""
+
+    def test_archived_spec_is_refused_with_strict_scoring_on(self, plasticos_spec_data: dict) -> None:
+        from pydantic import ValidationError
+
+        strict = _make_settings(domain_strict_validation=False, scoring_spec_strict_validation_enabled=True)
+        with patch(_SETTINGS_TARGET, strict), pytest.raises(ValidationError, match="aggregation 'multiplicative'"):
+            DomainSpec(**plasticos_spec_data)
+
+    def test_archived_spec_loads_with_strict_scoring_off(self, plasticos_spec_data: dict) -> None:
+        relaxed = _make_settings(domain_strict_validation=False, scoring_spec_strict_validation_enabled=False)
+        with patch(_SETTINGS_TARGET, relaxed):
+            spec = DomainSpec(**plasticos_spec_data)
+        assert any(d.aggregation.value == "multiplicative" for d in spec.scoring.dimensions)
 
 
 class TestPlasticosSpecActivation:

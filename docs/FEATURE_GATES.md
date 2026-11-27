@@ -123,6 +123,7 @@ independently of the code default.
 | Drift Requires Both Windows | `DRIFT_REQUIRES_BOTH_WINDOWS` (`drift_requires_both_windows`) | `True` | unset | active (correctness); outcomes `metadata.drift` raises no alert unless both a recent and a baseline distribution exist; `false` restores the one-sided divergence (RU-029 / CEG-COR-118) |
 | Drift Canonical Signals | `DRIFT_CANONICAL_SIGNALS_ENABLED` (`drift_canonical_signals_enabled`) | `False` | unset | dormant (correctness, SI-29); score-distribution drift has one canonical signal (`calibration.score_distribution_drift`) that `ScoreCalibrator.detect_score_drift` and `hgkr_utils.check_score_drift` delegate to, and `DriftDetector` results are labelled `outcome_dimension_mix` — see §4 |
 | Scoring Admission Check | `SCORING_ADMISSION_CHECK_ENABLED` (`scoring_admission_check_enabled`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission withholds a pack whose scoring refuses to compile, references an unbound `$parameter`, or declares an HGKR option with no producer — see §16 |
+| Scoring Spec Strict Validation | `SCORING_SPEC_STRICT_VALIDATION_ENABLED` (`scoring_spec_strict_validation_enabled`) | `True` | unset | active (CEG scoring audit L2, operator decision D3 2026-11-26): the schema refuses structurally invalid scoring declarations at load. Off: legacy loading (rollback) — see §16 "Scoring spec strict validation" |
 | Full-match Admission | `ADMISSION_CHECKS_FULL_MATCH` (`admission_checks_full_match`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, admission requires every declared direction's traversal to assemble and every `$parameter` in gates, traversal and scoring to be bound — see §16 |
 | Exclusion Endpoint Validation | `EXCLUSION_ENDPOINT_VALIDATION` (`exclusion_endpoint_validation`) | `False` | unset | dormant (owner decision 2026-10-29: packs keep being served as on main until the operator enables withholding); when on, an exclusion gate declaring `fromnode`/`tonode`, or whose edge does not start at a candidate label of its direction, is refused instead of compiling to an always-true `NOT EXISTS` — see §16 |
 | Gate Null Operands From Predicate | `GATE_NULL_OPERANDS_FROM_PREDICATE` (`gate_null_operands_from_predicate`) | `True` | unset | active; a gate's `nullbehavior` applies to exactly the operands its predicate tests (range FAIL rejects NULL bounds; temporalrange null-handles its window per side) — see §21 |
@@ -1077,6 +1078,48 @@ its dimensions declare their operands and it is served.
 Rollback: `SCORING_ADMISSION_CHECK_ENABLED=false` (gate-only admission, the
 previous wording of the withholding reason), or
 `UNVALIDATED_DOMAIN_PACKS_ENABLED=true` to serve every validated pack.
+
+### Scoring spec strict validation (CEG scoring audit L2, D3)
+
+`SCORING_SPEC_STRICT_VALIDATION_ENABLED` (default `True` — operator decision
+D3, option A, 2026-11-26) refuses structurally invalid scoring declarations at
+the schema owner (`engine/config/schema.py`), so the `DomainSpec` fails to load
+with a pydantic `ValidationError` naming the defect:
+
+- a `defaultweight` that is non-finite (`.nan`, `.inf`) or negative;
+- a non-finite `defaultwhennull`;
+- two scoring dimensions with the same `name` (the name is the Cypher alias
+  and the learned-weight key, so the second silently shadowed the first);
+- an unknown key on a scoring dimension (`extra="forbid"` semantics);
+- `aggregation: multiplicative` (never compiled: the score is always the
+  additive weighted sum);
+- `preference_sample_size` that is not a positive integer (`auto` was never
+  resolved and crashed the compiler);
+- a `decision_arbitration.constraints[].dimension` naming an undeclared
+  scoring dimension;
+- a `preference_attention` dimension active in a match direction where no
+  traversal step applicable to that direction binds a `qe` node (its outcome
+  sample is matched from `qe`; unbound, the subquery matched every node);
+- a non-default value for an option no engine code reads: `normalization`,
+  `edge_type_strategy`, `entity_types`, `adaptive_sample_size`,
+  `preference_attention_feedback_blend`, Pareto `weight_hint`, arbitration
+  `optimization_method` and `policy_weights`;
+- an option whose input nothing produces (the producer rules under "Scoring
+  admission" above): `population_mean` without a `_popmean_<dim>` queryschema
+  field or derived parameter, `inherit_prior` / `structural_similarity`
+  without the candidate property they read.
+
+Every committed design pack loads with the flag on. This flag does not touch
+admission withholding: `SCORING_ADMISSION_CHECK_ENABLED` keeps its default
+(`False`). `tools/validate_domain.py --dry-run <pack-or-root>` reports,
+without serving anything, which published packs this flag would refuse, so
+operators can check them before deploy. Rollback:
+`SCORING_SPEC_STRICT_VALIDATION_ENABLED=false` (such packs load as before).
+
+Also in this lane (no new flag): `cypher_number` refuses `inf` / `-inf` /
+`nan`, which Python renders as identifiers Cypher cannot parse as numbers.
+
+Tests: `tests/unit/test_scoring_spec_strict_validation.py`.
 
 ### Full-match admission (RU-039)
 

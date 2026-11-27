@@ -357,6 +357,20 @@ def _spec_with_dimensions(  # type: ignore[no-untyped-def]
     raw["scoring"]["dimensions"] = dimensions
     raw["queryschema"]["fields"] = fields or []
     raw["ontology"]["nodes"][0]["properties"] += candidate_properties or []
+    if any(d.get("computation") == "preference_attention" for d in dimensions):
+        # D3 strict scoring validation: preference_attention matches from `qe`,
+        # so the pack binds it with a traversal step.
+        raw["ontology"]["edges"] = [
+            {
+                "type": "ASKS",
+                "from": "Ask",
+                "to": "Thing",
+                "direction": "DIRECTED",
+                "category": "capability",
+                "managedby": "sync",
+            }
+        ]
+        raw["traversal"] = {"steps": [{"name": "query_entity", "pattern": "(qe:Ask)-[:ASKS]->(candidate:Thing)"}]}
     return DomainSpec.model_validate(raw)
 
 
@@ -429,6 +443,10 @@ class TestScoringAdmission:
         monkeypatch.setattr(loader_module.settings, "dormant_domain_packs_enabled", False)
         # The check ships off (owner decision 2026-10-29); this class tests it on.
         monkeypatch.setattr(loader_module.settings, "scoring_admission_check_enabled", True)
+        # ND-PARAM: strict scoring validation refuses options without a producer
+        # at load; these admission defects are its rollback (flag-off) path
+        # (tests/unit/test_scoring_spec_strict_validation.py covers the refusal).
+        monkeypatch.setattr(loader_module.settings, "scoring_spec_strict_validation_enabled", False)
 
     def test_community_bridge_without_query_field_names_the_parameter(self) -> None:
         from engine.config.loader import withholding_reason

@@ -15,6 +15,7 @@ Security utilities for the L9 Graph Cognitive Engine.
 
 from __future__ import annotations
 
+import math
 import re
 
 _MAX_LABEL_LEN = 64
@@ -49,13 +50,22 @@ def cypher_number(value: object) -> float:
     is safe to interpolate; anything else (a string payload, ``None`` where the
     spec promised a number) is rejected here instead of reaching the query.
 
-    Raises ValueError if the value is not numeric.
+    A non-finite float (``inf``, ``-inf``, ``nan``) is refused too: Python
+    renders it as ``inf`` / ``nan``, which Cypher parses as an identifier (or
+    rejects), and no domain scalar is meaningfully infinite (CEG scoring audit
+    L2, ND-PARAM).
+
+    Raises ValueError if the value is not a finite number.
     """
     try:
-        return float(value)  # type: ignore[arg-type]
+        number = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError) as exc:
         msg = f"Expected a numeric Cypher literal, got {value!r}"
         raise ValueError(msg) from exc
+    if not math.isfinite(number):
+        msg = f"Expected a finite numeric Cypher literal, got {value!r}"
+        raise ValueError(msg)
+    return number
 
 
 # Tenant identity contract (CEG-IDENT-01 / CEG-DBNAME-01, decided 2026-10-22):

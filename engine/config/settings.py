@@ -587,6 +587,18 @@ class Settings(BaseSettings):
     # decision 2026-10-29): freight-matching keeps being served as on main
     # until the operator enables withholding.
     scoring_admission_check_enabled: bool = False
+    # CEG scoring audit L2 / D3 (operator decision 2026-11-26, option A): a
+    # structurally invalid scoring declaration is refused at the schema owner
+    # when the DomainSpec loads — a non-finite or negative defaultweight, a
+    # non-finite defaultwhennull, duplicate dimension names, an unknown key on
+    # a scoring dimension, aggregation: multiplicative (never compiled),
+    # preference_sample_size: auto (never resolved), an arbitration constraint
+    # naming an undeclared dimension, and preference_attention when no
+    # traversal step binds `qe`. Hardening that restores the declared scoring
+    # contract, so it ships ON. Off: such packs load as before (rollback).
+    # scoring_admission_check_enabled is unchanged: cross-reference defects
+    # (an unbound $_popmean_<dim>) stay under that default-off flag.
+    scoring_spec_strict_validation_enabled: bool = True
     # RU-039: a pack admission serves must execute for every declared match
     # direction. On: admission_defects also requires TraversalAssembler to
     # assemble each direction and every $parameter in gates, traversal and

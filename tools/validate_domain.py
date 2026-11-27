@@ -6,6 +6,11 @@ traversal warnings and prohibited factors. --strict escalates warnings to exit 1
 --complete/--receipt select full native operator admission, not authoring policy.
 --list-rules prints the admission rules a JSON Schema cannot express
 (docs/contracts/data/models/domain-admission-rules.json) and validates nothing.
+--dry-run validates one spec.yaml, or every <pack>/spec.yaml under a pack root,
+with scoring_spec_strict_validation_enabled forced on for the run (FEATURE_GATES
+§16, "Scoring spec strict validation"), so an operator sees which published
+packs that flag would refuse before deploying it. It loads specs only; nothing
+is served, written or provisioned, and the process settings are restored.
 No YAML bytes, settings or graph semantics are changed by this tool.
 """
 
@@ -19,7 +24,13 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from engine.config.loader import DomainNotFoundError, DomainSpecError, validate_authoring_file, validate_native_file
+from engine.config.loader import (
+    DomainNotFoundError,
+    DomainSpecError,
+    _parse_native_bytes,
+    validate_authoring_file,
+    validate_native_file,
+)
 from tools.path_policy import PathPolicyError, resolve_root, resolve_under_root
 
 RULES_PATH = Path(__file__).resolve().parent.parent / "docs/contracts/data/models/domain-admission-rules.json"
@@ -84,6 +95,54 @@ def validate_spec(
     ], 0
 
 
+def _dry_run_targets(path: Path) -> list[Path]:
+    """The spec files a dry run checks: the file itself, or each ``<pack>/spec.yaml`` under a root."""
+    if path.is_dir():
+        return sorted(child for child in path.glob("*/spec.yaml") if child.is_file())
+    return [path]
+
+
+def _dry_run_one(target: Path) -> dict:
+    """The schema verdict for one spec: the loader's bounded parse and schema, not admission withholding.
+
+    Dormant / unvalidated posture is a serving decision, not a structural
+    defect, so it is not reported here; ``validate_spec`` remains the full check.
+    """
+    tenant = target.parent.name if target.name == "spec.yaml" else None
+    verdict = {"check": "strict-scoring-dry-run", "spec_path": str(target)}
+    try:
+        spec = _parse_native_bytes(target.read_bytes(), tenant)
+    except (DomainSpecError, DomainNotFoundError, OSError) as exc:
+        return {**verdict, "status": "REFUSED", "message": str(exc)}
+    return {**verdict, "status": "PASS", "message": f"Domain '{spec.domain.id}' loads under strict scoring validation"}
+
+
+def dry_run(path: Path) -> tuple[list[dict], int]:
+    """Validate packs as the strict scoring schema would load them, serving nothing.
+
+    ``scoring_spec_strict_validation_enabled`` is forced on for the duration and
+    restored afterwards, so the verdict is the one the flag will give at deploy
+    whatever the current environment sets. Exit code 1 when any pack is refused
+    (or when ``path`` names no spec), else 0.
+    """
+    from engine.config.settings import settings
+
+    targets = _dry_run_targets(path)
+    if not targets:
+        verdict = {"check": "strict-scoring-dry-run", "status": "FAIL", "spec_path": str(path)}
+        return [{**verdict, "message": f"no spec.yaml under {path}"}], 1
+    previous = settings.scoring_spec_strict_validation_enabled
+    settings.scoring_spec_strict_validation_enabled = True
+    try:
+        results: list[dict] = []
+        for target in targets:
+            results.append(_dry_run_one(target))
+    finally:
+        settings.scoring_spec_strict_validation_enabled = previous
+    code = 1 if any(result["status"] != "PASS" for result in results) else 0
+    return results, code
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Validate native CEG authoring or complete operator admission")
     parser.add_argument("spec_path", type=Path, nargs="?")
@@ -105,6 +164,14 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Print the non-schema admission rule catalogue (with --json: the catalogue file) and exit 0",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Check one spec.yaml or every <pack>/spec.yaml under a pack root with strict scoring "
+            "validation forced on; loads only, serves nothing (exit 1 if any pack is refused)"
+        ),
+    )
     args = parser.parse_args(argv)
     if args.list_rules:
         _print_rules(args.json_output)
@@ -117,6 +184,16 @@ def main(argv: list[str] | None = None) -> None:
         receipt_path = resolve_under_root(args.receipt, root, option="--receipt") if args.receipt is not None else None
     except PathPolicyError as exc:
         parser.error(str(exc))
+
+    if args.dry_run:
+        results, code = dry_run(spec_path)
+        if args.json_output:
+            print(json.dumps({"results": results, "exit_code": code, "spec_path": str(spec_path)}, indent=2))
+        else:
+            for result in results:
+                print(f"[{result['status']}] {result['spec_path']}: {result['message']}")
+            print("Result: NO PACK REFUSED" if code == 0 else "Result: PACK(S) REFUSED")
+        sys.exit(code)
 
     results, code = validate_spec(
         spec_path,
