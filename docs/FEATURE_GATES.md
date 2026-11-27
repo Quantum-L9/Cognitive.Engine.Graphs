@@ -76,6 +76,7 @@ independently of the code default.
 | Graph Inference Feedback | `GRAPH_INFERENCE_FEEDBACK_ENABLED` (`graph_inference_feedback_enabled`) | `False` | unset | dormant; CEG → Gate → EIE `graph-inference-result` — see §13 |
 | Graph Inference Trigger | `GRAPH_INFERENCE_TRIGGER_ENABLED` (`graph_inference_trigger_enabled`) | `False` | unset | dormant; inference reads the node from the graph (not a caller `entity`), a committed node `sync` evaluates it, findings are recorded as `CegInferenceObligation` and delivered after the write; needs `graph_inference_feedback_enabled` and the tenant's `plugins.inference_rules` — see §13 |
 | Relationship Evidence Sync | `RELATIONSHIP_SYNC_ENABLED` (`relationship_sync_enabled`) | `True` | unset | active; `sync` to a `targetedge` endpoint writes typed evidence edges; requires Neo4j Enterprise 5.7+ — see §28 |
+| Declared Temporal Value Types | `SYNC_TEMPORAL_NATIVE_VALUES_ENABLED` (`sync_temporal_native_values_enabled`), `EGRESS_VALUE_NORMALISATION_ENABLED` (`egress_value_normalisation_enabled`), `FRESHNESS_GATE_DECLARED_TEMPORAL_ENABLED` (`freshness_gate_declared_temporal_enabled`) | `True` | unset | active (hardening, D1); declared datetime/date/duration stored as native Neo4j temporals, timezone-naive datetimes refused at sync; egress temporals → ISO-8601, non-finite floats → `EgressValueError`; freshness on a date property compares against `date()` — see "Declared temporal value types" |
 | Relationship Sync Audit On Commit | `RELATIONSHIP_SYNC_AUDIT_ON_COMMIT_ENABLED` (`relationship_sync_audit_on_commit_enabled`) | `True` | unset | active (hardening); refused/rolled-back batches leave no success audit record — see §28 |
 | Observed Association Required | `OBSERVED_ASSOCIATION_REQUIRED` (`observed_association_required`) | `False` | unset | staged (D-9, #386); a present `observed_association` is always checked; on, an observed row on an `observedfrom` endpoint must carry one — see §28 |
 | Evidence Identity Per Type | `EVIDENCE_IDENTITY_PER_TYPE_ENABLED` (`evidence_identity_per_type_enabled`) | `False` | unset | dormant; score dedupes on `(relationship_type, evidence_ref)` — see §28 |
@@ -1336,6 +1337,36 @@ changes of this section: plasticos 1.4.0 declares `Facility.processed_polymers`
 as `list<map{code: string required}>`; the synthetic `orbital-logistics` 0.2.0
 fixture carries a `list<string>` property, a `list<string>` taxonomy field and a
 `list<map>` childsync.
+
+## Declared temporal value types (ceg-scoring-audit L1, operator decision D1, 2026-11-26)
+
+JSON has no temporal type, so a declared `datetime` / `date` / `duration`
+reaches `sync` as an ISO-8601 string. The node sync projection wrote that
+string, and every temporal expression the match query compiles —
+`duration.inDays(candidate.p, datetime())` in `temporalproximity`, the
+freshness gate's `candidate.p >= datetime() - duration(...)` — refuses or
+nulls a string (ND-TEMPORAL-SYNC). Once a value *was* native (a `datetime()`
+stamp such as the `n.updated_at = datetime()` UNWINDMATCHSET writes,
+`engine/sync/generator.py`), the response row carried a `neo4j.time.DateTime`
+that crashed `deflate_egress` with a raw `TypeError` (ND-SERIAL); a stored
+`Infinity` crashed it with a raw `ValueError` (SC-003, response part).
+
+| Flag | On (default) | Off |
+|---|---|---|
+| `sync_temporal_native_values_enabled` | `SyncRowContract.project` (`engine/sync/row_contract.py`) writes a declared `datetime` as an aware `datetime`, `date` as `date`, `duration` as `neo4j.time.Duration` (weeks and fractional units included), on the node, in `list<temporal>` and in childsync items — the driver stores Neo4j `DateTime` / `Date` / `Duration`. Ingress (`sync_row_type_validation_enabled`) refuses a timezone-naive datetime: `row 0 opened_at: expected datetime, got string (timezone-naive ISO-8601 datetime)`; a date-only string is not a datetime. Malformed values and non-finite floats stay refused; values are never echoed | The ISO strings are stored as sent; a naive datetime is accepted |
+| `egress_value_normalisation_enabled` | `deflate_egress` (`engine/packet/chassis_contract.py`) first runs `normalise_egress_values` on `engine_data`, **in place**, so the response packet and the dict `chassis/actions.py` returns carry the same values: Neo4j temporals → `iso_format()` (nanoseconds and offset kept), Python temporals → `isoformat()`, `timedelta` → ISO duration. A non-finite float, or any value with no JSON form, raises `EgressValueError` (a `ValueError`) naming its path (`data.candidates[0].candidate.rate_per_ton`), never the value | A temporal or a non-finite float crashes egress (legacy) |
+| `freshness_gate_declared_temporal_enabled` | A freshness gate whose `candidateprop` every applicable candidate label declares `date` compiles `candidate.p >= date() - duration({days: N})`; `datetime`-declared, undeclared (`updated_at`) or mixed keep `datetime()` | Always `datetime()`: a native `Date` compares null and fails every candidate |
+
+No historical data is converted (D1). The read-only audit of string-valued
+declared temporals ships separately (PR #565, `fix/scoring-l1b-temporal-storage-audit`,
+with its own runbook). Relationship-endpoint
+(`targetedge`) rows write only the fixed evidence keys of §28, never declared
+edge properties, so their `expires_at` (an offset-bearing ISO string, already
+refused when naive) is outside this section.
+
+Tests: `tests/unit/test_temporal_value_types.py`,
+`tests/unit/test_egress_value_normalisation.py`,
+`tests/integration/test_temporal_sync_match.py`.
 
 ## 32. Stage 2 follow-up — declared domain vocabulary (owner decisions 2026-11-11)
 

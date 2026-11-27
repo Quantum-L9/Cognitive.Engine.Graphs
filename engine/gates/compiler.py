@@ -736,6 +736,7 @@ class GateCompiler:
     def _compile_freshness(self, gate: GateSpec) -> str:
         """
         Freshness gate: candidate.prop >= datetime() - duration({days: N})
+        (``date()`` for a date-declared property, ``_freshness_now``).
         Ensures data recency (e.g., rate sheets updated within 24h).
         """
         from engine.config.settings import settings
@@ -754,10 +755,45 @@ class GateCompiler:
                 duration_value = int(gate.maxagedays)
         else:
             duration_value = int(gate.maxagedays or 1)
+        now = self._freshness_now(gate, gate.candidateprop or "updated_at")
         return _Predicate(
-            f"candidate.{prop} >= datetime() - duration({{{duration_field}: {duration_value}}})",
+            f"candidate.{prop} >= {now} - duration({{{duration_field}: {duration_value}}})",
             [_Operand(f"candidate.{prop}")],
         )
+
+    def _freshness_now(self, gate: GateSpec, prop: str) -> str:
+        """``date()`` when every candidate label of the compiled direction declares ``prop`` a ``date``.
+
+        A native Neo4j ``Date`` compared with a ``DateTime`` is null, so the
+        legacy ``datetime()`` cutoff failed every date-declared candidate (D1).
+        A ``datetime``-declared, undeclared (``updated_at``, stamped by
+        ``datetime()`` in the sync generator) or mixed property keeps
+        ``datetime()``. ``freshness_gate_declared_temporal_enabled`` off: always
+        ``datetime()``.
+        """
+        from engine.config.settings import settings
+
+        if not settings.freshness_gate_declared_temporal_enabled:
+            return "datetime()"
+        matchentities = getattr(self.domain_spec, "matchentities", None)
+        candidates = getattr(matchentities, "candidate", None)
+        ontology = getattr(self.domain_spec, "ontology", None)
+        nodes = getattr(ontology, "nodes", None)
+        if not isinstance(candidates, list) or not isinstance(nodes, list):
+            return "datetime()"  # not a validated DomainSpec (a test double)
+        # The direction being compiled when there is one (an unscoped gate is compiled once per
+        # direction); otherwise every direction the gate applies to.
+        directions = {self._direction} if self._direction else set(self._exclusion_directions(gate, candidates))
+        labels = {c.label for c in candidates if c.matchdirection in directions}
+        # One declared type per selected label; a label that does not declare it counts as undeclared.
+        declared = {
+            label: next(
+                (p.type.value for node in nodes if node.label == label for p in node.properties if p.name == prop),
+                None,
+            )
+            for label in labels
+        }
+        return "date()" if declared and set(declared.values()) == {"date"} else "datetime()"
 
     def _compile_temporal_range(self, gate: GateSpec) -> str:
         """
