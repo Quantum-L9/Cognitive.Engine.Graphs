@@ -57,6 +57,13 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:\\-]{0,127}$",
       "description": "Optional replay key (outcome_idempotency_enabled, FEEDBACK-IDEMP-01): a replay with the same id records nothing new and propagates at most once; a replay with different match_id, candidate_id or outcome is refused. Omitted: the server mints an id, and a retry cannot be recognised."
     },
+    "query_entity_id": {
+      "type": ["string", "integer", "null"],
+      "minLength": 1,
+      "minimum": -9223372036854775808,
+      "maximum": 9223372036854775807,
+      "description": "Optional, additive (L8 item 3, outcome_preference_history_enabled): the declared id of the query entity this outcome answers, on the fingerprint direction's queryentity label. Given, handle_outcomes also links that entity to the outcome node the way a preference_attention dimension reads it. Omitted or null: the outcome is written exactly as before."
+    },
     "fingerprint": {
       "type": "object",
       "properties": {
@@ -175,7 +182,9 @@
   "x-conditional-fields": {
     "when": "outcome_schema_unified=True (default)",
     "fields": ["fingerprint.dimension_scores", "fingerprint.was_selected"],
-    "runtime_policy": "Nonfinite dimension scores or non-boolean selection rejected by _outcome_feedback_fields; disabled flag changes enforcement and persistence."
+    "runtime_policy": "Nonfinite dimension scores or non-boolean selection rejected by _outcome_feedback_fields; disabled flag changes enforcement and persistence.",
+    "query_entity_id_when": "outcome_preference_history_enabled=True (default) and the pack declares a preference_attention dimension for the direction",
+    "query_entity_id_runtime_policy": "A bool, empty, non-string non-integer id, an ambiguous queryentity label or a dimension reading another outcome node is refused by _preference_history_plan before the outcome is written; flag off, the key is ignored."
   },
   "x-runtime-validation-boundary": "The SDK routes payload dict to handler; no observed loader validates this JSON Schema. additionalProperties:false and example rejection are candidate client contracts, NOT runtime rejection proofs.",
   "x-contract-status": "candidate_unenforced_not_release_admitted",

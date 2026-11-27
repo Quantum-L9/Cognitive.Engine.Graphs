@@ -135,6 +135,38 @@ class OutcomesPayload(BaseModel):
     outcome: Literal["success", "failure", "partial"]
     value: Any | None = None
     fingerprint: OutcomeFingerprint = OutcomeFingerprint()
+    query_entity_id: str | int | None = None  # L8 item 3: optional, additive
+```
+
+`query_entity_id` (optional, additive; `OUTCOME_PREFERENCE_HISTORY_ENABLED`,
+default on, FEATURE_GATES §30a): the declared id of the query entity the
+outcome answers, on the `fingerprint.match_direction`'s `queryentity` label (or
+the pack's only one). Given, and the pack declares a `preference_attention`
+dimension for that direction, `handle_outcomes` also `MERGE`s
+`(qe)-[:<outcome_relation>]->(o)`, stores the outcome under the dimension's
+`success_property` and copies the candidate's community onto `o`, so the
+dimension can read the history. The outcome and its history are written in
+one transaction. A malformed id (empty, boolean, or an integer outside signed
+64-bit), an ambiguous label, or a dimension reading an outcome node the writer
+does not write raises `ValidationError` before anything is written; a keyed
+replay naming another query entity, or naming one for an outcome first
+recorded without one, raises `ValidationError` and changes nothing; a query entity absent from the graph links nothing; the response adds
+`preference_history: {query_entity_id, linked_dimensions}`. Omitted, null, or
+flag off: unchanged.
+
+```python
+# WRONG: two query entity labels and no direction to choose one; refused before any write
+{"match_id": "m-1", "candidate_id": "depot-1", "outcome": "success", "query_entity_id": "window-1"}
+
+# RIGHT: fingerprint.match_direction names the direction whose queryentity label
+# (here LaunchWindow) holds the entity with window_id "window-1"
+{
+    "match_id": "m-1",
+    "candidate_id": "depot-1",
+    "outcome": "success",
+    "fingerprint": {"match_direction": "window_to_depot"},
+    "query_entity_id": "window-1",
+}
 ```
 
 RU-006 (`OUTCOME_SCHEMA_UNIFIED`, default on, R1a-DEC-02): `handle_outcomes` is

@@ -510,6 +510,12 @@ class Settings(BaseSettings):
     # applying once per outcome_id (requires propagation_single_application).
     # Off: server-minted ids and the unclaimed propagation query.
     outcome_idempotency_enabled: bool = True
+    # L8 item 3: an outcome whose payload names `query_entity_id` is also linked
+    # the way `preference_attention` reads it — (query entity)-[outcome_relation]
+    # ->(outcome), the outcome under the dimension's success property, the
+    # candidate's community copied onto it. Off: only the candidate's own outcome
+    # edge, which preference_attention never reads. FEATURE_GATES §30a.
+    outcome_preference_history_enabled: bool = True
     # FEEDBACK-PARTIAL-01: a ConvergenceLoop stage that raised escaped
     # handle_outcomes after the outcome node was written, so the caller got an
     # error with no record of what was applied. On: each stage is isolated and
