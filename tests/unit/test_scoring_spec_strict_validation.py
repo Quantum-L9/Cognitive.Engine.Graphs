@@ -486,3 +486,69 @@ def test_dead_options_at_their_defaults_are_admitted() -> None:
         "pareto_config": {"objectives": [{"dimension": "depot_reliability", "weight_hint": 1.0}]},
     }
     assert DomainSpec.model_validate(raw).domain.id == _DOMAIN
+
+
+# ── CEG-R01: a producer must be declared on the candidate of each direction the dimension scores ──
+
+
+def _second_direction(prior_on: str) -> dict[str, Any]:
+    """orbital-logistics plus depot_to_window (candidate LaunchWindow, query OrbitalDepot).
+
+    depot_reliability is scoped to window_to_depot (candidate OrbitalDepot) and
+    declares inherit_prior; ``_prior_depot_reliability`` is declared on ``prior_on``.
+    """
+    raw = _raw()
+    raw["queryschema"]["matchdirections"].append("depot_to_window")
+    raw["matchentities"]["candidate"].append({"label": "LaunchWindow", "matchdirection": "depot_to_window"})
+    raw["matchentities"]["queryentity"].append({"label": "OrbitalDepot", "matchdirection": "depot_to_window"})
+    for dim in raw["scoring"]["dimensions"]:
+        dim.setdefault("matchdirections", ["window_to_depot"])
+    reliability = raw["scoring"]["dimensions"][0]
+    assert reliability["name"] == "depot_reliability"
+    reliability["null_strategy"] = "inherit_prior"
+    node = next(n for n in raw["ontology"]["nodes"] if n["label"] == prior_on)
+    node["properties"].append({"name": "_prior_depot_reliability", "type": "float"})
+    return raw
+
+
+def test_producer_on_another_directions_candidate_is_refused() -> None:
+    with pytest.raises(ValidationError, match="inherit_prior reads the candidate property '_prior_depot_reliability'"):
+        DomainSpec.model_validate(_second_direction(prior_on="LaunchWindow"))
+
+
+def test_producer_on_the_scored_directions_candidate_is_admitted() -> None:
+    spec = DomainSpec.model_validate(_second_direction(prior_on="OrbitalDepot"))
+    assert spec.scoring.dimensions[0].null_strategy.value == "inherit_prior"
+
+
+def test_loader_producer_check_is_direction_scoped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The admission check (``check_producers=True``) applies the same per-direction rule."""
+    from engine.config.loader import _producer_defects
+
+    monkeypatch.setattr(settings, _FLAG, False)  # build the spec past the schema check
+    spec = DomainSpec.model_validate(_second_direction(prior_on="LaunchWindow"))
+    assert _producer_defects(spec) == []  # legacy union: LaunchWindow's declaration counted
+    monkeypatch.setattr(settings, _FLAG, True)
+    assert _producer_defects(spec) == [
+        (
+            "scoring depot_reliability: null_strategy inherit_prior has no producer "
+            "(nothing writes candidate._prior_depot_reliability)"
+        )
+    ]
+    admitted = DomainSpec.model_validate(_second_direction(prior_on="OrbitalDepot"))
+    assert _producer_defects(admitted) == []
+
+
+def test_flag_off_restores_the_pooled_producer_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, _FLAG, False)
+    DomainSpec.model_validate(_second_direction(prior_on="LaunchWindow"))
+
+
+def test_an_unscoped_dimension_needs_its_producer_in_every_direction() -> None:
+    raw = _second_direction(prior_on="OrbitalDepot")
+    raw["scoring"]["dimensions"][0].pop("matchdirections")
+    with pytest.raises(ValidationError, match="'_prior_depot_reliability'"):
+        DomainSpec.model_validate(raw)
+    launch = next(n for n in raw["ontology"]["nodes"] if n["label"] == "LaunchWindow")
+    launch["properties"].append({"name": "_prior_depot_reliability", "type": "float"})
+    DomainSpec.model_validate(raw)
