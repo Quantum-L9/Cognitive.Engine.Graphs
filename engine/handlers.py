@@ -3414,12 +3414,18 @@ def _preference_claim_cypher(outcome_label: str) -> str:
 
     CEG-04: the binding is the resolved graph identity, the query entity's label
     for the outcome's direction together with its declared id, so one local id
-    under another label is another entity.
+    under another label is another entity. A binding recorded before the label
+    was stored resolves by the outcome's own ``match_direction``: a replay in that
+    direction resolves the same label, which is backfilled; another direction
+    leaves it unresolved, so the replay is refused.
     """
     label = sanitize_label(outcome_label)
     return (
         "MATCH (o:" + label + " {outcome_id: $outcome_id})\n"
-        "WITH o, o.query_entity_id AS prior, o.query_entity_label AS prior_label\n"
+        "WITH o, o.query_entity_id AS prior,\n"
+        "     CASE WHEN o.query_entity_id IS NOT NULL AND o.query_entity_label IS NULL\n"
+        "               AND coalesce(o.match_direction, '') = coalesce($match_direction, '') THEN $query_entity_label\n"
+        "          ELSE o.query_entity_label END AS prior_label\n"
         "SET o.query_entity_id = coalesce(prior, $query_entity_id),\n"
         "    o.query_entity_label = CASE WHEN prior IS NULL THEN $query_entity_label ELSE prior_label END\n"
         "RETURN prior, prior_label"
@@ -3448,7 +3454,11 @@ async def _write_outcome_with_preference_history(
     claim = _preference_claim_cypher(_outcome_label(domain_spec, tenant, "outcomes", "an outcome write"))
     # CEG-04: the resolved query entity (its label for this direction, every plan
     # statement carries the same one) is part of the binding, not only its local id.
-    binding = {**history, "query_entity_label": plan[0][1]["params"]["query_entity_label"]}
+    binding = {
+        **history,
+        "query_entity_label": plan[0][1]["params"]["query_entity_label"],
+        "match_direction": parameters.get("match_direction"),
+    }
 
     async def _work(tx: Any) -> tuple[list[dict[str, Any]], bool, list[str]]:
         rows = await (await tx.run(cypher, parameters)).data()

@@ -375,3 +375,35 @@ async def test_ceg04_a_replay_resolving_another_query_entity_with_the_same_id_is
             "window-1", "depot-a", "success", outcome_id="out-relay-1", fingerprint={"match_direction": RELAY}
         )
     assert await _bindings() == before
+
+
+async def test_ceg04_a_binding_without_a_stored_label_replays_only_in_its_own_direction(
+    graph: GraphDriver, tmp_path: Path
+) -> None:
+    from engine.handlers import ValidationError
+
+    _reload(graph, tmp_path / "legacy", _relay_direction)
+    synced = await handle_sync(TENANT, {"entity_type": "relay-windows", "batch": [{"window_id": "window-1"}]})
+    assert synced["status"] == "success"
+    await _record("window-1", "depot-a", "success", outcome_id="out-legacy-1")
+    # An outcome bound before the label was stored (#577's writer): raw Cypher models it.
+    await graph.execute_write(
+        cypher="MATCH (o:DockingResult {outcome_id: 'out-legacy-1'}) REMOVE o.query_entity_label",
+        parameters={},
+        database=TENANT,
+    )
+
+    with pytest.raises(ValidationError, match="already recorded for another query entity"):
+        await _record(
+            "window-1", "depot-a", "success", outcome_id="out-legacy-1", fingerprint={"match_direction": RELAY}
+        )
+    replay = await _record("window-1", "depot-a", "success", outcome_id="out-legacy-1")
+
+    assert replay["preference_history"]["linked_dimensions"] == ["launch_preference"]
+    [row] = await graph.execute_query(
+        "MATCH (o:DockingResult {outcome_id: 'out-legacy-1'}) "
+        "OPTIONAL MATCH (r:RelayWindow)-[x]->(o) "
+        "RETURN o.query_entity_label AS label, count(x) AS relay_links",
+        database=TENANT,
+    )
+    assert row == {"label": "LaunchWindow", "relay_links": 0}

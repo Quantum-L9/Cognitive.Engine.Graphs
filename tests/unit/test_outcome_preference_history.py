@@ -115,6 +115,10 @@ class _Graph:
         if "o.query_entity_id AS prior" in cypher:
             # The binding is the resolved query entity: its label and its id (CEG-04).
             prior = self.bound.get(parameters["outcome_id"])
+            stored = self.outcomes.get(parameters["outcome_id"], {})
+            if prior and prior[0] is None and stored.get("match_direction") == parameters["match_direction"]:
+                # A binding recorded before the label was stored resolves by the outcome's direction.
+                prior = self.bound[parameters["outcome_id"]] = (parameters["query_entity_label"], prior[1])
             self.bound.setdefault(
                 parameters["outcome_id"], (parameters["query_entity_label"], parameters["query_entity_id"])
             )
@@ -526,3 +530,12 @@ async def test_a_replay_whose_query_entity_resolves_under_another_label_is_refus
     with pytest.raises(ValidationError, match="already recorded for another query entity"):
         await handle_outcomes(TENANT, _payload(outcome_id="out-1"))
     assert graph.bound["out-1"] == ("OrbitClass", "window-1")
+
+
+async def test_a_binding_recorded_before_labels_were_stored_replays_in_its_own_direction() -> None:
+    graph = _wire(_spec(), _Graph())
+    await handle_outcomes(TENANT, _payload(outcome_id="out-1"))
+    graph.bound["out-1"] = (None, "window-1")  # written by the implementation that stored no label
+    result = await handle_outcomes(TENANT, _payload(outcome_id="out-1"))
+    assert result["preference_history"]["query_entity_id"] == "window-1"
+    assert graph.bound["out-1"] == ("LaunchWindow", "window-1")
