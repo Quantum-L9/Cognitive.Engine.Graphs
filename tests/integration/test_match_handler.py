@@ -455,13 +455,14 @@ def _buyer_dims(
     community: int,
     rate: float,
     dated: bool,
+    declared: bool = True,
 ) -> dict[str, float]:
     distance = _haversine_m(40.0, -75.0, lat, -75.0)
     community_score = 0.92 if community == 7 else 0.2
     price = 1.0 - abs(math.log(rate / 1000.0)) / 2.0 if rate > 0 else 0.0
-    # SC-001: the declared-signal temporalproximity compiler is the default; a
-    # facility dated now scores the pure decay 1.0 (the legacy mix capped it at 0.6).
-    recency = 1.0 if dated else 0.0
+    # SC-001: the declared-signal temporalproximity compiler (the default) scores a
+    # facility dated now the pure decay 1.0; the legacy rollback mix capped it at 0.6.
+    recency = (1.0 if declared else 0.6) if dated else 0.0
     return {
         "geo_proximity": _clamp(1.0 / (1.0 + distance / 800_000.0)),
         "credit_score": _log_norm(credit, 100.0) if credit > -1.0 else 0.0,
@@ -518,8 +519,19 @@ def _props(lat: float = 40.0, **overrides: object) -> dict[str, object]:
 
 
 @pytest.mark.asyncio
-async def test_plasticos_buyer_scores_match_independent_dimensions(design_pack_deps, graph_driver):
-    """Every active buyer dimension, plus a failed hard gate that a high score cannot restore."""
+@pytest.mark.parametrize("declared", [True, False], ids=["declared-default", "legacy-rollback"])
+async def test_plasticos_buyer_scores_match_independent_dimensions(
+    design_pack_deps, graph_driver, monkeypatch, declared
+):
+    """Every active buyer dimension, plus a failed hard gate that a high score cannot restore.
+
+    Both states of ``temporalproximity_declared_signals_enabled`` are asserted: on
+    (the SC-001 default) recency is the declared pure decay; off is the legacy
+    rollback, kept only as that.
+    """
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "temporalproximity_declared_signals_enabled", declared)
     batch = [
         {
             "facility_id": "facility:fit",
@@ -627,22 +639,27 @@ async def test_plasticos_buyer_scores_match_independent_dimensions(design_pack_d
     second = await handle_match(PLASTICOS, payload)
 
     expected = {
-        "facility:fit": _buyer_dims(lat=40.0, credit=100.0, contamination=0.0, community=7, rate=1000.0, dated=True),
-        "facility:offset": _buyer_dims(lat=41.0, credit=100.0, contamination=0.0, community=7, rate=1000.0, dated=True),
+        "facility:fit": _buyer_dims(
+            lat=40.0, credit=100.0, contamination=0.0, community=7, rate=1000.0, dated=True, declared=declared
+        ),
+        "facility:offset": _buyer_dims(
+            lat=41.0, credit=100.0, contamination=0.0, community=7, rate=1000.0, dated=True, declared=declared
+        ),
         "facility:null-capacity": _buyer_dims(
-            lat=40.0, credit=100.0, contamination=0.0, community=7, rate=1000.0, dated=True
+            lat=40.0, credit=100.0, contamination=0.0, community=7, rate=1000.0, dated=True, declared=declared
         ),
         "facility:low-capacity": _buyer_dims(
-            lat=40.0, credit=100.0, contamination=0.0, community=7, rate=1000.0, dated=True
+            lat=40.0, credit=100.0, contamination=0.0, community=7, rate=1000.0, dated=True, declared=declared
         ),
         "facility:null-contamination": _buyer_dims(
-            lat=40.0, credit=100.0, contamination=100.0, community=7, rate=1000.0, dated=True
+            lat=40.0, credit=100.0, contamination=100.0, community=7, rate=1000.0, dated=True, declared=declared
         ),
         "facility:outlier": _buyer_dims(
-            lat=40.0, credit=-5.0, contamination=0.0, community=3, rate=1_000_000.0, dated=False
+            lat=40.0, credit=-5.0, contamination=0.0, community=3, rate=1_000_000.0, dated=False, declared=declared
         ),
     }
-    assert _weighted(expected["facility:fit"]) == pytest.approx(0.992)  # recency 1.0 under SC-001
+    # Recency 1.0 on the declared default, 0.6 on the legacy rollback (weight 0.1).
+    assert _weighted(expected["facility:fit"]) == pytest.approx(0.992 if declared else 0.952)
     assert _weighted(expected["facility:outlier"]) == pytest.approx(0.52)
 
     def scored(result: dict) -> dict[str, dict]:
