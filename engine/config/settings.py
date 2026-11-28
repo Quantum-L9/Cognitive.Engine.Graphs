@@ -133,6 +133,19 @@ class Settings(BaseSettings):
     # (pareto_integrator.precut_pool_limit), order it by Pareto front, then cut.
     # A missing objective value is never filled with 0.0. Off: unchanged.
     pareto_precut_enabled: bool = False
+    # ND-ARB (ceg-scoring-audit L3, D4): decision_arbitration constraints run in
+    # the match Cypher, before ORDER BY / LIMIT: a hard constraint is a WHERE on
+    # the scoring WITH, a soft penalty multiplies score. No Python post-cut pass.
+    # Hardening (gate-then-score in Cypher); off restores the post-cut Python pass.
+    match_arbitration_in_cypher_enabled: bool = True
+    # ND-TIE (L3, D4): the final ORDER BY breaks score ties on the pack's declared
+    # candidate identity, and the per-candidate path collapse orders by the
+    # projected dimensions after score. Off restores ORDER BY score DESC alone.
+    match_candidate_tiebreak_enabled: bool = True
+    # SC-004 (L3): compute_pareto_front compares the declared dimension names when
+    # given, else the union of every candidate's keys, never the first row's keys
+    # alone. Off restores candidates[0]'s keys (input-order dependent).
+    pareto_front_declared_dimensions_enabled: bool = True
 
     # --- Wave 1: Invariant & Validation Hardening (seL4-inspired) ---
     domain_strict_validation: bool = True  # W1-01: cross-reference validators at load time

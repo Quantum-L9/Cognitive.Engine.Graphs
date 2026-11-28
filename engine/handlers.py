@@ -589,6 +589,104 @@ def _candidate_id_property(domain_spec: DomainSpec, label: str) -> str:
     return _FALLBACK_CANDIDATE_ID_PROPERTY
 
 
+def _declared_candidate_identity(domain_spec: DomainSpec, label: str) -> str | None:
+    """ND-TIE: the candidate identity the pack declares for ``label``, or None.
+
+    The identity is the ``idproperty`` of the sync endpoint(s) whose
+    ``targetnode`` is ``label`` (the key the engine MERGEs on). Exactly one
+    distinct ``idproperty`` is the identity. None declared, or endpoints that
+    disagree, resolve to None: the tie-break is then omitted, never guessed
+    (no ``required``-property or ``entity_id`` fallback), and the pack is not
+    refused. The existing resolvers (``engine.resolution.similarity`` /
+    ``engine.causal.identity``) fall back silently and cannot report either case.
+    """
+    declared: list[str] = []
+    if domain_spec.sync:
+        for endpoint in domain_spec.sync.endpoints:
+            if endpoint.targetnode == label and endpoint.idproperty and endpoint.idproperty not in declared:
+                declared.append(endpoint.idproperty)
+    return declared[0] if len(declared) == 1 else None
+
+
+@functools.lru_cache(maxsize=256)
+def _warn_unordered_ties(
+    domain_id: str, domain_version: str, direction: str, label: str, declared: tuple[str, ...]
+) -> None:
+    """One warning per pack revision and direction: score ties are left unordered."""
+    reason = "conflicting sync idproperty values " + ", ".join(declared) if declared else "no sync idproperty"
+    logger.warning(
+        "match %s@%s direction %s: candidate label %s has %s; score ties are unordered (ND-TIE)",
+        domain_id,
+        domain_version,
+        direction,
+        label,
+        reason,
+    )
+
+
+def _unbound_param_name(base: str, taken: set[str]) -> str:
+    """``base``, else ``base_1``, ``base_2`` ..., the first no other parameter already uses."""
+    name = sanitize_label(base)
+    suffix = 0
+    while name in taken:
+        suffix += 1
+        name = sanitize_label(f"{base}_{suffix}")
+    taken.add(name)
+    return name
+
+
+def _arbitration_constraint_cypher(
+    domain_spec: DomainSpec,
+    active_dimensions: list[str],
+    reserved_params: set[str] | None = None,
+) -> tuple[str, str, dict[str, Any]]:
+    """ND-ARB (D4): ``decision_arbitration.constraints`` as Cypher, before the cut.
+
+    Returns ``(hard_predicate, soft_factor, params)``:
+
+    * ``hard_predicate`` — ``NOT coalesce(<dim> < $t, false)`` per hard
+      constraint, ANDed; the caller attaches it as the scoring ``WITH``'s
+      ``WHERE``. A null dimension (or one that does not compare) is not below
+      the threshold, exactly as ``apply_constraint_penalties`` skips it.
+    * ``soft_factor`` — ``(CASE WHEN coalesce(<dim> < $t, false) THEN $p ELSE
+      1.0 END)`` per soft constraint, multiplied; the caller rescales ``score``.
+    * ``params`` — thresholds and penalties, bound as parameters (C-9). A name
+      in ``reserved_params`` (query, derived, gate and scoring parameters) is
+      never reused, so an arbitration value cannot overwrite a request value.
+
+    A constraint on a dimension that is not active for this direction has no
+    alias in scope and no value, so it is not compiled (Python skipped it).
+    Empty strings when arbitration is disabled or nothing applies.
+    """
+    arbitration = domain_spec.decision_arbitration
+    if not arbitration.enabled or not arbitration.constraints:
+        return "", "", {}
+    active = set(active_dimensions)
+    taken = set(reserved_params or ())
+    hard: list[str] = []
+    soft: list[str] = []
+    params: dict[str, Any] = {}
+    for constraint in arbitration.constraints:
+        if constraint.dimension not in active:
+            continue
+        alias = sanitize_label(constraint.dimension)
+        if constraint.hard:
+            name = _unbound_param_name(f"arb_hard_threshold_{len(hard)}", taken)
+            params[name] = float(constraint.threshold)
+            hard.append(f"NOT coalesce({alias} < ${sanitize_label(name)}, false)")
+        else:
+            index = len(soft)
+            threshold = _unbound_param_name(f"arb_soft_threshold_{index}", taken)
+            penalty = _unbound_param_name(f"arb_soft_penalty_{index}", taken)
+            params[threshold] = float(constraint.threshold)
+            params[penalty] = float(constraint.penalty)
+            soft.append(
+                f"(CASE WHEN coalesce({alias} < ${sanitize_label(threshold)}, false) "
+                f"THEN ${sanitize_label(penalty)} ELSE 1.0 END)"
+            )
+    return " AND ".join(hard), " * ".join(soft), params
+
+
 def _namespaced_entity_ref(value: Any) -> str | None:
     """A stored ``namespace:id`` identity, or None.
 
@@ -817,6 +915,7 @@ def _apply_pareto_precut(
     id_property: str,
     top_n: int,
     pool_limit: int,
+    constraints_applied: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """SI-06: decision arbitration on the fetched pool, before the ``top_n`` cut.
 
@@ -831,7 +930,10 @@ def _apply_pareto_precut(
         {"dimension": c.dimension, "threshold": c.threshold, "hard": c.hard, "penalty": c.penalty}
         for c in arbitration.constraints
     ]
-    if constraint_dicts:
+    # ND-ARB: ``constraints_applied`` means the match Cypher already applied them
+    # (match_arbitration_in_cypher_enabled); the dormant SI-06 front reorder of
+    # the pool is a recorded known exception to D4 and stays as it was.
+    if constraint_dicts and not constraints_applied:
         results = apply_constraint_penalties(results, constraint_dicts)
     objectives = arbitration.pareto_config.objectives
     return pareto_precut(
@@ -1013,6 +1115,36 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         dim_aliases = [sanitize_label(name) for name in scoring_assembler.last_active_dimension_names]
         dim_map = ", ".join(f"{alias}: {alias}" for alias in dim_aliases)
         dim_projection = f"{{{dim_map}}} AS dimension_scores"
+    # ND-TIE (D4): score ties break on the declared candidate identity, never on
+    # elementId or Neo4j's row order; the path collapse orders a candidate's paths
+    # by their projected dimensions after score, so `head(collect(...))` is a
+    # function of the paths, not of their traversal order.
+    tiebreak = bool(_match_settings.match_candidate_tiebreak_enabled)
+    final_order = "ORDER BY score DESC"
+    collapse_order = "ORDER BY score DESC"
+    if tiebreak:
+        identity = _declared_candidate_identity(domain_spec, candidate_labels[0])
+        if identity is not None:
+            final_order += f", candidate.{sanitize_label(identity)} ASC"
+        else:
+            declared_ids = tuple(
+                sorted(
+                    {
+                        e.idproperty
+                        for e in (domain_spec.sync.endpoints if domain_spec.sync else [])
+                        if e.targetnode == candidate_labels[0] and e.idproperty
+                    }
+                )
+            )
+            _warn_unordered_ties(
+                domain_spec.domain.id,
+                str(domain_spec.domain.version),
+                match_direction,
+                candidate_labels[0],
+                declared_ids,
+            )
+        if project_dimensions:
+            collapse_order += "".join(f", dimension_scores.{alias} DESC" for alias in dim_aliases)
     # RU-036 / CEG-COR-007: one row per candidate (its best-scoring path) before
     # ORDER BY / LIMIT, so top_n counts distinct candidates (R2-DEC-05 option A).
     if _match_settings.match_collapse_traversal_rows:
@@ -1029,7 +1161,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             return_line = "RETURN candidate, best.score AS score\n"
         return_line = (
             row_projection
-            + "ORDER BY score DESC\n"
+            + f"{collapse_order}\n"
             + f"WITH candidate, head(collect({best_row})) AS best\n"
             + return_line
         )
@@ -1053,6 +1185,27 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         from engine.scoring.pareto_integrator import precut_pool_limit
 
         fetch_limit = precut_pool_limit(top_n)
+    # ND-ARB (D4): arbitration constraints sit between the scoring WITH and every
+    # ORDER BY / LIMIT, so the cut ranks only admissible, penalised scores.
+    arbitration_in_cypher = bool(_match_settings.match_arbitration_in_cypher_enabled)
+    arbitration_clause = ""
+    arbitration_params: dict[str, Any] = {}
+    if arbitration_in_cypher:
+        active_dims = scoring_assembler.last_active_dimension_names
+        reserved = {
+            *resolved_query,
+            *gate_compiler.last_query_params,
+            *scoring_assembler.last_query_params,
+            "top_n",
+        }
+        hard_predicate, soft_factor, arbitration_params = _arbitration_constraint_cypher(
+            domain_spec, active_dims, reserved
+        )
+        if hard_predicate:
+            arbitration_clause += f"WHERE {hard_predicate}\n"
+        if soft_factor:
+            passthrough = "".join(f", {sanitize_label(name)}" for name in active_dims)
+            arbitration_clause += f"WITH candidate{passthrough}, score * {soft_factor} AS score\n"
     cypher = (
         f"MATCH (candidate:{sanitize_label(candidate_labels[0])})\n"
         + "\n".join(traversal_clauses)
@@ -1060,8 +1213,9 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         + gate_row_boundary
         + f"WHERE {where_clause}\n"
         + f"{scoring_clause}\n"
+        + arbitration_clause
         + return_line
-        + "ORDER BY score DESC\n"
+        + f"{final_order}\n"
         + "LIMIT $top_n"
     )
 
@@ -1073,6 +1227,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             "top_n": fetch_limit,
             **gate_compiler.last_query_params,
             **scoring_assembler.last_query_params,
+            **arbitration_params,
         }
         results = await graph_driver.execute_query(
             cypher=cypher,
@@ -1096,6 +1251,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             id_property=_candidate_id_property(domain_spec, candidate_labels[0]),
             top_n=top_n,
             pool_limit=fetch_limit,
+            constraints_applied=arbitration_in_cypher,
         )
 
     # Build Pareto candidates from results and compute front metadata
@@ -1155,7 +1311,10 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 for c in domain_spec.decision_arbitration.constraints
             ]
 
-            if constraint_dicts:
+            # ND-ARB: under match_arbitration_in_cypher_enabled the query already
+            # rejected and penalised before ORDER BY / LIMIT; re-applying here
+            # would drop or re-score rows after the cut.
+            if constraint_dicts and not arbitration_in_cypher:
                 results = apply_constraint_penalties(list(results), constraint_dicts)
 
             # Spec-driven Pareto filter using declared objectives

@@ -348,7 +348,10 @@ def apply_pareto_filter(
         comparable = [c for c in pareto_candidates if set(c.dimension_scores) == wanted]
         unranked = [c for c in pareto_candidates if set(c.dimension_scores) != wanted]
 
-    front: ParetoFront = compute_pareto_front(comparable, directions=resolved_directions)
+    # SC-004: compare the declared objectives, not whichever keys the first row carries.
+    front: ParetoFront = compute_pareto_front(
+        comparable, directions=resolved_directions, dimension_names=list(dimension_names)
+    )
 
     kept = list(front.non_dominated)
     trimmed_ids: list[str] = []

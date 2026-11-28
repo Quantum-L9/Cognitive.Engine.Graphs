@@ -196,7 +196,7 @@ class TestFlagOn:
         response = await _match()
         # Flag off returns [a, b]; b is dominated by a, d is not.
         assert _ids(response) == ["a", "d"]
-        assert driver.calls[0]["cypher"].endswith("ORDER BY score DESC\nLIMIT $top_n")
+        assert driver.calls[0]["cypher"].endswith("ORDER BY score DESC, candidate.depot_id ASC\nLIMIT $top_n")
         assert driver.calls[0]["parameters"]["top_n"] == 8  # 4 x top_n
         arbitration = response["pareto"]["arbitration"]
         assert arbitration["nondominated_ids"] == ["a", "d"]
@@ -257,7 +257,10 @@ class TestFlagOn:
         assert precut["returned"] == 300
         assert len(response["candidates"]) == 300
 
-    async def test_hard_constraint_applies_to_the_pool_before_the_cut(self) -> None:
+    async def test_hard_constraint_applies_to_the_pool_before_the_cut(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The Python pool pass is the rollback path of ND-ARB: with
+        # match_arbitration_in_cypher_enabled off it still rejects in the pool.
+        monkeypatch.setattr(settings, "match_arbitration_in_cypher_enabled", False)
         constrained = arbitration_spec(
             constraints=[ArbitrationConstraintSpec(dimension="depot_reliability", threshold=0.5, hard=True)]
         )
@@ -266,6 +269,22 @@ class TestFlagOn:
         # d (reliability 0.2) is rejected; b is the best of what remains.
         assert _ids(response) == ["a", "b"]
         assert response["pareto"]["arbitration"]["precut"]["pool_size"] == 3
+
+    async def test_cypher_arbitration_is_not_reapplied_to_the_pool(self) -> None:
+        # ND-ARB (D4): the hard constraint is a WHERE in the pool query itself, so
+        # the pool Neo4j returns is already admissible; Python must not re-filter
+        # or re-penalise it. This fake driver ignores the WHERE on purpose: d
+        # surviving proves no second pass ran.
+        constrained = arbitration_spec(
+            constraints=[ArbitrationConstraintSpec(dimension="depot_reliability", threshold=0.5, hard=True)]
+        )
+        driver = _wire(_spec(constrained))
+        response = await _match(top_n=2)
+        cypher = driver.calls[0]["cypher"]
+        assert "WHERE NOT coalesce(depot_reliability < $arb_hard_threshold_0, false)" in cypher
+        assert driver.calls[0]["parameters"]["arb_hard_threshold_0"] == 0.5
+        assert _ids(response) == ["a", "d"]
+        assert response["pareto"]["arbitration"]["precut"]["pool_size"] == 4
 
     async def test_missing_objective_is_unranked_not_zero(self) -> None:
         rows = [

@@ -15,6 +15,7 @@ Covers W1-01 through W1-05 feature flags, validators, and error paths.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from unittest.mock import patch
 
@@ -944,6 +945,11 @@ async def _plasticos_dir1_match_cypher() -> str:
     return driver.cyphers[0]
 
 
+# `ORDER BY score DESC`, then optionally the declared identity tie-break (ND-TIE,
+# ceg-scoring-audit L3), then the `$top_n` cut that ends the query.
+_TIEBREAK_TAIL = r"(, candidate\.\w+ ASC)?\nLIMIT \$top_n\Z"
+
+
 @pytest.mark.finding("CEG-COR-007")
 class TestMatchCollapsesTraversalRows:
     """A Facility with k PROCESSES paths is one candidate, not k rows (RG-047)."""
@@ -959,11 +965,12 @@ class TestMatchCollapsesTraversalRows:
         assert collapse in cypher
         tail = (
             "RETURN candidate, best.score AS score, best.dimension_scores AS dimension_scores, "
-            "best.absent_sources AS absent_sources\nORDER BY score DESC\nLIMIT $top_n"
+            "best.absent_sources AS absent_sources\nORDER BY score DESC"
         )
-        assert cypher.endswith(tail)
+        # The collapsed rows are ranked by score (then any declared tie-break) and cut.
+        assert re.search(re.escape(tail) + _TIEBREAK_TAIL, cypher)
         # Rows are ordered by score before the per-candidate collect keeps the best.
-        assert cypher.index("AS absent_sources\nORDER BY score DESC\nWITH candidate, head(collect(") > 0
+        assert re.search(r"AS absent_sources\nORDER BY score DESC[^\n]*\nWITH candidate, head\(collect\(", cypher)
         assert cypher.index(collapse) < cypher.index("LIMIT $top_n")
 
     async def test_collapse_without_dimension_projection(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -972,7 +979,9 @@ class TestMatchCollapsesTraversalRows:
         monkeypatch.setattr(settings, "match_dimension_projection", False)
         cypher = await _plasticos_dir1_match_cypher()
         assert "WITH candidate, head(collect({score: score})) AS best\n" in cypher
-        assert cypher.endswith("RETURN candidate, best.score AS score\nORDER BY score DESC\nLIMIT $top_n")
+        assert re.search(
+            re.escape("RETURN candidate, best.score AS score\nORDER BY score DESC") + _TIEBREAK_TAIL, cypher
+        )
 
     async def test_flag_off_has_no_aggregation(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from engine.config.settings import settings
@@ -986,4 +995,4 @@ class TestMatchCollapsesTraversalRows:
             "contamination_tolerance_score: contamination_tolerance_score, community_match: community_match, "
             "rate_score: rate_score, price_alignment: price_alignment, recency: recency} AS dimension_scores, "
         ) in cypher
-        assert cypher.endswith(" AS absent_sources\nORDER BY score DESC\nLIMIT $top_n")
+        assert re.search(re.escape(" AS absent_sources\nORDER BY score DESC") + _TIEBREAK_TAIL, cypher)
