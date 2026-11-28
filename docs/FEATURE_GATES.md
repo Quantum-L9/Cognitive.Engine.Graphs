@@ -61,6 +61,7 @@ independently of the code default.
 | Pack Root Required in Prod | `DOMAINS_ROOT_REQUIRED_IN_PROD` (`domains_root_required_in_prod`) | `True` | unset | active (hardening); under `L9_ENV=prod` the pack loader refuses an unset, relative, missing, non-directory or unreadable `DOMAINS_ROOT` — see §35 |
 | Production Domain Stage | `DOMAIN_PRODUCTION_STAGE_REQUIRED` | `False` | unchanged | dormant; production legacy admission requires reviewed/production; publisher/receipt mode always enforce stage |
 | Score Clamping | `SCORE_CLAMP_ENABLED` | `True` | `True` | active; a null dimension clamps to `0.0` as well (Stage 2, see §20) |
+| Effective Null Strategy / Finite Learned Weights | `NULL_STRATEGY_EFFECTIVE_ENABLED` (`null_strategy_effective_enabled`); `LEARNED_WEIGHT_FINITE_READ_ENABLED` (`learned_weight_finite_read_enabled`) | `True`; `True` | unset | active (CEG scoring audit L2, operator decision D3a 2026-11-26): `null_strategy` `inherit_prior` / `population_mean` take effect when the source property is missing; with `SCORE_CLAMP_ENABLED` the composite score is clamped to [0, 1] too, and non-finite learned weights are ignored on read (D5). Off: the legacy wrapper — see "Scoring bounds and effective null strategies" before §37 |
 | Strict Null Gates | `STRICT_NULL_GATES` | `True` | `True` | active |
 | Param Strict Mode | `PARAM_STRICT_MODE` | `True` | `True` | active |
 | LLM Security (ValidatedLLMClient) | `LLM_PROVIDER` | `openai` (implicit) | `openai` | active — fully implemented, requires `OPENAI_API_KEY` |
@@ -1581,6 +1582,36 @@ recalculation records `DimensionWeightChange` candidates and only
 Tests: `tests/unit/test_signal_weight_dimension_scores.py`,
 `tests/integration/test_feedback_dimension_scores.py`.
 
+### Scoring bounds and effective null strategies (CEG scoring audit L2, D3a / D5)
+
+`NULL_STRATEGY_EFFECTIVE_ENABLED` (default `True`, decision D3a) makes
+`null_strategy: inherit_prior` and `population_mean` take effect. Each
+computation coalesces (or CASE-guards) its own property, so the legacy
+`coalesce((<dimension>), candidate._prior_<dim>, default)` never saw a null and
+both options were dead. On, the dimension compiles to
+`CASE WHEN <source property> IS NULL THEN <fallback> ELSE coalesce((<dimension>),
+<fallback>) END` with `<fallback>` = `coalesce(<prior | $_popmean_<dim>>,
+defaultwhennull)`: a missing source property takes the declared fallback, a
+present one keeps the computed value (including 0.0), and a computation that is
+still null with its source present (geodecay with a null query operand) takes
+the fallback as before. The guarded property is the one the computation reads
+(geodecay: latitude and the longitude `geodecay_declared_longitude` selects).
+Computations without one stored source property (`customcypher`,
+`community_bridge`) keep the legacy wrapper. Rollback:
+`NULL_STRATEGY_EFFECTIVE_ENABLED=false`.
+
+Under `SCORE_CLAMP_ENABLED` (default `True`, decision D5) the composite `score`
+is clamped to [0, 1] like each dimension, so a learned-weight penalty still
+subtracts inside the range and floors at 0.0. Learned `DimensionWeight.weight`
+values that are not finite numbers (`NaN`, `±Infinity`, non-numeric) are
+ignored on read with a logged reason; the dimension scores with its request or
+spec weight. `LEARNED_WEIGHT_FINITE_READ_ENABLED` (default `True`) gates this
+filter; `false` restores the legacy reader.
+
+Tests: `tests/unit/test_scoring_bounds_and_null_strategy.py`,
+`tests/property/test_scoring_property.py`,
+`tests/integration/test_scoring_bounds_real_graph.py`.
+
 ## 37. temporalproximity reads declared auxiliary signals (CEG-FEEDBACK-1)
 
 ### `temporalproximity_declared_signals_enabled` (default `False`)
@@ -1605,7 +1636,10 @@ On: a `temporalproximity` dimension declares its auxiliary signals in
 Recency takes the weight the declared signals leave, `1 - frequency_weight -
 acceleration_weight`, so an undeclared signal contributes nothing and a
 dimension declaring none is pure recency decay over [0, 1] (renormalised, not
-capped). Every weight and the scale bind as query parameters
+capped). A candidate date in the future has a negative age; the declared path
+floors the age at 0 days (decision D2, 2026-11-26), so a future date scores the
+same recency as a fresh one and never more (`exp` of a positive exponent
+exceeded 1.0). The legacy path is not floored. Every weight and the scale bind as query parameters
 (`tp_recency_w_<dim>`, `tp_freq_w_<dim>`, `tp_freq_scale_<dim>`,
 `tp_accel_w_<dim>`); property names pass `sanitize_label`. The compiler
 refuses a weight or scale declared without its property and auxiliary weights
@@ -1622,7 +1656,15 @@ candidates within that dimension is unchanged; its contribution to the
 weighted total grows. Off: the legacy text, byte for byte, and `metadata` on a
 `temporalproximity` dimension is accepted but not read.
 
-Tests: `tests/unit/test_temporalproximity_declared_signals.py`.
+The flag stays default `False` (decision D2); activation is a later, separate
+decision. `tests/integration/test_temporalproximity_rescale_fixtures.py`
+records, on the committed `temporalproximity` packs synced through the engine,
+the legacy and declared recency per candidate (`value_declared = value_legacy /
+0.6` while no auxiliary signal is declared) and the composite ranking under
+each, as evidence for that decision.
+
+Tests: `tests/unit/test_temporalproximity_declared_signals.py`,
+`tests/integration/test_temporalproximity_rescale_fixtures.py`.
 
 ## 35. Production pack root required (issue #400 A4/A5)
 
