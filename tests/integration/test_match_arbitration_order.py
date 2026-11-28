@@ -118,3 +118,71 @@ async def test_tied_scores_give_prefix_stable_top_k(engine_deps, graph_driver, d
     assert top1 == top3[:1]
     for _ in range(3):
         assert _ids(await _match(top_n=3)) == top3
+
+
+@pytest.mark.asyncio
+async def test_soft_penalty_never_raises_a_negative_score(
+    engine_deps, graph_driver, domain_spec, clean_db, monkeypatch
+):
+    """SCR-04: with the clamp off a stored negative reliability scores below zero.
+
+    ``score * penalty`` would raise it (-0.2523 * 0.25 = -0.0631, above -0.2523);
+    under ``arbitration_unknown_fails_constraint_enabled`` the score is
+    ``min(score, score * penalty)`` and stays -0.2523.
+    """
+    from engine.config.settings import settings
+
+    monkeypatch.setattr(settings, "score_clamp_enabled", False)
+    soft = ArbitrationConstraintSpec(dimension="port_capacity", threshold=0.6, hard=False, penalty=0.25)
+    await _sync([_depot("negative", -0.50, 2), _depot("positive", 0.50, 2)])
+    serve(graph_driver, _arbitrated(domain_spec, soft))
+
+    rows = {row["candidate"]["depot_id"]: row["score"] for row in await _match(top_n=2)}
+
+    assert rows["negative"] == pytest.approx(-0.30 + 0.0477, abs=1e-3)  # unpenalised
+    assert rows["positive"] == pytest.approx((0.30 + 0.0477) * 0.25, abs=1e-3)  # penalised
+
+
+# A foreign writer stores NaN; the engine's own sync path is the only other writer.
+_FOREIGN_NAN_WRITE = """
+MERGE (n:OrbitalDepot {depot_id: $depot_id})
+SET n.reliability = $nan, n.docking_ports = 100, n.accepts_hazmat = true
+"""
+
+
+@pytest.fixture(
+    params=[(True, True), (True, False), (False, True), (False, False)],
+    ids=["projection_on-clamp_on", "projection_on-clamp_off", "projection_off-clamp_on", "projection_off-clamp_off"],
+)
+def flag_state(request, monkeypatch):
+    from engine.config.settings import settings
+
+    projection, clamp = request.param
+    monkeypatch.setattr(settings, "match_dimension_projection", projection)
+    monkeypatch.setattr(settings, "score_clamp_enabled", clamp)
+    return request.param
+
+
+@pytest.mark.asyncio
+async def test_unknown_source_fails_a_zero_threshold_in_every_flag_state(
+    engine_deps, graph_driver, domain_spec, clean_db, flag_state
+):
+    """CEG-A07 (CTO REMEDIATE #573): hard ``depot_reliability >= 0``.
+
+    A known 0.0 passes. A missing and a NaN reliability are unknown and fail,
+    though the scoring WITH defaults the missing one to 0.0 and the clamp maps
+    NaN to 0.0. The constraint reads the raw property, so the result does not
+    depend on ``score_clamp_enabled`` or ``match_dimension_projection``.
+    """
+    from engine.config.settings import settings
+
+    assert settings.arbitration_unknown_fails_constraint_enabled is True
+    hard = ArbitrationConstraintSpec(dimension="depot_reliability", threshold=0.0, hard=True)
+    missing = {"depot_id": "missing", "docking_ports": 100, "accepts_hazmat": True}
+    await _sync([_depot("zero", 0.0, 100), missing])
+    await graph_driver.execute_write(
+        cypher=_FOREIGN_NAN_WRITE, parameters={"depot_id": "nan", "nan": float("nan")}, database=ORBITAL
+    )
+    serve(graph_driver, _arbitrated(domain_spec, hard))
+
+    assert _ids(await _match(top_n=10)) == ["zero"]

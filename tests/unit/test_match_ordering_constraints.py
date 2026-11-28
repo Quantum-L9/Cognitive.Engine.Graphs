@@ -28,6 +28,7 @@ tests/integration/test_match_arbitration_order.py.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -78,16 +79,26 @@ def _wire(spec: DomainSpec, rows: list[dict[str, Any]] | None = None) -> Driver:
     return driver
 
 
-async def _cypher(spec: DomainSpec) -> tuple[str, dict[str, Any]]:
+# The raw-source term each constraint carries (TestRawSourceIsUnknown);
+# stripped by default so the composition tests read the rest of the predicate.
+# CEG-01/02: the resolver's missing predicate, then the numeric parse / NaN test.
+_ABSENT_TERM = re.compile(
+    r" OR candidate\.\w+ IS NULL OR toFloatOrNull\(candidate\.\w+\) IS NULL OR isNaN\(toFloatOrNull\(candidate\.\w+\)\)"
+)
+
+
+async def _cypher(spec: DomainSpec, *, keep_absent: bool = False) -> tuple[str, dict[str, Any]]:
     driver = _wire(spec)
     await handle_match(DOMAIN, {"query": {}, "match_direction": DIRECTION, "top_n": 3})
     call = driver.calls[0]
-    return call["cypher"], call["parameters"]
+    cypher = call["cypher"] if keep_absent else _ABSENT_TERM.sub("", call["cypher"])
+    return cypher, call["parameters"]
 
 
 def _row(depot_id: str, score: float, reliability: float, ports: float) -> dict[str, Any]:
     return {
-        "candidate": {"depot_id": depot_id},
+        # Raw source properties are stored: the Python pass judges knownness on them (CEG-A07).
+        "candidate": {"depot_id": depot_id, "reliability": reliability, "docking_ports": 5},
         "score": score,
         "dimension_scores": {"depot_reliability": reliability, "port_capacity": ports},
         "absent_sources": [],
@@ -104,7 +115,9 @@ class TestHardConstraintIsAWhereBeforeTheCut:
     async def test_hard_constraint_filters_the_scoring_rows(self) -> None:
         cypher, params = await _cypher(_spec(HARD))
         lines = cypher.split("\n")
-        where_at = lines.index("WHERE NOT coalesce(depot_reliability < $arb_hard_threshold_0, false)")
+        where_at = lines.index(
+            "WHERE NOT (depot_reliability IS NULL OR isNaN(depot_reliability) OR depot_reliability < $arb_hard_threshold_0)"
+        )
         # The WHERE belongs to the scoring WITH that binds `score`, whatever the
         # composite expression is (lane L2 owns it): structure, not text.
         scoring_with = lines[where_at - 1]
@@ -114,7 +127,7 @@ class TestHardConstraintIsAWhereBeforeTheCut:
 
     async def test_hard_where_precedes_every_order_by_and_the_limit(self) -> None:
         cypher, _ = await _cypher(_spec(HARD))
-        where_at = cypher.index("WHERE NOT coalesce(depot_reliability")
+        where_at = cypher.index("WHERE NOT (depot_reliability IS NULL")
         assert where_at < cypher.index("ORDER BY")
         assert where_at < cypher.index("LIMIT $top_n")
 
@@ -126,10 +139,11 @@ class TestHardConstraintIsAWhereBeforeTheCut:
 class TestSoftPenaltyIsInTheScoreBeforeTheCut:
     async def test_soft_penalty_rescales_score(self) -> None:
         cypher, params = await _cypher(_spec(SOFT))
+        factor = "(CASE WHEN port_capacity IS NULL OR isNaN(port_capacity) OR port_capacity < $arb_soft_threshold_0 THEN $arb_soft_penalty_0 ELSE 1.0 END)"
+        # SCR-04: the penalised score is min(score, score * factor), never larger.
         penalised = (
-            "WITH candidate, depot_reliability, port_capacity, score * "
-            "(CASE WHEN coalesce(port_capacity < $arb_soft_threshold_0, false) "
-            "THEN $arb_soft_penalty_0 ELSE 1.0 END) AS score\n"
+            "WITH candidate, depot_reliability, port_capacity, "
+            f"CASE WHEN score * {factor} < score THEN score * {factor} ELSE score END AS score\n"
         )
         assert penalised in cypher
         assert params["arb_soft_threshold_0"] == 0.4
@@ -138,16 +152,15 @@ class TestSoftPenaltyIsInTheScoreBeforeTheCut:
 
     async def test_hard_and_soft_compose_in_declared_order(self) -> None:
         cypher, _ = await _cypher(_spec(SOFT, HARD))
-        assert cypher.index("WHERE NOT coalesce(depot_reliability") < cypher.index("score * (CASE WHEN")
+        assert cypher.index("WHERE NOT (depot_reliability IS NULL") < cypher.index("score * (CASE WHEN")
 
     async def test_several_soft_penalties_multiply(self) -> None:
         second = ArbitrationConstraintSpec(dimension="depot_reliability", threshold=0.9, penalty=0.5)
         cypher, params = await _cypher(_spec(SOFT, second))
         assert (
-            "score * (CASE WHEN coalesce(port_capacity < $arb_soft_threshold_0, false) THEN $arb_soft_penalty_0 "
-            "ELSE 1.0 END) * (CASE WHEN coalesce(depot_reliability < $arb_soft_threshold_1, false) "
-            "THEN $arb_soft_penalty_1 ELSE 1.0 END) AS score"
-        ) in cypher
+            "score * (CASE WHEN port_capacity IS NULL OR isNaN(port_capacity) OR port_capacity < $arb_soft_threshold_0 THEN $arb_soft_penalty_0 ELSE 1.0 END) * (CASE WHEN depot_reliability IS NULL OR isNaN(depot_reliability) OR depot_reliability < $arb_soft_threshold_1 THEN $arb_soft_penalty_1 ELSE 1.0 END) < score"
+            in cypher
+        )
         assert params["arb_soft_penalty_1"] == 0.5
 
 
@@ -312,8 +325,78 @@ class TestParameterNamespace:
         # The caller's values are untouched; the constraint binds its own names.
         assert params["arb_hard_threshold_0"] == 0.99
         assert params["arb_soft_penalty_0"] == 0.77
-        assert "depot_reliability < $arb_hard_threshold_0_1," in cypher
+        assert "depot_reliability < $arb_hard_threshold_0_1 OR" in cypher
         assert params["arb_hard_threshold_0_1"] == 0.5
         assert "THEN $arb_soft_penalty_0_1 ELSE" in cypher
         assert params["arb_soft_penalty_0_1"] == 0.25
         assert params["arb_soft_threshold_0"] == 0.4
+
+
+class TestUnknownValueFailsTheConstraint:
+    """SCR-03 / SCR-04 (operator rule Q2): an unknown value never satisfies a constraint.
+
+    In Cypher a null comparison is null and ``NaN < t`` is false, so the old
+    ``coalesce(d < $t, false)`` let a null or NaN dimension pass a hard
+    constraint and escape a soft penalty. Under
+    ``arbitration_unknown_fails_constraint_enabled`` null and NaN test as failing.
+    """
+
+    def test_flag_ships_on(self) -> None:
+        assert settings.arbitration_unknown_fails_constraint_enabled is True
+
+    async def test_null_and_nan_are_tested_explicitly(self) -> None:
+        cypher, _ = await _cypher(_spec(HARD, SOFT))
+        assert "depot_reliability IS NULL OR isNaN(depot_reliability) OR depot_reliability <" in cypher
+        assert "port_capacity IS NULL OR isNaN(port_capacity) OR port_capacity <" in cypher
+        assert "coalesce(" not in cypher.split("WHERE NOT (depot_reliability", 1)[1].split("ORDER BY", 1)[0]
+
+    async def test_cypher_path_reports_the_unknown_count_as_unobserved(self) -> None:
+        # Rows a WHERE removed never reach Python; the count is not invented.
+        _wire(_spec(HARD), [_row("a", 0.42, 0.90, 0.10)])
+        result = await handle_match(DOMAIN, {"query": {}, "match_direction": DIRECTION, "top_n": 3})
+        assert result["pareto"]["arbitration"]["unknown_rejected"] is None
+
+    async def test_flag_off_restores_the_null_passes_form(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(settings, "arbitration_unknown_fails_constraint_enabled", False)
+        cypher, _ = await _cypher(_spec(HARD, SOFT))
+        assert "WHERE NOT coalesce(depot_reliability < $arb_hard_threshold_0, false)\n" in cypher
+        assert (
+            "WITH candidate, depot_reliability, port_capacity, score * (CASE WHEN coalesce(port_capacity < "
+            "$arb_soft_threshold_0, false) THEN $arb_soft_penalty_0 ELSE 1.0 END) AS score\n"
+        ) in cypher
+
+
+class TestRawSourceIsUnknown:
+    """CEG-A07 (CTO REMEDIATE #573): the scoring WITH defaults a missing source
+    and the clamp maps null / NaN to 0.0, so the alias cannot show the value is
+    unknown. The constraint tests the dimension's raw candidate property itself,
+    whatever ``score_clamp_enabled`` and ``match_dimension_projection`` say."""
+
+    RAW = (
+        "candidate.reliability IS NULL"
+        " OR toFloatOrNull(candidate.reliability) IS NULL OR isNaN(toFloatOrNull(candidate.reliability))"
+    )
+
+    @pytest.mark.parametrize("projection", [True, False], ids=["projection_on", "projection_off"])
+    @pytest.mark.parametrize("clamp", [True, False], ids=["clamp_on", "clamp_off"])
+    async def test_raw_source_test_is_in_the_hard_predicate(
+        self, projection: bool, clamp: bool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(settings, "match_dimension_projection", projection)
+        monkeypatch.setattr(settings, "score_clamp_enabled", clamp)
+        cypher, _ = await _cypher(_spec(HARD), keep_absent=True)
+        assert f"OR depot_reliability < $arb_hard_threshold_0 OR {self.RAW})" in cypher
+
+    async def test_raw_source_test_is_in_the_soft_factor(self) -> None:
+        cypher, _ = await _cypher(_spec(SOFT), keep_absent=True)
+        raw = (
+            "candidate.docking_ports IS NULL"
+            " OR toFloatOrNull(candidate.docking_ports) IS NULL OR isNaN(toFloatOrNull(candidate.docking_ports))"
+        )
+        assert f"OR port_capacity < $arb_soft_threshold_0 OR {raw} THEN $arb_soft_penalty_0" in cypher
+
+    async def test_flag_off_has_no_raw_source_test(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(settings, "arbitration_unknown_fails_constraint_enabled", False)
+        cypher, _ = await _cypher(_spec(HARD, SOFT), keep_absent=True)
+        assert "toFloatOrNull(" not in cypher
+        assert "candidate.reliability IS NULL OR" not in cypher

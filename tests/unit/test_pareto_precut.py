@@ -264,7 +264,12 @@ class TestFlagOn:
         constrained = arbitration_spec(
             constraints=[ArbitrationConstraintSpec(dimension="depot_reliability", threshold=0.5, hard=True)]
         )
-        _wire(_spec(constrained))
+        # The raw source is stored, as on a real node (CEG-A07 judges knownness on it).
+        stored = [
+            {**r, "candidate": {**r["candidate"], "reliability": r["dims"]["depot_reliability"], "docking_ports": 10}}
+            for r in ROWS
+        ]
+        _wire(_spec(constrained), stored)
         response = await _match(top_n=2)
         # d (reliability 0.2) is rejected; b is the best of what remains.
         assert _ids(response) == ["a", "b"]
@@ -281,7 +286,10 @@ class TestFlagOn:
         driver = _wire(_spec(constrained))
         response = await _match(top_n=2)
         cypher = driver.calls[0]["cypher"]
-        assert "WHERE NOT coalesce(depot_reliability < $arb_hard_threshold_0, false)" in cypher
+        assert (
+            "WHERE NOT (depot_reliability IS NULL OR isNaN(depot_reliability) OR depot_reliability < $arb_hard_threshold_0"
+            in cypher
+        )
         assert driver.calls[0]["parameters"]["arb_hard_threshold_0"] == 0.5
         assert _ids(response) == ["a", "d"]
         assert response["pareto"]["arbitration"]["precut"]["pool_size"] == 4

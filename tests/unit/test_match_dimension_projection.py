@@ -125,7 +125,12 @@ class TestDimensionProjection:
             enabled=True,
             constraints=[ArbitrationConstraintSpec(dimension="depot_reliability", threshold=0.5, hard=True)],
         )
-        _wire(_spec(decision_arbitration=arbitration))
+        # The raw source is stored, as on a real node (CEG-A07 judges knownness on it).
+        stored = [
+            {**r, "candidate": {**r["candidate"], "reliability": r["dims"]["depot_reliability"], "docking_ports": 10}}
+            for r in GRAPH_ROWS
+        ]
+        _wire(_spec(decision_arbitration=arbitration), stored)
         result = await _match()
         ids = [c["candidate"]["depot_id"] for c in result["candidates"]]
         assert "d3" not in ids  # reliability 0.2 < 0.5
@@ -141,7 +146,7 @@ class TestDimensionProjection:
         driver = _wire(_spec(decision_arbitration=arbitration))
         await _match()
         cypher, params = driver.calls[0]["cypher"], driver.calls[0]["parameters"]
-        where = re.search(r"\nWHERE NOT coalesce\((\w+) < \$(\w+), false\)\n", cypher)
+        where = re.search(r"\nWHERE NOT \((\w+) IS NULL OR isNaN\(\1\) OR \1 < \$(\w+)(?: OR [^\n]*)?\)\n", cypher)
         assert where is not None
         assert where.group(1) == "depot_reliability"
         assert "depot_reliability" in (_returned_dimension_aliases(cypher) or [])

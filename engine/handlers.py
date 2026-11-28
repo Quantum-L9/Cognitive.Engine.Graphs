@@ -22,7 +22,7 @@ import re
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 from neo4j.exceptions import ConstraintError
 
@@ -644,12 +644,25 @@ def _arbitration_constraint_cypher(
 
     Returns ``(hard_predicate, soft_factor, params)``:
 
-    * ``hard_predicate`` — ``NOT coalesce(<dim> < $t, false)`` per hard
-      constraint, ANDed; the caller attaches it as the scoring ``WITH``'s
-      ``WHERE``. A null dimension (or one that does not compare) is not below
-      the threshold, exactly as ``apply_constraint_penalties`` skips it.
-    * ``soft_factor`` — ``(CASE WHEN coalesce(<dim> < $t, false) THEN $p ELSE
-      1.0 END)`` per soft constraint, multiplied; the caller rescales ``score``.
+    * ``hard_predicate`` — per hard constraint, ANDed; the caller attaches it
+      as the scoring ``WITH``'s ``WHERE``. Under
+      ``arbitration_unknown_fails_constraint_enabled`` (SCR-03, rule Q2) it is
+      ``NOT (<dim> IS NULL OR isNaN(<dim>) OR <dim> < $t OR <raw unknown>)``:
+      an unknown value fails. A null comparison is null and ``NaN < t`` is false
+      in Cypher, so both are tested explicitly. ``<raw unknown>`` (CEG-A07,
+      CEG-01/02) is the scoring compiler's own source resolution
+      (``_dimension_sources``): its "source missing" predicate over the
+      properties it reads (a default property when ``candidateprop`` is
+      omitted), plus ``toFloatOrNull(p) IS NULL OR isNaN(toFloatOrNull(p))`` for
+      numeric operands only. A temporal or categorical source is known when it
+      is non-null. The scoring WITH has already defaulted a missing source and
+      the clamp maps null / NaN to 0.0, so only the source says whether the
+      value is known. It does not depend on ``score_clamp_enabled`` or
+      ``match_dimension_projection``.
+      Off: ``NOT coalesce(<dim> < $t, false)``, where an unknown passes.
+    * ``soft_factor`` — ``(CASE WHEN <fails> THEN $p ELSE 1.0 END)`` per soft
+      constraint, multiplied, with ``<fails>`` the same test; the caller
+      rescales ``score``.
     * ``params`` — thresholds and penalties, bound as parameters (C-9). A name
       in ``reserved_params`` (query, derived, gate and scoring parameters) is
       never reused, so an arbitration value cannot overwrite a request value.
@@ -663,6 +676,22 @@ def _arbitration_constraint_cypher(
         return "", "", {}
     active = set(active_dimensions)
     taken = set(reserved_params or ())
+    from engine.config.settings import settings as _arb_settings
+
+    unknown_fails = bool(_arb_settings.arbitration_unknown_fails_constraint_enabled)
+
+    def fails(alias: str, threshold: str, dimension: str) -> str:
+        if not unknown_fails:
+            return f"coalesce({alias} < ${sanitize_label(threshold)}, false)"
+        test = f"{alias} IS NULL OR isNaN({alias}) OR {alias} < ${sanitize_label(threshold)}"
+        sources = _dimension_sources(domain_spec, dimension)
+        if sources.missing_predicate:
+            test += f" OR {sources.missing_predicate}"
+        for owner, prop in sources.numeric:
+            raw = f"toFloatOrNull({sanitize_label(owner)}.{sanitize_label(prop)})"
+            test += f" OR {raw} IS NULL OR isNaN({raw})"
+        return test
+
     hard: list[str] = []
     soft: list[str] = []
     params: dict[str, Any] = {}
@@ -673,17 +702,16 @@ def _arbitration_constraint_cypher(
         if constraint.hard:
             name = _unbound_param_name(f"arb_hard_threshold_{len(hard)}", taken)
             params[name] = float(constraint.threshold)
-            hard.append(f"NOT coalesce({alias} < ${sanitize_label(name)}, false)")
+            test = fails(alias, name, constraint.dimension)
+            hard.append(f"NOT ({test})" if unknown_fails else f"NOT {test}")
         else:
             index = len(soft)
             threshold = _unbound_param_name(f"arb_soft_threshold_{index}", taken)
             penalty = _unbound_param_name(f"arb_soft_penalty_{index}", taken)
             params[threshold] = float(constraint.threshold)
             params[penalty] = float(constraint.penalty)
-            soft.append(
-                f"(CASE WHEN coalesce({alias} < ${sanitize_label(threshold)}, false) "
-                f"THEN ${sanitize_label(penalty)} ELSE 1.0 END)"
-            )
+            test = fails(alias, threshold, constraint.dimension)
+            soft.append(f"(CASE WHEN {test} THEN ${sanitize_label(penalty)} ELSE 1.0 END)")
     return " AND ".join(hard), " * ".join(soft), params
 
 
@@ -916,6 +944,7 @@ def _apply_pareto_precut(
     top_n: int,
     pool_limit: int,
     constraints_applied: bool = False,
+    active_dimensions: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """SI-06: decision arbitration on the fetched pool, before the ``top_n`` cut.
 
@@ -926,17 +955,15 @@ def _apply_pareto_precut(
     from engine.scoring.pareto_integrator import apply_constraint_penalties, pareto_precut
 
     arbitration = domain_spec.decision_arbitration
-    constraint_dicts = [
-        {"dimension": c.dimension, "threshold": c.threshold, "hard": c.hard, "penalty": c.penalty}
-        for c in arbitration.constraints
-    ]
+    constraint_dicts = _arbitration_constraint_dicts(domain_spec, active_dimensions)
     # ND-ARB: ``constraints_applied`` means the match Cypher already applied them
     # (match_arbitration_in_cypher_enabled); the dormant SI-06 front reorder of
     # the pool is a recorded known exception to D4 and stays as it was.
+    stats: dict[str, int] = {}
     if constraint_dicts and not constraints_applied:
-        results = apply_constraint_penalties(results, constraint_dicts)
+        results = apply_constraint_penalties(results, constraint_dicts, stats=stats)
     objectives = arbitration.pareto_config.objectives
-    return pareto_precut(
+    ordered, meta = pareto_precut(
         results,
         [obj.dimension for obj in objectives],
         top_n=top_n,
@@ -944,6 +971,92 @@ def _apply_pareto_precut(
         candidate_id_key=id_property,
         directions={obj.dimension: obj.direction for obj in objectives},
     )
+    if constraint_dicts and _unknown_fails_constraint():
+        meta["unknown_rejected"] = None if constraints_applied else stats.get("unknown_rejected", 0)
+    return ordered, meta
+
+
+class _DimensionSources(NamedTuple):
+    """CEG-01/02: a dimension's sources as the scoring compiler resolves them."""
+
+    missing_predicate: str | None
+    numeric: list[tuple[str, str]]  # (owner, property): unknown when null, NaN or not a number
+    presence: list[tuple[str, str]]  # (owner, property): unknown only when null
+
+
+# Computations whose stored source is not a number: a datetime, a community id.
+_NON_NUMERIC_SOURCE = frozenset({"temporalproximity", "communitymatch", "preference_attention"})
+
+
+def _dimension_sources(domain_spec: DomainSpec, dimension: str) -> _DimensionSources:
+    """CEG-01/02: knownness inputs taken from the scoring compiler, not reconstructed.
+
+    ``missing_predicate`` is ``ScoringAssembler._source_missing_predicate`` (the
+    property the compiler reads, its default when ``candidateprop`` is omitted,
+    the geodecay longitude, the weightedrate confidence). The resolved
+    properties are split by operand type: numeric ones are also tested for NaN
+    and parseability; a temporal or categorical one only for presence. A
+    dimension with no single stored source (customcypher, community_bridge)
+    has none, and its knownness rests on the alias alone.
+    """
+    from engine.config.schema import ComputationType
+    from engine.scoring.assembler import ScoringAssembler
+
+    empty = _DimensionSources(None, [], [])
+    dim = next((d for d in domain_spec.scoring.dimensions if d.name == dimension), None)
+    if dim is None:
+        return empty
+    assembler = ScoringAssembler(domain_spec)
+    missing = assembler._source_missing_predicate(dim)
+    owner = assembler._source_owner(dim)
+    prop = assembler._source_property(dim) if owner else None
+    if missing is None or not owner or not isinstance(prop, str) or not prop:
+        return empty
+    props = [prop]
+    if dim.computation is ComputationType.GEODECAY:
+        lon = assembler._geodecay_source_longitude(dim)
+        if isinstance(lon, str) and lon:
+            props.append(lon)
+    pairs = [(owner, p) for p in props]
+    if str(dim.computation) in _NON_NUMERIC_SOURCE:
+        return _DimensionSources(missing, [], pairs)
+    return _DimensionSources(missing, pairs, [])
+
+
+def _unknown_fails_constraint() -> bool:
+    from engine.config.settings import settings as _arb_settings
+
+    return bool(_arb_settings.arbitration_unknown_fails_constraint_enabled)
+
+
+def _arbitration_constraint_dicts(
+    domain_spec: DomainSpec, active_dimensions: list[str] | None = None
+) -> list[dict[str, Any]]:
+    """The declared constraints as the Python pass reads them.
+
+    SCR-03: under ``arbitration_unknown_fails_constraint_enabled`` a constraint on
+    a dimension inactive for the direction is dropped, as the Cypher compiler
+    drops it: every candidate lacks that value, so "unknown fails" would reject
+    them all for a constraint the direction never scores.
+    """
+    keep = set(active_dimensions) if active_dimensions is not None and _unknown_fails_constraint() else None
+    return [
+        {
+            "dimension": c.dimension,
+            "threshold": c.threshold,
+            "hard": c.hard,
+            "penalty": c.penalty,
+            # CEG-01/02: the Python pass sees candidate-held sources only.
+            "source_properties": [
+                p for o, p in _dimension_sources(domain_spec, c.dimension).numeric if o == "candidate"
+            ],
+            "presence_properties": [
+                p for o, p in _dimension_sources(domain_spec, c.dimension).presence if o == "candidate"
+            ],
+        }
+        for c in domain_spec.decision_arbitration.constraints
+        if keep is None or c.dimension in keep
+    ]
 
 
 def _match_request_as_legacy(tenant: str, payload: dict[str, Any], domain_loader: DomainPackLoader) -> dict[str, Any]:
@@ -1205,7 +1318,11 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             arbitration_clause += f"WHERE {hard_predicate}\n"
         if soft_factor:
             passthrough = "".join(f", {sanitize_label(name)}" for name in active_dims)
-            arbitration_clause += f"WITH candidate{passthrough}, score * {soft_factor} AS score\n"
+            penalised = f"score * {soft_factor}"
+            if _match_settings.arbitration_unknown_fails_constraint_enabled:
+                # SCR-04: a penalty never raises a score (a negative one, clamp off).
+                penalised = f"CASE WHEN {penalised} < score THEN {penalised} ELSE score END"
+            arbitration_clause += f"WITH candidate{passthrough}, {penalised} AS score\n"
     cypher = (
         f"MATCH (candidate:{sanitize_label(candidate_labels[0])})\n"
         + "\n".join(traversal_clauses)
@@ -1252,6 +1369,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             top_n=top_n,
             pool_limit=fetch_limit,
             constraints_applied=arbitration_in_cypher,
+            active_dimensions=scoring_assembler.last_active_dimension_names,
         )
 
     # Build Pareto candidates from results and compute front metadata
@@ -1301,21 +1419,14 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                 apply_pareto_filter,
             )
 
-            constraint_dicts = [
-                {
-                    "dimension": c.dimension,
-                    "threshold": c.threshold,
-                    "hard": c.hard,
-                    "penalty": c.penalty,
-                }
-                for c in domain_spec.decision_arbitration.constraints
-            ]
+            constraint_dicts = _arbitration_constraint_dicts(domain_spec, scoring_assembler.last_active_dimension_names)
 
             # ND-ARB: under match_arbitration_in_cypher_enabled the query already
             # rejected and penalised before ORDER BY / LIMIT; re-applying here
             # would drop or re-score rows after the cut.
+            constraint_stats: dict[str, int] = {}
             if constraint_dicts and not arbitration_in_cypher:
-                results = apply_constraint_penalties(list(results), constraint_dicts)
+                results = apply_constraint_penalties(list(results), constraint_dicts, stats=constraint_stats)
 
             # Spec-driven Pareto filter using declared objectives
             arb_config = domain_spec.decision_arbitration.pareto_config
@@ -1341,6 +1452,14 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
                     # RU-019: non-dominated ids dropped by front_size_limit are
                     # reported, not silently folded into pruned_pct.
                     pareto_metadata["arbitration"]["trimmed_ids"] = arb_pareto["trimmed"]
+            if constraint_dicts and _unknown_fails_constraint():
+                # SCR-03: hard rejections for an unknown value. Rows the Cypher WHERE
+                # removed never reach Python, so that count is unobserved (None).
+                if pareto_metadata is None:
+                    pareto_metadata = {}
+                pareto_metadata.setdefault("arbitration", {})["unknown_rejected"] = (
+                    None if arbitration_in_cypher else constraint_stats.get("unknown_rejected", 0)
+                )
 
     execution_time_ms = (time.monotonic() - start_time) * 1000
 

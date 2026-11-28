@@ -172,6 +172,8 @@ def build_pareto_candidates(
 def apply_constraint_penalties(
     candidates: list[dict[str, Any]],
     constraints: list[dict[str, Any]],
+    *,
+    stats: dict[str, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Apply hard/soft constraint penalties from DecisionArbitrationSpec.
 
@@ -184,12 +186,23 @@ def apply_constraint_penalties(
         Each has: ``dimension``, ``threshold``, ``hard`` (bool), and optional
         ``penalty`` (float, default 0.5).
 
+    stats:
+        SCR-03: when given, ``stats["unknown_rejected"]`` receives the number of
+        candidates a hard constraint rejected for an unknown value (flag on only).
+
     Returns
     -------
     Filtered list — hard constraint violations removed, soft penalties applied.
+
+    Under ``arbitration_unknown_fails_constraint_enabled`` (SCR-03 / SCR-04, rule
+    Q2) a missing, None, non-numeric (``bool`` included) or NaN value fails the
+    constraint, and the penalised score is ``min(score, score * penalty)`` with a
+    None score left as None.
     """
     from engine.config.settings import settings
 
+    if settings.arbitration_unknown_fails_constraint_enabled:
+        return _apply_constraints_unknown_fails(candidates, constraints, stats)
     zero_present = settings.arbitration_zero_score_present
     filtered: list[dict[str, Any]] = []
 
@@ -244,6 +257,95 @@ def apply_constraint_penalties(
         len(candidates) - len(filtered),
     )
 
+    return filtered
+
+
+def _raw_source_known(candidate: dict[str, Any], prop: str) -> bool:
+    """CEG-A07: the candidate's stored source is a number, as ``toFloatOrNull`` reads it.
+
+    Missing, None, NaN, bool and any non-numeric value are unknown; a numeric
+    string parses, matching the Cypher pass.
+    """
+    node = candidate.get("candidate")
+    raw = node.get(prop) if isinstance(node, dict) else None
+    if raw is None or isinstance(raw, bool):
+        return False
+    if isinstance(raw, str):
+        try:
+            raw = float(raw)
+        except ValueError:
+            return False
+    if not isinstance(raw, (int, float)):
+        return False
+    return not math.isnan(float(raw))
+
+
+def _raw_source_present(candidate: dict[str, Any], prop: str) -> bool:
+    """CEG-01/02: a temporal or categorical source is known when it is stored (non-null)."""
+    node = candidate.get("candidate")
+    return isinstance(node, dict) and node.get(prop) is not None
+
+
+def _known_dimension_value(
+    candidate: dict[str, Any],
+    dim: str,
+    source_properties: list[str] | None = None,
+    presence_properties: list[str] | None = None,
+) -> float | None:
+    """The constrained value as a finite-or-infinite float, or None when unknown (SCR-03).
+
+    CEG-A07: when the dimension reads raw numeric candidate properties, each
+    must be a known number; CEG-01/02: a temporal or categorical one
+    (``presence_properties``) must be non-null. The dimension score alone may
+    be a default or a clamp.
+    """
+    if source_properties and not all(_raw_source_known(candidate, p) for p in source_properties):
+        return None
+    if presence_properties and not all(_raw_source_present(candidate, p) for p in presence_properties):
+        return None
+    raw = _lookup_dimension_score(candidate, dim)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    value = float(raw)
+    return None if math.isnan(value) else value
+
+
+def _apply_constraints_unknown_fails(
+    candidates: list[dict[str, Any]],
+    constraints: list[dict[str, Any]],
+    stats: dict[str, int] | None,
+) -> list[dict[str, Any]]:
+    """SCR-03 / SCR-04: unknown fails the constraint; a penalty never raises a score."""
+    filtered: list[dict[str, Any]] = []
+    unknown_rejected = 0
+    for candidate in candidates:
+        rejected = False
+        for constraint in constraints:
+            dim = constraint.get("dimension", "")
+            threshold = float(constraint.get("threshold", 0.0))
+            value = _known_dimension_value(
+                candidate, dim, constraint.get("source_properties"), constraint.get("presence_properties")
+            )
+            if value is not None and value >= threshold:
+                continue
+            if constraint.get("hard", False):
+                rejected = True
+                unknown_rejected += value is None
+                break
+            score = candidate.get("score")
+            if isinstance(score, (int, float)) and not isinstance(score, bool):
+                candidate["score"] = min(score, score * float(constraint.get("penalty", 0.5)))
+        if not rejected:
+            filtered.append(candidate)
+    if stats is not None:
+        stats["unknown_rejected"] = unknown_rejected
+    logger.info(
+        "Constraint enforcement: %d/%d candidates passed (%d rejected, %d for an unknown value)",
+        len(filtered),
+        len(candidates),
+        len(candidates) - len(filtered),
+        unknown_rejected,
+    )
     return filtered
 
 
