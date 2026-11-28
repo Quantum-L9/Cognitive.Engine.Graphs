@@ -301,12 +301,36 @@ class ScoringAssembler:
         exprs, names = list(dimension_exprs), [sanitize_label(n) for n in active_dim_names]
         if settings.dimension_knownness_projection_enabled:
             dims = {d.name: d for d in self.scoring_spec.dimensions}
-            for name in active_dim_names:
-                known_alias = sanitize_label(f"{name}__known")
+            taken = {d.name for d in self.scoring_spec.dimensions} | self._RESERVED_COLUMNS
+            for index, name in enumerate(active_dim_names):
+                known_alias = self._known_alias(name, index, taken)
+                taken.add(known_alias)
                 exprs.append(f"{self._known_expression(dims[name])} AS {known_alias}")
                 names.append(known_alias)
                 self._last_known_aliases[name] = known_alias
         return ", ".join(exprs), ", ".join(names)
+
+    # Columns the match query binds beside the dimensions (CEG-13 alias reservation).
+    _RESERVED_COLUMNS: frozenset[str] = frozenset(
+        {"candidate", "score", "best", "dimension_scores", "absent_sources", "dimension_known"}
+    )
+    _KNOWN_SUFFIX = "__known"
+    _MAX_COLUMN_LEN = 64  # sanitize_label's limit
+
+    @classmethod
+    def _known_alias(cls, name: str, index: int, taken: set[str]) -> str:
+        """A ``<dim>__known`` column name that is a valid label and binds no other column.
+
+        A dimension already named ``<dim>__known``, or a name too long for the
+        suffix, gets the positional ``_known_<index>`` form instead (underscored
+        until unique), so a valid pack never compiles a duplicate or an invalid alias.
+        """
+        alias = f"{name}{cls._KNOWN_SUFFIX}"
+        if len(alias) > cls._MAX_COLUMN_LEN or alias in taken:
+            alias = f"_known_{index}"
+        while alias in taken:
+            alias = f"_{alias}"
+        return sanitize_label(alias)
 
     @property
     def last_dimension_known_aliases(self) -> dict[str, str]:

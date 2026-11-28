@@ -22,6 +22,7 @@ Score values are untouched. The values on a real graph are asserted in
 from __future__ import annotations
 
 import copy
+import re
 from typing import Any
 
 import pytest
@@ -167,6 +168,26 @@ def test_known_aliases_are_exposed_for_a_re_projecting_clause(monkeypatch: pytes
     monkeypatch.setattr(settings, _FLAG, False)
     _first_with(assembler)
     assert assembler.last_dimension_known_aliases == {}
+
+
+def test_a_dimension_named_like_a_knownness_alias_does_not_collide() -> None:
+    dims = [_reliability(), _extra(name="depot_reliability__known", computation="lognormalized")]
+    assembler = _assembler(dims)
+    first, second = _first_with(assembler)
+    aliases = assembler.last_dimension_known_aliases
+    assert aliases["depot_reliability"] == "_known_0"
+    assert aliases["depot_reliability__known"] == "depot_reliability__known__known"
+    columns = re.findall(r" AS (\w+)", first)
+    assert len(columns) == len(set(columns))
+    assert "_known_0" in second
+
+
+def test_a_long_dimension_name_gets_a_length_safe_alias() -> None:
+    long_name = "d" * 60
+    assembler = _assembler([_reliability(), _extra(name=long_name, computation="lognormalized")])
+    first, _ = _first_with(assembler)
+    assert assembler.last_dimension_known_aliases[long_name] == "_known_1"
+    assert "AS _known_1" in first
 
 
 def test_knownness_does_not_enter_the_score() -> None:
