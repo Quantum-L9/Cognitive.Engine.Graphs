@@ -2460,8 +2460,12 @@ now write the annotation through `apply_confidence_flags` in
 | `confidence_check_enabled` off (either setting) | absent | absent |
 
 The published contract is array-only: `contracts/payloads/match-response.schema.yaml`
-and the native `MatchCandidate` model (`engine/models/payloads.py`, default `[]`,
-values limited to the vocabulary below and unique) both reject a bare string.
+and the native `MatchCandidate` model (`engine/models/payloads.py`,
+`list[str] | None`, values limited to the vocabulary below and unique) both
+reject a bare string. Three states (CEG-16): the confidence stage ran and found
+nothing → `[]`; it ran and flagged → `[x]` / `[x, y]`; it did not run
+(`confidence_check_enabled` off) → the field is absent. The native model never
+defaults a missing field to `[]`, and serializes `None` as no field at all.
 Setting the flag off restores the pre-contract legacy shape, which is outside the
 published contract; use it only as an emergency rollback for a consumer that has
 not moved to the list.

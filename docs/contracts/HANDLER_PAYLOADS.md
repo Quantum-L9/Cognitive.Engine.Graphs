@@ -53,7 +53,8 @@ class MatchResponse(BaseModel):
 > monoculture) share this shape. With the checks off the key is absent. Off, the historical
 > shape returns: absent for none, a bare string for one flag, a list for two. That
 > rollback shape is outside the published contract: the draft schema and the native
-> `MatchCandidate` model are array-only (default `[]`). See
+> `MatchCandidate` model are array-only. The native model holds `None` for a stage
+> that did not run and serializes it as no field, never as `[]` (CEG-16). See
 > `docs/FEATURE_GATES.md` §39a.
 >
 > ```python

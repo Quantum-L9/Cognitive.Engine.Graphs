@@ -25,18 +25,20 @@ import copy
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
 
 from engine.config.settings import settings
-from engine.handlers import _annotate_weighted_confidence
+from engine.handlers import _annotate_weighted_confidence, handle_match, init_dependencies
 from engine.models.payloads import MatchCandidate
 from engine.scoring.confidence import (
     FLAG_LOW_DIMENSIONAL_AGREEMENT,
     FLAG_MONOCULTURE,
     ConfidenceChecker,
 )
+from tests.fixtures.domain_contracts import synthetic_loader
 from tests.fixtures.match_response_contract import draft_response_validator
 
 pytestmark = pytest.mark.unit
@@ -74,9 +76,40 @@ def _produce(weighted: bool) -> list[Any]:
     return [row.get("confidence_flag") for row in rows]
 
 
+class _Driver:
+    async def execute_query(self, *, cypher: str, parameters: dict[str, Any], database: str) -> list[dict[str, Any]]:
+        dims = ({"depot_reliability": 0.5, "port_capacity": 0.5}, {"depot_reliability": 0.95, "port_capacity": 0.16})
+        return [
+            {"candidate": {"depot_id": f"d{i}"}, "score": 0.5, "dimension_scores": dict(d), "absent_sources": []}
+            for i, d in enumerate(dims)
+        ]
+
+
+async def _match_rows() -> list[dict[str, Any]]:
+    loader = MagicMock()
+    loader.load_domain.return_value = synthetic_loader().load_domain("orbital-logistics")
+    loader.list_domains.return_value = ["orbital-logistics"]
+    init_dependencies(_Driver(), loader)  # type: ignore[arg-type]
+    result = await handle_match("orbital-logistics", {"query": {}, "match_direction": "window_to_depot", "top_n": 10})
+    return list(result["candidates"])
+
+
 class TestNativeModel:
-    def test_absent_flag_defaults_to_empty_list(self) -> None:
-        assert MatchCandidate.model_validate(_candidate()).confidence_flag == []
+    def test_absent_flag_stays_absent(self) -> None:
+        """CEG-16: absent means the confidence stage did not run; it is never defaulted to []."""
+        model = MatchCandidate.model_validate(_candidate())
+        assert model.confidence_flag is None
+        assert "confidence_flag" not in model.model_dump()
+        assert "confidence_flag" not in json.loads(model.model_dump_json())
+
+    def test_explicit_none_is_absent_on_serialization(self) -> None:
+        model = MatchCandidate.model_validate(_candidate() | {"confidence_flag": None})
+        assert "confidence_flag" not in model.model_dump()
+
+    def test_empty_list_round_trips_as_ran_clean(self) -> None:
+        model = MatchCandidate.model_validate(_candidate() | {"confidence_flag": []})
+        assert model.model_dump()["confidence_flag"] == []
+        assert json.loads(model.model_dump_json())["confidence_flag"] == []
 
     @pytest.mark.parametrize(
         "flags",
@@ -111,6 +144,30 @@ class TestProducersAgreeWithContract:
 
     def test_both_producers_agree_on_shape(self) -> None:
         assert [type(f) for f in _produce(True)] == [type(f) for f in _produce(False)] == [list, list, list]
+
+    @pytest.mark.parametrize("weighted", [True, False], ids=["weighted", "raw"])
+    @pytest.mark.parametrize("stage_on", [True, False], ids=["stage_ran", "stage_off"])
+    async def test_three_states_through_handle_match(
+        self, weighted: bool, stage_on: bool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """CEG-16: stage ran -> list[str] on every candidate ([] when clean); stage off ->
+        absent. Each candidate's value is valid for the native model and the schema."""
+        monkeypatch.setattr(settings, "monoculture_weighted_contribution", weighted)
+        monkeypatch.setattr(settings, "confidence_check_enabled", stage_on)
+        rows = await _match_rows()
+        for row in rows:
+            cand = _candidate()
+            if stage_on:
+                assert isinstance(row["confidence_flag"], list)
+                cand["confidence_flag"] = row["confidence_flag"]
+            else:
+                assert "confidence_flag" not in row
+            model = MatchCandidate.model_validate(cand)
+            assert _schema_errors(cand) == []
+            assert ("confidence_flag" in model.model_dump()) is stage_on
+        if stage_on:
+            assert [] in [row["confidence_flag"] for row in rows]
+            assert any(row["confidence_flag"] for row in rows)
 
     def test_legacy_rollback_shape_is_outside_the_contract(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(settings, "confidence_flag_list_enabled", False)
