@@ -20,7 +20,7 @@ only reads the result back and wipes the database.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +41,7 @@ TENANT = "it-outcome-preference"
 DIRECTION = "window_to_depot"
 
 
-def _write_pack(root: Path) -> None:
+def _write_pack(root: Path, variant: Callable[[dict[str, Any]], None] | None = None) -> None:
     raw = yaml.safe_load((SYNTHETIC_DOMAINS_ROOT / "orbital-logistics" / "spec.yaml").read_text())
     raw["domain"]["id"] = TENANT
     nodes = {n["label"]: n for n in raw["ontology"]["nodes"]}
@@ -84,8 +84,56 @@ def _write_pack(root: Path) -> None:
             }
         ]
     }
-    (root / TENANT).mkdir()
+    if variant is not None:
+        variant(raw)
+    (root / TENANT).mkdir(parents=True)
     (root / TENANT / "spec.yaml").write_text(yaml.safe_dump(raw, sort_keys=False))
+
+
+RELAY = "relay_to_depot"
+
+
+def _relay_direction(raw: dict[str, Any]) -> None:
+    """CEG-04: a second direction whose query entity shares the local id property and values."""
+    raw["ontology"]["nodes"].append(
+        {
+            "label": "RelayWindow",
+            "managedby": "sync",
+            "queryentity": True,
+            "matchdirection": RELAY,
+            "properties": [{"name": "window_id", "type": "string", "required": True}],
+        }
+    )
+    raw["matchentities"]["candidate"].append({"label": "OrbitalDepot", "matchdirection": RELAY})
+    raw["matchentities"]["queryentity"].append({"label": "RelayWindow", "matchdirection": RELAY})
+    raw["queryschema"]["matchdirections"].append(RELAY)
+    raw["sync"]["endpoints"].append(
+        {"path": "/v1/sync/relay-windows", "method": "POST", "batchstrategy": "UNWINDMERGE"}
+        | {"targetnode": "RelayWindow", "idproperty": "window_id"}
+    )
+    raw["ontology"]["edges"].append(
+        {
+            "type": "CONSIDERED_RELAY",
+            "from": "RelayWindow",
+            "to": "OrbitalDepot",
+            "direction": "DIRECTED",
+            "category": "transaction",
+            "managedby": "api",
+        }
+    )
+    raw["traversal"]["steps"].append(
+        {
+            "name": "bind_query_relay",
+            "pattern": "(qe:RelayWindow)-[:CONSIDERED_RELAY]->(candidate:OrbitalDepot)",
+            "required": False,
+            "matchdirections": [RELAY],
+        }
+    )
+    window_dim = next(d for d in raw["scoring"]["dimensions"] if d["name"] == "launch_preference")
+    window_dim["matchdirections"] = [DIRECTION]
+    raw["scoring"]["dimensions"].append(
+        {**window_dim, "name": "relay_preference", "weightkey": "w_relay", "matchdirections": [RELAY]}
+    )
 
 
 async def _wipe(driver: GraphDriver) -> None:
@@ -225,3 +273,241 @@ async def test_a_replay_keeps_the_community_recorded_with_the_outcome(graph: Gra
     await _record("window-1", "depot-a", "success", outcome_id="out-snap-1")
     [row] = await _history(graph)
     assert row["community"] == 1
+
+
+def _reload(graph: GraphDriver, root: Path, variant: Callable[[dict[str, Any]], None]) -> None:
+    _write_pack(root, variant)
+    get_state().reset()
+    init_dependencies(graph, DomainPackLoader(config_path=str(root)))
+
+
+def _window_dim(raw: dict[str, Any]) -> dict[str, Any]:
+    return next(d for d in raw["scoring"]["dimensions"] if d["name"] == "launch_preference")
+
+
+def _by_region(raw: dict[str, Any], **metadata: Any) -> None:
+    depot = next(n for n in raw["ontology"]["nodes"] if n["label"] == "OrbitalDepot")
+    depot["properties"].append({"name": "region_id", "type": "int"})
+    raw["scoring"]["dimensions"].append(
+        {**_window_dim(raw), "name": "by_region", "candidateprop": "region_id", "weightkey": "w_region"}
+        | {"defaultweight": 0.0, "metadata": {"success_value": "won", "success_property": "region_outcome", **metadata}}
+    )
+
+
+async def _outcomes(graph: GraphDriver) -> int:
+    [row] = await graph.execute_query("MATCH (o:DockingResult) RETURN count(o) AS n", database=TENANT)
+    return int(row["n"])
+
+
+async def test_ceg03_a_success_property_the_outcome_owns_is_refused_and_writes_nothing(
+    graph: GraphDriver, tmp_path: Path
+) -> None:
+    from engine.handlers import ValidationError
+
+    _reload(graph, tmp_path / "owned", lambda raw: _window_dim(raw)["metadata"].update(success_property="created_at"))
+    with pytest.raises(ValidationError, match="outcome identity field"):
+        await _record("window-1", "depot-a", "success", outcome_id="out-owned-1")
+    assert await _outcomes(graph) == 0
+
+
+async def test_ceg03_a_community_property_another_dimension_stores_success_in_is_refused(
+    graph: GraphDriver, tmp_path: Path
+) -> None:
+    from engine.handlers import ValidationError
+
+    _reload(graph, tmp_path / "collide", lambda raw: _by_region(raw, success_property="community_id"))
+    with pytest.raises(ValidationError, match="would both write it"):
+        await _record("window-1", "depot-a", "success", outcome_id="out-collide-1")
+    assert await _outcomes(graph) == 0
+
+
+async def test_ceg03_two_dimensions_with_disjoint_write_sets_both_record(graph: GraphDriver, tmp_path: Path) -> None:
+    _reload(graph, tmp_path / "disjoint", _by_region)
+    depot = {"depot_id": "depot-a", "accepts_hazmat": True, "docking_ports": 4, "reliability": 0.9}
+    synced = await handle_sync(
+        TENANT, {"entity_type": "orbital-depots", "batch": [depot | {"community_id": 1, "region_id": 7}]}
+    )
+    assert synced["status"] == "success"
+
+    result = await _record("window-1", "depot-a", "success", outcome_id="out-disjoint-1")
+
+    assert result["preference_history"]["linked_dimensions"] == ["launch_preference", "by_region"]
+    [row] = await graph.execute_query(
+        "MATCH (o:DockingResult {outcome_id: 'out-disjoint-1'}) "
+        "RETURN o.outcome_type AS outcome_type, o.region_outcome AS region_outcome, "
+        "o.community_id AS community, o.region_id AS region, o.outcome AS outcome",
+        database=TENANT,
+    )
+    assert row == {
+        "outcome_type": "success",
+        "region_outcome": "won",
+        "community": 1,
+        "region": 7,
+        "outcome": "success",
+    }
+
+
+async def test_ceg04_a_replay_resolving_another_query_entity_with_the_same_id_is_refused(
+    graph: GraphDriver, tmp_path: Path
+) -> None:
+    from engine.handlers import ValidationError
+
+    _reload(graph, tmp_path / "relay", _relay_direction)
+    synced = await handle_sync(TENANT, {"entity_type": "relay-windows", "batch": [{"window_id": "window-1"}]})
+    assert synced["status"] == "success"
+    first = await _record("window-1", "depot-a", "success", outcome_id="out-relay-1")
+    assert first["preference_history"]["linked_dimensions"] == ["launch_preference"]
+
+    async def _bindings() -> list[dict[str, Any]]:
+        return await graph.execute_query(
+            "MATCH (o:DockingResult {outcome_id: 'out-relay-1'}) "
+            "OPTIONAL MATCH (qe)-[r]->(o) WHERE qe:LaunchWindow OR qe:RelayWindow "
+            "RETURN [l IN labels(qe) WHERE l IN ['LaunchWindow', 'RelayWindow']] AS labels, count(r) AS links, "
+            "o.query_entity_id AS bound_id, o.query_entity_label AS bound_label",
+            database=TENANT,
+        )
+
+    before = await _bindings()
+    assert before == [{"labels": ["LaunchWindow"], "links": 1, "bound_id": "window-1", "bound_label": "LaunchWindow"}]
+    # Same local id, same match identity, another direction: another query entity.
+    with pytest.raises(ValidationError, match="is already recorded"):
+        await _record(
+            "window-1", "depot-a", "success", outcome_id="out-relay-1", fingerprint={"match_direction": RELAY}
+        )
+    assert await _bindings() == before
+
+
+async def test_ceg04_a_binding_without_a_stored_label_replays_only_in_its_own_direction(
+    graph: GraphDriver, tmp_path: Path
+) -> None:
+    from engine.handlers import ValidationError
+
+    _reload(graph, tmp_path / "legacy", _relay_direction)
+    synced = await handle_sync(TENANT, {"entity_type": "relay-windows", "batch": [{"window_id": "window-1"}]})
+    assert synced["status"] == "success"
+    await _record("window-1", "depot-a", "success", outcome_id="out-legacy-1")
+    # An outcome bound before the label was stored (#577's writer): raw Cypher models it.
+    await graph.execute_write(
+        cypher="MATCH (o:DockingResult {outcome_id: 'out-legacy-1'}) REMOVE o.query_entity_label",
+        parameters={},
+        database=TENANT,
+    )
+
+    with pytest.raises(ValidationError, match="is already recorded"):
+        await _record(
+            "window-1", "depot-a", "success", outcome_id="out-legacy-1", fingerprint={"match_direction": RELAY}
+        )
+    replay = await _record("window-1", "depot-a", "success", outcome_id="out-legacy-1")
+
+    assert replay["preference_history"]["linked_dimensions"] == ["launch_preference"]
+    [row] = await graph.execute_query(
+        "MATCH (o:DockingResult {outcome_id: 'out-legacy-1'}) "
+        "OPTIONAL MATCH (r:RelayWindow)-[x]->(o) "
+        "RETURN o.query_entity_label AS label, count(x) AS relay_links",
+        database=TENANT,
+    )
+    assert row == {"label": "LaunchWindow", "relay_links": 0}
+
+
+def _counterfactuals(raw: dict[str, Any]) -> None:
+    raw["counterfactual"] = {"enabled": True, "max_scenarios_per_outcome": 3, "min_confidence": 0.3}
+
+
+async def test_ceg14_a_success_property_the_counterfactual_claim_owns_is_refused(
+    graph: GraphDriver, tmp_path: Path
+) -> None:
+    from engine.handlers import ValidationError
+
+    def claimed(raw: dict[str, Any]) -> None:
+        _counterfactuals(raw)
+        _window_dim(raw)["metadata"]["success_property"] = "counterfactual_generated_at"
+
+    _reload(graph, tmp_path / "cf-claimed", claimed)
+    with pytest.raises(ValidationError, match="outcome identity field"):
+        await _record("window-1", "depot-a", "failure", outcome_id="out-cf-claimed-1")
+    assert await _outcomes(graph) == 0
+
+
+async def test_ceg14_preference_history_never_satisfies_the_counterfactual_claim(
+    graph: GraphDriver, tmp_path: Path
+) -> None:
+    _reload(graph, tmp_path / "cf", _counterfactuals)
+
+    def _fingerprint(dims: list[str], weights: dict[str, float]) -> dict[str, Any]:
+        return {"match_direction": DIRECTION, "active_dimensions": dims, "dimension_weights": weights}
+
+    # Two positives in the direction share a dimension the negative lacks: a contrast to generate from.
+    positives = [(["price", "geo"], {"price": 0.5, "geo": 0.5}), (["price", "geo"], {"price": 0.6, "geo": 0.4})]
+    for n, (dims, weights) in enumerate(positives):
+        await _record(
+            "window-2", "depot-b", "success", outcome_id=f"out-cf-p{n}", fingerprint=_fingerprint(dims, weights)
+        )
+
+    result = await _record(
+        "window-1", "depot-a", "failure", outcome_id="out-cf-neg", fingerprint=_fingerprint(["price"], {"price": 0.2})
+    )
+
+    assert result["preference_history"]["linked_dimensions"] == ["launch_preference"]
+    [row] = await graph.execute_query(
+        "MATCH (o:DockingResult {outcome_id: 'out-cf-neg'}) "
+        "OPTIONAL MATCH (cs:CounterfactualScenario {actual_outcome: 'out-cf-neg'}) "
+        "RETURN o.counterfactual_generated_at IS NOT NULL AS generated, count(cs) AS scenarios, "
+        "o.outcome_type AS outcome_type",
+        database=TENANT,
+    )
+    assert row["generated"] is True
+    assert row["scenarios"] > 0
+    assert row["outcome_type"] == "failure"
+
+
+EXPRESS = "express_window_to_depot"
+
+
+def _express_direction(raw: dict[str, Any]) -> None:
+    """CEG-15: a second direction sharing the LaunchWindow query label, with its own dimension and relation."""
+    raw["matchentities"]["candidate"].append({"label": "OrbitalDepot", "matchdirection": EXPRESS})
+    raw["matchentities"]["queryentity"].append({"label": "LaunchWindow", "matchdirection": EXPRESS})
+    raw["queryschema"]["matchdirections"].append(EXPRESS)
+    raw["traversal"]["steps"][0]["matchdirections"].append(EXPRESS)
+    window_dim = _window_dim(raw)
+    window_dim["matchdirections"] = [DIRECTION]
+    express_dim = {**window_dim, "name": "express_preference", "weightkey": "w_express"}
+    express_dim |= {"matchdirections": [EXPRESS], "defaultweight": 0.0}
+    express_dim["metadata"] = {"success_value": "success", "success_property": "express_outcome"}
+    express_dim["metadata"] |= {"outcome_relation": "EXPRESS_RESULT"}
+    raw["scoring"]["dimensions"].append(express_dim)
+
+
+async def test_ceg15_a_replay_under_another_direction_sharing_the_query_label_is_refused(
+    graph: GraphDriver, tmp_path: Path
+) -> None:
+    from engine.handlers import ValidationError
+
+    _reload(graph, tmp_path / "express", _express_direction)
+    express = EXPRESS
+    first = await _record("window-1", "depot-a", "success", outcome_id="out-express-1")
+    assert first["preference_history"]["linked_dimensions"] == ["launch_preference"]
+
+    async def _state() -> dict[str, Any]:
+        [row] = await graph.execute_query(
+            "MATCH (o:DockingResult {outcome_id: 'out-express-1'}) "
+            "OPTIONAL MATCH (:LaunchWindow)-[x:EXPRESS_RESULT]->(o) "
+            "RETURN count(x) AS express_links, o.express_outcome AS express_outcome, "
+            "o.query_entity_label AS label, o.query_entity_id AS id, o.match_direction AS direction",
+            database=TENANT,
+        )
+        return row
+
+    before = await _state()
+    assert before == {"express_links": 0, "express_outcome": None, "label": "LaunchWindow", "id": "window-1"} | {
+        "direction": DIRECTION
+    }
+    with pytest.raises(ValidationError, match="under match direction"):
+        await _record(
+            "window-1", "depot-a", "success", outcome_id="out-express-1", fingerprint={"match_direction": express}
+        )
+    assert await _state() == before
+    # The same-direction replay is still a no-op.
+    replay = await _record("window-1", "depot-a", "success", outcome_id="out-express-1")
+    assert replay.get("replayed") is True
+    assert await _state() == before
