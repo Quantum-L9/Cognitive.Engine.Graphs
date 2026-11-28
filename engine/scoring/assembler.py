@@ -308,6 +308,15 @@ class ScoringAssembler:
                 self._last_known_aliases[name] = known_alias
         return ", ".join(exprs), ", ".join(names)
 
+    @property
+    def last_dimension_known_aliases(self) -> dict[str, str]:
+        """``{<dim>: <dim>__known}`` the last clause projected; empty when not projected (CEG-13).
+
+        A clause that re-projects rows after the scoring WITH (an arbitration
+        ``WITH``) must pass these columns through for ``dimension_known`` to resolve.
+        """
+        return dict(getattr(self, "_last_known_aliases", None) or {})
+
     def dimension_known_projection(self) -> str | None:
         """``{<dim>: <dim>__known, ...}`` for the last assembled clause; ``None`` when not projected (CEG-13)."""
         known = getattr(self, "_last_known_aliases", None) or {}

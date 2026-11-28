@@ -156,6 +156,19 @@ def test_known_projection_names_every_projected_dimension() -> None:
     )
 
 
+def test_known_aliases_are_exposed_for_a_re_projecting_clause(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A clause after the scoring WITH (an arbitration WITH) passes these columns through."""
+    assembler = _assembler([_reliability(), _extra(computation="lognormalized")])
+    _first_with(assembler)
+    assert assembler.last_dimension_known_aliases == {
+        "depot_reliability": "depot_reliability__known",
+        "extra": "extra__known",
+    }
+    monkeypatch.setattr(settings, _FLAG, False)
+    _first_with(assembler)
+    assert assembler.last_dimension_known_aliases == {}
+
+
 def test_knownness_does_not_enter_the_score() -> None:
     assembler = _assembler([_reliability(), _extra(computation="lognormalized")])
     _, second = _first_with(assembler)
