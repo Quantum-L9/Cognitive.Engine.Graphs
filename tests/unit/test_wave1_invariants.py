@@ -948,7 +948,12 @@ async def _plasticos_dir1_match_cypher() -> str:
 class TestMatchCollapsesTraversalRows:
     """A Facility with k PROCESSES paths is one candidate, not k rows (RG-047)."""
 
-    async def test_collapse_clause_precedes_order_and_limit(self) -> None:
+    async def test_collapse_clause_precedes_order_and_limit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from engine.config.settings import settings
+
+        # CEG-13's knownness map rides the same collapse (tests/unit/test_dimension_knownness.py);
+        # pinned off here, where the collapse order is the subject.
+        monkeypatch.setattr(settings, "dimension_knownness_projection_enabled", False)
         cypher = await _plasticos_dir1_match_cypher()
         # The required multi-valued step that multiplies rows:
         assert "MATCH (candidate:Facility)-[:PROCESSES]->(polymer:PolymerFamily)" in cypher

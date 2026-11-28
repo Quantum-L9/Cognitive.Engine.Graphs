@@ -272,7 +272,7 @@ class ScoringAssembler:
 
         self._last_active_dims = list(active_dim_names)
         self._last_effective_weights = effective_weights
-        all_exprs = ", ".join(dimension_exprs)
+        all_exprs, passthrough = self._projected_columns(dimension_exprs, active_dim_names)
         score_expr = self._build_score_expression(weight_exprs)
         if settings.score_clamp_enabled and weight_exprs:
             # D5: the composite is bounded to [0, 1] too. A learned-weight
@@ -281,12 +281,78 @@ class ScoringAssembler:
             score_expr = self._clamp_expression(score_expr)
 
         if all_exprs:
-            dim_names_passthrough = ", ".join(active_dim_names)
-            clause = f"WITH candidate, {all_exprs}\nWITH candidate, {dim_names_passthrough}, {score_expr} AS score"
+            clause = f"WITH candidate, {all_exprs}\nWITH candidate, {passthrough}, {score_expr} AS score"
         else:
             clause = f"WITH candidate, {score_expr} AS score"
 
         return clause, pareto_metadata
+
+    def _projected_columns(self, dimension_exprs: list[str], active_dim_names: list[str]) -> tuple[str, str]:
+        """The first scoring WITH's columns and the names the second WITH passes through.
+
+        CEG-13 (``dimension_knownness_projection_enabled``): each active and
+        observed-only dimension also projects ``<dim>__known``, computed here
+        while its operands (traversal aliases included) are still in scope.
+        Off: the dimension columns alone, byte-identical to before.
+        """
+        from engine.config.settings import settings
+
+        self._last_known_aliases: dict[str, str] = {}
+        exprs, names = list(dimension_exprs), [sanitize_label(n) for n in active_dim_names]
+        if settings.dimension_knownness_projection_enabled:
+            dims = {d.name: d for d in self.scoring_spec.dimensions}
+            for name in active_dim_names:
+                known_alias = sanitize_label(f"{name}__known")
+                exprs.append(f"{self._known_expression(dims[name])} AS {known_alias}")
+                names.append(known_alias)
+                self._last_known_aliases[name] = known_alias
+        return ", ".join(exprs), ", ".join(names)
+
+    def dimension_known_projection(self) -> str | None:
+        """``{<dim>: <dim>__known, ...}`` for the last assembled clause; ``None`` when not projected (CEG-13)."""
+        known = getattr(self, "_last_known_aliases", None) or {}
+        if not known:
+            return None
+        return "{" + ", ".join(f"{sanitize_label(name)}: {alias}" for name, alias in known.items()) + "}"
+
+    # Computations whose resolved source is not a number (CEG-13): present means not null.
+    _TEMPORAL_SOURCE: frozenset[ComputationType] = frozenset({ComputationType.TEMPORALPROXIMITY})
+    _CATEGORICAL_SOURCE: frozenset[ComputationType] = frozenset(
+        {ComputationType.COMMUNITYMATCH, ComputationType.PREFERENCEATTENTION}
+    )
+
+    @staticmethod
+    def _numeric_known(operand: str) -> str:
+        """A numeric operand is known when it is not null and not NaN (a non-number reads as unknown)."""
+        return f"({operand} IS NOT NULL AND coalesce(NOT isNaN(toFloatOrNull({operand})), false))"
+
+    def _known_expression(self, dim: ScoringDimensionSpec) -> str:
+        """CEG-13: whether the dimension's resolved source is present and valid for its operand type.
+
+        Uses the compiler's resolution (``_source_owner`` / ``_source_property``,
+        the geodecay longitude, weightedrate's confidence). Numeric sources must
+        be non-null and not NaN; temporal and categorical ones non-null. A
+        dimension with no single stored source (customcypher, community_bridge,
+        an unknown computation) is known when its compiled value is a number.
+        """
+        computation: Any = dim.computation
+        owner = self._source_owner(dim) if isinstance(computation, ComputationType) else None
+        prop = self._source_property(dim) if owner else None
+        if not owner or not isinstance(prop, str) or not prop:
+            return self._numeric_known(f"({self._compile_dimension(dim)})")
+        primary = f"{owner}.{sanitize_label(prop)}"
+        if computation in self._TEMPORAL_SOURCE or computation in self._CATEGORICAL_SOURCE:
+            parts = [f"({primary} IS NOT NULL)"]
+        else:
+            parts = [self._numeric_known(primary)]
+        secondary: Any = None
+        if computation is ComputationType.GEODECAY:
+            secondary = self._geodecay_source_longitude(dim)
+        elif computation is ComputationType.WEIGHTEDRATE:
+            secondary = self._weightedrate_confidence_property(dim)
+        if isinstance(secondary, str) and secondary:
+            parts.append(self._numeric_known(f"{owner}.{sanitize_label(secondary)}"))
+        return " AND ".join(parts)
 
     @property
     def last_active_dimension_names(self) -> list[str]:

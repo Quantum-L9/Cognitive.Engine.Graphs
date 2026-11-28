@@ -91,7 +91,8 @@ class TestScoringProperties:
         if not active:
             assert score_line == "WITH candidate, 0.0 AS score"
             return
-        assert score_line.startswith(f"WITH candidate, {', '.join(active)}, CASE WHEN ((")
+        known = [f"{name}__known" for name in active]  # CEG-13 knownness columns pass through too
+        assert score_line.startswith(f"WITH candidate, {', '.join(active + known)}, CASE WHEN ((")
         assert score_line.endswith(" END AS score")
         assert "isNaN(" in score_line
 
