@@ -171,6 +171,13 @@ class Settings(BaseSettings):
     # lognormalized treats a candidate value <= -1 (log undefined) as unknown,
     # like a missing value. Off: the legacy `or` defaults and log(1 + x).
     scoring_explicit_numeric_defaults_enabled: bool = True
+    # L7 / CEG-13: the scoring WITH also projects `<dim>__known` per active and
+    # observed-only dimension (its resolved source is present and valid for its
+    # operand type: numeric not null and not NaN, temporal / categorical not
+    # null), computed while traversal aliases are in scope; handle_match carries
+    # it through the per-candidate collapse as `dimension_known` for
+    # arbitration. Score values are unchanged. Off: no extra projection.
+    dimension_knownness_projection_enabled: bool = True
     strict_null_gates: bool = True  # W1-03: reject gates with null-resolved params
     max_hop_hard_cap: int = 10  # W1-04: maximum hops for traversal patterns
     param_strict_mode: bool = True  # W1-05: raise on derived parameter resolution failures

@@ -1009,6 +1009,9 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     project_dimensions = bool(_match_settings.match_dimension_projection)
     dim_projection = ""
     absent_expr = scoring_assembler.absent_sources_expr()
+    # CEG-13: per-dimension knownness the scoring WITH projected, as one map.
+    known_map = scoring_assembler.dimension_known_projection() if project_dimensions else None
+    known_projection = f", {known_map} AS dimension_known" if known_map is not None else ""
     if project_dimensions:
         dim_aliases = [sanitize_label(name) for name in scoring_assembler.last_active_dimension_names]
         dim_map = ", ".join(f"{alias}: {alias}" for alias in dim_aliases)
@@ -1017,11 +1020,18 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
     # ORDER BY / LIMIT, so top_n counts distinct candidates (R2-DEC-05 option A).
     if _match_settings.match_collapse_traversal_rows:
         if project_dimensions:
-            row_projection = f"WITH candidate, score, {dim_projection}, {absent_expr} AS absent_sources\n"
-            best_row = "{score: score, dimension_scores: dimension_scores, absent_sources: absent_sources}"
+            row_projection = (
+                f"WITH candidate, score, {dim_projection}{known_projection}, {absent_expr} AS absent_sources\n"
+            )
+            known_field = ", dimension_known: dimension_known" if known_projection else ""
+            best_row = (
+                f"{{score: score, dimension_scores: dimension_scores, absent_sources: absent_sources{known_field}}}"
+            )
             return_line = (
                 "RETURN candidate, best.score AS score, best.dimension_scores AS dimension_scores, "
-                "best.absent_sources AS absent_sources\n"
+                "best.absent_sources AS absent_sources"
+                + (", best.dimension_known AS dimension_known" if known_field else "")
+                + "\n"
             )
         else:
             row_projection = "WITH candidate, score\n"
@@ -1034,7 +1044,7 @@ async def handle_match(tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
             + return_line
         )
     elif project_dimensions:
-        return_line = f"RETURN candidate, score, {dim_projection}, {absent_expr} AS absent_sources\n"
+        return_line = f"RETURN candidate, score, {dim_projection}{known_projection}, {absent_expr} AS absent_sources\n"
     else:
         return_line = "RETURN candidate, score\n"
     # RU-011 / CEG-COR-033: a WHERE directly after OPTIONAL MATCH belongs to it

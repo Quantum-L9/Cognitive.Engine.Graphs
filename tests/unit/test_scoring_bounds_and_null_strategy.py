@@ -95,7 +95,8 @@ def test_composite_score_is_clamped_under_score_clamp() -> None:
     clause, _ = assembler.assemble_scoring_clause(_DIRECTION, {})
     weighted = "(0.6 * depot_reliability) + (0.3 * port_capacity)"
     assert _score_line(clause) == (
-        f"WITH candidate, depot_reliability, port_capacity, {ScoringAssembler._clamp_expression(weighted)} AS score"
+        "WITH candidate, depot_reliability, port_capacity, depot_reliability__known, port_capacity__known, "
+        f"{ScoringAssembler._clamp_expression(weighted)} AS score"
     )
 
 
@@ -103,7 +104,8 @@ def test_composite_is_unclamped_with_score_clamp_off(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(settings, "score_clamp_enabled", False)
     clause, _ = ScoringAssembler(_spec()).assemble_scoring_clause(_DIRECTION, {})
     assert _score_line(clause) == (
-        "WITH candidate, depot_reliability, port_capacity, (0.6 * depot_reliability) + (0.3 * port_capacity) AS score"
+        "WITH candidate, depot_reliability, port_capacity, depot_reliability__known, port_capacity__known, "
+        "(0.6 * depot_reliability) + (0.3 * port_capacity) AS score"
     )
 
 

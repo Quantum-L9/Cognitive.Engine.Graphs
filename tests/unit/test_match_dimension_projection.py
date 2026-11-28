@@ -141,7 +141,10 @@ class TestDimensionProjection:
             assert not set(DIMS) & set(cand)
             assert set(cand["dimension_scores"]) == set(DIMS)
 
-    async def test_projection_survives_the_per_candidate_collapse(self) -> None:
+    async def test_projection_survives_the_per_candidate_collapse(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The knownness map (CEG-13) rides the same collapse; it is asserted in
+        # tests/unit/test_dimension_knownness.py. Pinned off here: this test is the score map's.
+        monkeypatch.setattr(settings, "dimension_knownness_projection_enabled", False)
         driver = _wire(_spec())
         await _match()
         cypher = driver.calls[0]["cypher"]
