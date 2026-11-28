@@ -156,6 +156,19 @@ class Settings(BaseSettings):
     # --- Wave 1: Invariant & Validation Hardening (seL4-inspired) ---
     domain_strict_validation: bool = True  # W1-01: cross-reference validators at load time
     score_clamp_enabled: bool = True  # W1-02: clamp dimension scores to [0, 1]
+    # CEG scoring audit L2 / D3a: null_strategy inherit_prior / population_mean
+    # were dead — each computation coalesces its property first, so the outer
+    # coalesce never saw a null. On: when the dimension's source property is
+    # missing, the dimension takes candidate._prior_<dim> / $_popmean_<dim>
+    # (then defaultwhennull); a present property is unaffected. Restores the
+    # declared option, so it ships ON. Off: the legacy (dead) wrapper.
+    null_strategy_effective_enabled: bool = True
+    # CEG scoring audit L2 / D5: a learned DimensionWeight.weight that is not a
+    # finite number (NaN, +/-Infinity, a bool or a string) was emitted into the
+    # score expression. On: such a weight is ignored on read with a logged
+    # reason and the dimension scores with its request / spec weight. Restores
+    # the [0, 1] score invariant, so it ships ON. Off: the legacy reader.
+    learned_weight_finite_read_enabled: bool = True
     strict_null_gates: bool = True  # W1-03: reject gates with null-resolved params
     max_hop_hard_cap: int = 10  # W1-04: maximum hops for traversal patterns
     param_strict_mode: bool = True  # W1-05: raise on derived parameter resolution failures
