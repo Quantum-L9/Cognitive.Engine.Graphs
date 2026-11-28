@@ -370,7 +370,7 @@ async def test_ceg04_a_replay_resolving_another_query_entity_with_the_same_id_is
     before = await _bindings()
     assert before == [{"labels": ["LaunchWindow"], "links": 1, "bound_id": "window-1", "bound_label": "LaunchWindow"}]
     # Same local id, same match identity, another direction: another query entity.
-    with pytest.raises(ValidationError, match="already recorded for another query entity"):
+    with pytest.raises(ValidationError, match="is already recorded"):
         await _record(
             "window-1", "depot-a", "success", outcome_id="out-relay-1", fingerprint={"match_direction": RELAY}
         )
@@ -393,7 +393,7 @@ async def test_ceg04_a_binding_without_a_stored_label_replays_only_in_its_own_di
         database=TENANT,
     )
 
-    with pytest.raises(ValidationError, match="already recorded for another query entity"):
+    with pytest.raises(ValidationError, match="is already recorded"):
         await _record(
             "window-1", "depot-a", "success", outcome_id="out-legacy-1", fingerprint={"match_direction": RELAY}
         )
@@ -407,3 +407,107 @@ async def test_ceg04_a_binding_without_a_stored_label_replays_only_in_its_own_di
         database=TENANT,
     )
     assert row == {"label": "LaunchWindow", "relay_links": 0}
+
+
+def _counterfactuals(raw: dict[str, Any]) -> None:
+    raw["counterfactual"] = {"enabled": True, "max_scenarios_per_outcome": 3, "min_confidence": 0.3}
+
+
+async def test_ceg14_a_success_property_the_counterfactual_claim_owns_is_refused(
+    graph: GraphDriver, tmp_path: Path
+) -> None:
+    from engine.handlers import ValidationError
+
+    def claimed(raw: dict[str, Any]) -> None:
+        _counterfactuals(raw)
+        _window_dim(raw)["metadata"]["success_property"] = "counterfactual_generated_at"
+
+    _reload(graph, tmp_path / "cf-claimed", claimed)
+    with pytest.raises(ValidationError, match="outcome identity field"):
+        await _record("window-1", "depot-a", "failure", outcome_id="out-cf-claimed-1")
+    assert await _outcomes(graph) == 0
+
+
+async def test_ceg14_preference_history_never_satisfies_the_counterfactual_claim(
+    graph: GraphDriver, tmp_path: Path
+) -> None:
+    _reload(graph, tmp_path / "cf", _counterfactuals)
+
+    def _fingerprint(dims: list[str], weights: dict[str, float]) -> dict[str, Any]:
+        return {"match_direction": DIRECTION, "active_dimensions": dims, "dimension_weights": weights}
+
+    # Two positives in the direction share a dimension the negative lacks: a contrast to generate from.
+    positives = [(["price", "geo"], {"price": 0.5, "geo": 0.5}), (["price", "geo"], {"price": 0.6, "geo": 0.4})]
+    for n, (dims, weights) in enumerate(positives):
+        await _record(
+            "window-2", "depot-b", "success", outcome_id=f"out-cf-p{n}", fingerprint=_fingerprint(dims, weights)
+        )
+
+    result = await _record(
+        "window-1", "depot-a", "failure", outcome_id="out-cf-neg", fingerprint=_fingerprint(["price"], {"price": 0.2})
+    )
+
+    assert result["preference_history"]["linked_dimensions"] == ["launch_preference"]
+    [row] = await graph.execute_query(
+        "MATCH (o:DockingResult {outcome_id: 'out-cf-neg'}) "
+        "OPTIONAL MATCH (cs:CounterfactualScenario {actual_outcome: 'out-cf-neg'}) "
+        "RETURN o.counterfactual_generated_at IS NOT NULL AS generated, count(cs) AS scenarios, "
+        "o.outcome_type AS outcome_type",
+        database=TENANT,
+    )
+    assert row["generated"] is True
+    assert row["scenarios"] > 0
+    assert row["outcome_type"] == "failure"
+
+
+EXPRESS = "express_window_to_depot"
+
+
+def _express_direction(raw: dict[str, Any]) -> None:
+    """CEG-15: a second direction sharing the LaunchWindow query label, with its own dimension and relation."""
+    raw["matchentities"]["candidate"].append({"label": "OrbitalDepot", "matchdirection": EXPRESS})
+    raw["matchentities"]["queryentity"].append({"label": "LaunchWindow", "matchdirection": EXPRESS})
+    raw["queryschema"]["matchdirections"].append(EXPRESS)
+    raw["traversal"]["steps"][0]["matchdirections"].append(EXPRESS)
+    window_dim = _window_dim(raw)
+    window_dim["matchdirections"] = [DIRECTION]
+    express_dim = {**window_dim, "name": "express_preference", "weightkey": "w_express"}
+    express_dim |= {"matchdirections": [EXPRESS], "defaultweight": 0.0}
+    express_dim["metadata"] = {"success_value": "success", "success_property": "express_outcome"}
+    express_dim["metadata"] |= {"outcome_relation": "EXPRESS_RESULT"}
+    raw["scoring"]["dimensions"].append(express_dim)
+
+
+async def test_ceg15_a_replay_under_another_direction_sharing_the_query_label_is_refused(
+    graph: GraphDriver, tmp_path: Path
+) -> None:
+    from engine.handlers import ValidationError
+
+    _reload(graph, tmp_path / "express", _express_direction)
+    express = EXPRESS
+    first = await _record("window-1", "depot-a", "success", outcome_id="out-express-1")
+    assert first["preference_history"]["linked_dimensions"] == ["launch_preference"]
+
+    async def _state() -> dict[str, Any]:
+        [row] = await graph.execute_query(
+            "MATCH (o:DockingResult {outcome_id: 'out-express-1'}) "
+            "OPTIONAL MATCH (:LaunchWindow)-[x:EXPRESS_RESULT]->(o) "
+            "RETURN count(x) AS express_links, o.express_outcome AS express_outcome, "
+            "o.query_entity_label AS label, o.query_entity_id AS id, o.match_direction AS direction",
+            database=TENANT,
+        )
+        return row
+
+    before = await _state()
+    assert before == {"express_links": 0, "express_outcome": None, "label": "LaunchWindow", "id": "window-1"} | {
+        "direction": DIRECTION
+    }
+    with pytest.raises(ValidationError, match="under match direction"):
+        await _record(
+            "window-1", "depot-a", "success", outcome_id="out-express-1", fingerprint={"match_direction": express}
+        )
+    assert await _state() == before
+    # The same-direction replay is still a no-op.
+    replay = await _record("window-1", "depot-a", "success", outcome_id="out-express-1")
+    assert replay.get("replayed") is True
+    assert await _state() == before

@@ -122,7 +122,13 @@ class _Graph:
             self.bound.setdefault(
                 parameters["outcome_id"], (parameters["query_entity_label"], parameters["query_entity_id"])
             )
-            return [{"prior": prior[1] if prior else None, "prior_label": prior[0] if prior else None}]
+            return [
+                {
+                    "prior": prior[1] if prior else None,
+                    "prior_label": prior[0] if prior else None,
+                    "prior_direction": stored.get("match_direction") if prior else None,
+                }
+            ]
         if "MERGE (qe)" in cypher:
             if self._fail_history:
                 raise RuntimeError("history write lost its connection")
@@ -463,7 +469,10 @@ def test_every_property_an_outcome_writer_sets_is_reserved(keyed: bool) -> None:
     assert assigned <= _PREFERENCE_RESERVED_OUTCOME_FIELDS
 
 
-@pytest.mark.parametrize("owned", ["created_at", "value", "domain_id", "match_direction", "propagated_at"])
+@pytest.mark.parametrize(
+    "owned",
+    ["created_at", "value", "domain_id", "match_direction", "propagated_at", "counterfactual_generated_at"],
+)
 async def test_a_success_property_naming_any_outcome_owned_property_is_refused(owned: str) -> None:
     graph = _wire(_spec(_raw(success_property=owned, success_value="won")), _Graph())
     with pytest.raises(ValidationError, match="outcome identity field"):
@@ -539,3 +548,47 @@ async def test_a_binding_recorded_before_labels_were_stored_replays_in_its_own_d
     result = await handle_outcomes(TENANT, _payload(outcome_id="out-1"))
     assert result["preference_history"]["query_entity_id"] == "window-1"
     assert graph.bound["out-1"] == ("LaunchWindow", "window-1")
+
+
+# ── CEG-14: every subsystem that claims the outcome node owns its properties ───
+
+
+def test_every_property_another_outcome_owner_claims_is_reserved() -> None:
+    """The propagation and counterfactual claims alias the outcome node ``claim``."""
+    import inspect
+    import re
+
+    from engine.causal import counterfactual
+    from engine.feedback import score_propagator
+    from engine.handlers import _PREFERENCE_RESERVED_OUTCOME_FIELDS
+
+    claimed: set[str] = set()
+    for owner in (counterfactual, score_propagator):
+        claimed |= set(re.findall(r"\bclaim\.([A-Za-z_][A-Za-z0-9_]*)\s*=", inspect.getsource(owner)))
+        claimed |= set(re.findall(r"(?:SET|REMOVE) claim\.([A-Za-z_][A-Za-z0-9_]*)", inspect.getsource(owner)))
+    assert {"counterfactual_generated_at", "_counterfactual_lock", "propagated_at", "_propagation_lock"} <= claimed
+    assert claimed <= _PREFERENCE_RESERVED_OUTCOME_FIELDS
+
+
+# ── CEG-15: the binding carries the outcome's direction ────────────────────────
+
+
+def _express_direction(raw: dict[str, Any]) -> dict[str, Any]:
+    """A second direction whose query entity is the same LaunchWindow label."""
+    raw["matchentities"]["candidate"].append({"label": "OrbitalDepot", "matchdirection": "express"})
+    raw["matchentities"]["queryentity"].append({"label": "LaunchWindow", "matchdirection": "express"})
+    raw["queryschema"]["matchdirections"].append("express")
+    raw["traversal"]["steps"][0]["matchdirections"].append("express")
+    return raw
+
+
+async def test_a_replay_under_another_direction_sharing_the_label_is_refused() -> None:
+    graph = _wire(_spec(_express_direction(_raw())), _Graph())
+    await handle_outcomes(TENANT, _payload(outcome_id="out-1"))
+    before = len(_history(graph))
+    with pytest.raises(ValidationError, match="under match direction 'window_to_depot'"):
+        await handle_outcomes(TENANT, _payload(outcome_id="out-1", fingerprint={"match_direction": "express"}))
+    assert len(_history(graph)) == before
+    # A same-direction replay is still accepted.
+    replay = await handle_outcomes(TENANT, _payload(outcome_id="out-1"))
+    assert replay["preference_history"]["query_entity_id"] == "window-1"

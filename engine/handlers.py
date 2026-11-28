@@ -3109,9 +3109,11 @@ def _build_outcome_write(
 
 _OUTCOME_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:\-]{0,127}$")
 _OUTCOME_STORED_FIELDS = ("match_id", "candidate_id", "outcome", "tenant")
-# CEG-03: every property an outcome writer (both forms of _build_outcome_write), the
-# replay binding or the propagation claim owns on the outcome node. A preference-history
-# SET on one would corrupt the observation, so the history write set may name none.
+# CEG-03 / CEG-14: every property an outcome writer (both forms of _build_outcome_write),
+# the replay binding, the propagation claim or the counterfactual claim owns on the
+# outcome node. A preference-history SET on one would corrupt the observation, so the
+# history write set may name none. tests/unit/test_outcome_preference_history.py reads
+# every owner's Cypher and fails if one sets an outcome property missing here.
 _PREFERENCE_RESERVED_OUTCOME_FIELDS = frozenset(
     (
         *_OUTCOME_STORED_FIELDS,
@@ -3129,8 +3131,13 @@ _PREFERENCE_RESERVED_OUTCOME_FIELDS = frozenset(
         "_created_by_request",
         "query_entity_id",
         "query_entity_label",
+        # engine/feedback/score_propagator.py: the keyed propagation claim.
         "_propagation_lock",
         "propagated_at",
+        # engine/causal/counterfactual.py: the per-outcome generation claim (CEG-14). A
+        # history value here would read as "already generated" and suppress scenarios.
+        "_counterfactual_lock",
+        "counterfactual_generated_at",
     )
 )
 
@@ -3417,18 +3424,21 @@ def _preference_claim_cypher(outcome_label: str) -> str:
     under another label is another entity. A binding recorded before the label
     was stored resolves by the outcome's own ``match_direction``: a replay in that
     direction resolves the same label, which is backfilled; another direction
-    leaves it unresolved, so the replay is refused.
+    leaves it unresolved, so the replay is refused. CEG-15: the binding also
+    carries the outcome's direction, ``o.match_direction`` written once with the
+    outcome; one label can serve two directions with different history plans.
     """
     label = sanitize_label(outcome_label)
     return (
         "MATCH (o:" + label + " {outcome_id: $outcome_id})\n"
         "WITH o, o.query_entity_id AS prior,\n"
+        "     o.match_direction AS prior_direction,\n"
         "     CASE WHEN o.query_entity_id IS NOT NULL AND o.query_entity_label IS NULL\n"
         "               AND coalesce(o.match_direction, '') = coalesce($match_direction, '') THEN $query_entity_label\n"
         "          ELSE o.query_entity_label END AS prior_label\n"
         "SET o.query_entity_id = coalesce(prior, $query_entity_id),\n"
         "    o.query_entity_label = CASE WHEN prior IS NULL THEN $query_entity_label ELSE prior_label END\n"
-        "RETURN prior, prior_label"
+        "RETURN prior, prior_label, prior_direction"
     )
 
 
@@ -3468,6 +3478,15 @@ async def _write_outcome_with_preference_history(
             raise _OutcomeWriteRefused(exc) from exc
         [bound] = await (await tx.run(claim, binding)).data() or [{"prior": None}]
         prior = bound.get("prior")
+        if prior is not None and (bound.get("prior_direction") or None) != (binding["match_direction"] or None):
+            raise _OutcomeWriteRefused(
+                ValidationError(
+                    f"outcome_id {parameters['outcome_id']!r} is already recorded under match direction "
+                    f"{bound.get('prior_direction')!r}; a replay cannot change it",
+                    action="outcomes",
+                    tenant=tenant,
+                )
+            )
         if prior is not None and (prior, bound.get("prior_label")) != (
             binding["query_entity_id"],
             binding["query_entity_label"],
