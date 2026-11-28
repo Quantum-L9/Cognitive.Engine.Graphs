@@ -101,6 +101,7 @@ independently of the code default.
 | Gate WHERE Row Scope | `GATE_WHERE_ROW_SCOPE` (`gate_where_row_scope`) | `True` | unset | active (correctness, RU-011); match emits `WITH *` before the gate `WHERE` so gates remove candidate rows even after a trailing `OPTIONAL MATCH`; off restores `WHERE` directly after the traversal |
 | Match Collapse Traversal Rows | `MATCH_COLLAPSE_TRAVERSAL_ROWS` (`match_collapse_traversal_rows`) | `True` | unset | active (correctness, RU-036); match keeps each candidate's best-scoring traversal row before `ORDER BY … LIMIT $top_n`, so `top_n` counts distinct candidates; off restores one row per path |
 | Monoculture Weighted Contribution | `MONOCULTURE_WEIGHTED_CONTRIBUTION` (`monoculture_weighted_contribution`) | `True` | unset | active (correctness, RU-032); the monoculture confidence check measures `weight × value` per dimension; dimensional agreement and the returned `dimension_scores` stay raw; off restores raw-value monoculture |
+| Confidence Flag List | `CONFIDENCE_FLAG_LIST_ENABLED` (`confidence_flag_list_enabled`) | `True` | unset | active (consumer contract, SCR-13 / L10); every candidate the W2-03 confidence checks annotate carries `confidence_flag` as `list[str]` (`[]` when no check fired), from both producers; off restores the pre-contract legacy shape (bare string for one flag, a list for two, absent for none), outside the published contract — see §39a |
 | Query Defaults Before Derived | `QUERY_DEFAULTS_BEFORE_DERIVED` (`query_defaults_before_derived`) | `True` | unset | active (correctness, RU-016); match applies declared `queryschema` defaults before resolving derived parameters (caller values win); off restores resolve-then-backfill |
 | Match Effective Weight Validation | `MATCH_EFFECTIVE_WEIGHT_VALIDATION` (`match_effective_weight_validation`) | `True` | unset | active (correctness, RU-009; requires `SCORE_CLAMP_ENABLED`); the ≤ 1.0 ceiling is checked on the merged per-dimension weights scoring will apply, and unknown weight keys are rejected; off restores the supplied-keys-only sum |
 | Resolve Requires Created Edge | `RESOLVE_REQUIRES_CREATED_EDGE` (`resolve_requires_created_edge`) | `True` | unset | active (correctness, RU-004); legacy `resolve` raises a ValidationError when no `RESOLVED_FROM` edge was created; off restores an unconditional `resolved` |
@@ -2437,6 +2438,52 @@ Undeclared: today's statement. Tests: `tests/unit/test_sync_version_guard.py`,
 
 Tests: `tests/unit/test_sync_provenance.py`,
 `tests/integration/test_sync_provenance_precedence.py`.
+
+## 39a. Confidence flag is always a list (SCR-13 / L10, 2026-11-27)
+
+`confidence_flag_list_enabled` (env `CONFIDENCE_FLAG_LIST_ENABLED`, default
+`True`). Operator decision 2026-11-27.
+
+`handle_match` runs the W2-03 confidence checks when `confidence_check_enabled`
+is on, through one of two producers: `_annotate_weighted_confidence` in
+`engine/handlers.py` (weighted monoculture, `monoculture_weighted_contribution`
+on, the default) or `ConfidenceChecker.annotate_candidates` (raw values). Both
+now write the annotation through `apply_confidence_flags` in
+`engine/scoring/confidence.py`, so they cannot drift apart again.
+
+| | `confidence_flag` | `confidence_detail` |
+|---|---|---|
+| On, no check fired | `[]` | absent |
+| On, one check fired | `["monoculture"]` or `["low_dimensional_agreement"]` | present |
+| On, both fired | `["monoculture", "low_dimensional_agreement"]` | present |
+| Off | absent / bare string / two-element list | as on |
+| `confidence_check_enabled` off (either setting) | absent | absent |
+
+The published contract is array-only: `contracts/payloads/match-response.schema.yaml`
+and the native `MatchCandidate` model (`engine/models/payloads.py`,
+`list[str] | None`, values limited to the vocabulary below and unique) both
+reject a bare string. Three states (CEG-16): the confidence stage ran and found
+nothing → `[]`; it ran and flagged → `[x]` / `[x, y]`; it did not run
+(`confidence_check_enabled` off) → the field is absent. The native model never
+defaults a missing field to `[]`, and serializes `None` as no field at all.
+Setting the flag off restores the pre-contract legacy shape, which is outside the
+published contract; use it only as an emergency rollback for a consumer that has
+not moved to the list.
+
+Order is fixed: monoculture before low dimensional agreement. The vocabulary
+(`monoculture`, `low_dimensional_agreement`, `ensemble_divergence`) and the
+thresholds are unchanged; `ensemble_divergence` is in the vocabulary but no
+match producer emits it today. When the checks are off the key stays absent,
+because `[]` asserts "checked, nothing found".
+
+Consumers: Enrichment.Inference.Engine has no code consumer of the field
+(checked by the campaign coordinator). The Odoo mapper cannot be verified from
+this repository's session; a consumer
+that compared the field with a string must read list membership instead.
+
+Tests: `tests/unit/test_confidence_flag_list.py`,
+`tests/unit/test_confidence_flag_contract.py`,
+`tests/integration/test_match_confidence_flag_list.py`.
 
 ## Resolution on the declared identity (CEG-NATIVE-CLOSURE-001, A1 / L-RES)
 

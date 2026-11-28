@@ -46,6 +46,24 @@ class MatchResponse(BaseModel):
     execution_time_ms: float
 ```
 
+> SCR-13 / L10 (`CONFIDENCE_FLAG_LIST_ENABLED`, default on): with `confidence_check_enabled`
+> on, every candidate carries `confidence_flag: list[str]` — `[]` when no check fired,
+> otherwise the flags in check order (`monoculture`, then `low_dimensional_agreement`).
+> `confidence_detail` appears only beside a non-empty list. Both producers (weighted and raw
+> monoculture) share this shape. With the checks off the key is absent. Off, the historical
+> shape returns: absent for none, a bare string for one flag, a list for two. That
+> rollback shape is outside the published contract: the draft schema and the native
+> `MatchCandidate` model are array-only. The native model holds `None` for a stage
+> that did not run and serializes it as no field, never as `[]` (CEG-16). See
+> `docs/FEATURE_GATES.md` §39a.
+>
+> ```python
+> # WRONG — in list mode a flagged candidate never equals a bare string
+> if candidate.get("confidence_flag") == "monoculture": ...
+> # RIGHT — test list membership; [] means the checks ran and nothing fired
+> if "monoculture" in candidate.get("confidence_flag", []): ...
+> ```
+
 > SI-06 (`PARETO_PRECUT_ENABLED`, default off): when on and the tenant's pack declares
 > `decision_arbitration` (`enabled: true`, at least one `pareto_config.objectives` entry),
 > which candidates fill `top_n` and their order are decided by Pareto front over the declared

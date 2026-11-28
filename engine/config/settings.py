@@ -430,6 +430,11 @@ class Settings(BaseSettings):
     # dimension (ScoringAssembler.last_effective_weights), its share of the score,
     # instead of raw dimension values. Off: raw values (annotate_candidates).
     monoculture_weighted_contribution: bool = True
+    # SCR-13 / ceg-scoring-audit L10 (operator decision 2026-11-27): both W2-03
+    # producers write `confidence_flag` as list[str] on every candidate they
+    # annotate: [] (no flag), [x] or [x, y], monoculture first. Off: a bare
+    # string for one flag, a list for two, the key absent for none.
+    confidence_flag_list_enabled: bool = True
     # RU-016 / CEG-COR-171: handle_match backfills queryschema defaults before
     # resolving derived parameters, so a derivation over an omitted defaulted
     # field sees its default. Off: resolve first, backfill after.

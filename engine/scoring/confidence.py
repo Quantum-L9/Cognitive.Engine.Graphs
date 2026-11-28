@@ -25,12 +25,16 @@ import logging
 import math
 from typing import Any
 
+from engine.config.settings import settings
+
 logger = logging.getLogger(__name__)
 
 # Sentinel value for confidence flags
 FLAG_MONOCULTURE = "monoculture"
 FLAG_ENSEMBLE_DIVERGENCE = "ensemble_divergence"
 FLAG_LOW_DIMENSIONAL_AGREEMENT = "low_dimensional_agreement"  # S2-07
+# The published `confidence_flag` vocabulary, in check order (match-response schema enum).
+CONFIDENCE_FLAGS: tuple[str, ...] = (FLAG_MONOCULTURE, FLAG_LOW_DIMENSIONAL_AGREEMENT, FLAG_ENSEMBLE_DIVERGENCE)
 
 
 def _finite_contribution(value: object) -> float | None:
@@ -231,8 +235,27 @@ class ConfidenceChecker:
                 flags_list.append(agreement_map[idx]["flag"])
                 detail["dimensional_agreement"] = agreement_map[idx]["confidence"]
 
-            if flags_list:
-                candidate["confidence_flag"] = flags_list[0] if len(flags_list) == 1 else flags_list
-                candidate["confidence_detail"] = detail
+            apply_confidence_flags(candidate, flags_list, detail)
 
         return candidates
+
+
+def apply_confidence_flags(candidate: dict[str, Any], flags: list[str], detail: dict[str, Any]) -> None:
+    """Write the W2-03 annotation shared by both producers (SCR-13, L10).
+
+    ``flags`` arrives in the checks' deterministic order (monoculture, then low
+    dimensional agreement). Under ``confidence_flag_list_enabled`` the candidate
+    always carries ``confidence_flag`` as ``list[str]`` (``[]`` when no check
+    fired); off, the historical shape: absent, a bare string, or a list of two.
+    ``confidence_detail`` is written only when a flag is; in list mode a clean
+    result also removes a detail left by an earlier annotation.
+    """
+    if settings.confidence_flag_list_enabled:
+        candidate["confidence_flag"] = list(flags)
+        if not flags:
+            # A re-annotated candidate that is now clean drops the detail of an earlier run.
+            candidate.pop("confidence_detail", None)
+    elif flags:
+        candidate["confidence_flag"] = flags[0] if len(flags) == 1 else flags
+    if flags:
+        candidate["confidence_detail"] = detail

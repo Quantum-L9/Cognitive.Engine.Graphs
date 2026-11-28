@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import pytest
 
+from engine.config.settings import settings
 from engine.scoring.confidence import (
     FLAG_ENSEMBLE_DIVERGENCE,
     FLAG_MONOCULTURE,
@@ -149,9 +150,34 @@ class TestAnnotateCandidates:
         else:
             assert flag == FLAG_MONOCULTURE
         assert result[0]["confidence_detail"]["dominant_dimension"] == "geo"
+        # SCR-13 / L10: a candidate no check flagged carries an empty list, no detail.
+        assert result[1]["confidence_flag"] == []
+        assert "confidence_detail" not in result[1]
+
+    def test_monoculture_flag_off_restores_absent_key(self, monkeypatch):
+        monkeypatch.setattr(settings, "confidence_flag_list_enabled", False)
+        checker = ConfidenceChecker(monoculture_threshold=0.70)
+        candidates = [
+            {"dimension_scores": {"geo": 0.95, "structural": 0.05}},
+            {"dimension_scores": {"geo": 0.5, "structural": 0.5}},
+        ]
+        result = checker.annotate_candidates(candidates)
+
+        assert FLAG_MONOCULTURE in result[0]["confidence_flag"]
         assert "confidence_flag" not in result[1]
 
     def test_no_annotations_when_clean(self):
+        checker = ConfidenceChecker(monoculture_threshold=0.70)
+        candidates = [
+            {"dimension_scores": {"geo": 0.4, "structural": 0.6}},
+        ]
+        result = checker.annotate_candidates(candidates)
+
+        assert result[0]["confidence_flag"] == []
+        assert "confidence_detail" not in result[0]
+
+    def test_no_annotations_when_clean_flag_off(self, monkeypatch):
+        monkeypatch.setattr(settings, "confidence_flag_list_enabled", False)
         checker = ConfidenceChecker(monoculture_threshold=0.70)
         candidates = [
             {"dimension_scores": {"geo": 0.4, "structural": 0.6}},

@@ -780,6 +780,8 @@ def _annotate_weighted_confidence(
     them, and each row's ``dimension_scores`` stays the raw projection. The
     annotation shape matches ``ConfidenceChecker.annotate_candidates``.
     """
+    from engine.scoring.confidence import apply_confidence_flags
+
     contribution_views: list[dict[str, Any]] = []
     for cand in candidates:
         raw = cand.get("dimension_scores") if isinstance(cand, dict) else None
@@ -805,9 +807,7 @@ def _annotate_weighted_confidence(
         if idx in agreement:
             flags.append(agreement[idx]["flag"])
             detail["dimensional_agreement"] = agreement[idx]["confidence"]
-        if flags:
-            cand["confidence_flag"] = flags[0] if len(flags) == 1 else flags
-            cand["confidence_detail"] = detail
+        apply_confidence_flags(cand, flags, detail)
 
 
 def _apply_pareto_precut(

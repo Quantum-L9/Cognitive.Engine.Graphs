@@ -28,7 +28,18 @@ from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    ValidationInfo,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
+
+from engine.scoring.confidence import CONFIDENCE_FLAGS
 
 if TYPE_CHECKING:
     from engine.config.schema import DomainSpec
@@ -306,6 +317,31 @@ class MatchCandidate(BaseModel):
     feature_contributions: list[FeatureContribution]
     missing_evidence: list[str]
     explanation: str | None = None
+    # SCR-13 / CEG-11 / CEG-16: W2-03 flags in check order when the confidence
+    # stage ran ([] = ran, nothing found); None (absent on the wire) when it did not.
+    confidence_flag: list[str] | None = None
+
+    @field_validator("confidence_flag")
+    @classmethod
+    def _confidence_flags(cls, values: list[str] | None) -> list[str] | None:
+        if values is None:
+            return None
+        unknown = [v for v in values if v not in CONFIDENCE_FLAGS]
+        if unknown:
+            msg = f"unknown confidence_flag values {unknown}; allowed {list(CONFIDENCE_FLAGS)}"
+            raise ValueError(msg)
+        if len(set(values)) != len(values):
+            msg = "confidence_flag values must be unique"
+            raise ValueError(msg)
+        return values
+
+    @model_serializer(mode="wrap")
+    def _omit_unrun_confidence(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """CEG-16: a stage that did not run serializes no ``confidence_flag`` (never [])."""
+        data: dict[str, Any] = handler(self)
+        if self.confidence_flag is None:
+            data.pop("confidence_flag", None)
+        return data
 
     @model_validator(mode="after")
     def eligible_rank_rule(self) -> MatchCandidate:
